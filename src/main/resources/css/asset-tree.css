@@ -7271,8 +7271,8 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-roster .asset-tree-roster-day {
-    width: 36px;
-    min-width: 36px;
+    width: 40px;
+    min-width: 40px;
     background: #fff;
 }
 
@@ -7345,7 +7345,7 @@ a.asset-tree-url {
 
 #asset-tree-app button.asset-tree-roster-hit {
     display: block;
-    width: 28px;
+    width: 32px;
     height: 28px;
     min-height: 28px;
     margin: 0 auto;
@@ -7641,74 +7641,95 @@ a.asset-tree-url {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin: 0 0 12px;
 }
 
 #asset-tree-app .asset-tree-mark,
-#asset-tree-app button.asset-tree-mark-pick {
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    min-height: 36px;
+    gap: 4px;
+    min-height: 28px;
     margin: 0;
-    padding: 4px 8px;
+    padding: 0 2px 0 0;
     border: 1px solid #e6e8ec;
-    border-radius: 10px;
+    border-radius: 8px;
     background: #fff;
     color: #172b4d;
 }
 
-#asset-tree-app button.asset-tree-mark-pick {
-    height: 36px;
-    min-height: 36px;
-    padding: 0 12px !important;
-    border: 1px solid #e6e8ec !important;
-    background: #fff !important;
-    color: #42526e !important;
-    font-size: 13px;
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick,
+#asset-tree-app .asset-tree-mark button.asset-tree-mark-pick {
+    height: 28px;
+    min-height: 28px;
+    margin: 0;
+    padding: 0 8px !important;
+    border: 0 !important;
+    border-radius: 8px;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     box-shadow: none !important;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick {
+    padding: 0 10px !important;
+    border: 1px solid #e6e8ec !important;
+    background: #fff !important;
 }
 
 #asset-tree-app .asset-tree-mark.is-on,
-#asset-tree-app button.asset-tree-mark-pick.is-on {
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick.is-on {
     border-color: #172b4d !important;
     background: #f7f8fa !important;
     color: #172b4d !important;
 }
 
+#asset-tree-app .asset-tree-mark-label {
+    max-width: 108px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 #asset-tree-app .asset-tree-mark-color {
-    width: 28px;
-    height: 28px;
+    width: 16px;
+    height: 16px;
+    margin: 0 4px 0 0;
     padding: 0;
     border: 0;
     background: transparent;
     cursor: pointer;
 }
 
-#asset-tree-app .asset-tree-mark-name,
-#asset-tree-app .asset-tree-mark-hours {
-    height: 28px;
+#asset-tree-app .asset-tree-mark-name {
+    width: 108px;
+    height: 24px;
     min-height: 0;
-    margin: 0;
-    padding: 0 6px;
+    margin: 0 4px;
+    padding: 0 4px;
     border: 0;
     background: transparent;
     color: #172b4d;
-    font-size: 13px;
-}
-
-#asset-tree-app .asset-tree-mark-name {
-    width: 148px;
+    font-size: 12px;
     font-weight: 600;
 }
 
-#asset-tree-app .asset-tree-mark-hours {
-    width: 42px;
-    text-align: center;
+#asset-tree-app .asset-tree-mark .asset-tree-roster-remove {
+    width: 16px;
+    height: 16px;
+    margin: 0 4px 0 0;
+}
+
+#asset-tree-app .asset-tree-roster-unit {
+    margin-left: 2px;
     color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-roster-num {

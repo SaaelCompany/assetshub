@@ -1065,6 +1065,7 @@ public final class UiCatalog {
             "staffMarkTrip",
             "staffMarkSick",
             "staffMarkAdd",
+            "staffMarkNew",
             "staffMarkHours",
             "staffPhones",
             "schedulesAllKinds",

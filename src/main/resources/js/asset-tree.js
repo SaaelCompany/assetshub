@@ -12011,10 +12011,11 @@
 
     function staffDayHours(id, personHours) {
         if (!id || id === 'off') return 0;
-        if (id === 'work') return personHours;
-        var mark = staffMarkById(id);
-        if (!mark) return 0;
-        return mark.hours;
+        if (id !== 'work') {
+            var mark = staffMarkById(id);
+            if (!mark || mark.hours === 0) return 0;
+        }
+        return personHours;
     }
 
     function staffTally(person, year, month) {
@@ -12116,7 +12117,7 @@
         return sections;
     }
 
-    function paintStaffDays(person, isos) {
+    function paintStaffDays(person, isos, erase) {
         if (!person.hours) return;
         var marks = parseDayMarks(person.hours.marks);
         var brush = state.staffBrush || 'work';
@@ -12124,8 +12125,15 @@
             var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
             if (!match) return;
             var date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-            if (brush === staffNatural(person, iso, date)) delete marks[iso];
-            else marks[iso] = brush;
+            var natural = staffNatural(person, iso, date);
+            if (erase) {
+                delete marks[iso];
+                if (natural === brush) marks[iso] = 'off';
+            } else if (brush === natural) {
+                delete marks[iso];
+            } else {
+                marks[iso] = brush;
+            }
         });
         saveStaffHours(person.userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks));
     }
@@ -12133,7 +12141,12 @@
     function beginStaffPaint(person, iso, event) {
         if (!state.canEdit || !person.hours || event.button !== 0) return;
         event.preventDefault();
-        state.staffDrag = { userKey: person.userKey, isos: [iso] };
+        var brush = state.staffBrush || 'work';
+        var existing = parseDayMarks(person.hours.marks);
+        var start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+        var startDate = start ? new Date(Number(start[1]), Number(start[2]) - 1, Number(start[3])) : new Date();
+        var erase = staffVisible(person, iso, startDate, existing) === brush;
+        state.staffDrag = { userKey: person.userKey, isos: [iso], erase: erase };
         function move(ev) {
             var node = ev.target;
             while (node && node !== document.body) {
@@ -12150,8 +12163,9 @@
             document.removeEventListener('mousemove', move);
             document.removeEventListener('mouseup', up);
             var isos = state.staffDrag ? state.staffDrag.isos.slice() : [];
+            var clear = state.staffDrag ? state.staffDrag.erase : false;
             state.staffDrag = null;
-            if (isos.length) paintStaffDays(person, isos);
+            if (isos.length) paintStaffDays(person, isos, clear);
         }
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', up);
@@ -12186,6 +12200,7 @@
                 if (value !== person.hours.hours) saveStaffHours(person.userKey, person.hours.weekdays, value);
             });
             name.appendChild(hours);
+            name.appendChild(el('span', 'asset-tree-roster-unit', t('staffHoursCount', '').trim()));
             var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
                 if (!window.confirm(t('staffRemoveConfirm', person.userName))) return;
                 ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + row.id, null, function (status, payload) {
@@ -12350,14 +12365,55 @@
                 chip.classList.add('is-on');
                 off.classList.remove('is-on');
             }
+            var pick = button('', 'asset-tree-mark-pick', choose);
+            var dot = el('i', 'asset-tree-layer-dot');
+            dot.style.background = '#' + row.color;
+            pick.appendChild(dot);
+            pick.appendChild(el('span', 'asset-tree-mark-label', staffMarkName(row)));
+            pick.title = staffMarkName(row);
+            chip.appendChild(pick);
             if (state.canEdit) {
+                pick.addEventListener('dblclick', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var editor = document.createElement('input');
+                    editor.type = 'text';
+                    editor.className = 'asset-tree-mark-name';
+                    editor.maxLength = 40;
+                    editor.value = row.label || staffMarkName(row);
+                    editor.setAttribute('aria-label', staffMarkName(row));
+                    pick.replaceWith(editor);
+                    editor.focus();
+                    editor.select();
+                    function commit() {
+                        var next = cleanKindLabel(editor.value.replace(/#/g, ' '));
+                        var builtin = staffMarkName({ id: row.id, label: '' });
+                        if (!next) next = builtin;
+                        var stored = next === builtin ? '' : next;
+                        if (stored === (row.label || '')) {
+                            renderFrame();
+                            return;
+                        }
+                        var copy = staffMarkList();
+                        copy.forEach(function (item) { if (item.id === row.id) item.label = stored; });
+                        saveStaffPalette(copy);
+                    }
+                    editor.addEventListener('blur', commit);
+                    editor.addEventListener('keydown', function (keyEvent) {
+                        if (keyEvent.key === 'Enter') editor.blur();
+                        if (keyEvent.key === 'Escape') {
+                            editor.value = row.label || staffMarkName(row);
+                            editor.blur();
+                        }
+                    });
+                });
                 var color = document.createElement('input');
                 color.type = 'color';
                 color.className = 'asset-tree-mark-color';
                 color.value = '#' + row.color;
                 color.title = staffMarkName(row);
                 color.setAttribute('aria-label', staffMarkName(row));
-                color.addEventListener('focus', choose);
+                color.addEventListener('mousedown', function (event) { event.stopPropagation(); });
                 color.addEventListener('change', function () {
                     var next = color.value.replace('#', '').toLowerCase();
                     if (!/^[0-9a-f]{6}$/.test(next) || next === row.color) return;
@@ -12366,49 +12422,6 @@
                     saveStaffPalette(copy);
                 });
                 chip.appendChild(color);
-                var hours = document.createElement('input');
-                hours.type = 'number';
-                hours.className = 'asset-tree-mark-hours';
-                hours.min = row.id === 'work' ? '1' : '0';
-                hours.max = '24';
-                hours.value = String(row.id === 'work' ? Math.max(1, row.hours) : row.hours);
-                hours.title = row.id === 'work' ? t('staffHours') : t('staffMarkHours');
-                hours.setAttribute('aria-label', hours.title);
-                hours.addEventListener('focus', choose);
-                hours.addEventListener('change', function () {
-                    var value = parseInt(hours.value, 10);
-                    var floor = row.id === 'work' ? 1 : 0;
-                    if (isNaN(value) || value < floor || value > 24) {
-                        hours.value = String(row.hours);
-                        return;
-                    }
-                    if (value === row.hours) return;
-                    var copy = staffMarkList();
-                    copy.forEach(function (item) { if (item.id === row.id) item.hours = value; });
-                    saveStaffPalette(copy);
-                });
-                chip.appendChild(hours);
-                var name = document.createElement('input');
-                name.type = 'text';
-                name.className = 'asset-tree-mark-name';
-                name.maxLength = 40;
-                name.value = row.label || staffMarkName(row);
-                name.setAttribute('aria-label', staffMarkName(row));
-                name.addEventListener('focus', choose);
-                name.addEventListener('blur', function () {
-                    var next = cleanKindLabel(name.value.replace(/#/g, ' '));
-                    var builtin = staffMarkName({ id: row.id, label: '' });
-                    if (!next) next = builtin;
-                    var stored = next === builtin ? '' : next;
-                    if (stored === (row.label || '')) {
-                        name.value = row.label || builtin;
-                        return;
-                    }
-                    var copy = staffMarkList();
-                    copy.forEach(function (item) { if (item.id === row.id) item.label = stored; });
-                    saveStaffPalette(copy);
-                });
-                chip.appendChild(name);
                 if (row.id !== 'work') {
                     var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
                         var copy = staffMarkList().filter(function (item) { return item.id !== row.id; });
@@ -12419,11 +12432,6 @@
                     remove.setAttribute('aria-label', t('delete'));
                     chip.appendChild(remove);
                 }
-            } else {
-                chip.appendChild(button(staffMarkName(row), 'asset-tree-mark-pick', function () {
-                    state.staffBrush = row.id;
-                    renderFrame();
-                }));
             }
             bar.appendChild(chip);
         });
@@ -12438,7 +12446,7 @@
                     n += 1;
                     id = 'm' + n;
                 }
-                copy.push({ id: id, label: t('staffMarkAdd'), color: '64748b', hours: 8 });
+                copy.push({ id: id, label: t('staffMarkNew'), color: '64748b', hours: 8 });
                 state.staffBrush = id;
                 saveStaffPalette(copy);
             }));
