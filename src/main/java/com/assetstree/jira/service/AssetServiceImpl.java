@@ -5321,6 +5321,9 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ServicePlanDto updatePlan(ApplicationUser user, final int assetId, final int planId, final ServicePlanDraft draft) {
+        if (assetId == 0) {
+            return updateLoosePlan(user, planId, draft);
+        }
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
         ServicePlanDto updated = ao().executeInTransaction(new TransactionCallback<ServicePlanDto>() {
             @Override
@@ -5342,6 +5345,10 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deletePlan(ApplicationUser user, final int assetId, final int planId) {
+        if (assetId == 0) {
+            deleteLoosePlan(user, planId);
+            return;
+        }
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
@@ -5789,7 +5796,8 @@ public class AssetServiceImpl implements AssetService {
         row.setEveryCount(count);
         if (draft.getStatusKey() != null || creating) {
             String statusKey = draft.getStatusKey() == null ? "" : draft.getStatusKey().trim();
-            if (!statusKey.isEmpty() && findStatus(asset.getProjectKey(), statusKey) == null) {
+            String statusProject = asset == null ? "" : asset.getProjectKey();
+            if (!statusKey.isEmpty() && (statusProject.isEmpty() || findStatus(statusProject, statusKey) == null)) {
                 throw new AssetException(400, "asset-tree.error.status");
             }
             row.setStatusKey(statusKey);
@@ -5947,9 +5955,10 @@ public class AssetServiceImpl implements AssetService {
     public List<ScheduleRowDto> createSchedule(ApplicationUser user, String projectKey, final ScheduleDraft draft) {
         final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
         requireModule(project.getKey(), ProjectModules.SERVICE);
-        if (draft == null || draft.getAssetIds() == null || draft.getAssetIds().isEmpty() || draft.getAssetIds().size() > 40) {
+        if (draft == null || draft.getAssetIds() == null || draft.getAssetIds().size() > 40) {
             throw new AssetException(400, "asset-tree.error.service");
         }
+        final boolean unbound = draft.getAssetIds().isEmpty();
         final String kind = WorkKind.clean(draft.getKind());
         if (kind.isEmpty() || !ServiceDue.countAllowed(draft.getEveryCount() == null ? 0 : draft.getEveryCount().intValue(), ServiceDue.unit(draft.getEveryUnit()))) {
             throw new AssetException(400, "asset-tree.error.service");
@@ -5969,6 +5978,21 @@ public class AssetServiceImpl implements AssetService {
             public List<ScheduleRowDto> doInTransaction() {
                 List<ScheduleRowDto> rows = new ArrayList<ScheduleRowDto>();
                 LocalDate today = LocalDate.now();
+                if (unbound) {
+                    ServicePlanEntity[] loose = ao().find(ServicePlanEntity.class,
+                            Query.select().where("ASSET_ID = ? AND PROJECT_KEY = ?", Integer.valueOf(0), project.getKey()));
+                    if (loose != null && loose.length >= 40) {
+                        throw new AssetException(400, "asset-tree.error.service.limit");
+                    }
+                    ServicePlanDraft plan = scheduleDraft(draft, name, kind, assignee);
+                    ServicePlanEntity row = ao().create(ServicePlanEntity.class, new DBParam("ASSET_ID", Integer.valueOf(0)));
+                    row.setProjectKey(project.getKey());
+                    fillPlan(row, null, plan, true);
+                    row.save();
+                    rows.add(scheduleRow(row, null, today));
+                    applyDueQuietly(project.getKey(), notices);
+                    return rows;
+                }
                 for (Integer assetId : draft.getAssetIds()) {
                     if (assetId == null) {
                         throw new AssetException(400, "asset-tree.error.service");
@@ -5980,20 +6004,9 @@ public class AssetServiceImpl implements AssetService {
                     if (plansOf(asset.getID()).size() >= MAX_PLANS) {
                         throw new AssetException(400, "asset-tree.error.service.limit");
                     }
-                    ServicePlanDraft plan = new ServicePlanDraft();
-                    plan.setName(name);
-                    plan.setKind(kind);
-                    plan.setAssigneeKey(assignee);
-                    plan.setLastDone(ScheduleAnchor.before(draft.getLastDone(),
-                            draft.getEveryCount() == null ? 0 : draft.getEveryCount().intValue(), draft.getEveryUnit()));
-                    plan.setEveryCount(draft.getEveryCount());
-                    plan.setEveryUnit(draft.getEveryUnit());
-                    plan.setStatusKey(draft.getStatusKey() == null ? "" : draft.getStatusKey());
-                    plan.setNotify(draft.getNotify() == null ? Boolean.FALSE : draft.getNotify());
-                    plan.setNote(draft.getNote());
-                    plan.setStartTime(draft.getStartTime());
-                    plan.setEndTime(draft.getEndTime());
+                    ServicePlanDraft plan = scheduleDraft(draft, name, kind, assignee);
                     ServicePlanEntity row = ao().create(ServicePlanEntity.class, new DBParam("ASSET_ID", asset.getID()));
+                    row.setProjectKey(project.getKey());
                     fillPlan(row, asset, plan, true);
                     row.save();
                     rows.add(scheduleRow(row, asset, today));
@@ -6211,6 +6224,70 @@ public class AssetServiceImpl implements AssetService {
         return dto;
     }
 
+    private ServicePlanDraft scheduleDraft(ScheduleDraft draft, String name, String kind, String assignee) {
+        ServicePlanDraft plan = new ServicePlanDraft();
+        plan.setName(name);
+        plan.setKind(kind);
+        plan.setAssigneeKey(assignee);
+        plan.setLastDone(ScheduleAnchor.before(draft.getLastDone(),
+                draft.getEveryCount() == null ? 0 : draft.getEveryCount().intValue(), draft.getEveryUnit()));
+        plan.setEveryCount(draft.getEveryCount());
+        plan.setEveryUnit(draft.getEveryUnit());
+        plan.setStatusKey(draft.getStatusKey() == null ? "" : draft.getStatusKey());
+        plan.setNotify(draft.getNotify() == null ? Boolean.FALSE : draft.getNotify());
+        plan.setNote(draft.getNote());
+        plan.setStartTime(draft.getStartTime());
+        plan.setEndTime(draft.getEndTime());
+        return plan;
+    }
+
+    private ServicePlanEntity loosePlan(int planId) {
+        ServicePlanEntity row = ao().get(ServicePlanEntity.class, planId);
+        if (row == null || row.getAssetId() != 0 || row.getProjectKey() == null || row.getProjectKey().trim().isEmpty()) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        return row;
+    }
+
+    private ServicePlanDto updateLoosePlan(ApplicationUser user, final int planId, final ServicePlanDraft draft) {
+        ServicePlanEntity probe = loosePlan(planId);
+        final Project project = requireProjectCap(user, probe.getProjectKey(), GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.SERVICE);
+        final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
+        ServicePlanDto updated = ao().executeInTransaction(new TransactionCallback<ServicePlanDto>() {
+            @Override
+            public ServicePlanDto doInTransaction() {
+                ServicePlanEntity row = loosePlan(planId);
+                if (!ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                fillPlan(row, null, draft, false);
+                row.save();
+                applyDueQuietly(project.getKey(), notices);
+                return planDto(row, LocalDate.now());
+            }
+        });
+        dispatchNotices(notices);
+        return updated;
+    }
+
+    private void deleteLoosePlan(ApplicationUser user, final int planId) {
+        ServicePlanEntity probe = loosePlan(planId);
+        final Project project = requireProjectCap(user, probe.getProjectKey(), GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.SERVICE);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                ServicePlanEntity row = loosePlan(planId);
+                if (!ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
     private List<ScheduleRowDto> scheduleRows(String projectKey) {
         Map<Integer, AssetEntity> assets = new HashMap<Integer, AssetEntity>();
         for (AssetEntity asset : assetsIn(projectKey)) {
@@ -6221,6 +6298,12 @@ public class AssetServiceImpl implements AssetService {
         LocalDate today = LocalDate.now();
         if (plans != null) {
             for (ServicePlanEntity plan : plans) {
+                if (plan.getAssetId() == 0) {
+                    if (ProjectKeys.same(plan.getProjectKey(), projectKey)) {
+                        rows.add(scheduleRow(plan, null, today));
+                    }
+                    continue;
+                }
                 AssetEntity asset = assets.get(Integer.valueOf(plan.getAssetId()));
                 if (asset == null || isLocation(asset)) {
                     continue;
@@ -6235,9 +6318,9 @@ public class AssetServiceImpl implements AssetService {
         ServicePlanDto source = planDto(plan, today);
         ScheduleRowDto row = new ScheduleRowDto();
         row.setId(source.getId());
-        row.setAssetId(asset.getID());
-        row.setAssetName(asset.getName() == null ? "" : asset.getName());
-        row.setObjectKey(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+        row.setAssetId(asset == null ? 0 : asset.getID());
+        row.setAssetName(asset == null || asset.getName() == null ? "" : asset.getName());
+        row.setObjectKey(asset == null || asset.getObjectKey() == null ? "" : asset.getObjectKey());
         row.setName(source.getName());
         row.setKind(source.getKind());
         row.setAssigneeKey(source.getAssigneeKey());

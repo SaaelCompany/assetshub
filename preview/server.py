@@ -1756,9 +1756,9 @@ def plan_dtos(asset_id):
 def schedule_item(plan, asset):
     item = plan_dto(plan)
     item.update({
-        "assetId": asset["id"],
-        "assetName": asset.get("name") or "",
-        "objectKey": asset.get("objectKey") or "",
+        "assetId": asset["id"] if asset else 0,
+        "assetName": (asset or {}).get("name") or "",
+        "objectKey": (asset or {}).get("objectKey") or "",
     })
     return item
 
@@ -1766,6 +1766,10 @@ def schedule_item(plan, asset):
 def schedule_rows(project_key):
     rows = []
     for plan in STATE["plans"].values():
+        if not plan.get("assetId"):
+            if plan.get("projectKey") == project_key:
+                rows.append(schedule_item(plan, None))
+            continue
         asset = STATE["assets"].get(plan["assetId"])
         if not asset or asset.get("projectKey") != project_key or is_location_id(asset["id"]):
             continue
@@ -1887,12 +1891,29 @@ def create_schedule(project_key, body, text):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     body = body or {}
     ids = body.get("assetIds") or []
-    if not ids or len(ids) > 40:
+    if len(ids) > 40:
         return 400, {"message": text.get("asset-tree.error.service", "Schedule")}
     kind = (body.get("kind") or "to").strip().lower()
     if not KIND_SLUG.fullmatch(kind):
         return 400, {"message": text.get("asset-tree.error.service", "Schedule")}
     name = (body.get("name") or "").strip() or kind_label(project_key, kind)
+    if not ids:
+        loose = [row for row in STATE["plans"].values() if not row.get("assetId") and row.get("projectKey") == project_key]
+        if len(loose) >= 40:
+            return 400, {"message": text.get("asset-tree.error.service.limit", "Limit")}
+        row = {"assetId": 0, "projectKey": project_key, "appliedFor": "", "notify": False}
+        payload = dict(body)
+        payload["name"] = name
+        payload["kind"] = kind
+        payload["lastDone"] = schedule_anchor(body.get("lastDone"), int(body.get("everyCount") or 0), (body.get("everyUnit") or "").strip().lower())
+        error = fill_plan(row, payload, True, project_key, text)
+        if error:
+            return 400, {"message": error}
+        plan_id = STATE["plan_seq"]
+        STATE["plan_seq"] += 1
+        row["id"] = plan_id
+        STATE["plans"][plan_id] = row
+        return 201, [schedule_item(row, None)]
     staged = []
     for raw in ids:
         asset = STATE["assets"].get(int(raw))
@@ -5322,8 +5343,15 @@ setTimeout(function () {
         return 201, plan_dto(STATE["plans"][plan_id])
 
     def update_plan(self, asset_id, plan_id, body, text):
-        asset = STATE["assets"].get(asset_id)
         row = STATE["plans"].get(plan_id)
+        if asset_id == 0:
+            if not row or row.get("assetId"):
+                return 404, {"message": text["asset-tree.error.notFound"]}
+            error = fill_plan(row, body, False, row.get("projectKey") or "", text)
+            if error:
+                return 400, {"message": error}
+            return 200, plan_dto(row)
+        asset = STATE["assets"].get(asset_id)
         if not asset or not row or row["assetId"] != asset_id:
             return 404, {"message": text["asset-tree.error.notFound"]}
         error = fill_plan(row, body, False, asset["projectKey"], text)
@@ -5334,6 +5362,11 @@ setTimeout(function () {
 
     def delete_plan(self, asset_id, plan_id, text):
         row = STATE["plans"].get(plan_id)
+        if asset_id == 0:
+            if not row or row.get("assetId"):
+                return 404, {"message": text["asset-tree.error.notFound"]}
+            STATE["plans"].pop(plan_id, None)
+            return 204, None
         if not STATE["assets"].get(asset_id) or not row or row["assetId"] != asset_id:
             return 404, {"message": text["asset-tree.error.notFound"]}
         STATE["plans"].pop(plan_id, None)

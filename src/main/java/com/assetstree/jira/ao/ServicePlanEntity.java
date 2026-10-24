@@ -12,6 +12,13 @@ public interface ServicePlanEntity extends Entity {
 
     void setAssetId(int assetId);
 
+    /** Project of a calendar event that is not tied to an object. Empty on older rows. */
+    @Indexed
+    @StringLength(80)
+    String getProjectKey();
+
+    void setProjectKey(String projectKey);
+
     @StringLength(80)
     String getName();
 

@@ -6248,6 +6248,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-calendar-nav,
 #asset-tree-app .asset-tree-editor-bar,
 #asset-tree-app .asset-tree-time-row,
+.asset-tree-backdrop .asset-tree-time-row,
 #asset-tree-app .asset-tree-inline-actions,
 #asset-tree-app .asset-tree-sheet-filters {
     display: flex;
@@ -6489,13 +6490,15 @@ a.asset-tree-url {
     pointer-events: none;
 }
 
-#asset-tree-app .asset-tree-work-dialog {
+#asset-tree-app .asset-tree-work-dialog,
+.asset-tree-backdrop .asset-tree-work-dialog {
     width: min(560px, calc(100vw - 32px));
     max-height: calc(100vh - 48px);
     overflow: auto;
 }
 
 #asset-tree-app .asset-tree-schedule-assets,
+.asset-tree-backdrop .asset-tree-schedule-assets,
 #asset-tree-app .asset-tree-check-list {
     display: flex;
     flex-direction: column;
@@ -6508,20 +6511,23 @@ a.asset-tree-url {
     background: #fff;
 }
 
-#asset-tree-app .asset-tree-asset-row {
+#asset-tree-app .asset-tree-asset-row,
+.asset-tree-backdrop .asset-tree-asset-row {
     display: flex;
     gap: 8px;
     align-items: flex-start;
 }
 
-#asset-tree-app .asset-tree-asset-row span {
+#asset-tree-app .asset-tree-asset-row span,
+.asset-tree-backdrop .asset-tree-asset-row span {
     display: flex;
     flex-direction: column;
     color: #6b778c;
     font-size: 12px;
 }
 
-#asset-tree-app .asset-tree-asset-row strong {
+#asset-tree-app .asset-tree-asset-row strong,
+.asset-tree-backdrop .asset-tree-asset-row strong {
     color: #172b4d;
     font-size: 13px;
 }
@@ -7330,11 +7336,15 @@ a.asset-tree-url {
     cursor: pointer;
 }
 
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day {
+    padding: 0;
+}
+
 #asset-tree-app button.asset-tree-roster-hit {
     display: block;
     width: 100%;
-    height: 20px;
-    min-height: 0;
+    height: 22px;
+    min-height: 22px;
     margin: 0;
     padding: 0 !important;
     border: 0 !important;
@@ -7346,7 +7356,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-roster-note {
-    min-width: 180px;
+    min-width: 280px;
     text-align: left;
 }
 

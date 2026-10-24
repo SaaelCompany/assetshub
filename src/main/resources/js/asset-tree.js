@@ -12234,11 +12234,13 @@
                     });
                 }));
             }
-            actions.appendChild(button(plan.assetName || t('open'), 'asset-tree-btn', function () {
-                closeModal();
-                var asset = byId()[plan.assetId];
-                if (asset) openListedAsset(asset);
-            }));
+            if (plan.assetId) {
+                actions.appendChild(button(plan.assetName || t('open'), 'asset-tree-btn', function () {
+                    closeModal();
+                    var asset = byId()[plan.assetId];
+                    if (asset) openListedAsset(asset);
+                }));
+            }
             actions.appendChild(button(t('close'), 'asset-tree-btn', closeModal));
             dialog.appendChild(actions);
         });
@@ -12253,7 +12255,11 @@
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, t('schedulesNew')));
             var kind = document.createElement('select');
-            var preset = enabledKinds().indexOf(state.scheduleKindFilter) >= 0 ? state.scheduleKindFilter : (enabledKinds()[0] || 'to');
+            var preset = enabledKinds().indexOf(state.scheduleKindFilter) >= 0 ? state.scheduleKindFilter : (enabledKinds()[0] || 'event');
+            if (preset === 'staff') {
+                var others = enabledKinds().filter(function (id) { return id !== 'staff'; });
+                preset = others.length ? others[0] : 'event';
+            }
             fillKindSelect(kind, preset, true);
             kind.value = preset;
             var name = document.createElement('input');
@@ -12302,8 +12308,7 @@
                 option.textContent = t(pair[1]);
                 repeat.appendChild(option);
             });
-            repeat.value = moduleSetup().scheduleUnit || 'once';
-            if (!repeat.value) repeat.value = 'once';
+            repeat.value = 'once';
             var nobody = document.createElement('input');
             nobody.type = 'radio';
             nobody.name = 'asset-tree-who';
@@ -12415,27 +12420,49 @@
             dialog.appendChild(whoField);
             var assetField = el('div', 'asset-tree-plan-field');
             assetField.appendChild(el('span', null, t('schedulesAssets')));
+            assetField.appendChild(el('span', 'asset-tree-hint', t('schedulesObjectsOptional')));
             assetField.appendChild(assetQuery);
             assetField.appendChild(assets);
             dialog.appendChild(assetField);
+            function syncScheduleKind() {
+                var rosterKind = kind.value === 'staff';
+                when.style.display = rosterKind ? 'none' : '';
+                timeField.style.display = rosterKind ? 'none' : '';
+                assetField.style.display = rosterKind ? 'none' : '';
+                note.parentNode.style.display = rosterKind ? 'none' : '';
+            }
+            kind.addEventListener('change', syncScheduleKind);
             dialog.appendChild(planField(t('schedulesWhat'), note));
+            syncScheduleKind();
             var actions = el('div', 'asset-tree-inline-actions');
             actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+                if (kind.value === 'staff') {
+                    if (!draft.assigneeKey) {
+                        notify(t('schedulesNeedPerson'));
+                        return;
+                    }
+                    closeModal();
+                    state.scheduleKindFilter = 'staff';
+                    state.scheduleLayerSet = true;
+                    if (!staffHas(draft.assigneeKey)) saveStaffHours(draft.assigneeKey, 31, 8);
+                    else renderFrame();
+                    return;
+                }
+                if (!first.value) {
+                    notify(t('schedulesNeedDate'));
+                    return;
+                }
                 var ids = [];
                 Object.keys(draft.assetIds).forEach(function (id) {
                     if (draft.assetIds[id]) ids.push(parseInt(id, 10));
                 });
-                if (!ids.length || !first.value) {
-                    notify(t('schedulesAssets'));
-                    return;
-                }
                 var body = {
                     assetIds: ids,
                     name: name.value.trim(),
                     kind: kind.value,
                     lastDone: first.value,
                     everyCount: 1,
-                    everyUnit: repeat.value,
+                    everyUnit: repeat.value || 'once',
                     note: note.value,
                     notify: !!moduleSetup().scheduleNotify
                 };
@@ -12449,6 +12476,8 @@
                         closeModal();
                         state.scheduleRows = null;
                         state.scheduleLoading = false;
+                        state.scheduleKindFilter = kind.value || '';
+                        state.scheduleLayerSet = true;
                         var chosenDay = parseIsoDate(first.value);
                         if (chosenDay) {
                             state.scheduleYear = chosenDay.getFullYear();
