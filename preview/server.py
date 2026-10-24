@@ -1720,6 +1720,8 @@ def staff_dto(row):
         "id": row["id"],
         "userKey": row.get("userKey") or "",
         "userName": user.get("displayName") or row.get("userKey") or "",
+        "department": user.get("department") or "",
+        "phone": user.get("phone") or "",
         "kind": row.get("kind") or "",
         "weekdays": int(row.get("weekdays") or 0),
         "hours": int(row.get("hours") or 0),

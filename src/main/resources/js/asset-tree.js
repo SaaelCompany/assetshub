@@ -2009,9 +2009,11 @@
         top.appendChild(viewTabs());
         var row = el('div', 'asset-tree-top-row');
         var titles = el('div', 'asset-tree-heading');
-        if (state.view !== 'schedules') {
-            titles.appendChild(el('h1', null, viewTitle(state.view)));
+        var heading = el('h1', null, viewTitle(state.view));
+        if (state.view === 'schedules') {
+            heading.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
         }
+        titles.appendChild(heading);
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
         }
@@ -11344,11 +11346,11 @@
             state.scheduleMonth = now.getMonth() + 1;
         }
         var panel = el('section', 'asset-tree-sheet');
-        var head = sheetHead('schedulesPageTitle');
         if (state.canEdit) {
+            var head = el('div', 'asset-tree-sheet-head');
             head.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', openScheduleDialog));
+            panel.appendChild(head);
         }
-        panel.appendChild(head);
         panel.appendChild(el('p', 'asset-tree-hint', t(state.scheduleMode === 'staff' ? 'staffHint' : 'schedulesHint')));
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -11617,9 +11619,11 @@
         (state.staffRows || []).forEach(function (row) {
             if (!row || !row.userKey || !people[row.userKey]) {
                 if (!row || !row.userKey) return;
-                people[row.userKey] = { userKey: row.userKey, userName: row.userName || row.userKey, hours: null, leaves: [] };
+                people[row.userKey] = { userKey: row.userKey, userName: row.userName || row.userKey, department: '', phone: '', hours: null, leaves: [] };
                 order.push(row.userKey);
             }
+            if (row.department && !people[row.userKey].department) people[row.userKey].department = row.department;
+            if (row.phone && !people[row.userKey].phone) people[row.userKey].phone = row.phone;
             if (row.kind === 'leave') people[row.userKey].leaves.push(row);
             else if (row.kind === 'hours') {
                 people[row.userKey].hours = row;
@@ -11720,76 +11724,143 @@
         return box;
     }
 
-    function staffCard(person) {
+    function staffDayShort(iso) {
+        var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+        if (!match) return '';
+        return match[3] + '.' + match[2];
+    }
+
+    function staffLeaveOn(person, iso) {
+        var leaves = person.leaves || [];
+        var index;
+        for (index = 0; index < leaves.length; index++) {
+            var start = leaves[index].startOn || '';
+            var end = leaves[index].endOn || '';
+            if (start && end && iso >= start && iso <= end) return leaves[index];
+        }
+        return null;
+    }
+
+    function staffSections(grouped) {
+        var sections = [];
+        var index = {};
+        grouped.order.forEach(function (key) {
+            var person = grouped.people[key];
+            var name = String(person.department || '').trim();
+            if (!index[name]) {
+                index[name] = { name: name, people: [] };
+                sections.push(index[name]);
+            }
+            index[name].people.push(person);
+        });
+        sections.sort(function (left, right) {
+            if (!left.name && right.name) return 1;
+            if (left.name && !right.name) return -1;
+            return left.name.localeCompare(right.name, state.locale || 'ru');
+        });
+        return sections;
+    }
+
+    function toggleStaffDay(person, bit) {
+        if (!state.canEdit || !person.hours) return;
+        var next = person.hours.weekdays ^ (1 << bit);
+        if (next < 1 || next > 127) return;
+        saveStaffHours(person.userKey, next, person.hours.hours || 8);
+    }
+
+    function staffRosterRow(person, year, month, count, today) {
         var row = person.hours || { weekdays: 31, hours: 8, id: 0 };
-        var tally = staffTally(row.weekdays, row.hours, person.leaves, state.scheduleYear, state.scheduleMonth);
-        var card = el('section', 'asset-tree-staff-card');
-        var head = el('div', 'asset-tree-staff-head');
-        head.appendChild(el('strong', null, person.userName));
-        head.appendChild(el('span', 'asset-tree-staff-tally', t('staffDaysCount', tally.days) + ' · ' + t('staffHoursCount', tally.hours) + ' · ' + t('staffLeaveCount', tally.leave)));
-        if (state.canEdit && row.id) {
-            head.appendChild(button(t('staffRemove'), 'asset-tree-btn slim', function () {
+        var tally = staffTally(row.weekdays, row.hours, person.leaves, year, month);
+        var line = el('tr', 'asset-tree-roster-person');
+        var name = el('th', 'asset-tree-roster-name');
+        name.scope = 'row';
+        var who = el('span', 'asset-tree-roster-who', person.userName);
+        if (person.phone) who.title = person.phone;
+        name.appendChild(who);
+        if (state.canEdit && person.hours) {
+            var hours = document.createElement('input');
+            hours.type = 'number';
+            hours.className = 'asset-tree-roster-hours';
+            hours.min = '1';
+            hours.max = '24';
+            hours.value = String(row.hours || 8);
+            hours.title = t('staffHours');
+            hours.setAttribute('aria-label', t('staffHours'));
+            hours.addEventListener('change', function () {
+                var value = parseInt(hours.value, 10) || 0;
+                if (value < 1 || value > 24) {
+                    hours.value = String(person.hours.hours || 8);
+                    return;
+                }
+                if (value !== person.hours.hours) saveStaffHours(person.userKey, person.hours.weekdays, value);
+            });
+            name.appendChild(hours);
+            var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
                 if (!window.confirm(t('staffRemoveConfirm', person.userName))) return;
                 ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + row.id, null, function (status, payload) {
                     if (status >= 200 && status < 300) reloadStaff();
                     else notify((payload && payload.message) || t('errorTitle'));
                 });
-            }));
+            });
+            remove.title = t('staffRemove');
+            remove.setAttribute('aria-label', t('staffRemove'));
+            name.appendChild(remove);
         }
-        card.appendChild(head);
-        var days = el('div', 'asset-tree-staff-days');
-        var labels = weekdayLabels();
-        var bit;
-        for (bit = 0; bit < 7; bit++) {
-            var on = !!(row.weekdays & (1 << bit));
-            (function (index, pressed) {
-                var toggle = button(labels[index] || String(index + 1), 'asset-tree-day-toggle' + (pressed ? ' is-on' : ''), function () {
-                    if (!state.canEdit || !person.hours) return;
-                    var next = person.hours.weekdays ^ (1 << index);
-                    if (next < 1 || next > 127) return;
-                    saveStaffHours(person.userKey, next, person.hours.hours || 8);
-                });
-                toggle.disabled = !state.canEdit;
-                toggle.setAttribute('aria-pressed', pressed ? 'true' : 'false');
-                days.appendChild(toggle);
-            })(bit, on);
+        line.appendChild(name);
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var iso = isoDate(date);
+            var weekend = date.getDay() === 0 || date.getDay() === 6;
+            var bit = (date.getDay() + 6) % 7;
+            var leave = staffLeaveOn(person, iso);
+            var working = !leave && !!(row.weekdays & (1 << bit));
+            var cell = el('td', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : '') + (working ? ' is-work' : '') + (leave ? ' is-leave' : ''));
+            if (working) {
+                var label = String(row.hours || 8);
+                if (state.canEdit && person.hours) {
+                    (function (index) {
+                        var hit = button(label, 'asset-tree-roster-hit', function () { toggleStaffDay(person, index); });
+                        hit.title = label;
+                        cell.appendChild(hit);
+                    })(bit);
+                } else {
+                    cell.textContent = label;
+                }
+            } else if (state.canEdit && person.hours && !leave) {
+                (function (index) {
+                    var hit = button('', 'asset-tree-roster-hit', function () { toggleStaffDay(person, index); });
+                    hit.setAttribute('aria-label', String(day));
+                    cell.appendChild(hit);
+                })(bit);
+            }
+            line.appendChild(cell);
         }
-        card.appendChild(days);
-        var hoursField = el('label', 'asset-tree-staff-hours');
-        hoursField.appendChild(el('span', null, t('staffHours')));
-        var hours = document.createElement('input');
-        hours.type = 'number';
-        hours.min = '1';
-        hours.max = '24';
-        hours.value = String(row.hours || 8);
-        hours.disabled = !state.canEdit;
-        hours.setAttribute('aria-label', t('staffHours'));
-        hours.addEventListener('change', function () {
-            if (!person.hours) return;
-            var value = parseInt(hours.value, 10) || 0;
-            if (value < 1 || value > 24) {
-                hours.value = String(person.hours.hours || 8);
+        line.appendChild(el('td', 'asset-tree-roster-total', String(tally.days)));
+        line.appendChild(el('td', 'asset-tree-roster-total', String(tally.hours)));
+        line.appendChild(staffNote(person));
+        return line;
+    }
+
+    function staffNote(person) {
+        var note = el('td', 'asset-tree-roster-note');
+        person.leaves.forEach(function (leave) {
+            var text = t('staffLeave') + ' ' + staffDayShort(leave.startOn) + '-' + staffDayShort(leave.endOn);
+            if (!state.canEdit) {
+                note.appendChild(el('div', 'asset-tree-roster-leave', text));
                 return;
             }
-            if (value !== person.hours.hours) saveStaffHours(person.userKey, person.hours.weekdays, value);
-        });
-        hoursField.appendChild(hours);
-        card.appendChild(hoursField);
-        person.leaves.forEach(function (leave) {
-            var line = el('div', 'asset-tree-staff-leave');
-            line.appendChild(el('span', null, t('staffLeave') + ' ' + formatFieldDate(leave.startOn) + ' \u2013 ' + formatFieldDate(leave.endOn)));
-            if (state.canEdit) {
-                line.appendChild(button(t('delete'), 'asset-tree-btn slim', function () {
-                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + leave.id, null, function (status, payload) {
-                        if (status >= 200 && status < 300) reloadStaff();
-                        else notify((payload && payload.message) || t('errorTitle'));
-                    });
-                }));
-            }
-            card.appendChild(line);
+            var remove = button(text, 'asset-tree-roster-leave', function () {
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + leave.id, null, function (status, payload) {
+                    if (status >= 200 && status < 300) reloadStaff();
+                    else notify((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            remove.title = t('delete');
+            note.appendChild(remove);
         });
         if (state.canEdit && person.hours) {
-            var add = el('div', 'asset-tree-staff-leave');
+            var add = el('div', 'asset-tree-roster-leave-add');
             var from = document.createElement('input');
             from.type = 'date';
             from.setAttribute('aria-label', t('staffLeaveFrom'));
@@ -11799,10 +11870,7 @@
             var start = isoDate(new Date(state.scheduleYear, state.scheduleMonth - 1, 1));
             from.value = start;
             to.value = start;
-            add.appendChild(el('span', null, t('staffLeave')));
-            add.appendChild(from);
-            add.appendChild(to);
-            add.appendChild(button(t('staffLeaveAdd'), 'asset-tree-btn slim', function () {
+            var plus = button('+', 'asset-tree-btn slim', function () {
                 if (!from.value || !to.value) return;
                 ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/leave', {
                     userKey: person.userKey,
@@ -11812,10 +11880,76 @@
                     if (status >= 200 && status < 300) reloadStaff();
                     else notify((payload && payload.message) || t('errorTitle'));
                 });
-            }));
-            card.appendChild(add);
+            });
+            plus.title = t('staffLeaveAdd');
+            plus.setAttribute('aria-label', t('staffLeaveAdd'));
+            add.appendChild(from);
+            add.appendChild(to);
+            add.appendChild(plus);
+            note.appendChild(add);
         }
-        return card;
+        return note;
+    }
+
+    function staffRoster(grouped) {
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var today = isoDate(new Date());
+        var sections = staffSections(grouped);
+        var named = false;
+        sections.forEach(function (section) { if (section.name) named = true; });
+        var scroll = el('div', 'asset-tree-roster-scroll');
+        var table = el('table', 'asset-tree-roster');
+        var head = el('tr');
+        head.appendChild(el('th', 'asset-tree-roster-name', ''));
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var weekend = date.getDay() === 0 || date.getDay() === 6;
+            head.appendChild(el('th', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : ''), String(day)));
+        }
+        head.appendChild(el('th', 'asset-tree-roster-total', t('staffDaysCol')));
+        head.appendChild(el('th', 'asset-tree-roster-total', t('staffHoursCol')));
+        head.appendChild(el('th', 'asset-tree-roster-note', ''));
+        table.appendChild(head);
+        sections.forEach(function (section) {
+            if (named) {
+                var banner = el('tr', 'asset-tree-roster-group');
+                var cell = el('th', null, section.name || t('staffNoDepartment'));
+                cell.colSpan = count + 4;
+                banner.appendChild(cell);
+                table.appendChild(banner);
+            }
+            section.people.forEach(function (person) {
+                table.appendChild(staffRosterRow(person, year, month, count, today));
+            });
+        });
+        scroll.appendChild(table);
+        return scroll;
+    }
+
+    function staffDirectory(grouped) {
+        var box = el('div', 'asset-tree-staff-foot');
+        var legend = el('div', 'asset-tree-staff-legend');
+        legend.appendChild(el('span', 'asset-tree-roster-swatch', ''));
+        legend.appendChild(el('span', null, t('staffLegendWork')));
+        legend.appendChild(el('span', 'asset-tree-roster-leave', t('staffLegendLeave')));
+        box.appendChild(legend);
+        var phones = [];
+        grouped.order.forEach(function (key) {
+            var person = grouped.people[key];
+            if (person.phone) phones.push(person.userName + ' ' + person.phone);
+        });
+        if (phones.length) {
+            var list = el('div', 'asset-tree-staff-phones');
+            list.appendChild(el('div', 'asset-tree-staff-phones-title', t('staffPhones')));
+            phones.forEach(function (line) {
+                list.appendChild(el('div', null, line));
+            });
+            box.appendChild(list);
+        }
+        return box;
     }
 
     function scheduleStaff() {
@@ -11828,10 +11962,12 @@
         if (state.staffError) wrap.appendChild(el('p', 'asset-tree-hint', state.staffError));
         if (state.canEdit) wrap.appendChild(staffFinder());
         var grouped = staffGroups();
-        if (!grouped.order.length) wrap.appendChild(el('p', 'asset-tree-hint', t('staffEmpty')));
-        grouped.order.forEach(function (key) {
-            wrap.appendChild(staffCard(grouped.people[key]));
-        });
+        if (!grouped.order.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', t('staffEmpty')));
+            return wrap;
+        }
+        wrap.appendChild(staffRoster(grouped));
+        wrap.appendChild(staffDirectory(grouped));
         return wrap;
     }
 

@@ -6185,7 +6185,14 @@ public class AssetServiceImpl implements AssetService {
         StaffDutyDto dto = new StaffDutyDto();
         dto.setId(row.getID());
         dto.setUserKey(row.getUserKey() == null ? "" : row.getUserKey());
-        dto.setUserName(userLabel(row.getUserKey()));
+        UserProfileDto person = profile(row.getUserKey());
+        String name = person == null ? "" : person.getDisplayName();
+        if (name == null || name.trim().isEmpty()) {
+            name = userLabel(row.getUserKey());
+        }
+        dto.setUserName(name);
+        dto.setDepartment(person == null || person.getDepartment() == null ? "" : person.getDepartment());
+        dto.setPhone(person == null || person.getPhone() == null ? "" : person.getPhone());
         dto.setKind(row.getKind() == null ? "" : row.getKind());
         dto.setWeekdays(row.getWeekdays());
         dto.setHours(row.getHours());

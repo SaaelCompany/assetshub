@@ -54,6 +54,9 @@
 }
 
 .asset-tree h1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     font-size: 20px;
     line-height: 1.2;
@@ -6920,6 +6923,7 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-service > .asset-tree-plan-actions {
     margin-top: 8px;
+    justify-content: flex-start;
 }
 
 #asset-tree-app .asset-tree-staff-find {
@@ -7011,4 +7015,190 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-staff-leave input {
     width: 148px !important;
     max-width: 100% !important;
+}
+
+#asset-tree-app .asset-tree-roster-scroll {
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #bfbfbf;
+}
+
+#asset-tree-app .asset-tree-roster {
+    border-collapse: collapse;
+    width: max-content;
+    min-width: 100%;
+    background: #fff;
+    color: #172b4d;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-roster th,
+#asset-tree-app .asset-tree-roster td {
+    height: 22px;
+    padding: 0 4px;
+    border: 1px solid #d0d0d0;
+    font-weight: 400;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-name {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 220px;
+    max-width: 280px;
+    padding: 2px 8px;
+    background: #fff;
+    text-align: left;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-roster thead .asset-tree-roster-name,
+#asset-tree-app .asset-tree-roster tr:first-child .asset-tree-roster-name {
+    z-index: 2;
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-day {
+    width: 28px;
+    min-width: 28px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-day.is-weekend {
+    color: #6b778c;
+}
+
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day.is-work {
+    background: #ffff00;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day.is-today {
+    box-shadow: inset 0 0 0 1px #0052cc;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-total {
+    min-width: 42px;
+    background: #fff;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-roster tr:first-child th {
+    background: #f4f5f7;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-roster-group th {
+    padding: 4px 8px;
+    background: #f4f5f7;
+    text-align: left;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-roster-who {
+    display: inline-block;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+#asset-tree-app .asset-tree-roster-hours {
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 20px !important;
+    min-height: 0 !important;
+    margin-left: 6px;
+    padding: 0 2px !important;
+    text-align: center;
+}
+
+#asset-tree-app button.asset-tree-roster-remove {
+    width: 20px;
+    height: 20px;
+    min-height: 0;
+    margin: 0 0 0 4px;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #6b778c !important;
+    font-size: 16px;
+    line-height: 18px;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-roster-hit {
+    display: block;
+    width: 100%;
+    height: 20px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-roster-note {
+    min-width: 180px;
+    text-align: left;
+}
+
+#asset-tree-app .asset-tree-roster-leave,
+#asset-tree-app button.asset-tree-roster-leave {
+    display: block;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #de350b !important;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-roster-leave-add {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+#asset-tree-app .asset-tree-roster-leave-add input {
+    width: 118px !important;
+    height: 22px !important;
+    min-height: 0 !important;
+    padding: 0 4px !important;
+}
+
+#asset-tree-app .asset-tree-staff-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-staff-legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-roster-swatch {
+    width: 28px;
+    height: 16px;
+    background: #ffff00;
+    border: 1px solid #d0d0d0;
+}
+
+#asset-tree-app .asset-tree-staff-phones-title {
+    margin-bottom: 4px;
+    font-weight: 700;
 }
