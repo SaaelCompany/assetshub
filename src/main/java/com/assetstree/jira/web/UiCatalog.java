@@ -1072,6 +1072,7 @@ public final class UiCatalog {
             "schedulesAllLayers",
             "schedulesAllPeople",
             "schedulesToday",
+            "schedulesDrag",
             "schedulesFirst",
             "schedulesAllDay",
             "schedulesOnce",

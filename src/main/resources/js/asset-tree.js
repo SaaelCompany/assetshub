@@ -11729,6 +11729,7 @@
             var inMonth = date.getMonth() === start.getMonth();
             var weekend = date.getDay() === 0 || date.getDay() === 6;
             var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''));
+            cell.setAttribute('data-day', iso);
             cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
             if (inMonth) {
                 var plans = byDay[iso] || [];
@@ -11742,6 +11743,10 @@
                 if (state.canEdit) {
                     (function (dayIso, dayCell) {
                         dayCell.addEventListener('click', function (event) {
+                            if (state.scheduleSuppressClick) {
+                                state.scheduleSuppressClick = false;
+                                return;
+                            }
                             var node = event.target;
                             while (node && node !== dayCell) {
                                 if (node.tagName === 'BUTTON') return;
@@ -11759,7 +11764,13 @@
 
     function scheduleEventCard(plan, iso) {
         var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
-        var card = button('', 'asset-tree-event' + (focused ? ' is-focus' : ''), function () { openPlanEvent(plan, iso); });
+        var card = button('', 'asset-tree-event' + (focused ? ' is-focus' : ''), function () {
+            if (state.scheduleSuppressClick) {
+                state.scheduleSuppressClick = false;
+                return;
+            }
+            openPlanEvent(plan, iso);
+        });
         var mark = el('i', 'asset-tree-event-mark');
         mark.style.background = kindColor(plan.kind);
         var text = el('span', 'asset-tree-event-text');
@@ -11771,7 +11782,94 @@
         card.appendChild(mark);
         card.appendChild(text);
         card.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
+        if (state.canEdit) {
+            card.title += ' · ' + t('schedulesDrag');
+            card.addEventListener('mousedown', function (event) { beginPlanDrag(plan, iso, card, event); });
+        }
         return card;
+    }
+
+    function dayCellAt(x, y) {
+        var node = document.elementFromPoint(x, y);
+        while (node && node !== document.body) {
+            if (node.getAttribute && node.getAttribute('data-day')) return node;
+            node = node.parentNode;
+        }
+        return null;
+    }
+
+    function planAnchorFor(plan, fromIso, toIso) {
+        if (!toIso || toIso === fromIso) return plan.lastDone || fromIso || '';
+        if (!plan.everyUnit || plan.everyUnit === 'once') return toIso;
+        var from = parseIsoDate(fromIso);
+        var to = parseIsoDate(toIso);
+        var anchor = parseIsoDate(plan.lastDone || fromIso);
+        if (!from || !to || !anchor) return toIso;
+        return isoDate(shiftDays(anchor, dayNumber(to) - dayNumber(from)));
+    }
+
+    function savePlan(plan, patch, done) {
+        var body = {
+            name: patch.name != null ? patch.name : (plan.name || kindName(plan.kind) || kindLong(plan.kind)),
+            lastDone: patch.lastDone || plan.lastDone || '',
+            everyCount: plan.everyCount || 1,
+            everyUnit: plan.everyUnit || 'once',
+            kind: patch.kind || plan.kind || 'event',
+            assigneeKey: patch.assigneeKey != null ? patch.assigneeKey : (plan.assigneeKey || ''),
+            note: patch.note != null ? patch.note : (plan.note || ''),
+            startTime: patch.startTime != null ? patch.startTime : (plan.startTime || ''),
+            endTime: patch.endTime != null ? patch.endTime : (plan.endTime || ''),
+            notify: plan.notify !== false
+        };
+        ajax('PUT', '/assets/' + (plan.assetId || 0) + '/plans/' + plan.id, body, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                state.scheduleRows = null;
+                state.scheduleLoading = false;
+                if (done) done(true);
+                renderFrame();
+            } else {
+                notify((payload && payload.message) || t('errorTitle'));
+                if (done) done(false);
+            }
+        });
+    }
+
+    function beginPlanDrag(plan, iso, card, event) {
+        if (!state.canEdit || event.button !== 0) return;
+        var startX = event.clientX;
+        var startY = event.clientY;
+        var dragging = false;
+        var target = null;
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 5) return;
+            dragging = true;
+            card.classList.add('is-dragging');
+            var next = dayCellAt(ev.clientX, ev.clientY);
+            if (target && target !== next) target.classList.remove('is-drop');
+            target = next;
+            if (target) target.classList.add('is-drop');
+        }
+        function up(ev) {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            if (target) target.classList.remove('is-drop');
+            card.classList.remove('is-dragging');
+            if (!dragging) return;
+            state.scheduleSuppressClick = true;
+            function eatClick(clickEvent) {
+                clickEvent.preventDefault();
+                clickEvent.stopPropagation();
+                state.scheduleSuppressClick = false;
+                document.removeEventListener('click', eatClick, true);
+            }
+            document.addEventListener('click', eatClick, true);
+            setTimeout(function () { document.removeEventListener('click', eatClick, true); }, 0);
+            var day = target ? target.getAttribute('data-day') : '';
+            if (!day || day === iso) return;
+            savePlan(plan, { lastDone: planAnchorFor(plan, iso, day) });
+        }
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
     }
 
     function scheduleTable() {
@@ -12365,10 +12463,30 @@
                 chip.classList.add('is-on');
                 off.classList.remove('is-on');
             }
+            var swatch = document.createElement('label');
+            swatch.className = 'asset-tree-mark-swatch';
+            swatch.style.background = '#' + row.color;
+            swatch.title = staffMarkName(row);
+            if (state.canEdit) {
+                var color = document.createElement('input');
+                color.type = 'color';
+                color.className = 'asset-tree-mark-color';
+                color.value = '#' + row.color;
+                color.title = staffMarkName(row);
+                color.setAttribute('aria-label', staffMarkName(row));
+                color.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+                color.addEventListener('click', function (event) { event.stopPropagation(); });
+                color.addEventListener('change', function () {
+                    var next = color.value.replace('#', '').toLowerCase();
+                    if (!/^[0-9a-f]{6}$/.test(next) || next === row.color) return;
+                    var copy = staffMarkList();
+                    copy.forEach(function (item) { if (item.id === row.id) item.color = next; });
+                    saveStaffPalette(copy);
+                });
+                swatch.appendChild(color);
+            }
+            chip.appendChild(swatch);
             var pick = button('', 'asset-tree-mark-pick', choose);
-            var dot = el('i', 'asset-tree-layer-dot');
-            dot.style.background = '#' + row.color;
-            pick.appendChild(dot);
             pick.appendChild(el('span', 'asset-tree-mark-label', staffMarkName(row)));
             pick.title = staffMarkName(row);
             chip.appendChild(pick);
@@ -12407,21 +12525,6 @@
                         }
                     });
                 });
-                var color = document.createElement('input');
-                color.type = 'color';
-                color.className = 'asset-tree-mark-color';
-                color.value = '#' + row.color;
-                color.title = staffMarkName(row);
-                color.setAttribute('aria-label', staffMarkName(row));
-                color.addEventListener('mousedown', function (event) { event.stopPropagation(); });
-                color.addEventListener('change', function () {
-                    var next = color.value.replace('#', '').toLowerCase();
-                    if (!/^[0-9a-f]{6}$/.test(next) || next === row.color) return;
-                    var copy = staffMarkList();
-                    copy.forEach(function (item) { if (item.id === row.id) item.color = next; });
-                    saveStaffPalette(copy);
-                });
-                chip.appendChild(color);
                 if (row.id !== 'work') {
                     var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
                         var copy = staffMarkList().filter(function (item) { return item.id !== row.id; });
@@ -12522,13 +12625,131 @@
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, plan.name || kindLong(plan.kind)));
-            dialog.appendChild(el('p', null, kindLong(plan.kind) + ' · ' + (plan.assetName || '') + (plan.objectKey ? ' · ' + plan.objectKey : '')));
-            var meta = formatFieldDate(iso || plan.nextDue || '');
-            if (plan.startTime) meta += ' · ' + plan.startTime + (plan.endTime ? '–' + plan.endTime : '');
-            if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
-            dialog.appendChild(el('p', null, meta));
-            if (plan.note) dialog.appendChild(el('p', null, plan.note));
+            var place = (plan.assetName || '') + (plan.objectKey ? ' · ' + plan.objectKey : '');
+            if (place) dialog.appendChild(el('p', null, place));
+            var when = iso || plan.nextDue || plan.lastDone || '';
+            var draft = {
+                name: plan.name || '',
+                kind: plan.kind || 'event',
+                date: when,
+                assigneeKey: plan.assigneeKey || '',
+                assigneeName: plan.assigneeName || '',
+                note: plan.note || ''
+            };
+            if (state.canEdit) {
+                var name = document.createElement('input');
+                name.value = draft.name;
+                name.maxLength = 80;
+                name.setAttribute('aria-label', t('name'));
+                var kind = document.createElement('select');
+                fillKindSelect(kind, draft.kind, true);
+                kind.value = draft.kind;
+                var date = document.createElement('input');
+                date.type = 'date';
+                date.value = String(when).slice(0, 10);
+                date.setAttribute('aria-label', t('schedulesFirst'));
+                var person = document.createElement('input');
+                person.type = 'search';
+                person.placeholder = t('schedulesFindUser');
+                person.value = draft.assigneeName;
+                person.setAttribute('aria-label', t('schedulesAssignee'));
+                var hits = el('div', 'asset-tree-user-results');
+                var timer = null;
+                var seq = 0;
+                person.addEventListener('input', function () {
+                    if (person.value.trim() !== draft.assigneeName) draft.assigneeKey = '';
+                    draft.assigneeName = person.value.trim();
+                    clearTimeout(timer);
+                    timer = setTimeout(function () {
+                        var query = person.value.trim();
+                        var mark = ++seq;
+                        hits.innerHTML = '';
+                        if (query.length < 2) return;
+                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                            if (mark !== seq) return;
+                            hits.innerHTML = '';
+                            (payload || []).forEach(function (user) {
+                                hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
+                                    draft.assigneeKey = user.userKey;
+                                    draft.assigneeName = user.displayName;
+                                    person.value = user.displayName;
+                                    hits.innerHTML = '';
+                                }));
+                            });
+                        });
+                    }, 200);
+                });
+                var note = document.createElement('textarea');
+                note.value = draft.note;
+                note.maxLength = 2000;
+                note.setAttribute('aria-label', t('schedulesWhat'));
+                var allDay = document.createElement('input');
+                allDay.type = 'radio';
+                allDay.name = 'asset-tree-edit-when';
+                allDay.checked = !plan.startTime;
+                var ranged = document.createElement('input');
+                ranged.type = 'radio';
+                ranged.name = 'asset-tree-edit-when';
+                ranged.checked = !!plan.startTime;
+                var startTime = document.createElement('input');
+                startTime.type = 'time';
+                startTime.value = plan.startTime || '';
+                var endTime = document.createElement('input');
+                endTime.type = 'time';
+                endTime.value = plan.endTime || '';
+                startTime.disabled = !plan.startTime;
+                endTime.disabled = !plan.startTime;
+                allDay.addEventListener('change', function () {
+                    startTime.disabled = true;
+                    endTime.disabled = true;
+                });
+                ranged.addEventListener('change', function () {
+                    startTime.disabled = false;
+                    endTime.disabled = false;
+                });
+                var timeRow = el('div', 'asset-tree-time-row');
+                var allLabel = el('label', 'asset-tree-check');
+                allLabel.appendChild(allDay);
+                allLabel.appendChild(document.createTextNode(t('schedulesAllDay')));
+                var rangeLabel = el('label', 'asset-tree-check');
+                rangeLabel.appendChild(ranged);
+                rangeLabel.appendChild(startTime);
+                rangeLabel.appendChild(endTime);
+                timeRow.appendChild(allLabel);
+                timeRow.appendChild(rangeLabel);
+                dialog.appendChild(planField(t('name'), name));
+                dialog.appendChild(planField(t('schedulesKind'), kind));
+                dialog.appendChild(planField(t('schedulesFirst'), date));
+                var timeField = el('div', 'asset-tree-plan-field');
+                timeField.appendChild(el('span', null, t('schedulesTime')));
+                timeField.appendChild(timeRow);
+                dialog.appendChild(timeField);
+                dialog.appendChild(planField(t('schedulesAssignee'), person));
+                dialog.appendChild(hits);
+                dialog.appendChild(planField(t('schedulesWhat'), note));
+            } else {
+                var meta = formatFieldDate(when);
+                if (plan.startTime) meta += ' · ' + plan.startTime + (plan.endTime ? '–' + plan.endTime : '');
+                if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
+                dialog.appendChild(el('p', null, meta));
+                if (plan.note) dialog.appendChild(el('p', null, plan.note));
+            }
             var actions = el('div', 'asset-tree-inline-actions');
+            if (state.canEdit) {
+                actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+                    var title = name.value.trim();
+                    if (!title || !date.value) return;
+                    savePlan(plan, {
+                        name: title,
+                        kind: kind.value || plan.kind,
+                        lastDone: planAnchorFor(plan, when, date.value),
+                        assigneeKey: person.value.trim() ? draft.assigneeKey : '',
+                        note: note.value,
+                        startTime: ranged.checked ? startTime.value : '',
+                        endTime: ranged.checked ? endTime.value : ''
+                    }, function (ok) { if (ok) closeModal(); });
+                }));
+            }
             if (state.canEdit && !plan.completed) {
                 actions.appendChild(button(t('serviceDone'), 'asset-tree-btn primary', function () {
                     ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, { done: true }, function (status, payload) {
