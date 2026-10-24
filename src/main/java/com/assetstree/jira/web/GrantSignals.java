@@ -6,6 +6,7 @@ import com.atlassian.jira.security.groups.GroupManager;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.ao.ProjectGrantEntity;
 import com.assetstree.jira.model.GrantCaps;
+import com.assetstree.jira.service.JiraServices;
 import net.java.ao.Query;
 
 /**
@@ -29,7 +30,7 @@ final class GrantSignals {
             return false;
         }
         try {
-            ActiveObjects ao = ComponentAccessor.getOSGiComponentInstanceOfType(ActiveObjects.class);
+            ActiveObjects ao = JiraServices.activeObjects();
             GroupManager groups = ComponentAccessor.getGroupManager();
             if (ao == null || groups == null) {
                 return false;
