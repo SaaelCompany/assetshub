@@ -4412,15 +4412,8 @@
         syncEvery();
         var kind = document.createElement('select');
         kind.setAttribute('aria-label', t('schedulesKind'));
-        enabledKinds().forEach(function (key) {
-            var labels = { to: 'kindTo', kts: 'kindKts', verify: 'kindVerify' };
-            var option = document.createElement('option');
-            option.value = key;
-            option.textContent = t(labels[key]);
-            kind.appendChild(option);
-        });
-        if (plan && plan.kind) kind.value = plan.kind;
-        if (!kind.value) kind.value = enabledKinds()[0] || 'to';
+        fillKindSelect(kind, plan && plan.kind, false);
+        kind.value = (plan && plan.kind) || enabledKinds()[0] || 'to';
         var everyWrap = el('div', 'asset-tree-plan-every');
         everyWrap.appendChild(every);
         everyWrap.appendChild(unit);
@@ -10736,20 +10729,54 @@
             });
         }
         if (moduleKey === 'service') {
-            var kinds = el('div', 'asset-tree-check-list');
-            ['to', 'kts', 'verify'].forEach(function (key) {
-                var labels = { to: 'kindToLong', kts: 'kindKtsLong', verify: 'kindVerifyLong' };
-                var label = el('label', 'asset-tree-check');
-                var box = document.createElement('input');
-                box.type = 'checkbox';
-                box.checked = setup.scheduleKinds.split(',').indexOf(key) >= 0;
-                box.setAttribute('data-kind', key);
-                label.appendChild(box);
-                label.appendChild(document.createTextNode(t(labels[key])));
-                kinds.appendChild(label);
-            });
+            var rows = parseKindList(setup.scheduleKinds);
+            var list = el('div', 'asset-tree-kind-list');
+            function paintKinds() {
+                list.innerHTML = '';
+                rows.forEach(function (row, index) {
+                    var line = el('div', 'asset-tree-kind-row');
+                    var name = document.createElement('input');
+                    name.type = 'text';
+                    name.maxLength = 40;
+                    name.value = row.label || builtinKind(row.id, true);
+                    name.setAttribute('aria-label', t('setupKinds'));
+                    name.addEventListener('input', function () {
+                        var next = cleanKindLabel(name.value);
+                        if (next) row.label = next;
+                    });
+                    name.addEventListener('blur', function () {
+                        if (!cleanKindLabel(name.value)) name.value = row.label || builtinKind(row.id, true);
+                    });
+                    line.appendChild(name);
+                    var remove = button(t('setupKindRemove'), 'asset-tree-btn', function () {
+                        if (rows.length < 2) return;
+                        rows.splice(index, 1);
+                        paintKinds();
+                    });
+                    remove.disabled = rows.length < 2;
+                    line.appendChild(remove);
+                    list.appendChild(line);
+                });
+            }
+            paintKinds();
+            var adder = document.createElement('input');
+            adder.type = 'text';
+            adder.maxLength = 40;
+            adder.placeholder = t('setupKindAdd');
+            adder.setAttribute('aria-label', t('setupKindAdd'));
+            var addRow = el('div', 'asset-tree-kind-row');
+            addRow.appendChild(adder);
+            addRow.appendChild(button(t('setupKindAdd'), 'asset-tree-btn', function () {
+                var label = cleanKindLabel(adder.value);
+                if (!label || rows.length >= 24) return;
+                rows.push({ id: nextKindId(rows), label: label });
+                adder.value = '';
+                paintKinds();
+            }));
             panel.appendChild(el('span', 'asset-tree-nav-label', t('setupKinds')));
-            panel.appendChild(kinds);
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupKindsHint')));
+            panel.appendChild(list);
+            panel.appendChild(addRow);
             var unit = document.createElement('select');
             [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -10767,11 +10794,8 @@
             notify.appendChild(document.createTextNode(t('setupNotify')));
             panel.appendChild(notify);
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
-                var picked = [];
-                var boxes = kinds.querySelectorAll('input');
-                for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) picked.push(boxes[i].getAttribute('data-kind'));
                 var next = moduleSetup();
-                next.scheduleKinds = picked.join(',');
+                next.scheduleKinds = packKinds(rows);
                 next.scheduleUnit = unit.value;
                 next.scheduleNotify = notifyBox.checked;
                 saveSetup(next);
@@ -11278,22 +11302,114 @@
         return found;
     }
 
+    var KIND_TEXT = {
+        to: ['kindTo', 'kindToLong'],
+        kts: ['kindKts', 'kindKtsLong'],
+        verify: ['kindVerify', 'kindVerifyLong'],
+        staff: ['kindStaff', 'kindStaffLong'],
+        event: ['kindEvent', 'kindEventLong'],
+        update: ['kindUpdate', 'kindUpdateLong']
+    };
+    var DEFAULT_KINDS = 'to,kts,verify,staff,event,update';
+
+    function cleanKindLabel(value) {
+        return String(value || '').replace(/[,;|=]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+
+    function parseKindList(raw) {
+        var source = String(raw || '').trim() || DEFAULT_KINDS;
+        var rows = [];
+        var seen = {};
+        source.split(',').forEach(function (part) {
+            part = part.trim();
+            if (!part || rows.length >= 24) return;
+            var bar = part.indexOf('|');
+            var id = (bar < 0 ? part : part.slice(0, bar)).trim().toLowerCase();
+            var label = bar < 0 ? '' : cleanKindLabel(part.slice(bar + 1));
+            if (!/^[a-z][a-z0-9]{0,15}$/.test(id) || seen[id]) return;
+            seen[id] = true;
+            rows.push({ id: id, label: label });
+        });
+        if (!rows.length) {
+            DEFAULT_KINDS.split(',').forEach(function (id) { rows.push({ id: id, label: '' }); });
+        }
+        return rows;
+    }
+
+    function packKinds(items) {
+        return items.map(function (row) {
+            var label = cleanKindLabel(row.label);
+            if (!label || label === builtinKind(row.id, true) || label === builtinKind(row.id, false)) return row.id;
+            return row.id + '|' + label;
+        }).join(',');
+    }
+
+    function nextKindId(items) {
+        var taken = {};
+        items.forEach(function (row) { taken[row.id] = true; });
+        var n = 1;
+        var id = 'w1';
+        while (taken[id] && n < 200) {
+            n += 1;
+            id = 'w' + n;
+        }
+        return id;
+    }
+
+    function builtinKind(kind, longForm) {
+        var pair = KIND_TEXT[kind];
+        if (!pair) return kind || '';
+        return t(longForm ? pair[1] : pair[0]);
+    }
+
+    function kindRow(kind) {
+        var rows = parseKindList(moduleSetup().scheduleKinds);
+        for (var i = 0; i < rows.length; i++) if (rows[i].id === kind) return rows[i];
+        return null;
+    }
+
     function kindName(kind) {
-        if (kind === 'kts') return t('kindKts');
-        if (kind === 'verify') return t('kindVerify');
-        return t('kindTo');
+        var row = kindRow(kind);
+        if (row && row.label) return row.label;
+        return builtinKind(kind, false);
     }
 
     function kindLong(kind) {
-        if (kind === 'kts') return t('kindKtsLong');
-        if (kind === 'verify') return t('kindVerifyLong');
-        return t('kindToLong');
+        var row = kindRow(kind);
+        if (row && row.label) return row.label;
+        return builtinKind(kind, true);
     }
 
     function kindColor(kind) {
         if (kind === 'kts') return '#FF8B00';
         if (kind === 'verify') return '#6554C0';
-        return '#0052CC';
+        if (kind === 'staff') return '#00875A';
+        if (kind === 'event') return '#00B8D9';
+        if (kind === 'update') return '#FF5630';
+        if (kind === 'to') return '#0052CC';
+        var palette = ['#006644', '#403294', '#FF7452', '#2684FF', '#57D9A3', '#8777D9'];
+        var n = 0;
+        var text = String(kind || '');
+        for (var i = 0; i < text.length; i++) n = (n + text.charCodeAt(i)) % palette.length;
+        return palette[n];
+    }
+
+    function fillKindSelect(select, current, longForm) {
+        var rows = parseKindList(moduleSetup().scheduleKinds);
+        var seen = false;
+        rows.forEach(function (row) {
+            var option = document.createElement('option');
+            option.value = row.id;
+            option.textContent = longForm ? kindLong(row.id) : kindName(row.id);
+            select.appendChild(option);
+            if (current && row.id === current) seen = true;
+        });
+        if (current && !seen) {
+            var extra = document.createElement('option');
+            extra.value = current;
+            extra.textContent = kindName(current);
+            select.appendChild(extra);
+        }
     }
 
     function monthTitle(year, month) {
@@ -11405,11 +11521,6 @@
             state.scheduleMonth = now.getMonth() + 1;
         }
         var panel = el('section', 'asset-tree-sheet');
-        if (state.canEdit) {
-            var head = el('div', 'asset-tree-sheet-head');
-            head.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', openScheduleDialog));
-            panel.appendChild(head);
-        }
         panel.appendChild(el('p', 'asset-tree-hint', t(state.scheduleMode === 'staff' ? 'staffHint' : 'schedulesHint')));
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -11471,10 +11582,13 @@
         }));
         nav.appendChild(button('\u203A', 'asset-tree-btn slim', function () { shiftScheduleMonth(1); }));
         bar.appendChild(nav);
+        var filters = el('div', 'asset-tree-sheet-filters');
         if (state.scheduleMode !== 'staff') {
-            bar.appendChild(scheduleKindSelect());
-            bar.appendChild(schedulePersonSelect());
+            filters.appendChild(scheduleKindSelect());
+            filters.appendChild(schedulePersonSelect());
         }
+        if (state.canEdit) filters.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', openScheduleDialog));
+        if (filters.childNodes.length) bar.appendChild(filters);
         return bar;
     }
 
@@ -11499,13 +11613,7 @@
         all.value = '';
         all.textContent = t('schedulesAllKinds');
         select.appendChild(all);
-        enabledKinds().forEach(function (key) {
-            var labels = { to: 'kindTo', kts: 'kindKts', verify: 'kindVerify' };
-            var option = document.createElement('option');
-            option.value = key;
-            option.textContent = t(labels[key]);
-            select.appendChild(option);
-        });
+        fillKindSelect(select, state.scheduleKindFilter, false);
         select.value = state.scheduleKindFilter || '';
         select.addEventListener('change', function () {
             state.scheduleKindFilter = select.value;
@@ -12085,13 +12193,7 @@
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, t('schedulesNew')));
             var kind = document.createElement('select');
-            var longLabels = { to: 'kindToLong', kts: 'kindKtsLong', verify: 'kindVerifyLong' };
-            enabledKinds().forEach(function (key) {
-                var option = document.createElement('option');
-                option.value = key;
-                option.textContent = t(longLabels[key]);
-                kind.appendChild(option);
-            });
+            fillKindSelect(kind, '', true);
             kind.value = enabledKinds()[0] || 'to';
             var name = document.createElement('input');
             name.placeholder = t('name');
@@ -12579,7 +12681,7 @@
         var project = currentProject();
         var setup = project && project.setup ? project.setup : {};
         return {
-            scheduleKinds: setup.scheduleKinds || 'to,kts,verify',
+            scheduleKinds: setup.scheduleKinds || DEFAULT_KINDS,
             scheduleUnit: setup.scheduleUnit || 'month',
             scheduleNotify: !!setup.scheduleNotify,
             mapWidth: clampNum(setup.mapWidth || 1200, 640, 2400),
@@ -12595,13 +12697,7 @@
     }
 
     function enabledKinds() {
-        var known = ['to', 'kts', 'verify'];
-        var picked = String(moduleSetup().scheduleKinds || '').split(',');
-        var kept = [];
-        known.forEach(function (key) {
-            if (picked.indexOf(key) >= 0) kept.push(key);
-        });
-        return kept.length ? kept : known;
+        return parseKindList(moduleSetup().scheduleKinds).map(function (row) { return row.id; });
     }
 
     function reportHidden(id) {
@@ -13531,44 +13627,66 @@
             var reason = document.createElement('textarea');
             reason.placeholder = t('lifeReason');
             reason.value = life.writeoffReason || '';
-            var chosen = el('div', 'asset-tree-userpick-name', life.approverName || (approverKey === state.userKey ? (state.displayName || '') : approverKey));
-            var finder = document.createElement('input');
-            finder.type = 'search';
-            finder.placeholder = t('schedulesFindUser');
-            var hits = el('div', 'asset-tree-user-results');
-            var timer = null;
-            var seq = 0;
-            finder.addEventListener('input', function () {
-                clearTimeout(timer);
-                timer = setTimeout(function () {
-                    var query = finder.value.trim();
-                    var mark = ++seq;
-                    hits.innerHTML = '';
-                    if (query.length < 2) return;
-                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                        if (mark !== seq) return;
-                        hits.innerHTML = '';
-                        (payload || []).forEach(function (user) {
-                            hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
-                                approverKey = user.userKey;
-                                chosen.textContent = user.displayName;
-                                hits.innerHTML = '';
-                            }));
-                        });
-                    });
-                }, 200);
-            });
             dialog.appendChild(planField(t('lifeReason'), reason));
-            var who = el('div', 'asset-tree-plan-field');
-            who.appendChild(el('span', null, t('lifeApprover')));
-            who.appendChild(button(t('schedulesMe'), 'asset-tree-btn slim', function () {
-                approverKey = state.userKey || '';
-                chosen.textContent = state.displayName || '';
-            }));
-            who.appendChild(chosen);
-            who.appendChild(finder);
-            who.appendChild(hits);
-            dialog.appendChild(who);
+            if (!direct) {
+                var knownName = life.approverName || (approverKey === state.userKey ? (state.displayName || '') : '');
+                var chosen = el('div', 'asset-tree-userpick-name is-empty', t('lifeApproverEmpty'));
+                var finder = document.createElement('input');
+                finder.type = 'search';
+                finder.placeholder = t('schedulesFindUser');
+                finder.setAttribute('aria-label', t('lifeApprover'));
+                var hits = el('div', 'asset-tree-user-results');
+                var timer = null;
+                var seq = 0;
+                function showApprover(name) {
+                    chosen.textContent = name || t('lifeApproverEmpty');
+                    if (name) chosen.classList.remove('is-empty');
+                    else chosen.classList.add('is-empty');
+                }
+                showApprover(knownName);
+                finder.addEventListener('input', function () {
+                    clearTimeout(timer);
+                    timer = setTimeout(function () {
+                        var query = finder.value.trim();
+                        var mark = ++seq;
+                        hits.innerHTML = '';
+                        if (query.length < 2) return;
+                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                            if (mark !== seq) return;
+                            hits.innerHTML = '';
+                            (payload || []).forEach(function (user) {
+                                var label = user.displayName || user.userKey;
+                                if (user.email) label += ' · ' + user.email;
+                                hits.appendChild(button(label, 'asset-tree-user-hit', function () {
+                                    approverKey = user.userKey;
+                                    showApprover(user.displayName || user.userKey);
+                                    hits.innerHTML = '';
+                                    finder.value = '';
+                                }));
+                            });
+                        });
+                    }, 200);
+                });
+                var who = el('div', 'asset-tree-approver-pick');
+                var head = el('div', 'asset-tree-approver-head');
+                head.appendChild(el('span', null, t('lifeApprover')));
+                head.appendChild(button(t('schedulesMe'), 'asset-tree-linkish', function () {
+                    approverKey = state.userKey || '';
+                    showApprover(state.displayName || '');
+                    hits.innerHTML = '';
+                    finder.value = '';
+                }));
+                who.appendChild(head);
+                who.appendChild(chosen);
+                who.appendChild(finder);
+                who.appendChild(hits);
+                dialog.appendChild(who);
+                if (approverKey && !knownName) {
+                    ajax('GET', '/users/' + encodeURIComponent(approverKey), null, function (status, user) {
+                        if (status === 200 && user && user.displayName) showApprover(user.displayName);
+                    });
+                }
+            }
             var actions = el('div', 'asset-tree-inline-actions');
             actions.appendChild(button(direct ? t('lifeWriteoffNow') : t('lifeAsk'), 'asset-tree-btn primary', function () {
                 var who = direct ? (state.userKey || '') : approverKey;

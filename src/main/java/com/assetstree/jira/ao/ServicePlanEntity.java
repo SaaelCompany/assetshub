@@ -47,7 +47,7 @@ public interface ServicePlanEntity extends Entity {
 
     void setAppliedFor(String appliedFor);
 
-    /** to, kts, or verify. Empty on rows created before kinds existed. */
+    /** Work-kind id, at most 16 characters. Empty on rows created before kinds existed. */
     @StringLength(16)
     String getKind();
 

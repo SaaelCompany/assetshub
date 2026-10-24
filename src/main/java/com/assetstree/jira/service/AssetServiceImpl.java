@@ -5958,7 +5958,7 @@ public class AssetServiceImpl implements AssetService {
         if (supplied.length() > 80) {
             throw new AssetException(400, "asset-tree.error.service");
         }
-        final String name = supplied.isEmpty() ? kindLabel(kind) : supplied;
+        final String name = supplied.isEmpty() ? namedKind(kind, kindNames(project.getKey())) : supplied;
         final String assignee = draft.getAssigneeKey() == null ? "" : draft.getAssigneeKey().trim();
         if (!assignee.isEmpty() && userManager().getUserByKey(assignee) == null) {
             throw new AssetException(400, "asset-tree.error.user");
@@ -6255,12 +6255,35 @@ public class AssetServiceImpl implements AssetService {
         return row;
     }
 
-    private String kindLabel(String kind) {
+    private Map<String, String> kindNames(String projectKey) {
+        ProjectViewEntity row = viewRow(projectKey);
+        return ModuleSetup.kindLabels(row == null ? "" : row.getOptionList());
+    }
+
+    private String namedKind(String kind, Map<String, String> custom) {
+        if (kind != null && custom != null) {
+            String label = custom.get(kind);
+            if (label != null && !label.isEmpty()) {
+                return label;
+            }
+        }
         if (WorkKind.KTS.equals(kind)) {
             return i18n().getText("asset-tree.ui.kindKts");
         }
         if (WorkKind.VERIFY.equals(kind)) {
             return i18n().getText("asset-tree.ui.kindVerify");
+        }
+        if (WorkKind.STAFF.equals(kind)) {
+            return i18n().getText("asset-tree.ui.kindStaff");
+        }
+        if (WorkKind.EVENT.equals(kind)) {
+            return i18n().getText("asset-tree.ui.kindEvent");
+        }
+        if (WorkKind.UPDATE.equals(kind)) {
+            return i18n().getText("asset-tree.ui.kindUpdate");
+        }
+        if (kind != null && !kind.isEmpty() && !WorkKind.TO.equals(kind)) {
+            return kind;
         }
         return i18n().getText("asset-tree.ui.kindTo");
     }
@@ -6796,16 +6819,17 @@ public class AssetServiceImpl implements AssetService {
         List<ReportLineDto> lines = new ArrayList<ReportLineDto>();
         long sum = 0L;
         LocalDate today = LocalDate.now();
+        Map<String, String> kindNames = kindNames(project.getKey());
         for (AssetEntity asset : chosen) {
             String bucketKey = reportBucketKey(key, group, asset, types, index, lives, nextPlan, today);
-            String label = reportBucketLabel(key, group, bucketKey, asset, types, index);
+            String label = reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames);
             ReportBucketDto bucket = buckets.get(bucketKey);
             if (bucket == null) {
                 bucket = new ReportBucketDto(bucketKey, label, reportColor(key, group, bucketKey, types), 0);
                 buckets.put(bucketKey, bucket);
             }
             bucket.setCount(bucket.getCount() + 1);
-            String detail = reportDetail(key, asset, lives, nextPlan, today);
+            String detail = reportDetail(key, asset, lives, nextPlan, today, kindNames);
             if (ReportCatalog.COST.equals(key)) {
                 sum += bookOf(lives.get(Integer.valueOf(asset.getID())), today);
             }
@@ -6927,9 +6951,9 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private String reportBucketLabel(String reportKey, String group, String bucketKey, AssetEntity asset,
-            Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+            Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index, Map<String, String> kindNames) {
         if (ReportCatalog.SERVICE.equals(reportKey) || ReportCatalog.WORK.equals(reportKey)) {
-            return kindLabel(bucketKey);
+            return namedKind(bucketKey, kindNames);
         }
         if (ReportCatalog.AGE.equals(reportKey)) {
             if ("y0".equals(bucketKey)) {
@@ -7033,14 +7057,14 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private String reportDetail(String reportKey, AssetEntity asset, Map<Integer, LifecycleEntity> lives,
-            Map<Integer, ServicePlanEntity> plans, LocalDate today) {
+            Map<Integer, ServicePlanEntity> plans, LocalDate today, Map<String, String> kindNames) {
         if (ReportCatalog.SERVICE.equals(reportKey) || ReportCatalog.WORK.equals(reportKey)) {
             ServicePlanEntity plan = plans.get(Integer.valueOf(asset.getID()));
             if (plan == null) {
                 return "";
             }
             LocalDate next = ServiceDue.next(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit());
-            return kindLabel(WorkKind.clean(plan.getKind())) + (next == null ? "" : " · " + next.toString());
+            return namedKind(WorkKind.clean(plan.getKind()), kindNames) + (next == null ? "" : " · " + next.toString());
         }
         LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
         if (life == null) {

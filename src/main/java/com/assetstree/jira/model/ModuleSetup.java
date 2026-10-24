@@ -11,7 +11,9 @@ import java.util.Map;
 
 /** Compact storage for {@link ModuleSetupDto}. Unknown keys are ignored. Missing keys keep the defaults. */
 public final class ModuleSetup {
-    private static final List<String> KINDS = Arrays.asList("to", "kts", "verify");
+    private static final String DEFAULT_KINDS = "to,kts,verify,staff,event,update";
+    private static final int KIND_LIMIT = 24;
+    private static final int LABEL_LIMIT = 40;
     private static final List<String> UNITS = Arrays.asList("once", "day", "week", "month", "year");
     private static final List<String> GRIDS = Arrays.asList("8", "12", "16", "24", "32");
 
@@ -21,7 +23,7 @@ public final class ModuleSetup {
     public static ModuleSetupDto read(String stored) {
         Map<String, String> values = split(stored);
         ModuleSetupDto setup = new ModuleSetupDto();
-        setup.setScheduleKinds(kinds(values.get("kinds")));
+        setup.setScheduleKinds(kinds(values.get("kinds"), !"2".equals(values.get("kver"))));
         setup.setScheduleUnit(unit(values.get("unit")));
         setup.setScheduleNotify(Boolean.valueOf("1".equals(values.get("notify"))));
         setup.setMapWidth(Integer.valueOf(FloorBounds.width(number(values.get("mw")))));
@@ -39,7 +41,8 @@ public final class ModuleSetup {
     public static String write(ModuleSetupDto draft) {
         ModuleSetupDto value = draft == null ? new ModuleSetupDto() : draft;
         StringBuilder stored = new StringBuilder();
-        append(stored, "kinds", kinds(value.getScheduleKinds()));
+        append(stored, "kinds", kinds(value.getScheduleKinds(), false));
+        append(stored, "kver", "2");
         append(stored, "unit", unit(value.getScheduleUnit()));
         append(stored, "notify", Boolean.TRUE.equals(value.getScheduleNotify()) ? "1" : "0");
         append(stored, "mw", String.valueOf(FloorBounds.width(value.getMapWidth() == null ? 0 : value.getMapWidth().intValue())));
@@ -77,31 +80,64 @@ public final class ModuleSetup {
         return values;
     }
 
-    private static String kinds(String raw) {
-        List<String> kept = new ArrayList<String>();
-        if (raw != null) {
-            String[] parts = raw.split(",");
-            for (String part : parts) {
-                String key = part.trim().toLowerCase(Locale.ROOT);
-                if (KINDS.contains(key) && !kept.contains(key)) {
-                    kept.add(key);
-                }
-            }
+    /** Id to the project's own name. An empty name means the built-in label. */
+    public static Map<String, String> kindLabels(String storedOptions) {
+        Map<String, String> values = split(storedOptions);
+        return parseKinds(values.get("kinds"), !"2".equals(values.get("kver")));
+    }
+
+    private static Map<String, String> parseKinds(String raw, boolean migrate) {
+        String text = raw == null ? "" : raw.trim();
+        if (migrate && (text.isEmpty() || "to,kts,verify".equals(text))) {
+            text = DEFAULT_KINDS;
         }
-        if (kept.isEmpty()) {
-            return "to,kts,verify";
-        }
-        StringBuilder stored = new StringBuilder();
-        for (String key : KINDS) {
-            if (!kept.contains(key)) {
+        Map<String, String> labels = new LinkedHashMap<String, String>();
+        String[] parts = text.split(",");
+        for (String part : parts) {
+            String piece = part == null ? "" : part.trim();
+            if (piece.isEmpty()) {
                 continue;
             }
+            int bar = piece.indexOf('|');
+            String id = WorkKind.id(bar < 0 ? piece : piece.substring(0, bar));
+            if (id.isEmpty() || labels.containsKey(id)) {
+                continue;
+            }
+            labels.put(id, bar < 0 ? "" : clipLabel(piece.substring(bar + 1)));
+            if (labels.size() >= KIND_LIMIT) {
+                break;
+            }
+        }
+        if (labels.isEmpty()) {
+            String[] defaults = DEFAULT_KINDS.split(",");
+            for (String id : defaults) {
+                labels.put(id, "");
+            }
+        }
+        return labels;
+    }
+
+    private static String kinds(String raw, boolean migrate) {
+        StringBuilder stored = new StringBuilder();
+        for (Map.Entry<String, String> entry : parseKinds(raw, migrate).entrySet()) {
             if (stored.length() > 0) {
                 stored.append(',');
             }
-            stored.append(key);
+            stored.append(entry.getKey());
+            if (!entry.getValue().isEmpty()) {
+                stored.append('|').append(entry.getValue());
+            }
         }
         return stored.toString();
+    }
+
+    private static String clipLabel(String raw) {
+        String value = raw == null ? "" : raw.replace(',', ' ').replace(';', ' ').replace('|', ' ').replace('=', ' ');
+        value = value.trim().replaceAll("\\s+", " ");
+        if (value.length() > LABEL_LIMIT) {
+            value = value.substring(0, LABEL_LIMIT).trim();
+        }
+        return value;
     }
 
     private static String unit(String raw) {

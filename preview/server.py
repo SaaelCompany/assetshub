@@ -1048,9 +1048,63 @@ def reject_module(project_key, module, text):
     return None
 
 
-def module_setup(stored):
+KIND_SLUG = re.compile(r"[a-z][a-z0-9]{0,15}")
+BUILTIN_KIND_LABELS = {
+    "to": "ТО",
+    "kts": "КТС",
+    "verify": "Поверка",
+    "staff": "Работа",
+    "event": "Мероприятие",
+    "update": "Обновление",
+}
+DEFAULT_KINDS = "to,kts,verify,staff,event,update"
+
+
+def parse_kinds(raw):
+    rows = []
+    seen = set()
+    for part in str(raw or "").split(","):
+        piece = part.strip()
+        if not piece:
+            continue
+        ident, _, label = piece.partition("|")
+        ident = ident.strip().lower()
+        label = re.sub(r"[,;|=]", " ", label)
+        label = re.sub(r"\s+", " ", label).strip()[:40]
+        if not KIND_SLUG.fullmatch(ident) or ident in seen:
+            continue
+        seen.add(ident)
+        rows.append((ident, label))
+        if len(rows) >= 24:
+            break
+    if not rows:
+        rows = [(key, "") for key in DEFAULT_KINDS.split(",")]
+    return rows
+
+
+def pack_kinds(rows):
+    parts = []
+    for ident, label in rows:
+        label = re.sub(r"\s+", " ", re.sub(r"[,;|=]", " ", label or "")).strip()[:40]
+        parts.append(ident if not label else ident + "|" + label)
+    return ",".join(parts) or DEFAULT_KINDS
+
+
+def kind_label(project_key, kind):
+    stored = ((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}
+    for ident, label in parse_kinds(stored.get("scheduleKinds")):
+        if ident == kind and label:
+            return label
+    return BUILTIN_KIND_LABELS.get(kind, kind)
+
+
+def module_setup(stored, migrate=True):
     stored = stored or {}
-    kinds = [key for key in ("to", "kts", "verify") if key in str(stored.get("scheduleKinds") or "to,kts,verify").split(",")]
+    raw = stored.get("scheduleKinds")
+    version = stored.get("scheduleKindVersion")
+    if migrate and version != 2 and (raw in (None, "") or str(raw).strip() == "to,kts,verify"):
+        raw = ""
+    kinds = parse_kinds(raw)
     unit = stored.get("scheduleUnit") or "month"
     if unit not in ("once", "day", "week", "month", "year"):
         unit = "month"
@@ -1065,7 +1119,7 @@ def module_setup(stored):
     if not re.fullmatch(r"[A-Za-z0-9._@-]{0,80}", approver):
         approver = ""
     return {
-        "scheduleKinds": ",".join(kinds or ["to", "kts", "verify"]),
+        "scheduleKinds": pack_kinds(kinds),
         "scheduleUnit": unit,
         "scheduleNotify": bool(stored.get("scheduleNotify")),
         "mapWidth": plan_limit(stored.get("mapWidth"), 1200, 640, 2400),
@@ -1077,6 +1131,7 @@ def module_setup(stored):
         "lifeApprover": approver,
         "lifeCurrency": currency,
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
+        "scheduleKindVersion": 2,
     }
 
 
@@ -1128,7 +1183,7 @@ def save_project_view(project_key, body, text):
                 present.add(key)
         view["modules"] = [key for key in KNOWN_MODULES if key in present]
     if isinstance(body.get("setup"), dict):
-        view["setup"] = module_setup(body.get("setup"))
+        view["setup"] = module_setup(body.get("setup"), migrate=False)
     return 200, project_view(project_key)
 
 
@@ -1831,10 +1886,9 @@ def create_schedule(project_key, body, text):
     if not ids or len(ids) > 40:
         return 400, {"message": text.get("asset-tree.error.service", "Schedule")}
     kind = (body.get("kind") or "to").strip().lower()
-    labels = {"to": "ТО", "kts": "КТС", "verify": "Поверка"}
-    if kind not in labels:
+    if not KIND_SLUG.fullmatch(kind):
         return 400, {"message": text.get("asset-tree.error.service", "Schedule")}
-    name = (body.get("name") or "").strip() or labels[kind]
+    name = (body.get("name") or "").strip() or kind_label(project_key, kind)
     staged = []
     for raw in ids:
         asset = STATE["assets"].get(int(raw))
@@ -2270,7 +2324,7 @@ def report_view(project_key, report_key, text):
         if report_key in ("service", "work"):
             plan = plan_rows(asset["id"])[0]
             bucket = plan.get("kind") or "to"
-            label = {"to": "ТО", "kts": "КТС", "verify": "Поверка"}.get(bucket, bucket)
+            label = kind_label(asset.get("projectKey") or "", bucket)
             detail = label
         elif report_key == "receipts":
             bucket = (life.get("purchased") or "")[:7]
@@ -2444,7 +2498,7 @@ def fill_plan(row, body, creating, project_key, text):
         row["notify"] = True if body.get("notify") is None else bool(body.get("notify"))
     if body.get("kind") is not None or creating:
         kind = (body.get("kind") or "to").strip().lower()
-        if kind not in ("to", "kts", "verify"):
+        if not KIND_SLUG.fullmatch(kind):
             return text.get("asset-tree.error.service", "Schedule")
         row["kind"] = kind
     if body.get("assigneeKey") is not None or creating:
