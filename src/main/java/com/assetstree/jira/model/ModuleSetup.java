@@ -39,6 +39,7 @@ public final class ModuleSetup {
         setup.setLifeCurrency(currency(values.get("cur")));
         setup.setLifeMonths(Integer.valueOf(months(values.get("months"))));
         setup.setStaffMarks(staffMarks(values.get("marks")));
+        setup.setStaffOrder(staffOrder(values.get("order")));
         return setup;
     }
 
@@ -61,6 +62,7 @@ public final class ModuleSetup {
         append(stored, "cur", currency(value.getLifeCurrency()));
         append(stored, "months", String.valueOf(months(value.getLifeMonths() == null ? "" : String.valueOf(value.getLifeMonths()))));
         append(stored, "marks", staffMarks(value.getStaffMarks()));
+        append(stored, "order", staffOrder(value.getStaffOrder()));
         return stored.toString();
     }
 
@@ -166,6 +168,31 @@ public final class ModuleSetup {
             }
             String[] value = entry.getValue();
             stored.append(entry.getKey()).append('|').append(value[0]).append('|').append(value[1]).append('|').append(value[2]);
+        }
+        return stored.toString();
+    }
+
+    private static String staffOrder(String raw) {
+        List<String> keys = new ArrayList<String>();
+        if (raw != null) {
+            String[] parts = raw.split(",");
+            for (String part : parts) {
+                String key = part == null ? "" : part.trim();
+                if (key.length() > 80 || !key.matches("[A-Za-z0-9._@-]+") || keys.contains(key)) {
+                    continue;
+                }
+                keys.add(key);
+                if (keys.size() >= 60) {
+                    break;
+                }
+            }
+        }
+        StringBuilder stored = new StringBuilder();
+        for (String key : keys) {
+            if (stored.length() > 0) {
+                stored.append(',');
+            }
+            stored.append(key);
         }
         return stored.toString();
     }

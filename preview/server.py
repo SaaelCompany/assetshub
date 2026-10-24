@@ -1138,6 +1138,7 @@ def module_setup(stored, migrate=True):
         "lifeCurrency": currency,
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
         "staffMarks": pack_staff_marks(stored.get("staffMarks")),
+        "staffOrder": pack_staff_order(stored.get("staffOrder")),
         "scheduleKindVersion": 2,
     }
 
@@ -1149,6 +1150,17 @@ DEFAULT_STAFF_MARKS = (
     ("leave", "", "d97706", 0),
     ("sick", "", "e11d48", 0),
 )
+
+
+def pack_staff_order(raw):
+    keys = []
+    for part in str(raw or "").split(","):
+        key = part.strip()
+        if re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", key) and key not in keys:
+            keys.append(key)
+        if len(keys) >= 60:
+            break
+    return ",".join(keys)
 
 
 def pack_staff_marks(raw):
@@ -1898,7 +1910,16 @@ def save_staff(project_key, body, text):
         STATE["duties"][duty_id] = existing
     existing["weekdays"] = weekdays
     existing["hours"] = hours
-    existing["startOn"] = ""
+    anchor = existing.get("startOn") or ""
+    if "startOn" in body:
+        parsed = parse_staff_day(body.get("startOn"))
+        anchor = parsed.isoformat() if parsed else ""
+    if hours >= 12:
+        if not anchor:
+            anchor = "2024-01-01"
+    else:
+        anchor = ""
+    existing["startOn"] = anchor
     existing["endOn"] = ""
     if "marks" in body:
         existing["marks"] = clean_day_marks(body.get("marks"))

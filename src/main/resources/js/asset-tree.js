@@ -11978,14 +11978,58 @@
             }
         });
         order = order.filter(function (key) { return !!people[key].hours; });
+        var rank = {};
+        staffOrderKeys().forEach(function (key, index) { rank[key] = index; });
         order.sort(function (left, right) {
-            return String(people[left].userName).localeCompare(String(people[right].userName));
+            var leftRank = Object.prototype.hasOwnProperty.call(rank, left) ? rank[left] : 10000;
+            var rightRank = Object.prototype.hasOwnProperty.call(rank, right) ? rank[right] : 10000;
+            if (leftRank !== rightRank) return leftRank - rightRank;
+            return String(people[left].userName).localeCompare(String(people[right].userName), state.locale || 'ru');
         });
         return { people: people, order: order };
     }
 
-    function saveStaffHours(userKey, weekdays, hours, marks) {
-        var body = { userKey: userKey, weekdays: weekdays, hours: hours };
+    function staffOrderKeys() {
+        var keys = [];
+        var seen = {};
+        String(moduleSetup().staffOrder || '').split(',').forEach(function (part) {
+            var key = part.trim();
+            if (!/^[A-Za-z0-9._@-]{1,80}$/.test(key) || seen[key]) return;
+            seen[key] = true;
+            keys.push(key);
+        });
+        return keys;
+    }
+
+    function saveStaffOrder(keys) {
+        var next = moduleSetup();
+        var clean = [];
+        var seen = {};
+        (keys || []).forEach(function (key) {
+            if (!/^[A-Za-z0-9._@-]{1,80}$/.test(key) || seen[key] || clean.length >= 60) return;
+            seen[key] = true;
+            clean.push(key);
+        });
+        next.staffOrder = clean.join(',');
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            var project = currentProject();
+            if (project && payload && payload.setup) project.setup = payload.setup;
+            renderFrame();
+        });
+    }
+
+    function saveStaffHours(userKey, weekdays, hours, marks, startOn) {
+        var shift = (parseInt(hours, 10) || 0) >= 12;
+        var body = {
+            userKey: userKey,
+            weekdays: weekdays || 31,
+            hours: hours,
+            startOn: shift ? (startOn || '2024-01-01') : ''
+        };
         if (marks !== undefined) body.marks = marks;
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/staff', body, function (status, payload) {
             if (status >= 200 && status < 300) reloadStaff();
@@ -12097,8 +12141,15 @@
 
     function staffNatural(person, iso, date) {
         if (staffLeaveOn(person, iso)) return 'leave';
+        var hours = person.hours ? parseInt(person.hours.hours, 10) || 0 : 0;
+        if (hours >= 12) {
+            var anchor = parseIsoDate(person.hours.startOn) || parseIsoDate('2024-01-01');
+            var delta = dayNumber(date) - dayNumber(anchor);
+            var phase = ((delta % 4) + 4) % 4;
+            return phase < 2 ? 'work' : 'off';
+        }
         var bit = (date.getDay() + 6) % 7;
-        var weekdays = person.hours ? person.hours.weekdays : 0;
+        var weekdays = person.hours && person.hours.weekdays ? person.hours.weekdays : 31;
         return (weekdays & (1 << bit)) ? 'work' : 'off';
     }
 
@@ -12144,7 +12195,8 @@
 
     function staffFinder() {
         var box = el('div', 'asset-tree-staff-find');
-        box.appendChild(el('span', null, t('staffAdd')));
+        var field = el('label', 'asset-tree-staff-find-field');
+        field.appendChild(el('span', null, t('staffAdd')));
         var query = document.createElement('input');
         query.type = 'search';
         query.placeholder = t('schedulesFindUser');
@@ -12163,8 +12215,10 @@
                     (payload || []).forEach(function (user) {
                         hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
                             if (!staffHas(user.userKey)) {
-                                var work = staffMarkById('work');
-                                saveStaffHours(user.userKey, 31, work && work.hours > 0 ? work.hours : 8);
+                                saveStaffHours(user.userKey, 31, 8);
+                                var keys = staffOrderKeys();
+                                if (keys.indexOf(user.userKey) < 0) keys.push(user.userKey);
+                                saveStaffOrder(keys);
                             }
                             hits.innerHTML = '';
                             query.value = '';
@@ -12173,7 +12227,8 @@
                 });
             }, 200);
         });
-        box.appendChild(query);
+        field.appendChild(query);
+        box.appendChild(field);
         box.appendChild(hits);
         return box;
     }
@@ -12197,20 +12252,15 @@
 
     function staffSections(grouped) {
         var sections = [];
-        var index = {};
         grouped.order.forEach(function (key) {
             var person = grouped.people[key];
             var name = String(person.department || '').trim();
-            if (!index[name]) {
-                index[name] = { name: name, people: [] };
-                sections.push(index[name]);
+            var last = sections[sections.length - 1];
+            if (!last || last.name !== name) {
+                last = { name: name, people: [] };
+                sections.push(last);
             }
-            index[name].people.push(person);
-        });
-        sections.sort(function (left, right) {
-            if (!left.name && right.name) return 1;
-            if (left.name && !right.name) return -1;
-            return left.name.localeCompare(right.name, state.locale || 'ru');
+            last.people.push(person);
         });
         return sections;
     }
@@ -12233,7 +12283,7 @@
                 marks[iso] = brush;
             }
         });
-        saveStaffHours(person.userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks));
+        saveStaffHours(person.userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks), person.hours.startOn);
     }
 
     function beginStaffPaint(person, iso, event) {
@@ -12269,17 +12319,98 @@
         document.addEventListener('mouseup', up);
     }
 
+    function beginStaffReorder(userKey, event) {
+        if (!state.canEdit || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        var origin = event.currentTarget;
+        while (origin && origin.tagName !== 'TR') origin = origin.parentNode;
+        if (!origin) return;
+        var startY = event.clientY;
+        var dragging = false;
+        var target = null;
+        var placeAfter = false;
+        function clearMarks() {
+            var rows = document.querySelectorAll('.asset-tree-roster-person');
+            var index;
+            for (index = 0; index < rows.length; index++) rows[index].classList.remove('is-drop-before', 'is-drop-after');
+        }
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
+            dragging = true;
+            origin.classList.add('is-dragging');
+            var node = document.elementFromPoint(ev.clientX, ev.clientY);
+            var row = null;
+            while (node && node !== document.body) {
+                if (node.classList && node.classList.contains('asset-tree-roster-person')) {
+                    row = node;
+                    break;
+                }
+                node = node.parentNode;
+            }
+            clearMarks();
+            target = row && row !== origin ? row : null;
+            if (!target) return;
+            var box = target.getBoundingClientRect();
+            placeAfter = ev.clientY > box.top + box.height / 2;
+            target.classList.add(placeAfter ? 'is-drop-after' : 'is-drop-before');
+        }
+        function up() {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            clearMarks();
+            origin.classList.remove('is-dragging');
+            if (!dragging || !target) return;
+            var keys = [];
+            var rows = document.querySelectorAll('.asset-tree-roster-person');
+            var index;
+            for (index = 0; index < rows.length; index++) {
+                var key = rows[index].getAttribute('data-staff-user');
+                if (key && key !== userKey) keys.push(key);
+            }
+            var dest = target.getAttribute('data-staff-user');
+            var at = keys.indexOf(dest);
+            if (at < 0) return;
+            keys.splice(placeAfter ? at + 1 : at, 0, userKey);
+            saveStaffOrder(keys);
+        }
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    }
+
     function staffRosterRow(person, year, month, count, today) {
         var row = person.hours || { weekdays: 31, hours: 8, id: 0, marks: '' };
         var marks = parseDayMarks(row.marks);
         var tally = staffTally(person, year, month);
         var per = parseInt(row.hours, 10) || 8;
         var line = el('tr', 'asset-tree-roster-person');
+        line.setAttribute('data-staff-user', person.userKey);
         var name = el('th', 'asset-tree-roster-name');
         name.scope = 'row';
+        var identity = el('span', 'asset-tree-roster-id');
+        if (state.canEdit && person.hours) {
+            var grip = button('', 'asset-tree-roster-grip', function () {});
+            grip.title = t('staffDrag');
+            grip.setAttribute('aria-label', t('staffDrag'));
+            grip.appendChild(el('i'));
+            grip.addEventListener('mousedown', function (event) { beginStaffReorder(person.userKey, event); });
+            identity.appendChild(grip);
+        }
         var who = el('span', 'asset-tree-roster-who', person.userName);
         if (person.phone) who.title = person.phone;
-        name.appendChild(who);
+        identity.appendChild(who);
+        if (state.canEdit && person.hours) {
+            identity.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                var node = event.target;
+                while (node && node !== identity) {
+                    if (node.tagName === 'INPUT' || node.tagName === 'BUTTON') return;
+                    node = node.parentNode;
+                }
+                beginStaffReorder(person.userKey, event);
+            });
+        }
+        name.appendChild(identity);
         if (state.canEdit && person.hours) {
             var hours = document.createElement('input');
             hours.type = 'number';
@@ -12295,10 +12426,22 @@
                     hours.value = String(person.hours.hours || 8);
                     return;
                 }
-                if (value !== person.hours.hours) saveStaffHours(person.userKey, person.hours.weekdays, value);
+                if (value !== person.hours.hours) saveStaffHours(person.userKey, person.hours.weekdays, value, undefined, person.hours.startOn);
             });
             name.appendChild(hours);
             name.appendChild(el('span', 'asset-tree-roster-unit', t('staffHoursCount', '').trim()));
+            if (per >= 12) {
+                var shift = button(t('staffPatternShift'), 'asset-tree-roster-pattern', function () {
+                    var anchor = parseIsoDate(person.hours.startOn) || parseIsoDate('2024-01-01');
+                    saveStaffHours(person.userKey, person.hours.weekdays || 31, person.hours.hours, undefined, isoDate(shiftDays(anchor, 1)));
+                });
+                shift.title = t('staffShiftHint');
+                name.appendChild(shift);
+            } else {
+                var week = el('span', 'asset-tree-roster-pattern is-week', t('staffPatternWeek'));
+                week.title = t('staffPatternWeek');
+                name.appendChild(week);
+            }
             var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
                 if (!window.confirm(t('staffRemoveConfirm', person.userName))) return;
                 ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + row.id, null, function (status, payload) {
@@ -13332,7 +13475,8 @@
             lifeApprover: setup.lifeApprover || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',
             lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
-            staffMarks: setup.staffMarks || ''
+            staffMarks: setup.staffMarks || '',
+            staffOrder: setup.staffOrder || ''
         };
     }
 

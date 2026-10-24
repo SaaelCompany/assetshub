@@ -7133,20 +7133,70 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-staff-find {
+    position: relative;
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
+    margin: 0 0 12px;
 }
 
-#asset-tree-app .asset-tree-staff-find input {
-    width: 280px !important;
-    max-width: 100% !important;
+#asset-tree-app .asset-tree-staff-find-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    min-width: 280px;
+    margin: 0;
+    padding: 0 10px 0 12px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-staff-find-field span {
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-staff-find-field input {
+    width: 150px !important;
+    height: 22px !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-staff-find-field input:focus {
+    outline: none;
+}
+
+#asset-tree-app .asset-tree-staff-find-field:focus-within {
+    border-color: #172b4d;
 }
 
 #asset-tree-app .asset-tree-staff-hits {
-    flex: 1 0 100%;
+    position: absolute;
+    left: 0;
+    top: 32px;
+    z-index: 4;
+    min-width: 280px;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    box-shadow: 0 8px 16px rgba(9, 30, 66, 0.12);
+}
+
+#asset-tree-app .asset-tree-staff-hits:empty {
+    display: none;
 }
 
 #asset-tree-app .asset-tree-staff-card {
@@ -7256,8 +7306,8 @@ a.asset-tree-url {
     position: sticky;
     left: 0;
     z-index: 1;
-    min-width: 220px;
-    max-width: 280px;
+    min-width: 300px;
+    max-width: 380px;
     padding: 2px 8px;
     background: #fff;
     text-align: left;
@@ -7307,12 +7357,83 @@ a.asset-tree-url {
     font-weight: 700;
 }
 
+#asset-tree-app .asset-tree-roster-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 150px;
+}
+
 #asset-tree-app .asset-tree-roster-who {
     display: inline-block;
-    max-width: 160px;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     vertical-align: middle;
+    cursor: grab;
+}
+
+#asset-tree-app button.asset-tree-roster-grip {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 28px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    cursor: grab;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-roster-grip i {
+    width: 8px;
+    height: 12px;
+    background-image: radial-gradient(#97a0af 1.15px, transparent 1.25px);
+    background-size: 4px 4px;
+    background-position: 0 0;
+}
+
+#asset-tree-app tr.asset-tree-roster-person.is-dragging {
+    opacity: 0.45;
+}
+
+#asset-tree-app tr.asset-tree-roster-person.is-drop-before th,
+#asset-tree-app tr.asset-tree-roster-person.is-drop-before td {
+    box-shadow: inset 0 2px 0 #172b4d;
+}
+
+#asset-tree-app tr.asset-tree-roster-person.is-drop-after th,
+#asset-tree-app tr.asset-tree-roster-person.is-drop-after td {
+    box-shadow: inset 0 -2px 0 #172b4d;
+}
+
+#asset-tree-app .asset-tree-roster-pattern,
+#asset-tree-app button.asset-tree-roster-pattern {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    min-height: 0;
+    margin: 0 0 0 4px;
+    padding: 0 5px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-roster-pattern.is-week {
+    color: #6b778c !important;
+    cursor: default;
 }
 
 #asset-tree-app .asset-tree-roster-hours {
