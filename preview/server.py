@@ -1137,8 +1137,67 @@ def module_setup(stored, migrate=True):
         "lifeApprover": approver,
         "lifeCurrency": currency,
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
+        "staffMarks": pack_staff_marks(stored.get("staffMarks")),
         "scheduleKindVersion": 2,
     }
+
+
+DEFAULT_STAFF_MARKS = (
+    ("work", "", "172b4d", 8),
+    ("night", "", "4338ca", 8),
+    ("trip", "", "0f766e", 8),
+    ("leave", "", "d97706", 0),
+    ("sick", "", "e11d48", 0),
+)
+
+
+def pack_staff_marks(raw):
+    source = str(raw or "").strip() or ",".join(f"{item[0]}|{item[1]}|{item[2]}|{item[3]}" for item in DEFAULT_STAFF_MARKS)
+    rows = []
+    seen = set()
+    for part in source.split(","):
+        if len(rows) >= 12:
+            break
+        piece = part.split("|")
+        ident = (piece[0] if piece else "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9]{0,15}", ident) or ident in ("off", "hours") or ident in seen:
+            continue
+        seen.add(ident)
+        label = re.sub(r"\s+", " ", re.sub(r"[,;|=#]", " ", piece[1] if len(piece) > 1 else "")).strip()[:40]
+        color = (piece[2] if len(piece) > 2 else "").strip().lower()
+        if color.startswith("#"):
+            color = color[1:]
+        if not re.fullmatch(r"[0-9a-f]{6}", color):
+            color = "64748b"
+        try:
+            hours = int(piece[3] if len(piece) > 3 and piece[3] != "" else 8)
+        except (TypeError, ValueError):
+            hours = 8
+        hours = max(0, min(24, hours))
+        rows.append((ident, label, color, hours))
+    if not any(item[0] == "work" for item in rows):
+        rows.insert(0, ("work", "", "172b4d", 8))
+        rows = rows[:12]
+    if not rows:
+        rows = list(DEFAULT_STAFF_MARKS)
+    return ",".join(f"{ident}|{label}|{color}|{hours}" for ident, label, color, hours in rows)
+
+
+def clean_day_marks(raw):
+    marks = {}
+    text = str(raw or "").strip()[:12000]
+    for part in text.split(","):
+        if ":" not in part or len(marks) >= 400:
+            continue
+        day, ident = part.split(":", 1)
+        day = day.strip()
+        ident = ident.strip().lower()
+        if parse_staff_day(day) is None:
+            continue
+        if ident != "off" and not re.fullmatch(r"[a-z][a-z0-9]{0,15}", ident):
+            continue
+        marks[day] = ident
+    return ",".join(f"{day}:{marks[day]}" for day in sorted(marks))
 
 
 def plan_limit(raw, default, low, high):
@@ -1792,6 +1851,7 @@ def staff_dto(row):
         "hours": int(row.get("hours") or 0),
         "startOn": row.get("startOn") or "",
         "endOn": row.get("endOn") or "",
+        "marks": row.get("marks") or "",
     }
 
 
@@ -1840,6 +1900,10 @@ def save_staff(project_key, body, text):
     existing["hours"] = hours
     existing["startOn"] = ""
     existing["endOn"] = ""
+    if "marks" in body:
+        existing["marks"] = clean_day_marks(body.get("marks"))
+    elif "marks" not in existing:
+        existing["marks"] = ""
     return 200, staff_dto(existing)
 
 

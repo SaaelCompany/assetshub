@@ -47,4 +47,10 @@ public interface StaffDutyEntity extends Entity {
     String getEndOn();
 
     void setEndOn(String endOn);
+
+    /** Day overrides on an hours row: yyyy-MM-dd:situation, comma separated. */
+    @StringLength(StringLength.UNLIMITED)
+    String getMarks();
+
+    void setMarks(String marks);
 }

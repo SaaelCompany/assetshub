@@ -19,6 +19,7 @@ public class ModuleSetupDto {
     private String lifeApprover;
     private String lifeCurrency;
     private Integer lifeMonths;
+    private String staffMarks;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -46,4 +47,6 @@ public class ModuleSetupDto {
     public void setLifeCurrency(String lifeCurrency) { this.lifeCurrency = lifeCurrency; }
     public Integer getLifeMonths() { return lifeMonths; }
     public void setLifeMonths(Integer lifeMonths) { this.lifeMonths = lifeMonths; }
+    public String getStaffMarks() { return staffMarks; }
+    public void setStaffMarks(String staffMarks) { this.staffMarks = staffMarks; }
 }

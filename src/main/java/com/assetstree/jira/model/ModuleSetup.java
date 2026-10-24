@@ -12,6 +12,7 @@ import java.util.Map;
 /** Compact storage for {@link ModuleSetupDto}. Unknown keys are ignored. Missing keys keep the defaults. */
 public final class ModuleSetup {
     private static final String DEFAULT_KINDS = "to,kts,verify,staff,event,update";
+    private static final String DEFAULT_MARKS = "work||172b4d|8,night||4338ca|8,trip||0f766e|8,leave||d97706|0,sick||e11d48|0";
     private static final int KIND_LIMIT = 24;
     private static final int LABEL_LIMIT = 40;
     private static final List<String> UNITS = Arrays.asList("once", "day", "week", "month", "year");
@@ -37,6 +38,7 @@ public final class ModuleSetup {
         setup.setLifeApprover(who(values.get("who")));
         setup.setLifeCurrency(currency(values.get("cur")));
         setup.setLifeMonths(Integer.valueOf(months(values.get("months"))));
+        setup.setStaffMarks(staffMarks(values.get("marks")));
         return setup;
     }
 
@@ -58,6 +60,7 @@ public final class ModuleSetup {
         append(stored, "who", who(value.getLifeApprover()));
         append(stored, "cur", currency(value.getLifeCurrency()));
         append(stored, "months", String.valueOf(months(value.getLifeMonths() == null ? "" : String.valueOf(value.getLifeMonths()))));
+        append(stored, "marks", staffMarks(value.getStaffMarks()));
         return stored.toString();
     }
 
@@ -119,6 +122,72 @@ public final class ModuleSetup {
             }
         }
         return labels;
+    }
+
+    private static String staffMarks(String raw) {
+        Map<String, String[]> rows = new LinkedHashMap<String, String[]>();
+        String source = raw == null || raw.trim().isEmpty() ? DEFAULT_MARKS : raw;
+        String[] parts = source.split(",");
+        for (String part : parts) {
+            if (rows.size() >= 12) {
+                break;
+            }
+            String[] piece = part.split("\\|", -1);
+            if (piece.length < 1) {
+                continue;
+            }
+            String id = WorkKind.id(piece[0]);
+            if (id.isEmpty() || "off".equals(id) || "hours".equals(id) || rows.containsKey(id)) {
+                continue;
+            }
+            String label = markLabel(piece.length > 1 ? piece[1] : "");
+            String color = markColor(piece.length > 2 ? piece[2] : "");
+            String hours = String.valueOf(markHours(piece.length > 3 ? piece[3] : "8"));
+            rows.put(id, new String[] { label, color, hours });
+        }
+        if (!rows.containsKey("work")) {
+            Map<String, String[]> withWork = new LinkedHashMap<String, String[]>();
+            withWork.put("work", new String[] { "", "172b4d", "8" });
+            for (Map.Entry<String, String[]> entry : rows.entrySet()) {
+                if (withWork.size() >= 12) {
+                    break;
+                }
+                withWork.put(entry.getKey(), entry.getValue());
+            }
+            rows = withWork;
+        }
+        if (rows.isEmpty()) {
+            return DEFAULT_MARKS;
+        }
+        StringBuilder stored = new StringBuilder();
+        for (Map.Entry<String, String[]> entry : rows.entrySet()) {
+            if (stored.length() > 0) {
+                stored.append(',');
+            }
+            String[] value = entry.getValue();
+            stored.append(entry.getKey()).append('|').append(value[0]).append('|').append(value[1]).append('|').append(value[2]);
+        }
+        return stored.toString();
+    }
+
+    private static String markLabel(String raw) {
+        return clipLabel(raw == null ? "" : raw.replace('#', ' '));
+    }
+
+    private static String markColor(String raw) {
+        String value = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if (value.startsWith("#")) {
+            value = value.substring(1);
+        }
+        return value.matches("[0-9a-f]{6}") ? value : "64748b";
+    }
+
+    private static int markHours(String raw) {
+        int value = number(raw);
+        if (value < 0) {
+            return 0;
+        }
+        return value > 24 ? 24 : value;
     }
 
     private static String layer(String raw, String kinds) {

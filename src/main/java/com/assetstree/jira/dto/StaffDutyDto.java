@@ -13,6 +13,7 @@ public class StaffDutyDto {
     private int hours;
     private String startOn;
     private String endOn;
+    private String marks;
     private String department;
     private String phone;
 
@@ -32,6 +33,8 @@ public class StaffDutyDto {
     public void setStartOn(String startOn) { this.startOn = startOn; }
     public String getEndOn() { return endOn; }
     public void setEndOn(String endOn) { this.endOn = endOn; }
+    public String getMarks() { return marks; }
+    public void setMarks(String marks) { this.marks = marks; }
     public String getDepartment() { return department; }
     public void setDepartment(String department) { this.department = department; }
     public String getPhone() { return phone; }

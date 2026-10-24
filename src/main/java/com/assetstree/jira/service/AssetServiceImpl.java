@@ -6065,6 +6065,11 @@ public class AssetServiceImpl implements AssetService {
                 hoursRow.setHours(hours);
                 hoursRow.setStartOn("");
                 hoursRow.setEndOn("");
+                if (draft != null && draft.getMarks() != null) {
+                    hoursRow.setMarks(cleanStaffMarks(draft.getMarks()));
+                } else if (hoursRow.getMarks() == null) {
+                    hoursRow.setMarks("");
+                }
                 hoursRow.save();
                 return staffDto(hoursRow);
             }
@@ -6221,7 +6226,43 @@ public class AssetServiceImpl implements AssetService {
         dto.setHours(row.getHours());
         dto.setStartOn(row.getStartOn() == null ? "" : row.getStartOn());
         dto.setEndOn(row.getEndOn() == null ? "" : row.getEndOn());
+        dto.setMarks(row.getMarks() == null ? "" : row.getMarks());
         return dto;
+    }
+
+    private String cleanStaffMarks(String raw) {
+        String trimmed = raw == null ? "" : raw.trim();
+        if (trimmed.length() > 12000) {
+            trimmed = trimmed.substring(0, 12000);
+        }
+        Map<String, String> marks = new java.util.TreeMap<String, String>();
+        String[] parts = trimmed.split(",");
+        for (String part : parts) {
+            int colon = part.indexOf(':');
+            if (colon <= 0) {
+                continue;
+            }
+            String day = part.substring(0, colon).trim();
+            String id = part.substring(colon + 1).trim().toLowerCase(java.util.Locale.ROOT);
+            if (staffDay(day) == null) {
+                continue;
+            }
+            if (!"off".equals(id) && !id.matches("[a-z][a-z0-9]{0,15}")) {
+                continue;
+            }
+            marks.put(day, id);
+            if (marks.size() >= 400) {
+                break;
+            }
+        }
+        StringBuilder stored = new StringBuilder();
+        for (Map.Entry<String, String> entry : marks.entrySet()) {
+            if (stored.length() > 0) {
+                stored.append(',');
+            }
+            stored.append(entry.getKey()).append(':').append(entry.getValue());
+        }
+        return stored.toString();
     }
 
     private ServicePlanDraft scheduleDraft(ScheduleDraft draft, String name, String kind, String assignee) {

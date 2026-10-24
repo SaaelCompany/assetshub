@@ -10,6 +10,7 @@ public class StaffDutyDraft {
     private Integer hours;
     private String startOn;
     private String endOn;
+    private String marks;
 
     public String getUserKey() { return userKey; }
     public void setUserKey(String userKey) { this.userKey = userKey; }
@@ -21,4 +22,6 @@ public class StaffDutyDraft {
     public void setStartOn(String startOn) { this.startOn = startOn; }
     public String getEndOn() { return endOn; }
     public void setEndOn(String endOn) { this.endOn = endOn; }
+    public String getMarks() { return marks; }
+    public void setMarks(String marks) { this.marks = marks; }
 }
