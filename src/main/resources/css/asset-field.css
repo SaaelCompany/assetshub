@@ -1,0 +1,157 @@
+.asset-tree-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 100%;
+}
+
+.asset-tree-picker-levels {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.asset-tree-picker-level {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.asset-tree-picker-level span {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b778c;
+}
+
+.asset-tree-picker select {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    font-weight: 400;
+}
+
+/* Fallback chrome when the portal's own select rules do not reach this control.
+   Width and height are copied from a visible neighbour, so they are not set here. */
+.asset-tree-picker-portal select {
+    margin: 0;
+    padding: 0 32px 0 8px;
+    border: 2px solid transparent;
+    border-radius: 3px;
+    background-color: #eceef0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%23172B4D' d='M8.292 10.293a1.009 1.009 0 0 0 0 1.419l2.939 2.965c.218.215.5.322.779.322s.556-.107.769-.322l2.93-2.955a1.01 1.01 0 0 0 0-1.419.987.987 0 0 0-1.406 0l-2.298 2.317-2.307-2.327a.99.99 0 0 0-1.406 0z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 16px 16px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+.asset-tree-picker-portal select:disabled {
+    opacity: 1;
+    color: #172b4d;
+}
+
+/* Jira sizes a plain text input to about 250px. That input, and select2's
+   own focus field, were painting over the left of the full-width closed list. */
+.select2-container.asset-tree-portal-select.select2-container {
+    max-width: none !important;
+    background: transparent !important;
+    box-sizing: border-box !important;
+}
+
+.select2-container.asset-tree-portal-select.select2-container .select2-choice {
+    display: block !important;
+    position: relative !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+}
+
+.select2-container.asset-tree-portal-select.select2-container:not(.select2-dropdown-open) .select2-choice {
+    background-color: var(--asset-tree-choice-bg, #ebecf0) !important;
+}
+
+.select2-container.asset-tree-portal-select.select2-container .select2-chosen {
+    width: auto !important;
+    max-width: none !important;
+    background: transparent !important;
+}
+
+.select2-container.asset-tree-portal-select.select2-container > input.select2-focusser,
+.select2-container.asset-tree-portal-select.select2-container input.select2-offscreen {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    max-width: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+    border: 0 !important;
+    background: transparent !important;
+    z-index: 0 !important;
+}
+
+/* The open list is moved onto the page body. Select2 then writes a plain
+   element width, which replaces an inline priority. The custom property
+   stays, so the list keeps the closed field's width. */
+div.select2-drop.asset-tree-portal-drop {
+    width: var(--asset-tree-drop-width) !important;
+    min-width: var(--asset-tree-drop-width) !important;
+    max-width: var(--asset-tree-drop-width) !important;
+    box-sizing: border-box !important;
+}
+
+div.select2-drop.asset-tree-portal-drop .select2-search,
+div.select2-drop.asset-tree-portal-drop .select2-search input,
+div.select2-drop.asset-tree-portal-drop .select2-results,
+div.select2-drop.asset-tree-portal-drop .select2-results ul,
+div.select2-drop.asset-tree-portal-drop .select2-result-label {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+div.select2-drop.asset-tree-portal-drop .select2-results li,
+div.select2-drop.asset-tree-portal-drop .select2-result-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset-tree-picker-current,
+.asset-tree-picker-root {
+    margin: 0;
+    color: #172b4d;
+}
+
+.asset-tree-picker-current:empty,
+.asset-tree-picker-root:empty {
+    display: none;
+}
+
+.asset-tree-picker-root {
+    font-weight: 600;
+}
+
+.asset-tree-picker-wait {
+    margin: 0;
+    color: #6b778c;
+}
+
+.asset-tree-picker button {
+    align-self: flex-start;
+}
+
+input.asset-tree-picker-native,
+textarea.asset-tree-picker-native {
+    display: none !important;
+}

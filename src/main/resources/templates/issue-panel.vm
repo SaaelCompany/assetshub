@@ -1,0 +1,60 @@
+#set($panelIssueId = "")
+#set($panelIssueKey = "")
+#set($panelProject = "")
+#set($panelBase = "")
+#if($issue)
+  #set($panelIssueId = $issue.id)
+  #set($panelIssueKey = $issue.key)
+#end
+#if($assetTreeIssueId)
+  #set($panelIssueId = $assetTreeIssueId)
+#end
+#if($assetTreeIssueKey)
+  #set($panelIssueKey = $assetTreeIssueKey)
+#end
+#if($assetTreeProjectKey)
+  #set($panelProject = $assetTreeProjectKey)
+#end
+#if($assetTreeBase)
+  #set($panelBase = $assetTreeBase)
+#end
+<div id="asset-tree-panel" class="asset-tree-panel" data-issue-id="$panelIssueId" data-issue-key="$panelIssueKey" data-project-key="$panelProject">
+#if($i18n)
+  #set($panelHint = $i18n.getText("asset-tree.ui.panelHint"))
+  #if($panelHint && $panelHint != "" && $panelHint != "asset-tree.ui.panelHint")
+    <p class="asset-tree-panel-hint">$panelHint</p>
+  #end
+#end
+#if($assetTreeReady)
+  #if($assetTreeAssets && $assetTreeAssets.size() > 0)
+    <ul class="asset-tree-panel-list" id="asset-tree-panel-list">
+      #foreach($asset in $assetTreeAssets)
+        <li>
+          <div class="asset-tree-panel-line"><a href="${panelBase}/plugins/servlet/asset-tree?project=${textutils.htmlEncode($asset.projectKey)}#${asset.id}">$textutils.htmlEncode($asset.objectKey)  $textutils.htmlEncode($asset.name)#if($asset.location && $asset.location != "") · $textutils.htmlEncode($asset.location)#end</a></div>
+          <div class="asset-tree-panel-card">
+            <strong>$textutils.htmlEncode($asset.name)</strong>
+            #foreach($attr in $asset.attributes)
+              #if($attr.showOnIssue && $attr.name && $attr.name != "")
+                <div class="asset-tree-panel-card-row"><span>$textutils.htmlEncode($attr.name)</span><span>#if($attr.displayValue)$textutils.htmlEncode($attr.displayValue)#else$textutils.htmlEncode($!attr.value)#end</span></div>
+              #end
+            #end
+            #if($i18n && $asset.custodian && $asset.custodian.displayName && $asset.custodian.displayName != "")
+              <div class="asset-tree-panel-card-row"><span>$i18n.getText("asset-tree.ui.custodian")</span><span>$textutils.htmlEncode($asset.custodian.displayName)</span></div>
+            #end
+          </div>
+        </li>
+      #end
+    </ul>
+  #else
+    #if($i18n)
+      <p class="asset-tree-panel-empty">$i18n.getText("asset-tree.ui.panelEmpty")</p>
+    #end
+  #end
+#end
+#if($i18n)
+  #set($panelOpen = $i18n.getText("asset-tree.ui.openTree"))
+  #if($panelOpen && $panelOpen != "" && $panelOpen != "asset-tree.ui.openTree")
+    <a class="asset-tree-panel-open" href="${panelBase}/plugins/servlet/asset-tree#if($panelProject)?project=${panelProject}#end">$panelOpen</a>
+  #end
+#end
+</div>

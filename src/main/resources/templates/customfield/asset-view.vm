@@ -1,0 +1,3 @@
+#if ($assetLabel && $assetLabel != "")
+<span class="asset-tree-cf-view">$textutils.htmlEncode($assetLabel)</span>
+#end

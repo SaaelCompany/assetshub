@@ -1,0 +1,3 @@
+<div id="asset-tree-portal-boot" hidden data-portal="$!textutils.htmlEncode($!assetTreePortalId)" data-project="$!textutils.htmlEncode($!assetTreeProjectKey)" data-fields="$!textutils.htmlEncode($!assetTreeFieldIds)"></div>
+<link rel="stylesheet" href="$!assetTreeBase/download/resources/com.assetstree.jira.asset-tree:asset-tree-field/asset-field.css?v=$!assetTreeVersion">
+<script src="$!assetTreeBase/download/resources/com.assetstree.jira.asset-tree:asset-tree-field/asset-field.js?v=$!assetTreeVersion"></script>

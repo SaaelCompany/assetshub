@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<atlassian-plugin key="com.assetstree.jira.asset-tree" name="Niout AssetHub for JSM" plugins-version="2">
+    <plugin-info>
+        <description key="asset-tree.description">Niout AssetHub for JSM. Дерево активов для Jira Service Management: площадки, оборудование, ответственные и связи с заявками. Поддержка: niouti@yandex.ru, nioutistudio@gmail.com</description>
+        <version>${project.version}</version>
+        <vendor name="Niout" url="mailto:niouti@yandex.ru"/>
+        <param name="atlassian-data-center-status">compatible</param>
+        <param name="atlassian-data-center-compatible">true</param>
+        <param name="configure.url">/plugins/servlet/asset-tree?view=settings</param>
+    </plugin-info>
+
+    <resource type="i18n" name="i18n" location="i18n/asset-tree"/>
+
+    <ao key="asset-tree-ao">
+        <entity>com.assetstree.jira.ao.AssetEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetAttributeEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetIssueLinkEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetTypeEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetCounterEntity</entity>
+        <entity>com.assetstree.jira.ao.ProjectAssetKeyEntity</entity>
+        <entity>com.assetstree.jira.ao.ProjectViewEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetFieldEntity</entity>
+        <entity>com.assetstree.jira.ao.InventoryMarkEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetCommentEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetFileEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetActivityEntity</entity>
+        <entity>com.assetstree.jira.ao.ProjectStatusEntity</entity>
+        <entity>com.assetstree.jira.ao.ProjectGrantEntity</entity>
+        <entity>com.assetstree.jira.ao.PortalRuleEntity</entity>
+        <entity>com.assetstree.jira.ao.PortalRuleConditionEntity</entity>
+        <entity>com.assetstree.jira.ao.FlowRuleEntity</entity>
+        <entity>com.assetstree.jira.ao.FlowGraphEntity</entity>
+        <entity>com.assetstree.jira.ao.ServicePlanEntity</entity>
+        <entity>com.assetstree.jira.ao.StaffDutyEntity</entity>
+        <entity>com.assetstree.jira.ao.FloorEntity</entity>
+        <entity>com.assetstree.jira.ao.RoomEntity</entity>
+        <entity>com.assetstree.jira.ao.PinEntity</entity>
+        <entity>com.assetstree.jira.ao.SavedReportEntity</entity>
+        <entity>com.assetstree.jira.ao.LifecycleEntity</entity>
+        <entity>com.assetstree.jira.ao.CardTemplateEntity</entity>
+    </ao>
+
+    <customfield-type key="asset-cf" name="Project asset" i18n-name-key="asset-tree.field.cf.name" class="com.assetstree.jira.field.AssetCustomField">
+        <description key="asset-tree.field.cf.description">Links a request to an asset from the same Jira project. On the portal the field walks the branch, department, and equipment tree.</description>
+        <resource type="velocity" name="view" location="templates/customfield/asset-view.vm"/>
+        <resource type="velocity" name="edit" location="templates/customfield/asset-edit.vm"/>
+        <resource type="velocity" name="xml" location="templates/customfield/asset-xml.vm"/>
+    </customfield-type>
+
+    <rest key="asset-tree-rest" path="/asset-tree" version="1.0">
+        <description>Asset tree REST API</description>
+        <package>com.assetstree.jira.rest</package>
+    </rest>
+
+    <servlet key="asset-tree-servlet" name="Asset Tree Page" class="com.assetstree.jira.servlet.AssetPageServlet">
+        <url-pattern>/asset-tree</url-pattern>
+    </servlet>
+
+    <servlet key="asset-tree-file" name="Asset Tree Files" class="com.assetstree.jira.servlet.AssetFileServlet">
+        <url-pattern>/asset-tree-file</url-pattern>
+    </servlet>
+
+    <servlet key="asset-tree-card-image" name="Asset Tree Card Image" class="com.assetstree.jira.servlet.CardImageServlet">
+        <url-pattern>/asset-tree-card-image</url-pattern>
+    </servlet>
+
+    <web-item key="asset-tree-nav" name="Asset Tree Link" section="system.top.navigation.bar" weight="47">
+        <label key="asset-tree.nav.label"/>
+        <link linkId="asset-tree-nav-link">/plugins/servlet/asset-tree?view=all</link>
+        <condition class="com.assetstree.jira.web.AgentAssetsCondition"/>
+    </web-item>
+
+    <web-section key="asset-tree-menu" name="Asset Tree Menu" location="asset-tree-nav-link" weight="10"/>
+
+    <web-item key="asset-tree-mine" name="My Assets" section="asset-tree-nav-link/asset-tree-menu" weight="10">
+        <label key="asset-tree.nav.mine"/>
+        <link linkId="asset-tree-nav-mine">/plugins/servlet/asset-tree?view=mine</link>
+        <condition class="com.atlassian.jira.plugin.webfragment.conditions.UserLoggedInCondition"/>
+    </web-item>
+
+    <web-item key="asset-tree-all" name="All Assets" section="asset-tree-nav-link/asset-tree-menu" weight="20">
+        <label key="asset-tree.nav.all"/>
+        <link linkId="asset-tree-nav-all">/plugins/servlet/asset-tree?view=all</link>
+        <condition class="com.atlassian.jira.plugin.webfragment.conditions.UserLoggedInCondition"/>
+    </web-item>
+
+    <web-item key="asset-tree-settings" name="Asset Settings" section="asset-tree-nav-link/asset-tree-menu" weight="40">
+        <label key="asset-tree.nav.settings"/>
+        <link linkId="asset-tree-nav-settings">/plugins/servlet/asset-tree?view=settings</link>
+        <condition class="com.assetstree.jira.web.ManageAssetsCondition"/>
+    </web-item>
+
+    <web-item key="asset-tree-project" name="Asset Tree Project Link" section="jira.project.sidebar.plugins.navigation" weight="300">
+        <label key="asset-tree.nav.label"/>
+        <link linkId="asset-tree-project-link">/plugins/servlet/asset-tree?project=$project.key&amp;view=all</link>
+        <param name="iconClass" value="aui-icon-large asset-tree-sidebar-icon"/>
+        <condition class="com.assetstree.jira.web.AgentAssetsCondition"/>
+    </web-item>
+
+    <web-resource key="asset-tree-sidebar" name="Asset Tree Sidebar Icon">
+        <context>atl.general</context>
+        <context>jira.general</context>
+        <context>jira.project.sidebar</context>
+        <context>servicedesk.general</context>
+        <resource type="download" name="sidebar-icon.css" location="css/sidebar-icon.css"/>
+        <resource type="download" name="sidebar-assets.svg" location="images/sidebar-assets.svg"/>
+    </web-resource>
+
+    <global-permission key="MANAGE_ASSETS" i18n-name-key="asset-tree.permission.manage.name" i18n-description-key="asset-tree.permission.manage.description" anonymous-allowed="false"/>
+
+    <project-permission key="edit-assets" i18n-name-key="asset-tree.permission.edit.name" i18n-description-key="asset-tree.permission.edit.description" category="PROJECTS"/>
+
+    <web-resource key="asset-tree-web" name="Asset Tree Page Resources">
+        <resource type="download" name="asset-tree.css" location="css/asset-tree.css"/>
+        <resource type="download" name="qr-code.js" location="js/qr-code.js"/>
+        <resource type="download" name="asset-tree.js" location="js/asset-tree.js"/>
+    </web-resource>
+
+    <web-resource key="asset-tree-issue" name="Asset Tree Issue Panel Resources">
+        <dependency>com.atlassian.auiplugin:ajs</dependency>
+        <context>jira.view.issue</context>
+        <context>jira.navigator</context>
+        <resource type="download" name="issue-panel.css" location="css/issue-panel.css"/>
+        <resource type="download" name="issue-panel.js" location="js/issue-panel.js"/>
+    </web-resource>
+
+    <web-resource key="asset-tree-field" name="Asset Tree Request Field">
+        <context>jira.create.issue</context>
+        <context>jira.edit.issue</context>
+        <context>jira.view.issue</context>
+        <context>servicedesk.general</context>
+        <context>servicedesk.portal</context>
+        <context>customerportal</context>
+        <resource type="download" name="asset-field.css" location="css/asset-field.css"/>
+        <resource type="download" name="asset-field.js" location="js/asset-field.js"/>
+    </web-resource>
+
+    <listener key="asset-tree-flow-listener" name="Asset Tree Flow Listener" class="com.assetstree.jira.event.AssetFlowListener">
+        <description>Moves linked equipment when a request changes status.</description>
+    </listener>
+
+    <servlet-filter name="Asset Tree Portal Field" key="asset-tree-portal-filter" class="com.assetstree.jira.servlet.PortalPageFilter" location="before-decoration" weight="50">
+        <description>Adds the asset dropdown to the customer portal create form.</description>
+        <url-pattern>/servicedesk/customer/*</url-pattern>
+        <dispatcher>REQUEST</dispatcher>
+        <dispatcher>FORWARD</dispatcher>
+    </servlet-filter>
+
+    <web-panel key="asset-tree-portal-footer" location="servicedesk.portal.footer" weight="1000">
+        <context-provider class="com.assetstree.jira.web.PortalBootContextProvider"/>
+        <resource name="view" type="velocity" location="templates/portal-boot.vm"/>
+        <condition class="com.assetstree.jira.web.PortalPageCondition"/>
+    </web-panel>
+
+    <web-panel key="asset-tree-portal-header" location="servicedesk.portal.header" weight="1000">
+        <context-provider class="com.assetstree.jira.web.PortalBootContextProvider"/>
+        <resource name="view" type="velocity" location="templates/portal-boot.vm"/>
+        <condition class="com.assetstree.jira.web.PortalPageCondition"/>
+    </web-panel>
+
+    <web-panel key="asset-tree-portal-fields" location="servicedesk.portal.request.fields.create" weight="1000">
+        <context-provider class="com.assetstree.jira.web.PortalBootContextProvider"/>
+        <resource name="view" type="velocity" location="templates/portal-boot.vm"/>
+        <condition class="com.assetstree.jira.web.PortalPageCondition"/>
+    </web-panel>
+
+    <web-panel key="asset-tree-issue-panel" location="atl.jira.view.issue.right.context" weight="250">
+        <label key="asset-tree.panel.title"/>
+        <context-provider class="com.assetstree.jira.web.IssuePanelContextProvider"/>
+        <resource name="view" type="velocity" location="templates/issue-panel.vm"/>
+        <condition class="com.atlassian.jira.plugin.webfragment.conditions.UserLoggedInCondition"/>
+    </web-panel>
+</atlassian-plugin>

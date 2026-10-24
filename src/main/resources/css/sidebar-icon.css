@@ -1,0 +1,20 @@
+/* Project sidebar glyph for "Активы". Same slot as the JSM nav icons:
+   a 16px mark inside .aui-icon-large, painted with the link color so the
+   selected and hover states follow the rest of the menu. The graphic is
+   images/sidebar-assets.svg. */
+.asset-tree-sidebar-icon {
+    background-color: currentColor;
+    background-image: none;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Ccircle cx='12' cy='5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='5.75' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='18.25' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Cpath d='M12 7.2v3.3M12 10.5H7.1M12 10.5h4.9M7.1 10.5v5.7M16.9 10.5v5.7' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Ccircle cx='12' cy='5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='5.75' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='18.25' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Cpath d='M12 7.2v3.3M12 10.5H7.1M12 10.5h4.9M7.1 10.5v5.7M16.9 10.5v5.7' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+}
+
+.asset-tree-sidebar-icon:before {
+    content: none;
+}

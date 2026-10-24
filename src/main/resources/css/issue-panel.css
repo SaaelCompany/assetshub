@@ -1,0 +1,116 @@
+.asset-tree-panel {
+    font-size: 14px;
+    color: #172b4d;
+}
+
+.asset-tree-panel-find {
+    max-width: 240px;
+}
+
+.asset-tree-panel input {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 30px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    padding: 4px 8px;
+    font: inherit;
+}
+
+.asset-tree-panel-hint,
+.asset-tree-panel-empty,
+.asset-tree-panel-error {
+    color: #6b778c;
+    margin: 8px 0;
+}
+
+.asset-tree-panel-error {
+    color: #b42318;
+}
+
+.asset-tree-panel-results,
+.asset-tree-panel-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+}
+
+.asset-tree-panel-results {
+    max-width: 240px;
+}
+
+.asset-tree-panel-results li,
+.asset-tree-panel-line {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.asset-tree-panel-results li,
+.asset-tree-panel-list li {
+    padding: 6px 0;
+    border-bottom: 1px solid #eef1f5;
+}
+
+.asset-tree-panel-card {
+    max-width: 260px;
+    margin-top: 6px;
+    padding: 8px 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+.asset-tree-panel-card strong {
+    display: block;
+    margin: 0 0 6px;
+    font-size: 13px;
+}
+
+.asset-tree-panel-card-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.asset-tree-panel-card-row span:first-child {
+    color: #6b778c;
+}
+
+.asset-tree-panel a {
+    color: #0052cc;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.asset-tree-panel-open {
+    display: inline-block;
+    margin-top: 8px;
+}
+
+.asset-tree-panel button {
+    border: 0;
+    background: transparent;
+    color: #6b778c;
+    cursor: pointer;
+    font: inherit;
+}
+
+.asset-tree-panel-hit {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    color: #172033;
+}
+
+.asset-tree-panel-key {
+    color: #8b97a8;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px;
+}
