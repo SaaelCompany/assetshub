@@ -4467,8 +4467,14 @@ setTimeout(function () {
             return self.create_asset(self.read_json(), text)
         if path == "/users" and method == "GET":
             needle = (query.get("q") or [""])[0].strip().lower()
-            found = [user for user in USERS.values() if needle and needle in (user["displayName"] + user["email"] + user["department"]).lower()]
+            found = [user for user in USERS.values() if needle and needle in (user["displayName"] + user["email"] + user["department"] + user["username"] + user["userKey"]).lower()]
             return 200, found[:8]
+        match = re.fullmatch(r"/users/([A-Za-z0-9._@-]+)", path)
+        if match and method == "GET":
+            user = USERS.get(match.group(1))
+            if not user:
+                return 404, {"message": text["asset-tree.error.user"]}
+            return 200, user
         match = re.fullmatch(r"/users/([a-z0-9_-]+)/assets", path)
         if match and method == "GET":
             user_key = match.group(1)

@@ -180,6 +180,8 @@ public interface AssetService {
 
     List<UserProfileDto> searchUsers(ApplicationUser user, String query);
 
+    UserProfileDto userProfile(ApplicationUser user, String userKey);
+
     List<AssetDto> assetsForUser(ApplicationUser user, String userKey);
 
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);

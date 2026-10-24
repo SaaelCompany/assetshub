@@ -2906,6 +2906,16 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public UserProfileDto userProfile(ApplicationUser user, String userKey) {
+        requireUser(user);
+        String key = userKey == null ? "" : userKey.trim();
+        if (key.isEmpty() || userManager().getUserByKey(key) == null) {
+            throw new AssetException(404, "asset-tree.error.user");
+        }
+        return profile(key);
+    }
+
+    @Override
     public List<AssetDto> assetsForUser(ApplicationUser user, String userKey) {
         requireUser(user);
         if (userKey == null || userKey.trim().isEmpty() || userManager().getUserByKey(userKey.trim()) == null) {

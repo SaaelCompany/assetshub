@@ -4113,11 +4113,26 @@ a.asset-tree-url {
     box-sizing: border-box;
 }
 
-#asset-tree-app button.asset-tree-user-hit {
+#asset-tree-app button.asset-tree-user-hit,
+.asset-tree-backdrop button.asset-tree-user-hit {
+    display: flex !important;
+    visibility: visible !important;
+    align-items: center;
+    justify-content: flex-start;
     height: auto !important;
     min-height: 0 !important;
     width: 100% !important;
+    margin: 0;
+    padding: 6px 8px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fff !important;
+    color: #172b4d !important;
+    font-size: 14px;
+    font-weight: 400;
+    text-align: left;
     white-space: normal !important;
+    cursor: pointer;
 }
 
 #asset-tree-app .asset-tree-comment {
@@ -6715,8 +6730,10 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-life-actions {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
     gap: 8px;
 }
 
@@ -6947,6 +6964,28 @@ a.asset-tree-url {
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+#asset-tree-app .asset-tree-life-setup-head,
+.asset-tree-backdrop .asset-tree-life-setup-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+#asset-tree-app .asset-tree-module-setup .asset-tree-user-results,
+.asset-tree-backdrop .asset-tree-module-setup .asset-tree-user-results {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#asset-tree-app .asset-tree-module-setup .asset-tree-userpick-name,
+.asset-tree-backdrop .asset-tree-module-setup .asset-tree-userpick-name {
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 .asset-tree-dialog .asset-tree-check-list,

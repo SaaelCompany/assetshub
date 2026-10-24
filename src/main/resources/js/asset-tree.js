@@ -10845,9 +10845,73 @@
             approvalBox.checked = setup.lifeApproval;
             approval.appendChild(approvalBox);
             approval.appendChild(document.createTextNode(t('setupApproval')));
-            var approver = document.createElement('input');
-            approver.value = setup.lifeApprover || '';
-            approver.setAttribute('aria-label', t('setupApprover'));
+            var approverKey = setup.lifeApprover || '';
+            var approverName = approverKey && approverKey === state.userKey ? (state.displayName || '') : '';
+            var chosen = el('div', 'asset-tree-userpick-name', approverName || t('lifeApproverEmpty'));
+            var finder = document.createElement('input');
+            finder.type = 'search';
+            finder.placeholder = t('schedulesFindUser');
+            finder.setAttribute('aria-label', t('setupApprover'));
+            finder.value = approverName;
+            var hits = el('div', 'asset-tree-user-results');
+            var timer = null;
+            var seq = 0;
+            function showApprover(name) {
+                approverName = name || '';
+                finder.value = approverName;
+                chosen.textContent = approverName || t('lifeApproverEmpty');
+            }
+            function pickApprover(user) {
+                approverKey = user && user.userKey ? user.userKey : '';
+                showApprover(user && (user.displayName || user.userKey));
+                hits.innerHTML = '';
+            }
+            finder.addEventListener('input', function () {
+                var typed = finder.value.trim();
+                if (!typed) {
+                    approverKey = '';
+                    approverName = '';
+                    chosen.textContent = t('lifeApproverEmpty');
+                } else if (typed !== approverName) {
+                    approverKey = '';
+                    chosen.textContent = '';
+                }
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var query = finder.value.trim();
+                    var mark = ++seq;
+                    hits.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mark !== seq) return;
+                        hits.innerHTML = '';
+                        (payload || []).forEach(function (user) {
+                            var label = user.displayName || user.userKey;
+                            if (user.email) label += ' · ' + user.email;
+                            else if (user.department) label += ' · ' + user.department;
+                            hits.appendChild(button(label, 'asset-tree-user-hit', function () {
+                                pickApprover(user);
+                            }));
+                        });
+                    });
+                }, 200);
+            });
+            if (approverKey && !approverName) {
+                ajax('GET', '/users/' + encodeURIComponent(approverKey), null, function (status, user) {
+                    if (status === 200 && user && user.displayName) showApprover(user.displayName);
+                    else chosen.textContent = approverKey;
+                });
+            }
+            var head = el('div', 'asset-tree-life-setup-head');
+            head.appendChild(approval);
+            head.appendChild(button(t('schedulesMe'), 'asset-tree-linkish', function () {
+                pickApprover({ userKey: state.userKey || '', displayName: state.displayName || '' });
+            }));
+            panel.appendChild(head);
+            var who = planField(t('setupApprover'), finder);
+            who.appendChild(chosen);
+            who.appendChild(hits);
+            panel.appendChild(who);
             var currency = document.createElement('select');
             ['RUB', 'USD', 'EUR'].forEach(function (code) {
                 var option = document.createElement('option');
@@ -10861,17 +10925,12 @@
             months.min = '0';
             months.max = '600';
             months.value = String(setup.lifeMonths > 0 ? setup.lifeMonths : 60);
-            panel.appendChild(approval);
-            panel.appendChild(button(t('schedulesMe'), 'asset-tree-btn slim', function () {
-                approver.value = state.userKey || '';
-            }));
-            panel.appendChild(planField(t('setupApprover'), approver));
             panel.appendChild(planField(t('setupCurrency'), currency));
             panel.appendChild(planField(t('setupMonths'), months));
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
                 next.lifeApproval = approvalBox.checked;
-                next.lifeApprover = approver.value.trim();
+                next.lifeApprover = approverKey;
                 next.lifeCurrency = currency.value;
                 next.lifeMonths = clampNum(months.value, 0, 600);
                 saveSetup(next);

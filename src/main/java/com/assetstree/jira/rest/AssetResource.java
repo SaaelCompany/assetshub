@@ -983,6 +983,17 @@ public class AssetResource {
     }
 
     @GET
+    @Path("users/{userKey}")
+    public Response userProfile(@PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.userProfile(user(), userKey)).build();
+            }
+        });
+    }
+
+    @GET
     @Path("users/{userKey}/assets")
     public Response userAssets(@PathParam("userKey") final String userKey) {
         return invoke(new Callable<Response>() {
