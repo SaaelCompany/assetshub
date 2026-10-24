@@ -7431,6 +7431,7 @@ a.asset-tree-url {
     font-weight: 600;
     letter-spacing: -0.02em;
     text-align: center;
+    text-transform: none;
 }
 
 #asset-tree-app button.asset-tree-month-btn {

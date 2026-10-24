@@ -11740,14 +11740,16 @@
                     cell.appendChild(el('span', 'asset-tree-day-more', '+' + (plans.length - shown.length)));
                 }
                 if (state.canEdit) {
-                    cell.addEventListener('click', function (event) {
-                        var node = event.target;
-                        while (node && node !== cell) {
-                            if (node.tagName === 'BUTTON') return;
-                            node = node.parentNode;
-                        }
-                        openScheduleDialog(iso);
-                    });
+                    (function (dayIso, dayCell) {
+                        dayCell.addEventListener('click', function (event) {
+                            var node = event.target;
+                            while (node && node !== dayCell) {
+                                if (node.tagName === 'BUTTON') return;
+                                node = node.parentNode;
+                            }
+                            openScheduleDialog(dayIso);
+                        });
+                    })(iso, cell);
                 }
             }
             grid.appendChild(cell);
