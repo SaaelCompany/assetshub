@@ -10782,13 +10782,18 @@
                 all.value = '';
                 all.textContent = t('schedulesAllLayers');
                 layer.appendChild(all);
+                var roster = document.createElement('option');
+                roster.value = 'roster';
+                roster.textContent = t('schedulesRoster');
+                layer.appendChild(roster);
                 rows.forEach(function (row) {
                     var option = document.createElement('option');
                     option.value = row.id;
                     option.textContent = row.label || builtinKind(row.id, true);
                     layer.appendChild(option);
                 });
-                layer.value = rows.some(function (row) { return row.id === current; }) ? current : '';
+                if (current === 'staff') current = 'roster';
+                layer.value = current === 'roster' || rows.some(function (row) { return row.id === current; }) ? current : '';
             }
             paintKinds();
             var adder = document.createElement('input');
@@ -11553,11 +11558,17 @@
         if (state.scheduleLayerSet) return;
         state.scheduleLayerSet = true;
         var layer = moduleSetup().scheduleLayer;
+        if (layer === 'roster') {
+            state.scheduleBoard = 'roster';
+            state.scheduleKindFilter = '';
+            return;
+        }
+        state.scheduleBoard = 'calendar';
         state.scheduleKindFilter = enabledKinds().indexOf(layer) >= 0 ? layer : '';
     }
 
-    function staffLayerOn() {
-        return state.scheduleKindFilter === 'staff';
+    function rosterOn() {
+        return state.scheduleBoard === 'roster';
     }
 
     function renderSchedules() {
@@ -11568,39 +11579,54 @@
         }
         if (state.scheduleMode === 'staff') state.scheduleMode = 'calendar';
         ensureScheduleLayer();
-        var panel = el('section', 'asset-tree-sheet');
-        var roster = staffLayerOn();
-        panel.appendChild(el('p', 'asset-tree-hint', t(roster ? 'staffHint' : 'schedulesHint')));
+        var panel = el('section', 'asset-tree-sheet asset-tree-board');
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadSchedules();
             return panel;
         }
         if (state.scheduleError) panel.appendChild(el('p', 'asset-tree-hint', state.scheduleError));
-        var kpis = el('div', 'asset-tree-kpis');
-        if (staffLayerOn()) {
-            var sum = staffMonthSum();
-            var daysCard = kpiCard(String(sum.days), t('staffDaysLabel'), '');
-            daysCard.appendChild(el('span', 'asset-tree-kpi-sub', monthTitle(state.scheduleYear, state.scheduleMonth)));
-            kpis.appendChild(daysCard);
-            kpis.appendChild(kpiCard(String(sum.hours), t('staffHoursLabel'), ''));
-            kpis.appendChild(kpiCard(String(sum.leave), t('staffLeaveLabel'), ''));
+        panel.appendChild(scheduleBoardHead());
+        if (rosterOn()) {
+            panel.appendChild(el('p', 'asset-tree-hint', t('staffHint')));
+            panel.appendChild(scheduleStaff());
         } else {
-            var stats = scheduleStats();
-            kpis.appendChild(kpiCard(String(stats.overdue), t('schedulesOverdue'), stats.overdue ? 'is-alert' : ''));
-            var week = kpiCard(String(stats.weekCount), t('schedulesWeek'), '');
-            week.appendChild(el('span', 'asset-tree-kpi-sub', stats.monthCount + ' ' + t('schedulesPlanned') + ' · ' + monthTitle(state.scheduleYear, state.scheduleMonth)));
-            kpis.appendChild(week);
-            kpis.appendChild(kpiCard(String(stats.done), t('schedulesDoneMonth'), ''));
+            panel.appendChild(scheduleLayers());
+            panel.appendChild(scheduleCalendar());
         }
-        panel.appendChild(kpis);
-        panel.appendChild(scheduleLayers());
-        panel.appendChild(scheduleToolbar());
-        if (roster) panel.appendChild(scheduleStaff());
-        else if (state.scheduleMode === 'list') panel.appendChild(scheduleTable());
-        else if (state.scheduleMode === 'people') panel.appendChild(schedulePeople());
-        else panel.appendChild(scheduleCalendar());
         return panel;
+    }
+
+    function scheduleBoardHead() {
+        var head = el('div', 'asset-tree-board-head');
+        var nav = el('div', 'asset-tree-calendar-nav');
+        nav.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftScheduleMonth(-1); }));
+        nav.appendChild(el('strong', 'asset-tree-calendar-title', monthTitle(state.scheduleYear, state.scheduleMonth)));
+        nav.appendChild(button('\u203A', 'asset-tree-month-btn', function () { shiftScheduleMonth(1); }));
+        nav.appendChild(button(t('schedulesToday'), 'asset-tree-btn slim', function () {
+            var now = new Date();
+            state.scheduleYear = now.getFullYear();
+            state.scheduleMonth = now.getMonth() + 1;
+            renderFrame();
+        }));
+        head.appendChild(nav);
+        var seg = el('div', 'asset-tree-board-switch');
+        [['calendar', 'schedulesCalendar'], ['roster', 'schedulesRoster']].forEach(function (pair) {
+            var on = pair[0] === 'roster' ? rosterOn() : !rosterOn();
+            var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
+                state.scheduleBoard = pair[0];
+                state.scheduleLayerSet = true;
+                renderFrame();
+            });
+            item.setAttribute('aria-pressed', on ? 'true' : 'false');
+            seg.appendChild(item);
+        });
+        head.appendChild(seg);
+        var filters = el('div', 'asset-tree-sheet-filters');
+        if (!rosterOn()) filters.appendChild(schedulePersonSelect());
+        if (state.canEdit) filters.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', function () { openScheduleDialog(); }));
+        if (filters.childNodes.length) head.appendChild(filters);
+        return head;
     }
 
     function kpiCard(value, label, extra) {
@@ -11621,52 +11647,20 @@
 
     function layerButton(id, label) {
         var on = (state.scheduleKindFilter || '') === id;
-        var item = button(label, 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
+        var item = button('', 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
+            state.scheduleBoard = 'calendar';
             state.scheduleKindFilter = id;
             state.scheduleLayerSet = true;
             renderFrame();
         });
         item.setAttribute('aria-pressed', on ? 'true' : 'false');
-        if (id && on) {
-            item.style.setProperty('background', kindColor(id), 'important');
-            item.style.setProperty('border-color', kindColor(id), 'important');
-            item.style.setProperty('color', '#fff', 'important');
-        } else if (id) {
-            item.style.setProperty('color', kindColor(id), 'important');
-            item.style.setProperty('border-color', kindColor(id), 'important');
+        if (id) {
+            var dot = el('i', 'asset-tree-layer-dot');
+            dot.style.background = kindColor(id);
+            item.appendChild(dot);
         }
+        item.appendChild(document.createTextNode(label));
         return item;
-    }
-
-    function scheduleToolbar() {
-        var bar = el('div', 'asset-tree-sheet-bar');
-        if (!staffLayerOn()) {
-            var seg = el('div', 'asset-tree-seg');
-            [['calendar', 'schedulesCalendar'], ['list', 'schedulesList'], ['people', 'schedulesPeople']].forEach(function (pair) {
-                var item = button(t(pair[1]), 'asset-tree-seg-btn' + (state.scheduleMode === pair[0] ? ' is-on' : ''), function () {
-                    state.scheduleMode = pair[0];
-                    renderFrame();
-                });
-                seg.appendChild(item);
-            });
-            bar.appendChild(seg);
-        }
-        var nav = el('div', 'asset-tree-calendar-nav');
-        nav.appendChild(button('\u2039', 'asset-tree-btn slim', function () { shiftScheduleMonth(-1); }));
-        nav.appendChild(el('strong', 'asset-tree-calendar-title', monthTitle(state.scheduleYear, state.scheduleMonth)));
-        nav.appendChild(button(t('schedulesToday'), 'asset-tree-btn slim', function () {
-            var now = new Date();
-            state.scheduleYear = now.getFullYear();
-            state.scheduleMonth = now.getMonth() + 1;
-            renderFrame();
-        }));
-        nav.appendChild(button('\u203A', 'asset-tree-btn slim', function () { shiftScheduleMonth(1); }));
-        bar.appendChild(nav);
-        var filters = el('div', 'asset-tree-sheet-filters');
-        if (!staffLayerOn()) filters.appendChild(schedulePersonSelect());
-        if (state.canEdit) filters.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', openScheduleDialog));
-        if (filters.childNodes.length) bar.appendChild(filters);
-        return bar;
     }
 
     function shiftScheduleMonth(delta) {
@@ -11720,8 +11714,8 @@
             });
         });
         var grid = el('div', 'asset-tree-calendar');
-        weekdayLabels().forEach(function (label) {
-            grid.appendChild(el('div', 'asset-tree-weekday', label));
+        weekdayLabels().forEach(function (label, index) {
+            grid.appendChild(el('div', 'asset-tree-weekday' + (index > 4 ? ' is-weekend' : ''), label));
         });
         var start = new Date(state.scheduleYear, state.scheduleMonth - 1, 1);
         var days = new Date(state.scheduleYear, state.scheduleMonth, 0).getDate();
@@ -11733,23 +11727,49 @@
             var date = shiftDays(start, index - lead);
             var iso = isoDate(date);
             var inMonth = date.getMonth() === start.getMonth();
-            var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (iso === today ? ' is-today' : ''));
+            var weekend = date.getDay() === 0 || date.getDay() === 6;
+            var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''));
             cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
             if (inMonth) {
-                (byDay[iso] || []).forEach(function (plan) {
-                    var day = iso;
-                    var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
-                    var label = kindName(plan.kind);
-                    if (plan.name) label += ' · ' + plan.name;
-                    var chip = button(label, 'asset-tree-bar-event' + (focused ? ' is-focus' : ''), function () { openPlanEvent(plan, day); });
-                    chip.style.background = kindColor(plan.kind);
-                    chip.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
-                    cell.appendChild(chip);
+                var plans = byDay[iso] || [];
+                var shown = plans.length > 3 ? plans.slice(0, 2) : plans;
+                shown.forEach(function (plan) {
+                    cell.appendChild(scheduleEventCard(plan, iso));
                 });
+                if (plans.length > shown.length) {
+                    cell.appendChild(el('span', 'asset-tree-day-more', '+' + (plans.length - shown.length)));
+                }
+                if (state.canEdit) {
+                    cell.addEventListener('click', function (event) {
+                        var node = event.target;
+                        while (node && node !== cell) {
+                            if (node.tagName === 'BUTTON') return;
+                            node = node.parentNode;
+                        }
+                        openScheduleDialog(iso);
+                    });
+                }
             }
             grid.appendChild(cell);
         }
         return grid;
+    }
+
+    function scheduleEventCard(plan, iso) {
+        var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
+        var card = button('', 'asset-tree-event' + (focused ? ' is-focus' : ''), function () { openPlanEvent(plan, iso); });
+        var mark = el('i', 'asset-tree-event-mark');
+        mark.style.background = kindColor(plan.kind);
+        var text = el('span', 'asset-tree-event-text');
+        text.appendChild(el('strong', null, plan.name || kindName(plan.kind)));
+        var meta = kindName(plan.kind);
+        if (plan.startTime) meta = plan.startTime + (plan.endTime ? '–' + plan.endTime : '') + ' · ' + meta;
+        if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
+        text.appendChild(el('em', null, meta));
+        card.appendChild(mark);
+        card.appendChild(text);
+        card.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
+        return card;
     }
 
     function scheduleTable() {
@@ -11820,7 +11840,7 @@
                 state.staffRows = [];
                 state.staffError = (payload && payload.message) || t('errorTitle');
             }
-            if (state.view === 'schedules' && staffLayerOn()) renderFrame();
+            if (state.view === 'schedules' && rosterOn()) renderFrame();
         });
     }
 
@@ -12246,9 +12266,9 @@
         });
     }
 
-    function openScheduleDialog() {
+    function openScheduleDialog(presetDate) {
         var draft = {
-            name: '', kind: 'to', first: isoDate(new Date()), allDay: true, startTime: '', endTime: '',
+            name: '', kind: 'to', first: typeof presetDate === 'string' ? presetDate : isoDate(new Date()), allDay: true, startTime: '', endTime: '',
             repeat: 'once', assigneeKey: '', assigneeName: '', assetIds: {}, note: '', assetQuery: ''
         };
         openModal(function (dialog) {
@@ -12442,7 +12462,8 @@
                         return;
                     }
                     closeModal();
-                    state.scheduleKindFilter = 'staff';
+                    state.scheduleBoard = 'roster';
+                    state.scheduleKindFilter = '';
                     state.scheduleLayerSet = true;
                     if (!staffHas(draft.assigneeKey)) saveStaffHours(draft.assigneeKey, 31, 8);
                     else renderFrame();
@@ -12476,6 +12497,7 @@
                         closeModal();
                         state.scheduleRows = null;
                         state.scheduleLoading = false;
+                        state.scheduleBoard = 'calendar';
                         state.scheduleKindFilter = kind.value || '';
                         state.scheduleLayerSet = true;
                         var chosenDay = parseIsoDate(first.value);
@@ -12774,6 +12796,7 @@
             scheduleKinds: setup.scheduleKinds || DEFAULT_KINDS,
             scheduleLayer: (function () {
                 var id = String(setup.scheduleLayer || '').toLowerCase();
+                if (id === 'roster' || id === 'staff') return 'roster';
                 var known = parseKindList(setup.scheduleKinds || DEFAULT_KINDS);
                 return known.some(function (row) { return row.id === id; }) ? id : '';
             })(),

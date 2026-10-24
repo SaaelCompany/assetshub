@@ -7412,3 +7412,221 @@ a.asset-tree-url {
     margin-bottom: 4px;
     font-weight: 700;
 }
+
+#asset-tree-app .asset-tree-board-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin: 0 0 14px;
+}
+
+#asset-tree-app .asset-tree-board-head .asset-tree-calendar-nav {
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-board-head .asset-tree-calendar-title {
+    min-width: 180px;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    text-align: center;
+}
+
+#asset-tree-app button.asset-tree-month-btn {
+    width: 34px;
+    height: 34px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 1px solid #e2e5ea !important;
+    border-radius: 10px;
+    background: #fff !important;
+    color: #172b4d !important;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-board-switch {
+    display: inline-flex;
+    padding: 3px;
+    background: #eef0f3;
+    border-radius: 12px;
+}
+
+#asset-tree-app button.asset-tree-board-tab {
+    height: 32px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 16px !important;
+    border: 0 !important;
+    border-radius: 9px;
+    background: transparent !important;
+    color: #5e6c84 !important;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-board-tab.is-on {
+    background: #fff !important;
+    color: #172b4d !important;
+    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.16) !important;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-layers {
+    margin: 0 0 12px;
+    gap: 4px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-layer {
+    height: 30px;
+    padding: 0 10px !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px;
+    background: transparent !important;
+    color: #42526e !important;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-layer.is-on {
+    background: #fff !important;
+    border-color: #dfe1e6 !important;
+    color: #172b4d !important;
+}
+
+#asset-tree-app .asset-tree-layer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-calendar {
+    gap: 8px;
+    padding: 4px 0 8px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-weekday {
+    padding: 0 8px 4px;
+    background: transparent;
+    border: 0;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: capitalize;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-weekday.is-weekend {
+    color: #97a0af;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day {
+    min-height: 124px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 12px;
+    box-shadow: none;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-weekend {
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-out {
+    background: transparent;
+    border-color: transparent;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-out .asset-tree-day-num {
+    color: #c1c7d0;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-today .asset-tree-day-num {
+    background: #172b4d;
+    color: #fff;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event {
+    display: flex !important;
+    align-items: stretch;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    margin: 6px 0 0;
+    padding: 0 !important;
+    overflow: hidden;
+    border: 0 !important;
+    border-radius: 8px;
+    background: #f4f5f7 !important;
+    color: #172b4d !important;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-focus {
+    outline: 2px solid #172b4d;
+    outline-offset: 1px;
+}
+
+#asset-tree-app .asset-tree-event-mark {
+    width: 4px;
+    flex: 0 0 4px;
+}
+
+#asset-tree-app .asset-tree-event-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 4px 6px 5px;
+}
+
+#asset-tree-app .asset-tree-event-text strong,
+#asset-tree-app .asset-tree-event-text em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: normal;
+}
+
+#asset-tree-app .asset-tree-event-text strong {
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-event-text em {
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+#asset-tree-app .asset-tree-day-more {
+    display: block;
+    margin-top: 4px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 600;
+}

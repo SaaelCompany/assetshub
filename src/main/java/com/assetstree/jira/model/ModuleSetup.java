@@ -126,6 +126,9 @@ public final class ModuleSetup {
         if (id.isEmpty()) {
             return "";
         }
+        if ("roster".equals(id) || "staff".equals(id)) {
+            return "roster";
+        }
         return parseKinds(kinds, false).containsKey(id) ? id : "";
     }
 

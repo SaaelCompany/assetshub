@@ -1035,6 +1035,7 @@ public final class UiCatalog {
             "schedulesDoneMonth",
             "schedulesPlanned",
             "schedulesCalendar",
+            "schedulesRoster",
             "schedulesList",
             "schedulesPeople",
             "schedulesStaff",

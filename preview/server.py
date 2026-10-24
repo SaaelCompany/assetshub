@@ -1106,7 +1106,9 @@ def module_setup(stored, migrate=True):
         raw = ""
     kinds = parse_kinds(raw)
     layer = str(stored.get("scheduleLayer") or "").strip().lower()
-    if layer not in {ident for ident, _label in kinds}:
+    if layer in ("roster", "staff"):
+        layer = "roster"
+    elif layer not in {ident for ident, _label in kinds}:
         layer = ""
     unit = stored.get("scheduleUnit") or "month"
     if unit not in ("once", "day", "week", "month", "year"):
