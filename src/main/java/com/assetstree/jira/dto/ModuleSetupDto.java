@@ -8,6 +8,7 @@ import javax.xml.bind.annotation.XmlAccessorType;
 public class ModuleSetupDto {
     private String scheduleKinds;
     private String scheduleUnit;
+    private String scheduleLayer;
     private Boolean scheduleNotify;
     private Integer mapWidth;
     private Integer mapHeight;
@@ -23,6 +24,8 @@ public class ModuleSetupDto {
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
     public String getScheduleUnit() { return scheduleUnit; }
     public void setScheduleUnit(String scheduleUnit) { this.scheduleUnit = scheduleUnit; }
+    public String getScheduleLayer() { return scheduleLayer; }
+    public void setScheduleLayer(String scheduleLayer) { this.scheduleLayer = scheduleLayer; }
     public Boolean getScheduleNotify() { return scheduleNotify; }
     public void setScheduleNotify(Boolean scheduleNotify) { this.scheduleNotify = scheduleNotify; }
     public Integer getMapWidth() { return mapWidth; }

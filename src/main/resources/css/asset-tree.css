@@ -6261,6 +6261,37 @@ a.asset-tree-url {
     margin-left: auto;
 }
 
+#asset-tree-app .asset-tree-layers {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+#asset-tree-app button.asset-tree-layer {
+    display: inline-flex !important;
+    align-items: center;
+    height: 28px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 12px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 14px;
+    background: #fff !important;
+    color: #42526e !important;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-layer.is-on {
+    background: #0052cc !important;
+    border-color: #0052cc !important;
+    color: #fff !important;
+}
+
 #asset-tree-app .asset-tree-calendar-title {
     min-width: 140px;
     color: #172b4d;

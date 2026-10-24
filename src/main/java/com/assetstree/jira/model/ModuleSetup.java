@@ -23,8 +23,10 @@ public final class ModuleSetup {
     public static ModuleSetupDto read(String stored) {
         Map<String, String> values = split(stored);
         ModuleSetupDto setup = new ModuleSetupDto();
-        setup.setScheduleKinds(kinds(values.get("kinds"), !"2".equals(values.get("kver"))));
+        String kindList = kinds(values.get("kinds"), !"2".equals(values.get("kver")));
+        setup.setScheduleKinds(kindList);
         setup.setScheduleUnit(unit(values.get("unit")));
+        setup.setScheduleLayer(layer(values.get("layer"), kindList));
         setup.setScheduleNotify(Boolean.valueOf("1".equals(values.get("notify"))));
         setup.setMapWidth(Integer.valueOf(FloorBounds.width(number(values.get("mw")))));
         setup.setMapHeight(Integer.valueOf(FloorBounds.height(number(values.get("mh")))));
@@ -41,9 +43,11 @@ public final class ModuleSetup {
     public static String write(ModuleSetupDto draft) {
         ModuleSetupDto value = draft == null ? new ModuleSetupDto() : draft;
         StringBuilder stored = new StringBuilder();
-        append(stored, "kinds", kinds(value.getScheduleKinds(), false));
+        String kindList = kinds(value.getScheduleKinds(), false);
+        append(stored, "kinds", kindList);
         append(stored, "kver", "2");
         append(stored, "unit", unit(value.getScheduleUnit()));
+        append(stored, "layer", layer(value.getScheduleLayer(), kindList));
         append(stored, "notify", Boolean.TRUE.equals(value.getScheduleNotify()) ? "1" : "0");
         append(stored, "mw", String.valueOf(FloorBounds.width(value.getMapWidth() == null ? 0 : value.getMapWidth().intValue())));
         append(stored, "mh", String.valueOf(FloorBounds.height(value.getMapHeight() == null ? 0 : value.getMapHeight().intValue())));
@@ -115,6 +119,14 @@ public final class ModuleSetup {
             }
         }
         return labels;
+    }
+
+    private static String layer(String raw, String kinds) {
+        String id = WorkKind.id(raw);
+        if (id.isEmpty()) {
+            return "";
+        }
+        return parseKinds(kinds, false).containsKey(id) ? id : "";
     }
 
     private static String kinds(String raw, boolean migrate) {

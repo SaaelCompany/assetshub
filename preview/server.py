@@ -1105,6 +1105,9 @@ def module_setup(stored, migrate=True):
     if migrate and version != 2 and (raw in (None, "") or str(raw).strip() == "to,kts,verify"):
         raw = ""
     kinds = parse_kinds(raw)
+    layer = str(stored.get("scheduleLayer") or "").strip().lower()
+    if layer not in {ident for ident, _label in kinds}:
+        layer = ""
     unit = stored.get("scheduleUnit") or "month"
     if unit not in ("once", "day", "week", "month", "year"):
         unit = "month"
@@ -1120,6 +1123,7 @@ def module_setup(stored, migrate=True):
         approver = ""
     return {
         "scheduleKinds": pack_kinds(kinds),
+        "scheduleLayer": layer,
         "scheduleUnit": unit,
         "scheduleNotify": bool(stored.get("scheduleNotify")),
         "mapWidth": plan_limit(stored.get("mapWidth"), 1200, 640, 2400),

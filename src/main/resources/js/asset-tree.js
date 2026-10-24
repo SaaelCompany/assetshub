@@ -436,6 +436,7 @@
         scheduleError: '',
         scheduleMode: 'calendar',
         scheduleKindFilter: '',
+        scheduleLayerSet: false,
         schedulePersonFilter: '',
         scheduleFocusAsset: 0,
         staffRows: null,
@@ -4283,11 +4284,16 @@
 
     function openPlansOnSchedule(asset) {
         var soon = '';
+        var soonKind = '';
         (asset.plans || []).forEach(function (plan) {
             var day = plan.nextDue || plan.lastDone || '';
-            if (day && (!soon || day < soon)) soon = day;
+            if (day && (!soon || day < soon)) {
+                soon = day;
+                soonKind = plan.kind || '';
+            }
         });
-        state.scheduleKindFilter = '';
+        state.scheduleKindFilter = soonKind;
+        state.scheduleLayerSet = true;
         state.schedulePersonFilter = '';
         state.scheduleFocusAsset = asset && asset.id ? asset.id : 0;
         touchSchedule(soon);
@@ -4454,7 +4460,8 @@
             ajax(creating ? 'POST' : 'PUT', path, payload(done), function (statusCode, response) {
                 if (statusCode >= 200 && statusCode < 300) {
                     if (creating) state.serviceOpen = null;
-                    state.scheduleKindFilter = '';
+                    state.scheduleKindFilter = kind.value || '';
+                    state.scheduleLayerSet = true;
                     state.schedulePersonFilter = '';
                     state.scheduleFocusAsset = asset.id;
                     var shown = last.value;
@@ -8481,6 +8488,9 @@
         state.scheduleLoading = false;
         state.scheduleToken++;
         state.scheduleError = '';
+        state.scheduleKindFilter = '';
+        state.scheduleLayerSet = false;
+        state.scheduleMode = 'calendar';
         state.staffRows = null;
         state.staffLoading = false;
         state.staffToken++;
@@ -10723,9 +10733,12 @@
     function moduleSetupPanel(moduleKey) {
         var setup = moduleSetup();
         var panel = el('div', 'asset-tree-module-setup');
-        function saveSetup(next) {
+            function saveSetup(next) {
             saveProjectView({ setup: next }, function (ok) {
-                if (ok) closeModal();
+                if (ok) {
+                    if (moduleKey === 'service') state.scheduleLayerSet = false;
+                    closeModal();
+                }
             });
         }
         if (moduleKey === 'service') {
@@ -10743,6 +10756,7 @@
                     name.addEventListener('input', function () {
                         var next = cleanKindLabel(name.value);
                         if (next) row.label = next;
+                        paintLayerOptions();
                     });
                     name.addEventListener('blur', function () {
                         if (!cleanKindLabel(name.value)) name.value = row.label || builtinKind(row.id, true);
@@ -10757,6 +10771,24 @@
                     line.appendChild(remove);
                     list.appendChild(line);
                 });
+                paintLayerOptions();
+            }
+            var layer = document.createElement('select');
+            layer.setAttribute('aria-label', t('setupLayer'));
+            function paintLayerOptions() {
+                var current = layer.value || setup.scheduleLayer || '';
+                layer.innerHTML = '';
+                var all = document.createElement('option');
+                all.value = '';
+                all.textContent = t('schedulesAllLayers');
+                layer.appendChild(all);
+                rows.forEach(function (row) {
+                    var option = document.createElement('option');
+                    option.value = row.id;
+                    option.textContent = row.label || builtinKind(row.id, true);
+                    layer.appendChild(option);
+                });
+                layer.value = rows.some(function (row) { return row.id === current; }) ? current : '';
             }
             paintKinds();
             var adder = document.createElement('input');
@@ -10777,6 +10809,8 @@
             panel.appendChild(el('p', 'asset-tree-hint', t('setupKindsHint')));
             panel.appendChild(list);
             panel.appendChild(addRow);
+            panel.appendChild(planField(t('setupLayer'), layer));
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupLayerHint')));
             var unit = document.createElement('select');
             [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -10796,6 +10830,7 @@
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
                 next.scheduleKinds = packKinds(rows);
+                next.scheduleLayer = layer.value;
                 next.scheduleUnit = unit.value;
                 next.scheduleNotify = notifyBox.checked;
                 saveSetup(next);
@@ -11514,14 +11549,28 @@
         return { overdue: overdue, monthCount: monthCount, weekCount: weekCount, done: done };
     }
 
+    function ensureScheduleLayer() {
+        if (state.scheduleLayerSet) return;
+        state.scheduleLayerSet = true;
+        var layer = moduleSetup().scheduleLayer;
+        state.scheduleKindFilter = enabledKinds().indexOf(layer) >= 0 ? layer : '';
+    }
+
+    function staffLayerOn() {
+        return state.scheduleKindFilter === 'staff';
+    }
+
     function renderSchedules() {
         if (!state.scheduleYear) {
             var now = new Date();
             state.scheduleYear = now.getFullYear();
             state.scheduleMonth = now.getMonth() + 1;
         }
+        if (state.scheduleMode === 'staff') state.scheduleMode = 'calendar';
+        ensureScheduleLayer();
         var panel = el('section', 'asset-tree-sheet');
-        panel.appendChild(el('p', 'asset-tree-hint', t(state.scheduleMode === 'staff' ? 'staffHint' : 'schedulesHint')));
+        var roster = staffLayerOn() && state.scheduleMode !== 'calendar';
+        panel.appendChild(el('p', 'asset-tree-hint', t(roster ? 'staffHint' : 'schedulesHint')));
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadSchedules();
@@ -11529,7 +11578,7 @@
         }
         if (state.scheduleError) panel.appendChild(el('p', 'asset-tree-hint', state.scheduleError));
         var kpis = el('div', 'asset-tree-kpis');
-        if (state.scheduleMode === 'staff') {
+        if (staffLayerOn()) {
             var sum = staffMonthSum();
             var daysCard = kpiCard(String(sum.days), t('staffDaysLabel'), '');
             daysCard.appendChild(el('span', 'asset-tree-kpi-sub', monthTitle(state.scheduleYear, state.scheduleMonth)));
@@ -11545,10 +11594,12 @@
             kpis.appendChild(kpiCard(String(stats.done), t('schedulesDoneMonth'), ''));
         }
         panel.appendChild(kpis);
+        panel.appendChild(scheduleLayers());
         panel.appendChild(scheduleToolbar());
-        if (state.scheduleMode === 'list') panel.appendChild(scheduleTable());
+        if (staffLayerOn() && state.staffRows == null) loadStaff();
+        if (staffLayerOn() && state.scheduleMode !== 'calendar') panel.appendChild(scheduleStaff());
+        else if (state.scheduleMode === 'list') panel.appendChild(scheduleTable());
         else if (state.scheduleMode === 'people') panel.appendChild(schedulePeople());
-        else if (state.scheduleMode === 'staff') panel.appendChild(scheduleStaff());
         else panel.appendChild(scheduleCalendar());
         return panel;
     }
@@ -11560,10 +11611,38 @@
         return card;
     }
 
+    function scheduleLayers() {
+        var bar = el('div', 'asset-tree-layers');
+        bar.appendChild(layerButton('', t('schedulesAllLayers')));
+        parseKindList(moduleSetup().scheduleKinds).forEach(function (row) {
+            bar.appendChild(layerButton(row.id, kindName(row.id)));
+        });
+        return bar;
+    }
+
+    function layerButton(id, label) {
+        var on = (state.scheduleKindFilter || '') === id;
+        var item = button(label, 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
+            state.scheduleKindFilter = id;
+            state.scheduleLayerSet = true;
+            renderFrame();
+        });
+        item.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (id && on) {
+            item.style.setProperty('background', kindColor(id), 'important');
+            item.style.setProperty('border-color', kindColor(id), 'important');
+            item.style.setProperty('color', '#fff', 'important');
+        } else if (id) {
+            item.style.setProperty('color', kindColor(id), 'important');
+            item.style.setProperty('border-color', kindColor(id), 'important');
+        }
+        return item;
+    }
+
     function scheduleToolbar() {
         var bar = el('div', 'asset-tree-sheet-bar');
         var seg = el('div', 'asset-tree-seg');
-        [['calendar', 'schedulesCalendar'], ['list', 'schedulesList'], ['people', 'schedulesPeople'], ['staff', 'schedulesStaff']].forEach(function (pair) {
+        [['calendar', 'schedulesCalendar'], ['list', 'schedulesList'], ['people', 'schedulesPeople']].forEach(function (pair) {
             var item = button(t(pair[1]), 'asset-tree-seg-btn' + (state.scheduleMode === pair[0] ? ' is-on' : ''), function () {
                 state.scheduleMode = pair[0];
                 renderFrame();
@@ -11583,10 +11662,7 @@
         nav.appendChild(button('\u203A', 'asset-tree-btn slim', function () { shiftScheduleMonth(1); }));
         bar.appendChild(nav);
         var filters = el('div', 'asset-tree-sheet-filters');
-        if (state.scheduleMode !== 'staff') {
-            filters.appendChild(scheduleKindSelect());
-            filters.appendChild(schedulePersonSelect());
-        }
+        if (!staffLayerOn()) filters.appendChild(schedulePersonSelect());
         if (state.canEdit) filters.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', openScheduleDialog));
         if (filters.childNodes.length) bar.appendChild(filters);
         return bar;
@@ -11605,21 +11681,19 @@
         renderFrame();
     }
 
-    function scheduleKindSelect() {
-        var select = document.createElement('select');
-        select.className = 'asset-tree-filter';
-        select.setAttribute('aria-label', t('schedulesKind'));
-        var all = document.createElement('option');
-        all.value = '';
-        all.textContent = t('schedulesAllKinds');
-        select.appendChild(all);
-        fillKindSelect(select, state.scheduleKindFilter, false);
-        select.value = state.scheduleKindFilter || '';
-        select.addEventListener('change', function () {
-            state.scheduleKindFilter = select.value;
-            renderFrame();
+    function staffWorking(iso) {
+        if (!staffLayerOn()) return [];
+        var date = parseIsoDate(iso);
+        if (!date) return [];
+        var bit = (date.getDay() + 6) % 7;
+        var grouped = staffGroups();
+        var found = [];
+        grouped.order.forEach(function (key) {
+            var person = grouped.people[key];
+            if (!person.hours || staffLeaveOn(person, iso)) return;
+            if (person.hours.weekdays & (1 << bit)) found.push(person);
         });
-        return select;
+        return found;
     }
 
     function schedulePersonSelect() {
@@ -11676,6 +11750,17 @@
             var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (iso === today ? ' is-today' : ''));
             cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
             if (inMonth) {
+                if (staffLayerOn()) {
+                    staffWorking(iso).forEach(function (person) {
+                        var bit = (date.getDay() + 6) % 7;
+                        var chip = button((person.userName || person.userKey) + ' · ' + (person.hours.hours || 8), 'asset-tree-bar-event', function () {
+                            toggleStaffDay(person, bit);
+                        });
+                        chip.style.background = kindColor('staff');
+                        chip.title = person.userName + (person.department ? ' · ' + person.department : '');
+                        cell.appendChild(chip);
+                    });
+                }
                 (byDay[iso] || []).forEach(function (plan) {
                     var day = iso;
                     var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
@@ -11760,7 +11845,7 @@
                 state.staffRows = [];
                 state.staffError = (payload && payload.message) || t('errorTitle');
             }
-            if (state.view === 'schedules' && state.scheduleMode === 'staff') renderFrame();
+            if (state.view === 'schedules' && staffLayerOn()) renderFrame();
         });
     }
 
@@ -12193,8 +12278,9 @@
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, t('schedulesNew')));
             var kind = document.createElement('select');
-            fillKindSelect(kind, '', true);
-            kind.value = enabledKinds()[0] || 'to';
+            var preset = enabledKinds().indexOf(state.scheduleKindFilter) >= 0 ? state.scheduleKindFilter : (enabledKinds()[0] || 'to');
+            fillKindSelect(kind, preset, true);
+            kind.value = preset;
             var name = document.createElement('input');
             name.placeholder = t('name');
             name.setAttribute('aria-label', t('name'));
@@ -12682,6 +12768,11 @@
         var setup = project && project.setup ? project.setup : {};
         return {
             scheduleKinds: setup.scheduleKinds || DEFAULT_KINDS,
+            scheduleLayer: (function () {
+                var id = String(setup.scheduleLayer || '').toLowerCase();
+                var known = parseKindList(setup.scheduleKinds || DEFAULT_KINDS);
+                return known.some(function (row) { return row.id === id; }) ? id : '';
+            })(),
             scheduleUnit: setup.scheduleUnit || 'month',
             scheduleNotify: !!setup.scheduleNotify,
             mapWidth: clampNum(setup.mapWidth || 1200, 640, 2400),
