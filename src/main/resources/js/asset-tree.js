@@ -11569,7 +11569,7 @@
         if (state.scheduleMode === 'staff') state.scheduleMode = 'calendar';
         ensureScheduleLayer();
         var panel = el('section', 'asset-tree-sheet');
-        var roster = staffLayerOn() && state.scheduleMode !== 'calendar';
+        var roster = staffLayerOn();
         panel.appendChild(el('p', 'asset-tree-hint', t(roster ? 'staffHint' : 'schedulesHint')));
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -11596,8 +11596,7 @@
         panel.appendChild(kpis);
         panel.appendChild(scheduleLayers());
         panel.appendChild(scheduleToolbar());
-        if (staffLayerOn() && state.staffRows == null) loadStaff();
-        if (staffLayerOn() && state.scheduleMode !== 'calendar') panel.appendChild(scheduleStaff());
+        if (roster) panel.appendChild(scheduleStaff());
         else if (state.scheduleMode === 'list') panel.appendChild(scheduleTable());
         else if (state.scheduleMode === 'people') panel.appendChild(schedulePeople());
         else panel.appendChild(scheduleCalendar());
@@ -11641,15 +11640,17 @@
 
     function scheduleToolbar() {
         var bar = el('div', 'asset-tree-sheet-bar');
-        var seg = el('div', 'asset-tree-seg');
-        [['calendar', 'schedulesCalendar'], ['list', 'schedulesList'], ['people', 'schedulesPeople']].forEach(function (pair) {
-            var item = button(t(pair[1]), 'asset-tree-seg-btn' + (state.scheduleMode === pair[0] ? ' is-on' : ''), function () {
-                state.scheduleMode = pair[0];
-                renderFrame();
+        if (!staffLayerOn()) {
+            var seg = el('div', 'asset-tree-seg');
+            [['calendar', 'schedulesCalendar'], ['list', 'schedulesList'], ['people', 'schedulesPeople']].forEach(function (pair) {
+                var item = button(t(pair[1]), 'asset-tree-seg-btn' + (state.scheduleMode === pair[0] ? ' is-on' : ''), function () {
+                    state.scheduleMode = pair[0];
+                    renderFrame();
+                });
+                seg.appendChild(item);
             });
-            seg.appendChild(item);
-        });
-        bar.appendChild(seg);
+            bar.appendChild(seg);
+        }
         var nav = el('div', 'asset-tree-calendar-nav');
         nav.appendChild(button('\u2039', 'asset-tree-btn slim', function () { shiftScheduleMonth(-1); }));
         nav.appendChild(el('strong', 'asset-tree-calendar-title', monthTitle(state.scheduleYear, state.scheduleMonth)));
@@ -11679,21 +11680,6 @@
             state.scheduleYear += 1;
         }
         renderFrame();
-    }
-
-    function staffWorking(iso) {
-        if (!staffLayerOn()) return [];
-        var date = parseIsoDate(iso);
-        if (!date) return [];
-        var bit = (date.getDay() + 6) % 7;
-        var grouped = staffGroups();
-        var found = [];
-        grouped.order.forEach(function (key) {
-            var person = grouped.people[key];
-            if (!person.hours || staffLeaveOn(person, iso)) return;
-            if (person.hours.weekdays & (1 << bit)) found.push(person);
-        });
-        return found;
     }
 
     function schedulePersonSelect() {
@@ -11750,17 +11736,6 @@
             var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (iso === today ? ' is-today' : ''));
             cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
             if (inMonth) {
-                if (staffLayerOn()) {
-                    staffWorking(iso).forEach(function (person) {
-                        var bit = (date.getDay() + 6) % 7;
-                        var chip = button((person.userName || person.userKey) + ' · ' + (person.hours.hours || 8), 'asset-tree-bar-event', function () {
-                            toggleStaffDay(person, bit);
-                        });
-                        chip.style.background = kindColor('staff');
-                        chip.title = person.userName + (person.department ? ' · ' + person.department : '');
-                        cell.appendChild(chip);
-                    });
-                }
                 (byDay[iso] || []).forEach(function (plan) {
                     var day = iso;
                     var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
