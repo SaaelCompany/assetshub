@@ -1076,7 +1076,7 @@ def module_setup(stored):
         "lifeApproval": stored.get("lifeApproval") is not False,
         "lifeApprover": approver,
         "lifeCurrency": currency,
-        "lifeMonths": max(0, min(600, int(stored.get("lifeMonths") or 0))),
+        "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
     }
 
 

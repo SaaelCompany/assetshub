@@ -149,6 +149,9 @@ public final class ModuleSetup {
     }
 
     private static int months(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return 60;
+        }
         int value = number(raw);
         if (value < 0) {
             return 0;

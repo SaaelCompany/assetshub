@@ -10852,7 +10852,7 @@
             ['RUB', 'USD', 'EUR'].forEach(function (code) {
                 var option = document.createElement('option');
                 option.value = code;
-                option.textContent = code;
+                option.textContent = currencyMark(code);
                 currency.appendChild(option);
             });
             currency.value = setup.lifeCurrency || 'RUB';
@@ -10860,7 +10860,7 @@
             months.type = 'number';
             months.min = '0';
             months.max = '600';
-            months.value = String(setup.lifeMonths || 0);
+            months.value = String(setup.lifeMonths > 0 ? setup.lifeMonths : 60);
             panel.appendChild(approval);
             panel.appendChild(button(t('schedulesMe'), 'asset-tree-btn slim', function () {
                 approver.value = state.userKey || '';
@@ -12531,7 +12531,7 @@
             lifeApproval: setup.lifeApproval !== false,
             lifeApprover: setup.lifeApprover || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',
-            lifeMonths: clampNum(setup.lifeMonths || 0, 0, 600)
+            lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600)
         };
     }
 
@@ -13226,10 +13226,22 @@
     }
 
     function moneyInput(value) {
-        if (value == null || value === '') return '0.00';
-        var text = String(value);
-        if (text.indexOf('.') < 0) return text + '.00';
+        var text = value == null || value === '' ? '0' : String(value).replace(/\s/g, '').replace(',', '.');
+        if (!/^\d+(\.\d+)?$/.test(text)) text = '0';
+        var parts = text.split('.');
+        text = parts[0] + '.' + ((parts[1] || '') + '00').slice(0, 2);
+        if (String(state.locale || 'ru').toLowerCase().indexOf('en') !== 0) text = text.replace('.', ',');
         return text;
+    }
+
+    function moneyWire(value) {
+        return String(value || '').replace(/\s/g, '').replace(',', '.');
+    }
+
+    function currencyMark(code) {
+        if (code === 'USD') return '$';
+        if (code === 'EUR') return '\u20AC';
+        return '\u20BD';
     }
 
     function lifeBlank(life) {
@@ -13252,11 +13264,10 @@
 
     function lifeStepper(life) {
         var row = el('ol', 'asset-tree-steps');
-        lifeSteps(life).forEach(function (step, index) {
-            if (index) row.appendChild(el('li', 'asset-tree-step-line' + (step.on ? ' is-on' : ''), ''));
+        lifeSteps(life).forEach(function (step) {
             var item = el('li', 'asset-tree-step' + (step.on ? ' is-on' : ''));
             item.appendChild(el('span', 'asset-tree-step-dot', ''));
-            item.appendChild(el('span', null, t(step.key)));
+            item.appendChild(el('span', 'asset-tree-step-label', t(step.key)));
             row.appendChild(item);
         });
         return row;
@@ -13279,54 +13290,72 @@
         });
     }
 
+    function lifeModule(asset, inner) {
+        var block = moduleBlock(t('lifeTitle'), inner, false);
+        block.classList.add('asset-tree-life-module');
+        var title = block.querySelector('.asset-tree-module-head > span:last-child');
+        if (title) {
+            title.classList.add('asset-tree-life-heading');
+            title.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
+        }
+        return block;
+    }
+
     function lifeBlock(asset) {
-        var host = el('section', 'asset-tree-life-block');
-        var head = el('h3', null, t('lifeTitle'));
-        head.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
-        host.appendChild(head);
-        if (state.life[asset.id]) host.appendChild(lifeBody(asset, state.life[asset.id]));
-        else if (state.lifeFailed[asset.id]) {
-            host.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
-            host.appendChild(button(t('retry'), 'asset-tree-btn', function () {
+        if (state.life[asset.id]) return lifeModule(asset, lifeBody(asset, state.life[asset.id]));
+        var inner = el('div', 'asset-tree-life');
+        if (state.lifeFailed[asset.id]) {
+            inner.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
+            inner.appendChild(button(t('retry'), 'asset-tree-btn', function () {
                 state.lifeFailed[asset.id] = false;
                 state.lifeLoading[asset.id] = false;
                 loadLife(asset.id);
             }));
         } else {
-            host.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            inner.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadLife(asset.id);
         }
-        return host;
+        return lifeModule(asset, inner);
+    }
+
+    function lifeWide(field) {
+        field.classList.add('is-wide');
+        return field;
     }
 
     function lifeBody(asset, life) {
         var body = el('div', 'asset-tree-life');
-        body.appendChild(lifeStepper(life));
         var editingLife = !!(state.lifeEditing[asset.id] && life.writeoffState !== 'approved');
-        if (editingLife) body.appendChild(lifeForm(asset, life));
-        else if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
+        if (editingLife) {
+            body.appendChild(lifeForm(asset, life));
+            return body;
+        }
+        body.appendChild(lifeStepper(life));
+        if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
         else {
             var facts = el('div', 'asset-tree-life-facts');
-            if (life.price) facts.appendChild(el('span', null, t('lifePrice') + ': ' + life.price + ' ' + (life.currency || '')));
-            if (life.monthly) facts.appendChild(el('span', null, t('lifeMonthly') + ': ' + life.monthly));
-            if (life.book) facts.appendChild(el('span', null, t('lifeBook') + ': ' + life.book));
+            if (life.price) facts.appendChild(el('span', null, t('lifePrice') + ': ' + moneyInput(life.price) + ' ' + currencyMark(life.currency || 'RUB')));
+            if (life.monthly) facts.appendChild(el('span', null, t('lifeMonthly') + ': ' + moneyInput(life.monthly)));
+            if (life.book) facts.appendChild(el('span', null, t('lifeBook') + ': ' + moneyInput(life.book)));
             if (life.warrantyUntil) facts.appendChild(el('span', null, life.warrantyActive ? t('lifeWarrantyOn') : t('lifeWarrantyOff')));
             body.appendChild(facts);
         }
-        if (life.writeoffState === 'rejected') body.appendChild(el('p', 'asset-tree-life-state', t('lifeRejected')));
-        if (mayEdit(asset) || life.writeoffState) body.appendChild(lifeApprovalBlock(asset, life));
-        var actions = el('div', 'asset-tree-inline-actions');
-        if (!editingLife && mayEdit(asset) && life.writeoffState !== 'approved' && life.writeoffState !== 'pending') {
+        if (life.writeoffState === 'pending') {
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifePending') + (life.approverName ? ' · ' + life.approverName : '')));
+        } else if (life.writeoffState === 'approved') {
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifeApproved') + (life.approverName ? ' · ' + life.approverName : '')));
+        } else if (life.writeoffState === 'rejected') {
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifeRejected')));
+        }
+        var actions = el('div', 'asset-tree-life-actions');
+        if (mayEdit(asset) && life.writeoffState !== 'approved' && life.writeoffState !== 'pending') {
             if (moduleSetup().lifeApproval) {
                 actions.appendChild(button(t('lifeAsk'), 'asset-tree-btn', function () { openWriteoffDialog(asset, life); }));
             } else {
                 actions.appendChild(button(t('lifeWriteoffNow'), 'asset-tree-btn', function () { openWriteoffDialog(asset, life, true); }));
             }
-            actions.appendChild(button(t('lifeFill'), 'asset-tree-btn', function () {
-                state.lifeEditing[asset.id] = true;
-                showDetail(state.detail || asset, false);
-            }));
-        } else if (!editingLife && mayEdit(asset) && life.writeoffState !== 'approved') {
+        }
+        if (mayEdit(asset) && life.writeoffState !== 'approved') {
             actions.appendChild(button(t('lifeFill'), 'asset-tree-btn', function () {
                 state.lifeEditing[asset.id] = true;
                 showDetail(state.detail || asset, false);
@@ -13336,14 +13365,15 @@
             actions.appendChild(button(t('lifeApprove'), 'asset-tree-btn primary', function () { decideWriteoff(asset, true); }));
             actions.appendChild(button(t('lifeReject'), 'asset-tree-btn', function () { decideWriteoff(asset, false); }));
         }
-        body.appendChild(actions);
+        if (actions.childNodes.length) body.appendChild(actions);
         return body;
     }
 
     function lifeForm(asset, life) {
         var form = el('form', 'asset-tree-life-form');
         form.addEventListener('submit', function (event) { event.preventDefault(); });
-        form.appendChild(el('h4', null, t('lifeSectionBuy')));
+        var buyPanel = el('section', 'asset-tree-life-panel');
+        buyPanel.appendChild(el('h4', null, t('lifeSectionBuy')));
         var buy = el('div', 'asset-tree-life-grid');
         var purchased = document.createElement('input');
         purchased.type = 'date';
@@ -13358,17 +13388,19 @@
         ['RUB', 'USD', 'EUR'].forEach(function (code) {
             var option = document.createElement('option');
             option.value = code;
-            option.textContent = code;
+            option.textContent = currencyMark(code);
             currency.appendChild(option);
         });
         currency.value = lifeBlank(life) ? (moduleSetup().lifeCurrency || 'RUB') : (life.currency || moduleSetup().lifeCurrency || 'RUB');
         buy.appendChild(planField(t('lifePurchase'), purchased));
         buy.appendChild(planField(t('lifeSupplier'), supplier));
-        buy.appendChild(planField(t('lifeDocument'), documentNo));
+        buy.appendChild(lifeWide(planField(t('lifeDocument'), documentNo)));
         buy.appendChild(planField(t('lifePrice'), price));
         buy.appendChild(planField(t('lifeCurrency'), currency));
-        form.appendChild(buy);
-        form.appendChild(el('h4', null, t('lifeSectionUse')));
+        buyPanel.appendChild(buy);
+        form.appendChild(buyPanel);
+        var usePanel = el('section', 'asset-tree-life-panel');
+        usePanel.appendChild(el('h4', null, t('lifeSectionUse')));
         var use = el('div', 'asset-tree-life-grid');
         var commissioned = document.createElement('input');
         commissioned.type = 'date';
@@ -13380,15 +13412,17 @@
         service.value = life.warrantyService || '';
         use.appendChild(planField(t('lifeCommissioned'), commissioned));
         use.appendChild(planField(t('lifeWarranty'), warranty));
-        use.appendChild(planField(t('lifeWarrantyService'), service));
-        form.appendChild(use);
-        form.appendChild(el('h4', null, t('lifeSectionMethod')));
-        var method = el('div', 'asset-tree-life-grid');
+        use.appendChild(lifeWide(planField(t('lifeWarrantyService'), service)));
+        usePanel.appendChild(use);
+        form.appendChild(usePanel);
+        var methodPanel = el('section', 'asset-tree-life-panel');
+        methodPanel.appendChild(el('h4', null, t('lifeSectionMethod')));
+        var method = el('div', 'asset-tree-life-grid is-three');
         var months = document.createElement('input');
         months.type = 'number';
         months.min = '0';
         months.max = '600';
-        months.value = life.lifeMonths ? String(life.lifeMonths) : String(moduleSetup().lifeMonths || 0);
+        months.value = String(life.lifeMonths || moduleSetup().lifeMonths || 60);
         var methodSelect = document.createElement('select');
         var linear = document.createElement('option');
         linear.value = 'linear';
@@ -13399,20 +13433,21 @@
         method.appendChild(planField(t('lifeMonths'), months));
         method.appendChild(planField(t('lifeMethod'), methodSelect));
         method.appendChild(planField(t('lifeResidual'), residual));
-        form.appendChild(method);
+        methodPanel.appendChild(method);
+        form.appendChild(methodPanel);
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
             ajax('PUT', '/assets/' + asset.id + '/lifecycle', {
                 purchased: purchased.value,
                 supplier: supplier.value,
                 document: documentNo.value,
-                price: price.value,
+                price: moneyWire(price.value),
                 currency: currency.value,
                 commissioned: commissioned.value,
                 warrantyUntil: warranty.value,
                 warrantyService: service.value,
                 lifeMonths: parseInt(months.value, 10) || 0,
-                residual: residual.value
+                residual: moneyWire(residual.value)
             }, function (status, payload) {
                 if (status >= 200 && status < 300 && payload) {
                     state.life[asset.id] = payload;
@@ -13427,80 +13462,6 @@
         }));
         form.appendChild(actions);
         return form;
-    }
-
-    function lifePayload(life, approverKey) {
-        return {
-            purchased: life.purchased || '',
-            supplier: life.supplier || '',
-            document: life.document || '',
-            price: life.price || '0',
-            currency: lifeBlank(life) ? (moduleSetup().lifeCurrency || life.currency || 'RUB') : (life.currency || moduleSetup().lifeCurrency || 'RUB'),
-            commissioned: life.commissioned || '',
-            warrantyUntil: life.warrantyUntil || '',
-            warrantyService: life.warrantyService || '',
-            lifeMonths: life.lifeMonths || moduleSetup().lifeMonths || 0,
-            residual: life.residual || '0',
-            approverKey: approverKey || ''
-        };
-    }
-
-    function saveLifeApprover(asset, life, key, name) {
-        ajax('PUT', '/assets/' + asset.id + '/lifecycle', lifePayload(life, key), function (status, payload) {
-            if (status >= 200 && status < 300 && payload) {
-                payload.approverName = name || payload.approverName;
-                state.life[asset.id] = payload;
-                showDetail(state.detail || asset, false);
-            } else notify((payload && payload.message) || t('errorTitle'));
-        });
-    }
-
-    function lifeApprovalBlock(asset, life) {
-        var block = el('section', 'asset-tree-approval');
-        block.appendChild(el('h4', null, t('lifeApproval')));
-        if (life.writeoffState === 'approved') {
-            block.appendChild(el('p', null, t('lifeApproved') + (life.approverName ? ' · ' + life.approverName : '')));
-            return block;
-        }
-        if (life.writeoffState === 'pending') {
-            block.appendChild(el('p', null, t('lifePending') + (life.approverName ? ' · ' + life.approverName : '')));
-            return block;
-        }
-        var chosenKey = life.approverKey || moduleSetup().lifeApprover || '';
-        var chosenName = life.approverName || (chosenKey && chosenKey === state.userKey ? (state.displayName || chosenKey) : chosenKey);
-        var chosen = el('div', 'asset-tree-userpick-name', chosenName || t('lifeApproverEmpty'));
-        var finder = document.createElement('input');
-        finder.type = 'search';
-        finder.placeholder = t('schedulesFindUser');
-        var hits = el('div', 'asset-tree-user-results');
-        var timer = null;
-        var seq = 0;
-        finder.addEventListener('input', function () {
-            clearTimeout(timer);
-            timer = setTimeout(function () {
-                var query = finder.value.trim();
-                var mark = ++seq;
-                hits.innerHTML = '';
-                if (query.length < 2) return;
-                ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                    if (mark !== seq) return;
-                    hits.innerHTML = '';
-                    (payload || []).forEach(function (user) {
-                        hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
-                            saveLifeApprover(asset, life, user.userKey, user.displayName);
-                        }));
-                    });
-                });
-            }, 200);
-        });
-        block.appendChild(el('span', null, t('lifeApprover')));
-        block.appendChild(button(t('schedulesMe'), 'asset-tree-btn slim', function () {
-            saveLifeApprover(asset, life, state.userKey || '', state.displayName || '');
-        }));
-        block.appendChild(chosen);
-        block.appendChild(finder);
-        block.appendChild(hits);
-        return block;
     }
 
     function openWriteoffDialog(asset, life, direct) {
