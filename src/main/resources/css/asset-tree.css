@@ -1144,7 +1144,7 @@ html.asset-tree-dragging * {
     position: fixed;
     inset: 0;
     background: rgba(18, 24, 38, 0.46);
-    z-index: 40;
+    z-index: 5000;
     display: grid;
     place-items: center;
     padding: 24px;
@@ -6646,16 +6646,44 @@ a.asset-tree-url {
     flex: 0 0 240px !important;
 }
 
-#asset-tree-app .asset-tree-report-chart svg.asset-tree-donut text.asset-tree-chart-value {
-    font-size: 32px;
-    font-weight: 700;
+#asset-tree-app .asset-tree-report-ring {
+    position: relative;
+    width: 240px;
+    height: 240px;
+    flex: 0 0 240px;
+}
+
+#asset-tree-app .asset-tree-report-ring-value {
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 240px;
+    height: 240px;
+    margin: 0;
+    padding: 0;
+    color: #172b4d;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif !important;
+    font-size: 36px !important;
+    font-weight: 600 !important;
+    font-style: normal !important;
+    font-stretch: normal !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    text-align: center;
+    text-transform: none !important;
+    transform: none !important;
+    pointer-events: none;
 }
 
 #asset-tree-app .asset-tree-report-legend {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     align-content: center;
-    gap: 10px 28px;
+    gap: 8px 22px;
     flex: 1 1 auto;
     margin: 0;
     padding: 0;
@@ -6684,7 +6712,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-report-legend strong {
-    margin-left: auto;
+    margin-left: 8px;
     color: #42526e;
     font-size: 15px;
     font-weight: 600;
