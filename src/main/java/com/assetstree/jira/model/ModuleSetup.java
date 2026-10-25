@@ -401,7 +401,7 @@ public final class ModuleSetup {
         return value > 600 ? 600 : value;
     }
 
-    /** id^name^kind,x,y,w,h,color,label!shape|next . Colors are stored without a hash. */
+    /** id^name^kind,x,y,w,h,color,label,angle!shape|next . Colors are stored without a hash. Angle is optional. */
     private static String furniture(String raw) {
         if (raw == null || raw.trim().isEmpty()) {
             return "";
@@ -467,11 +467,12 @@ public final class ModuleSetup {
                 color = FloorBounds.color(rawColor).replace("#", "");
             }
             String label = bits.length > 6 ? furnLabel(bits[6]) : "";
+            int angle = bits.length > 7 ? FloorBounds.angle(number(bits[7])) : 0;
             if (stored.length() > 0) {
                 stored.append('!');
             }
             stored.append(kind).append(',').append(x).append(',').append(y).append(',').append(w).append(',').append(h)
-                    .append(',').append(color).append(',').append(label);
+                    .append(',').append(color).append(',').append(label).append(',').append(angle);
             count++;
         }
         return stored.toString();

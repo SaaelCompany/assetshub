@@ -33,6 +33,11 @@ public interface RoomEntity extends Entity {
 
     void setPosH(int posH);
 
+    /** Clockwise degrees. Zero keeps the shape axis-aligned. */
+    int getAngle();
+
+    void setAngle(int angle);
+
     /** room, wall, door, window, column, stair, desk, or partition. Empty on rows drawn before kinds existed. */
     @StringLength(16)
     String getKind();

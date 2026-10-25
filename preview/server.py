@@ -1183,9 +1183,10 @@ def pack_furniture(raw):
             if not re.fullmatch(r"[0-9a-f]{6}", color):
                 color = ""
             label = re.sub(r"\s+", " ", re.sub(r"[,;|^!=]", " ", bits[6] if len(bits) > 6 else "")).strip()[:40]
-            shapes.append("%s,%s,%s,%s,%s,%s,%s" % (
+            shapes.append("%s,%s,%s,%s,%s,%s,%s,%s" % (
                 kind, coord(bits[1], 2000), coord(bits[2], 2000),
                 max(minimum, coord(bits[3], 800)), max(minimum, coord(bits[4], 800)), color, label,
+                room_angle(bits[7] if len(bits) > 7 else 0),
             ))
         if name and shapes and ident not in {item.split("^", 1)[0] for item in kept}:
             kept.append(ident + "^" + name + "^" + "!".join(shapes))
@@ -2148,12 +2149,24 @@ def create_schedule(project_key, body, text):
     return 201, created
 
 
+def room_angle(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = 0
+    number %= 360
+    if number < 0:
+        number += 360
+    return number
+
+
 def floor_dto(row):
     rooms = []
     for room in row.get("rooms") or []:
         rooms.append({
             "id": room["id"], "name": room.get("name") or "", "kind": room.get("kind") or "room",
             "color": room_color(room.get("color")), "x": room["x"], "y": room["y"], "w": room["w"], "h": room["h"],
+            "angle": room_angle(room.get("angle")),
         })
     pins = []
     for pin in row.get("pins") or []:
@@ -2250,7 +2263,7 @@ def save_floor(project_key, floor_id, body, text):
             h = plan_h - y
         stored_rooms.append({
             "id": seq, "name": label[:80], "kind": kind, "color": room_color(room.get("color")),
-            "x": x, "y": y, "w": w, "h": h,
+            "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
         })
         seq += 1
     stored_pins = []

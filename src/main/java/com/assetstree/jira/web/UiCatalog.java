@@ -1141,6 +1141,8 @@ public final class UiCatalog {
             "mapSnap",
             "mapDuplicate",
             "mapFit",
+            "mapAngle",
+            "mapMyTemplates",
             "mapDirty",
             "mapChosen",
             "mapOnFloor",

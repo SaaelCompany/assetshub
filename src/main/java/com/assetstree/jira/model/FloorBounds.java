@@ -82,6 +82,15 @@ public final class FloorBounds {
         return raw > 1600 ? 1600 : raw;
     }
 
+    /** Degrees clockwise, matching the plan canvas. */
+    public static int angle(int raw) {
+        int value = raw % 360;
+        if (value < 0) {
+            value += 360;
+        }
+        return value;
+    }
+
     public static String color(String raw) {
         if (raw == null) {
             return "";

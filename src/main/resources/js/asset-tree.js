@@ -460,6 +460,7 @@
         mapEditing: false,
         mapDirty: false,
         mapZoom: 1,
+        mapCam: null,
         reportCatalog: null,
         reportKey: 'status',
         reportView: null,
@@ -8558,6 +8559,7 @@
         state.mapLoading = false;
         state.mapToken++;
         state.mapSelection = null;
+        state.mapCam = null;
         state.reportCatalog = null;
         state.reportKey = 'status';
         state.reportView = null;
@@ -14668,6 +14670,7 @@
         state.mapDirty = false;
         state.mapSelection = null;
         state.mapGroup = [];
+        state.mapCam = null;
         if (!floors.length) state.mapEditing = false;
         renderFrame();
     }
@@ -14686,6 +14689,18 @@
         return Math.round(value / step) * step;
     }
 
+    function normalizeAngle(value) {
+        var number = Math.round(Number(value) || 0) % 360;
+        if (number < 0) number += 360;
+        return number;
+    }
+
+    function snapAngle(value, loose) {
+        var number = normalizeAngle(value);
+        if (loose) return number;
+        return (Math.round(number / 15) * 15) % 360;
+    }
+
     function clampRoom(room, size) {
         var box = size || planSize(state.mapDraft || currentFloor());
         var kind = room.kind || 'room';
@@ -14700,6 +14715,7 @@
             name: room.name || (kind === 'room' ? t('mapRoom') : ''),
             kind: kind,
             color: roomColor(room.color),
+            angle: normalizeAngle(room.angle),
             x: x, y: y, w: w, h: h
         };
     }
@@ -14736,13 +14752,113 @@
         state.mapDrag = null;
     }
 
-    function svgPoint(svg, event) {
-        var rect = svg.getBoundingClientRect();
+    function fittedCamera(size) {
+        var pad = 48;
+        return { x: -pad, y: -pad, w: size.w + pad * 2, h: size.h + pad * 2 };
+    }
+
+    function activeCamera(size) {
+        var cam = state.mapCam;
+        if (cam && cam.w && cam.h) return cam;
+        return fittedCamera(size);
+    }
+
+    function zoomPercent() {
         var size = planSize(state.mapDraft || currentFloor());
+        var cam = activeCamera(size);
+        var fit = fittedCamera(size);
+        return Math.max(1, Math.round(fit.w / cam.w * 100));
+    }
+
+    function viewMetrics(svg) {
+        var rect = svg.getBoundingClientRect();
+        var raw = (svg.getAttribute('viewBox') || '0 0 1 1').replace(/,/g, ' ').split(/\s+/);
+        var vx = Number(raw[0]) || 0;
+        var vy = Number(raw[1]) || 0;
+        var vw = Number(raw[2]) || 1;
+        var vh = Number(raw[3]) || 1;
+        var rw = rect.width || 1;
+        var rh = rect.height || 1;
+        var scale = Math.min(rw / vw, rh / vh) || 1;
         return {
-            x: ((event.clientX - rect.left) / (rect.width || 1)) * size.w,
-            y: ((event.clientY - rect.top) / (rect.height || 1)) * size.h
+            vx: vx, vy: vy, vw: vw, vh: vh,
+            scale: scale,
+            padX: (rw - vw * scale) / 2,
+            padY: (rh - vh * scale) / 2,
+            rect: rect
         };
+    }
+
+    function svgPoint(svg, event) {
+        var metrics = viewMetrics(svg);
+        return {
+            x: metrics.vx + (event.clientX - metrics.rect.left - metrics.padX) / metrics.scale,
+            y: metrics.vy + (event.clientY - metrics.rect.top - metrics.padY) / metrics.scale
+        };
+    }
+
+    function applyCamera(svg) {
+        var cam = state.mapCam;
+        if (!cam || !svg) return;
+        svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
+        var label = document.querySelector('.asset-tree-zoom-readout');
+        if (label) label.textContent = zoomPercent() + '%';
+    }
+
+    function zoomAt(svg, event, factor) {
+        var size = planSize(state.mapDraft || currentFloor());
+        var metrics = viewMetrics(svg);
+        var before = svgPoint(svg, event);
+        var aspect = (metrics.rect.width || 1) / (metrics.rect.height || 1);
+        var w = clampNum(metrics.vw / factor, size.w / 8, Math.max(size.w, size.h) * 2.4);
+        var h = w / aspect;
+        var rx = (event.clientX - metrics.rect.left) / (metrics.rect.width || 1);
+        var ry = (event.clientY - metrics.rect.top) / (metrics.rect.height || 1);
+        state.mapCam = {
+            x: before.x - rx * w,
+            y: before.y - ry * h,
+            w: w,
+            h: h
+        };
+        applyCamera(svg);
+    }
+
+    function zoomMap(factor) {
+        var svg = document.querySelector('#asset-tree-app .asset-tree-floorplan .asset-tree-canvas');
+        if (!svg) return;
+        var rect = svg.getBoundingClientRect();
+        zoomAt(svg, {
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+        }, factor);
+    }
+
+    function startPan(svg, event) {
+        event.preventDefault();
+        event.stopPropagation();
+        var metrics = viewMetrics(svg);
+        var originX = event.clientX;
+        var originY = event.clientY;
+        var cam = { x: metrics.vx, y: metrics.vy, w: metrics.vw, h: metrics.vh };
+        var moved = false;
+        beginDrag(svg, { kind: 'pan', moved: false }, function (move) {
+            var dx = move.clientX - originX;
+            var dy = move.clientY - originY;
+            if (dx * dx + dy * dy > 9) moved = true;
+            state.mapCam = {
+                x: cam.x - dx / metrics.scale,
+                y: cam.y - dy / metrics.scale,
+                w: cam.w,
+                h: cam.h
+            };
+            applyCamera(svg);
+        }, function () {
+            if (!moved && state.mapEditing && state.mapTool === 'select' && !state.mapAssetId) {
+                state.mapSelection = null;
+                state.mapGroup = [];
+                renderFrame();
+            }
+        });
     }
 
     function beginDrag(svg, drag, onMove, onUp) {
@@ -14803,7 +14919,7 @@
 
     function builtinFurniture() {
         function piece(id, key, kind, w, h) {
-            return { id: id, name: t(key), builtin: true, shapes: [{ kind: kind, name: t(key), color: '', x: 0, y: 0, w: w, h: h }] };
+            return { id: id, name: t(key), builtin: true, shapes: [{ kind: kind, name: t(key), color: '', angle: 0, x: 0, y: 0, w: w, h: h }] };
         }
         return [
             piece('table', 'mapTable', 'table', 96, 48),
@@ -14832,6 +14948,9 @@
                 if (bits.length < 5) return;
                 var kind = bits[0] || 'desk';
                 var color = /^[0-9a-fA-F]{6}$/.test(bits[5] || '') ? '#' + String(bits[5]).toLowerCase() : '';
+                var labelBits = bits.slice(6);
+                var shapeAngle = 0;
+                if (labelBits.length > 1) shapeAngle = normalizeAngle(labelBits.pop());
                 shapes.push({
                     kind: kind,
                     x: clampNum(bits[1], 0, 2000),
@@ -14839,7 +14958,8 @@
                     w: Math.max(roomMin(kind), clampNum(bits[3], 0, 800)),
                     h: Math.max(roomMin(kind), clampNum(bits[4], 0, 800)),
                     color: color,
-                    name: furnLabel(bits.slice(6).join(','))
+                    name: furnLabel(labelBits.join(',')),
+                    angle: shapeAngle
                 });
             });
             if (shapes.length) list.push({ id: id, name: name, builtin: false, shapes: shapes });
@@ -14850,7 +14970,10 @@
     function packFurniture(list) {
         return (list || []).slice(0, 24).map(function (tpl) {
             var shapes = (tpl.shapes || []).slice(0, 16).map(function (shape) {
-                return [shape.kind || 'desk', shape.x || 0, shape.y || 0, shape.w, shape.h, String(shape.color || '').replace('#', ''), furnLabel(shape.name)].join(',');
+                return [
+                    shape.kind || 'desk', shape.x || 0, shape.y || 0, shape.w, shape.h,
+                    String(shape.color || '').replace('#', ''), furnLabel(shape.name), normalizeAngle(shape.angle)
+                ].join(',');
             }).join('!');
             return shapes ? (tpl.id + '^' + furnLabel(tpl.name) + '^' + shapes) : '';
         }).filter(function (row) { return row; }).join('|');
@@ -14942,6 +15065,7 @@
                     kind: shape.kind || 'desk',
                     name: shape.name || label,
                     color: shape.color || '',
+                    angle: normalizeAngle(shape.angle),
                     x: shape.x - minX,
                     y: shape.y - minY,
                     w: shape.w,
@@ -14974,6 +15098,7 @@
                 kind: shape.kind,
                 name: shape.name || '',
                 color: shape.color || '',
+                angle: shape.angle || 0,
                 x: originX + (Number(shape.x) || 0),
                 y: originY + (Number(shape.y) || 0),
                 w: shape.w,
@@ -15002,111 +15127,87 @@
         return (state.mapGroup || []).indexOf(index) >= 0;
     }
 
+    function bindFloorplanSize(panel) {
+        function apply() {
+            if (!panel.parentNode) {
+                window.removeEventListener('resize', apply);
+                if (state.mapResize === apply) state.mapResize = null;
+                return;
+            }
+            var top = panel.getBoundingClientRect().top;
+            panel.style.height = Math.max(420, Math.round(window.innerHeight - top - 20)) + 'px';
+        }
+        if (!panel.parentNode) return;
+        apply();
+        if (state.mapResize) window.removeEventListener('resize', state.mapResize);
+        state.mapResize = apply;
+        window.addEventListener('resize', apply);
+    }
+
     function renderMap() {
-        var panel = el('section', 'asset-tree-sheet asset-tree-board asset-tree-map-board');
+        var panel = el('section', 'asset-tree-floorplan');
         if (state.floors == null) {
-            panel.appendChild(mapBoardHead());
+            panel.appendChild(mapTopBar([]));
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadFloors();
+            setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
             return panel;
         }
         ensureBuilding();
         var buildings = buildingAssets();
         var floors = floorsForBuilding(state.mapPlaceId);
-        panel.appendChild(mapBoardHead());
-        panel.appendChild(el('p', 'asset-tree-hint', t('mapHint')));
+        panel.appendChild(mapTopBar(floors));
         if (!buildings.length) {
             panel.appendChild(el('p', 'asset-tree-map-empty', t('mapNoBuilding')));
+            setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
             return panel;
         }
-        panel.appendChild(mapBuildingBar());
-        panel.appendChild(mapFloorBar(floors));
-        if (!floors.length) {
-            var empty = el('div', 'asset-tree-map-card');
-            empty.appendChild(el('p', 'asset-tree-map-empty', t('mapNoFloors')));
-            if (state.canEdit) empty.appendChild(button(t('mapAddFloor'), 'asset-tree-btn primary', function () { addFloor(true); }));
-            panel.appendChild(empty);
-            return panel;
-        }
-        if (state.mapEditing && state.canEdit && state.mapDraft) {
-            panel.appendChild(mapToolBar());
-            panel.appendChild(mapFurnitureBar());
-            if (state.mapStamp) panel.appendChild(el('p', 'asset-tree-hint', t('mapPlaceHint')));
-            else panel.appendChild(el('p', 'asset-tree-hint', t('mapDrawHint')));
-        }
-        var card = el('div', 'asset-tree-map-card');
-        if (state.mapEditing && state.mapDraft) {
-            card.appendChild(mapEditorBar());
-            card.appendChild(mapInspector());
-            card.appendChild(floorCanvas(state.mapDraft, true));
-        } else {
-            var floor = currentFloor();
-            if (floor) card.appendChild(floorCanvas(floor, false));
-        }
-        panel.appendChild(card);
-        if (state.mapEditing && state.canEdit) panel.appendChild(mapGearCard());
+        var editing = !!(state.mapEditing && state.canEdit && state.mapDraft);
+        var body = el('div', 'asset-tree-floorplan-body' + (editing ? '' : ' is-view'));
+        if (editing) body.appendChild(mapCatalog());
+        body.appendChild(mapStage(floors, editing));
+        panel.appendChild(body);
+        setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
         return panel;
     }
 
-    function mapBoardHead() {
-        var head = el('div', 'asset-tree-board-head');
-        var nav = el('div', 'asset-tree-calendar-nav');
-        nav.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftBuilding(-1); }));
-        var building = currentBuilding();
-        nav.appendChild(el('strong', 'asset-tree-calendar-title', building ? (building.name || t('mapPageTitle')) : t('mapPageTitle')));
-        var forward = button('\u203A', 'asset-tree-month-btn', function () { shiftBuilding(1); });
-        nav.appendChild(forward);
-        head.appendChild(nav);
-        var filters = el('div', 'asset-tree-sheet-filters');
-        if (state.mapEditing) {
-            if (state.mapDirty) filters.appendChild(el('span', 'asset-tree-dirty', t('mapDirty')));
-            filters.appendChild(button(t('save'), 'asset-tree-btn primary', saveMap));
-            filters.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
-                state.mapEditing = false;
-                state.mapDirty = false;
-                state.mapStamp = '';
-                state.mapNaming = false;
-                state.mapGroup = [];
-                var floor = currentFloor();
-                state.mapDraft = floor ? cloneFloor(floor) : null;
-                renderFrame();
-            }));
-        } else if (state.canEdit) {
-            filters.appendChild(button(t('mapEdit'), 'asset-tree-btn primary', function () {
-                if (!state.mapPlaceId) {
-                    notify(t('mapNoBuilding'));
-                    return;
-                }
-                if (!floorsForBuilding(state.mapPlaceId).length) {
-                    addFloor(true);
-                    return;
-                }
-                state.mapEditing = true;
-                renderFrame();
-            }));
+    function beginMapEdit() {
+        if (!state.mapPlaceId) {
+            notify(t('mapNoBuilding'));
+            return;
         }
-        if (filters.childNodes.length) head.appendChild(filters);
-        return head;
+        if (!floorsForBuilding(state.mapPlaceId).length) {
+            addFloor(true);
+            return;
+        }
+        state.mapEditing = true;
+        renderFrame();
     }
 
-    function mapBuildingBar() {
-        var bar = el('div', 'asset-tree-layers');
-        buildingAssets().forEach(function (asset) {
-            var on = asset.id === state.mapPlaceId;
-            var item = button(asset.name || asset.objectKey || '', 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
-                chooseBuilding(asset.id);
-            });
-            item.setAttribute('aria-pressed', on ? 'true' : 'false');
-            bar.appendChild(item);
-        });
-        return bar;
+    function cancelMapEdit() {
+        state.mapEditing = false;
+        state.mapDirty = false;
+        state.mapStamp = '';
+        state.mapNaming = false;
+        state.mapGroup = [];
+        var floor = currentFloor();
+        state.mapDraft = floor ? cloneFloor(floor) : null;
+        renderFrame();
     }
 
-    function mapFloorBar(floors) {
-        var bar = el('div', 'asset-tree-layers');
+    function mapTopBar(floors) {
+        var bar = el('div', 'asset-tree-plan-top');
+        var row = el('div', 'asset-tree-plan-row');
+        var title = el('div', 'asset-tree-plan-title');
+        title.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftBuilding(-1); }));
+        var building = currentBuilding();
+        title.appendChild(el('strong', null, building ? (building.name || t('mapPageTitle')) : t('mapPageTitle')));
+        title.appendChild(button('\u203A', 'asset-tree-month-btn', function () { shiftBuilding(1); }));
+        row.appendChild(title);
+        var chips = el('div', 'asset-tree-plan-floors');
         (floors || []).forEach(function (floor) {
             var on = floor.id === state.floorId;
-            var item = button(floor.name || t('mapFloor'), 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
+            var chip = button(floor.name || t('mapFloor'), 'asset-tree-floor-chip' + (on ? ' is-on' : ''), function () {
                 if (floor.id === state.floorId) return;
                 if (state.mapDirty && !window.confirm(t('mapDirty'))) return;
                 state.floorId = floor.id;
@@ -15114,76 +15215,184 @@
                 state.mapDirty = false;
                 state.mapSelection = null;
                 state.mapGroup = [];
+                state.mapCam = null;
                 renderFrame();
             });
-            item.setAttribute('aria-pressed', on ? 'true' : 'false');
-            bar.appendChild(item);
+            chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+            chips.appendChild(chip);
         });
-        if (state.canEdit) {
-            bar.appendChild(button('+ ' + t('mapAddFloor'), 'asset-tree-layer', function () { addFloor(!!state.mapEditing); }));
-            if (state.mapEditing && floors.length) bar.appendChild(button(t('delete'), 'asset-tree-layer', deleteCurrentFloor));
+        if (state.canEdit && state.mapPlaceId) {
+            chips.appendChild(button('+', 'asset-tree-floor-chip', function () { addFloor(!!state.mapEditing); }));
         }
+        row.appendChild(chips);
+        var filters = el('div', 'asset-tree-sheet-filters');
+        if (state.mapEditing) {
+            if (state.mapDirty) filters.appendChild(el('span', 'asset-tree-dirty', t('mapDirty')));
+            if (floors && floors.length) filters.appendChild(button(t('delete'), 'asset-tree-btn', deleteCurrentFloor));
+            filters.appendChild(button(t('save'), 'asset-tree-btn primary', saveMap));
+            filters.appendChild(button(t('cancel'), 'asset-tree-btn', cancelMapEdit));
+        } else if (state.canEdit) {
+            filters.appendChild(button(t('mapEdit'), 'asset-tree-btn primary', beginMapEdit));
+        }
+        if (filters.childNodes.length) row.appendChild(filters);
+        bar.appendChild(row);
+        if (state.mapEditing && state.mapDraft) bar.appendChild(mapEditorBar());
         return bar;
     }
 
-    function mapToolBar() {
-        var bar = el('div', 'asset-tree-layers');
+    function mapCatalog() {
+        var side = el('aside', 'asset-tree-catalog');
+        side.appendChild(mapToolGrid());
+        side.appendChild(el('p', 'asset-tree-catalog-hint', state.mapStamp ? t('mapPlaceHint') : t('mapDrawHint')));
+        side.appendChild(el('h3', null, t('mapFurnReady')));
+        var ready = el('div', 'asset-tree-thumb-grid');
+        builtinFurniture().forEach(function (tpl) { ready.appendChild(thumbCard(tpl)); });
+        side.appendChild(ready);
+        side.appendChild(el('h3', null, t('mapMyTemplates')));
+        var mine = el('div', 'asset-tree-thumb-grid');
+        var custom = customFurniture();
+        if (!custom.length) mine.appendChild(el('p', 'asset-tree-catalog-hint', t('mapFurnHint')));
+        custom.forEach(function (tpl) { mine.appendChild(thumbCard(tpl)); });
+        side.appendChild(mine);
+        side.appendChild(mapGearCard());
+        return side;
+    }
+
+    function mapToolGrid() {
+        var grid = el('div', 'asset-tree-tool-grid');
         [
             ['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['partition', 'mapPartition'],
             ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk']
         ].forEach(function (pair) {
             var on = state.mapTool === pair[0] && !state.mapStamp;
-            var tool = button(t(pair[1]), 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
+            var tool = button('', 'asset-tree-tool' + (on ? ' is-on' : ''), function () {
                 state.mapTool = pair[0];
                 state.mapStamp = '';
                 renderFrame();
             });
+            tool.appendChild(mapToolIcon(pair[0]));
+            tool.appendChild(el('span', null, t(pair[1])));
             tool.title = t(pair[1]);
             tool.setAttribute('aria-label', t(pair[1]));
             tool.setAttribute('aria-pressed', on ? 'true' : 'false');
-            bar.appendChild(tool);
+            grid.appendChild(tool);
         });
-        return bar;
+        return grid;
     }
 
-    function mapFurnitureBar() {
-        var wrap = el('div', 'asset-tree-map-furn');
-        wrap.appendChild(el('p', 'asset-tree-hint', t('mapFurnHint')));
-        var bar = el('div', 'asset-tree-layers');
-        furnitureLibrary().forEach(function (tpl) {
-            var on = state.mapStamp === tpl.id;
-            var chip = button('', 'asset-tree-layer asset-tree-furn' + (on ? ' is-on' : ''), function (event) {
-                var target = event && event.target;
-                if (target && target.classList && target.classList.contains('asset-tree-furn-x')) {
-                    removeFurniture(tpl.id);
-                    return;
-                }
-                if (state.mapStamp === tpl.id) {
-                    state.mapStamp = '';
-                    state.mapTool = 'select';
-                } else {
-                    state.mapStamp = tpl.id;
-                    state.mapTool = 'stamp';
-                    state.mapAssetId = 0;
-                }
-                renderFrame();
-            });
-            chip.appendChild(document.createTextNode(tpl.name));
-            if (!tpl.builtin) {
-                var remove = el('span', 'asset-tree-furn-x', '\u00d7');
-                remove.title = t('mapRemoveTemplate');
-                chip.appendChild(remove);
+    function thumbCard(tpl) {
+        var on = state.mapStamp === tpl.id;
+        var card = button('', 'asset-tree-thumb-card' + (on ? ' is-on' : ''), function (event) {
+            var target = event && event.target;
+            if (target && target.classList && target.classList.contains('asset-tree-furn-x')) {
+                removeFurniture(tpl.id);
+                return;
             }
-            chip.title = tpl.name;
-            chip.setAttribute('aria-pressed', on ? 'true' : 'false');
-            bar.appendChild(chip);
+            if (state.mapStamp === tpl.id) {
+                state.mapStamp = '';
+                state.mapTool = 'select';
+            } else {
+                state.mapStamp = tpl.id;
+                state.mapTool = 'stamp';
+                state.mapAssetId = 0;
+            }
+            renderFrame();
         });
-        wrap.appendChild(bar);
-        return wrap;
+        card.appendChild(furnitureThumb(tpl));
+        var caption = el('span', 'asset-tree-thumb-name', tpl.name);
+        card.appendChild(caption);
+        if (!tpl.builtin) {
+            var remove = el('span', 'asset-tree-furn-x', '\u00d7');
+            remove.title = t('mapRemoveTemplate');
+            card.appendChild(remove);
+        }
+        card.title = tpl.name;
+        card.setAttribute('aria-pressed', on ? 'true' : 'false');
+        return card;
+    }
+
+    function furnitureThumb(tpl) {
+        var svg = svgEl('svg');
+        svg.setAttribute('class', 'asset-tree-thumb');
+        var maxX = 8;
+        var maxY = 8;
+        (tpl.shapes || []).forEach(function (shape) {
+            maxX = Math.max(maxX, (Number(shape.x) || 0) + (Number(shape.w) || 1));
+            maxY = Math.max(maxY, (Number(shape.y) || 0) + (Number(shape.h) || 1));
+        });
+        svg.setAttribute('viewBox', '-6 -6 ' + (maxX + 12) + ' ' + (maxY + 12));
+        (tpl.shapes || []).forEach(function (shape) {
+            svg.appendChild(shapeNode({
+                kind: shape.kind,
+                name: '',
+                color: shape.color || '',
+                angle: shape.angle || 0,
+                x: Number(shape.x) || 0,
+                y: Number(shape.y) || 0,
+                w: Number(shape.w) || 8,
+                h: Number(shape.h) || 8
+            }, null));
+        });
+        return svg;
+    }
+
+    function mapStage(floors, editing) {
+        var stage = el('div', 'asset-tree-floorplan-stage');
+        if (!floors.length) {
+            var empty = el('div', 'asset-tree-map-empty');
+            empty.appendChild(el('p', null, t('mapNoFloors')));
+            if (state.canEdit) empty.appendChild(button(t('mapAddFloor'), 'asset-tree-btn primary', function () { addFloor(true); }));
+            stage.appendChild(empty);
+            return stage;
+        }
+        var floor = editing ? state.mapDraft : currentFloor();
+        var view = el('div', 'asset-tree-floorplan-view');
+        if (floor) view.appendChild(floorCanvas(floor, editing));
+        stage.appendChild(view);
+        stage.appendChild(mapZoomDock());
+        if (editing && state.mapSelection != null) stage.appendChild(mapInspector());
+        return stage;
+    }
+
+    function mapZoomDock() {
+        var dock = el('div', 'asset-tree-zoom-dock');
+        var zoomOut = button('\u2212', 'asset-tree-zoom-btn', function () { zoomMap(1 / 1.25); });
+        zoomOut.title = t('mapZoomOut');
+        zoomOut.setAttribute('aria-label', t('mapZoomOut'));
+        var zoomIn = button('+', 'asset-tree-zoom-btn', function () { zoomMap(1.25); });
+        zoomIn.title = t('mapZoomIn');
+        zoomIn.setAttribute('aria-label', t('mapZoomIn'));
+        var fit = button('', 'asset-tree-zoom-btn', function () {
+            state.mapCam = null;
+            renderFrame();
+        });
+        fit.title = t('mapFit');
+        fit.setAttribute('aria-label', t('mapFit'));
+        fit.appendChild(mapFitIcon());
+        dock.appendChild(zoomOut);
+        dock.appendChild(el('span', 'asset-tree-zoom-readout', zoomPercent() + '%'));
+        dock.appendChild(zoomIn);
+        dock.appendChild(fit);
+        return dock;
+    }
+
+    function mapFitIcon() {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('aria-hidden', 'true');
+        var path = svgEl('path');
+        path.setAttribute('d', 'M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.6');
+        svg.appendChild(path);
+        return svg;
     }
 
     function mapGearCard() {
-        var card = el('div', 'asset-tree-map-card asset-tree-map-gear');
+        var card = el('div', 'asset-tree-catalog-gear');
         var pins = (state.mapDraft && state.mapDraft.pins) || [];
         var onFloor = 0;
         var rows = [];
@@ -15194,7 +15403,7 @@
             if (placed) onFloor++;
             rows.push({ asset: asset, placed: placed });
         });
-        card.appendChild(el('strong', 'asset-tree-map-gear-title', t('mapGear') + ' · ' + t('mapOnFloor') + ': ' + onFloor));
+        card.appendChild(el('h3', null, t('mapGear') + ' · ' + onFloor));
         var query = document.createElement('input');
         query.type = 'search';
         query.placeholder = t('schedulesFindAssets');
@@ -15224,7 +15433,6 @@
         return card;
     }
 
-
     function mapEditorBar() {
         var size = planSize(state.mapDraft);
         var bar = el('div', 'asset-tree-editor-bar');
@@ -15236,27 +15444,14 @@
             state.mapDraft.name = name.value;
             state.mapDirty = true;
             var dirty = document.querySelector('.asset-tree-dirty');
-            if (dirty) dirty.textContent = t('mapDirty');
+            if (dirty) {
+                dirty.textContent = t('mapDirty');
+                return;
+            }
+            var filters = document.querySelector('.asset-tree-plan-top .asset-tree-sheet-filters');
+            if (filters) filters.insertBefore(el('span', 'asset-tree-dirty', t('mapDirty')), filters.firstChild);
         });
         bar.appendChild(name);
-        bar.appendChild(button(t('mapFit'), 'asset-tree-btn slim', function () {
-            state.mapZoom = 1;
-            renderFrame();
-        }));
-        var zoomOut = button('−', 'asset-tree-month-btn asset-tree-zoom', function () {
-            state.mapZoom = Math.max(0.5, Math.round(((state.mapZoom || 1) - 0.25) * 100) / 100);
-            renderFrame();
-        });
-        zoomOut.title = t('mapZoomOut');
-        zoomOut.setAttribute('aria-label', t('mapZoomOut'));
-        var zoomIn = button('+', 'asset-tree-month-btn asset-tree-zoom', function () {
-            state.mapZoom = Math.min(4, Math.round(((state.mapZoom || 1) + 0.25) * 100) / 100);
-            renderFrame();
-        });
-        zoomIn.title = t('mapZoomIn');
-        zoomIn.setAttribute('aria-label', t('mapZoomIn'));
-        bar.appendChild(zoomOut);
-        bar.appendChild(zoomIn);
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapSnap')));
         [4, 8, 16, 24].forEach(function (step) {
             var snap = button(String(step), 'asset-tree-btn slim' + ((state.mapStep || 8) === step ? ' is-on' : ''), function () {
@@ -15291,13 +15486,14 @@
                 pin.y = clampNum(pin.y, 0, next.h);
                 return pin;
             });
+            state.mapCam = null;
             state.mapDirty = true;
             renderFrame();
         }
         width.addEventListener('change', resizePlan);
         height.addEventListener('change', resizePlan);
         bar.appendChild(width);
-        bar.appendChild(el('span', null, '×'));
+        bar.appendChild(el('span', null, '\u00d7'));
         bar.appendChild(height);
         return bar;
     }
@@ -15323,6 +15519,7 @@
                 state.mapDraft = cloneFloor(payload);
                 state.mapEditing = !!edit || state.mapEditing;
                 state.mapDirty = false;
+                state.mapCam = null;
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
         });
@@ -15341,6 +15538,7 @@
                 state.mapDirty = false;
                 state.mapSelection = null;
                 state.mapGroup = [];
+                state.mapCam = null;
                 if (!left.length) state.mapEditing = false;
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
@@ -15359,20 +15557,39 @@
         });
     }
 
+    function shapeTransform(room) {
+        var angle = normalizeAngle(room.angle);
+        if (!angle) return 'translate(' + room.x + ' ' + room.y + ')';
+        return 'translate(' + room.x + ' ' + room.y + ') rotate(' + angle + ' ' + (room.w / 2) + ' ' + (room.h / 2) + ')';
+    }
+
+    function localToWorld(room, lx, ly) {
+        var angle = normalizeAngle(room.angle) * Math.PI / 180;
+        var cos = Math.cos(angle);
+        var sin = Math.sin(angle);
+        var dx = lx - room.w / 2;
+        var dy = ly - room.h / 2;
+        var cx = room.x + room.w / 2;
+        var cy = room.y + room.h / 2;
+        return {
+            x: cx + dx * cos - dy * sin,
+            y: cy + dx * sin + dy * cos
+        };
+    }
+
     function floorCanvas(floor, editing) {
         var size = planSize(floor);
         var step = editing ? (state.mapStep || 8) : (moduleSetup().mapGrid || 24);
+        var cam = activeCamera(size);
         var svg = svgEl('svg');
-        svg.setAttribute('viewBox', '0 0 ' + size.w + ' ' + size.h);
-        svg.setAttribute('class', 'asset-tree-canvas');
-        var zoom = editing ? (state.mapZoom || 1) : 1;
-        if (editing) {
-            svg.style.width = Math.round(size.w * zoom) + 'px';
-            svg.style.height = Math.round(size.h * zoom) + 'px';
-        } else {
-            svg.style.width = '100%';
-            svg.style.height = 'auto';
-        }
+        svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
+        var mode = 'is-pan';
+        if (editing && state.mapStamp) mode = 'is-stamp';
+        else if (editing && state.mapTool && state.mapTool !== 'select') mode = 'is-draw';
+        svg.setAttribute('class', 'asset-tree-canvas ' + mode);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
         var defs = svgEl('defs');
         var pattern = svgEl('pattern');
         pattern.setAttribute('id', 'asset-tree-grid');
@@ -15384,84 +15601,36 @@
         grid.setAttribute('fill', 'none');
         grid.setAttribute('stroke', '#dfe1e6');
         grid.setAttribute('stroke-width', '1');
+        grid.setAttribute('vector-effect', 'non-scaling-stroke');
         pattern.appendChild(grid);
         defs.appendChild(pattern);
         svg.appendChild(defs);
         var paper = svgEl('rect');
+        paper.setAttribute('x', '0');
+        paper.setAttribute('y', '0');
         paper.setAttribute('width', String(size.w));
         paper.setAttribute('height', String(size.h));
-        paper.setAttribute('fill', 'url(#asset-tree-grid)');
+        paper.setAttribute('class', 'asset-tree-paper');
+        paper.setAttribute('fill', '#ffffff');
         svg.appendChild(paper);
+        var gridPaper = svgEl('rect');
+        gridPaper.setAttribute('x', '0');
+        gridPaper.setAttribute('y', '0');
+        gridPaper.setAttribute('width', String(size.w));
+        gridPaper.setAttribute('height', String(size.h));
+        gridPaper.setAttribute('fill', 'url(#asset-tree-grid)');
+        gridPaper.setAttribute('pointer-events', 'none');
+        svg.appendChild(gridPaper);
         (floor.rooms || []).forEach(function (room, index) {
-            var rect = svgEl('rect');
-            rect.setAttribute('x', String(room.x));
-            rect.setAttribute('y', String(room.y));
-            rect.setAttribute('width', String(room.w));
-            rect.setAttribute('height', String(room.h));
-            rect.setAttribute('class', 'asset-tree-room is-' + (room.kind || 'room') + (mapShapeOn(index) ? ' is-selected' : ''));
-            if ((room.kind || 'room') === 'room' && room.color) rect.setAttribute('fill', room.color);
-            if (editing) {
-                rect.addEventListener('mousedown', function (event) {
-                    if (state.mapTool !== 'select') return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (event.shiftKey) {
-                        var group = (state.mapGroup || []).slice();
-                        var at = group.indexOf(index);
-                        if (at >= 0) group.splice(at, 1);
-                        else if (state.mapSelection !== index) group.push(index);
-                        state.mapGroup = group;
-                        if (state.mapSelection == null) state.mapSelection = index;
-                        renderFrame();
-                        return;
-                    }
-                    state.mapSelection = index;
-                    state.mapGroup = [];
-                    var point = svgPoint(svg, event);
-                    beginDrag(svg, { kind: 'move', index: index, dx: point.x - room.x, dy: point.y - room.y, moved: false, x0: point.x, y0: point.y }, function (move) {
-                        var next = svgPoint(svg, move);
-                        var dx = next.x - state.mapDrag.x0;
-                        var dy = next.y - state.mapDrag.y0;
-                        if (!state.mapDrag.moved && dx * dx + dy * dy < 16) return;
-                        state.mapDrag.moved = true;
-                        room.x = clampNum(snapCoord(next.x - state.mapDrag.dx), 0, size.w - room.w);
-                        room.y = clampNum(snapCoord(next.y - state.mapDrag.dy), 0, size.h - room.h);
-                        rect.setAttribute('x', String(room.x));
-                        rect.setAttribute('y', String(room.y));
-                        state.mapDirty = true;
-                    }, function (finished) {
-                        if (finished && !finished.moved && state.mapAssetId) placeArmedPin(floor, finished.x0, finished.y0);
-                        renderFrame();
-                    });
-                });
-            }
-            svg.appendChild(rect);
-            var kindName = room.kind || 'room';
-            decorateRoom(svg, room);
-            if (kindName === 'door' || kindName === 'window') {
-                var markLine = svgEl('path');
-                var horizontal = room.w >= room.h;
-                var d = kindName === 'door'
-                    ? (horizontal
-                        ? 'M ' + room.x + ' ' + (room.y + room.h) + ' A ' + room.w + ' ' + room.w + ' 0 0 1 ' + (room.x + room.w) + ' ' + room.y
-                        : 'M ' + room.x + ' ' + room.y + ' A ' + room.h + ' ' + room.h + ' 0 0 1 ' + (room.x + room.w) + ' ' + (room.y + room.h))
-                    : (horizontal
-                        ? 'M ' + room.x + ' ' + (room.y + room.h / 2) + ' L ' + (room.x + room.w) + ' ' + (room.y + room.h / 2)
-                        : 'M ' + (room.x + room.w / 2) + ' ' + room.y + ' L ' + (room.x + room.w / 2) + ' ' + (room.y + room.h));
-                markLine.setAttribute('d', d);
-                markLine.setAttribute('class', 'asset-tree-opening');
-                svg.appendChild(markLine);
-            }
-            if ((kindName === 'room' || kindName === 'stair' || kindName === 'column' || kindName === 'desk' || kindName === 'table' || kindName === 'chair' || kindName === 'cabinet' || kindName === 'sofa' || kindName === 'seat' || kindName === 'pedestal') && room.name && room.h >= 12 && room.w >= 20) {
-                var label = svgEl('text');
-                var font = Math.max(8, Math.min(14, Math.floor(room.h / 2)));
-                label.setAttribute('x', String(room.x + Math.min(8, Math.floor(room.w / 5))));
-                label.setAttribute('y', String(room.y + Math.min(font + 4, room.h - 2)));
-                label.setAttribute('class', 'asset-tree-room-label');
-                label.style.fontSize = font + 'px';
-                label.textContent = room.name;
-                svg.appendChild(label);
-            }
+            svg.appendChild(shapeNode(room, {
+                editing: editing,
+                selected: mapShapeOn(index),
+                primary: state.mapSelection === index,
+                index: index,
+                floor: floor,
+                size: size,
+                svg: svg
+            }));
         });
         (floor.pins || []).forEach(function (pin) {
             var mark = svgEl('g');
@@ -15481,6 +15650,7 @@
             mark.appendChild(glyph);
             if (editing) {
                 mark.addEventListener('mousedown', function (event) {
+                    if (event.button === 1) return;
                     event.preventDefault();
                     event.stopPropagation();
                     state.mapAssetId = pin.assetId;
@@ -15501,14 +15671,26 @@
             caption.textContent = pin.assetName || pin.objectKey || '';
             svg.appendChild(caption);
         });
+        paper.addEventListener('mousedown', function (event) {
+            if (event.button === 1) return;
+            if (!editing || state.mapTool === 'select') {
+                if (editing && state.mapTool === 'select' && state.mapAssetId) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var point = svgPoint(svg, event);
+                    if (placeArmedPin(floor, point.x, point.y)) renderFrame();
+                    return;
+                }
+                startPan(svg, event);
+            }
+        });
         if (editing) {
-            paper.addEventListener('mousedown', function (event) {
-                if (state.mapTool !== 'select' || !state.mapAssetId) return;
-                var point = svgPoint(svg, event);
-                if (!placeArmedPin(floor, point.x, point.y)) return;
-                renderFrame();
-            });
             svg.addEventListener('mousedown', function (event) {
+                if (event.button === 1) {
+                    startPan(svg, event);
+                    return;
+                }
+                if (event.button !== 0) return;
                 if (state.mapTool === 'stamp') {
                     event.preventDefault();
                     var stamped = svgPoint(svg, event);
@@ -15530,147 +15712,284 @@
                         floor.rooms = floor.rooms || [];
                         floor.rooms.push(shape);
                         state.mapSelection = floor.rooms.length - 1;
+                        state.mapGroup = [];
                         state.mapDirty = true;
                     }
                     renderFrame();
                 });
             });
-            if (state.mapSelection != null && floor.rooms && floor.rooms[state.mapSelection]) {
-                drawRoomHandles(svg, floor.rooms[state.mapSelection], state.mapSelection, size);
-            }
         }
+        svg.addEventListener('wheel', function (event) {
+            if (state.mapDrag) return;
+            event.preventDefault();
+            zoomAt(svg, event, event.deltaY > 0 ? (1 / 1.12) : 1.12);
+        }, { passive: false });
         return svg;
     }
 
-    function decorateRoom(svg, room) {
+    function shapeNode(room, options) {
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-shape');
+        group.setAttribute('transform', shapeTransform(room));
+        var rect = svgEl('rect');
+        rect.setAttribute('x', '0');
+        rect.setAttribute('y', '0');
+        rect.setAttribute('width', String(room.w));
+        rect.setAttribute('height', String(room.h));
+        var kindName = room.kind || 'room';
+        rect.setAttribute('class', 'asset-tree-room is-' + kindName + (options && options.selected ? ' is-selected' : ''));
+        if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
+        group.appendChild(rect);
+        decorateRoom(group, room);
+        appendOpening(group, room);
+        appendLabel(group, room);
+        if (options && options.editing) {
+            rect.addEventListener('mousedown', function (event) {
+                if (event.button === 1) return;
+                if (state.mapTool !== 'select') return;
+                event.preventDefault();
+                event.stopPropagation();
+                var index = options.index;
+                if (event.shiftKey) {
+                    var grouped = (state.mapGroup || []).slice();
+                    var at = grouped.indexOf(index);
+                    if (at >= 0) grouped.splice(at, 1);
+                    else if (state.mapSelection !== index) grouped.push(index);
+                    state.mapGroup = grouped;
+                    if (state.mapSelection == null) state.mapSelection = index;
+                    renderFrame();
+                    return;
+                }
+                state.mapSelection = index;
+                state.mapGroup = [];
+                var point = svgPoint(options.svg, event);
+                beginDrag(options.svg, {
+                    kind: 'move',
+                    index: index,
+                    dx: point.x - room.x,
+                    dy: point.y - room.y,
+                    moved: false,
+                    x0: point.x,
+                    y0: point.y
+                }, function (move) {
+                    var next = svgPoint(options.svg, move);
+                    var dx = next.x - state.mapDrag.x0;
+                    var dy = next.y - state.mapDrag.y0;
+                    if (!state.mapDrag.moved && dx * dx + dy * dy < 16) return;
+                    state.mapDrag.moved = true;
+                    room.x = clampNum(snapCoord(next.x - state.mapDrag.dx), 0, options.size.w - room.w);
+                    room.y = clampNum(snapCoord(next.y - state.mapDrag.dy), 0, options.size.h - room.h);
+                    group.setAttribute('transform', shapeTransform(room));
+                    state.mapDirty = true;
+                }, function (finished) {
+                    if (finished && !finished.moved && state.mapAssetId) placeArmedPin(options.floor, finished.x0, finished.y0);
+                    renderFrame();
+                });
+            });
+            if (options.primary) drawRoomHandles(group, rect, room, options);
+        }
+        return group;
+    }
+
+    function decorateRoom(parent, room) {
         var kind = room.kind || 'room';
+        var x = 0;
+        var y = 0;
+        var w = room.w;
+        var h = room.h;
         if (kind === 'column') {
             var mark = svgEl('circle');
-            var radius = Math.max(2, Math.min(room.w, room.h) / 2 - 2);
-            mark.setAttribute('cx', String(room.x + room.w / 2));
-            mark.setAttribute('cy', String(room.y + room.h / 2));
-            mark.setAttribute('r', String(radius));
+            mark.setAttribute('cx', String(x + w / 2));
+            mark.setAttribute('cy', String(y + h / 2));
+            mark.setAttribute('r', String(Math.max(2, Math.min(w, h) / 2 - 2)));
             mark.setAttribute('class', 'asset-tree-mark');
-            svg.appendChild(mark);
+            parent.appendChild(mark);
             return;
         }
         if (kind === 'stair') {
             var lines = svgEl('path');
             var parts = [];
-            var count = Math.max(3, Math.floor((room.w >= room.h ? room.h : room.w) / 8));
+            var count = Math.max(3, Math.floor((w >= h ? h : w) / 8));
             var i;
-            if (room.w >= room.h) {
+            if (w >= h) {
                 for (i = 1; i < count; i++) {
-                    var lineY = room.y + (room.h * i / count);
-                    parts.push('M ' + room.x + ' ' + lineY + ' L ' + (room.x + room.w) + ' ' + lineY);
+                    var lineY = y + (h * i / count);
+                    parts.push('M ' + x + ' ' + lineY + ' L ' + (x + w) + ' ' + lineY);
                 }
             } else {
                 for (i = 1; i < count; i++) {
-                    var lineX = room.x + (room.w * i / count);
-                    parts.push('M ' + lineX + ' ' + room.y + ' L ' + lineX + ' ' + (room.y + room.h));
+                    var lineX = x + (w * i / count);
+                    parts.push('M ' + lineX + ' ' + y + ' L ' + lineX + ' ' + (y + h));
                 }
             }
             lines.setAttribute('d', parts.join(' '));
             lines.setAttribute('class', 'asset-tree-mark');
-            svg.appendChild(lines);
+            parent.appendChild(lines);
             return;
         }
         if (kind === 'desk' || kind === 'table') {
             var inner = svgEl('rect');
-            var inset = Math.min(6, Math.floor(Math.min(room.w, room.h) / 5));
-            inner.setAttribute('x', String(room.x + inset));
-            inner.setAttribute('y', String(room.y + inset));
-            inner.setAttribute('width', String(Math.max(1, room.w - inset * 2)));
-            inner.setAttribute('height', String(Math.max(1, room.h - inset * 2)));
+            var inset = Math.min(6, Math.floor(Math.min(w, h) / 5));
+            inner.setAttribute('x', String(x + inset));
+            inner.setAttribute('y', String(y + inset));
+            inner.setAttribute('width', String(Math.max(1, w - inset * 2)));
+            inner.setAttribute('height', String(Math.max(1, h - inset * 2)));
             inner.setAttribute('class', 'asset-tree-mark');
-            svg.appendChild(inner);
+            parent.appendChild(inner);
             return;
         }
         if (kind === 'chair' || kind === 'seat') {
             var seat = svgEl('circle');
-            seat.setAttribute('cx', String(room.x + room.w / 2));
-            seat.setAttribute('cy', String(room.y + room.h * 0.62));
-            seat.setAttribute('r', String(Math.max(3, Math.min(room.w, room.h) * 0.28)));
+            seat.setAttribute('cx', String(x + w / 2));
+            seat.setAttribute('cy', String(y + h * 0.62));
+            seat.setAttribute('r', String(Math.max(3, Math.min(w, h) * 0.28)));
             seat.setAttribute('class', 'asset-tree-mark');
-            svg.appendChild(seat);
+            parent.appendChild(seat);
             var back = svgEl('path');
-            back.setAttribute('d', 'M ' + (room.x + 3) + ' ' + (room.y + Math.max(4, room.h * 0.28)) + ' L ' + (room.x + room.w - 3) + ' ' + (room.y + Math.max(4, room.h * 0.28)));
+            back.setAttribute('d', 'M ' + (x + 3) + ' ' + (y + Math.max(4, h * 0.28)) + ' L ' + (x + w - 3) + ' ' + (y + Math.max(4, h * 0.28)));
             back.setAttribute('class', 'asset-tree-mark');
-            svg.appendChild(back);
+            parent.appendChild(back);
             return;
         }
         if (kind === 'cabinet' || kind === 'pedestal') {
             var joints = svgEl('path');
             var d = kind === 'cabinet'
-                ? ('M ' + (room.x + room.w / 2) + ' ' + room.y + ' L ' + (room.x + room.w / 2) + ' ' + (room.y + room.h))
-                : ('M ' + room.x + ' ' + (room.y + room.h / 3) + ' L ' + (room.x + room.w) + ' ' + (room.y + room.h / 3) + ' M ' + room.x + ' ' + (room.y + room.h * 2 / 3) + ' L ' + (room.x + room.w) + ' ' + (room.y + room.h * 2 / 3));
+                ? ('M ' + (x + w / 2) + ' ' + y + ' L ' + (x + w / 2) + ' ' + (y + h))
+                : ('M ' + x + ' ' + (y + h / 3) + ' L ' + (x + w) + ' ' + (y + h / 3) + ' M ' + x + ' ' + (y + h * 2 / 3) + ' L ' + (x + w) + ' ' + (y + h * 2 / 3));
             joints.setAttribute('d', d);
             joints.setAttribute('class', 'asset-tree-mark');
-            svg.appendChild(joints);
+            parent.appendChild(joints);
             return;
         }
         if (kind === 'sofa') {
             var cushion = svgEl('rect');
-            cushion.setAttribute('x', String(room.x + 3));
-            cushion.setAttribute('y', String(room.y + 3));
-            cushion.setAttribute('width', String(Math.max(1, room.w - 6)));
-            cushion.setAttribute('height', String(Math.max(4, Math.round(room.h * 0.34))));
+            cushion.setAttribute('x', String(x + 3));
+            cushion.setAttribute('y', String(y + 3));
+            cushion.setAttribute('width', String(Math.max(1, w - 6)));
+            cushion.setAttribute('height', String(Math.max(4, Math.round(h * 0.34))));
             cushion.setAttribute('class', 'asset-tree-mark');
-            svg.appendChild(cushion);
+            parent.appendChild(cushion);
         }
     }
 
-    function applyResize(room, corner, point, size) {
+    function appendOpening(parent, room) {
+        var kind = room.kind || 'room';
+        if (kind !== 'door' && kind !== 'window') return;
+        var x = 0;
+        var y = 0;
+        var w = room.w;
+        var h = room.h;
+        var horizontal = w >= h;
+        var d = kind === 'door'
+            ? (horizontal
+                ? 'M ' + x + ' ' + (y + h) + ' A ' + w + ' ' + w + ' 0 0 1 ' + (x + w) + ' ' + y
+                : 'M ' + x + ' ' + y + ' A ' + h + ' ' + h + ' 0 0 1 ' + (x + w) + ' ' + (y + h))
+            : (horizontal
+                ? 'M ' + x + ' ' + (y + h / 2) + ' L ' + (x + w) + ' ' + (y + h / 2)
+                : 'M ' + (x + w / 2) + ' ' + y + ' L ' + (x + w / 2) + ' ' + (y + h));
+        var markLine = svgEl('path');
+        markLine.setAttribute('d', d);
+        markLine.setAttribute('class', 'asset-tree-opening');
+        parent.appendChild(markLine);
+    }
+
+    function appendLabel(parent, room) {
+        var kindName = room.kind || 'room';
+        var named = kindName === 'room' || kindName === 'stair' || kindName === 'column' || kindName === 'desk' || kindName === 'table' || kindName === 'chair' || kindName === 'cabinet' || kindName === 'sofa' || kindName === 'seat' || kindName === 'pedestal';
+        if (!named || !room.name || room.h < 12 || room.w < 20) return;
+        var label = svgEl('text');
+        var font = Math.max(8, Math.min(14, Math.floor(room.h / 2)));
+        label.setAttribute('x', String(Math.min(8, Math.floor(room.w / 5))));
+        label.setAttribute('y', String(Math.min(font + 4, room.h - 2)));
+        label.setAttribute('class', 'asset-tree-room-label');
+        label.style.fontSize = font + 'px';
+        label.textContent = room.name;
+        parent.appendChild(label);
+    }
+
+    function syncShape(group, rect, room) {
+        rect.setAttribute('width', String(room.w));
+        rect.setAttribute('height', String(room.h));
+        group.setAttribute('transform', shapeTransform(room));
+        var nodes = group.querySelectorAll('.asset-tree-handle');
+        var spots = [[0, 0], [room.w, 0], [0, room.h], [room.w, room.h]];
+        var i;
+        for (i = 0; i < nodes.length && i < spots.length; i++) {
+            nodes[i].setAttribute('x', String(spots[i][0] - 5));
+            nodes[i].setAttribute('y', String(spots[i][1] - 5));
+        }
+        var knob = group.querySelector('.asset-tree-rotate');
+        if (knob) {
+            knob.setAttribute('cx', String(room.w / 2));
+            knob.setAttribute('cy', '-18');
+        }
+        var stem = group.querySelector('.asset-tree-rotate-stem');
+        if (stem) stem.setAttribute('d', 'M ' + (room.w / 2) + ' 0 L ' + (room.w / 2) + ' -12');
+    }
+
+    function resizeRotated(room, drag, point, size) {
+        var angle = normalizeAngle(drag.angle);
+        var rad = angle * Math.PI / 180;
+        var ux = Math.cos(rad);
+        var uy = Math.sin(rad);
+        var vx = -Math.sin(rad);
+        var vy = Math.cos(rad);
+        var dx = point.x - drag.fixed.x;
+        var dy = point.y - drag.fixed.y;
+        var lx = dx * ux + dy * uy;
+        var ly = dx * vx + dy * vy;
         var min = roomMin(room.kind || 'room');
-        var left = room.x;
-        var top = room.y;
-        var right = room.x + room.w;
-        var bottom = room.y + room.h;
-        var px = snapCoord(point.x);
-        var py = snapCoord(point.y);
-        var thin = room.kind === 'wall' || room.kind === 'partition' || room.kind === 'door' || room.kind === 'window';
-        var horizontal = room.w >= room.h;
-        if (!thin || horizontal) {
-            if (corner === 'nw' || corner === 'sw') left = Math.min(px, right - min);
-            if (corner === 'ne' || corner === 'se') right = Math.max(px, left + min);
-        }
-        if (!thin || !horizontal) {
-            if (corner === 'nw' || corner === 'ne') top = Math.min(py, bottom - min);
-            if (corner === 'sw' || corner === 'se') bottom = Math.max(py, top + min);
-        }
-        if (thin) {
-            var thick = room.kind === 'partition' ? 4 : (room.kind === 'wall' ? 8 : 10);
-            if (horizontal) {
-                top = room.y;
-                bottom = room.y + thick;
+        var corner = drag.corner;
+        var alongX = corner === 'ne' || corner === 'se' ? lx : -lx;
+        var alongY = corner === 'sw' || corner === 'se' ? ly : -ly;
+        var w;
+        var h;
+        if (drag.thin) {
+            if (drag.long === 'x') {
+                w = Math.max(min, snapCoord(Math.max(min, alongX)));
+                h = drag.thick;
             } else {
-                left = room.x;
-                right = room.x + thick;
+                w = drag.thick;
+                h = Math.max(min, snapCoord(Math.max(min, alongY)));
             }
+        } else if (room.kind === 'column') {
+            var side = Math.max(min, snapCoord(Math.max(alongX, alongY)));
+            w = side;
+            h = side;
+        } else {
+            w = Math.max(min, snapCoord(Math.max(min, alongX)));
+            h = Math.max(min, snapCoord(Math.max(min, alongY)));
         }
-        if (room.kind === 'column') {
-            var side = Math.max(min, Math.max(right - left, bottom - top));
-            if (corner === 'nw' || corner === 'sw') left = right - side;
-            else right = left + side;
-            if (corner === 'nw' || corner === 'ne') top = bottom - side;
-            else bottom = top + side;
-        }
+        var ox = (corner === 'nw' || corner === 'sw') ? -w : 0;
+        var oy = (corner === 'nw' || corner === 'ne') ? -h : 0;
+        var tlx = drag.fixed.x + ox * ux + oy * vx;
+        var tly = drag.fixed.y + ox * uy + oy * vy;
+        var cx = tlx + (w / 2) * ux + (h / 2) * vx;
+        var cy = tly + (w / 2) * uy + (h / 2) * vy;
         var next = clampRoom({
-            name: room.name, kind: room.kind, color: room.color,
-            x: left, y: top, w: Math.max(min, right - left), h: Math.max(min, bottom - top)
+            name: room.name,
+            kind: room.kind,
+            color: room.color,
+            angle: angle,
+            x: cx - w / 2,
+            y: cy - h / 2,
+            w: w,
+            h: h
         }, size);
         room.x = next.x;
         room.y = next.y;
         room.w = next.w;
         room.h = next.h;
+        room.angle = next.angle;
     }
 
-    function drawRoomHandles(svg, room, index, size) {
+    function drawRoomHandles(group, rect, room, options) {
+        var opposite = { nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' };
         [
-            ['nw', room.x, room.y, 'nwse-resize'],
-            ['ne', room.x + room.w, room.y, 'nesw-resize'],
-            ['sw', room.x, room.y + room.h, 'nesw-resize'],
-            ['se', room.x + room.w, room.y + room.h, 'nwse-resize']
+            ['nw', 0, 0, 'nwse-resize'],
+            ['ne', room.w, 0, 'nesw-resize'],
+            ['sw', 0, room.h, 'nesw-resize'],
+            ['se', room.w, room.h, 'nwse-resize']
         ].forEach(function (corner) {
             var handle = svgEl('rect');
             handle.setAttribute('x', String(corner[1] - 5));
@@ -15682,20 +16001,48 @@
             handle.addEventListener('mousedown', function (event) {
                 event.preventDefault();
                 event.stopPropagation();
-                var rect = svg.querySelectorAll('.asset-tree-room')[index];
-                beginDrag(svg, { kind: 'resize', corner: corner[0] }, function (move) {
-                    applyResize(room, corner[0], svgPoint(svg, move), size);
-                    if (rect) {
-                        rect.setAttribute('x', String(room.x));
-                        rect.setAttribute('y', String(room.y));
-                        rect.setAttribute('width', String(room.w));
-                        rect.setAttribute('height', String(room.h));
-                    }
+                var fixedName = opposite[corner[0]];
+                var fixed = localToWorld(room, (fixedName === 'ne' || fixedName === 'se') ? room.w : 0, (fixedName === 'sw' || fixedName === 'se') ? room.h : 0);
+                var thin = room.kind === 'wall' || room.kind === 'partition' || room.kind === 'door' || room.kind === 'window';
+                beginDrag(options.svg, {
+                    kind: 'resize',
+                    corner: corner[0],
+                    fixed: fixed,
+                    angle: normalizeAngle(room.angle),
+                    thin: thin,
+                    long: room.w >= room.h ? 'x' : 'y',
+                    thick: room.w >= room.h ? room.h : room.w
+                }, function (move) {
+                    resizeRotated(room, state.mapDrag, svgPoint(options.svg, move), options.size);
+                    syncShape(group, rect, room);
                     state.mapDirty = true;
                 }, function () { renderFrame(); });
             });
-            svg.appendChild(handle);
+            group.appendChild(handle);
         });
+        var stem = svgEl('path');
+        stem.setAttribute('d', 'M ' + (room.w / 2) + ' 0 L ' + (room.w / 2) + ' -12');
+        stem.setAttribute('class', 'asset-tree-rotate-stem');
+        group.appendChild(stem);
+        var knob = svgEl('circle');
+        knob.setAttribute('cx', String(room.w / 2));
+        knob.setAttribute('cy', '-18');
+        knob.setAttribute('r', '7');
+        knob.setAttribute('class', 'asset-tree-rotate');
+        knob.addEventListener('mousedown', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            beginDrag(options.svg, { kind: 'rotate' }, function (move) {
+                var point = svgPoint(options.svg, move);
+                var cx = room.x + room.w / 2;
+                var cy = room.y + room.h / 2;
+                var deg = Math.atan2(point.y - cy, point.x - cx) * 180 / Math.PI + 90;
+                room.angle = snapAngle(deg, move.shiftKey);
+                group.setAttribute('transform', shapeTransform(room));
+                state.mapDirty = true;
+            }, function () { renderFrame(); });
+        });
+        group.appendChild(knob);
     }
 
     function placeArmedPin(floor, x, y) {
@@ -15743,6 +16090,8 @@
         path.setAttribute('fill', kind === 'select' || kind === 'wall' ? 'currentColor' : 'none');
         path.setAttribute('stroke', 'currentColor');
         path.setAttribute('stroke-width', '1.6');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.setAttribute('stroke-linecap', 'round');
         svg.appendChild(path);
         return svg;
     }
@@ -15751,7 +16100,7 @@
         var rooms = state.mapDraft && state.mapDraft.rooms;
         var room = rooms && state.mapSelection != null ? rooms[state.mapSelection] : null;
         if (!room) return el('div');
-        var block = el('div', 'asset-tree-map-inspector');
+        var block = el('div', 'asset-tree-plan-inspector');
         block.appendChild(el('strong', null, mapSelectionLabel()));
         var name = document.createElement('input');
         name.value = room.name || '';
@@ -15759,14 +16108,13 @@
         name.addEventListener('change', function () {
             room.name = name.value;
             state.mapDirty = true;
-            var dirty = document.querySelector('.asset-tree-dirty');
-            if (dirty) dirty.textContent = t('mapDirty');
+            renderFrame();
         });
         block.appendChild(name);
         if ((room.kind || 'room') === 'room') {
             var colors = el('div', 'asset-tree-swatches');
             ['', '#deebff', '#e3fcef', '#fff0b3', '#ffebe6', '#eae6ff'].forEach(function (color) {
-                var swatch = button('', 'asset-tree-swatch' + (roomColor(room.color) === roomColor(color) ? ' is-on' : ''), function () {
+                var swatch = button('', 'asset-tree-swatch' + (roomColor(room.color) === roomColor(color) ? ' is-selected' : ''), function () {
                     room.color = color;
                     state.mapDirty = true;
                     renderFrame();
@@ -15792,11 +16140,20 @@
         height.value = String(room.h);
         height.className = 'asset-tree-plan-size';
         height.setAttribute('aria-label', t('setupPlanH'));
+        var angle = document.createElement('input');
+        angle.type = 'number';
+        angle.min = '0';
+        angle.max = '359';
+        angle.step = '15';
+        angle.value = String(normalizeAngle(room.angle));
+        angle.className = 'asset-tree-plan-size';
+        angle.setAttribute('aria-label', t('mapAngle'));
         function applySize() {
             var next = clampRoom({
                 name: room.name,
                 kind: room.kind,
                 color: room.color,
+                angle: snapAngle(angle.value),
                 x: room.x,
                 y: room.y,
                 w: Number(width.value),
@@ -15804,20 +16161,27 @@
             });
             if ((room.kind || 'room') === 'column') {
                 var side = Math.max(next.w, next.h);
-                next = clampRoom({ name: room.name, kind: room.kind, color: room.color, x: room.x, y: room.y, w: side, h: side });
+                next = clampRoom({
+                    name: room.name, kind: room.kind, color: room.color, angle: next.angle,
+                    x: room.x, y: room.y, w: side, h: side
+                });
             }
             room.x = next.x;
             room.y = next.y;
             room.w = next.w;
             room.h = next.h;
+            room.angle = next.angle;
             state.mapDirty = true;
             renderFrame();
         }
         width.addEventListener('change', applySize);
         height.addEventListener('change', applySize);
+        angle.addEventListener('change', applySize);
         sizes.appendChild(width);
-        sizes.appendChild(el('span', null, '×'));
+        sizes.appendChild(el('span', null, '\u00d7'));
         sizes.appendChild(height);
+        sizes.appendChild(el('span', 'asset-tree-plan-label', t('mapAngle')));
+        sizes.appendChild(angle);
         block.appendChild(sizes);
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('mapDuplicate'), 'asset-tree-btn', function () {
@@ -15830,6 +16194,7 @@
                     name: source.name,
                     kind: source.kind,
                     color: source.color,
+                    angle: source.angle,
                     x: Math.max(0, Math.min(source.x + step, box.w - source.w)),
                     y: Math.max(0, Math.min(source.y + step, box.h - source.h)),
                     w: source.w,
@@ -15870,7 +16235,7 @@
     function mapSelectionLabel() {
         var rooms = state.mapDraft && state.mapDraft.rooms;
         var room = rooms && state.mapSelection != null ? rooms[state.mapSelection] : null;
-        if (!room) return '—';
+        if (!room) return '\u2014';
         var kind = room.kind || 'room';
         if (kind === 'wall') return t('mapWall');
         if (kind === 'door') return t('mapDoor');
@@ -15891,7 +16256,12 @@
     function paintRoomPreview(svg) {
         var drag = state.mapDrag;
         var node = svg.querySelector('#asset-tree-room-preview');
-        if (!drag || drag.kind === 'move' || drag.kind === 'pin' || drag.kind === 'resize') {
+        if (!drag || drag.kind === 'move' || drag.kind === 'pin' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'pan') {
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+            return;
+        }
+        var shape = shapeFromDrag(drag.kind, drag.x0, drag.y0, drag.x1, drag.y1);
+        if (!shape) {
             if (node && node.parentNode) node.parentNode.removeChild(node);
             return;
         }
@@ -15900,12 +16270,14 @@
             node.id = 'asset-tree-room-preview';
             svg.appendChild(node);
         }
-        var x = Math.min(drag.x0, drag.x1);
-        var y = Math.min(drag.y0, drag.y1);
-        node.setAttribute('x', String(Math.round(x)));
-        node.setAttribute('y', String(Math.round(y)));
-        node.setAttribute('width', String(Math.max(1, Math.round(Math.abs(drag.x1 - drag.x0)))));
-        node.setAttribute('height', String(Math.max(1, Math.round(Math.abs(drag.y1 - drag.y0)))));
+        node.setAttribute('x', String(shape.x));
+        node.setAttribute('y', String(shape.y));
+        node.setAttribute('width', String(shape.w));
+        node.setAttribute('height', String(shape.h));
+        var angle = normalizeAngle(shape.angle);
+        if (angle) {
+            node.setAttribute('transform', 'rotate(' + angle + ' ' + (shape.x + shape.w / 2) + ' ' + (shape.y + shape.h / 2) + ')');
+        } else node.removeAttribute('transform');
     }
 
     function shapeFromDrag(tool, x0, y0, x1, y1) {
@@ -15913,28 +16285,45 @@
         y0 = snapCoord(y0);
         x1 = snapCoord(x1);
         y1 = snapCoord(y1);
+        var thin = tool === 'wall' || tool === 'partition' || tool === 'door' || tool === 'window';
+        if (thin) {
+            var dx = x1 - x0;
+            var dy = y1 - y0;
+            var length = Math.sqrt(dx * dx + dy * dy);
+            var minThin = roomMin(tool);
+            if (length < Math.max(minThin, 8)) return null;
+            var thick = tool === 'partition' ? 4 : (tool === 'wall' ? 8 : 10);
+            var w = Math.max(minThin, Math.round(length));
+            var h = thick;
+            var mx = (x0 + x1) / 2;
+            var my = (y0 + y1) / 2;
+            return clampRoom({
+                kind: tool,
+                name: '',
+                angle: snapAngle(Math.atan2(dy, dx) * 180 / Math.PI),
+                x: mx - w / 2,
+                y: my - h / 2,
+                w: w,
+                h: h
+            });
+        }
         var x = Math.min(x0, x1);
         var y = Math.min(y0, y1);
-        var w = Math.abs(x1 - x0);
-        var h = Math.abs(y1 - y0);
-        if (tool === 'wall' || tool === 'partition' || tool === 'door' || tool === 'window') {
-            var thick = tool === 'partition' ? 4 : (tool === 'wall' ? 8 : 10);
-            if (w >= h) h = thick;
-            else w = thick;
-        }
+        var width = Math.abs(x1 - x0);
+        var height = Math.abs(y1 - y0);
         if (tool === 'column') {
-            var side = Math.max(w, h);
-            w = side;
-            h = side;
+            var side = Math.max(width, height);
+            width = side;
+            height = side;
         }
         var min = roomMin(tool);
-        if (w < min || h < min) return null;
+        if (width < min || height < min) return null;
         var label = '';
         if (tool === 'room') label = t('mapRoom');
         else if (tool === 'stair') label = t('mapStair');
         else if (tool === 'column') label = t('mapColumn');
         else if (tool === 'desk') label = t('mapDesk');
-        return clampRoom({ kind: tool, name: label, x: x, y: y, w: w, h: h });
+        return clampRoom({ kind: tool, name: label, angle: 0, x: x, y: y, w: width, h: height });
     }
 
     function moneyInput(value) {
