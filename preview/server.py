@@ -1170,7 +1170,7 @@ def pack_furniture(raw):
             if len(bits) < 5:
                 continue
             kind = bits[0].strip().lower()
-            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal"):
+            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug"):
                 kind = "room"
             def coord(value, limit):
                 try:
@@ -1178,7 +1178,7 @@ def pack_furniture(raw):
                 except (TypeError, ValueError):
                     number = 0
                 return max(0, min(limit, number))
-            minimum = 16 if kind in ("room", "stair") else 8 if kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal") else 4
+            minimum = 16 if kind in ("room", "stair") else 8 if kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug") else 4
             color = (bits[5] if len(bits) > 5 else "").strip().lower().lstrip("#")
             if not re.fullmatch(r"[0-9a-f]{6}", color):
                 color = ""
@@ -2249,25 +2249,32 @@ def save_floor(project_key, floor_id, body, text):
     seq = 1
     for room in rooms:
         kind = (room.get("kind") or "room").strip().lower()
-        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal"):
+        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug"):
             kind = "room"
         label = (room.get("name") or "").strip()
-        if not label and kind == "room":
+        if not label and kind == "room" and not room_points(room.get("points")):
             label = "Комната"
         if kind in ("room", "stair"):
             minimum = 16
-        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal"):
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug"):
             minimum = 8
         else:
             minimum = 4
-        x = max(0, min(plan_w - minimum, int(room.get("x") or 0)))
-        y = max(0, min(plan_h - minimum, int(room.get("y") or 0)))
+        angle = room_angle(room.get("angle"))
         w = max(minimum, int(room.get("w") or minimum))
         h = max(minimum, int(room.get("h") or minimum))
-        if x + w > plan_w:
-            w = plan_w - x
-        if y + h > plan_h:
-            h = plan_h - y
+        if angle % 180 == 0:
+            x = max(0, min(plan_w - minimum, int(room.get("x") or 0)))
+            y = max(0, min(plan_h - minimum, int(room.get("y") or 0)))
+            if x + w > plan_w:
+                w = max(minimum, plan_w - x)
+            if y + h > plan_h:
+                h = max(minimum, plan_h - y)
+        else:
+            x = max(-2400, min(4800, int(room.get("x") or 0)))
+            y = max(-2400, min(4800, int(room.get("y") or 0)))
+            w = min(w, 4800)
+            h = min(h, 4800)
         stored_rooms.append({
             "id": seq, "name": label[:80], "kind": kind, "color": room_color(room.get("color")),
             "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),

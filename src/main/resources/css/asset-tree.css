@@ -7041,71 +7041,74 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-room {
-    fill: rgba(222, 235, 255, 0.55);
-    stroke: #4c9aff;
-    stroke-width: 2;
+    fill: #e4e4e4;
+    stroke: none;
+    stroke-width: 0;
     cursor: pointer;
 }
 
 #asset-tree-app .asset-tree-room.is-wall {
-    fill: #172b4d;
-    stroke: #172b4d;
+    fill: #1c1c1c;
+    stroke: #1c1c1c;
+    stroke-width: 0;
 }
 
-#asset-tree-app .asset-tree-room.is-door {
-    fill: #ffab00;
-    stroke: #ff8b00;
-}
-
+#asset-tree-app .asset-tree-room.is-door,
 #asset-tree-app .asset-tree-room.is-window {
-    fill: #b3d4ff;
-    stroke: #4c9aff;
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
 }
 
 #asset-tree-app .asset-tree-room.is-column {
-    fill: #6b778c;
-    stroke: #42526e;
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
 }
 
 #asset-tree-app .asset-tree-room.is-stair {
-    fill: #f4f5f7;
-    stroke: #6b778c;
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
 }
 
 #asset-tree-app .asset-tree-room.is-desk {
-    fill: #fff7d6;
-    stroke: #ffab00;
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
 }
 
 #asset-tree-app .asset-tree-room.is-partition {
-    fill: #97a0af;
-    stroke: #6b778c;
+    fill: #4a4a4a;
+    stroke: #4a4a4a;
+    stroke-width: 0;
 }
 
-#asset-tree-app .asset-tree-room.is-table {
-    fill: #fff7d6;
-    stroke: #ffab00;
-}
-
+#asset-tree-app .asset-tree-room.is-table,
 #asset-tree-app .asset-tree-room.is-chair,
-#asset-tree-app .asset-tree-room.is-seat {
-    fill: #f4f5f7;
-    stroke: #6b778c;
+#asset-tree-app .asset-tree-room.is-seat,
+#asset-tree-app .asset-tree-room.is-cabinet,
+#asset-tree-app .asset-tree-room.is-pedestal,
+#asset-tree-app .asset-tree-room.is-sofa,
+#asset-tree-app .asset-tree-room.is-bed,
+#asset-tree-app .asset-tree-room.is-bath,
+#asset-tree-app .asset-tree-room.is-toilet,
+#asset-tree-app .asset-tree-room.is-sink,
+#asset-tree-app .asset-tree-room.is-stove,
+#asset-tree-app .asset-tree-room.is-rug {
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
 }
 
-#asset-tree-app .asset-tree-room.is-cabinet {
-    fill: #eae6ff;
-    stroke: #6554c0;
-}
-
-#asset-tree-app .asset-tree-room.is-pedestal {
-    fill: #ffebe6;
-    stroke: #ff7452;
-}
-
-#asset-tree-app .asset-tree-room.is-sofa {
-    fill: #deebff;
-    stroke: #4c9aff;
+#asset-tree-app .asset-tree-room.is-plant {
+    fill: rgba(255, 255, 255, 0.01);
+    stroke: none;
 }
 
 #asset-tree-app .asset-tree-room.is-selected {
@@ -7353,8 +7356,10 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-opening {
     fill: none;
-    stroke: #172b4d;
-    stroke-width: 1.5;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
     pointer-events: none;
 }
 
@@ -7365,16 +7370,18 @@ a.asset-tree-url {
     cursor: nwse-resize;
 }
 
-#asset-tree-app .asset-tree-mark {
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark {
     fill: none;
-    stroke: #42526e;
-    stroke-width: 1.5;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
     pointer-events: none;
 }
 
-#asset-tree-app .asset-tree-mark.is-fill {
-    fill: rgba(23, 43, 77, 0.22);
-    stroke: #42526e;
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-solid {
+    fill: #1c1c1c;
 }
 
 #asset-tree-app .asset-tree-editor-bar button.asset-tree-btn.slim.is-on {
@@ -9003,53 +9010,118 @@ a.asset-tree-url {
     gap: 6px;
 }
 
-#asset-tree-app button.asset-tree-tool,
-#asset-tree-app button.asset-tree-thumb-card {
-    display: flex !important;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    width: 100%;
-    min-height: 58px;
-    margin: 0;
-    padding: 6px 4px !important;
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool {
+    display: grid !important;
+    grid-template-rows: 24px 18px !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-items: center !important;
+    justify-items: center !important;
+    align-content: center !important;
+    justify-content: center !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    gap: 2px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    height: 56px !important;
+    min-height: 56px !important;
+    max-height: 56px !important;
+    margin: 0 !important;
+    padding: 4px 2px !important;
     border: 1px solid #dfe1e6 !important;
     border-radius: 3px;
     background: #fafbfc !important;
     color: #172b4d !important;
-    font-size: 14px !important;
+    font-size: 12px !important;
     font-weight: 400 !important;
-    line-height: 16px !important;
-    text-align: center;
+    line-height: 0 !important;
+    text-align: center !important;
+    text-indent: 0 !important;
+    white-space: nowrap !important;
     cursor: pointer;
+    float: none !important;
+    overflow: hidden !important;
+    vertical-align: top !important;
 }
 
-#asset-tree-app button.asset-tree-tool span {
-    display: block;
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool::before,
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool::after {
+    content: none !important;
+    display: none !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-glyph {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 24px !important;
+    height: 24px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 0 !important;
+    float: none !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-glyph svg,
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-icon {
+    display: block !important;
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0 !important;
+    float: none !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-label {
+    display: block !important;
+    width: 100% !important;
     max-width: 100%;
-    color: inherit;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden;
+    color: inherit !important;
     font-family: inherit !important;
-    font-size: 14px !important;
+    font-size: 12px !important;
     font-weight: 400 !important;
     line-height: 16px !important;
     letter-spacing: 0 !important;
-    text-align: center;
-    white-space: normal;
+    text-align: center !important;
+    text-indent: 0 !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis;
+    float: none !important;
 }
 
-#asset-tree-app button.asset-tree-tool.is-on,
-#asset-tree-app button.asset-tree-thumb-card.is-on {
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool.is-on,
+#asset-tree-app .asset-tree-floorplan button.asset-tree-thumb-card.is-on {
     border-color: #4c9aff !important;
     background: #deebff !important;
     color: #0052cc !important;
 }
 
-#asset-tree-app button.asset-tree-thumb-card {
+#asset-tree-app .asset-tree-floorplan button.asset-tree-thumb-card {
     position: relative;
-    min-height: 112px;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 4px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 112px !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 6px 4px 8px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
     background: #fff !important;
-    border-color: #dfe1e6 !important;
+    color: #172b4d !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 16px !important;
+    text-align: center !important;
+    float: none !important;
+    overflow: hidden;
 }
 
 #asset-tree-app .asset-tree-tool-icon,
@@ -9323,9 +9395,19 @@ a.asset-tree-url {
     padding: 24px;
 }
 
+.asset-tree-plan-menu-back {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30000;
+    background: transparent;
+}
+
 .asset-tree-plan-menu {
     position: fixed;
-    z-index: 5000;
+    z-index: 30001;
     min-width: 196px;
     margin: 0;
     padding: 4px 0;

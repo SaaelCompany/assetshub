@@ -6530,25 +6530,39 @@ public class AssetServiceImpl implements AssetService {
                         }
                         String kind = FloorBounds.kind(room.getKind());
                         int min = FloorBounds.minSize(kind);
-                        int x = FloorBounds.clamp(room.getX(), planW - min);
-                        int y = FloorBounds.clamp(room.getY(), planH - min);
+                        int angle = FloorBounds.angle(room.getAngle());
                         int w = Math.max(min, room.getW());
                         int h = Math.max(min, room.getH());
-                        if (x + w > planW) {
-                            w = planW - x;
-                        }
-                        if (y + h > planH) {
-                            h = planH - y;
+                        int x;
+                        int y;
+                        if (angle % 180 == 0) {
+                            x = FloorBounds.clamp(room.getX(), planW - min);
+                            y = FloorBounds.clamp(room.getY(), planH - min);
+                            if (x + w > planW) {
+                                w = Math.max(min, planW - x);
+                            }
+                            if (y + h > planH) {
+                                h = Math.max(min, planH - y);
+                            }
+                        } else {
+                            x = FloorBounds.origin(room.getX());
+                            y = FloorBounds.origin(room.getY());
+                            if (w > 4800) {
+                                w = 4800;
+                            }
+                            if (h > 4800) {
+                                h = 4800;
+                            }
                         }
                         RoomEntity stored = ao().create(RoomEntity.class, new DBParam("FLOOR_ID", row.getID()));
-                        stored.setName(roomName(room.getName(), kind));
+                        stored.setName(roomName(room.getName(), kind, room.getPoints()));
                         stored.setKind(kind);
                         stored.setColor(FloorBounds.color(room.getColor()));
                         stored.setPosX(x);
                         stored.setPosY(y);
                         stored.setPosW(w);
                         stored.setPosH(h);
-                        stored.setAngle(FloorBounds.angle(room.getAngle()));
+                        stored.setAngle(angle);
                         stored.setPoints(FloorBounds.points(room.getPoints()));
                         stored.save();
                     }
@@ -6589,10 +6603,13 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
-    private String roomName(String raw, String kind) {
+    private String roomName(String raw, String kind, String points) {
         String name = raw == null ? "" : raw.trim();
         if (name.isEmpty()) {
-            return FloorBounds.ROOM.equals(kind) ? i18n().getText("asset-tree.ui.mapRoom") : "";
+            if (FloorBounds.ROOM.equals(kind) && FloorBounds.points(points).isEmpty()) {
+                return i18n().getText("asset-tree.ui.mapRoom");
+            }
+            return "";
         }
         if (name.length() > 80) {
             throw new AssetException(400, "asset-tree.error.floor");

@@ -25,6 +25,13 @@ public final class FloorBounds {
     public static final String SOFA = "sofa";
     public static final String SEAT = "seat";
     public static final String PEDESTAL = "pedestal";
+    public static final String BED = "bed";
+    public static final String PLANT = "plant";
+    public static final String BATH = "bath";
+    public static final String TOILET = "toilet";
+    public static final String SINK = "sink";
+    public static final String STOVE = "stove";
+    public static final String RUG = "rug";
 
     private FloorBounds() {
     }
@@ -36,6 +43,14 @@ public final class FloorBounds {
         return value > max ? max : value;
     }
 
+    /** Origin of a rotated shape. Its unrotated box may hang off the sheet. */
+    public static int origin(int value) {
+        if (value < -2400) {
+            return -2400;
+        }
+        return value > 4800 ? 4800 : value;
+    }
+
     public static String kind(String raw) {
         if (raw == null) {
             return ROOM;
@@ -44,7 +59,9 @@ public final class FloorBounds {
         if (WALL.equals(value) || DOOR.equals(value) || WINDOW.equals(value)
                 || COLUMN.equals(value) || STAIR.equals(value) || DESK.equals(value) || PARTITION.equals(value)
                 || TABLE.equals(value) || CHAIR.equals(value) || CABINET.equals(value)
-                || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)) {
+                || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
+                || BED.equals(value) || PLANT.equals(value) || BATH.equals(value)
+                || TOILET.equals(value) || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)) {
             return value;
         }
         return ROOM;
@@ -56,7 +73,9 @@ public final class FloorBounds {
             return MIN_ROOM;
         }
         if (COLUMN.equals(value) || DESK.equals(value) || TABLE.equals(value) || CHAIR.equals(value)
-                || CABINET.equals(value) || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)) {
+                || CABINET.equals(value) || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
+                || BED.equals(value) || PLANT.equals(value) || BATH.equals(value) || TOILET.equals(value)
+                || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)) {
             return 8;
         }
         return MIN_PART;
