@@ -7553,8 +7553,9 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row .asset-tree-roster-name,
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-day,
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-total {
-    height: 32px;
-    background: #f4f5f7;
+    height: 36px;
+    min-height: 0;
+    background: #f7f8fa;
 }
 
 #asset-tree-app .asset-tree-roster-branch-solo {

@@ -13106,7 +13106,17 @@
         table.appendChild(thead);
         var body = el('tbody');
         sections.forEach(function (section, index) {
-            if (index > 0) body.appendChild(staffSectionHead(section, year, month, count, today));
+            if (index > 0 && section.name) {
+                var banner = el('tr', 'asset-tree-roster-branch-row');
+                var cell = el('th', 'asset-tree-roster-name');
+                cell.appendChild(staffPlaceHead(section.placeId, section.name));
+                banner.appendChild(cell);
+                var gap;
+                for (gap = 0; gap < count; gap++) banner.appendChild(el('td', 'asset-tree-roster-day'));
+                banner.appendChild(el('td', 'asset-tree-roster-total'));
+                banner.appendChild(el('td', 'asset-tree-roster-total'));
+                body.appendChild(banner);
+            }
             section.people.forEach(function (person) {
                 body.appendChild(staffRosterRow(person, year, month, count, today));
             });
