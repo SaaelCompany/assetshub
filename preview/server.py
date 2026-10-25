@@ -1889,7 +1889,47 @@ def plan_due(row, today=None):
     nxt = plan_next(row)
     if not nxt or plan_completed(row, nxt):
         return False
-    return nxt <= (today or datetime.date.today())
+    today = today or datetime.date.today()
+    source = nxt.isoformat()
+    display = source
+    start = (row.get("startTime") or "").strip()
+    for part in str(row.get("moves") or "").split(","):
+        at = part.find(">")
+        if at < 1 or part[:at].strip() != source:
+            continue
+        target = part[at + 1:].strip()
+        timed = target.find("@")
+        day = target if timed < 0 else target[:timed].strip()
+        if day == "-":
+            return nxt <= today
+        if day:
+            display = day
+        if timed >= 0:
+            span = target[timed + 1:].strip()
+            if span == "-":
+                start = ""
+            else:
+                start = span.split("-", 1)[0].strip()
+        break
+    try:
+        shown = datetime.date.fromisoformat(display)
+    except ValueError:
+        return nxt <= today
+    if shown > today:
+        return False
+    if shown < today:
+        return True
+    if len(start) != 5 or start[2] != ":":
+        return True
+    try:
+        hour = int(start[:2])
+        minute = int(start[3:])
+    except ValueError:
+        return True
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return True
+    now = datetime.datetime.now()
+    return (hour, minute) <= (now.hour, now.minute)
 
 
 def schedule_anchor(first, count, unit):

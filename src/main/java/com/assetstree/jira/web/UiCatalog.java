@@ -1095,6 +1095,7 @@ public final class UiCatalog {
             "schedulesCollapse",
             "schedulesEveryCount",
             "schedulesFirst",
+            "schedulesWhen",
             "schedulesAllDay",
             "schedulesOnce",
             "schedulesEachDay",

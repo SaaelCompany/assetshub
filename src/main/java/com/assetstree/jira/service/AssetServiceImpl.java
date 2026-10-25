@@ -172,6 +172,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -5969,6 +5970,71 @@ public class AssetServiceImpl implements AssetService {
         return result;
     }
 
+    /** A later hour today is not overdue. A moved day is judged by the day it is shown on. */
+    private boolean planIsDue(ServicePlanEntity row, LocalDate next, LocalDate today, boolean completed) {
+        if (completed || next == null || today == null) {
+            return false;
+        }
+        String source = next.toString();
+        String display = source;
+        String start = row.getStartTime() == null ? "" : row.getStartTime().trim();
+        String moves = row.getMoves() == null ? "" : row.getMoves();
+        for (String part : moves.split(",")) {
+            int at = part.indexOf('>');
+            if (at < 1 || !source.equals(part.substring(0, at).trim())) {
+                continue;
+            }
+            String target = part.substring(at + 1).trim();
+            int timed = target.indexOf('@');
+            String day = timed < 0 ? target : target.substring(0, timed).trim();
+            if ("-".equals(day)) {
+                return ServiceDue.reached(next, today);
+            }
+            if (!day.isEmpty()) {
+                display = day;
+            }
+            if (timed >= 0) {
+                String span = target.substring(timed + 1).trim();
+                if ("-".equals(span)) {
+                    start = "";
+                } else {
+                    int dash = span.indexOf('-');
+                    start = (dash < 0 ? span : span.substring(0, dash)).trim();
+                }
+            }
+            break;
+        }
+        LocalDate shown;
+        try {
+            shown = LocalDate.parse(display);
+        } catch (RuntimeException ex) {
+            return ServiceDue.reached(next, today);
+        }
+        if (shown.isAfter(today)) {
+            return false;
+        }
+        if (shown.isBefore(today)) {
+            return true;
+        }
+        return start.length() != 5 || !clockLater(start);
+    }
+
+    private boolean clockLater(String hhmm) {
+        int hour;
+        int minute;
+        try {
+            hour = Integer.parseInt(hhmm.substring(0, 2));
+            minute = Integer.parseInt(hhmm.substring(3, 5));
+        } catch (RuntimeException ex) {
+            return false;
+        }
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || hhmm.charAt(2) != ':') {
+            return false;
+        }
+        LocalTime now = LocalTime.now();
+        return hour > now.getHour() || (hour == now.getHour() && minute > now.getMinute());
+    }
+
     private ServicePlanDto planDto(ServicePlanEntity row, LocalDate today) {
         ServicePlanDto dto = new ServicePlanDto();
         dto.setId(row.getID());
@@ -5989,7 +6055,7 @@ public class AssetServiceImpl implements AssetService {
         boolean completed = planCompleted(row, next);
         dto.setCompleted(completed);
         dto.setNextDue(next == null ? "" : next.toString());
-        dto.setDue(ServiceDue.reached(next, today) && !completed);
+        dto.setDue(planIsDue(row, next, today, completed));
         dto.setMoves(row.getMoves() == null ? "" : row.getMoves());
         return dto;
     }

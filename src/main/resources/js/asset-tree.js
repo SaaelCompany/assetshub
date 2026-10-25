@@ -2173,10 +2173,12 @@
                 nodes.push({ top: found[index].scrollTop, left: found[index].scrollLeft });
             }
         }
+        var clock = root ? root.querySelector('.asset-tree-clock') : null;
         return {
             x: window.pageXOffset || document.documentElement.scrollLeft || 0,
             y: window.pageYOffset || document.documentElement.scrollTop || 0,
-            nodes: nodes
+            nodes: nodes,
+            clock: clock ? clock.scrollTop : null
         };
     }
 
@@ -2190,6 +2192,10 @@
                 found[index].scrollTop = kept.nodes[index].top;
                 found[index].scrollLeft = kept.nodes[index].left;
             }
+        }
+        if (kept.clock != null && root) {
+            var clock = root.querySelector('.asset-tree-clock');
+            if (clock) clock.scrollTop = kept.clock;
         }
         if (kept.x || kept.y) window.scrollTo(kept.x, kept.y);
     }
@@ -4512,7 +4518,16 @@
                 statusKey: status.value,
                 notify: box.checked
             };
-            if (done) body.done = true;
+            if (done) {
+                body.done = true;
+                if (plan && plan.everyUnit && plan.everyUnit !== 'once') {
+                    var source = nextPendingSource(plan);
+                    if (source) {
+                        body.doneOn = source;
+                        body.moves = dropMovesUntil(plan, source);
+                    }
+                }
+            }
             return body;
         }
         function send(done) {
@@ -11904,7 +11919,10 @@
             var now = new Date();
             state.scheduleYear = now.getFullYear();
             state.scheduleMonth = now.getMonth() + 1;
+            state.scheduleExpanded = '';
+            if (state.scheduleClockDay) state.scheduleClockDay = isoDate(now);
             renderFrame();
+            if (state.scheduleClockDay) revealScheduleClock();
         }));
         head.appendChild(nav);
         var boards = scheduleBoards();
@@ -12039,11 +12057,31 @@
         return (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
     }
 
+    function minutesClock(total) {
+        if (total < 0) total = 0;
+        if (total > 23 * 60 + 59) total = 23 * 60 + 59;
+        var hour = Math.floor(total / 60);
+        var minute = total % 60;
+        return (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+    }
+
     function clockDuration(clock) {
         if (!clock || !clock.start || !clock.end) return 60;
         var span = timeMinutes(clock.end) - timeMinutes(clock.start);
-        if (span < 30) return 60;
+        if (span < 1) return 60;
         return span;
+    }
+
+    function fitClock(start, duration) {
+        var max = 23 * 60 + 59;
+        var begin = timeMinutes(start);
+        if (begin > 24 * 60) begin = 0;
+        if (duration < 1) duration = 60;
+        if (begin + duration > max) begin = max - duration;
+        if (begin < 0) begin = 0;
+        var end = begin + duration;
+        if (end > max) end = max;
+        return { start: minutesClock(begin), end: minutesClock(end) };
     }
 
     function sortDayPlans(plans, iso) {
@@ -12235,11 +12273,24 @@
         return more;
     }
 
+    function occurrenceIsDue(plan, displayIso) {
+        if (!plan || plan.completed) return false;
+        var source = seriesSource(plan, displayIso);
+        if (!source || source !== (plan.nextDue || '')) return false;
+        var today = isoDate(new Date());
+        if (displayIso > today) return false;
+        if (displayIso < today) return true;
+        var start = occurrenceClock(plan, displayIso).start;
+        if (!start) return true;
+        var now = new Date();
+        return timeMinutes(start) <= now.getHours() * 60 + now.getMinutes();
+    }
+
     function scheduleEventCard(plan, iso, onClock) {
         var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
         var source = seriesSource(plan, iso);
         var done = !!plan.completed;
-        var due = !done && !!plan.due && source === (plan.nextDue || '');
+        var due = occurrenceIsDue(plan, iso);
         var card = button('', 'asset-tree-event' + (done ? ' is-done' : '') + (due ? ' is-due' : '') + (focused ? ' is-focus' : ''), function () {
             if (state.scheduleSuppressClick) {
                 state.scheduleSuppressClick = false;
@@ -12362,13 +12413,36 @@
         loadSchedules();
     }
 
+    function occurrenceMoves(plan, source, day, start, end) {
+        var map = planMoveMap(plan);
+        if (!source || !day) return packPlanMoves(map);
+        var sameDay = day === source;
+        var sameClock = (start || '') === (plan.startTime || '') && (end || '') === (plan.endTime || '');
+        if (sameDay && sameClock) delete map[source];
+        else if (!start) map[source] = sameClock ? day : day + '@-';
+        else if (sameClock) map[source] = day;
+        else map[source] = day + '@' + start + (end ? '-' + end : '');
+        return packPlanMoves(map);
+    }
+
     function dropPlanAt(plan, fromIso, day, time) {
         var current = occurrenceClock(plan, fromIso);
         var timed = time != null;
         if (!timed && (!day || day === fromIso)) return;
-        var start = timed ? (time || '') : (current.start || '');
-        var end = timed ? '' : (current.end || '');
-        if (timed && start) end = addMinutes(start, clockDuration(current));
+        var start = current.start || '';
+        var end = current.end || '';
+        if (timed) {
+            if (!time) {
+                start = '';
+                end = '';
+            } else {
+                var offset = current.start ? timeMinutes(current.start) % 30 : 0;
+                var fitted = fitClock(minutesClock(timeMinutes(time) + offset), clockDuration(current));
+                start = fitted.start;
+                end = fitted.end;
+            }
+        }
+        if (day === fromIso && start === (current.start || '') && end === (current.end || '')) return;
         if (!plan.everyUnit || plan.everyUnit === 'once') {
             var patch = {};
             if (day && day !== fromIso) patch.lastDone = day;
@@ -12381,14 +12455,7 @@
             return;
         }
         var source = seriesSource(plan, fromIso);
-        var map = planMoveMap(plan);
-        var sameDay = day === source;
-        var sameClock = start === (plan.startTime || '') && end === (plan.endTime || '');
-        if (sameDay && sameClock) delete map[source];
-        else if (!start) map[source] = sameClock ? day : day + '@-';
-        else if (sameClock) map[source] = day;
-        else map[source] = day + '@' + start + (end ? '-' + end : '');
-        savePlan(plan, { moves: packPlanMoves(map) });
+        savePlan(plan, { moves: occurrenceMoves(plan, source, day, start, end) });
     }
 
     function beginPlanDrag(plan, iso, card, event) {
@@ -14126,11 +14193,11 @@
                 kind.value = draft.kind;
                 var date = document.createElement('input');
                 date.type = 'date';
-                var seriesDate = !plan.everyUnit || plan.everyUnit === 'once'
-                    ? (plan.lastDone || when)
-                    : (plan.nextDue || plan.lastDone || when);
-                date.value = String(seriesDate).slice(0, 10);
-                date.setAttribute('aria-label', t('schedulesFirst'));
+                var repeating = !!(plan.everyUnit && plan.everyUnit !== 'once');
+                var shownDay = String(when).slice(0, 10);
+                var shownClock = occurrenceClock(plan, shownDay);
+                date.value = String(repeating ? shownDay : (plan.lastDone || shownDay)).slice(0, 10);
+                date.setAttribute('aria-label', repeating ? t('schedulesWhen') : t('schedulesFirst'));
                 var every = document.createElement('input');
                 every.type = 'number';
                 every.min = '1';
@@ -14151,7 +14218,11 @@
                     every.disabled = onceUnit;
                     if (onceUnit) every.value = '1';
                 }
-                repeat.addEventListener('change', syncEvery);
+                var firstLabel = el('span', null, repeating ? t('schedulesWhen') : t('schedulesFirst'));
+                repeat.addEventListener('change', function () {
+                    syncEvery();
+                    firstLabel.textContent = repeat.value === 'once' || !repeating ? t('schedulesFirst') : t('schedulesWhen');
+                });
                 syncEvery();
                 var firstRow = el('div', 'asset-tree-time-row');
                 firstRow.appendChild(date);
@@ -14195,13 +14266,13 @@
                 var allDay = document.createElement('input');
                 allDay.type = 'radio';
                 allDay.name = 'asset-tree-edit-when';
-                allDay.checked = !plan.startTime;
+                allDay.checked = !shownClock.start;
                 var ranged = document.createElement('input');
                 ranged.type = 'radio';
                 ranged.name = 'asset-tree-edit-when';
-                ranged.checked = !!plan.startTime;
-                var clock = clockPair(plan.startTime || '', plan.endTime || '');
-                clock.setDisabled(!plan.startTime);
+                ranged.checked = !!shownClock.start;
+                var clock = clockPair(shownClock.start || '', shownClock.end || '');
+                clock.setDisabled(!shownClock.start);
                 allDay.addEventListener('change', function () {
                     clock.setDisabled(true);
                 });
@@ -14221,7 +14292,7 @@
                 dialog.appendChild(planField(t('name'), name));
                 dialog.appendChild(planField(t('schedulesKind'), kind));
                 var firstField = el('div', 'asset-tree-plan-field');
-                firstField.appendChild(el('span', null, t('schedulesFirst')));
+                firstField.appendChild(firstLabel);
                 firstField.appendChild(firstRow);
                 dialog.appendChild(firstField);
                 var timeField = el('div', 'asset-tree-plan-field');
@@ -14233,7 +14304,8 @@
                 dialog.appendChild(planField(t('schedulesWhat'), note));
             } else {
                 var meta = formatFieldDate(when);
-                if (plan.startTime) meta += ' · ' + plan.startTime + (plan.endTime ? '–' + plan.endTime : '');
+                var readClock = occurrenceClock(plan, String(when).slice(0, 10));
+                if (readClock.start) meta += ' · ' + readClock.start + (readClock.end ? '–' + readClock.end : '');
                 if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
                 dialog.appendChild(el('p', null, meta));
                 if (plan.note) dialog.appendChild(el('p', null, plan.note));
@@ -14256,22 +14328,28 @@
                         notify(t('schedulesNeedDate'));
                         return;
                     }
-                    var anchor = scheduleAnchor(date.value, count, unit);
-                    var changed = anchor !== (plan.lastDone || '')
-                        || String(count) !== String(plan.everyCount || 1)
-                        || unit !== (plan.everyUnit || 'once');
-                    savePlan(plan, {
+                    var start = ranged.checked ? (clock.start() || '09:00') : '';
+                    var end = start ? (clock.end() || addMinutes(start, 60)) : '';
+                    var patch = {
                         name: title,
                         kind: kind.value || plan.kind,
-                        lastDone: anchor,
                         everyCount: count,
                         everyUnit: unit,
-                        moves: changed ? '' : (plan.moves || ''),
                         assigneeKey: person.value.trim() ? draft.assigneeKey : '',
-                        note: note.value,
-                        startTime: ranged.checked ? (clock.start() || '09:00') : '',
-                        endTime: ranged.checked ? (clock.end() || addMinutes(clock.start() || '09:00', 60)) : ''
-                    }, function (ok) { if (ok) closeModal(); });
+                        note: note.value
+                    };
+                    if (!repeating || unit === 'once') {
+                        patch.lastDone = scheduleAnchor(date.value, count, unit);
+                        patch.moves = '';
+                        patch.startTime = start;
+                        patch.endTime = end;
+                    } else if (String(count) !== String(plan.everyCount || 1) || unit !== (plan.everyUnit || 'once')) {
+                        patch.lastDone = scheduleAnchor(plan.nextDue || plan.lastDone || shownDay, count, unit);
+                        patch.moves = '';
+                    } else {
+                        patch.moves = occurrenceMoves(plan, seriesSource(plan, shownDay), date.value, start, end);
+                    }
+                    savePlan(plan, patch, function (ok) { if (ok) closeModal(); });
                 }));
             }
             if (state.canEdit && !plan.completed) {
@@ -14279,14 +14357,9 @@
                     var body = { done: true };
                     if (plan.everyUnit && plan.everyUnit !== 'once') {
                         var source = seriesSource(plan, String(when).slice(0, 10));
-                        if (source && source === nextPendingSource(plan)) {
+                        if (source) {
                             body.doneOn = source;
                             body.moves = dropMovesUntil(plan, source);
-                        } else if (source) {
-                            var map = planMoveMap(plan);
-                            map[source] = '-';
-                            savePlan(plan, { moves: packPlanMoves(map) }, function (ok) { if (ok) closeModal(); });
-                            return;
                         }
                     }
                     ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, body, function (status, payload) {
