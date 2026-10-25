@@ -14821,12 +14821,10 @@
         if (!money) return rows;
         var next = [];
         rows.forEach(function (row) {
-            var amount = Number(row.amount) || 0;
-            if (!amount) return;
             next.push({
                 label: row.label,
                 color: row.color,
-                count: amount,
+                count: Number(row.amount) || 0,
                 text: row.amountText || '0'
             });
         });
@@ -14836,6 +14834,8 @@
     function reportChartPanel(rows, total, max, kind, money, sumText) {
         var measured = measuredRows(rows, money);
         if (!measured.length) return null;
+        var drawn = [];
+        measured.forEach(function (row) { if (row.count) drawn.push(row); });
         if (kind === 'columns') {
             var columns = el('div', 'asset-tree-report-chart');
             columns.appendChild(reportColumnsChart(measured, max, money));
@@ -14846,13 +14846,14 @@
             bars.appendChild(reportBarsChart(measured, max, money));
             return bars;
         }
+        if (!drawn.length) return null;
         var round = el('div', 'asset-tree-report-chart is-round');
         var ring = el('div', 'asset-tree-report-ring');
         var center = money ? (sumText || '') : String(total);
         if (kind === 'pie') {
-            ring.appendChild(reportPieChart(measured));
+            ring.appendChild(reportPieChart(drawn));
         } else {
-            ring.appendChild(donutChart(measured, true));
+            ring.appendChild(donutChart(drawn, true));
             var figure = el('span', 'asset-tree-report-ring-value' + (center.length > 7 ? ' is-compact' : ''), center);
             ring.appendChild(figure);
         }
