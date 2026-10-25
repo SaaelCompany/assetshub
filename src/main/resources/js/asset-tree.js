@@ -14075,6 +14075,28 @@
         document.body.removeChild(link);
     }
 
+    function reportFact(color, value, label) {
+        var chip = el('span', 'asset-tree-report-fact');
+        if (color) {
+            var dot = el('i');
+            dot.style.background = color;
+            chip.appendChild(dot);
+        }
+        chip.appendChild(el('strong', null, value));
+        if (label) chip.appendChild(document.createTextNode(label));
+        return chip;
+    }
+
+    function reportMeter(count, max, color) {
+        var track = el('span', 'asset-tree-report-track');
+        var fill = el('span');
+        var width = max ? Math.round(100 * (count || 0) / max) : 0;
+        fill.style.width = width + '%';
+        fill.style.background = color || '#0052CC';
+        track.appendChild(fill);
+        return track;
+    }
+
     function shareText(count, total) {
         if (!total) return '0 %';
         var pct = count * 100 / total;
@@ -14164,48 +14186,74 @@
             main.appendChild(el('p', 'asset-tree-hint', state.reportError || t('loading')));
         } else {
             var view = state.reportView;
-            main.appendChild(el('h3', null, view.title || ''));
-            main.appendChild(el('p', 'asset-tree-hint', t('reportGroupBy') + ': ' + groupWord(view.groupBy)));
-            if (view.rows && view.rows.length) {
-                var chartWrap = el('div', 'asset-tree-chart-wrap' + (view.chart === 'donut' ? ' is-donut' : ''));
-                chartWrap.appendChild(view.chart === 'donut' ? donutChart(view.rows) : barChart(view.rows));
-                if (view.chart === 'donut') {
-                    var legend = el('div', 'asset-tree-legend');
-                    legend.appendChild(el('strong', null, String(view.total || 0) + ' ' + t('reportTotalRow')));
-                    view.rows.forEach(function (row) {
-                        var line = el('span', 'asset-tree-legend-line');
-                        var swatch = el('i');
-                        swatch.style.background = row.color || '#0052CC';
-                        line.appendChild(swatch);
-                        line.appendChild(document.createTextNode((row.label || '') + ' ' + row.count));
-                        legend.appendChild(line);
-                    });
-                    chartWrap.appendChild(legend);
-                }
-                main.appendChild(chartWrap);
-            }
-            var table = el('table', 'asset-tree-sheet-table');
+            var rows = view.rows || [];
+            var maxCount = 1;
+            rows.forEach(function (row) {
+                if (row.count > maxCount) maxCount = row.count;
+            });
+            var titleRow = el('div', 'asset-tree-report-title');
+            var titles = el('div');
+            titles.appendChild(el('h3', null, view.title || ''));
+            titles.appendChild(el('p', null, t('reportGroupBy') + ': ' + groupWord(view.groupBy)));
+            titleRow.appendChild(titles);
+            if (view.chart === 'donut' && rows.length) titleRow.appendChild(donutChart(rows));
+            main.appendChild(titleRow);
+            var facts = el('div', 'asset-tree-report-facts');
+            facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
+            if (view.sum) facts.appendChild(reportFact('', view.sum, ''));
+            main.appendChild(facts);
+            var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
             header.appendChild(el('th', null, groupWord(view.groupBy)));
-            header.appendChild(el('th', null, t('reportCount')));
-            header.appendChild(el('th', null, t('reportShare')));
+            header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
+            var countHead = el('th', 'is-num', t('reportCount'));
+            var shareHead = el('th', 'is-num', t('reportShare'));
+            header.appendChild(countHead);
+            header.appendChild(shareHead);
             table.appendChild(header);
-            (view.rows || []).forEach(function (row) {
+            rows.forEach(function (row) {
                 var line = el('tr');
-                line.appendChild(el('td', null, row.label || ''));
-                line.appendChild(el('td', null, String(row.count)));
-                line.appendChild(el('td', null, shareText(row.count, view.total || 0)));
+                var name = el('td', 'asset-tree-report-name');
+                var dot = el('i');
+                dot.style.background = row.color || '#0052CC';
+                name.appendChild(dot);
+                name.appendChild(document.createTextNode(row.label || ''));
+                line.appendChild(name);
+                var meter = el('td', 'asset-tree-report-meter');
+                meter.appendChild(reportMeter(row.count, maxCount, row.color));
+                line.appendChild(meter);
+                line.appendChild(el('td', 'is-num', String(row.count)));
+                line.appendChild(el('td', 'is-num', shareText(row.count, view.total || 0)));
                 table.appendChild(line);
             });
             var total = el('tr', 'is-total');
             total.appendChild(el('td', null, t('reportTotalRow')));
-            total.appendChild(el('td', null, String(view.total || 0)));
-            total.appendChild(el('td', null, shareText(view.total || 0, view.total || 0)));
+            total.appendChild(el('td', 'asset-tree-report-meter', ''));
+            total.appendChild(el('td', 'is-num', String(view.total || 0)));
+            total.appendChild(el('td', 'is-num', shareText(view.total || 0, view.total || 0)));
             table.appendChild(total);
             main.appendChild(table);
-            main.appendChild(el('p', 'asset-tree-hint', t('reportCounted')));
+            if (view.lines && view.lines.length) {
+                var lines = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-lines');
+                var lineHead = el('tr');
+                lineHead.appendChild(el('th', null, t('keyLabel')));
+                lineHead.appendChild(el('th', null, t('name')));
+                lines.appendChild(lineHead);
+                view.lines.forEach(function (row) {
+                    var line = el('tr');
+                    line.appendChild(el('td', 'asset-tree-report-key', row.objectKey || ''));
+                    var who = el('td', 'asset-tree-report-line');
+                    who.appendChild(el('strong', null, row.name || ''));
+                    if (row.detail) who.appendChild(el('span', null, row.detail));
+                    line.appendChild(who);
+                    lines.appendChild(line);
+                });
+                main.appendChild(lines);
+            }
+            var foot = el('div', 'asset-tree-report-foot');
+            foot.appendChild(el('p', null, t('reportCounted')));
             if (!view.standard && state.canEdit) {
-                main.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
+                foot.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
                     ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), null, function (status, payload) {
                         if (status >= 200 && status < 300) {
                             state.reportKey = 'status';
@@ -14217,6 +14265,7 @@
                     });
                 }));
             }
+            main.appendChild(foot);
         }
         shell.appendChild(main);
         panel.appendChild(shell);

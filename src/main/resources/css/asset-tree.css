@@ -6580,9 +6580,191 @@ a.asset-tree-url {
 #asset-tree-app button.asset-tree-report-link.is-current {
     background: #deebff !important;
     color: #0052cc !important;
+    font-weight: 600;
 }
 
-#asset-tree-app .asset-tree-report-main,
+#asset-tree-app .asset-tree-report-main {
+    min-height: 0;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-title {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 16px;
+    padding: 12px 14px 0;
+}
+
+#asset-tree-app .asset-tree-report-title h3 {
+    margin: 0;
+    color: #172b4d;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+#asset-tree-app .asset-tree-report-title p {
+    margin: 2px 0 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-title svg.asset-tree-donut {
+    width: 72px !important;
+    height: 72px !important;
+    min-width: 72px !important;
+    max-width: 72px !important;
+    min-height: 72px !important;
+    max-height: 72px !important;
+    flex: 0 0 72px !important;
+}
+
+#asset-tree-app .asset-tree-report-facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px 12px;
+}
+
+#asset-tree-app .asset-tree-report-fact {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    margin: 0;
+    padding: 0 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 14px;
+    background: #fff;
+    color: #42526e;
+    font-size: 12px;
+    line-height: 1;
+}
+
+#asset-tree-app .asset-tree-report-fact strong {
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-report-fact i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+#asset-tree-app .asset-tree-report-table {
+    width: auto;
+    border-top: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-report-table th {
+    height: 36px;
+    background: #f7f8fa;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-report-table th,
+#asset-tree-app .asset-tree-report-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid #f4f5f7;
+    font-size: 13px;
+    vertical-align: middle;
+}
+
+#asset-tree-app .asset-tree-report-table th.is-num,
+#asset-tree-app .asset-tree-report-table td.is-num {
+    width: 96px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-name {
+    width: 220px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-name i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 8px;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+#asset-tree-app .asset-tree-report-meter {
+    width: 160px;
+}
+
+#asset-tree-app .asset-tree-report-track {
+    display: block;
+    width: 140px;
+    height: 8px;
+    border-radius: 4px;
+    background: #f4f5f7;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-track span {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+}
+
+#asset-tree-app .asset-tree-report-lines {
+    border-top: 8px solid #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-report-key {
+    width: 120px;
+    color: #6b778c;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-line strong {
+    display: block;
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-report-line span {
+    display: block;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+#asset-tree-app .asset-tree-report-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 12px;
+}
+
+#asset-tree-app .asset-tree-report-foot p {
+    margin: 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-foot .asset-tree-btn {
+    margin-left: auto;
+}
+
 #asset-tree-app .asset-tree-map-stage {
     min-height: 420px;
     padding: 16px;

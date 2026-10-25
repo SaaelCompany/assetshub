@@ -2570,6 +2570,8 @@ def report_view(project_key, report_key, text):
         color = "#0052CC"
         if report_key == "status" or group == "status":
             color = {"in_use": "#00875A", "active": "#00875A", "repair": "#FF8B00", "maintenance": "#FF8B00", "written_off": "#DE350B", "reserve": "#6554C0", "in_stock": "#6B778C"}.get(bucket, "#0052CC")
+        elif group == "type" or report_key == "cost":
+            color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
         slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0})
         slot["count"] += 1
         if len(lines) < 300:
