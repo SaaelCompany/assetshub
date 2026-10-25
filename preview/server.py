@@ -2730,6 +2730,7 @@ def report_view(project_key, report_key, text):
     status_names = {row["statusKey"]: row.get("label") or row["statusKey"] for row in ensure_statuses(project_key, text)}
     buckets = {}
     lines = []
+    line_keys = []
     total_book = 0
     capped = False
     today = datetime.date.today()
@@ -2814,6 +2815,7 @@ def report_view(project_key, report_key, text):
             slot["amount"] += book
         if len(lines) < 300:
             lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
+            line_keys.append(bucket)
         else:
             capped = True
     rows = list(buckets.values())
@@ -2829,6 +2831,14 @@ def report_view(project_key, report_key, text):
     elif group == "month" or report_key == "writeoff":
         rows.sort(key=lambda row: row["key"] if len(row["key"]) >= 7 and row["key"][4] == "-" else "9999-99")
     distinct_report_colors(rows)
+    rank = {row["key"]: index for index, row in enumerate(rows)}
+    paired = list(zip(lines, line_keys))
+    paired.sort(key=lambda item: (
+        rank.get(item[1], len(rows)),
+        (item[0].get("name") or "").lower(),
+        (item[0].get("objectKey") or "").lower(),
+    ))
+    lines = [item[0] for item in paired]
     return 200, {
         "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCounted", ""),
         "total": chosen,

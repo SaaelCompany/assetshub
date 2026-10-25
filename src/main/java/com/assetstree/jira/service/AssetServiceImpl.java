@@ -7164,6 +7164,7 @@ public class AssetServiceImpl implements AssetService {
         }
         Map<String, ReportBucketDto> buckets = new LinkedHashMap<String, ReportBucketDto>();
         List<ReportLineDto> lines = new ArrayList<ReportLineDto>();
+        List<String> lineKeys = new ArrayList<String>();
         long sum = 0L;
         boolean capped = false;
         LocalDate today = LocalDate.now();
@@ -7188,6 +7189,7 @@ public class AssetServiceImpl implements AssetService {
             }
             if (lines.size() < 300) {
                 lines.add(new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(), detail));
+                lineKeys.add(bucketKey);
             } else {
                 capped = true;
             }
@@ -7200,6 +7202,7 @@ public class AssetServiceImpl implements AssetService {
         }
         sortReportRows(key, group, rows);
         distinctReportColors(rows);
+        sortReportLines(rows, lines, lineKeys);
         ReportViewDto view = new ReportViewDto();
         view.setId(key);
         view.setTitle(title);
@@ -7398,6 +7401,52 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             return bucketKey.substring(0, 7);
         }
+    }
+
+    private void sortReportLines(List<ReportBucketDto> rows, List<ReportLineDto> lines, List<String> lineKeys) {
+        final Map<String, Integer> rank = new HashMap<String, Integer>();
+        for (int i = 0; i < rows.size(); i++) {
+            rank.put(rows.get(i).getKey(), Integer.valueOf(i));
+        }
+        final int fallback = rows.size();
+        final List<Integer> order = new ArrayList<Integer>();
+        for (int i = 0; i < lines.size(); i++) {
+            order.add(Integer.valueOf(i));
+        }
+        final List<ReportLineDto> source = lines;
+        final List<String> keys = lineKeys;
+        Collections.sort(order, new Comparator<Integer>() {
+            @Override
+            public int compare(Integer left, Integer right) {
+                int leftRank = lineRank(rank, keys.get(left.intValue()), fallback);
+                int rightRank = lineRank(rank, keys.get(right.intValue()), fallback);
+                if (leftRank != rightRank) {
+                    return leftRank < rightRank ? -1 : 1;
+                }
+                ReportLineDto first = source.get(left.intValue());
+                ReportLineDto second = source.get(right.intValue());
+                int byName = textOf(first.getName()).compareToIgnoreCase(textOf(second.getName()));
+                if (byName != 0) {
+                    return byName;
+                }
+                return textOf(first.getObjectKey()).compareToIgnoreCase(textOf(second.getObjectKey()));
+            }
+        });
+        List<ReportLineDto> sorted = new ArrayList<ReportLineDto>(source.size());
+        for (int i = 0; i < order.size(); i++) {
+            sorted.add(source.get(order.get(i).intValue()));
+        }
+        source.clear();
+        source.addAll(sorted);
+    }
+
+    private int lineRank(Map<String, Integer> rank, String key, int fallback) {
+        Integer value = key == null ? null : rank.get(key);
+        return value == null ? fallback : value.intValue();
+    }
+
+    private String textOf(String value) {
+        return value == null ? "" : value;
     }
 
     private void sortReportRows(String key, String group, List<ReportBucketDto> rows) {

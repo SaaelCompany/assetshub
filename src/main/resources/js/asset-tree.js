@@ -1993,7 +1993,9 @@
             loadMine();
             return;
         }
+        if (view === 'reports') forgetReports();
         if (state.view === view) {
+            if (view === 'reports') mount();
             return;
         }
         state.view = view;
@@ -14661,12 +14663,57 @@
 
     function csvCell(value) {
         var text = String(value == null ? '' : value);
-        if (/[",\n;]/.test(text)) return '"' + text.split('"').join('""') + '"';
+        if (/["\n;]/.test(text)) return '"' + text.split('"').join('""') + '"';
         return text;
     }
 
     function reportMoney(view) {
         return !!(view && view.sum);
+    }
+
+    function reportRussian() {
+        return String(state.locale || 'ru').toLowerCase().indexOf('en') !== 0;
+    }
+
+    function reportMoneyParts(minor) {
+        var value = Math.round(Number(minor) || 0);
+        var sign = value < 0 ? '-' : '';
+        value = Math.abs(value);
+        var rubles = Math.floor(value / 100);
+        var kopecks = value % 100;
+        var whole = String(rubles);
+        var groups = [];
+        while (whole.length > 3) {
+            groups.unshift(whole.slice(-3));
+            whole = whole.slice(0, -3);
+        }
+        groups.unshift(whole || '0');
+        return { sign: sign, groups: groups, fraction: (kopecks < 10 ? '0' : '') + kopecks };
+    }
+
+    function reportMoneyLabel(minor) {
+        var parts = reportMoneyParts(minor);
+        var body = parts.sign + parts.groups.join(reportRussian() ? '\u00a0' : ',');
+        body += (reportRussian() ? ',' : '.') + parts.fraction;
+        return body + '\u00a0' + currencyMark(moduleSetup().lifeCurrency || 'RUB');
+    }
+
+    function reportMoneyCsv(minor) {
+        var parts = reportMoneyParts(minor);
+        var body = parts.sign + parts.groups.join('');
+        return body + (reportRussian() ? ',' : '.') + parts.fraction;
+    }
+
+    function reportMoneyMinor(text) {
+        var raw = String(text == null ? '' : text).replace(/[\s\u00a0]/g, '').replace(',', '.');
+        raw = raw.replace(/[^\d.-]/g, '');
+        if (!/^-?\d+(\.\d+)?$/.test(raw)) return null;
+        var sign = raw.charAt(0) === '-' ? -1 : 1;
+        if (raw.charAt(0) === '-') raw = raw.slice(1);
+        var bits = raw.split('.');
+        var minor = Math.round(Number(bits[0]) * 100);
+        minor += Number(((bits[1] || '') + '00').slice(0, 2));
+        return sign * minor;
     }
 
     function reportFileName(view) {
@@ -14688,12 +14735,12 @@
         (view.rows || []).forEach(function (row) {
             var value = money ? (Number(row.amount) || 0) : (row.count || 0);
             var cells = [csvCell(row.label), csvCell(row.count)];
-            if (money) cells.push(csvCell(row.amountText || '0'));
+            if (money) cells.push(csvCell(reportMoneyCsv(Number(row.amount) || 0)));
             cells.push(csvCell(shareText(value, shareTotal)));
             rows.push(cells.join(';'));
         });
         var totalCells = [csvCell(t('reportTotalRow')), csvCell(view.total || 0)];
-        if (money) totalCells.push(csvCell(view.sum));
+        if (money) totalCells.push(csvCell(reportMoneyCsv(shareTotal)));
         totalCells.push(csvCell(shareText(shareTotal, shareTotal)));
         rows.push(totalCells.join(';'));
         if (view.lines && view.lines.length) {
@@ -14701,7 +14748,12 @@
             var detailHead = money ? t('lifeBook') : groupWord(view.groupBy);
             rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
             view.lines.forEach(function (row) {
-                rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(row.detail)].join(';'));
+                var detail = row.detail;
+                if (money) {
+                    var minor = reportMoneyMinor(detail);
+                    if (minor != null) detail = reportMoneyCsv(minor);
+                }
+                rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(detail)].join(';'));
             });
         }
         var blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -14764,7 +14816,7 @@
             name.title = row.label || '';
             item.appendChild(name);
             var value = money ? (Number(row.amount) || 0) : (row.count || 0);
-            var shown = money ? (row.amountText || '0') : String(row.count);
+            var shown = money ? reportMoneyLabel(value) : String(row.count);
             item.appendChild(el('strong', null, shown + ' · ' + shareText(value, total)));
             list.appendChild(item);
         });
@@ -14825,7 +14877,7 @@
                 label: row.label,
                 color: row.color,
                 count: Number(row.amount) || 0,
-                text: row.amountText || '0'
+                text: reportMoneyLabel(Number(row.amount) || 0)
             });
         });
         return next;
@@ -14849,7 +14901,7 @@
         if (!drawn.length) return null;
         var round = el('div', 'asset-tree-report-chart is-round');
         var ring = el('div', 'asset-tree-report-ring');
-        var center = money ? (sumText || '') : String(total);
+        var center = money ? reportMoneyLabel(maxShare(rows)) : String(total);
         if (kind === 'pie') {
             ring.appendChild(reportPieChart(drawn));
         } else {
@@ -14928,8 +14980,15 @@
         return true;
     }
 
+    function forgetReports() {
+        state.reportCatalog = null;
+        state.reportView = null;
+        state.galleryLoading = false;
+        state.galleryToken++;
+    }
+
     function openGallery(id) {
-        if (!id || (id === state.reportKey && state.reportView)) return;
+        if (!id) return;
         state.reportKey = id;
         highlightReport(id);
         if (state.reportCatalog == null) return;
@@ -15006,7 +15065,7 @@
         main.appendChild(titleRow);
         var facts = el('div', 'asset-tree-report-facts');
         facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
-        if (view.sum) facts.appendChild(reportFact('', view.sum, t('lifeBook')));
+        if (view.sum) facts.appendChild(reportFact('', reportMoneyLabel(shareTotal), t('lifeBook')));
         main.appendChild(facts);
         if (!rows.length) {
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
@@ -15035,7 +15094,7 @@
                 meter.appendChild(reportMeter(meterValue, maxValue, row.color));
                 line.appendChild(meter);
                 line.appendChild(el('td', 'is-num', String(row.count)));
-                if (money) line.appendChild(el('td', 'is-num is-money', row.amountText || '0'));
+                if (money) line.appendChild(el('td', 'is-num is-money', reportMoneyLabel(Number(row.amount) || 0)));
                 line.appendChild(el('td', 'is-num', shareText(meterValue, shareTotal)));
                 table.appendChild(line);
             });
@@ -15043,7 +15102,7 @@
             total.appendChild(el('td', null, t('reportTotalRow')));
             total.appendChild(el('td', 'asset-tree-report-meter', ''));
             total.appendChild(el('td', 'is-num', String(view.total || 0)));
-            if (money) total.appendChild(el('td', 'is-num is-money', view.sum || ''));
+            if (money) total.appendChild(el('td', 'is-num is-money', reportMoneyLabel(shareTotal)));
             total.appendChild(el('td', 'is-num', shareText(shareTotal, shareTotal)));
             table.appendChild(total);
             main.appendChild(table);
@@ -15059,7 +15118,12 @@
                 line.appendChild(el('td', 'asset-tree-report-key', row.objectKey || ''));
                 var who = el('td', 'asset-tree-report-line');
                 who.appendChild(el('strong', null, row.name || ''));
-                if (row.detail) who.appendChild(el('span', null, row.detail));
+                var detail = row.detail || '';
+                if (money && detail) {
+                    var minor = reportMoneyMinor(detail);
+                    if (minor != null) detail = reportMoneyLabel(minor);
+                }
+                if (detail) who.appendChild(el('span', null, detail));
                 line.appendChild(who);
                 lines.appendChild(line);
             });
@@ -15071,6 +15135,7 @@
         foot.appendChild(el('p', null, note));
         if (!view.standard && state.canEdit) {
             foot.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
+                if (!window.confirm(t('reportDeleteConfirm', view.title || ''))) return;
                 ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), null, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         state.reportKey = 'status';

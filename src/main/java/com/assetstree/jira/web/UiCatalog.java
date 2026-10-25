@@ -973,6 +973,7 @@ public final class UiCatalog {
             "reportFilter",
             "reportFilterNone",
             "reportDelete",
+            "reportDeleteConfirm",
             "reportStandard",
             "reportSavedTitle",
             "reportService",
