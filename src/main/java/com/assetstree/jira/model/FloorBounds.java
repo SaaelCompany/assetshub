@@ -91,6 +91,18 @@ public final class FloorBounds {
         return value;
     }
 
+    /** Closed-room corners as "x,y;x,y". Empty for a plain rectangle. */
+    public static String points(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        String cleaned = raw.replaceAll("[^0-9,;\\-]", "");
+        if (cleaned.length() > 4000) {
+            cleaned = cleaned.substring(0, 4000);
+        }
+        return cleaned;
+    }
+
     public static String color(String raw) {
         if (raw == null) {
             return "";

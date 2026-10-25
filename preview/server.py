@@ -2149,6 +2149,12 @@ def create_schedule(project_key, body, text):
     return 201, created
 
 
+def room_points(value):
+    text = "" if value is None else str(value)
+    cleaned = "".join(ch for ch in text if ch.isdigit() or ch in ",;-")
+    return cleaned[:4000]
+
+
 def room_angle(value):
     try:
         number = int(value)
@@ -2167,6 +2173,7 @@ def floor_dto(row):
             "id": room["id"], "name": room.get("name") or "", "kind": room.get("kind") or "room",
             "color": room_color(room.get("color")), "x": room["x"], "y": room["y"], "w": room["w"], "h": room["h"],
             "angle": room_angle(room.get("angle")),
+            "points": room_points(room.get("points")),
         })
     pins = []
     for pin in row.get("pins") or []:
@@ -2264,6 +2271,7 @@ def save_floor(project_key, floor_id, body, text):
         stored_rooms.append({
             "id": seq, "name": label[:80], "kind": kind, "color": room_color(room.get("color")),
             "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
+            "points": room_points(room.get("points")),
         })
         seq += 1
     stored_pins = []

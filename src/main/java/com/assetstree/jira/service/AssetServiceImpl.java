@@ -6549,6 +6549,7 @@ public class AssetServiceImpl implements AssetService {
                         stored.setPosW(w);
                         stored.setPosH(h);
                         stored.setAngle(FloorBounds.angle(room.getAngle()));
+                        stored.setPoints(FloorBounds.points(room.getPoints()));
                         stored.save();
                     }
                 }
@@ -6682,6 +6683,7 @@ public class AssetServiceImpl implements AssetService {
                 item.setKind(FloorBounds.kind(room.getKind()));
                 item.setColor(FloorBounds.color(room.getColor()));
                 item.setAngle(FloorBounds.angle(room.getAngle()));
+                item.setPoints(FloorBounds.points(room.getPoints()));
                 roomDtos.add(item);
             }
         }

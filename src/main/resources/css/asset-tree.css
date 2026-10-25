@@ -7110,14 +7110,19 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-room.is-selected {
     stroke: #0052cc;
-    stroke-width: 3;
+    stroke-width: 2;
+}
+
+#asset-tree-app .asset-tree-room.is-wall.is-selected,
+#asset-tree-app .asset-tree-room.is-partition.is-selected,
+#asset-tree-app .asset-tree-room.is-door.is-selected,
+#asset-tree-app .asset-tree-room.is-window.is-selected {
+    stroke-width: 1;
 }
 
 #asset-tree-app #asset-tree-room-preview {
-    fill: rgba(0, 82, 204, 0.12);
-    stroke: #0052cc;
-    stroke-width: 2;
-    stroke-dasharray: 6 4;
+    stroke-width: 1;
+    pointer-events: none;
 }
 
 #asset-tree-app .asset-tree-room-label,
@@ -8843,9 +8848,9 @@ a.asset-tree-url {
     height: calc(100vh - 230px);
     min-height: 480px;
     overflow: hidden;
-    background: #eef0f3;
+    background: #fff;
     border: 1px solid #dfe1e6;
-    border-radius: 10px;
+    border-radius: 3px;
     user-select: none;
 }
 
@@ -8856,7 +8861,7 @@ a.asset-tree-url {
     flex: 0 0 auto;
     padding: 8px 12px;
     background: #fff;
-    border-bottom: 1px solid #e6e8ec;
+    border-bottom: 1px solid #dfe1e6;
 }
 
 #asset-tree-app .asset-tree-plan-row {
@@ -8877,9 +8882,8 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-plan-title strong {
     max-width: 220px;
     overflow: hidden;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: 20px;
+    font-weight: 500;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -8887,8 +8891,8 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-plan-title .asset-tree-month-btn {
     width: 28px;
     height: 28px;
-    border-radius: 8px;
-    font-size: 18px;
+    border-radius: 3px;
+    font-size: 16px;
 }
 
 #asset-tree-app .asset-tree-plan-floors {
@@ -8910,19 +8914,19 @@ a.asset-tree-url {
     margin: 0;
     padding: 0 10px !important;
     border: 1px solid transparent !important;
-    border-radius: 8px;
-    background: transparent !important;
-    color: #42526e !important;
-    font-size: 13px;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #172b4d !important;
+    font-size: 14px;
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
 }
 
 #asset-tree-app button.asset-tree-floor-chip.is-on {
-    border-color: #dfe1e6 !important;
-    background: #f4f5f7 !important;
-    color: #172b4d !important;
+    border-color: #4c9aff !important;
+    background: #deebff !important;
+    color: #0052cc !important;
 }
 
 #asset-tree-app .asset-tree-plan-top .asset-tree-editor-bar {
@@ -8946,23 +8950,21 @@ a.asset-tree-url {
     overflow: auto;
     padding: 10px;
     background: #fff;
-    border-right: 1px solid #e6e8ec;
+    border-right: 1px solid #dfe1e6;
 }
 
 #asset-tree-app .asset-tree-catalog h3 {
     margin: 14px 0 8px;
-    color: #6b778c;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-catalog-hint {
     margin: 8px 0 0;
     color: #6b778c;
-    font-size: 12px;
-    line-height: 1.35;
+    font-size: 14px;
+    line-height: 1.4;
 }
 
 #asset-tree-app .asset-tree-tool-grid,
@@ -8983,11 +8985,11 @@ a.asset-tree-url {
     min-height: 58px;
     margin: 0;
     padding: 6px 4px !important;
-    border: 1px solid transparent !important;
-    border-radius: 8px;
-    background: #f7f8fa !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
     color: #172b4d !important;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 500;
     line-height: 1.2;
     text-align: center;
@@ -9005,7 +9007,7 @@ a.asset-tree-url {
     position: relative;
     min-height: 92px;
     background: #fff !important;
-    border-color: #e6e8ec !important;
+    border-color: #dfe1e6 !important;
 }
 
 #asset-tree-app .asset-tree-tool-icon,
@@ -9050,8 +9052,8 @@ a.asset-tree-url {
     min-height: 32px;
     margin: 0 0 6px;
     padding: 4px 8px;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
 }
 
 #asset-tree-app .asset-tree-catalog .asset-tree-map-gear-list {
@@ -9064,7 +9066,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-catalog button.asset-tree-gear-row {
     width: 100% !important;
     min-width: 0;
-    border-radius: 8px;
+    border-radius: 3px;
 }
 
 #asset-tree-app .asset-tree-floorplan-stage {
@@ -9087,7 +9089,7 @@ a.asset-tree-url {
     height: 100%;
     border: 0;
     border-radius: 0;
-    background: #e7ebf0;
+    background: #f4f5f7;
 }
 
 #asset-tree-app .asset-tree-canvas.is-pan {
@@ -9110,11 +9112,10 @@ a.asset-tree-url {
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 4px;
+    padding: 2px;
     background: #fff;
-    border: 1px solid #e6e8ec;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(9, 30, 66, 0.12);
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
 }
 
 #asset-tree-app button.asset-tree-zoom-btn {
@@ -9128,10 +9129,10 @@ a.asset-tree-url {
     margin: 0;
     padding: 0 !important;
     border: 0 !important;
-    border-radius: 8px;
+    border-radius: 3px;
     background: transparent !important;
     color: #172b4d !important;
-    font-size: 18px;
+    font-size: 16px;
     line-height: 1;
     cursor: pointer;
 }
@@ -9150,19 +9151,19 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-plan-inspector {
     position: absolute;
-    top: 12px;
-    right: 12px;
-    left: 12px;
+    top: 0;
+    right: 0;
+    left: 0;
     z-index: 2;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
-    background: rgba(255, 255, 255, 0.96);
-    border: 1px solid #e6e8ec;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(9, 30, 66, 0.12);
+    padding: 8px 12px;
+    background: #fff;
+    border: 0;
+    border-bottom: 1px solid #dfe1e6;
+    border-radius: 0;
 }
 
 #asset-tree-app .asset-tree-plan-inspector strong {
@@ -9175,8 +9176,8 @@ a.asset-tree-url {
     box-sizing: border-box;
     min-height: 32px;
     padding: 4px 8px;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
     background: #fff;
     color: #172b4d;
 }
@@ -9224,8 +9225,8 @@ a.asset-tree-url {
     padding: 4px;
     background: #fff;
     border: 1px solid #dfe1e6;
-    border-radius: 8px;
-    box-shadow: 0 8px 20px rgba(9, 30, 66, 0.18);
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
     pointer-events: none;
     opacity: 0.92;
 }

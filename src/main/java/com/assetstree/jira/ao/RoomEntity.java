@@ -49,4 +49,10 @@ public interface RoomEntity extends Entity {
     String getColor();
 
     void setColor(String color);
+
+    /** Closed wall corners, "x,y;x,y". Empty when the room is a rectangle. */
+    @StringLength(StringLength.UNLIMITED)
+    String getPoints();
+
+    void setPoints(String points);
 }
