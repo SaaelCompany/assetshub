@@ -12980,29 +12980,38 @@
         var target = null;
         var placeAfter = false;
         function clearMarks() {
-            var rows = document.querySelectorAll('.asset-tree-roster-person');
+            var rows = document.querySelectorAll('.asset-tree-roster-person, tr.asset-tree-roster-head, tr.asset-tree-roster-branch-row');
             var index;
             for (index = 0; index < rows.length; index++) rows[index].classList.remove('is-drop-before', 'is-drop-after');
         }
-        function move(ev) {
-            if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
-            dragging = true;
-            origin.classList.add('is-dragging');
-            var node = document.elementFromPoint(ev.clientX, ev.clientY);
-            var row = null;
+        function rowAt(node) {
             while (node && node !== document.body) {
-                if (node.classList && node.classList.contains('asset-tree-roster-person')) {
-                    row = node;
-                    break;
-                }
+                if (node.tagName === 'TR' && node.classList && (
+                    node.classList.contains('asset-tree-roster-person') ||
+                    node.classList.contains('asset-tree-roster-head') ||
+                    node.classList.contains('asset-tree-roster-branch-row')
+                ) && node.getAttribute('data-place') != null) return node;
                 node = node.parentNode;
             }
+            return null;
+        }
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
+            if (!dragging) closeStaffBranchAdd();
+            dragging = true;
+            origin.classList.add('is-dragging');
+            var row = rowAt(document.elementFromPoint(ev.clientX, ev.clientY));
             clearMarks();
             target = row && row !== origin ? row : null;
             if (!target) return;
-            var box = target.getBoundingClientRect();
-            placeAfter = ev.clientY > box.top + box.height / 2;
-            target.classList.add(placeAfter ? 'is-drop-after' : 'is-drop-before');
+            if (target.classList.contains('asset-tree-roster-person')) {
+                var box = target.getBoundingClientRect();
+                placeAfter = ev.clientY > box.top + box.height / 2;
+                target.classList.add(placeAfter ? 'is-drop-after' : 'is-drop-before');
+            } else {
+                placeAfter = false;
+                target.classList.add('is-drop-after');
+            }
         }
         function up() {
             document.removeEventListener('mousemove', move);
@@ -13010,6 +13019,9 @@
             clearMarks();
             origin.classList.remove('is-dragging');
             if (!dragging || !target) return;
+            var destPlace = target.getAttribute('data-place');
+            var originPlace = origin.getAttribute('data-place') || '0';
+            if (destPlace == null) return;
             var keys = [];
             var rows = document.querySelectorAll('.asset-tree-roster-person');
             var index;
@@ -13017,10 +13029,26 @@
                 var key = rows[index].getAttribute('data-staff-user');
                 if (key && key !== userKey) keys.push(key);
             }
-            var dest = target.getAttribute('data-staff-user');
-            var at = keys.indexOf(dest);
-            if (at < 0) return;
-            keys.splice(placeAfter ? at + 1 : at, 0, userKey);
+            if (target.classList.contains('asset-tree-roster-person')) {
+                var dest = target.getAttribute('data-staff-user');
+                var at = keys.indexOf(dest);
+                if (at < 0) return;
+                keys.splice(placeAfter ? at + 1 : at, 0, userKey);
+            } else {
+                var spot = keys.length;
+                for (index = 0; index < rows.length; index++) {
+                    if (rows[index] === origin) continue;
+                    if (rows[index].getAttribute('data-place') !== destPlace) continue;
+                    var found = keys.indexOf(rows[index].getAttribute('data-staff-user'));
+                    if (found >= 0) spot = found;
+                    break;
+                }
+                keys.splice(spot, 0, userKey);
+            }
+            if (String(destPlace) !== String(originPlace)) {
+                var hoursRow = staffHoursRow(userKey);
+                if (hoursRow) saveStaffHours(userKey, hoursRow.weekdays, hoursRow.hours, undefined, hoursRow.startOn, parseInt(destPlace, 10) || 0);
+            }
             saveStaffOrder(keys);
         }
         document.addEventListener('mousemove', move);
@@ -13293,7 +13321,9 @@
                 body.appendChild(banner);
             }
             section.people.forEach(function (person) {
-                body.appendChild(staffRosterRow(person, year, month, count, today));
+                var line = staffRosterRow(person, year, month, count, today);
+                line.setAttribute('data-place', String(section.placeId || 0));
+                body.appendChild(line);
             });
         });
         table.appendChild(body);
