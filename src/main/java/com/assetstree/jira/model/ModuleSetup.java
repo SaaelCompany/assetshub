@@ -40,6 +40,7 @@ public final class ModuleSetup {
         setup.setLifeMonths(Integer.valueOf(months(values.get("months"))));
         setup.setStaffMarks(staffMarks(values.get("marks")));
         setup.setStaffOrder(staffOrder(values.get("order")));
+        setup.setStaffPlaceOrder(staffPlaces(values.get("places")));
         setup.setScheduleBoards(boards(values.get("boards")));
         setup.setScheduleOpen(openBoard(values.get("open"), values.get("layer")));
         return setup;
@@ -65,6 +66,7 @@ public final class ModuleSetup {
         append(stored, "months", String.valueOf(months(value.getLifeMonths() == null ? "" : String.valueOf(value.getLifeMonths()))));
         append(stored, "marks", staffMarks(value.getStaffMarks()));
         append(stored, "order", staffOrder(value.getStaffOrder()));
+        append(stored, "places", staffPlaces(value.getStaffPlaceOrder()));
         append(stored, "boards", boards(value.getScheduleBoards()));
         append(stored, "open", openBoard(value.getScheduleOpen(), value.getScheduleLayer()));
         return stored.toString();
@@ -243,6 +245,43 @@ public final class ModuleSetup {
         }
         StringBuilder stored = new StringBuilder();
         for (String key : keys) {
+            if (stored.length() > 0) {
+                stored.append(',');
+            }
+            stored.append(key);
+        }
+        return stored.toString();
+    }
+
+    private static String staffPlaces(String raw) {
+        List<String> ids = new ArrayList<String>();
+        if (raw != null) {
+            String[] parts = raw.split(",");
+            for (String part : parts) {
+                String key = part == null ? "" : part.trim();
+                if (!key.matches("\\d{1,9}")) {
+                    continue;
+                }
+                try {
+                    long value = Long.parseLong(key);
+                    if (value < 0) {
+                        continue;
+                    }
+                    key = String.valueOf(value);
+                } catch (NumberFormatException ex) {
+                    continue;
+                }
+                if (ids.contains(key)) {
+                    continue;
+                }
+                ids.add(key);
+                if (ids.size() >= 80) {
+                    break;
+                }
+            }
+        }
+        StringBuilder stored = new StringBuilder();
+        for (String key : ids) {
             if (stored.length() > 0) {
                 stored.append(',');
             }

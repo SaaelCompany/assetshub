@@ -12252,6 +12252,76 @@
         });
     }
 
+    function staffPlaceOrderKeys() {
+        var keys = [];
+        var seen = {};
+        String(moduleSetup().staffPlaceOrder || '').split(',').forEach(function (part) {
+            var key = part.trim();
+            if (!/^\d{1,9}$/.test(key)) return;
+            key = String(parseInt(key, 10));
+            if (seen[key]) return;
+            seen[key] = true;
+            keys.push(key);
+        });
+        return keys;
+    }
+
+    function saveStaffPlaceOrder(visibleIds) {
+        var next = moduleSetup();
+        var clean = [];
+        var seen = {};
+        function push(key) {
+            key = String(key == null ? '' : key).trim();
+            if (!/^\d{1,9}$/.test(key) || clean.length >= 80) return;
+            key = String(parseInt(key, 10));
+            if (seen[key]) return;
+            seen[key] = true;
+            clean.push(key);
+        }
+        var visible = [];
+        var visibleSet = {};
+        (visibleIds || []).forEach(function (key) {
+            key = String(key == null ? '' : key).trim();
+            if (!/^\d{1,9}$/.test(key)) return;
+            key = String(parseInt(key, 10));
+            if (visibleSet[key]) return;
+            visibleSet[key] = true;
+            visible.push(key);
+        });
+        var previous = staffPlaceOrderKeys();
+        var placed = false;
+        previous.forEach(function (id) {
+            if (visibleSet[id]) {
+                if (!placed) {
+                    visible.forEach(push);
+                    placed = true;
+                }
+                return;
+            }
+            push(id);
+        });
+        if (!placed) visible.forEach(push);
+        next.staffPlaceOrder = clean.join(',');
+        var project = currentProject();
+        var previousOrder = project && project.setup ? project.setup.staffPlaceOrder : '';
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.staffPlaceOrder = next.staffPlaceOrder;
+        }
+        if (state.view === 'schedules') renderFrame();
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                if (project && project.setup) project.setup.staffPlaceOrder = previousOrder;
+                notify((payload && payload.message) || t('errorTitle'));
+                if (state.view === 'schedules') renderFrame();
+                return;
+            }
+            var incoming = payload && payload.setup ? payload.setup.staffPlaceOrder || '' : '';
+            if (project && payload && payload.setup) project.setup = payload.setup;
+            if (incoming !== next.staffPlaceOrder && state.view === 'schedules') renderFrame();
+        });
+    }
+
     function saveStaffHours(userKey, weekdays, hours, marks, startOn, placeId) {
         var shift = (parseInt(hours, 10) || 0) >= 12;
         var anchor = shift ? (startOn || '2024-01-01') : '';
@@ -12643,7 +12713,12 @@
             }
             buckets[String(placeId)].people.push(person);
         });
+        var placeRank = {};
+        staffPlaceOrderKeys().forEach(function (id, index) { placeRank[id] = index; });
         order.sort(function (left, right) {
+            var leftRank = Object.prototype.hasOwnProperty.call(placeRank, left) ? placeRank[left] : 10000;
+            var rightRank = Object.prototype.hasOwnProperty.call(placeRank, right) ? placeRank[right] : 10000;
+            if (leftRank !== rightRank) return leftRank - rightRank;
             if (left === '0') return 1;
             if (right === '0') return -1;
             return buckets[left].name.localeCompare(buckets[right].name, state.locale || 'ru');
@@ -12800,7 +12875,23 @@
 
     function staffPlaceHead(placeId, label) {
         var box = el('div', 'asset-tree-roster-branch');
-        box.appendChild(el('strong', null, label));
+        var movable = !!(state.canEdit && label);
+        if (movable) {
+            var grip = button('', 'asset-tree-roster-grip', function () {});
+            grip.title = t('staffDrag');
+            grip.setAttribute('aria-label', t('staffDrag'));
+            grip.appendChild(el('i'));
+            grip.addEventListener('mousedown', function (event) { beginBranchReorder(placeId, event); });
+            box.appendChild(grip);
+        }
+        var title = el('strong', movable ? 'is-drag' : null, label);
+        if (movable) {
+            title.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                beginBranchReorder(placeId, event);
+            });
+        }
+        box.appendChild(title);
         if (state.canEdit) {
             var plus = button('+', 'asset-tree-roster-branch-add', function (event) {
                 event.stopPropagation();
@@ -12808,6 +12899,7 @@
             });
             plus.title = t('staffPlaceAdd');
             plus.setAttribute('aria-label', t('staffPlaceAdd'));
+            plus.addEventListener('mousedown', function (event) { event.stopPropagation(); });
             box.appendChild(plus);
         }
         return box;
@@ -12930,6 +13022,85 @@
             if (at < 0) return;
             keys.splice(placeAfter ? at + 1 : at, 0, userKey);
             saveStaffOrder(keys);
+        }
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    }
+
+    function beginBranchReorder(placeId, event) {
+        if (!state.canEdit || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        var origin = event.currentTarget;
+        while (origin && origin.tagName !== 'TR') origin = origin.parentNode;
+        if (!origin || origin.getAttribute('data-place') == null) return;
+        var dragged = String(placeId || 0);
+        var startY = event.clientY;
+        var dragging = false;
+        var target = null;
+        var placeAfter = false;
+        function branchRows() {
+            return document.querySelectorAll('tr.asset-tree-roster-head[data-place], tr.asset-tree-roster-branch-row[data-place]');
+        }
+        function clearMarks() {
+            var rows = branchRows();
+            var index;
+            for (index = 0; index < rows.length; index++) rows[index].classList.remove('is-drop-before', 'is-drop-after');
+        }
+        function headerFor(node) {
+            var row = null;
+            while (node && node !== document.body) {
+                if (node.tagName === 'TR') {
+                    row = node;
+                    break;
+                }
+                node = node.parentNode;
+            }
+            if (!row) return null;
+            if (row.getAttribute('data-place') != null && (row.classList.contains('asset-tree-roster-head') || row.classList.contains('asset-tree-roster-branch-row'))) {
+                return row;
+            }
+            if (!row.classList.contains('asset-tree-roster-person')) return null;
+            var cursor = row.previousElementSibling;
+            while (cursor) {
+                if (cursor.getAttribute && cursor.getAttribute('data-place') != null && cursor.classList && (cursor.classList.contains('asset-tree-roster-branch-row') || cursor.classList.contains('asset-tree-roster-head'))) {
+                    return cursor;
+                }
+                cursor = cursor.previousElementSibling;
+            }
+            return document.querySelector('tr.asset-tree-roster-head[data-place]');
+        }
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
+            if (!dragging) closeStaffBranchAdd();
+            dragging = true;
+            origin.classList.add('is-dragging');
+            var row = headerFor(document.elementFromPoint(ev.clientX, ev.clientY));
+            clearMarks();
+            target = row && row !== origin ? row : null;
+            if (!target) return;
+            var box = target.getBoundingClientRect();
+            placeAfter = ev.clientY > box.top + box.height / 2;
+            target.classList.add(placeAfter ? 'is-drop-after' : 'is-drop-before');
+        }
+        function up() {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            clearMarks();
+            origin.classList.remove('is-dragging');
+            if (!dragging || !target) return;
+            var ids = [];
+            var rows = branchRows();
+            var index;
+            for (index = 0; index < rows.length; index++) {
+                var id = rows[index].getAttribute('data-place');
+                if (id != null && id !== dragged) ids.push(id);
+            }
+            var dest = target.getAttribute('data-place');
+            var at = ids.indexOf(dest);
+            if (at < 0) return;
+            ids.splice(placeAfter ? at + 1 : at, 0, dragged);
+            saveStaffPlaceOrder(ids);
         }
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', up);
@@ -13086,7 +13257,10 @@
     function staffSectionHead(section, year, month, count, today) {
         var row = el('tr', 'asset-tree-roster-head');
         var name = el('th', 'asset-tree-roster-name');
-        if (section.name) name.appendChild(staffPlaceHead(section.placeId, section.name));
+        if (section.name) {
+            row.setAttribute('data-place', String(section.placeId || 0));
+            name.appendChild(staffPlaceHead(section.placeId, section.name));
+        }
         row.appendChild(name);
         staffDateHead(row, year, month, count, today);
         return row;
@@ -13108,6 +13282,7 @@
         sections.forEach(function (section, index) {
             if (index > 0 && section.name) {
                 var banner = el('tr', 'asset-tree-roster-branch-row');
+                banner.setAttribute('data-place', String(section.placeId || 0));
                 var cell = el('th', 'asset-tree-roster-name');
                 cell.appendChild(staffPlaceHead(section.placeId, section.name));
                 banner.appendChild(cell);
@@ -14113,6 +14288,7 @@
             lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
             staffMarks: setup.staffMarks || '',
             staffOrder: setup.staffOrder || '',
+            staffPlaceOrder: setup.staffPlaceOrder || '',
             scheduleBoards: (function () {
                 var parts = String(setup.scheduleBoards || '').toLowerCase().split(',');
                 var calendar = parts.indexOf('calendar') >= 0;

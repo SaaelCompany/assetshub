@@ -1,4 +1,4 @@
-# Niout AssetHub for JSM версия 1.3.40
+# Niout AssetHub for JSM версия 1.3.41
 
 Дерево активов для Jira Service Management **4.21.1** (платформа Jira **8.21.1**, байткод **Java 8**). Экран встроен в страницу Jira. Готовых макетов нет: в списке только ваши проекты, типы объектов и активы вы создаёте сами. Чужой проект в дереве не появляется.
 
@@ -34,7 +34,7 @@ export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 mvn -B package
 ```
 
-Готовый файл: `target/asset-tree-1.3.40.jar`.
+Готовый файл: `target/asset-tree-1.3.41.jar`.
 
 ```bash
 mvn -B test

@@ -7402,17 +7402,27 @@ a.asset-tree-url {
     background-position: 0 0;
 }
 
-#asset-tree-app tr.asset-tree-roster-person.is-dragging {
+#asset-tree-app tr.asset-tree-roster-person.is-dragging,
+#asset-tree-app tr.asset-tree-roster-head.is-dragging,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-dragging {
     opacity: 0.45;
 }
 
 #asset-tree-app tr.asset-tree-roster-person.is-drop-before th,
-#asset-tree-app tr.asset-tree-roster-person.is-drop-before td {
+#asset-tree-app tr.asset-tree-roster-person.is-drop-before td,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-before th,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-before td,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before th,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before td {
     box-shadow: inset 0 2px 0 #172b4d;
 }
 
 #asset-tree-app tr.asset-tree-roster-person.is-drop-after th,
-#asset-tree-app tr.asset-tree-roster-person.is-drop-after td {
+#asset-tree-app tr.asset-tree-roster-person.is-drop-after td,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-after th,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-after td,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after th,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after td {
     box-shadow: inset 0 -2px 0 #172b4d;
 }
 
@@ -7523,6 +7533,10 @@ a.asset-tree-url {
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-roster-branch strong.is-drag {
+    cursor: grab;
 }
 
 #asset-tree-app button.asset-tree-roster-branch-add {

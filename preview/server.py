@@ -1139,6 +1139,7 @@ def module_setup(stored, migrate=True):
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
         "staffMarks": pack_staff_marks(stored.get("staffMarks")),
         "staffOrder": pack_staff_order(stored.get("staffOrder")),
+        "staffPlaceOrder": pack_staff_places(stored.get("staffPlaceOrder")),
         "scheduleBoards": pack_boards(stored.get("scheduleBoards")),
         "scheduleOpen": pack_open(stored.get("scheduleOpen"), layer),
         "scheduleKindVersion": 2,
@@ -1196,6 +1197,20 @@ def pack_staff_order(raw):
         if len(keys) >= 60:
             break
     return ",".join(keys)
+
+
+def pack_staff_places(raw):
+    ids = []
+    for part in str(raw or "").split(","):
+        key = part.strip()
+        if not re.fullmatch(r"\d{1,9}", key):
+            continue
+        key = str(int(key))
+        if key not in ids:
+            ids.append(key)
+        if len(ids) >= 80:
+            break
+    return ",".join(ids)
 
 
 def pack_staff_marks(raw):
