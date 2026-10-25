@@ -1239,14 +1239,22 @@ def clean_day_marks(raw):
     for part in text.split(","):
         if ":" not in part or len(marks) >= 400:
             continue
-        day, ident = part.split(":", 1)
+        day, token = part.split(":", 1)
         day = day.strip()
-        ident = ident.strip().lower()
+        token = token.strip().lower()
+        ident = token
+        custom = None
+        if "@" in token:
+            ident, hours_text = token.split("@", 1)
+            if re.fullmatch(r"\d{1,2}", hours_text.strip()):
+                value = int(hours_text)
+                if 0 <= value <= 24:
+                    custom = value
         if parse_staff_day(day) is None:
             continue
         if ident != "off" and not re.fullmatch(r"[a-z][a-z0-9]{0,15}", ident):
             continue
-        marks[day] = ident
+        marks[day] = ident if ident == "off" or custom is None else "%s@%s" % (ident, custom)
     return ",".join(f"{day}:{marks[day]}" for day in sorted(marks))
 
 

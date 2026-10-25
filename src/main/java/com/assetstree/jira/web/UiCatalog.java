@@ -1047,6 +1047,8 @@ public final class UiCatalog {
             "staffShiftHint",
             "staffDrag",
             "staffFactorHint",
+            "staffOnce",
+            "staffOnceHint",
             "staffPlace",
             "staffAllPlaces",
             "staffNoPlace",

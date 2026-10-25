@@ -12375,21 +12375,48 @@
     }
 
     function parseDayMarks(raw) {
-        var map = {};
+        var map = { _hours: {} };
         String(raw || '').split(',').forEach(function (part) {
             var colon = part.indexOf(':');
             if (colon <= 0) return;
             var day = part.slice(0, colon).trim();
-            var id = part.slice(colon + 1).trim().toLowerCase();
+            var token = part.slice(colon + 1).trim().toLowerCase();
             if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+            var at = token.indexOf('@');
+            var id = at < 0 ? token : token.slice(0, at);
+            var custom = null;
+            if (at >= 0) {
+                var value = parseInt(token.slice(at + 1), 10);
+                if (!isNaN(value) && value >= 0 && value <= 24) custom = value;
+            }
             if (id !== 'off' && !/^[a-z][a-z0-9]{0,15}$/.test(id)) return;
             map[day] = id;
+            if (custom != null && id !== 'off') map._hours[day] = custom;
         });
         return map;
     }
 
     function packDayMarks(map) {
-        return Object.keys(map).sort().map(function (day) { return day + ':' + map[day]; }).join(',');
+        var hours = map && map._hours ? map._hours : {};
+        return Object.keys(map || {}).filter(function (day) {
+            return /^\d{4}-\d{2}-\d{2}$/.test(day);
+        }).sort().map(function (day) {
+            var token = map[day];
+            if (hours[day] != null && token && token !== 'off') token += '@' + hours[day];
+            return day + ':' + token;
+        }).join(',');
+    }
+
+    function markCustom(marks, iso) {
+        if (!marks || !marks._hours || !Object.prototype.hasOwnProperty.call(marks._hours, iso)) return null;
+        return marks._hours[iso];
+    }
+
+    function staffOnceHours() {
+        if (state.staffOnce == null || state.staffOnce === '') return null;
+        var value = parseInt(state.staffOnce, 10);
+        if (isNaN(value) || value < 0 || value > 24) return null;
+        return value;
     }
 
     function staffMarkColor(id) {
@@ -12456,7 +12483,8 @@
             var iso = isoDate(date);
             var id = staffVisible(person, iso, date, marks);
             if (!id || id === 'off' || (id !== 'work' && !staffMarkById(id))) continue;
-            var hours = staffDayHours(id, per);
+            var custom = markCustom(marks, iso);
+            var hours = custom != null ? custom : staffDayHours(id, per);
             if (!by[id]) by[id] = { days: 0, hours: 0 };
             by[id].days += 1;
             by[id].hours += hours;
@@ -12584,19 +12612,36 @@
     function staffSections(grouped) {
         var buckets = {};
         var order = [];
+        function ensure(placeId, name) {
+            var id = String(placeId || 0);
+            if (!buckets[id]) {
+                buckets[id] = { placeId: placeId || 0, name: name || '', people: [] };
+                order.push(id);
+            }
+            return buckets[id];
+        }
+        var places = sortedPlaces();
+        var filter = state.staffPlaceFilter || '';
+        if (!places.length) {
+            var loose = { placeId: 0, name: '', people: [] };
+            grouped.order.forEach(function (key) { loose.people.push(grouped.people[key]); });
+            return [loose];
+        }
+        if (filter === '__none__') {
+            ensure(0, t('staffNoPlace'));
+        } else if (filter) {
+            var chosen = parseInt(filter, 10) || 0;
+            ensure(chosen, placeNameById(chosen) || t('staffPlace'));
+        } else {
+            places.forEach(function (asset) { ensure(asset.id, placeLabel(asset)); });
+        }
         grouped.order.forEach(function (key) {
             var person = grouped.people[key];
             var placeId = person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
-            var id = String(placeId);
-            if (!buckets[id]) {
-                buckets[id] = {
-                    placeId: placeId,
-                    name: placeId ? (placeNameById(placeId) || t('staffPlace')) : t('staffNoPlace'),
-                    people: []
-                };
-                order.push(id);
+            if (!buckets[String(placeId)]) {
+                ensure(placeId, placeId ? (placeNameById(placeId) || t('staffPlace')) : t('staffNoPlace'));
             }
-            buckets[id].people.push(person);
+            buckets[String(placeId)].people.push(person);
         });
         order.sort(function (left, right) {
             if (left === '0') return 1;
@@ -12772,6 +12817,7 @@
         if (!person.hours) return;
         var marks = parseDayMarks(person.hours.marks);
         var brush = state.staffBrush || 'work';
+        var once = staffOnceHours();
         isos.forEach(function (iso) {
             var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
             if (!match) return;
@@ -12779,11 +12825,17 @@
             var natural = staffNatural(person, iso, date);
             if (erase) {
                 delete marks[iso];
+                delete marks._hours[iso];
                 if (natural === brush) marks[iso] = 'off';
+            } else if (once != null && brush !== 'off') {
+                marks[iso] = brush;
+                marks._hours[iso] = once;
             } else if (brush === natural) {
                 delete marks[iso];
+                delete marks._hours[iso];
             } else {
                 marks[iso] = brush;
+                delete marks._hours[iso];
             }
         });
         saveStaffHours(person.userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks), person.hours.startOn);
@@ -12796,7 +12848,9 @@
         var existing = parseDayMarks(person.hours.marks);
         var start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
         var startDate = start ? new Date(Number(start[1]), Number(start[2]) - 1, Number(start[3])) : new Date();
-        var erase = staffVisible(person, iso, startDate, existing) === brush;
+        var once = staffOnceHours();
+        var visible = staffVisible(person, iso, startDate, existing);
+        var erase = visible === brush && (once == null || brush === 'off' || markCustom(existing, iso) === once);
         state.staffDrag = { userKey: person.userKey, isos: [iso], erase: erase };
         function move(ev) {
             var node = ev.target;
@@ -12972,15 +13026,16 @@
                 var weekend = date.getDay() === 0 || date.getDay() === 6;
                 var id = staffVisible(person, iso, date, marks);
                 var known = id === 'off' || id === 'work' || !!staffMarkById(id);
-                var hoursValue = known ? staffDayHours(id, per) : 0;
+                var custom = markCustom(marks, iso);
+                var hoursValue = known ? (custom != null ? custom : staffDayHours(id, per)) : 0;
                 var cell = el('td', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : '') + (id && id !== 'off' && known ? ' is-mark' : ''));
                 cell.setAttribute('data-staff-day', iso);
                 cell.setAttribute('data-staff-user', person.userKey);
                 var mark = staffMarkById(id);
                 var caption = '';
-                if (id && id !== 'off' && known) caption = hoursValue > 0 ? String(hoursValue) : staffMarkName(mark || { id: id }).slice(0, 3);
+                if (id && id !== 'off' && known) caption = custom != null ? String(custom) : (hoursValue > 0 ? String(hoursValue) : staffMarkName(mark || { id: id }).slice(0, 3));
                 var title = id === 'off' || !known ? t('staffOff') : staffMarkName(mark || { id: id });
-                if (hoursValue > 0) title += ' · ' + t('staffHoursCount', hoursValue);
+                if (custom != null || hoursValue > 0) title += ' · ' + t('staffHoursCount', hoursValue);
                 if (state.canEdit && person.hours) {
                     var hit = button(caption, 'asset-tree-roster-hit', function () {});
                     hit.title = title;
@@ -13013,20 +13068,7 @@
         return line;
     }
 
-    function staffRoster(grouped) {
-        var year = state.scheduleYear;
-        var month = state.scheduleMonth;
-        var count = new Date(year, month, 0).getDate();
-        var today = isoDate(new Date());
-        var sections = staffSections(grouped);
-        var places = sortedPlaces();
-        var single = !!(places.length && sections.length === 1);
-        var scroll = el('div', 'asset-tree-roster-scroll');
-        var table = el('table', 'asset-tree-roster');
-        var head = el('tr');
-        var headName = el('th', 'asset-tree-roster-name');
-        if (single) headName.appendChild(staffPlaceHead(sections[0].placeId, sections[0].name));
-        head.appendChild(headName);
+    function staffDateHead(row, year, month, count, today) {
         var day;
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
@@ -13035,26 +13077,36 @@
             var label = el('span', 'asset-tree-roster-num' + (iso === today ? ' is-today' : ''), String(day));
             var cell = el('th', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : ''));
             cell.appendChild(label);
-            head.appendChild(cell);
+            row.appendChild(cell);
         }
-        head.appendChild(el('th', 'asset-tree-roster-total', t('staffDaysCol')));
-        head.appendChild(el('th', 'asset-tree-roster-total', t('staffHoursCol')));
+        row.appendChild(el('th', 'asset-tree-roster-total', t('staffDaysCol')));
+        row.appendChild(el('th', 'asset-tree-roster-total', t('staffHoursCol')));
+    }
+
+    function staffSectionHead(section, year, month, count, today) {
+        var row = el('tr', 'asset-tree-roster-head');
+        var name = el('th', 'asset-tree-roster-name');
+        if (section.name) name.appendChild(staffPlaceHead(section.placeId, section.name));
+        row.appendChild(name);
+        staffDateHead(row, year, month, count, today);
+        return row;
+    }
+
+    function staffRoster(grouped) {
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var today = isoDate(new Date());
+        var sections = staffSections(grouped);
+        var scroll = el('div', 'asset-tree-roster-scroll');
+        var table = el('table', 'asset-tree-roster');
         var thead = el('thead');
-        thead.appendChild(head);
+        var first = sections.length ? sections[0] : { placeId: 0, name: '', people: [] };
+        thead.appendChild(staffSectionHead(first, year, month, count, today));
         table.appendChild(thead);
         var body = el('tbody');
-        sections.forEach(function (section) {
-            if (places.length && !single) {
-                var banner = el('tr', 'asset-tree-roster-branch-row');
-                var cell = el('th', 'asset-tree-roster-name');
-                cell.appendChild(staffPlaceHead(section.placeId, section.name));
-                banner.appendChild(cell);
-                var gap;
-                for (gap = 0; gap < count; gap++) banner.appendChild(el('td', 'asset-tree-roster-day'));
-                banner.appendChild(el('td', 'asset-tree-roster-total'));
-                banner.appendChild(el('td', 'asset-tree-roster-total'));
-                body.appendChild(banner);
-            }
+        sections.forEach(function (section, index) {
+            if (index > 0) body.appendChild(staffSectionHead(section, year, month, count, today));
             section.people.forEach(function (person) {
                 body.appendChild(staffRosterRow(person, year, month, count, today));
             });
@@ -13225,6 +13277,34 @@
                 saveStaffPalette(copy);
             }));
         }
+        if (state.canEdit) {
+            var onceBox = el('label', 'asset-tree-mark-once' + (staffOnceHours() != null ? ' is-set' : ''));
+            onceBox.appendChild(el('span', null, t('staffOnce')));
+            var once = document.createElement('input');
+            once.type = 'number';
+            once.min = '0';
+            once.max = '24';
+            once.placeholder = '2';
+            once.title = t('staffOnceHint');
+            once.setAttribute('aria-label', t('staffOnce'));
+            if (staffOnceHours() != null) once.value = String(staffOnceHours());
+            function readOnce() {
+                var raw = String(once.value || '').trim();
+                if (!raw) {
+                    state.staffOnce = null;
+                    onceBox.classList.remove('is-set');
+                    return;
+                }
+                var value = parseInt(raw, 10);
+                if (isNaN(value) || value < 0 || value > 24) return;
+                state.staffOnce = value;
+                onceBox.classList.add('is-set');
+            }
+            once.addEventListener('input', readOnce);
+            once.addEventListener('change', readOnce);
+            onceBox.appendChild(once);
+            bar.appendChild(onceBox);
+        }
         return bar;
     }
 
@@ -13288,24 +13368,21 @@
         (state.staffRows || []).forEach(function (item) {
             if (item && item.kind === 'hours') anyone = true;
         });
-        var grouped = staffGroups();
-        if (!anyone) {
+        var places = sortedPlaces();
+        if (!anyone && !places.length) {
             wrap.appendChild(el('p', 'asset-tree-hint', t('staffEmpty')));
             return wrap;
         }
-        if (!grouped.order.length) {
-            var filterId = state.staffPlaceFilter || '';
-            if (filterId && sortedPlaces().length) {
-                var placeId = filterId === '__none__' ? 0 : (parseInt(filterId, 10) || 0);
-                var label = filterId === '__none__' ? t('staffNoPlace') : (placeNameById(placeId) || t('staffPlace'));
-                var solo = el('div', 'asset-tree-roster-branch-solo');
-                solo.appendChild(staffPlaceHead(placeId, label));
-                wrap.appendChild(solo);
-            }
-            wrap.appendChild(el('p', 'asset-tree-hint', t('staffPlaceEmpty')));
+        var grouped = staffGroups();
+        if (!places.length && !grouped.order.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', t('staffEmpty')));
             return wrap;
         }
         wrap.appendChild(staffRoster(grouped));
+        if (!grouped.order.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', places.length ? t('staffPlaceEmpty') : t('staffEmpty')));
+            return wrap;
+        }
         wrap.appendChild(staffSummary(grouped));
         var leaves = staffLeaves(grouped);
         if (leaves) wrap.appendChild(leaves);

@@ -6270,14 +6270,27 @@ public class AssetServiceImpl implements AssetService {
                 continue;
             }
             String day = part.substring(0, colon).trim();
-            String id = part.substring(colon + 1).trim().toLowerCase(java.util.Locale.ROOT);
+            String token = part.substring(colon + 1).trim().toLowerCase(java.util.Locale.ROOT);
+            String id = token;
+            Integer custom = null;
+            int at = token.indexOf('@');
+            if (at >= 0) {
+                id = token.substring(0, at);
+                String hoursText = token.substring(at + 1).trim();
+                if (hoursText.matches("\\d{1,2}")) {
+                    int value = Integer.parseInt(hoursText);
+                    if (value >= 0 && value <= 24) {
+                        custom = Integer.valueOf(value);
+                    }
+                }
+            }
             if (staffDay(day) == null) {
                 continue;
             }
             if (!"off".equals(id) && !id.matches("[a-z][a-z0-9]{0,15}")) {
                 continue;
             }
-            marks.put(day, id);
+            marks.put(day, "off".equals(id) || custom == null ? id : id + "@" + custom.intValue());
             if (marks.size() >= 400) {
                 break;
             }
