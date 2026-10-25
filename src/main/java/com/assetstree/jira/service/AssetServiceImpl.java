@@ -5753,7 +5753,11 @@ public class AssetServiceImpl implements AssetService {
             if (ServiceDue.ONCE.equals(row.getEveryUnit())) {
                 row.setAppliedFor("done");
             } else {
-                row.setLastDone(LocalDate.now().toString());
+                String doneOn = FieldDates.canonical(draft.getDoneOn());
+                if (doneOn == null || doneOn.isEmpty()) {
+                    doneOn = LocalDate.now().toString();
+                }
+                row.setLastDone(doneOn);
                 row.setAppliedFor("");
             }
         } else if (draft.getLastDone() != null || creating) {
@@ -5833,9 +5837,42 @@ public class AssetServiceImpl implements AssetService {
         if (draft.getEndTime() != null || creating) {
             row.setEndTime(clock(draft.getEndTime()));
         }
+        if (draft.getMoves() != null || creating) {
+            row.setMoves(cleanMoves(draft.getMoves()));
+        }
         if (row.getName() == null || row.getLastDone() == null || row.getEveryUnit() == null) {
             throw new AssetException(400, "asset-tree.error.service");
         }
+    }
+
+    /** Keeps at most 80 moved or skipped occurrence days. */
+    private String cleanMoves(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        int kept = 0;
+        for (String part : raw.split(",")) {
+            if (kept >= 80 || out.length() > 4000) {
+                break;
+            }
+            int at = part.indexOf('>');
+            if (at < 1) {
+                continue;
+            }
+            String source = FieldDates.canonical(part.substring(0, at).trim());
+            String targetRaw = part.substring(at + 1).trim();
+            String target = "-".equals(targetRaw) ? "-" : FieldDates.canonical(targetRaw);
+            if (source == null || source.isEmpty() || target == null || target.isEmpty() || source.equals(target)) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(source).append('>').append(target);
+            kept++;
+        }
+        return out.toString();
     }
 
     private String clock(String raw) {
@@ -5904,6 +5941,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setCompleted(completed);
         dto.setNextDue(next == null ? "" : next.toString());
         dto.setDue(ServiceDue.reached(next, today) && !completed);
+        dto.setMoves(row.getMoves() == null ? "" : row.getMoves());
         return dto;
     }
 
@@ -6416,6 +6454,8 @@ public class AssetServiceImpl implements AssetService {
         row.setEndTime(source.getEndTime());
         row.setCompletedOn(source.getCompletedOn());
         row.setCompleted(source.isCompleted());
+        row.setNotify(source.isNotify());
+        row.setMoves(source.getMoves() == null ? "" : source.getMoves());
         return row;
     }
 

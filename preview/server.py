@@ -1928,6 +1928,7 @@ def plan_dto(row):
         "endTime": row.get("endTime") or "",
         "completedOn": row.get("completedOn") or "",
         "completed": completed,
+        "moves": row.get("moves") or "",
     }
 
 
@@ -2711,6 +2712,27 @@ def apply_due(project_key=None):
                 STATE["mails"].append({"to": email, "subject": subject, "body": body, "assetId": asset["id"]})
 
 
+def clean_moves(raw):
+    parts = []
+    for part in str(raw or "").split(","):
+        if len(parts) >= 80:
+            break
+        if ">" not in part:
+            continue
+        source_raw, target_raw = part.split(">", 1)
+        source = parse_plan_date(source_raw.strip())
+        target_text = target_raw.strip()
+        if target_text == "-":
+            target = "-"
+        else:
+            parsed = parse_plan_date(target_text)
+            target = parsed.isoformat() if parsed else ""
+        if not source or not target or source.isoformat() == target:
+            continue
+        parts.append(source.isoformat() + ">" + target)
+    return ",".join(parts)
+
+
 def fill_plan(row, body, creating, project_key, text):
     body = body or {}
     if body.get("done") is True:
@@ -2718,7 +2740,8 @@ def fill_plan(row, body, creating, project_key, text):
         if row.get("everyUnit") == "once":
             row["appliedFor"] = "done"
         else:
-            row["lastDone"] = datetime.date.today().isoformat()
+            done_on = parse_plan_date(body.get("doneOn"))
+            row["lastDone"] = done_on.isoformat() if done_on else datetime.date.today().isoformat()
             row["appliedFor"] = ""
     elif body.get("lastDone") is not None or creating:
         parsed = parse_plan_date(body.get("lastDone"))
@@ -2783,6 +2806,8 @@ def fill_plan(row, body, creating, project_key, text):
         row["startTime"] = (body.get("startTime") or "").strip()
     if body.get("endTime") is not None or creating:
         row["endTime"] = (body.get("endTime") or "").strip()
+    if body.get("moves") is not None or creating:
+        row["moves"] = clean_moves(body.get("moves"))
     if not row.get("name") or not row.get("lastDone") or not row.get("everyUnit"):
         return text.get("asset-tree.error.service", "Schedule")
     return None

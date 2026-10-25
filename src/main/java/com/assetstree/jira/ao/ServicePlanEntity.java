@@ -85,4 +85,13 @@ public interface ServicePlanEntity extends Entity {
     String getCompletedOn();
 
     void setCompletedOn(String completedOn);
+
+    /**
+     * One occurrence moved or skipped without shifting the series.
+     * Pairs are {@code yyyy-mm-dd>yyyy-mm-dd} or {@code yyyy-mm-dd>-}, separated by commas.
+     */
+    @StringLength(StringLength.UNLIMITED)
+    String getMoves();
+
+    void setMoves(String moves);
 }

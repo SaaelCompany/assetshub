@@ -11475,6 +11475,97 @@
             cursor = planNextDate(isoDate(cursor), count, unit);
             seen++;
         }
+        return movedDates(plan, found, year, month);
+    }
+
+    function planMoveMap(plan) {
+        var map = {};
+        String(plan && plan.moves || '').split(',').forEach(function (part) {
+            var at = part.indexOf('>');
+            if (at < 1) return;
+            var source = part.slice(0, at);
+            var target = part.slice(at + 1);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(source)) return;
+            if (target !== '-' && !/^\d{4}-\d{2}-\d{2}$/.test(target)) return;
+            if (target === source) return;
+            map[source] = target;
+        });
+        return map;
+    }
+
+    function packPlanMoves(map) {
+        var parts = [];
+        Object.keys(map).sort().forEach(function (source) {
+            if (parts.length >= 80) return;
+            var target = map[source];
+            if (!target || target === source) return;
+            parts.push(source + '>' + target);
+        });
+        return parts.join(',');
+    }
+
+    function seriesSource(plan, displayIso) {
+        var map = planMoveMap(plan);
+        var source;
+        for (source in map) {
+            if (Object.prototype.hasOwnProperty.call(map, source) && map[source] === displayIso) return source;
+        }
+        return displayIso || '';
+    }
+
+    function nextPendingSource(plan) {
+        var count = parseInt(plan.everyCount, 10) || 0;
+        var unit = plan.everyUnit || '';
+        var cursor = planNextDate(plan.lastDone, count, unit);
+        var map = planMoveMap(plan);
+        var guard = 0;
+        while (cursor && guard < 80) {
+            var iso = isoDate(cursor);
+            if (map[iso] !== '-') return iso;
+            cursor = planNextDate(iso, count, unit);
+            guard++;
+        }
+        return '';
+    }
+
+    function dropMovesUntil(plan, iso) {
+        var map = planMoveMap(plan);
+        var limit = parseIsoDate(iso);
+        if (!limit) return packPlanMoves(map);
+        Object.keys(map).forEach(function (source) {
+            var day = parseIsoDate(source);
+            if (day && dayNumber(day) <= dayNumber(limit)) delete map[source];
+        });
+        return packPlanMoves(map);
+    }
+
+    function movedDates(plan, dates, year, month) {
+        var map = planMoveMap(plan);
+        var anchor = parseIsoDate(plan.lastDone || '');
+        function inside(iso) {
+            var day = parseIsoDate(iso);
+            return !!(day && day.getFullYear() === year && day.getMonth() + 1 === month);
+        }
+        function stillAhead(source) {
+            var origin = parseIsoDate(source);
+            return !(anchor && origin && dayNumber(origin) <= dayNumber(anchor));
+        }
+        var seen = {};
+        var found = [];
+        function add(display, source) {
+            if (!display || display === '-' || seen[display] || !inside(display) || !stillAhead(source)) return;
+            seen[display] = source;
+            found.push(display);
+        }
+        dates.forEach(function (iso) {
+            var moved = Object.prototype.hasOwnProperty.call(map, iso) ? map[iso] : iso;
+            add(moved, iso);
+        });
+        Object.keys(map).forEach(function (source) {
+            if (dates.indexOf(source) >= 0) return;
+            add(map[source], source);
+        });
+        found.sort();
         return found;
     }
 
@@ -11872,6 +11963,7 @@
             state.scheduleMonth = 1;
             state.scheduleYear += 1;
         }
+        state.scheduleExpanded = '';
         renderFrame();
     }
 
@@ -11932,12 +12024,15 @@
             cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
             if (inMonth) {
                 var plans = byDay[iso] || [];
-                var shown = plans.length > 3 ? plans.slice(0, 2) : plans;
+                var expanded = state.scheduleExpanded === iso;
+                var shown = !expanded && plans.length > 3 ? plans.slice(0, 2) : plans;
                 shown.forEach(function (plan) {
                     cell.appendChild(scheduleEventCard(plan, iso));
                 });
-                if (plans.length > shown.length) {
-                    cell.appendChild(el('span', 'asset-tree-day-more', '+' + (plans.length - shown.length)));
+                if (!expanded && plans.length > shown.length) {
+                    cell.appendChild(dayMoreButton(iso, '+' + (plans.length - shown.length), true));
+                } else if (expanded && plans.length > 3) {
+                    cell.appendChild(dayMoreButton(iso, t('schedulesCollapse'), false));
                 }
                 if (state.canEdit) {
                     (function (dayIso, dayCell) {
@@ -11961,9 +12056,22 @@
         return grid;
     }
 
+    function dayMoreButton(iso, label, expand) {
+        var more = button(label, 'asset-tree-day-more', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            state.scheduleExpanded = expand ? iso : '';
+            renderFrame();
+        });
+        return more;
+    }
+
     function scheduleEventCard(plan, iso) {
         var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
-        var card = button('', 'asset-tree-event' + (focused ? ' is-focus' : ''), function () {
+        var source = seriesSource(plan, iso);
+        var done = !!plan.completed;
+        var due = !done && !!plan.due && source === (plan.nextDue || '');
+        var card = button('', 'asset-tree-event' + (done ? ' is-done' : '') + (due ? ' is-due' : '') + (focused ? ' is-focus' : ''), function () {
             if (state.scheduleSuppressClick) {
                 state.scheduleSuppressClick = false;
                 return;
@@ -11986,7 +12094,8 @@
         card.appendChild(text);
         card.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
         if (state.canEdit) {
-            card.title += ' · ' + t('schedulesDrag');
+            var wholeSeries = !plan.everyUnit || plan.everyUnit === 'once';
+            card.title += ' · ' + t(wholeSeries ? 'schedulesDrag' : 'schedulesDragOne');
             card.addEventListener('mousedown', function (event) { beginPlanDrag(plan, iso, card, event); });
         }
         return card;
@@ -12015,14 +12124,15 @@
         var body = {
             name: patch.name != null ? patch.name : (plan.name || kindName(plan.kind) || kindLong(plan.kind)),
             lastDone: patch.lastDone || plan.lastDone || '',
-            everyCount: plan.everyCount || 1,
-            everyUnit: plan.everyUnit || 'once',
+            everyCount: patch.everyCount || plan.everyCount || 1,
+            everyUnit: patch.everyUnit || plan.everyUnit || 'once',
             kind: patch.kind || plan.kind || 'event',
             assigneeKey: patch.assigneeKey != null ? patch.assigneeKey : (plan.assigneeKey || ''),
             note: patch.note != null ? patch.note : (plan.note || ''),
             startTime: patch.startTime != null ? patch.startTime : (plan.startTime || ''),
             endTime: patch.endTime != null ? patch.endTime : (plan.endTime || ''),
-            notify: plan.notify !== false
+            notify: patch.notify != null ? patch.notify === true : plan.notify === true,
+            moves: patch.moves != null ? patch.moves : (plan.moves || '')
         };
         patchPlanLocal(plan, body);
         if (state.view === 'schedules') renderFrame();
@@ -12046,9 +12156,16 @@
             if (!row || row.id !== plan.id || (row.assetId || 0) !== (plan.assetId || 0)) continue;
             if (patch.name != null) row.name = patch.name;
             if (patch.kind) row.kind = patch.kind;
+            if (patch.everyCount) row.everyCount = patch.everyCount;
+            if (patch.everyUnit) row.everyUnit = patch.everyUnit;
+            if (patch.moves != null) row.moves = patch.moves;
             if (patch.lastDone) {
                 row.lastDone = patch.lastDone;
                 if (!row.everyUnit || row.everyUnit === 'once') row.nextDue = patch.lastDone;
+                else {
+                    var nxt = planNextDate(patch.lastDone, row.everyCount, row.everyUnit);
+                    if (nxt) row.nextDue = isoDate(nxt);
+                }
             }
             if (patch.assigneeKey != null) row.assigneeKey = patch.assigneeKey;
             if (patch.note != null) row.note = patch.note;
@@ -12095,7 +12212,15 @@
             setTimeout(function () { document.removeEventListener('click', eatClick, true); }, 0);
             var day = target ? target.getAttribute('data-day') : '';
             if (!day || day === iso) return;
-            savePlan(plan, { lastDone: planAnchorFor(plan, iso, day) });
+            if (!plan.everyUnit || plan.everyUnit === 'once') {
+                savePlan(plan, { lastDone: day });
+                return;
+            }
+            var source = seriesSource(plan, iso);
+            var map = planMoveMap(plan);
+            if (day === source) delete map[source];
+            else map[source] = day;
+            savePlan(plan, { moves: packPlanMoves(map) });
         }
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', up);
@@ -13711,8 +13836,37 @@
                 kind.value = draft.kind;
                 var date = document.createElement('input');
                 date.type = 'date';
-                date.value = String(when).slice(0, 10);
+                var seriesDate = !plan.everyUnit || plan.everyUnit === 'once'
+                    ? (plan.lastDone || when)
+                    : (plan.nextDue || plan.lastDone || when);
+                date.value = String(seriesDate).slice(0, 10);
                 date.setAttribute('aria-label', t('schedulesFirst'));
+                var every = document.createElement('input');
+                every.type = 'number';
+                every.min = '1';
+                every.max = '3650';
+                every.className = 'asset-tree-every-count';
+                every.value = String(plan.everyCount || 1);
+                every.setAttribute('aria-label', t('schedulesEveryCount'));
+                var repeat = document.createElement('select');
+                [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
+                    var option = document.createElement('option');
+                    option.value = pair[0];
+                    option.textContent = t(pair[1]);
+                    repeat.appendChild(option);
+                });
+                repeat.value = plan.everyUnit || 'once';
+                function syncEvery() {
+                    var onceUnit = repeat.value === 'once';
+                    every.disabled = onceUnit;
+                    if (onceUnit) every.value = '1';
+                }
+                repeat.addEventListener('change', syncEvery);
+                syncEvery();
+                var firstRow = el('div', 'asset-tree-time-row');
+                firstRow.appendChild(date);
+                firstRow.appendChild(every);
+                firstRow.appendChild(repeat);
                 var person = document.createElement('input');
                 person.type = 'search';
                 person.placeholder = t('schedulesFindUser');
@@ -13784,7 +13938,10 @@
                 timeRow.appendChild(rangeLabel);
                 dialog.appendChild(planField(t('name'), name));
                 dialog.appendChild(planField(t('schedulesKind'), kind));
-                dialog.appendChild(planField(t('schedulesFirst'), date));
+                var firstField = el('div', 'asset-tree-plan-field');
+                firstField.appendChild(el('span', null, t('schedulesFirst')));
+                firstField.appendChild(firstRow);
+                dialog.appendChild(firstField);
                 var timeField = el('div', 'asset-tree-plan-field');
                 timeField.appendChild(el('span', null, t('schedulesTime')));
                 timeField.appendChild(timeRow);
@@ -13803,11 +13960,31 @@
             if (state.canEdit) {
                 actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
                     var title = name.value.trim();
-                    if (!title || !date.value) return;
+                    if (!title) {
+                        notify(t('schedulesNeedName'));
+                        return;
+                    }
+                    if (!date.value) {
+                        notify(t('schedulesNeedDate'));
+                        return;
+                    }
+                    var unit = repeat.value || plan.everyUnit || 'once';
+                    var count = unit === 'once' ? 1 : (parseInt(every.value, 10) || 0);
+                    if (count < 1) {
+                        notify(t('schedulesNeedDate'));
+                        return;
+                    }
+                    var anchor = scheduleAnchor(date.value, count, unit);
+                    var changed = anchor !== (plan.lastDone || '')
+                        || String(count) !== String(plan.everyCount || 1)
+                        || unit !== (plan.everyUnit || 'once');
                     savePlan(plan, {
                         name: title,
                         kind: kind.value || plan.kind,
-                        lastDone: planAnchorFor(plan, when, date.value),
+                        lastDone: anchor,
+                        everyCount: count,
+                        everyUnit: unit,
+                        moves: changed ? '' : (plan.moves || ''),
                         assigneeKey: person.value.trim() ? draft.assigneeKey : '',
                         note: note.value,
                         startTime: ranged.checked ? startTime.value : '',
@@ -13817,7 +13994,20 @@
             }
             if (state.canEdit && !plan.completed) {
                 actions.appendChild(button(t('serviceDone'), 'asset-tree-btn primary', function () {
-                    ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, { done: true }, function (status, payload) {
+                    var body = { done: true };
+                    if (plan.everyUnit && plan.everyUnit !== 'once') {
+                        var source = seriesSource(plan, String(when).slice(0, 10));
+                        if (source && source === nextPendingSource(plan)) {
+                            body.doneOn = source;
+                            body.moves = dropMovesUntil(plan, source);
+                        } else if (source) {
+                            var map = planMoveMap(plan);
+                            map[source] = '-';
+                            savePlan(plan, { moves: packPlanMoves(map) }, function (ok) { if (ok) closeModal(); });
+                            return;
+                        }
+                    }
+                    ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, body, function (status, payload) {
                         if (status >= 200 && status < 300) {
                             closeModal();
                             refreshSchedules();
@@ -13915,6 +14105,19 @@
                 repeat.appendChild(option);
             });
             repeat.value = 'once';
+            var everyCount = document.createElement('input');
+            everyCount.type = 'number';
+            everyCount.min = '1';
+            everyCount.max = '3650';
+            everyCount.value = '1';
+            everyCount.className = 'asset-tree-every-count';
+            everyCount.disabled = true;
+            everyCount.setAttribute('aria-label', t('schedulesEveryCount'));
+            repeat.addEventListener('change', function () {
+                var onceUnit = repeat.value === 'once';
+                everyCount.disabled = onceUnit;
+                if (onceUnit) everyCount.value = '1';
+            });
             var nobody = document.createElement('input');
             nobody.type = 'radio';
             nobody.name = 'asset-tree-who';
@@ -14010,6 +14213,7 @@
             when.appendChild(el('span', null, t('schedulesFirst')));
             var whenRow = el('div', 'asset-tree-time-row');
             whenRow.appendChild(first);
+            whenRow.appendChild(everyCount);
             whenRow.appendChild(repeat);
             when.appendChild(whenRow);
             dialog.appendChild(when);
@@ -14063,13 +14267,19 @@
                 Object.keys(draft.assetIds).forEach(function (id) {
                     if (draft.assetIds[id]) ids.push(parseInt(id, 10));
                 });
+                var repeatUnit = repeat.value || 'once';
+                var repeatCount = repeatUnit === 'once' ? 1 : (parseInt(everyCount.value, 10) || 0);
+                if (repeatCount < 1) {
+                    notify(t('schedulesNeedDate'));
+                    return;
+                }
                 var body = {
                     assetIds: ids,
                     name: name.value.trim(),
                     kind: kind.value,
                     lastDone: first.value,
-                    everyCount: 1,
-                    everyUnit: repeat.value || 'once',
+                    everyCount: repeatCount,
+                    everyUnit: repeatUnit,
                     note: note.value,
                     notify: !!moduleSetup().scheduleNotify
                 };

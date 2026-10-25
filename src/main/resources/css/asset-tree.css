@@ -8416,6 +8416,20 @@ a.asset-tree-url {
     cursor: grabbing;
 }
 
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-due {
+    border-color: #ff5630 !important;
+    background: #ffebe6 !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-done {
+    background: #f4f5f7 !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-done .asset-tree-event-text strong {
+    color: #6b778c;
+    text-decoration: line-through;
+}
+
 #asset-tree-app .asset-tree-board .asset-tree-day.is-drop {
     outline: 2px solid #4c9aff;
     outline-offset: -2px;
@@ -8459,6 +8473,28 @@ a.asset-tree-url {
     color: #6b778c;
     font-size: 11px;
     font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-day-more {
+    display: inline-flex !important;
+    width: auto;
+    height: auto !important;
+    min-height: 0;
+    margin: 4px 0 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    color: #0052cc !important;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: left;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-every-count {
+    width: 72px;
 }
 
 #asset-tree-app .asset-tree-mark-bar {
