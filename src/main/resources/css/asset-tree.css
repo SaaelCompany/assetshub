@@ -6272,13 +6272,13 @@ a.asset-tree-url {
 #asset-tree-app button.asset-tree-layer {
     display: inline-flex !important;
     align-items: center;
-    height: 28px;
+    height: 32px;
     min-height: 0;
     margin: 0;
     padding: 0 12px !important;
     border: 1px solid #dfe1e6 !important;
-    border-radius: 14px;
-    background: #fff !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
     color: #42526e !important;
     font-size: 13px;
     font-weight: 500;
@@ -6288,9 +6288,9 @@ a.asset-tree-url {
 }
 
 #asset-tree-app button.asset-tree-layer.is-on {
-    background: #0052cc !important;
-    border-color: #0052cc !important;
-    color: #fff !important;
+    background: #deebff !important;
+    border-color: #4c9aff !important;
+    color: #0052cc !important;
 }
 
 #asset-tree-app .asset-tree-calendar-title {
@@ -7643,12 +7643,12 @@ a.asset-tree-url {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    height: 28px;
+    height: 32px;
     min-width: 280px;
     margin: 0;
     padding: 0 10px 0 12px;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
     background: #fff;
     color: #172b4d;
 }
@@ -7680,7 +7680,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-staff-find-field:focus-within {
-    border-color: #172b4d;
+    border-color: #4c9aff;
 }
 
 #asset-tree-app .asset-tree-staff-hits {
@@ -7690,9 +7690,9 @@ a.asset-tree-url {
     z-index: 4;
     min-width: 280px;
     background: #fff;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
-    box-shadow: 0 8px 16px rgba(9, 30, 66, 0.12);
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
 }
 
 #asset-tree-app .asset-tree-staff-hits:empty {
@@ -7776,8 +7776,8 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-roster-scroll {
     overflow: auto;
     background: #fff;
-    border: 1px solid #e6e8ec;
-    border-radius: 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
 }
 
 #asset-tree-app .asset-tree-roster {
@@ -7795,7 +7795,7 @@ a.asset-tree-url {
     min-height: 40px;
     padding: 0 2px;
     border: 0;
-    border-bottom: 1px solid #eef0f3;
+    border-bottom: 1px solid #f4f5f7;
     border-right: 1px solid #f4f5f7;
     font-weight: 400;
     text-align: center;
@@ -7834,7 +7834,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-roster td.asset-tree-roster-day.is-painting .asset-tree-roster-hit {
-    outline: 2px solid #172b4d;
+    outline: 2px solid #4c9aff;
     outline-offset: -2px;
 }
 
@@ -7849,7 +7849,7 @@ a.asset-tree-url {
     top: 0;
     z-index: 1;
     height: 36px;
-    background: #f7f8fa;
+    background: #fafbfc;
     font-weight: 600;
 }
 
@@ -7912,7 +7912,7 @@ a.asset-tree-url {
 #asset-tree-app tr.asset-tree-roster-head.is-drop-before td,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before th,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before td {
-    box-shadow: inset 0 2px 0 #172b4d;
+    box-shadow: inset 0 2px 0 #4c9aff;
 }
 
 #asset-tree-app tr.asset-tree-roster-person.is-drop-after th,
@@ -7921,7 +7921,7 @@ a.asset-tree-url {
 #asset-tree-app tr.asset-tree-roster-head.is-drop-after td,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after th,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after td {
-    box-shadow: inset 0 -2px 0 #172b4d;
+    box-shadow: inset 0 -2px 0 #4c9aff;
 }
 
 #asset-tree-app .asset-tree-roster-pattern,
@@ -7933,9 +7933,9 @@ a.asset-tree-url {
     min-height: 0;
     margin: 0 0 0 4px;
     padding: 0 5px !important;
-    border: 1px solid #e6e8ec !important;
-    border-radius: 8px;
-    background: #f7f8fa !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
     color: #172b4d !important;
     font-size: 11px;
     font-weight: 700;
@@ -7999,8 +7999,8 @@ a.asset-tree-url {
     min-height: 0 !important;
     margin: 2px 0 0;
     padding: 0 4px !important;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
     background: #fff;
     color: #172b4d;
     font-size: 11px;
@@ -8008,8 +8008,8 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-staff-place-filter {
-    height: 28px;
-    border-radius: 8px;
+    height: 32px;
+    border-radius: 3px;
 }
 
 #asset-tree-app .asset-tree-roster thead .asset-tree-roster-name {
@@ -8047,10 +8047,10 @@ a.asset-tree-url {
     min-height: 0;
     margin: 0;
     padding: 0 !important;
-    border: 1px solid #e6e8ec !important;
-    border-radius: 8px;
-    background: #fff !important;
-    color: #172b4d !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #42526e !important;
     font-size: 16px;
     font-weight: 700;
     line-height: 20px;
@@ -8067,7 +8067,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-total {
     height: 36px;
     min-height: 0;
-    background: #f7f8fa;
+    background: #f4f5f7;
 }
 
 #asset-tree-app .asset-tree-roster-branch-solo {
@@ -8077,7 +8077,7 @@ a.asset-tree-url {
     margin: 8px 0;
     padding: 4px 8px;
     background: #f4f5f7;
-    border-radius: 8px;
+    border-radius: 3px;
 }
 
 #asset-tree-app .asset-tree-branch-add {
@@ -8088,9 +8088,9 @@ a.asset-tree-url {
     max-height: 280px;
     overflow: auto;
     background: #fff;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(9, 30, 66, 0.12);
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
     padding: 8px;
 }
 
@@ -8110,11 +8110,11 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-branch-add input {
     width: 100%;
     box-sizing: border-box;
-    height: 28px;
+    height: 32px;
     margin-top: 6px;
     padding: 0 8px;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
     background: #fff;
 }
 
@@ -8134,7 +8134,7 @@ a.asset-tree-url {
     margin: 0 auto;
     padding: 0 !important;
     border: 0 !important;
-    border-radius: 8px;
+    border-radius: 3px;
     background: transparent;
     color: #172b4d;
     font: inherit;
@@ -8201,6 +8201,15 @@ a.asset-tree-url {
     font-weight: 700;
 }
 
+#asset-tree-app .asset-tree-board button,
+#asset-tree-app .asset-tree-board input,
+#asset-tree-app .asset-tree-board select,
+#asset-tree-app .asset-tree-board strong {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
+
 #asset-tree-app .asset-tree-board-head {
     display: flex;
     flex-wrap: wrap;
@@ -8215,24 +8224,29 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-board-head .asset-tree-calendar-title {
     min-width: 180px;
-    font-size: 22px;
+    color: #172b4d;
+    font-size: 20px;
     font-weight: 600;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     text-align: center;
-    text-transform: none;
+    text-transform: capitalize !important;
 }
 
 #asset-tree-app button.asset-tree-month-btn {
-    width: 34px;
-    height: 34px;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
     min-height: 0;
     margin: 0;
     padding: 0 !important;
-    border: 1px solid #e2e5ea !important;
-    border-radius: 10px;
-    background: #fff !important;
-    color: #172b4d !important;
-    font-size: 20px;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #42526e !important;
+    font-size: 18px;
+    font-weight: 400;
     line-height: 1;
     cursor: pointer;
     box-shadow: none !important;
@@ -8240,51 +8254,58 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-board-switch {
     display: inline-flex;
-    padding: 3px;
-    background: #eef0f3;
-    border-radius: 12px;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
 }
 
 #asset-tree-app button.asset-tree-board-tab {
     height: 32px;
     min-height: 0;
     margin: 0;
-    padding: 0 16px !important;
+    padding: 0 12px !important;
     border: 0 !important;
-    border-radius: 9px;
-    background: transparent !important;
-    color: #5e6c84 !important;
-    font-size: 14px;
-    font-weight: 600;
+    border-right: 1px solid #dfe1e6 !important;
+    border-radius: 0;
+    background: #fafbfc !important;
+    color: #42526e !important;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     box-shadow: none !important;
 }
 
+#asset-tree-app button.asset-tree-board-tab:last-child {
+    border-right: 0 !important;
+}
+
 #asset-tree-app button.asset-tree-board-tab.is-on {
-    background: #fff !important;
-    color: #172b4d !important;
-    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.16) !important;
+    background: #deebff !important;
+    color: #0052cc !important;
+    box-shadow: none !important;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-layers {
     margin: 0 0 12px;
-    gap: 4px;
+    gap: 6px;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-layer {
-    height: 30px;
+    height: 32px;
     padding: 0 10px !important;
-    border: 1px solid transparent !important;
-    border-radius: 8px;
-    background: transparent !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
     color: #42526e !important;
     gap: 6px;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-layer.is-on {
-    background: #fff !important;
-    border-color: #dfe1e6 !important;
-    color: #172b4d !important;
+    background: #deebff !important;
+    border-color: #4c9aff !important;
+    color: #0052cc !important;
 }
 
 #asset-tree-app .asset-tree-layer-dot {
@@ -8295,23 +8316,24 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-calendar {
-    gap: 8px;
-    padding: 4px 0 8px;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    overflow: visible;
+    gap: 0;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-weekday {
-    padding: 0 8px 4px;
-    background: transparent;
+    padding: 8px;
+    background: #fafbfc;
     border: 0;
+    border-bottom: 1px solid #dfe1e6;
     color: #6b778c;
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: capitalize;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-weekday.is-weekend {
@@ -8319,42 +8341,47 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day {
-    min-height: 124px;
-    padding: 8px;
+    min-height: 108px;
+    padding: 6px;
     background: #fff;
-    border: 1px solid #e6e8ec;
-    border-radius: 12px;
+    border: 0;
+    border-top: 1px solid #f4f5f7;
+    border-left: 1px solid #f4f5f7;
+    border-radius: 0;
     box-shadow: none;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-weekend {
-    background: #f7f8fa;
+    background: #fafbfc;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-out {
-    background: transparent;
-    border-color: transparent;
+    background: #fafbfc;
+    border-top-color: #f4f5f7;
+    border-left-color: #f4f5f7;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-out .asset-tree-day-num {
-    color: #c1c7d0;
+    color: #97a0af;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day-num {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    color: #172b4d;
-    font-size: 13px;
+    width: auto;
+    min-width: 22px;
+    height: auto;
+    padding: 0 4px;
+    border-radius: 3px;
+    color: #6b778c;
+    font-size: 12px;
     font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-today .asset-tree-day-num {
-    background: #172b4d;
-    color: #fff;
+    background: #deebff;
+    color: #0052cc;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event {
@@ -8366,9 +8393,9 @@ a.asset-tree-url {
     margin: 6px 0 0;
     padding: 0 !important;
     overflow: hidden;
-    border: 0 !important;
-    border-radius: 8px;
-    background: #f4f5f7 !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
     color: #172b4d !important;
     text-align: left;
     cursor: pointer;
@@ -8376,7 +8403,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-focus {
-    outline: 2px solid #172b4d;
+    outline: 2px solid #4c9aff;
     outline-offset: 1px;
 }
 
@@ -8390,7 +8417,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-drop {
-    outline: 2px solid #172b4d;
+    outline: 2px solid #4c9aff;
     outline-offset: -2px;
 }
 
@@ -8446,20 +8473,21 @@ a.asset-tree-url {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    height: 28px;
+    height: 32px;
     margin: 0;
     padding: 0 8px;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fafbfc;
     color: #6b778c;
     font-size: 12px;
     font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-mark-once.is-set {
-    border-color: #172b4d;
-    color: #172b4d;
+    border-color: #4c9aff;
+    background: #deebff;
+    color: #0052cc;
 }
 
 #asset-tree-app .asset-tree-mark-once-label {
@@ -8489,7 +8517,7 @@ a.asset-tree-url {
     margin: 0;
     padding: 0 !important;
     border: 0 !important;
-    border-radius: 8px;
+    border-radius: 3px;
     background: transparent !important;
     color: #6b778c !important;
     font-size: 14px;
@@ -8506,7 +8534,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-head th {
     height: 36px;
     min-height: 0;
-    background: #f7f8fa;
+    background: #fafbfc;
     font-weight: 600;
     text-align: center;
 }
@@ -8521,12 +8549,12 @@ a.asset-tree-url {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 28px;
+    min-height: 32px;
     margin: 0;
     padding: 0 6px 0 8px;
-    border: 1px solid #e6e8ec;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fafbfc;
     color: #172b4d;
 }
 
@@ -8537,7 +8565,7 @@ a.asset-tree-url {
     margin: 0;
     padding: 0 8px !important;
     border: 0 !important;
-    border-radius: 8px;
+    border-radius: 3px;
     background: transparent !important;
     color: #172b4d !important;
     font-size: 12px;
@@ -8549,15 +8577,16 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick {
     padding: 0 10px !important;
-    border: 1px solid #e6e8ec !important;
-    background: #fff !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
 }
 
 #asset-tree-app .asset-tree-mark.is-on,
 #asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick.is-on {
-    border-color: #172b4d !important;
-    background: #f7f8fa !important;
-    color: #172b4d !important;
+    border-color: #4c9aff !important;
+    background: #deebff !important;
+    color: #0052cc !important;
 }
 
 #asset-tree-app .asset-tree-mark-label {
@@ -8631,9 +8660,9 @@ a.asset-tree-url {
     min-height: 0;
     margin: 0;
     padding: 0 5px !important;
-    border: 1px solid #e6e8ec !important;
-    border-radius: 8px;
-    background: #f7f8fa !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
     color: #172b4d !important;
     font-size: 11px;
     font-weight: 700;
@@ -8664,15 +8693,15 @@ a.asset-tree-url {
     justify-content: center;
     width: 24px;
     height: 24px;
-    border-radius: 50%;
+    border-radius: 3px;
     color: #172b4d;
     font-size: 12px;
     font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-roster-num.is-today {
-    background: #172b4d;
-    color: #fff;
+    background: #deebff;
+    color: #0052cc;
 }
 
 #asset-tree-app .asset-tree-roster thead .is-weekend .asset-tree-roster-num,
@@ -8681,8 +8710,8 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-roster thead .asset-tree-roster-num.is-today {
-    background: #172b4d;
-    color: #fff;
+    background: #deebff;
+    color: #0052cc;
 }
 
 #asset-tree-app .asset-tree-staff-summary {
@@ -8698,8 +8727,8 @@ a.asset-tree-url {
     gap: 6px;
     min-height: 32px;
     padding: 4px 10px;
-    border: 1px solid #e6e8ec;
-    border-radius: 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
     background: #fff;
     color: #172b4d;
     font-size: 13px;
@@ -8715,7 +8744,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-staff-sum.is-total {
-    background: #f7f8fa;
+    background: #f4f5f7;
 }
 
 #asset-tree-app .asset-tree-staff-leaves {
