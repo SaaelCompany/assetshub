@@ -461,6 +461,12 @@
         mapDirty: false,
         mapZoom: 1,
         mapCam: null,
+        mapAnchor: null,
+        mapClickAt: 0,
+        mapClickX: 0,
+        mapClickY: 0,
+        mapChainDoneAt: 0,
+        mapSuppressClick: false,
         reportCatalog: null,
         reportKey: 'status',
         reportView: null,
@@ -8560,6 +8566,8 @@
         state.mapToken++;
         state.mapSelection = null;
         state.mapCam = null;
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
         state.reportCatalog = null;
         state.reportKey = 'status';
         state.reportView = null;
@@ -14651,13 +14659,19 @@
         var current = null;
         floors.forEach(function (floor) { if (floor.id === state.floorId) current = floor; });
         if (current) {
-            if (!state.mapDraft || state.mapDraft.id !== current.id) state.mapDraft = cloneFloor(current);
+            if (!state.mapDraft || state.mapDraft.id !== current.id) {
+                state.mapDraft = cloneFloor(current);
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+            }
             return;
         }
         state.floorId = floors.length ? floors[0].id : 0;
         state.mapDraft = floors.length ? cloneFloor(floors[0]) : null;
         state.mapSelection = null;
         state.mapGroup = [];
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
     }
 
     function chooseBuilding(id) {
@@ -14671,6 +14685,8 @@
         state.mapSelection = null;
         state.mapGroup = [];
         state.mapCam = null;
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
         if (!floors.length) state.mapEditing = false;
         renderFrame();
     }
@@ -15190,6 +15206,8 @@
         state.mapStamp = '';
         state.mapNaming = false;
         state.mapGroup = [];
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
         var floor = currentFloor();
         state.mapDraft = floor ? cloneFloor(floor) : null;
         renderFrame();
@@ -15216,6 +15234,8 @@
                 state.mapSelection = null;
                 state.mapGroup = [];
                 state.mapCam = null;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
                 renderFrame();
             });
             chip.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -15240,10 +15260,16 @@
         return bar;
     }
 
+    function mapHint() {
+        if (state.mapStamp) return t('mapPlaceHint');
+        if (state.mapAnchor && (state.mapTool === 'wall' || state.mapTool === 'partition')) return t('mapChainHint');
+        return t('mapDrawHint');
+    }
+
     function mapCatalog() {
         var side = el('aside', 'asset-tree-catalog');
         side.appendChild(mapToolGrid());
-        side.appendChild(el('p', 'asset-tree-catalog-hint', state.mapStamp ? t('mapPlaceHint') : t('mapDrawHint')));
+        side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
         side.appendChild(el('h3', null, t('mapFurnReady')));
         var ready = el('div', 'asset-tree-thumb-grid');
         builtinFurniture().forEach(function (tpl) { ready.appendChild(thumbCard(tpl)); });
@@ -15268,6 +15294,8 @@
             var tool = button('', 'asset-tree-tool' + (on ? ' is-on' : ''), function () {
                 state.mapTool = pair[0];
                 state.mapStamp = '';
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
                 renderFrame();
             });
             tool.appendChild(mapToolIcon(pair[0]));
@@ -15283,6 +15311,10 @@
     function thumbCard(tpl) {
         var on = state.mapStamp === tpl.id;
         var card = button('', 'asset-tree-thumb-card' + (on ? ' is-on' : ''), function (event) {
+            if (state.mapSuppressClick) {
+                state.mapSuppressClick = false;
+                return;
+            }
             var target = event && event.target;
             if (target && target.classList && target.classList.contains('asset-tree-furn-x')) {
                 removeFurniture(tpl.id);
@@ -15295,8 +15327,56 @@
                 state.mapStamp = tpl.id;
                 state.mapTool = 'stamp';
                 state.mapAssetId = 0;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
             }
             renderFrame();
+        });
+        card.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            var target = event.target;
+            if (target && target.classList && target.classList.contains('asset-tree-furn-x')) return;
+            var startX = event.clientX;
+            var startY = event.clientY;
+            var ghost = null;
+            var dragging = false;
+            function move(ev) {
+                var dx = ev.clientX - startX;
+                var dy = ev.clientY - startY;
+                if (!dragging && dx * dx + dy * dy < 25) return;
+                if (!dragging) ev.preventDefault();
+                dragging = true;
+                if (!ghost) {
+                    ghost = document.createElement('div');
+                    ghost.className = 'asset-tree-plan-ghost';
+                    ghost.appendChild(furnitureThumb(tpl));
+                    document.body.appendChild(ghost);
+                }
+                ghost.style.left = (ev.clientX + 12) + 'px';
+                ghost.style.top = (ev.clientY + 12) + 'px';
+            }
+            function up(ev) {
+                window.removeEventListener('mousemove', move);
+                window.removeEventListener('mouseup', up);
+                if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+                if (!dragging) return;
+                state.mapSuppressClick = true;
+                setTimeout(function () { state.mapSuppressClick = false; }, 0);
+                var canvas = document.querySelector('#asset-tree-app .asset-tree-floorplan .asset-tree-canvas');
+                if (!canvas || !state.mapDraft) return;
+                var rect = canvas.getBoundingClientRect();
+                if (ev.clientX < rect.left || ev.clientX > rect.right || ev.clientY < rect.top || ev.clientY > rect.bottom) return;
+                state.mapStamp = tpl.id;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+                var point = svgPoint(canvas, ev);
+                placeStamp(state.mapDraft, point.x, point.y);
+                state.mapStamp = '';
+                state.mapTool = 'select';
+                renderFrame();
+            }
+            window.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', up);
         });
         card.appendChild(furnitureThumb(tpl));
         var caption = el('span', 'asset-tree-thumb-name', tpl.name);
@@ -15423,6 +15503,8 @@
                 state.mapAssetId = asset.id;
                 state.mapTool = 'select';
                 state.mapStamp = '';
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
                 renderFrame();
             });
             buttonRow.appendChild(el('strong', null, asset.name || asset.objectKey || ''));
@@ -15520,6 +15602,8 @@
                 state.mapEditing = !!edit || state.mapEditing;
                 state.mapDirty = false;
                 state.mapCam = null;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
         });
@@ -15539,6 +15623,8 @@
                 state.mapSelection = null;
                 state.mapGroup = [];
                 state.mapCam = null;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
                 if (!left.length) state.mapEditing = false;
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
@@ -15575,6 +15661,298 @@
             x: cx + dx * cos - dy * sin,
             y: cy + dx * sin + dy * cos
         };
+    }
+
+    function isSegmentKind(kind) {
+        return kind === 'wall' || kind === 'partition';
+    }
+
+    function isThinKind(kind) {
+        return kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window';
+    }
+
+    function segmentLocalEnds(room) {
+        if (room.w >= room.h) return [[0, room.h / 2], [room.w, room.h / 2]];
+        return [[room.w / 2, 0], [room.w / 2, room.h]];
+    }
+
+    function segmentEnds(room) {
+        var local = segmentLocalEnds(room);
+        return [
+            localToWorld(room, local[0][0], local[0][1]),
+            localToWorld(room, local[1][0], local[1][1])
+        ];
+    }
+
+    function wallAngle(room) {
+        if (room.h > room.w) return normalizeAngle((room.angle || 0) + 90);
+        return normalizeAngle(room.angle || 0);
+    }
+
+    function angleDelta(a, b) {
+        var d = Math.abs(normalizeAngle(a) - normalizeAngle(b));
+        if (d > 180) d = 360 - d;
+        if (d > 90) d = 180 - d;
+        return d;
+    }
+
+    function nearestEnd(x, y, ignoreIndex, radius) {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var best = null;
+        var limit = radius * radius;
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (i === ignoreIndex) continue;
+            if (!isSegmentKind(rooms[i].kind)) continue;
+            var ends = segmentEnds(rooms[i]);
+            var n;
+            for (n = 0; n < ends.length; n++) {
+                var dx = ends[n].x - x;
+                var dy = ends[n].y - y;
+                var dist = dx * dx + dy * dy;
+                if (dist <= limit) {
+                    limit = dist;
+                    best = ends[n];
+                }
+            }
+        }
+        return best;
+    }
+
+    function snapStart(x, y) {
+        var join = nearestEnd(x, y, -1, 16);
+        if (join) return { x: join.x, y: join.y };
+        return { x: snapCoord(x), y: snapCoord(y) };
+    }
+
+    function aimWallEnd(origin, point, loose) {
+        var dx = point.x - origin.x;
+        var dy = point.y - origin.y;
+        var length = Math.sqrt(dx * dx + dy * dy);
+        if (length < 1) return { x: origin.x, y: origin.y };
+        var angle = snapAngle(Math.atan2(dy, dx) * 180 / Math.PI, loose);
+        var rad = angle * Math.PI / 180;
+        var snapped = Math.max(8, snapCoord(length));
+        return {
+            x: origin.x + Math.cos(rad) * snapped,
+            y: origin.y + Math.sin(rad) * snapped
+        };
+    }
+
+    function resolveEnd(origin, point, loose, ignoreIndex) {
+        var join = nearestEnd(point.x, point.y, ignoreIndex, 18);
+        if (join) {
+            var dx = join.x - origin.x;
+            var dy = join.y - origin.y;
+            if (dx * dx + dy * dy >= 64) return { x: join.x, y: join.y };
+        }
+        return aimWallEnd(origin, point, loose);
+    }
+
+    function applySegment(room, ax, ay, bx, by) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var length = Math.sqrt(dx * dx + dy * dy);
+        var kind = room.kind || 'wall';
+        var min = Math.max(roomMin(kind), 8);
+        if (length < min) return null;
+        var thick = room.h;
+        if (room.w && room.w < room.h) thick = room.w;
+        if (!thick || thick < 1) thick = kind === 'partition' ? 4 : (kind === 'wall' ? 8 : 10);
+        var w = Math.max(min, Math.round(length));
+        var h = Math.max(roomMin(kind), Math.round(thick));
+        var mx = (ax + bx) / 2;
+        var my = (ay + by) / 2;
+        return clampRoom({
+            name: room.name || '',
+            kind: kind,
+            color: room.color || '',
+            angle: normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI),
+            x: mx - w / 2,
+            y: my - h / 2,
+            w: w,
+            h: h
+        });
+    }
+
+    function projectOnSegment(ax, ay, bx, by, px, py) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var span2 = dx * dx + dy * dy;
+        if (span2 < 1) return null;
+        var t = ((px - ax) * dx + (py - ay) * dy) / span2;
+        var qx = ax + dx * t;
+        var qy = ay + dy * t;
+        var ex = px - qx;
+        var ey = py - qy;
+        return { t: t, x: qx, y: qy, dist: Math.sqrt(ex * ex + ey * ey), span: Math.sqrt(span2) };
+    }
+
+    function nearestWall(x, y, maxDist) {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var best = null;
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (!isSegmentKind(rooms[i].kind)) continue;
+            var ends = segmentEnds(rooms[i]);
+            var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, x, y);
+            if (!hit || hit.t < 0 || hit.t > 1 || hit.dist > maxDist) continue;
+            if (!best || hit.dist < best.dist) best = { index: i, room: rooms[i], t: hit.t, dist: hit.dist };
+        }
+        return best;
+    }
+
+    function seatOpening(kind, wall, t, length) {
+        var wallThick = wall.w >= wall.h ? wall.h : wall.w;
+        var thick = Math.max(wallThick, 10);
+        var span = wall.w >= wall.h ? wall.w : wall.h;
+        var len = length || (kind === 'window' ? 96 : 80);
+        if (len < 8) len = 8;
+        var use = t;
+        if (span <= len) {
+            use = 0.5;
+            len = Math.max(8, Math.round(span));
+        } else {
+            var margin = (len / 2) / span;
+            if (use < margin) use = margin;
+            if (use > 1 - margin) use = 1 - margin;
+        }
+        var ends = segmentEnds(wall);
+        var px = ends[0].x + (ends[1].x - ends[0].x) * use;
+        var py = ends[0].y + (ends[1].y - ends[0].y) * use;
+        return clampRoom({
+            kind: kind,
+            name: '',
+            color: '',
+            angle: wallAngle(wall),
+            x: px - len / 2,
+            y: py - thick / 2,
+            w: Math.round(len),
+            h: thick
+        });
+    }
+
+    function openingsOnWall(wallIndex) {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var wall = rooms[wallIndex];
+        var list = [];
+        if (!wall || !isSegmentKind(wall.kind)) return list;
+        var ends = segmentEnds(wall);
+        var direction = wallAngle(wall);
+        rooms.forEach(function (room, index) {
+            if (room.kind !== 'door' && room.kind !== 'window') return;
+            var cx = room.x + room.w / 2;
+            var cy = room.y + room.h / 2;
+            var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, cx, cy);
+            if (!hit || hit.t < -0.02 || hit.t > 1.02 || hit.dist > 22) return;
+            if (angleDelta(room.angle, direction) > 15) return;
+            list.push({ index: index, t: hit.t, length: room.w >= room.h ? room.w : room.h });
+        });
+        return list;
+    }
+
+    function reseatOpenings(svg, wallIndex, attached) {
+        var rooms = state.mapDraft && state.mapDraft.rooms;
+        if (!rooms || !attached) return;
+        var wall = rooms[wallIndex];
+        if (!wall) return;
+        var groups = svg ? svg.querySelectorAll('.asset-tree-shape') : null;
+        attached.forEach(function (item) {
+            var opening = rooms[item.index];
+            if (!opening) return;
+            var next = seatOpening(opening.kind, wall, item.t, item.length);
+            if (!next) return;
+            opening.x = next.x;
+            opening.y = next.y;
+            opening.w = next.w;
+            opening.h = next.h;
+            opening.angle = next.angle;
+            if (!groups) return;
+            var group = groups[item.index];
+            if (!group) return;
+            group.setAttribute('transform', shapeTransform(opening));
+            var rect = group.querySelector('.asset-tree-room');
+            if (rect) {
+                rect.setAttribute('width', String(opening.w));
+                rect.setAttribute('height', String(opening.h));
+            }
+        });
+    }
+
+    function pushShape(floor, shape) {
+        if (!shape) return false;
+        floor.rooms = floor.rooms || [];
+        if (floor.rooms.length >= 400) return false;
+        floor.rooms.push(shape);
+        state.mapSelection = floor.rooms.length - 1;
+        state.mapGroup = [];
+        state.mapDirty = true;
+        return true;
+    }
+
+    function commitSegment(floor, tool, ax, ay, bx, by) {
+        var thick = tool === 'partition' ? 4 : 8;
+        return pushShape(floor, applySegment({ kind: tool, name: '', color: '', h: thick, w: thick }, ax, ay, bx, by));
+    }
+
+    function placeOpeningAt(floor, kind, x, y) {
+        var hit = nearestWall(x, y, 28);
+        if (hit) return pushShape(floor, seatOpening(kind, hit.room, hit.t, kind === 'window' ? 96 : 80));
+        var len = kind === 'window' ? 96 : 80;
+        return pushShape(floor, clampRoom({
+            kind: kind,
+            name: '',
+            angle: 0,
+            x: snapCoord(x) - len / 2,
+            y: snapCoord(y) - 5,
+            w: len,
+            h: 10
+        }));
+    }
+
+    function applyWallCap(rect, room) {
+        var kind = room.kind || 'room';
+        if (isSegmentKind(kind) && room.w >= room.h) {
+            rect.setAttribute('x', String(-room.h / 2));
+            rect.setAttribute('y', '0');
+            rect.setAttribute('width', String(room.w + room.h));
+            rect.setAttribute('height', String(room.h));
+            return;
+        }
+        if (isSegmentKind(kind) && room.h > room.w) {
+            rect.setAttribute('x', '0');
+            rect.setAttribute('y', String(-room.w / 2));
+            rect.setAttribute('width', String(room.w));
+            rect.setAttribute('height', String(room.h + room.w));
+            return;
+        }
+        rect.setAttribute('x', '0');
+        rect.setAttribute('y', '0');
+        rect.setAttribute('width', String(room.w));
+        rect.setAttribute('height', String(room.h));
+    }
+
+    function placeDimension(node, room) {
+        var long = room.w >= room.h ? room.w : room.h;
+        node.textContent = String(Math.round(long));
+        node.setAttribute('text-anchor', 'middle');
+        if (room.w >= room.h) {
+            node.setAttribute('x', String(room.w / 2));
+            node.setAttribute('y', '-4');
+            node.removeAttribute('transform');
+            return;
+        }
+        node.setAttribute('x', '-4');
+        node.setAttribute('y', String(room.h / 2));
+        node.setAttribute('transform', 'rotate(-90 -4 ' + (room.h / 2) + ')');
+    }
+
+    function appendDimension(parent, room) {
+        if (!isSegmentKind(room.kind)) return;
+        var node = svgEl('text');
+        node.setAttribute('class', 'asset-tree-dim');
+        placeDimension(node, room);
+        parent.appendChild(node);
     }
 
     function floorCanvas(floor, editing) {
@@ -15684,6 +16062,14 @@
                 startPan(svg, event);
             }
         });
+        if (editing && state.mapAnchor && isSegmentKind(state.mapTool)) {
+            var anchorDot = svgEl('circle');
+            anchorDot.setAttribute('cx', String(state.mapAnchor.x));
+            anchorDot.setAttribute('cy', String(state.mapAnchor.y));
+            anchorDot.setAttribute('r', '6');
+            anchorDot.setAttribute('class', 'asset-tree-anchor');
+            svg.appendChild(anchorDot);
+        }
         if (editing) {
             svg.addEventListener('mousedown', function (event) {
                 if (event.button === 1) {
@@ -15698,25 +16084,100 @@
                     return;
                 }
                 if (state.mapTool === 'select') return;
+                var segmentTool = isSegmentKind(state.mapTool);
+                var openingTool = state.mapTool === 'door' || state.mapTool === 'window';
+                if (segmentTool && state.mapChainDoneAt && (Date.now() - state.mapChainDoneAt) < 450) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                if (segmentTool && state.mapClickAt && (Date.now() - state.mapClickAt) < 400
+                    && Math.abs(event.clientX - state.mapClickX) < 8
+                    && Math.abs(event.clientY - state.mapClickY) < 8) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    state.mapAnchor = null;
+                    state.mapClickAt = 0;
+                    state.mapChainDoneAt = Date.now();
+                    renderFrame();
+                    return;
+                }
                 event.preventDefault();
                 var point = svgPoint(svg, event);
-                beginDrag(svg, { kind: state.mapTool, x0: point.x, y0: point.y, x1: point.x, y1: point.y }, function (move) {
+                beginDrag(svg, {
+                    kind: state.mapTool,
+                    downX: point.x,
+                    downY: point.y,
+                    x0: point.x,
+                    y0: point.y,
+                    x1: point.x,
+                    y1: point.y,
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    shift: !!event.shiftKey,
+                    loose: false,
+                    moved: false
+                }, function (move) {
                     var next = svgPoint(svg, move);
-                    state.mapDrag.x1 = next.x;
-                    state.mapDrag.y1 = next.y;
+                    var cdx = move.clientX - state.mapDrag.clientX;
+                    var cdy = move.clientY - state.mapDrag.clientY;
+                    if (cdx * cdx + cdy * cdy > 36) state.mapDrag.moved = true;
+                    state.mapDrag.shift = !!move.shiftKey;
+                    if (segmentTool || openingTool) {
+                        var origin = snapStart(state.mapDrag.downX, state.mapDrag.downY);
+                        var end = resolveEnd(origin, next, move.shiftKey, -1);
+                        state.mapDrag.x0 = origin.x;
+                        state.mapDrag.y0 = origin.y;
+                        state.mapDrag.x1 = end.x;
+                        state.mapDrag.y1 = end.y;
+                        state.mapDrag.loose = true;
+                    } else {
+                        state.mapDrag.x1 = next.x;
+                        state.mapDrag.y1 = next.y;
+                    }
                     paintRoomPreview(svg);
                 }, function (finished) {
                     if (!finished) return;
-                    var shape = shapeFromDrag(finished.kind, finished.x0, finished.y0, finished.x1, finished.y1);
-                    if (shape) {
-                        floor.rooms = floor.rooms || [];
-                        floor.rooms.push(shape);
-                        state.mapSelection = floor.rooms.length - 1;
-                        state.mapGroup = [];
-                        state.mapDirty = true;
+                    var tool = finished.kind;
+                    if (isSegmentKind(tool)) {
+                        if (finished.moved) {
+                            if (commitSegment(floor, tool, finished.x0, finished.y0, finished.x1, finished.y1)) {
+                                state.mapAnchor = { x: finished.x1, y: finished.y1 };
+                            }
+                            state.mapClickAt = 0;
+                        } else if (state.mapAnchor) {
+                            var chained = resolveEnd(state.mapAnchor, { x: finished.downX, y: finished.downY }, finished.shift, -1);
+                            if (commitSegment(floor, tool, state.mapAnchor.x, state.mapAnchor.y, chained.x, chained.y)) {
+                                state.mapAnchor = { x: chained.x, y: chained.y };
+                            }
+                            state.mapClickAt = Date.now();
+                            state.mapClickX = finished.clientX;
+                            state.mapClickY = finished.clientY;
+                        } else {
+                            state.mapAnchor = snapStart(finished.downX, finished.downY);
+                            state.mapClickAt = Date.now();
+                            state.mapClickX = finished.clientX;
+                            state.mapClickY = finished.clientY;
+                        }
+                        renderFrame();
+                        return;
+                    }
+                    state.mapAnchor = null;
+                    state.mapClickAt = 0;
+                    if (tool === 'door' || tool === 'window') {
+                        if (finished.moved) pushShape(floor, shapeFromDrag(tool, finished.x0, finished.y0, finished.x1, finished.y1, true));
+                        else placeOpeningAt(floor, tool, finished.downX, finished.downY);
+                    } else {
+                        pushShape(floor, shapeFromDrag(tool, finished.x0, finished.y0, finished.x1, finished.y1, false));
                     }
                     renderFrame();
                 });
+            });
+            svg.addEventListener('mousemove', function (event) {
+                if (state.mapDrag || !state.mapAnchor || !isSegmentKind(state.mapTool)) return;
+                var next = svgPoint(svg, event);
+                var end = resolveEnd(state.mapAnchor, next, event.shiftKey, -1);
+                paintPreviewBox(svg, shapeFromDrag(state.mapTool, state.mapAnchor.x, state.mapAnchor.y, end.x, end.y, true));
             });
         }
         svg.addEventListener('wheel', function (event) {
@@ -15732,10 +16193,7 @@
         group.setAttribute('class', 'asset-tree-shape');
         group.setAttribute('transform', shapeTransform(room));
         var rect = svgEl('rect');
-        rect.setAttribute('x', '0');
-        rect.setAttribute('y', '0');
-        rect.setAttribute('width', String(room.w));
-        rect.setAttribute('height', String(room.h));
+        applyWallCap(rect, room);
         var kindName = room.kind || 'room';
         rect.setAttribute('class', 'asset-tree-room is-' + kindName + (options && options.selected ? ' is-selected' : ''));
         if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
@@ -15743,6 +16201,7 @@
         decorateRoom(group, room);
         appendOpening(group, room);
         appendLabel(group, room);
+        appendDimension(group, room);
         if (options && options.editing) {
             rect.addEventListener('mousedown', function (event) {
                 if (event.button === 1) return;
@@ -15770,23 +16229,43 @@
                     dy: point.y - room.y,
                     moved: false,
                     x0: point.x,
-                    y0: point.y
+                    y0: point.y,
+                    attached: isSegmentKind(room.kind) ? openingsOnWall(index) : null
                 }, function (move) {
                     var next = svgPoint(options.svg, move);
                     var dx = next.x - state.mapDrag.x0;
                     var dy = next.y - state.mapDrag.y0;
                     if (!state.mapDrag.moved && dx * dx + dy * dy < 16) return;
                     state.mapDrag.moved = true;
+                    if (room.kind === 'door' || room.kind === 'window') {
+                        var hit = nearestWall(next.x, next.y, 40);
+                        if (hit) {
+                            var seated = seatOpening(room.kind, hit.room, hit.t, room.w >= room.h ? room.w : room.h);
+                            if (seated) {
+                                room.x = seated.x;
+                                room.y = seated.y;
+                                room.w = seated.w;
+                                room.h = seated.h;
+                                room.angle = seated.angle;
+                                rect.setAttribute('width', String(room.w));
+                                rect.setAttribute('height', String(room.h));
+                                group.setAttribute('transform', shapeTransform(room));
+                                state.mapDirty = true;
+                                return;
+                            }
+                        }
+                    }
                     room.x = clampNum(snapCoord(next.x - state.mapDrag.dx), 0, options.size.w - room.w);
                     room.y = clampNum(snapCoord(next.y - state.mapDrag.dy), 0, options.size.h - room.h);
                     group.setAttribute('transform', shapeTransform(room));
+                    if (state.mapDrag.attached) reseatOpenings(options.svg, index, state.mapDrag.attached);
                     state.mapDirty = true;
                 }, function (finished) {
                     if (finished && !finished.moved && state.mapAssetId) placeArmedPin(options.floor, finished.x0, finished.y0);
                     renderFrame();
                 });
             });
-            if (options.primary) drawRoomHandles(group, rect, room, options);
+            if (options.primary && state.mapTool === 'select' && !state.mapStamp) drawRoomHandles(group, rect, room, options);
         }
         return group;
     }
@@ -15908,8 +16387,7 @@
     }
 
     function syncShape(group, rect, room) {
-        rect.setAttribute('width', String(room.w));
-        rect.setAttribute('height', String(room.h));
+        applyWallCap(rect, room);
         group.setAttribute('transform', shapeTransform(room));
         var nodes = group.querySelectorAll('.asset-tree-handle');
         var spots = [[0, 0], [room.w, 0], [0, room.h], [room.w, room.h]];
@@ -15918,6 +16396,16 @@
             nodes[i].setAttribute('x', String(spots[i][0] - 5));
             nodes[i].setAttribute('y', String(spots[i][1] - 5));
         }
+        var ends = group.querySelectorAll('.asset-tree-end');
+        if (ends.length) {
+            var local = segmentLocalEnds(room);
+            for (i = 0; i < ends.length && i < local.length; i++) {
+                ends[i].setAttribute('cx', String(local[i][0]));
+                ends[i].setAttribute('cy', String(local[i][1]));
+            }
+        }
+        var dim = group.querySelector('.asset-tree-dim');
+        if (dim) placeDimension(dim, room);
         var knob = group.querySelector('.asset-tree-rotate');
         if (knob) {
             knob.setAttribute('cx', String(room.w / 2));
@@ -15983,7 +16471,49 @@
         room.angle = next.angle;
     }
 
+    function drawEndHandles(group, rect, room, options) {
+        var local = segmentLocalEnds(room);
+        local.forEach(function (spot, which) {
+            var handle = svgEl('circle');
+            handle.setAttribute('cx', String(spot[0]));
+            handle.setAttribute('cy', String(spot[1]));
+            handle.setAttribute('r', '7');
+            handle.setAttribute('class', 'asset-tree-end');
+            handle.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                var ends = segmentEnds(room);
+                var fixed = which === 0 ? ends[1] : ends[0];
+                var attached = isSegmentKind(room.kind) ? openingsOnWall(options.index) : null;
+                beginDrag(options.svg, { kind: 'end' }, function (move) {
+                    var point = svgPoint(options.svg, move);
+                    var end = resolveEnd(fixed, point, move.shiftKey, options.index);
+                    var ax = which === 0 ? end.x : fixed.x;
+                    var ay = which === 0 ? end.y : fixed.y;
+                    var bx = which === 0 ? fixed.x : end.x;
+                    var by = which === 0 ? fixed.y : end.y;
+                    var next = applySegment(room, ax, ay, bx, by);
+                    if (!next) return;
+                    room.x = next.x;
+                    room.y = next.y;
+                    room.w = next.w;
+                    room.h = next.h;
+                    room.angle = next.angle;
+                    syncShape(group, rect, room);
+                    if (attached) reseatOpenings(options.svg, options.index, attached);
+                    state.mapDirty = true;
+                }, function () { renderFrame(); });
+            });
+            group.appendChild(handle);
+        });
+    }
+
     function drawRoomHandles(group, rect, room, options) {
+        if (isThinKind(room.kind)) {
+            drawEndHandles(group, rect, room, options);
+            return;
+        }
         var opposite = { nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' };
         [
             ['nw', 0, 0, 'nwse-resize'],
@@ -16144,16 +16674,17 @@
         angle.type = 'number';
         angle.min = '0';
         angle.max = '359';
-        angle.step = '15';
+        angle.step = '1';
         angle.value = String(normalizeAngle(room.angle));
         angle.className = 'asset-tree-plan-size';
         angle.setAttribute('aria-label', t('mapAngle'));
         function applySize() {
+            var attached = isSegmentKind(room.kind) ? openingsOnWall(state.mapSelection) : null;
             var next = clampRoom({
                 name: room.name,
                 kind: room.kind,
                 color: room.color,
-                angle: snapAngle(angle.value),
+                angle: normalizeAngle(angle.value),
                 x: room.x,
                 y: room.y,
                 w: Number(width.value),
@@ -16171,6 +16702,7 @@
             room.w = next.w;
             room.h = next.h;
             room.angle = next.angle;
+            if (attached) reseatOpenings(null, state.mapSelection, attached);
             state.mapDirty = true;
             renderFrame();
         }
@@ -16253,14 +16785,8 @@
         return room.name || t('mapRoom');
     }
 
-    function paintRoomPreview(svg) {
-        var drag = state.mapDrag;
+    function paintPreviewBox(svg, shape) {
         var node = svg.querySelector('#asset-tree-room-preview');
-        if (!drag || drag.kind === 'move' || drag.kind === 'pin' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'pan') {
-            if (node && node.parentNode) node.parentNode.removeChild(node);
-            return;
-        }
-        var shape = shapeFromDrag(drag.kind, drag.x0, drag.y0, drag.x1, drag.y1);
         if (!shape) {
             if (node && node.parentNode) node.parentNode.removeChild(node);
             return;
@@ -16275,17 +16801,27 @@
         node.setAttribute('width', String(shape.w));
         node.setAttribute('height', String(shape.h));
         var angle = normalizeAngle(shape.angle);
-        if (angle) {
-            node.setAttribute('transform', 'rotate(' + angle + ' ' + (shape.x + shape.w / 2) + ' ' + (shape.y + shape.h / 2) + ')');
-        } else node.removeAttribute('transform');
+        if (angle) node.setAttribute('transform', 'rotate(' + angle + ' ' + (shape.x + shape.w / 2) + ' ' + (shape.y + shape.h / 2) + ')');
+        else node.removeAttribute('transform');
     }
 
-    function shapeFromDrag(tool, x0, y0, x1, y1) {
-        x0 = snapCoord(x0);
-        y0 = snapCoord(y0);
-        x1 = snapCoord(x1);
-        y1 = snapCoord(y1);
-        var thin = tool === 'wall' || tool === 'partition' || tool === 'door' || tool === 'window';
+    function paintRoomPreview(svg) {
+        var drag = state.mapDrag;
+        if (!drag || drag.kind === 'move' || drag.kind === 'pin' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'pan' || drag.kind === 'end') {
+            paintPreviewBox(svg, null);
+            return;
+        }
+        paintPreviewBox(svg, shapeFromDrag(drag.kind, drag.x0, drag.y0, drag.x1, drag.y1, drag.loose));
+    }
+
+    function shapeFromDrag(tool, x0, y0, x1, y1, loose) {
+        if (!loose) {
+            x0 = snapCoord(x0);
+            y0 = snapCoord(y0);
+            x1 = snapCoord(x1);
+            y1 = snapCoord(y1);
+        }
+        var thin = isThinKind(tool);
         if (thin) {
             var dx = x1 - x0;
             var dy = y1 - y0;
@@ -16297,10 +16833,11 @@
             var h = thick;
             var mx = (x0 + x1) / 2;
             var my = (y0 + y1) / 2;
+            var deg = Math.atan2(dy, dx) * 180 / Math.PI;
             return clampRoom({
                 kind: tool,
                 name: '',
-                angle: snapAngle(Math.atan2(dy, dx) * 180 / Math.PI),
+                angle: loose ? normalizeAngle(deg) : snapAngle(deg),
                 x: mx - w / 2,
                 y: my - h / 2,
                 w: w,
@@ -18104,6 +18641,14 @@
         if (state.view === 'map' && state.mapEditing && state.mapDraft && !document.querySelector('.asset-tree-backdrop')) {
             var tag = event.target && event.target.tagName;
             if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+                if (event.key === 'Escape' && state.mapAnchor) {
+                    event.preventDefault();
+                    state.mapAnchor = null;
+                    state.mapClickAt = 0;
+                    state.mapChainDoneAt = 0;
+                    renderFrame();
+                    return;
+                }
                 var rooms = state.mapDraft.rooms || [];
                 var room = state.mapSelection != null ? rooms[state.mapSelection] : null;
                 var step = state.mapStep || 8;
@@ -18112,8 +18657,25 @@
                     var box = planSize(state.mapDraft);
                     var dx = event.key === 'ArrowLeft' ? -step : (event.key === 'ArrowRight' ? step : 0);
                     var dy = event.key === 'ArrowUp' ? -step : (event.key === 'ArrowDown' ? step : 0);
-                    room.x = clampNum(room.x + dx, 0, box.w - room.w);
-                    room.y = clampNum(room.y + dy, 0, box.h - room.h);
+                    var attached = isSegmentKind(room.kind) ? openingsOnWall(state.mapSelection) : null;
+                    if (room.kind === 'door' || room.kind === 'window') {
+                        var hit = nearestWall(room.x + room.w / 2 + dx, room.y + room.h / 2 + dy, 64);
+                        var seated = hit ? seatOpening(room.kind, hit.room, hit.t, room.w >= room.h ? room.w : room.h) : null;
+                        if (seated) {
+                            room.x = seated.x;
+                            room.y = seated.y;
+                            room.w = seated.w;
+                            room.h = seated.h;
+                            room.angle = seated.angle;
+                        } else {
+                            room.x = clampNum(room.x + dx, 0, box.w - room.w);
+                            room.y = clampNum(room.y + dy, 0, box.h - room.h);
+                        }
+                    } else {
+                        room.x = clampNum(room.x + dx, 0, box.w - room.w);
+                        room.y = clampNum(room.y + dy, 0, box.h - room.h);
+                        if (attached) reseatOpenings(null, state.mapSelection, attached);
+                    }
                     state.mapDirty = true;
                     renderFrame();
                 }

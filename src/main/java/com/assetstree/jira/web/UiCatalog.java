@@ -1149,6 +1149,7 @@ public final class UiCatalog {
             "mapFloors",
             "mapFloor",
             "mapDrawHint",
+            "mapChainHint",
             "reportGroupBy",
             "reportCount",
             "reportShare",

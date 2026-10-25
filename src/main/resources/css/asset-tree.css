@@ -9195,6 +9195,48 @@ a.asset-tree-url {
     pointer-events: none;
 }
 
+#asset-tree-app .asset-tree-end {
+    fill: #fff;
+    stroke: #0052cc;
+    stroke-width: 2;
+    cursor: grab;
+}
+
+#asset-tree-app .asset-tree-dim {
+    fill: #42526e;
+    font-size: 11px;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-anchor {
+    fill: #0052cc;
+    stroke: #fff;
+    stroke-width: 2;
+    pointer-events: none;
+}
+
+.asset-tree-plan-ghost {
+    position: fixed;
+    z-index: 4000;
+    width: 84px;
+    height: 56px;
+    padding: 4px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 8px;
+    box-shadow: 0 8px 20px rgba(9, 30, 66, 0.18);
+    pointer-events: none;
+    opacity: 0.92;
+}
+
+.asset-tree-plan-ghost .asset-tree-thumb {
+    display: block;
+    width: 76px;
+    height: 48px;
+    pointer-events: none;
+}
+
 #asset-tree-app .asset-tree-floorplan .asset-tree-map-empty {
     margin: auto;
     padding: 24px;
