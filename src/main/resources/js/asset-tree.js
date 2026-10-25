@@ -10786,7 +10786,19 @@
         return true;
     }
 
+    function refreshPortalSettings() {
+        if (state.view === 'settings' && state.schemaTab === 'portal') renderFrame();
+    }
+
     function openModuleSetup(moduleKey) {
+        if (moduleKey === 'portal') {
+            closeAllModals();
+            state.view = 'settings';
+            state.schemaTab = 'portal';
+            rememberView('settings');
+            renderFrame();
+            return;
+        }
         closeAllModals();
         state.moduleDialog = moduleKey;
         var root = document.getElementById('asset-tree-app') || document.body;
@@ -11164,6 +11176,7 @@
         if (state.canConfigure) {
             sections.push(['statuses', t('statusSection'), (state.statuses || []).length]);
             sections.push(['types', t('typesSection'), state.types.length]);
+            if (moduleOn('portal')) sections.push(['portal', t('portalSection'), null]);
         }
         if (state.canGrant) {
             sections.push(['access', t('accessSection'), state.grants ? state.grants.length : null]);
@@ -11206,6 +11219,10 @@
             renderAccessSettings(panel);
         } else if (state.schemaTab === 'project') {
             renderProjectSettings(panel);
+        } else if (state.schemaTab === 'portal') {
+            panel.classList.add('is-portal');
+            renderPortalSettings(panel);
+            fitPortalPanel(panel);
         } else {
             renderStatusSettings(panel);
         }
@@ -18354,7 +18371,7 @@
                 state.flowReady = true;
                 state.flowLoading = false;
                 if (!state.flowDraft) state.flowDraft = cloneBook(state.flowBook);
-                if (state.moduleDialog === 'portal') refreshModuleDialog();
+                refreshPortalSettings();
             }
             ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/flow-graph', null, function (status, payload) {
                 if (state.projectKey !== projectKey) return;
@@ -18794,7 +18811,7 @@
                     state.portalRules = [];
                     notify((payload && payload.message) || t('errorTitle'));
                 }
-                if (state.moduleDialog === 'portal') refreshModuleDialog();
+                refreshPortalSettings();
             });
             renderFlowSettings(layout);
             return;
