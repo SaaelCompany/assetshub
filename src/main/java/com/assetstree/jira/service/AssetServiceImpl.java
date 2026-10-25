@@ -6082,6 +6082,9 @@ public class AssetServiceImpl implements AssetService {
                 } else if (hoursRow.getMarks() == null) {
                     hoursRow.setMarks("");
                 }
+                if (draft != null && draft.getPlaceId() != null) {
+                    hoursRow.setPlaceId(checkedStaffPlace(project.getKey(), draft.getPlaceId().intValue()));
+                }
                 hoursRow.save();
                 return staffDto(hoursRow);
             }
@@ -6239,7 +6242,19 @@ public class AssetServiceImpl implements AssetService {
         dto.setStartOn(row.getStartOn() == null ? "" : row.getStartOn());
         dto.setEndOn(row.getEndOn() == null ? "" : row.getEndOn());
         dto.setMarks(row.getMarks() == null ? "" : row.getMarks());
+        dto.setPlaceId(row.getPlaceId());
         return dto;
+    }
+
+    private int checkedStaffPlace(String projectKey, int placeId) {
+        if (placeId <= 0) {
+            return 0;
+        }
+        AssetEntity place = ao().get(AssetEntity.class, placeId);
+        if (place == null || !ProjectKeys.same(place.getProjectKey(), projectKey) || !isLocation(place)) {
+            throw new AssetException(400, "asset-tree.error.staff");
+        }
+        return place.getID();
     }
 
     private String cleanStaffMarks(String raw) {

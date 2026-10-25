@@ -1139,17 +1139,52 @@ def module_setup(stored, migrate=True):
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
         "staffMarks": pack_staff_marks(stored.get("staffMarks")),
         "staffOrder": pack_staff_order(stored.get("staffOrder")),
+        "scheduleBoards": pack_boards(stored.get("scheduleBoards")),
+        "scheduleOpen": pack_open(stored.get("scheduleOpen"), layer),
         "scheduleKindVersion": 2,
     }
 
 
 DEFAULT_STAFF_MARKS = (
-    ("work", "", "172b4d", 8),
-    ("night", "", "4338ca", 8),
-    ("trip", "", "0f766e", 8),
-    ("leave", "", "d97706", 0),
-    ("sick", "", "e11d48", 0),
+    ("work", "", "172b4d", 8, 1),
+    ("night", "", "4338ca", 8, 2),
+    ("trip", "", "0f766e", 8, 1),
+    ("leave", "", "d97706", 0, 0),
+    ("sick", "", "e11d48", 0, 0),
 )
+
+
+def pack_boards(raw):
+    parts = [part.strip().lower() for part in str(raw or "").split(",") if part.strip()]
+    calendar = "calendar" in parts
+    roster = "roster" in parts
+    if calendar and roster or not calendar and not roster:
+        return "calendar,roster"
+    return "calendar" if calendar else "roster"
+
+
+def pack_open(raw, layer):
+    value = str(raw or "").strip().lower()
+    if value in ("calendar", "roster"):
+        return value
+    if str(layer or "").strip().lower() in ("roster", "staff"):
+        return "roster"
+    return "calendar"
+
+
+def mark_factor(piece, hours, ident):
+    if len(piece) > 4 and str(piece[4]).strip() != "":
+        try:
+            value = int(piece[4])
+        except (TypeError, ValueError):
+            value = -1
+        if value in (0, 1, 2):
+            return value
+    if hours <= 0:
+        return 0
+    if ident == "night":
+        return 2
+    return 1
 
 
 def pack_staff_order(raw):
@@ -1164,7 +1199,9 @@ def pack_staff_order(raw):
 
 
 def pack_staff_marks(raw):
-    source = str(raw or "").strip() or ",".join(f"{item[0]}|{item[1]}|{item[2]}|{item[3]}" for item in DEFAULT_STAFF_MARKS)
+    source = str(raw or "").strip() or ",".join(
+        f"{item[0]}|{item[1]}|{item[2]}|{item[3]}|{item[4]}" for item in DEFAULT_STAFF_MARKS
+    )
     rows = []
     seen = set()
     for part in source.split(","):
@@ -1186,13 +1223,14 @@ def pack_staff_marks(raw):
         except (TypeError, ValueError):
             hours = 8
         hours = max(0, min(24, hours))
-        rows.append((ident, label, color, hours))
+        factor = mark_factor(piece, hours, ident)
+        rows.append((ident, label, color, hours, factor))
     if not any(item[0] == "work" for item in rows):
-        rows.insert(0, ("work", "", "172b4d", 8))
+        rows.insert(0, ("work", "", "172b4d", 8, 1))
         rows = rows[:12]
     if not rows:
         rows = list(DEFAULT_STAFF_MARKS)
-    return ",".join(f"{ident}|{label}|{color}|{hours}" for ident, label, color, hours in rows)
+    return ",".join(f"{ident}|{label}|{color}|{hours}|{factor}" for ident, label, color, hours, factor in rows)
 
 
 def clean_day_marks(raw):
@@ -1313,6 +1351,7 @@ def seed():
         "showInTree": True, "service": False, "sortOrder": 1, "fields": [],
     }
     add_asset("STP", "stp-place", "Усть-Лабинск", None, "in_use", None, {}, "STP-1")
+    add_asset("STP", "stp-place", "Краснодар", None, "in_use", None, {}, "STP-2")
 
 
 def normalize_parent(parent_id):
@@ -1864,6 +1903,7 @@ def staff_dto(row):
         "startOn": row.get("startOn") or "",
         "endOn": row.get("endOn") or "",
         "marks": row.get("marks") or "",
+        "placeId": int(row.get("placeId") or 0),
     }
 
 
@@ -1925,6 +1965,18 @@ def save_staff(project_key, body, text):
         existing["marks"] = clean_day_marks(body.get("marks"))
     elif "marks" not in existing:
         existing["marks"] = ""
+    if "placeId" in body:
+        try:
+            place_id = int(body.get("placeId") or 0)
+        except (TypeError, ValueError):
+            return 400, {"message": text["asset-tree.error.staff"]}
+        if place_id:
+            place = STATE["assets"].get(place_id)
+            if not place or place.get("projectKey") != project_key or not is_location_id(place_id):
+                return 400, {"message": text["asset-tree.error.staff"]}
+        existing["placeId"] = place_id
+    elif "placeId" not in existing:
+        existing["placeId"] = 0
     return 200, staff_dto(existing)
 
 

@@ -12,7 +12,7 @@ import java.util.Map;
 /** Compact storage for {@link ModuleSetupDto}. Unknown keys are ignored. Missing keys keep the defaults. */
 public final class ModuleSetup {
     private static final String DEFAULT_KINDS = "to,kts,verify,staff,event,update";
-    private static final String DEFAULT_MARKS = "work||172b4d|8,night||4338ca|8,trip||0f766e|8,leave||d97706|0,sick||e11d48|0";
+    private static final String DEFAULT_MARKS = "work||172b4d|8|1,night||4338ca|8|2,trip||0f766e|8|1,leave||d97706|0|0,sick||e11d48|0|0";
     private static final int KIND_LIMIT = 24;
     private static final int LABEL_LIMIT = 40;
     private static final List<String> UNITS = Arrays.asList("once", "day", "week", "month", "year");
@@ -40,6 +40,8 @@ public final class ModuleSetup {
         setup.setLifeMonths(Integer.valueOf(months(values.get("months"))));
         setup.setStaffMarks(staffMarks(values.get("marks")));
         setup.setStaffOrder(staffOrder(values.get("order")));
+        setup.setScheduleBoards(boards(values.get("boards")));
+        setup.setScheduleOpen(openBoard(values.get("open"), values.get("layer")));
         return setup;
     }
 
@@ -63,6 +65,8 @@ public final class ModuleSetup {
         append(stored, "months", String.valueOf(months(value.getLifeMonths() == null ? "" : String.valueOf(value.getLifeMonths()))));
         append(stored, "marks", staffMarks(value.getStaffMarks()));
         append(stored, "order", staffOrder(value.getStaffOrder()));
+        append(stored, "boards", boards(value.getScheduleBoards()));
+        append(stored, "open", openBoard(value.getScheduleOpen(), value.getScheduleLayer()));
         return stored.toString();
     }
 
@@ -144,12 +148,13 @@ public final class ModuleSetup {
             }
             String label = markLabel(piece.length > 1 ? piece[1] : "");
             String color = markColor(piece.length > 2 ? piece[2] : "");
-            String hours = String.valueOf(markHours(piece.length > 3 ? piece[3] : "8"));
-            rows.put(id, new String[] { label, color, hours });
+            int hours = markHours(piece.length > 3 ? piece[3] : "8");
+            int factor = markFactor(piece, hours, id);
+            rows.put(id, new String[] { label, color, String.valueOf(hours), String.valueOf(factor) });
         }
         if (!rows.containsKey("work")) {
             Map<String, String[]> withWork = new LinkedHashMap<String, String[]>();
-            withWork.put("work", new String[] { "", "172b4d", "8" });
+            withWork.put("work", new String[] { "", "172b4d", "8", "1" });
             for (Map.Entry<String, String[]> entry : rows.entrySet()) {
                 if (withWork.size() >= 12) {
                     break;
@@ -167,9 +172,58 @@ public final class ModuleSetup {
                 stored.append(',');
             }
             String[] value = entry.getValue();
-            stored.append(entry.getKey()).append('|').append(value[0]).append('|').append(value[1]).append('|').append(value[2]);
+            stored.append(entry.getKey()).append('|').append(value[0]).append('|').append(value[1]).append('|').append(value[2]).append('|').append(value[3]);
         }
         return stored.toString();
+    }
+
+    /** 0 counts days only, 1 uses the person's hours, 2 doubles them. A missing field keeps the old meaning. */
+    private static int markFactor(String[] piece, int hours, String id) {
+        if (piece.length > 4 && piece[4] != null && !piece[4].trim().isEmpty()) {
+            int value = number(piece[4]);
+            if (value == 0 || value == 1 || value == 2) {
+                return value;
+            }
+        }
+        if (hours <= 0) {
+            return 0;
+        }
+        if ("night".equals(id)) {
+            return 2;
+        }
+        return 1;
+    }
+
+    private static String boards(String raw) {
+        boolean calendar = false;
+        boolean roster = false;
+        if (raw != null) {
+            String[] parts = raw.split(",");
+            for (String part : parts) {
+                String id = part == null ? "" : part.trim().toLowerCase(Locale.ROOT);
+                if ("calendar".equals(id)) {
+                    calendar = true;
+                } else if ("roster".equals(id)) {
+                    roster = true;
+                }
+            }
+        }
+        if (calendar && roster || !calendar && !roster) {
+            return "calendar,roster";
+        }
+        return calendar ? "calendar" : "roster";
+    }
+
+    private static String openBoard(String raw, String layer) {
+        String id = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if ("calendar".equals(id) || "roster".equals(id)) {
+            return id;
+        }
+        String storedLayer = layer == null ? "" : layer.trim().toLowerCase(Locale.ROOT);
+        if ("roster".equals(storedLayer) || "staff".equals(storedLayer)) {
+            return "roster";
+        }
+        return "calendar";
     }
 
     private static String staffOrder(String raw) {

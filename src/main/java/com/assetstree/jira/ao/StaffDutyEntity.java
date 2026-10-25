@@ -53,4 +53,9 @@ public interface StaffDutyEntity extends Entity {
     String getMarks();
 
     void setMarks(String marks);
+
+    /** Location asset this person works at. Zero means none. */
+    int getPlaceId();
+
+    void setPlaceId(int placeId);
 }

@@ -21,6 +21,8 @@ public class ModuleSetupDto {
     private Integer lifeMonths;
     private String staffMarks;
     private String staffOrder;
+    private String scheduleBoards;
+    private String scheduleOpen;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -52,4 +54,8 @@ public class ModuleSetupDto {
     public void setStaffMarks(String staffMarks) { this.staffMarks = staffMarks; }
     public String getStaffOrder() { return staffOrder; }
     public void setStaffOrder(String staffOrder) { this.staffOrder = staffOrder; }
+    public String getScheduleBoards() { return scheduleBoards; }
+    public void setScheduleBoards(String scheduleBoards) { this.scheduleBoards = scheduleBoards; }
+    public String getScheduleOpen() { return scheduleOpen; }
+    public void setScheduleOpen(String scheduleOpen) { this.scheduleOpen = scheduleOpen; }
 }

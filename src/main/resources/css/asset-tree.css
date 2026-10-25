@@ -7136,6 +7136,8 @@ a.asset-tree-url {
     position: relative;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     margin: 0 0 12px;
 }
 
@@ -7291,7 +7293,8 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-roster th,
 #asset-tree-app .asset-tree-roster td {
-    height: 40px;
+    height: auto;
+    min-height: 40px;
     padding: 0 2px;
     border: 0;
     border-bottom: 1px solid #eef0f3;
@@ -7308,10 +7311,12 @@ a.asset-tree-url {
     z-index: 1;
     min-width: 300px;
     max-width: 380px;
-    padding: 2px 8px;
+    height: auto;
+    padding: 4px 8px;
     background: #fff;
     text-align: left;
     font-weight: 600;
+    white-space: normal;
 }
 
 #asset-tree-app .asset-tree-roster thead .asset-tree-roster-name,
@@ -7460,8 +7465,43 @@ a.asset-tree-url {
     cursor: pointer;
 }
 
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day,
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-total {
+    height: 40px;
+}
+
 #asset-tree-app .asset-tree-roster td.asset-tree-roster-day {
     padding: 0;
+}
+
+#asset-tree-app .asset-tree-roster-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    min-height: 28px;
+}
+
+#asset-tree-app select.asset-tree-roster-place,
+#asset-tree-app .asset-tree-roster-place {
+    display: block;
+    width: 100%;
+    max-width: 220px;
+    height: 22px !important;
+    min-height: 0 !important;
+    margin: 2px 0 0;
+    padding: 0 4px !important;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #172b4d;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-staff-place-filter {
+    height: 28px;
+    border-radius: 8px;
 }
 
 #asset-tree-app button.asset-tree-roster-hit {
@@ -7885,6 +7925,34 @@ a.asset-tree-url {
     width: 16px;
     height: 16px;
     margin: 0 4px 0 0;
+}
+
+#asset-tree-app button.asset-tree-mark-factor {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 5px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-mark-factor.is-off {
+    color: #6b778c !important;
+}
+
+#asset-tree-app button.asset-tree-mark-factor.is-double {
+    color: #4338ca !important;
+    border-color: #c7d2fe !important;
 }
 
 #asset-tree-app .asset-tree-roster-unit {

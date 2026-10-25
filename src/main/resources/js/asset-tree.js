@@ -439,6 +439,7 @@
         scheduleLayerSet: false,
         schedulePersonFilter: '',
         scheduleFocusAsset: 0,
+        staffPlaceFilter: '',
         staffRows: null,
         staffLoading: false,
         staffToken: 0,
@@ -2137,6 +2138,46 @@
     }
 
     function renderFrame() {
+        var keptScroll = captureViewScroll();
+        try {
+            renderFrameContents();
+        } finally {
+            restoreViewScroll(keptScroll);
+        }
+    }
+
+    function captureViewScroll() {
+        var nodes = [];
+        var root = document.getElementById('asset-tree-app');
+        if (root) {
+            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side');
+            var index;
+            for (index = 0; index < found.length; index++) {
+                nodes.push({ top: found[index].scrollTop, left: found[index].scrollLeft });
+            }
+        }
+        return {
+            x: window.pageXOffset || document.documentElement.scrollLeft || 0,
+            y: window.pageYOffset || document.documentElement.scrollTop || 0,
+            nodes: nodes
+        };
+    }
+
+    function restoreViewScroll(kept) {
+        if (!kept) return;
+        var root = document.getElementById('asset-tree-app');
+        if (root && kept.nodes && kept.nodes.length) {
+            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side');
+            var index;
+            for (index = 0; index < found.length && index < kept.nodes.length; index++) {
+                found[index].scrollTop = kept.nodes[index].top;
+                found[index].scrollLeft = kept.nodes[index].left;
+            }
+        }
+        if (kept.x || kept.y) window.scrollTo(kept.x, kept.y);
+    }
+
+    function renderFrameContents() {
         closeStatusMenu();
         closeColorMenu();
         var frame = document.getElementById('asset-tree-frame');
@@ -10782,18 +10823,14 @@
                 all.value = '';
                 all.textContent = t('schedulesAllLayers');
                 layer.appendChild(all);
-                var roster = document.createElement('option');
-                roster.value = 'roster';
-                roster.textContent = t('schedulesRoster');
-                layer.appendChild(roster);
                 rows.forEach(function (row) {
                     var option = document.createElement('option');
                     option.value = row.id;
                     option.textContent = row.label || builtinKind(row.id, true);
                     layer.appendChild(option);
                 });
-                if (current === 'staff') current = 'roster';
-                layer.value = current === 'roster' || rows.some(function (row) { return row.id === current; }) ? current : '';
+                if (current === 'staff' || current === 'roster') current = '';
+                layer.value = rows.some(function (row) { return row.id === current; }) ? current : '';
             }
             paintKinds();
             var adder = document.createElement('input');
@@ -10816,6 +10853,52 @@
             panel.appendChild(addRow);
             panel.appendChild(planField(t('setupLayer'), layer));
             panel.appendChild(el('p', 'asset-tree-hint', t('setupLayerHint')));
+            var boardsNow = scheduleBoards();
+            var calendarBox = document.createElement('input');
+            calendarBox.type = 'checkbox';
+            calendarBox.checked = boardsNow.calendar;
+            var rosterBox = document.createElement('input');
+            rosterBox.type = 'checkbox';
+            rosterBox.checked = boardsNow.roster;
+            var openOn = document.createElement('select');
+            openOn.setAttribute('aria-label', t('setupOpen'));
+            function paintOpenOptions() {
+                if (!calendarBox.checked && !rosterBox.checked) {
+                    calendarBox.checked = true;
+                }
+                var current = openOn.value || setup.scheduleOpen || (setup.scheduleLayer === 'roster' ? 'roster' : 'calendar');
+                openOn.innerHTML = '';
+                if (calendarBox.checked) {
+                    var calendarOption = document.createElement('option');
+                    calendarOption.value = 'calendar';
+                    calendarOption.textContent = t('setupBoardCalendar');
+                    openOn.appendChild(calendarOption);
+                }
+                if (rosterBox.checked) {
+                    var rosterOption = document.createElement('option');
+                    rosterOption.value = 'roster';
+                    rosterOption.textContent = t('setupBoardRoster');
+                    openOn.appendChild(rosterOption);
+                }
+                openOn.value = openOn.querySelector('option[value="' + current + '"]') ? current : openOn.options[0].value;
+            }
+            calendarBox.addEventListener('change', paintOpenOptions);
+            rosterBox.addEventListener('change', paintOpenOptions);
+            var boardRow = el('div', 'asset-tree-check-list');
+            var calendarLabel = el('label', 'asset-tree-check');
+            calendarLabel.appendChild(calendarBox);
+            calendarLabel.appendChild(document.createTextNode(t('setupBoardCalendar')));
+            var rosterLabel = el('label', 'asset-tree-check');
+            rosterLabel.appendChild(rosterBox);
+            rosterLabel.appendChild(document.createTextNode(t('setupBoardRoster')));
+            boardRow.appendChild(calendarLabel);
+            boardRow.appendChild(rosterLabel);
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('setupBoards')));
+            panel.appendChild(boardRow);
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupBoardsHint')));
+            paintOpenOptions();
+            panel.appendChild(planField(t('setupOpen'), openOn));
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupOpenHint')));
             var unit = document.createElement('select');
             [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -10838,6 +10921,12 @@
                 next.scheduleLayer = layer.value;
                 next.scheduleUnit = unit.value;
                 next.scheduleNotify = notifyBox.checked;
+                var pickedBoards = [];
+                if (calendarBox.checked) pickedBoards.push('calendar');
+                if (rosterBox.checked) pickedBoards.push('roster');
+                if (!pickedBoards.length) pickedBoards.push('calendar');
+                next.scheduleBoards = pickedBoards.join(',');
+                next.scheduleOpen = pickedBoards.indexOf(openOn.value) >= 0 ? openOn.value : pickedBoards[0];
                 saveSetup(next);
             }));
         }
@@ -11518,7 +11607,42 @@
         if (state.scheduleKindFilter && plan.kind !== state.scheduleKindFilter) return false;
         if (state.schedulePersonFilter === '__none__') return !plan.assigneeKey;
         if (state.schedulePersonFilter && plan.assigneeKey !== state.schedulePersonFilter) return false;
+        if (!planMatchesPlace(plan)) return false;
         return true;
+    }
+
+    function planMatchesPlace(plan) {
+        var filter = state.staffPlaceFilter || '';
+        if (!filter) return true;
+        var asset = plan.assetId ? byId()[plan.assetId] : null;
+        if (filter === '__none__') return !asset || !assetPlaceId(asset);
+        var placeId = parseInt(filter, 10) || 0;
+        return !!(asset && placeId && assetUnderPlace(asset, placeId));
+    }
+
+    function assetPlaceId(asset) {
+        var guard = 0;
+        var current = asset;
+        while (current && current.parentId && guard < 24) {
+            var parent = byId()[current.parentId];
+            if (!parent) return 0;
+            if (isFolder(parent)) return parent.id;
+            current = parent;
+            guard++;
+        }
+        return 0;
+    }
+
+    function assetUnderPlace(asset, placeId) {
+        var guard = 0;
+        var current = asset;
+        while (current && guard < 24) {
+            if (current.id === placeId) return true;
+            if (!current.parentId) return false;
+            current = byId()[current.parentId];
+            guard++;
+        }
+        return false;
     }
 
     function datesInRange(plan, start, end) {
@@ -11554,17 +11678,35 @@
         return { overdue: overdue, monthCount: monthCount, weekCount: weekCount, done: done };
     }
 
+    function scheduleBoards() {
+        var raw = String(moduleSetup().scheduleBoards || '').toLowerCase().split(',');
+        var calendar = raw.indexOf('calendar') >= 0;
+        var roster = raw.indexOf('roster') >= 0;
+        if (!calendar && !roster) return { calendar: true, roster: true };
+        return { calendar: calendar, roster: roster };
+    }
+
+    function scheduleOpenBoard() {
+        var boards = scheduleBoards();
+        var open = moduleSetup().scheduleOpen;
+        if (open !== 'calendar' && open !== 'roster') {
+            open = moduleSetup().scheduleLayer === 'roster' ? 'roster' : 'calendar';
+        }
+        if (open === 'roster' && !boards.roster) return 'calendar';
+        if (open === 'calendar' && !boards.calendar) return 'roster';
+        return open;
+    }
+
     function ensureScheduleLayer() {
         if (state.scheduleLayerSet) return;
         state.scheduleLayerSet = true;
         var layer = moduleSetup().scheduleLayer;
-        if (layer === 'roster') {
-            state.scheduleBoard = 'roster';
+        state.scheduleBoard = scheduleOpenBoard();
+        if (state.scheduleBoard === 'roster') {
             state.scheduleKindFilter = '';
             return;
         }
-        state.scheduleBoard = 'calendar';
-        state.scheduleKindFilter = enabledKinds().indexOf(layer) >= 0 ? layer : '';
+        state.scheduleKindFilter = layer !== 'roster' && enabledKinds().indexOf(layer) >= 0 ? layer : '';
     }
 
     function rosterOn() {
@@ -11579,6 +11721,9 @@
         }
         if (state.scheduleMode === 'staff') state.scheduleMode = 'calendar';
         ensureScheduleLayer();
+        var boards = scheduleBoards();
+        if (rosterOn() && !boards.roster) state.scheduleBoard = 'calendar';
+        if (!rosterOn() && !boards.calendar) state.scheduleBoard = 'roster';
         var panel = el('section', 'asset-tree-sheet asset-tree-board');
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -11610,20 +11755,27 @@
             renderFrame();
         }));
         head.appendChild(nav);
-        var seg = el('div', 'asset-tree-board-switch');
-        [['calendar', 'schedulesCalendar'], ['roster', 'schedulesRoster']].forEach(function (pair) {
-            var on = pair[0] === 'roster' ? rosterOn() : !rosterOn();
-            var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
-                state.scheduleBoard = pair[0];
-                state.scheduleLayerSet = true;
-                renderFrame();
+        var boards = scheduleBoards();
+        if (boards.calendar && boards.roster) {
+            var seg = el('div', 'asset-tree-board-switch');
+            [['calendar', 'schedulesCalendar'], ['roster', 'schedulesRoster']].forEach(function (pair) {
+                var on = pair[0] === 'roster' ? rosterOn() : !rosterOn();
+                var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
+                    state.scheduleBoard = pair[0];
+                    state.scheduleLayerSet = true;
+                    renderFrame();
+                });
+                item.setAttribute('aria-pressed', on ? 'true' : 'false');
+                seg.appendChild(item);
             });
-            item.setAttribute('aria-pressed', on ? 'true' : 'false');
-            seg.appendChild(item);
-        });
-        head.appendChild(seg);
+            head.appendChild(seg);
+        }
         var filters = el('div', 'asset-tree-sheet-filters');
-        if (!rosterOn()) filters.appendChild(schedulePersonSelect());
+        if (!rosterOn()) {
+            var placeFilter = staffPlaceSelect();
+            if (placeFilter) filters.appendChild(placeFilter);
+            filters.appendChild(schedulePersonSelect());
+        }
         if (state.canEdit) filters.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', function () { openScheduleDialog(); }));
         if (filters.childNodes.length) head.appendChild(filters);
         return head;
@@ -11778,6 +11930,10 @@
         var meta = kindName(plan.kind);
         if (plan.startTime) meta = plan.startTime + (plan.endTime ? '–' + plan.endTime : '') + ' · ' + meta;
         if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
+        if (plan.assetId) {
+            var placeName = assetPlaceName(byId()[plan.assetId]);
+            if (placeName) meta += ' · ' + placeName;
+        }
         text.appendChild(el('em', null, meta));
         card.appendChild(mark);
         card.appendChild(text);
@@ -11821,17 +11977,43 @@
             endTime: patch.endTime != null ? patch.endTime : (plan.endTime || ''),
             notify: plan.notify !== false
         };
+        patchPlanLocal(plan, body);
+        if (state.view === 'schedules') renderFrame();
         ajax('PUT', '/assets/' + (plan.assetId || 0) + '/plans/' + plan.id, body, function (status, payload) {
             if (status >= 200 && status < 300) {
-                state.scheduleRows = null;
-                state.scheduleLoading = false;
+                refreshSchedules();
                 if (done) done(true);
-                renderFrame();
             } else {
                 notify((payload && payload.message) || t('errorTitle'));
+                refreshSchedules();
                 if (done) done(false);
             }
         });
+    }
+
+    function patchPlanLocal(plan, patch) {
+        var rows = state.scheduleRows || [];
+        var index;
+        for (index = 0; index < rows.length; index++) {
+            var row = rows[index];
+            if (!row || row.id !== plan.id || (row.assetId || 0) !== (plan.assetId || 0)) continue;
+            if (patch.name != null) row.name = patch.name;
+            if (patch.kind) row.kind = patch.kind;
+            if (patch.lastDone) {
+                row.lastDone = patch.lastDone;
+                if (!row.everyUnit || row.everyUnit === 'once') row.nextDue = patch.lastDone;
+            }
+            if (patch.assigneeKey != null) row.assigneeKey = patch.assigneeKey;
+            if (patch.note != null) row.note = patch.note;
+            if (patch.startTime != null) row.startTime = patch.startTime;
+            if (patch.endTime != null) row.endTime = patch.endTime;
+        }
+    }
+
+    function refreshSchedules() {
+        state.scheduleLoading = false;
+        state.scheduleToken++;
+        loadSchedules();
     }
 
     function beginPlanDrag(plan, iso, card, event) {
@@ -11945,10 +12127,48 @@
     }
 
     function reloadStaff() {
-        state.staffRows = null;
         state.staffLoading = false;
         state.staffToken++;
-        if (state.view === 'schedules') renderFrame();
+        loadStaff();
+    }
+
+    function staffHoursRow(userKey) {
+        var rows = state.staffRows || [];
+        var index;
+        for (index = 0; index < rows.length; index++) {
+            if (rows[index] && rows[index].userKey === userKey && rows[index].kind === 'hours') return rows[index];
+        }
+        return null;
+    }
+
+    function staffDtoSame(left, right) {
+        if (!left || !right) return false;
+        return left.id === right.id
+            && left.userKey === right.userKey
+            && (left.weekdays || 0) === (right.weekdays || 0)
+            && (parseInt(left.hours, 10) || 0) === (parseInt(right.hours, 10) || 0)
+            && (left.startOn || '') === (right.startOn || '')
+            && (left.marks || '') === (right.marks || '')
+            && (parseInt(left.placeId, 10) || 0) === (parseInt(right.placeId, 10) || 0)
+            && (left.userName || '') === (right.userName || '')
+            && (left.department || '') === (right.department || '');
+    }
+
+    function rememberStaff(payload) {
+        if (!payload || !payload.userKey) return false;
+        var rows = state.staffRows ? state.staffRows.slice() : [];
+        var index;
+        for (index = 0; index < rows.length; index++) {
+            if (rows[index].kind === 'hours' && rows[index].userKey === payload.userKey) {
+                var changed = !staffDtoSame(rows[index], payload);
+                rows[index] = payload;
+                state.staffRows = rows;
+                return changed;
+            }
+        }
+        rows.push(payload);
+        state.staffRows = rows;
+        return true;
     }
 
     function staffHas(userKey) {
@@ -11977,7 +12197,7 @@
                 if (row.userName) people[row.userKey].userName = row.userName;
             }
         });
-        order = order.filter(function (key) { return !!people[key].hours; });
+        order = order.filter(function (key) { return !!people[key].hours && staffPlaceVisible(people[key]); });
         var rank = {};
         staffOrderKeys().forEach(function (key, index) { rank[key] = index; });
         order.sort(function (left, right) {
@@ -12011,33 +12231,64 @@
             clean.push(key);
         });
         next.staffOrder = clean.join(',');
+        var project = currentProject();
+        var previous = project && project.setup ? project.setup.staffOrder : '';
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.staffOrder = next.staffOrder;
+        }
+        if (state.view === 'schedules') renderFrame();
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
             if (status < 200 || status >= 300) {
+                if (project && project.setup) project.setup.staffOrder = previous;
                 notify((payload && payload.message) || t('errorTitle'));
+                if (state.view === 'schedules') renderFrame();
                 return;
             }
-            var project = currentProject();
+            var incoming = payload && payload.setup ? payload.setup.staffOrder || '' : '';
             if (project && payload && payload.setup) project.setup = payload.setup;
-            renderFrame();
+            if (incoming !== next.staffOrder && state.view === 'schedules') renderFrame();
         });
     }
 
-    function saveStaffHours(userKey, weekdays, hours, marks, startOn) {
+    function saveStaffHours(userKey, weekdays, hours, marks, startOn, placeId) {
         var shift = (parseInt(hours, 10) || 0) >= 12;
+        var anchor = shift ? (startOn || '2024-01-01') : '';
         var body = {
             userKey: userKey,
             weekdays: weekdays || 31,
             hours: hours,
-            startOn: shift ? (startOn || '2024-01-01') : ''
+            startOn: anchor
         };
         if (marks !== undefined) body.marks = marks;
+        if (placeId !== undefined) body.placeId = placeId;
+        var current = staffHoursRow(userKey);
+        rememberStaff({
+            id: current ? current.id : 0,
+            userKey: userKey,
+            userName: current && current.userName ? current.userName : userKey,
+            department: current ? current.department || '' : '',
+            phone: current ? current.phone || '' : '',
+            kind: 'hours',
+            weekdays: body.weekdays,
+            hours: hours,
+            startOn: anchor,
+            endOn: '',
+            marks: marks !== undefined ? marks : (current && current.marks ? current.marks : ''),
+            placeId: placeId !== undefined ? placeId : (current ? parseInt(current.placeId, 10) || 0 : 0)
+        });
+        if (state.view === 'schedules' && rosterOn()) renderFrame();
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/staff', body, function (status, payload) {
-            if (status >= 200 && status < 300) reloadStaff();
-            else notify((payload && payload.message) || t('errorTitle'));
+            if (status >= 200 && status < 300) {
+                if (rememberStaff(payload) && state.view === 'schedules' && rosterOn()) renderFrame();
+            } else {
+                notify((payload && payload.message) || t('errorTitle'));
+                reloadStaff();
+            }
         });
     }
 
-    var DEFAULT_STAFF_MARKS = 'work||172b4d|8,night||4338ca|8,trip||0f766e|8,leave||d97706|0,sick||e11d48|0';
+    var DEFAULT_STAFF_MARKS = 'work||172b4d|8|1,night||4338ca|8|2,trip||0f766e|8|1,leave||d97706|0|0,sick||e11d48|0|0';
 
     function staffMarkName(row) {
         if (row && row.label) return row.label;
@@ -12067,15 +12318,22 @@
             if (isNaN(hours)) hours = 8;
             if (hours < 0) hours = 0;
             if (hours > 24) hours = 24;
-            rows.push({ id: id, label: label, color: color, hours: hours });
+            var factor = parseInt(piece[4], 10);
+            if (piece.length < 5 || piece[4] === '' || (factor !== 0 && factor !== 1 && factor !== 2)) {
+                if (hours <= 0) factor = 0;
+                else if (id === 'night') factor = 2;
+                else factor = 1;
+            }
+            rows.push({ id: id, label: label, color: color, hours: hours, factor: factor });
         });
-        if (!seen.work) rows.unshift({ id: 'work', label: '', color: '172b4d', hours: 8 });
+        if (!seen.work) rows.unshift({ id: 'work', label: '', color: '172b4d', hours: 8, factor: 1 });
         return rows.slice(0, 12);
     }
 
     function packStaffMarks(rows) {
         return rows.map(function (row) {
-            return row.id + '|' + (row.label || '') + '|' + row.color + '|' + row.hours;
+            var factor = row.factor === 0 || row.factor === 2 ? row.factor : 1;
+            return row.id + '|' + (row.label || '') + '|' + row.color + '|' + row.hours + '|' + factor;
         }).join(',');
     }
 
@@ -12095,14 +12353,23 @@
     function saveStaffPalette(rows) {
         var next = moduleSetup();
         next.staffMarks = packStaffMarks(rows);
+        var project = currentProject();
+        var previous = project && project.setup ? project.setup.staffMarks : '';
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.staffMarks = next.staffMarks;
+        }
+        if (state.view === 'schedules') renderFrame();
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
             if (status < 200 || status >= 300) {
+                if (project && project.setup) project.setup.staffMarks = previous;
                 notify((payload && payload.message) || t('errorTitle'));
+                if (state.view === 'schedules') renderFrame();
                 return;
             }
-            var project = currentProject();
+            var incoming = payload && payload.setup ? payload.setup.staffMarks || '' : '';
             if (project && payload && payload.setup) project.setup = payload.setup;
-            renderFrame();
+            if (incoming !== next.staffMarks && state.view === 'schedules') renderFrame();
         });
     }
 
@@ -12158,13 +12425,18 @@
         return staffNatural(person, iso, date);
     }
 
-    function staffDayHours(id, personHours) {
+    function staffMarkFactor(id) {
         if (!id || id === 'off') return 0;
-        if (id !== 'work') {
-            var mark = staffMarkById(id);
-            if (!mark || mark.hours === 0) return 0;
-        }
-        return personHours;
+        var mark = staffMarkById(id);
+        if (!mark) return 0;
+        if (mark.factor === 0 || mark.factor === 2) return mark.factor;
+        return 1;
+    }
+
+    function staffDayHours(id, personHours) {
+        var factor = staffMarkFactor(id);
+        if (!factor) return 0;
+        return personHours * factor;
     }
 
     function staffTally(person, year, month) {
@@ -12193,8 +12465,66 @@
         return { by: by, days: totalDays, hours: totalHours };
     }
 
+    function staffPlaceVisible(person) {
+        var filter = state.staffPlaceFilter || '';
+        if (!filter) return true;
+        var placeId = person && person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
+        if (filter === '__none__') return !placeId;
+        return String(placeId) === String(filter);
+    }
+
+    function sortedPlaces() {
+        return placeAssets().slice().sort(function (left, right) {
+            return placeLabel(left).localeCompare(placeLabel(right), state.locale || 'ru');
+        });
+    }
+
+    function placeLabel(asset) {
+        var parent = asset && asset.parentId ? byId()[asset.parentId] : null;
+        var name = asset && asset.name ? asset.name : '';
+        if (parent && isFolder(parent) && parent.name) return parent.name + ' / ' + name;
+        return name;
+    }
+
+    function placeNameById(placeId) {
+        var asset = byId()[placeId];
+        return asset ? placeLabel(asset) : '';
+    }
+
+    function staffPlaceSelect() {
+        var places = sortedPlaces();
+        if (!places.length) return null;
+        var select = document.createElement('select');
+        select.className = 'asset-tree-filter asset-tree-staff-place-filter';
+        select.setAttribute('aria-label', t('staffPlace'));
+        var all = document.createElement('option');
+        all.value = '';
+        all.textContent = t('staffAllPlaces');
+        select.appendChild(all);
+        var none = document.createElement('option');
+        none.value = '__none__';
+        none.textContent = t('staffNoPlace');
+        select.appendChild(none);
+        places.forEach(function (asset) {
+            var option = document.createElement('option');
+            option.value = String(asset.id);
+            option.textContent = placeLabel(asset);
+            select.appendChild(option);
+        });
+        var current = state.staffPlaceFilter || '';
+        select.value = select.querySelector('option[value="' + current + '"]') ? current : '';
+        select.addEventListener('change', function () {
+            state.staffPlaceFilter = select.value;
+            renderFrame();
+        });
+        return select;
+    }
+
     function staffFinder() {
         var box = el('div', 'asset-tree-staff-find');
+        var placeFilter = staffPlaceSelect();
+        if (placeFilter) box.appendChild(placeFilter);
+        if (!state.canEdit) return box.childNodes.length ? box : null;
         var field = el('label', 'asset-tree-staff-find-field');
         field.appendChild(el('span', null, t('staffAdd')));
         var query = document.createElement('input');
@@ -12410,7 +12740,8 @@
                 beginStaffReorder(person.userKey, event);
             });
         }
-        name.appendChild(identity);
+        var meta = el('span', 'asset-tree-roster-meta');
+        meta.appendChild(identity);
         if (state.canEdit && person.hours) {
             var hours = document.createElement('input');
             hours.type = 'number';
@@ -12428,30 +12759,71 @@
                 }
                 if (value !== person.hours.hours) saveStaffHours(person.userKey, person.hours.weekdays, value, undefined, person.hours.startOn);
             });
-            name.appendChild(hours);
-            name.appendChild(el('span', 'asset-tree-roster-unit', t('staffHoursCount', '').trim()));
+            meta.appendChild(hours);
+            meta.appendChild(el('span', 'asset-tree-roster-unit', t('staffHoursCount', '').trim()));
             if (per >= 12) {
                 var shift = button(t('staffPatternShift'), 'asset-tree-roster-pattern', function () {
                     var anchor = parseIsoDate(person.hours.startOn) || parseIsoDate('2024-01-01');
                     saveStaffHours(person.userKey, person.hours.weekdays || 31, person.hours.hours, undefined, isoDate(shiftDays(anchor, 1)));
                 });
                 shift.title = t('staffShiftHint');
-                name.appendChild(shift);
+                meta.appendChild(shift);
             } else {
                 var week = el('span', 'asset-tree-roster-pattern is-week', t('staffPatternWeek'));
                 week.title = t('staffPatternWeek');
-                name.appendChild(week);
+                meta.appendChild(week);
             }
             var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
                 if (!window.confirm(t('staffRemoveConfirm', person.userName))) return;
+                var removedKey = person.userKey;
+                state.staffRows = (state.staffRows || []).filter(function (item) { return !item || item.userKey !== removedKey; });
+                renderFrame();
                 ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + row.id, null, function (status, payload) {
-                    if (status >= 200 && status < 300) reloadStaff();
-                    else notify((payload && payload.message) || t('errorTitle'));
+                    if (status < 200 || status >= 300) {
+                        notify((payload && payload.message) || t('errorTitle'));
+                        reloadStaff();
+                    }
                 });
             });
             remove.title = t('staffRemove');
             remove.setAttribute('aria-label', t('staffRemove'));
-            name.appendChild(remove);
+            meta.appendChild(remove);
+        }
+        name.appendChild(meta);
+        var places = sortedPlaces();
+        var assigned = person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
+        if (places.length && person.hours) {
+            if (state.canEdit) {
+                var place = document.createElement('select');
+                place.className = 'asset-tree-roster-place';
+                place.setAttribute('aria-label', t('staffPlace'));
+                var nonePlace = document.createElement('option');
+                nonePlace.value = '0';
+                nonePlace.textContent = t('staffNoPlace');
+                place.appendChild(nonePlace);
+                places.forEach(function (asset) {
+                    var option = document.createElement('option');
+                    option.value = String(asset.id);
+                    option.textContent = placeLabel(asset);
+                    place.appendChild(option);
+                });
+                if (assigned && !place.querySelector('option[value="' + assigned + '"]')) {
+                    var missing = document.createElement('option');
+                    missing.value = String(assigned);
+                    missing.textContent = placeNameById(assigned) || t('staffPlace');
+                    place.appendChild(missing);
+                }
+                place.value = String(assigned || 0);
+                place.addEventListener('change', function () {
+                    var nextPlace = parseInt(place.value, 10) || 0;
+                    if (nextPlace === assigned) return;
+                    saveStaffHours(person.userKey, person.hours.weekdays, person.hours.hours || 8, undefined, person.hours.startOn, nextPlace);
+                });
+                name.appendChild(place);
+            } else if (assigned) {
+                var placeText = el('span', 'asset-tree-roster-place', placeNameById(assigned) || t('staffPlace'));
+                name.appendChild(placeText);
+            }
         }
         line.appendChild(name);
         var day;
@@ -12634,6 +13006,18 @@
             pick.title = staffMarkName(row);
             chip.appendChild(pick);
             if (state.canEdit) {
+                var factor = row.factor === 0 || row.factor === 2 ? row.factor : 1;
+                var factorButton = button(factor === 0 ? '0' : '\u00D7' + factor, 'asset-tree-mark-factor' + (factor === 0 ? ' is-off' : factor === 2 ? ' is-double' : ''), function () {
+                    var nextFactor = factor === 1 ? 2 : factor === 2 ? 0 : 1;
+                    var copy = staffMarkList();
+                    copy.forEach(function (item) {
+                        if (item.id === row.id) item.factor = nextFactor;
+                    });
+                    saveStaffPalette(copy);
+                });
+                factorButton.title = t('staffFactorHint');
+                factorButton.setAttribute('aria-label', staffMarkName(row) + ' ' + t('staffFactorHint'));
+                chip.appendChild(factorButton);
                 pick.addEventListener('dblclick', function (event) {
                     event.preventDefault();
                     event.stopPropagation();
@@ -12692,7 +13076,7 @@
                     n += 1;
                     id = 'm' + n;
                 }
-                copy.push({ id: id, label: t('staffMarkNew'), color: '64748b', hours: 8 });
+                copy.push({ id: id, label: t('staffMarkNew'), color: '64748b', hours: 8, factor: 1 });
                 state.staffBrush = id;
                 saveStaffPalette(copy);
             }));
@@ -12713,9 +13097,14 @@
                     return;
                 }
                 var remove = button(text, 'asset-tree-roster-leave', function () {
+                    var leaveId = leave.id;
+                    state.staffRows = (state.staffRows || []).filter(function (item) { return !item || item.id !== leaveId; });
+                    renderFrame();
                     ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + leave.id, null, function (status, payload) {
-                        if (status >= 200 && status < 300) reloadStaff();
-                        else notify((payload && payload.message) || t('errorTitle'));
+                        if (status < 200 || status >= 300) {
+                            notify((payload && payload.message) || t('errorTitle'));
+                            reloadStaff();
+                        }
                     });
                 });
                 remove.title = t('delete');
@@ -12749,10 +13138,19 @@
         }
         if (state.staffError) wrap.appendChild(el('p', 'asset-tree-hint', state.staffError));
         wrap.appendChild(staffPalette());
-        if (state.canEdit) wrap.appendChild(staffFinder());
+        var tools = staffFinder();
+        if (tools) wrap.appendChild(tools);
+        var anyone = false;
+        (state.staffRows || []).forEach(function (item) {
+            if (item && item.kind === 'hours') anyone = true;
+        });
         var grouped = staffGroups();
-        if (!grouped.order.length) {
+        if (!anyone) {
             wrap.appendChild(el('p', 'asset-tree-hint', t('staffEmpty')));
+            return wrap;
+        }
+        if (!grouped.order.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', t('staffPlaceEmpty')));
             return wrap;
         }
         wrap.appendChild(staffRoster(grouped));
@@ -12898,9 +13296,7 @@
                     ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, { done: true }, function (status, payload) {
                         if (status >= 200 && status < 300) {
                             closeModal();
-                            state.scheduleRows = null;
-                            state.scheduleLoading = false;
-                            renderFrame();
+                            refreshSchedules();
                         } else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
@@ -12911,9 +13307,11 @@
                     ajax('DELETE', '/assets/' + plan.assetId + '/plans/' + plan.id, null, function (status, payload) {
                         if (status >= 200 && status < 300) {
                             closeModal();
-                            state.scheduleRows = null;
-                            state.scheduleLoading = false;
+                            state.scheduleRows = (state.scheduleRows || []).filter(function (row) {
+                                return !(row && row.id === plan.id && (row.assetId || 0) === (plan.assetId || 0));
+                            });
                             renderFrame();
+                            refreshSchedules();
                         } else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
@@ -13126,7 +13524,7 @@
                         return;
                     }
                     closeModal();
-                    state.scheduleBoard = 'roster';
+                    if (scheduleBoards().roster) state.scheduleBoard = 'roster';
                     state.scheduleKindFilter = '';
                     state.scheduleLayerSet = true;
                     if (!staffHas(draft.assigneeKey)) saveStaffHours(draft.assigneeKey, 31, 8);
@@ -13159,9 +13557,7 @@
                 ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/schedule', body, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal();
-                        state.scheduleRows = null;
-                        state.scheduleLoading = false;
-                        state.scheduleBoard = 'calendar';
+                        if (scheduleBoards().calendar) state.scheduleBoard = 'calendar';
                         state.scheduleKindFilter = kind.value || '';
                         state.scheduleLayerSet = true;
                         var chosenDay = parseIsoDate(first.value);
@@ -13170,6 +13566,7 @@
                             state.scheduleMonth = chosenDay.getMonth() + 1;
                         }
                         renderFrame();
+                        refreshSchedules();
                     } else notify((payload && payload.message) || t('errorTitle'));
                 });
             }));
@@ -13476,7 +13873,23 @@
             lifeCurrency: setup.lifeCurrency || 'RUB',
             lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
             staffMarks: setup.staffMarks || '',
-            staffOrder: setup.staffOrder || ''
+            staffOrder: setup.staffOrder || '',
+            scheduleBoards: (function () {
+                var parts = String(setup.scheduleBoards || '').toLowerCase().split(',');
+                var calendar = parts.indexOf('calendar') >= 0;
+                var roster = parts.indexOf('roster') >= 0;
+                if (!calendar && !roster) return 'calendar,roster';
+                var chosen = [];
+                if (calendar) chosen.push('calendar');
+                if (roster) chosen.push('roster');
+                return chosen.join(',');
+            })(),
+            scheduleOpen: (function () {
+                var open = String(setup.scheduleOpen || '').toLowerCase();
+                if (open === 'calendar' || open === 'roster') return open;
+                var layer = String(setup.scheduleLayer || '').toLowerCase();
+                return layer === 'roster' || layer === 'staff' ? 'roster' : 'calendar';
+            })()
         };
     }
 
