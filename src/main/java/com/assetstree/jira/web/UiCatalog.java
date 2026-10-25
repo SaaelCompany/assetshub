@@ -1182,6 +1182,7 @@ public final class UiCatalog {
             "reportShare",
             "reportTotalRow",
             "reportCounted",
+            "reportLinesCut",
             "reportChart",
             "reportColumns",
             "reportDonut",

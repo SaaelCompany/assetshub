@@ -2583,6 +2583,120 @@ def delete_saved_report(project_key, report_key, text):
     return 204, None
 
 
+REPORT_PALETTE = (
+    "#0052CC", "#00875A", "#FF8B00", "#6554C0", "#00A3BF",
+    "#DE350B", "#36B37E", "#FF5630", "#8777D9", "#FFAB00",
+)
+RU_MONTHS = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+EN_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+
+def book_minor(life, today=None):
+    row = life or {}
+    price = int(row.get("priceMinor") or 0)
+    residual = int(row.get("residualMinor") or 0)
+    months = int(row.get("lifeMonths") or 0)
+    if price <= 0:
+        return 0
+    monthly = 0 if months <= 0 or price <= residual else (price - residual) // months
+    book = price
+    purchased = row.get("purchased") or ""
+    if purchased and monthly:
+        try:
+            start = datetime.date.fromisoformat(purchased)
+            today = today or datetime.date.today()
+            elapsed = (today.year - start.year) * 12 + today.month - start.month
+            if today.day < start.day:
+                elapsed -= 1
+            elapsed = max(0, elapsed)
+            floor = max(0, residual)
+            book = price - monthly * elapsed
+            if book < floor:
+                book = floor
+        except ValueError:
+            book = price
+    return book
+
+
+def soonest_plan(asset_id):
+    chosen = None
+    chosen_next = None
+    for plan in plan_rows(asset_id):
+        nxt = plan_next(plan)
+        if chosen is None:
+            chosen = plan
+            chosen_next = nxt
+            continue
+        if nxt is None:
+            continue
+        if chosen_next is None or nxt < chosen_next:
+            chosen = plan
+            chosen_next = nxt
+    return chosen
+
+
+def month_label(year_month, text):
+    raw = str(year_month or "")
+    if len(raw) < 7 or raw[4] != "-":
+        return text.get("asset-tree.ui.reportNoDate", "No date")
+    try:
+        month = int(raw[5:7])
+        year = raw[:4]
+    except ValueError:
+        return raw[:7]
+    if month < 1 or month > 12:
+        return raw[:7]
+    russian = (text.get("asset-tree.ui.reportTotalRow") or "").startswith("И")
+    names = RU_MONTHS if russian else EN_MONTHS
+    return "%s %s" % (names[month - 1], year)
+
+
+def warranty_band(raw, today):
+    try:
+        until = datetime.date.fromisoformat(raw or "")
+    except ValueError:
+        return "expired"
+    if until < today:
+        return "expired"
+    if until <= today + datetime.timedelta(days=90):
+        return "soon"
+    return "active"
+
+
+def age_band(raw, today):
+    try:
+        start = datetime.date.fromisoformat(raw or "")
+    except ValueError:
+        return "y0"
+    months = (today.year - start.year) * 12 + today.month - start.month
+    if today.day < start.day:
+        months -= 1
+    if months >= 60:
+        return "y5"
+    if months >= 36:
+        return "y3"
+    if months >= 12:
+        return "y1"
+    return "y0"
+
+
+def distinct_report_colors(rows):
+    used = set()
+    cursor = 0
+    for row in rows:
+        color = (row.get("color") or "").lower()
+        if not color or color in used:
+            guard = 0
+            while guard < len(REPORT_PALETTE) and REPORT_PALETTE[cursor % len(REPORT_PALETTE)].lower() in used:
+                cursor += 1
+                guard += 1
+            color = REPORT_PALETTE[cursor % len(REPORT_PALETTE)]
+            cursor += 1
+            row["color"] = color
+            color = color.lower()
+        used.add(color)
+
+
 def report_view(project_key, report_key, text):
     if not module_on(project_key, "reports"):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
@@ -2599,7 +2713,7 @@ def report_view(project_key, report_key, text):
         return (token or "") in [part for part in (raw or "").split(",") if part]
 
     if filt == "status":
-        assets = [asset for asset in assets if token_hit(value, asset.get("status") or "")]
+        assets = [asset for asset in assets if token_hit(value, canonical(asset.get("status")))]
     elif filt == "type":
         assets = [asset for asset in assets if token_hit(value, asset.get("typeKey") or "")]
     elif filt == "holder":
@@ -2612,10 +2726,14 @@ def report_view(project_key, report_key, text):
                 types = part[2:]
             elif part.startswith("s="):
                 statuses = part[2:]
-        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, asset.get("status") or ""))]
+        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status"))))]
+    status_names = {row["statusKey"]: row.get("label") or row["statusKey"] for row in ensure_statuses(project_key, text)}
     buckets = {}
     lines = []
     total_book = 0
+    capped = False
+    today = datetime.date.today()
+    chosen = 0
     for asset in assets:
         if report_key in ("service", "work") and not plan_rows(asset["id"]):
             continue
@@ -2626,84 +2744,100 @@ def report_view(project_key, report_key, text):
             continue
         if report_key in ("receipts", "age") and not life.get("purchased"):
             continue
-        if report_key == "writeoff" and asset.get("status") != "written_off" and life.get("writeoffState") != "approved":
+        if report_key == "writeoff" and canonical(asset.get("status")) != "written_off" and life.get("writeoffState") != "approved":
             continue
+        chosen += 1
+        detail = ""
+        color = "#0052CC"
         if report_key in ("service", "work"):
-            plan = plan_rows(asset["id"])[0]
+            plan = soonest_plan(asset["id"]) or {}
             bucket = plan.get("kind") or "to"
             label = kind_label(asset.get("projectKey") or "", bucket)
-            detail = label
+            nxt = plan_next(plan) if plan else None
+            detail = label + (" · " + nxt.isoformat() if nxt else "")
+            if bucket == "kts":
+                color = "#FF8B00"
+            elif bucket == "verify":
+                color = "#6554C0"
         elif report_key == "receipts":
             bucket = (life.get("purchased") or "")[:7]
-            label = bucket
-            detail = bucket
+            label = month_label(bucket, text)
+            detail = life.get("purchased") or ""
         elif report_key == "age":
-            bucket = "y0"
-            try:
-                start = datetime.date.fromisoformat(life.get("purchased") or "")
-                today = datetime.date.today()
-                months = (today.year - start.year) * 12 + today.month - start.month
-                if months >= 60:
-                    bucket = "y5"
-                elif months >= 36:
-                    bucket = "y3"
-                elif months >= 12:
-                    bucket = "y1"
-            except ValueError:
-                bucket = "y0"
+            bucket = age_band(life.get("purchased") or "", today)
             label = text.get("asset-tree.ui.reportAge" + bucket[1:], bucket)
             detail = life.get("purchased") or ""
         elif report_key == "writeoff":
             bucket = (life.get("decidedAt") or "")[:7] or "none"
-            label = bucket
-            detail = life.get("writeoffReason") or ""
+            label = month_label(bucket, text)
+            detail = (life.get("writeoffReason") or "").strip() or (life.get("decidedAt") or "")
         elif report_key == "warranty":
-            bucket = "active"
-            label = life.get("warrantyUntil") or ""
-            detail = label
-        elif report_key == "cost":
+            bucket = warranty_band(life.get("warrantyUntil") or "", today)
+            if bucket == "expired":
+                label = text.get("asset-tree.ui.lifeWarrantyOff", bucket)
+                color = "#DE350B"
+            elif bucket == "soon":
+                label = text.get("asset-tree.ui.lifeWarrantySoon", bucket)
+                color = "#FF8B00"
+            else:
+                label = text.get("asset-tree.ui.lifeWarrantyOn", bucket)
+            detail = life.get("warrantyUntil") or ""
+        elif report_key == "cost" or group == "type":
             bucket = asset.get("typeKey") or ""
             label = (STATE["types"].get(bucket) or {}).get("label") or bucket
-            detail = format_money(life.get("priceMinor") or 0)
-            total_book += int(life.get("priceMinor") or 0)
-        elif group == "type":
-            bucket = asset.get("typeKey") or ""
-            label = (STATE["types"].get(bucket) or {}).get("label") or bucket
-            detail = ""
+            color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
+            if report_key == "cost":
+                book = book_minor(life, today)
+                total_book += book
+                detail = format_money(book)
+            else:
+                book = 0
         elif group == "holder":
             bucket = asset.get("custodianKey") or ""
-            label = (USERS.get(bucket) or {}).get("displayName") or text.get("asset-tree.ui.reportUnassigned", "None")
-            detail = ""
+            person = USERS.get(bucket) or {}
+            label = text.get("asset-tree.ui.reportUnassigned", "None") if not bucket else (person.get("displayName") or bucket)
         elif group == "place":
-            parent = STATE["assets"].get(asset.get("parentId"))
-            bucket = str(parent["id"]) if parent else ""
-            label = parent.get("name") if parent else text.get("asset-tree.ui.root", "Root")
-            detail = ""
+            place_id = place_container(asset["id"])
+            place = STATE["assets"].get(place_id) if place_id else None
+            bucket = str(place["id"]) if place else ""
+            label = (place.get("name") if place else "") or text.get("asset-tree.ui.root", "Root")
         else:
-            bucket = asset.get("status") or ""
-            label = bucket
-            for status_row in ensure_statuses(project_key, text):
-                if status_row["statusKey"] == bucket:
-                    label = status_row["label"]
-                    break
-            detail = ""
-        color = "#0052CC"
-        if report_key == "status" or group == "status":
-            color = {"in_use": "#00875A", "active": "#00875A", "repair": "#FF8B00", "maintenance": "#FF8B00", "written_off": "#DE350B", "reserve": "#6554C0", "in_stock": "#6B778C"}.get(bucket, "#0052CC")
-        elif group == "type" or report_key == "cost":
-            color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
-        slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0})
+            bucket = canonical(asset.get("status"))
+            label = status_names.get(bucket) or bucket
+            color = {"in_use": "#00875A", "repair": "#FF8B00", "maintenance": "#FF8B00", "written_off": "#DE350B", "reserve": "#6554C0", "in_stock": "#6B778C"}.get(bucket, "#0052CC")
+            book = 0
+        if not detail:
+            detail = label
+        slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
         slot["count"] += 1
+        if report_key == "cost":
+            slot["amount"] += book
         if len(lines) < 300:
             lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
+        else:
+            capped = True
+    rows = list(buckets.values())
+    if report_key == "cost":
+        for row in rows:
+            row["amountText"] = format_money(row["amount"])
+    if report_key == "age":
+        order = {"y0": 0, "y1": 1, "y3": 2, "y5": 3}
+        rows.sort(key=lambda row: order.get(row["key"], 9))
+    elif report_key == "warranty":
+        order = {"expired": 0, "soon": 1, "active": 2}
+        rows.sort(key=lambda row: order.get(row["key"], 9))
+    elif group == "month" or report_key == "writeoff":
+        rows.sort(key=lambda row: row["key"] if len(row["key"]) >= 7 and row["key"][4] == "-" else "9999-99")
+    distinct_report_colors(rows)
     return 200, {
-        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportHint", ""),
-        "total": sum(item["count"] for item in buckets.values()),
+        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCounted", ""),
+        "total": chosen,
         "sum": format_money(total_book) if report_key == "cost" else "",
         "standard": bool(spec.get("standard")),
         "groupBy": group,
         "chart": spec.get("chart") or ("donut" if report_key == "status" else "bar"),
-        "rows": list(buckets.values()),
+        "capped": capped,
+        "rows": rows,
         "lines": lines,
     }
 

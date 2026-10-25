@@ -6659,6 +6659,12 @@ a.asset-tree-url {
     flex: 0 0 240px;
 }
 
+#asset-tree-app .asset-tree-report-ring-value.is-compact {
+    font-size: 22px !important;
+    padding: 0 36px;
+    box-sizing: border-box;
+}
+
 #asset-tree-app .asset-tree-report-ring-value {
     position: absolute;
     left: 0;
@@ -6715,6 +6721,10 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-report-legend span {
     min-width: 0;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 #asset-tree-app .asset-tree-report-legend strong {
@@ -6765,6 +6775,14 @@ a.asset-tree-url {
     display: block;
     width: 100%;
     border-radius: 3px 3px 0 0;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-money .asset-tree-report-column {
+    min-width: 88px;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-money .asset-tree-report-column-count {
+    font-size: 12px;
 }
 
 #asset-tree-app .asset-tree-report-column-label {
@@ -6829,6 +6847,12 @@ a.asset-tree-url {
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     text-align: right;
+}
+
+#asset-tree-app .asset-tree-report-bars.is-money .asset-tree-report-bar strong {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 72px;
 }
 
 #asset-tree-app .asset-tree-report-facts {
@@ -6896,9 +6920,16 @@ a.asset-tree-url {
     white-space: nowrap;
 }
 
+#asset-tree-app .asset-tree-report-table th.is-money,
+#asset-tree-app .asset-tree-report-table td.is-money {
+    width: 140px;
+}
+
 #asset-tree-app .asset-tree-report-name {
     width: 240px;
+    overflow: hidden;
     font-weight: 600;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 

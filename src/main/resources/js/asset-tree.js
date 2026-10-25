@@ -14665,17 +14665,49 @@
         return text;
     }
 
+    function reportMoney(view) {
+        return !!(view && view.sum);
+    }
+
+    function reportFileName(view) {
+        var name = String(view && view.title || 'report').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+        return (name || 'report') + '.csv';
+    }
+
     function downloadReport(view) {
-        var rows = [csvCell(groupWord(view.groupBy)) + ',' + csvCell(t('reportCount')) + ',' + csvCell(t('reportShare'))];
-        var total = view.total || 0;
+        var money = reportMoney(view);
+        var shareTotal = 0;
         (view.rows || []).forEach(function (row) {
-            rows.push([csvCell(row.label), csvCell(row.count), csvCell(shareText(row.count, total))].join(','));
+            shareTotal += money ? (Number(row.amount) || 0) : (row.count || 0);
         });
-        rows.push([csvCell(t('reportTotalRow')), csvCell(total), csvCell(shareText(total, total))].join(','));
-        var blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+        if (!money) shareTotal = view.total || 0;
+        var head = [csvCell(groupWord(view.groupBy)), csvCell(t('reportCount'))];
+        if (money) head.push(csvCell(t('lifeBook')));
+        head.push(csvCell(t('reportShare')));
+        var rows = [head.join(';')];
+        (view.rows || []).forEach(function (row) {
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            var cells = [csvCell(row.label), csvCell(row.count)];
+            if (money) cells.push(csvCell(row.amountText || '0'));
+            cells.push(csvCell(shareText(value, shareTotal)));
+            rows.push(cells.join(';'));
+        });
+        var totalCells = [csvCell(t('reportTotalRow')), csvCell(view.total || 0)];
+        if (money) totalCells.push(csvCell(view.sum));
+        totalCells.push(csvCell(shareText(shareTotal, shareTotal)));
+        rows.push(totalCells.join(';'));
+        if (view.lines && view.lines.length) {
+            rows.push('');
+            var detailHead = money ? t('lifeBook') : groupWord(view.groupBy);
+            rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
+            view.lines.forEach(function (row) {
+                rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(row.detail)].join(';'));
+            });
+        }
+        var blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         var link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = 'report.csv';
+        link.download = reportFileName(view);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -14721,25 +14753,32 @@
         return seg;
     }
 
-    function reportLegend(rows, total) {
+    function reportLegend(rows, total, money) {
         var list = el('ul', 'asset-tree-report-legend');
         rows.forEach(function (row) {
             var item = el('li');
             var swatch = el('i');
             swatch.style.background = row.color || '#0052CC';
             item.appendChild(swatch);
-            item.appendChild(el('span', null, row.label || ''));
-            item.appendChild(el('strong', null, String(row.count) + ' · ' + shareText(row.count, total)));
+            var name = el('span', null, row.label || '');
+            name.title = row.label || '';
+            item.appendChild(name);
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            var shown = money ? (row.amountText || '0') : String(row.count);
+            item.appendChild(el('strong', null, shown + ' · ' + shareText(value, total)));
             list.appendChild(item);
         });
         return list;
     }
 
-    function reportColumnsChart(rows, max) {
-        var wrap = el('div', 'asset-tree-report-columns');
+    function reportColumnsChart(rows, max, money) {
+        var wrap = el('div', 'asset-tree-report-columns' + (money ? ' is-money' : ''));
         rows.forEach(function (row) {
             var col = el('div', 'asset-tree-report-column');
-            col.appendChild(el('span', 'asset-tree-report-column-count', String(row.count)));
+            var shown = row.text || String(row.count);
+            var count = el('span', 'asset-tree-report-column-count', shown);
+            count.title = shown;
+            col.appendChild(count);
             var shaft = el('span', 'asset-tree-report-shaft');
             var fill = el('span');
             var pct = max ? Math.round(100 * (row.count || 0) / max) : 0;
@@ -14756,8 +14795,8 @@
         return wrap;
     }
 
-    function reportBarsChart(rows, max) {
-        var list = el('div', 'asset-tree-report-bars');
+    function reportBarsChart(rows, max, money) {
+        var list = el('div', 'asset-tree-report-bars' + (money ? ' is-money' : ''));
         rows.forEach(function (row) {
             var line = el('div', 'asset-tree-report-bar');
             var label = el('span', 'asset-tree-report-bar-label', row.label || '');
@@ -14769,35 +14808,63 @@
             fill.style.background = row.color || '#0052CC';
             track.appendChild(fill);
             line.appendChild(track);
-            line.appendChild(el('strong', null, String(row.count)));
+            var shown = row.text || String(row.count);
+            var value = el('strong', null, shown);
+            value.title = shown;
+            line.appendChild(value);
             list.appendChild(line);
         });
         return list;
     }
 
-    function reportChartPanel(rows, total, max, kind) {
-        if (!rows.length) return null;
+    function measuredRows(rows, money) {
+        if (!money) return rows;
+        var next = [];
+        rows.forEach(function (row) {
+            var amount = Number(row.amount) || 0;
+            if (!amount) return;
+            next.push({
+                label: row.label,
+                color: row.color,
+                count: amount,
+                text: row.amountText || '0'
+            });
+        });
+        return next;
+    }
+
+    function reportChartPanel(rows, total, max, kind, money, sumText) {
+        var measured = measuredRows(rows, money);
+        if (!measured.length) return null;
         if (kind === 'columns') {
             var columns = el('div', 'asset-tree-report-chart');
-            columns.appendChild(reportColumnsChart(rows, max));
+            columns.appendChild(reportColumnsChart(measured, max, money));
             return columns;
         }
         if (kind === 'bars') {
             var bars = el('div', 'asset-tree-report-chart');
-            bars.appendChild(reportBarsChart(rows, max));
+            bars.appendChild(reportBarsChart(measured, max, money));
             return bars;
         }
         var round = el('div', 'asset-tree-report-chart is-round');
         var ring = el('div', 'asset-tree-report-ring');
+        var center = money ? (sumText || '') : String(total);
         if (kind === 'pie') {
-            ring.appendChild(reportPieChart(rows));
+            ring.appendChild(reportPieChart(measured));
         } else {
-            ring.appendChild(donutChart(rows, true));
-            ring.appendChild(el('span', 'asset-tree-report-ring-value', String(total)));
+            ring.appendChild(donutChart(measured, true));
+            var figure = el('span', 'asset-tree-report-ring-value' + (center.length > 7 ? ' is-compact' : ''), center);
+            ring.appendChild(figure);
         }
         round.appendChild(ring);
-        round.appendChild(reportLegend(rows, total));
+        round.appendChild(reportLegend(money ? rows : measured, money ? maxShare(rows) : total, money));
         return round;
+    }
+
+    function maxShare(rows) {
+        var total = 0;
+        rows.forEach(function (row) { total += Number(row.amount) || 0; });
+        return total;
     }
 
     function shareText(count, total) {
@@ -14919,10 +14986,15 @@
             return main;
         }
         var rows = view.rows || [];
-        var maxCount = 1;
+        var money = reportMoney(view);
+        var shareTotal = 0;
+        var maxValue = 1;
         rows.forEach(function (row) {
-            if (row.count > maxCount) maxCount = row.count;
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            shareTotal += value;
+            if (value > maxValue) maxValue = value;
         });
+        if (!money) shareTotal = view.total || 0;
         var kind = reportChartKind(view);
         var titleRow = el('div', 'asset-tree-report-title');
         var titles = el('div');
@@ -14933,39 +15005,48 @@
         main.appendChild(titleRow);
         var facts = el('div', 'asset-tree-report-facts');
         facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
-        if (view.sum) facts.appendChild(reportFact('', view.sum, ''));
+        if (view.sum) facts.appendChild(reportFact('', view.sum, t('lifeBook')));
         main.appendChild(facts);
-        var chartPanel = reportChartPanel(rows, view.total || 0, maxCount, kind);
-        if (chartPanel) main.appendChild(chartPanel);
-        var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
-        var header = el('tr');
-        header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy)));
-        header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
-        header.appendChild(el('th', 'is-num', t('reportCount')));
-        header.appendChild(el('th', 'is-num', t('reportShare')));
-        table.appendChild(header);
-        rows.forEach(function (row) {
-            var line = el('tr');
-            var name = el('td', 'asset-tree-report-name');
-            var dot = el('i');
-            dot.style.background = row.color || '#0052CC';
-            name.appendChild(dot);
-            name.appendChild(document.createTextNode(row.label || ''));
-            line.appendChild(name);
-            var meter = el('td', 'asset-tree-report-meter');
-            meter.appendChild(reportMeter(row.count, maxCount, row.color));
-            line.appendChild(meter);
-            line.appendChild(el('td', 'is-num', String(row.count)));
-            line.appendChild(el('td', 'is-num', shareText(row.count, view.total || 0)));
-            table.appendChild(line);
-        });
-        var total = el('tr', 'is-total');
-        total.appendChild(el('td', null, t('reportTotalRow')));
-        total.appendChild(el('td', 'asset-tree-report-meter', ''));
-        total.appendChild(el('td', 'is-num', String(view.total || 0)));
-        total.appendChild(el('td', 'is-num', shareText(view.total || 0, view.total || 0)));
-        table.appendChild(total);
-        main.appendChild(table);
+        if (!rows.length) {
+            main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
+        } else {
+            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '');
+            if (chartPanel) main.appendChild(chartPanel);
+            var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
+            var header = el('tr');
+            header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy)));
+            header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
+            header.appendChild(el('th', 'is-num', t('reportCount')));
+            if (money) header.appendChild(el('th', 'is-num is-money', t('lifeBook')));
+            header.appendChild(el('th', 'is-num', t('reportShare')));
+            table.appendChild(header);
+            rows.forEach(function (row) {
+                var line = el('tr');
+                var name = el('td', 'asset-tree-report-name');
+                name.title = row.label || '';
+                var dot = el('i');
+                dot.style.background = row.color || '#0052CC';
+                name.appendChild(dot);
+                name.appendChild(document.createTextNode(row.label || ''));
+                line.appendChild(name);
+                var meter = el('td', 'asset-tree-report-meter');
+                var meterValue = money ? (Number(row.amount) || 0) : (row.count || 0);
+                meter.appendChild(reportMeter(meterValue, maxValue, row.color));
+                line.appendChild(meter);
+                line.appendChild(el('td', 'is-num', String(row.count)));
+                if (money) line.appendChild(el('td', 'is-num is-money', row.amountText || '0'));
+                line.appendChild(el('td', 'is-num', shareText(meterValue, shareTotal)));
+                table.appendChild(line);
+            });
+            var total = el('tr', 'is-total');
+            total.appendChild(el('td', null, t('reportTotalRow')));
+            total.appendChild(el('td', 'asset-tree-report-meter', ''));
+            total.appendChild(el('td', 'is-num', String(view.total || 0)));
+            if (money) total.appendChild(el('td', 'is-num is-money', view.sum || ''));
+            total.appendChild(el('td', 'is-num', shareText(shareTotal, shareTotal)));
+            table.appendChild(total);
+            main.appendChild(table);
+        }
         if (view.lines && view.lines.length) {
             var lines = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-lines');
             var lineHead = el('tr');
@@ -14984,7 +15065,9 @@
             main.appendChild(lines);
         }
         var foot = el('div', 'asset-tree-report-foot');
-        foot.appendChild(el('p', null, t('reportCounted')));
+        var note = t('reportCounted');
+        if (view.capped) note += ' ' + t('reportLinesCut');
+        foot.appendChild(el('p', null, note));
         if (!view.standard && state.canEdit) {
             foot.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
                 ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), null, function (status, payload) {
@@ -15091,10 +15174,9 @@
                     if (statusKeys.length) parts.push('s=' + statusKeys.join(','));
                     body.filterValue = parts.join(';');
                 }
-                closeModal(hold);
                 ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', body, function (status, payload) {
-                    closeModal(hold);
                     if (status >= 200 && status < 300) {
+                        closeModal(hold);
                         var created = payload && (payload.id || payload.key || '');
                         state.reportChart = '';
                         state.reportChartFor = '';
@@ -15103,7 +15185,10 @@
                         state.reportView = null;
                         state.galleryLoading = false;
                         renderFrame();
-                    } else notify((payload && payload.message) || t('errorTitle'));
+                    } else {
+                        save.disabled = false;
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
                 });
             });
             name.addEventListener('keydown', function (event) {
@@ -19902,6 +19987,7 @@
         svg.setAttribute('role', 'img');
         var total = 0;
         rows.forEach(function (row) { total += row.count; });
+        if (!total) return svg;
         if (rows.length === 1) {
             var ring = svgEl('circle');
             ring.setAttribute('cx', '60');
@@ -19926,6 +20012,19 @@
         var angle = -Math.PI / 2;
         rows.forEach(function (row) {
             var slice = (row.count / total) * Math.PI * 2;
+            if (slice >= Math.PI * 2 - 0.0001) {
+                var full = svgEl('circle');
+                full.setAttribute('cx', '60');
+                full.setAttribute('cy', '60');
+                full.setAttribute('r', '35');
+                full.setAttribute('fill', 'none');
+                full.setAttribute('stroke', row.color || '#0052CC');
+                full.setAttribute('stroke-width', '14');
+                bindSlice(full, row);
+                svg.appendChild(full);
+                angle += slice;
+                return;
+            }
             var path = svgEl('path');
             path.setAttribute('d', donutSlice(60, 60, 42, 28, angle, angle + slice));
             path.setAttribute('fill', row.color || '#0052CC');

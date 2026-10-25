@@ -173,6 +173,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -7128,6 +7129,12 @@ public class AssetServiceImpl implements AssetService {
         }
         Map<Integer, LifecycleEntity> lives = lifeIndex();
         Map<Integer, ServicePlanEntity> nextPlan = nextPlanIndex();
+        Map<String, String> statusNames = new HashMap<String, String>();
+        for (StatusDto status : statusDtos(project.getKey(), assets)) {
+            if (status.getStatusKey() != null && status.getLabel() != null && !status.getLabel().isEmpty()) {
+                statusNames.put(status.getStatusKey(), status.getLabel());
+            }
+        }
         List<AssetEntity> chosen = new ArrayList<AssetEntity>();
         for (AssetEntity asset : assets) {
             AssetTypeDto type = types.get(asset.getTypeKey());
@@ -7158,11 +7165,12 @@ public class AssetServiceImpl implements AssetService {
         Map<String, ReportBucketDto> buckets = new LinkedHashMap<String, ReportBucketDto>();
         List<ReportLineDto> lines = new ArrayList<ReportLineDto>();
         long sum = 0L;
+        boolean capped = false;
         LocalDate today = LocalDate.now();
         Map<String, String> kindNames = kindNames(project.getKey());
         for (AssetEntity asset : chosen) {
             String bucketKey = reportBucketKey(key, group, asset, types, index, lives, nextPlan, today);
-            String label = reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames);
+            String label = reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames, statusNames);
             ReportBucketDto bucket = buckets.get(bucketKey);
             if (bucket == null) {
                 bucket = new ReportBucketDto(bucketKey, label, reportColor(key, group, bucketKey, types), 0);
@@ -7170,21 +7178,37 @@ public class AssetServiceImpl implements AssetService {
             }
             bucket.setCount(bucket.getCount() + 1);
             String detail = reportDetail(key, asset, lives, nextPlan, today, kindNames);
+            if (detail.isEmpty()) {
+                detail = label;
+            }
             if (ReportCatalog.COST.equals(key)) {
-                sum += bookOf(lives.get(Integer.valueOf(asset.getID())), today);
+                long book = bookOf(lives.get(Integer.valueOf(asset.getID())), today);
+                sum += book;
+                bucket.setAmount(bucket.getAmount() + book);
             }
             if (lines.size() < 300) {
                 lines.add(new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(), detail));
+            } else {
+                capped = true;
             }
         }
+        List<ReportBucketDto> rows = new ArrayList<ReportBucketDto>(buckets.values());
+        if (ReportCatalog.COST.equals(key)) {
+            for (ReportBucketDto bucket : rows) {
+                bucket.setAmountText(MoneyText.format(bucket.getAmount()));
+            }
+        }
+        sortReportRows(key, group, rows);
+        distinctReportColors(rows);
         ReportViewDto view = new ReportViewDto();
         view.setId(key);
         view.setTitle(title);
         view.setHint(i18n().getText("asset-tree.ui.reportCounted"));
         view.setStandard(standard);
         view.setTotal(chosen.size());
-        view.setRows(new ArrayList<ReportBucketDto>(buckets.values()));
+        view.setRows(rows);
         view.setLines(lines);
+        view.setCapped(capped);
         view.setSum(ReportCatalog.COST.equals(key) ? MoneyText.format(sum) : "");
         return view;
     }
@@ -7291,7 +7315,8 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private String reportBucketLabel(String reportKey, String group, String bucketKey, AssetEntity asset,
-            Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index, Map<String, String> kindNames) {
+            Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index, Map<String, String> kindNames,
+            Map<String, String> statusNames) {
         if (ReportCatalog.SERVICE.equals(reportKey) || ReportCatalog.WORK.equals(reportKey)) {
             return namedKind(bucketKey, kindNames);
         }
@@ -7316,6 +7341,9 @@ public class AssetServiceImpl implements AssetService {
             }
             return i18n().getText("asset-tree.ui.lifeWarrantyOn");
         }
+        if (ReportCatalog.RECEIPTS.equals(reportKey) || ReportCatalog.WRITEOFF.equals(reportKey)) {
+            return monthLabel(bucketKey);
+        }
         if (ReportCatalog.TYPE.equals(group) || ReportCatalog.COST.equals(reportKey)) {
             AssetTypeDto type = types.get(bucketKey);
             return type == null ? bucketKey : type.getLabel();
@@ -7330,7 +7358,110 @@ public class AssetServiceImpl implements AssetService {
         if (ReportCatalog.HOLDER.equals(group)) {
             return bucketKey.isEmpty() ? i18n().getText("asset-tree.ui.reportUnassigned") : displayName(bucketKey);
         }
-        return statusText(bucketKey);
+        return statusName(bucketKey, statusNames);
+    }
+
+    private String statusName(String bucketKey, Map<String, String> statusNames) {
+        if (statusNames != null && bucketKey != null) {
+            String named = statusNames.get(bucketKey);
+            if (named != null && !named.isEmpty()) {
+                return named;
+            }
+        }
+        if (bucketKey != null && Statuses.ALL.contains(bucketKey)) {
+            return statusText(bucketKey);
+        }
+        if (bucketKey == null || bucketKey.isEmpty()) {
+            return statusText(Statuses.IN_USE);
+        }
+        return bucketKey;
+    }
+
+    private String monthLabel(String bucketKey) {
+        if (bucketKey == null || bucketKey.length() < 7 || bucketKey.charAt(4) != '-') {
+            return i18n().getText("asset-tree.ui.reportNoDate");
+        }
+        try {
+            LocalDate date = LocalDate.parse(bucketKey.substring(0, 7) + "-01");
+            Locale locale = i18n().getLocale();
+            if (locale == null) {
+                locale = Locale.ENGLISH;
+            }
+            String text = date.format(DateTimeFormatter.ofPattern("LLLL yyyy", locale));
+            if (text == null || text.isEmpty() || Character.isDigit(text.charAt(0))) {
+                text = date.format(DateTimeFormatter.ofPattern("MMMM yyyy", locale));
+            }
+            if (text == null || text.isEmpty()) {
+                return bucketKey.substring(0, 7);
+            }
+            return text.substring(0, 1).toUpperCase(locale) + text.substring(1);
+        } catch (RuntimeException ex) {
+            return bucketKey.substring(0, 7);
+        }
+    }
+
+    private void sortReportRows(String key, String group, List<ReportBucketDto> rows) {
+        if (ReportCatalog.AGE.equals(key)) {
+            sortByKeys(rows, Arrays.asList("y0", "y1", "y3", "y5"));
+            return;
+        }
+        if (ReportCatalog.WARRANTY.equals(key)) {
+            sortByKeys(rows, Arrays.asList("expired", "soon", "active"));
+            return;
+        }
+        if ("month".equals(group) || ReportCatalog.WRITEOFF.equals(key)) {
+            Collections.sort(rows, new Comparator<ReportBucketDto>() {
+                @Override
+                public int compare(ReportBucketDto left, ReportBucketDto right) {
+                    return monthRank(left.getKey()).compareTo(monthRank(right.getKey()));
+                }
+            });
+        }
+    }
+
+    private void sortByKeys(List<ReportBucketDto> rows, final List<String> order) {
+        Collections.sort(rows, new Comparator<ReportBucketDto>() {
+            @Override
+            public int compare(ReportBucketDto left, ReportBucketDto right) {
+                return keyRank(order, left.getKey()) - keyRank(order, right.getKey());
+            }
+        });
+    }
+
+    private int keyRank(List<String> order, String key) {
+        int index = order.indexOf(key);
+        return index < 0 ? order.size() : index;
+    }
+
+    private String monthRank(String key) {
+        if (key != null && key.length() >= 7 && key.charAt(4) == '-') {
+            return key.substring(0, 7);
+        }
+        return "9999-99";
+    }
+
+    private void distinctReportColors(List<ReportBucketDto> rows) {
+        String[] palette = new String[] {
+                "#0052CC", "#00875A", "#FF8B00", "#6554C0", "#00A3BF",
+                "#DE350B", "#36B37E", "#FF5630", "#8777D9", "#FFAB00"
+        };
+        Set<String> used = new HashSet<String>();
+        int cursor = 0;
+        for (ReportBucketDto row : rows) {
+            String color = row.getColor() == null ? "" : row.getColor().toLowerCase(Locale.ROOT);
+            if (color.isEmpty() || used.contains(color)) {
+                int guard = 0;
+                while (guard < palette.length && used.contains(palette[cursor % palette.length].toLowerCase(Locale.ROOT))) {
+                    cursor++;
+                    guard++;
+                }
+                String next = palette[cursor % palette.length];
+                cursor++;
+                row.setColor(next);
+                color = next.toLowerCase(Locale.ROOT);
+            }
+            used.add(color);
+        }
     }
 
     private String reportColor(String reportKey, String group, String bucketKey, Map<String, AssetTypeDto> types) {
@@ -7415,6 +7546,18 @@ public class AssetServiceImpl implements AssetService {
         }
         if (ReportCatalog.COST.equals(reportKey)) {
             return MoneyText.format(bookOf(life, today));
+        }
+        if (ReportCatalog.RECEIPTS.equals(reportKey) || ReportCatalog.AGE.equals(reportKey)) {
+            String purchased = FieldDates.canonical(life.getPurchased());
+            return purchased == null ? "" : purchased;
+        }
+        if (ReportCatalog.WRITEOFF.equals(reportKey)) {
+            String reason = life.getWriteoffReason();
+            if (reason != null && !reason.trim().isEmpty()) {
+                return reason.trim();
+            }
+            String decided = FieldDates.canonical(life.getDecidedAt());
+            return decided == null ? "" : decided;
         }
         return "";
     }
