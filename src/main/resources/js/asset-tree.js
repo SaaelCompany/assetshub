@@ -11889,7 +11889,7 @@
         } else {
             panel.appendChild(scheduleLayers());
             if (state.scheduleClockDay) panel.appendChild(scheduleClock(state.scheduleClockDay));
-            panel.appendChild(scheduleCalendar());
+            else panel.appendChild(scheduleCalendar());
         }
         return panel;
     }
@@ -12124,7 +12124,7 @@
             var start = occurrenceClock(plan, iso).start;
             var bucket = start ? timeBucket(start) : '';
             if (bucket !== time) return;
-            list.appendChild(scheduleEventCard(plan, iso));
+            list.appendChild(scheduleEventCard(plan, iso, true));
         });
         lane.appendChild(list);
         return lane;
@@ -12209,9 +12209,20 @@
             event.stopPropagation();
             state.scheduleClockDay = state.scheduleClockDay === iso ? '' : iso;
             renderFrame();
+            if (state.scheduleClockDay) revealScheduleClock();
         });
         num.title = t('schedulesClock');
         return num;
+    }
+
+    function revealScheduleClock() {
+        var board = document.querySelector('.asset-tree-clock');
+        if (!board || !board.scrollIntoView) return;
+        try {
+            board.scrollIntoView({ block: 'start' });
+        } catch (ignore) {
+            board.scrollIntoView();
+        }
     }
 
     function dayMoreButton(iso, label, expand) {
@@ -12224,7 +12235,7 @@
         return more;
     }
 
-    function scheduleEventCard(plan, iso) {
+    function scheduleEventCard(plan, iso, onClock) {
         var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
         var source = seriesSource(plan, iso);
         var done = !!plan.completed;
@@ -12253,8 +12264,12 @@
         card.appendChild(text);
         card.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
         if (state.canEdit) {
-            card.title += ' · ' + t('schedulesDragTime');
-            card.addEventListener('mousedown', function (event) { beginPlanDrag(plan, iso, card, event); });
+            card.title += ' · ' + t(onClock ? 'schedulesDragTime' : 'schedulesDragOne');
+            card.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                beginPlanDrag(plan, iso, card, event);
+            });
         }
         return card;
     }
@@ -12386,6 +12401,12 @@
             if (!dragging && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 5) return;
             dragging = true;
             card.classList.add('is-dragging');
+            var clockBoard = document.querySelector('.asset-tree-clock');
+            if (clockBoard) {
+                var bounds = clockBoard.getBoundingClientRect();
+                if (ev.clientY < bounds.top + 36) clockBoard.scrollTop -= 18;
+                else if (ev.clientY > bounds.bottom - 36) clockBoard.scrollTop += 18;
+            }
             var next = dropTargetAt(ev.clientX, ev.clientY);
             var nextNode = next ? next.node : null;
             if (target && target.node !== nextNode) target.node.classList.remove('is-drop');
@@ -13999,6 +14020,87 @@
         return wrap;
     }
 
+    function clockParts(value) {
+        var text = String(value || '');
+        if (text.length > 5) text = text.slice(0, 5);
+        var match = /^(\d{2}):(\d{2})$/.exec(text);
+        if (!match) return { hour: '', minute: '' };
+        var hour = parseInt(match[1], 10);
+        var minute = parseInt(match[2], 10);
+        if (hour > 23 || minute > 59) return { hour: '', minute: '' };
+        return { hour: match[1], minute: match[2] };
+    }
+
+    function fillClockSelect(select, values, selected) {
+        select.innerHTML = '';
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '—';
+        select.appendChild(empty);
+        var seen = {};
+        var index;
+        for (index = 0; index < values.length; index++) seen[values[index]] = true;
+        if (selected && !seen[selected]) values = values.concat([selected]);
+        values.forEach(function (value) {
+            var option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            select.appendChild(option);
+        });
+        select.value = selected || '';
+    }
+
+    function clockPair(startValue, endValue) {
+        var hours = [];
+        var minutes = [];
+        var index;
+        for (index = 0; index < 24; index++) hours.push((index < 10 ? '0' : '') + index);
+        for (index = 0; index < 60; index += 5) minutes.push((index < 10 ? '0' : '') + index);
+        var start = clockParts(startValue);
+        var end = clockParts(endValue);
+        function part(list, selected) {
+            var select = document.createElement('select');
+            select.className = 'asset-tree-clock-part';
+            fillClockSelect(select, list.slice(), selected);
+            return select;
+        }
+        var startHour = part(hours, start.hour);
+        var startMinute = part(minutes, start.minute);
+        var endHour = part(hours, end.hour);
+        var endMinute = part(minutes, end.minute);
+        function read(hourSelect, minuteSelect) {
+            if (!hourSelect.value || !minuteSelect.value) return '';
+            return hourSelect.value + ':' + minuteSelect.value;
+        }
+        var node = el('span', 'asset-tree-clock-pair');
+        node.appendChild(startHour);
+        node.appendChild(el('span', 'asset-tree-clock-colon', ':'));
+        node.appendChild(startMinute);
+        node.appendChild(el('span', 'asset-tree-clock-dash', '–'));
+        node.appendChild(endHour);
+        node.appendChild(el('span', 'asset-tree-clock-colon', ':'));
+        node.appendChild(endMinute);
+        return {
+            node: node,
+            start: function () { return read(startHour, startMinute); },
+            end: function () { return read(endHour, endMinute); },
+            setDisabled: function (disabled) {
+                startHour.disabled = disabled;
+                startMinute.disabled = disabled;
+                endHour.disabled = disabled;
+                endMinute.disabled = disabled;
+            },
+            setRange: function (startText, endText) {
+                var from = clockParts(startText);
+                var to = clockParts(endText);
+                fillClockSelect(startHour, hours.slice(), from.hour);
+                fillClockSelect(startMinute, minutes.slice(), from.minute);
+                fillClockSelect(endHour, hours.slice(), to.hour);
+                fillClockSelect(endMinute, minutes.slice(), to.minute);
+            }
+        };
+    }
+
     function openPlanEvent(plan, iso) {
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
@@ -14098,21 +14200,14 @@
                 ranged.type = 'radio';
                 ranged.name = 'asset-tree-edit-when';
                 ranged.checked = !!plan.startTime;
-                var startTime = document.createElement('input');
-                startTime.type = 'time';
-                startTime.value = plan.startTime || '';
-                var endTime = document.createElement('input');
-                endTime.type = 'time';
-                endTime.value = plan.endTime || '';
-                startTime.disabled = !plan.startTime;
-                endTime.disabled = !plan.startTime;
+                var clock = clockPair(plan.startTime || '', plan.endTime || '');
+                clock.setDisabled(!plan.startTime);
                 allDay.addEventListener('change', function () {
-                    startTime.disabled = true;
-                    endTime.disabled = true;
+                    clock.setDisabled(true);
                 });
                 ranged.addEventListener('change', function () {
-                    startTime.disabled = false;
-                    endTime.disabled = false;
+                    clock.setDisabled(false);
+                    if (!clock.start()) clock.setRange('09:00', '10:00');
                 });
                 var timeRow = el('div', 'asset-tree-time-row');
                 var allLabel = el('label', 'asset-tree-check');
@@ -14120,10 +14215,9 @@
                 allLabel.appendChild(document.createTextNode(t('schedulesAllDay')));
                 var rangeLabel = el('label', 'asset-tree-check');
                 rangeLabel.appendChild(ranged);
-                rangeLabel.appendChild(startTime);
-                rangeLabel.appendChild(endTime);
                 timeRow.appendChild(allLabel);
                 timeRow.appendChild(rangeLabel);
+                timeRow.appendChild(clock.node);
                 dialog.appendChild(planField(t('name'), name));
                 dialog.appendChild(planField(t('schedulesKind'), kind));
                 var firstField = el('div', 'asset-tree-plan-field');
@@ -14175,8 +14269,8 @@
                         moves: changed ? '' : (plan.moves || ''),
                         assigneeKey: person.value.trim() ? draft.assigneeKey : '',
                         note: note.value,
-                        startTime: ranged.checked ? startTime.value : '',
-                        endTime: ranged.checked ? endTime.value : ''
+                        startTime: ranged.checked ? (clock.start() || '09:00') : '',
+                        endTime: ranged.checked ? (clock.end() || addMinutes(clock.start() || '09:00', 60)) : ''
                     }, function (ok) { if (ok) closeModal(); });
                 }));
             }
@@ -14259,21 +14353,16 @@
             var ranged = document.createElement('input');
             ranged.type = 'radio';
             ranged.name = 'asset-tree-when';
-            var startTime = document.createElement('input');
-            startTime.type = 'time';
-            var endTime = document.createElement('input');
-            endTime.type = 'time';
-            startTime.disabled = true;
-            endTime.disabled = true;
+            var clock = clockPair('', '');
+            clock.setDisabled(true);
             allDay.addEventListener('change', function () {
                 draft.allDay = true;
-                startTime.disabled = true;
-                endTime.disabled = true;
+                clock.setDisabled(true);
             });
             ranged.addEventListener('change', function () {
                 draft.allDay = false;
-                startTime.disabled = false;
-                endTime.disabled = false;
+                clock.setDisabled(false);
+                if (!clock.start()) clock.setRange('09:00', '10:00');
             });
             var timeRow = el('div', 'asset-tree-time-row');
             var allLabel = el('label', 'asset-tree-check');
@@ -14281,10 +14370,9 @@
             allLabel.appendChild(document.createTextNode(t('schedulesAllDay')));
             var rangeLabel = el('label', 'asset-tree-check');
             rangeLabel.appendChild(ranged);
-            rangeLabel.appendChild(startTime);
-            rangeLabel.appendChild(endTime);
             timeRow.appendChild(allLabel);
             timeRow.appendChild(rangeLabel);
+            timeRow.appendChild(clock.node);
             var repeat = document.createElement('select');
             [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -14471,9 +14559,10 @@
                     note: note.value,
                     notify: !!moduleSetup().scheduleNotify
                 };
-                if (!allDay.checked && startTime.value) {
-                    body.startTime = startTime.value;
-                    body.endTime = endTime.value;
+                if (!allDay.checked) {
+                    if (!clock.start()) clock.setRange('09:00', '10:00');
+                    body.startTime = clock.start();
+                    body.endTime = clock.end() || addMinutes(clock.start(), 60);
                 }
                 if (draft.assigneeKey) body.assigneeKey = draft.assigneeKey;
                 ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/schedule', body, function (status, payload) {

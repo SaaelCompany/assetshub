@@ -8412,12 +8412,34 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-clock {
-    max-height: 440px;
-    margin: 0 0 12px;
+    max-height: calc(100vh - 220px);
+    margin: 0;
     overflow: auto;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     background: #fff;
+}
+
+#asset-tree-app .asset-tree-clock-pair,
+.asset-tree-backdrop .asset-tree-clock-pair {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#asset-tree-app .asset-tree-work-dialog select.asset-tree-clock-part,
+.asset-tree-backdrop .asset-tree-work-dialog select.asset-tree-clock-part {
+    width: 72px;
+    min-width: 72px;
+    padding: 4px 6px;
+}
+
+#asset-tree-app .asset-tree-clock-colon,
+#asset-tree-app .asset-tree-clock-dash,
+.asset-tree-backdrop .asset-tree-clock-colon,
+.asset-tree-backdrop .asset-tree-clock-dash {
+    color: #6b778c;
+    font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-clock-head {
