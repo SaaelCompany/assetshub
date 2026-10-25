@@ -551,12 +551,55 @@ public class AssetResource {
     }
 
     @GET
-    @Path("projects/{projectKey}/reports/{reportKey}")
-    public Response reportView(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey) {
+    @Path("projects/{projectKey}/reports.xlsx")
+    @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public Response exportReports(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.reportView(user(), projectKey, reportKey)).build();
+                byte[] book = assetService.exportReports(user(), projectKey);
+                String file = "reports-" + projectKey + ".xlsx";
+                return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
+                        .build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/reports/mail")
+    public Response sendReportMail(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.sendReportMail(user(), projectKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/reports/{reportKey}")
+    public Response updateReportChart(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey, final SavedReportDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String chart = draft == null ? "" : draft.getChart();
+                return Response.ok(assetService.updateReportChart(user(), projectKey, reportKey, chart)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/reports/{reportKey}")
+    public Response reportView(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
+            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                int lineFrom = from == null ? 0 : from.intValue();
+                boolean allLines = lines != null && "all".equalsIgnoreCase(lines.trim());
+                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines)).build();
             }
         });
     }

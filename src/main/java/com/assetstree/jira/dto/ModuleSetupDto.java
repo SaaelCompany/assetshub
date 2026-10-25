@@ -15,6 +15,12 @@ public class ModuleSetupDto {
     private Integer mapGrid;
     private Boolean mapSnap;
     private String reportHidden;
+    private String reportCharts;
+    private Boolean reportMail;
+    private String reportMailEvery;
+    private Integer reportMailDay;
+    private String reportMailTo;
+    private String reportMailSent;
     private Boolean lifeApproval;
     private String lifeApprover;
     private String lifeCurrency;
@@ -44,6 +50,18 @@ public class ModuleSetupDto {
     public void setMapSnap(Boolean mapSnap) { this.mapSnap = mapSnap; }
     public String getReportHidden() { return reportHidden; }
     public void setReportHidden(String reportHidden) { this.reportHidden = reportHidden; }
+    public String getReportCharts() { return reportCharts; }
+    public void setReportCharts(String reportCharts) { this.reportCharts = reportCharts; }
+    public Boolean getReportMail() { return reportMail; }
+    public void setReportMail(Boolean reportMail) { this.reportMail = reportMail; }
+    public String getReportMailEvery() { return reportMailEvery; }
+    public void setReportMailEvery(String reportMailEvery) { this.reportMailEvery = reportMailEvery; }
+    public Integer getReportMailDay() { return reportMailDay; }
+    public void setReportMailDay(Integer reportMailDay) { this.reportMailDay = reportMailDay; }
+    public String getReportMailTo() { return reportMailTo; }
+    public void setReportMailTo(String reportMailTo) { this.reportMailTo = reportMailTo; }
+    public String getReportMailSent() { return reportMailSent; }
+    public void setReportMailSent(String reportMailSent) { this.reportMailSent = reportMailSent; }
     public Boolean getLifeApproval() { return lifeApproval; }
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }

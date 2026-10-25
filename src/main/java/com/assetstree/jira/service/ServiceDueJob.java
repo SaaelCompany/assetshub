@@ -17,5 +17,10 @@ public class ServiceDueJob implements PluginJob {
         } catch (RuntimeException ex) {
             log.warn("Service dates were not applied", ex);
         }
+        try {
+            AssetBridge.service().sendScheduledReports();
+        } catch (RuntimeException ex) {
+            log.warn("Report mail was not sent", ex);
+        }
     }
 }

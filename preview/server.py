@@ -1114,6 +1114,31 @@ def module_setup(stored, migrate=True):
     if unit not in ("once", "day", "week", "month", "year"):
         unit = "month"
     hidden = [key for key in str(stored.get("reportHidden") or "").split(",") if key in REPORT_STANDARD]
+    charts = []
+    seen_charts = set()
+    for part in str(stored.get("reportCharts") or "").split(","):
+        if ":" not in part:
+            continue
+        chart_key, chart_kind = part.split(":", 1)
+        chart_key = chart_key.strip().lower()
+        chart_kind = chart_kind.strip().lower()
+        if chart_key in REPORT_STANDARD and chart_kind in ("donut", "pie", "bar", "bars") and chart_key not in seen_charts:
+            seen_charts.add(chart_key)
+            charts.append("%s:%s" % (chart_key, chart_kind))
+    every = "month" if str(stored.get("reportMailEvery") or "").strip().lower() == "month" else "week"
+    try:
+        mail_day = int(stored.get("reportMailDay") or 1)
+    except (TypeError, ValueError):
+        mail_day = 1
+    mail_day = min(28, max(1, mail_day)) if every == "month" else (mail_day if 1 <= mail_day <= 7 else 1)
+    mail_to = []
+    for key in str(stored.get("reportMailTo") or "").split(","):
+        key = key.strip()
+        if re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", key) and key not in mail_to and len(mail_to) < 5:
+            mail_to.append(key)
+    mail_sent = str(stored.get("reportMailSent") or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", mail_sent):
+        mail_sent = ""
     grid = int(stored.get("mapGrid") or 24)
     if grid not in (8, 12, 16, 24, 32):
         grid = 24
@@ -1133,6 +1158,12 @@ def module_setup(stored, migrate=True):
         "mapGrid": grid,
         "mapSnap": stored.get("mapSnap") is not False,
         "reportHidden": ",".join(hidden),
+        "reportCharts": ",".join(charts),
+        "reportMail": bool(stored.get("reportMail")),
+        "reportMailEvery": every,
+        "reportMailDay": mail_day,
+        "reportMailTo": ",".join(mail_to),
+        "reportMailSent": mail_sent,
         "lifeApproval": stored.get("lifeApproval") is not False,
         "lifeApprover": approver,
         "lifeCurrency": currency,
@@ -2511,6 +2542,16 @@ def decide_writeoff(asset_id, body, text):
     return 200, life_dto(asset_id)
 
 
+def stored_report_chart(project_key, report_key, fallback):
+    setup = module_setup(((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}, migrate=False)
+    for part in str(setup.get("reportCharts") or "").split(","):
+        if part.startswith(report_key + ":"):
+            chart = part.split(":", 1)[1]
+            if chart in ("donut", "pie", "bar", "bars"):
+                return chart
+    return fallback
+
+
 def report_group(key):
     if key in ("status", "type", "place", "holder"):
         return key
@@ -2530,7 +2571,7 @@ def report_catalog(project_key, text):
         "writeoff": text.get("asset-tree.ui.reportWriteoffs", "Write-offs"),
         "work": text.get("asset-tree.ui.reportWork", "Work"),
     }
-    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": "donut" if key == "status" else "bar", "metric": "count", "standard": True, "filterField": "", "filterValue": ""} for key in REPORT_STANDARD]
+    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": stored_report_chart(project_key, key, "donut" if key == "status" else "bar"), "metric": "cost" if key == "cost" else "count", "standard": True, "filterField": "", "filterValue": ""} for key in REPORT_STANDARD]
     own = [row for row in STATE.setdefault("saved_reports", {}).values() if row.get("projectKey") == project_key]
     own.sort(key=lambda item: item["id"])
     for row in own:
@@ -2546,12 +2587,16 @@ def create_saved_report(project_key, body, text):
     group = (body.get("groupBy") or "").strip().lower()
     filt = (body.get("filterField") or "").strip().lower()
     value = (body.get("filterValue") or "").strip()
-    if group not in ("status", "type", "place", "holder") or not name or len(name) > 80:
+    if group not in ("status", "type", "place", "holder", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if filt and filt not in ("status", "type", "holder", "mix"):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if bool(filt) != bool(value) or len(value) > 255:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if filt == "mix":
+        for part in value.split(";"):
+            if not part.startswith(("t=", "s=", "h=", "p=")):
+                return 400, {"message": text.get("asset-tree.error.report", "Report")}
     chart = (body.get("chart") or "bar").strip().lower()
     if chart not in ("bar", "bars", "donut", "pie"):
         chart = "bar"
@@ -2581,6 +2626,33 @@ def delete_saved_report(project_key, report_key, text):
         return 404, {"message": text["asset-tree.error.notFound"]}
     STATE["saved_reports"].pop(report_id, None)
     return 204, None
+
+
+def update_report_chart(project_key, report_key, body, text):
+    if not module_on(project_key, "reports"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    chart = ((body or {}).get("chart") or "").strip().lower()
+    if chart not in ("donut", "pie", "bar", "bars"):
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if report_key in REPORT_STANDARD:
+        view = STATE.setdefault("views", {}).setdefault(project_key, {})
+        setup = module_setup(view.get("setup") or {}, migrate=False)
+        kept = [part for part in (setup.get("reportCharts") or "").split(",") if part and not part.startswith(report_key + ":")]
+        kept.append(report_key + ":" + chart)
+        setup["reportCharts"] = ",".join(kept)
+        view["setup"] = module_setup(setup, migrate=False)
+        return 200, {"id": report_key, "chart": chart, "standard": True}
+    if not str(report_key).startswith("s"):
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    try:
+        report_id = int(str(report_key)[1:])
+    except ValueError:
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    row = STATE.setdefault("saved_reports", {}).get(report_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    row["chart"] = chart
+    return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "chart": chart, "metric": row.get("metric") or "count", "standard": False}
 
 
 REPORT_PALETTE = (
@@ -2697,7 +2769,85 @@ def distinct_report_colors(rows):
         used.add(color)
 
 
-def report_view(project_key, report_key, text):
+def report_line_page(lines, query, truncated):
+    query = query or {}
+    line_total = len(lines)
+    all_lines = str((query.get("lines") or [""])[0]).lower() == "all"
+    try:
+        start = int((query.get("from") or ["0"])[0] or 0)
+    except (TypeError, ValueError):
+        start = 0
+    if start < 0:
+        start = 0
+    if all_lines:
+        return lines, line_total, bool(truncated)
+    if start > line_total:
+        start = line_total
+    page = lines[start:start + 300]
+    return page, line_total, bool(truncated) or start + len(page) < line_total
+
+
+def empty_reason(report_key, group, money, text):
+    if report_key == "warranty" or group == "warranty":
+        return text.get("asset-tree.ui.reportEmptyWarranty", "")
+    if report_key == "age" or group == "age":
+        return text.get("asset-tree.ui.reportEmptyAge", "")
+    if report_key == "writeoff" or group == "writeoff":
+        return text.get("asset-tree.ui.reportEmptyWriteoff", "")
+    if money:
+        return text.get("asset-tree.ui.reportEmptyCost", "")
+    return ""
+
+
+def work_report_view(project_key, report_key, spec, assets, filt, text, query):
+    plans = []
+    for asset in assets:
+        plans.extend(plan_rows(asset["id"]))
+    if not filt:
+        loose = [row for row in STATE["plans"].values() if row.get("assetId") == 0 and row.get("projectKey") == project_key]
+        loose.sort(key=lambda item: item["id"])
+        plans.extend(loose)
+    buckets = {}
+    lines = []
+    line_keys = []
+    truncated = False
+    for plan in plans:
+        asset = STATE["assets"].get(plan.get("assetId")) if plan.get("assetId") else None
+        if plan.get("assetId") and not asset:
+            continue
+        bucket = plan.get("kind") or "to"
+        label = kind_label(project_key, bucket)
+        color = "#6554C0" if bucket == "verify" else "#FF8B00" if bucket == "kts" else "#0052CC"
+        slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
+        slot["count"] += 1
+        nxt = plan_next(plan)
+        who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
+        detail = who + (" · " + nxt.isoformat() if nxt else "")
+        name = (plan.get("name") or "").strip() or label
+        if len(lines) < 5000:
+            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail})
+            line_keys.append(bucket)
+        else:
+            truncated = True
+    rows = list(buckets.values())
+    distinct_report_colors(rows)
+    rank = {row["key"]: index for index, row in enumerate(rows)}
+    paired = list(zip(lines, line_keys))
+    paired.sort(key=lambda item: (rank.get(item[1], len(rows)), (item[0].get("name") or "").lower(), (item[0].get("objectKey") or "").lower()))
+    lines = [item[0] for item in paired]
+    page, line_total, capped = report_line_page(lines, query, truncated)
+    chart = spec.get("chart") or "bar"
+    if spec.get("standard"):
+        chart = stored_report_chart(project_key, report_key, "bar")
+    return 200, {
+        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCountedWorks", ""),
+        "total": sum(row["count"] for row in rows),
+        "sum": "", "standard": bool(spec.get("standard")), "groupBy": "kind", "chart": chart,
+        "capped": capped, "lineTotal": line_total, "reason": "", "rows": rows, "lines": page,
+    }
+
+
+def report_view(project_key, report_key, text, query=None):
     if not module_on(project_key, "reports"):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     catalog = {item["id"]: item for item in report_catalog(project_key, text)}
@@ -2721,12 +2871,29 @@ def report_view(project_key, report_key, text):
     elif filt == "mix":
         types = ""
         statuses = ""
+        holders = ""
+        places = ""
         for part in value.split(";"):
             if part.startswith("t="):
                 types = part[2:]
             elif part.startswith("s="):
                 statuses = part[2:]
-        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status"))))]
+            elif part.startswith("h="):
+                holders = part[2:]
+            elif part.startswith("p="):
+                places = part[2:]
+
+        def place_token(asset):
+            place_id = place_container(asset["id"])
+            return str(place_id or "")
+
+        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and (not places or token_hit(places, place_token(asset)))]
+    metric = spec.get("metric") or ("cost" if report_key == "cost" else "count")
+    if group == "kind":
+        metric = "count"
+    money = report_key == "cost" or metric == "cost"
+    if report_key in ("service", "work") or group == "kind":
+        return work_report_view(project_key, report_key, spec, assets, filt, text, query or {})
     status_names = {row["statusKey"]: row.get("label") or row["statusKey"] for row in ensure_statuses(project_key, text)}
     buckets = {}
     lines = []
@@ -2736,20 +2903,19 @@ def report_view(project_key, report_key, text):
     today = datetime.date.today()
     chosen = 0
     for asset in assets:
-        if report_key in ("service", "work") and not plan_rows(asset["id"]):
-            continue
         life = life_row(asset["id"]) or {}
-        if report_key == "warranty" and not life.get("warrantyUntil"):
+        if (report_key == "warranty" or group == "warranty") and not life.get("warrantyUntil"):
             continue
-        if report_key == "cost" and not life.get("priceMinor"):
+        if money and not life.get("priceMinor"):
             continue
-        if report_key in ("receipts", "age") and not life.get("purchased"):
+        if (report_key in ("receipts", "age") or group in ("month", "age")) and not life.get("purchased"):
             continue
-        if report_key == "writeoff" and canonical(asset.get("status")) != "written_off" and life.get("writeoffState") != "approved":
+        if (report_key == "writeoff" or group == "writeoff") and canonical(asset.get("status")) != "written_off" and life.get("writeoffState") != "approved":
             continue
         chosen += 1
         detail = ""
         color = "#0052CC"
+        book = 0
         if report_key in ("service", "work"):
             plan = soonest_plan(asset["id"]) or {}
             bucket = plan.get("kind") or "to"
@@ -2760,19 +2926,19 @@ def report_view(project_key, report_key, text):
                 color = "#FF8B00"
             elif bucket == "verify":
                 color = "#6554C0"
-        elif report_key == "receipts":
+        elif report_key == "receipts" or group == "month":
             bucket = (life.get("purchased") or "")[:7]
             label = month_label(bucket, text)
             detail = life.get("purchased") or ""
-        elif report_key == "age":
+        elif report_key == "age" or group == "age":
             bucket = age_band(life.get("purchased") or "", today)
             label = text.get("asset-tree.ui.reportAge" + bucket[1:], bucket)
             detail = life.get("purchased") or ""
-        elif report_key == "writeoff":
+        elif report_key == "writeoff" or group == "writeoff":
             bucket = (life.get("decidedAt") or "")[:7] or "none"
             label = month_label(bucket, text)
             detail = (life.get("writeoffReason") or "").strip() or (life.get("decidedAt") or "")
-        elif report_key == "warranty":
+        elif report_key == "warranty" or group == "warranty":
             bucket = warranty_band(life.get("warrantyUntil") or "", today)
             if bucket == "expired":
                 label = text.get("asset-tree.ui.lifeWarrantyOff", bucket)
@@ -2787,12 +2953,6 @@ def report_view(project_key, report_key, text):
             bucket = asset.get("typeKey") or ""
             label = (STATE["types"].get(bucket) or {}).get("label") or bucket
             color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
-            if report_key == "cost":
-                book = book_minor(life, today)
-                total_book += book
-                detail = format_money(book)
-            else:
-                book = 0
         elif group == "holder":
             bucket = asset.get("custodianKey") or ""
             person = USERS.get(bucket) or {}
@@ -2806,29 +2966,32 @@ def report_view(project_key, report_key, text):
             bucket = canonical(asset.get("status"))
             label = status_names.get(bucket) or bucket
             color = {"in_use": "#00875A", "repair": "#FF8B00", "maintenance": "#FF8B00", "written_off": "#DE350B", "reserve": "#6554C0", "in_stock": "#6B778C"}.get(bucket, "#0052CC")
-            book = 0
+        if money:
+            book = book_minor(life, today)
+            total_book += book
+            detail = format_money(book)
         if not detail:
             detail = label
         slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
         slot["count"] += 1
-        if report_key == "cost":
+        if money:
             slot["amount"] += book
-        if len(lines) < 300:
+        if len(lines) < 5000:
             lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
             line_keys.append(bucket)
         else:
             capped = True
     rows = list(buckets.values())
-    if report_key == "cost":
+    if money:
         for row in rows:
             row["amountText"] = format_money(row["amount"])
-    if report_key == "age":
+    if report_key == "age" or group == "age":
         order = {"y0": 0, "y1": 1, "y3": 2, "y5": 3}
         rows.sort(key=lambda row: order.get(row["key"], 9))
-    elif report_key == "warranty":
+    elif report_key == "warranty" or group == "warranty":
         order = {"expired": 0, "soon": 1, "active": 2}
         rows.sort(key=lambda row: order.get(row["key"], 9))
-    elif group == "month" or report_key == "writeoff":
+    elif group == "month" or report_key == "writeoff" or group == "writeoff":
         rows.sort(key=lambda row: row["key"] if len(row["key"]) >= 7 and row["key"][4] == "-" else "9999-99")
     distinct_report_colors(rows)
     rank = {row["key"]: index for index, row in enumerate(rows)}
@@ -2839,16 +3002,22 @@ def report_view(project_key, report_key, text):
         (item[0].get("objectKey") or "").lower(),
     ))
     lines = [item[0] for item in paired]
+    page, line_total, page_capped = report_line_page(lines, query, capped)
+    chart = spec.get("chart") or ("donut" if report_key == "status" else "bar")
+    if spec.get("standard"):
+        chart = stored_report_chart(project_key, report_key, chart)
     return 200, {
         "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCounted", ""),
         "total": chosen,
-        "sum": format_money(total_book) if report_key == "cost" else "",
+        "sum": format_money(total_book) if money else "",
         "standard": bool(spec.get("standard")),
         "groupBy": group,
-        "chart": spec.get("chart") or ("donut" if report_key == "status" else "bar"),
-        "capped": capped,
+        "chart": chart,
+        "capped": page_capped,
+        "lineTotal": line_total,
+        "reason": empty_reason(report_key, group, money, text) if not rows else "",
         "rows": rows,
-        "lines": lines,
+        "lines": page,
     }
 
 
@@ -3462,6 +3631,119 @@ def workbook_bytes(pages):
 
 def equipment_xlsx(project_key, text, day_first):
     return workbook_bytes(equipment_pages(project_key, text, day_first))
+
+
+def share_text(value, total):
+    if not total:
+        return "0 %"
+    pct = float(value) * 100.0 / float(total)
+    if abs(pct - round(pct)) < 0.05:
+        return "%d %%" % int(round(pct))
+    return "%.1f %%" % pct
+
+
+def report_sheet(view, text, used):
+    money = bool(view.get("sum"))
+    headers = [view.get("title") or "", text.get("asset-tree.ui.reportCount", "Count")]
+    if money:
+        headers.append(text.get("asset-tree.ui.lifeBook", "Book value"))
+    headers.append(text.get("asset-tree.ui.reportShare", "Share"))
+    rows = view.get("rows") or []
+    share_total = sum((row.get("amount") or 0) if money else (row.get("count") or 0) for row in rows)
+    if not money:
+        share_total = view.get("total") or 0
+    lines = []
+    for row in rows:
+        value = (row.get("amount") or 0) if money else (row.get("count") or 0)
+        cells = [row.get("label") or "", str(row.get("count") or 0)]
+        if money:
+            cells.append(format_money(row.get("amount") or 0))
+        cells.append(share_text(value, share_total).replace("%%", "%"))
+        lines.append(cells)
+    total = [text.get("asset-tree.ui.reportTotalRow", "Total"), str(view.get("total") or 0)]
+    if money:
+        total.append(format_money(share_total))
+    total.append(share_text(share_total, share_total).replace("%%", "%"))
+    lines.append(total)
+    lines.append([])
+    lines.append([
+        text.get("asset-tree.ui.keyLabel", "Key"),
+        text.get("asset-tree.ui.name", "Name"),
+        text.get("asset-tree.ui.lifeBook", "Book value") if money else (view.get("groupBy") or ""),
+    ])
+    for line in view.get("lines") or []:
+        detail = line.get("detail") or ""
+        lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
+    return (sheet_title(view.get("title") or "Report", used), headers, lines)
+
+
+def reports_xlsx(project_key, text):
+    setup = module_setup(((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}, migrate=False)
+    hidden = set(part for part in (setup.get("reportHidden") or "").split(",") if part)
+    pages = []
+    used = set()
+    for item in report_catalog(project_key, text):
+        if item.get("standard") and item["id"] in hidden:
+            continue
+        status, view = report_view(project_key, item["id"], text, {"lines": ["all"]})
+        if status != 200:
+            continue
+        pages.append(report_sheet(view, text, used))
+    return workbook_bytes(pages)
+
+
+def report_mail_due(setup, today):
+    if not setup.get("reportMail"):
+        return False
+    if setup.get("reportMailSent") == today.isoformat():
+        return False
+    every = setup.get("reportMailEvery") or "week"
+    day = int(setup.get("reportMailDay") or 1)
+    if every == "month":
+        last = calendar.monthrange(today.year, today.month)[1]
+        want = min(max(day, 1), last)
+        return today.day == want
+    want = day if 1 <= day <= 7 else 1
+    return today.isoweekday() == want
+
+
+def queue_report_mail(project_key, text, force):
+    if not module_on(project_key, "reports"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    view = STATE.setdefault("views", {}).setdefault(project_key, {})
+    setup = module_setup(view.get("setup") or {}, migrate=False)
+    today = datetime.date.today()
+    if not force and not report_mail_due(setup, today):
+        return 204, None
+    recipients = [key for key in (setup.get("reportMailTo") or "").split(",") if key]
+    if not recipients:
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    book = reports_xlsx(project_key, text)
+    subject = text.get("asset-tree.mail.reports.subject", "Reports for {0}").replace("{0}", project_key)
+    body = text.get("asset-tree.mail.reports.body", "The report workbook is attached.")
+    sent = False
+    for key in recipients:
+        user = USERS.get(key) or {}
+        email = (user.get("email") or "").strip()
+        if not email:
+            continue
+        STATE["mails"].append({
+            "to": email, "subject": subject, "body": body,
+            "attachment": "reports-%s.xlsx" % project_key, "bytes": len(book),
+        })
+        sent = True
+    if not sent:
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    setup["reportMailSent"] = today.isoformat()
+    view["setup"] = module_setup(setup, migrate=False)
+    return 204, None
+
+
+def dispatch_due_report_mail(text):
+    for project in PROJECTS:
+        if module_on(project["key"], "reports"):
+            queue_report_mail(project["key"], text, False)
+    return 204, None
 
 
 def xml_local(tag):
@@ -4539,6 +4821,9 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         if path == "/preview/mails" and method == "GET":
             return self.respond(200, json.dumps(STATE["mails"]).encode("utf-8"), "application/json; charset=utf-8")
+        if path == "/preview/report-mail" and method == "POST":
+            dispatch_due_report_mail(self.text())
+            return self.respond(204, b"", "application/json; charset=utf-8")
         if path in ("/", "/plugins/servlet/asset-tree"):
             return self.serve_page(query)
         if path == "/issue":
@@ -4554,6 +4839,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_static(path.rsplit("/", 1)[-1])
         if path.startswith("/rest/asset-tree/1.0/"):
             rest = path[len("/rest/asset-tree/1.0"):]
+            if method == "GET" and re.fullmatch(r"/projects/[A-Za-z0-9]+/reports\.xlsx", rest):
+                project_key = rest.split("/")[2]
+                body = reports_xlsx(project_key, self.text())
+                return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
+                    "Content-Disposition": 'attachment; filename="reports-%s.xlsx"' % project_key,
+                })
             if method == "GET" and re.fullmatch(r"/projects/[A-Za-z0-9]+/equipment\.xlsx", rest):
                 project_key = rest.split("/")[2]
                 body = equipment_xlsx(project_key, self.text(), self.lang() != "en")
@@ -5141,6 +5432,12 @@ setTimeout(function () {
                 return 200, report_catalog(project_key, text)
             if method == "POST":
                 return create_saved_report(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports/mail", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            return queue_report_mail(project_key, text, True)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports/([A-Za-z0-9]+)", path)
         if match:
             project_key = match.group(1)
@@ -5148,7 +5445,9 @@ setTimeout(function () {
             if project_key not in {item["key"] for item in PROJECTS}:
                 return 400, {"message": text["asset-tree.error.project.required"]}
             if method == "GET":
-                return report_view(project_key, report_key, text)
+                return report_view(project_key, report_key, text, query)
+            if method == "PUT":
+                return update_report_chart(project_key, report_key, self.read_json(), text)
             if method == "DELETE":
                 return delete_saved_report(project_key, report_key, text)
         match = re.fullmatch(r"/assets/(\d+)/lifecycle", path)

@@ -34,6 +34,12 @@ public final class ModuleSetup {
         setup.setMapGrid(Integer.valueOf(grid(values.get("grid"))));
         setup.setMapSnap(Boolean.valueOf(!"0".equals(values.get("snap"))));
         setup.setReportHidden(hidden(values.get("hidden")));
+        setup.setReportCharts(charts(values.get("charts")));
+        setup.setReportMail(Boolean.valueOf("1".equals(values.get("rmail"))));
+        setup.setReportMailEvery(mailEvery(values.get("revery")));
+        setup.setReportMailDay(Integer.valueOf(mailDay(values.get("rday"), setup.getReportMailEvery())));
+        setup.setReportMailTo(mailTo(values.get("rto")));
+        setup.setReportMailSent(mailSent(values.get("rsent")));
         setup.setLifeApproval(Boolean.valueOf(!"0".equals(values.get("approve"))));
         setup.setLifeApprover(who(values.get("who")));
         setup.setLifeCurrency(currency(values.get("cur")));
@@ -61,6 +67,13 @@ public final class ModuleSetup {
         append(stored, "grid", String.valueOf(grid(value.getMapGrid() == null ? "" : String.valueOf(value.getMapGrid()))));
         append(stored, "snap", Boolean.FALSE.equals(value.getMapSnap()) ? "0" : "1");
         append(stored, "hidden", hidden(value.getReportHidden()));
+        append(stored, "charts", charts(value.getReportCharts()));
+        String every = mailEvery(value.getReportMailEvery());
+        append(stored, "rmail", Boolean.TRUE.equals(value.getReportMail()) ? "1" : "0");
+        append(stored, "revery", every);
+        append(stored, "rday", String.valueOf(value.getReportMailDay() == null ? mailDay("", every) : mailDay(String.valueOf(value.getReportMailDay()), every)));
+        append(stored, "rto", mailTo(value.getReportMailTo()));
+        append(stored, "rsent", mailSent(value.getReportMailSent()));
         append(stored, "approve", Boolean.FALSE.equals(value.getLifeApproval()) ? "0" : "1");
         append(stored, "who", who(value.getLifeApprover()));
         append(stored, "cur", currency(value.getLifeCurrency()));
@@ -375,6 +388,79 @@ public final class ModuleSetup {
             stored.append(key);
         }
         return stored.toString();
+    }
+
+    private static String charts(String raw) {
+        StringBuilder stored = new StringBuilder();
+        if (raw == null) {
+            return "";
+        }
+        String[] parts = raw.split(",");
+        List<String> seen = new ArrayList<String>();
+        for (String part : parts) {
+            int mark = part.indexOf(':');
+            if (mark <= 0) {
+                continue;
+            }
+            String key = part.substring(0, mark).trim().toLowerCase(Locale.ROOT);
+            String chart = ReportCatalog.chart(part.substring(mark + 1));
+            if (!ReportCatalog.isStandard(key) || chart.isEmpty() || seen.contains(key)) {
+                continue;
+            }
+            seen.add(key);
+            if (stored.length() > 0) {
+                stored.append(',');
+            }
+            stored.append(key).append(':').append(chart);
+        }
+        return stored.toString();
+    }
+
+    private static String mailEvery(String raw) {
+        return raw != null && "month".equals(raw.trim().toLowerCase(Locale.ROOT)) ? "month" : "week";
+    }
+
+    private static int mailDay(String raw, String every) {
+        int value = number(raw);
+        if ("month".equals(every)) {
+            if (value < 1) {
+                return 1;
+            }
+            return value > 28 ? 28 : value;
+        }
+        if (value < 1 || value > 7) {
+            return 1;
+        }
+        return value;
+    }
+
+    private static String mailTo(String raw) {
+        StringBuilder stored = new StringBuilder();
+        if (raw == null) {
+            return "";
+        }
+        List<String> seen = new ArrayList<String>();
+        String[] parts = raw.split(",");
+        for (String part : parts) {
+            String key = part == null ? "" : part.trim();
+            if (key.isEmpty() || key.length() > 80 || !key.matches("[A-Za-z0-9._@-]+") || seen.contains(key)) {
+                continue;
+            }
+            if (seen.size() >= 5) {
+                break;
+            }
+            seen.add(key);
+            if (stored.length() > 0) {
+                stored.append(',');
+            }
+            stored.append(key);
+        }
+        return stored.toString();
+    }
+
+    private static String mailSent(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        return value.matches("\\d{4}-\\d{2}-\\d{2}") ? value : "";
     }
 
     private static String who(String raw) {

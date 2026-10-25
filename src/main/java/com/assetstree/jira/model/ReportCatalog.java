@@ -22,7 +22,7 @@ public final class ReportCatalog {
     private static final List<String> STANDARD = Collections.unmodifiableList(Arrays.asList(
             STATUS, TYPE, PLACE, HOLDER, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER));
+            STATUS, TYPE, PLACE, HOLDER, "month", "age", WARRANTY, WRITEOFF, "kind"));
 
     private ReportCatalog() {
     }

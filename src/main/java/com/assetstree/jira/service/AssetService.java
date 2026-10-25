@@ -230,9 +230,17 @@ public interface AssetService {
 
     SavedReportDto createReport(ApplicationUser user, String projectKey, SavedReportDraft draft);
 
+    SavedReportDto updateReportChart(ApplicationUser user, String projectKey, String reportKey, String chart);
+
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
 
-    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey);
+    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines);
+
+    byte[] exportReports(ApplicationUser user, String projectKey);
+
+    void sendReportMail(ApplicationUser user, String projectKey);
+
+    void sendScheduledReports();
 
     LifecycleDto lifecycle(ApplicationUser user, int assetId);
 

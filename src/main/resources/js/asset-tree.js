@@ -11041,14 +11041,117 @@
             });
             panel.appendChild(el('span', 'asset-tree-nav-label', t('setupShow')));
             panel.appendChild(reports);
-            panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
+            var mailOn = el('label', 'asset-tree-check');
+            var mailBox = document.createElement('input');
+            mailBox.type = 'checkbox';
+            mailBox.checked = setup.reportMail;
+            mailOn.appendChild(mailBox);
+            mailOn.appendChild(document.createTextNode(t('reportMail')));
+            var every = document.createElement('select');
+            [['week', 'reportMailWeek'], ['month', 'reportMailMonth']].forEach(function (pair) {
+                var option = document.createElement('option');
+                option.value = pair[0];
+                option.textContent = t(pair[1]);
+                every.appendChild(option);
+            });
+            every.value = setup.reportMailEvery === 'month' ? 'month' : 'week';
+            var day = document.createElement('select');
+            var dayField = planField(t('reportMailWeekDay'), day);
+            var dayLabel = dayField.querySelector('span');
+            function paintMailDay() {
+                var month = every.value === 'month';
+                if (dayLabel) dayLabel.textContent = t(month ? 'reportMailMonthDay' : 'reportMailWeekDay');
+                var previous = day.value || String(setup.reportMailDay || 1);
+                day.innerHTML = '';
+                var names = ['reportMailMon', 'reportMailTue', 'reportMailWed', 'reportMailThu', 'reportMailFri', 'reportMailSat', 'reportMailSun'];
+                var count = month ? 28 : 7;
+                for (var i = 1; i <= count; i++) {
+                    var option = document.createElement('option');
+                    option.value = String(i);
+                    option.textContent = month ? String(i) : t(names[i - 1]);
+                    day.appendChild(option);
+                }
+                day.value = String(Math.min(count, Math.max(1, Number(previous) || 1)));
+            }
+            every.addEventListener('change', paintMailDay);
+            paintMailDay();
+            var mailTo = (setup.reportMailTo || '').split(',').filter(function (key) { return key; });
+            var chips = el('div', 'asset-tree-check-list');
+            var finder = document.createElement('input');
+            finder.type = 'search';
+            finder.placeholder = t('schedulesFindUser');
+            finder.setAttribute('aria-label', t('reportMailTo'));
+            var hits = el('div', 'asset-tree-user-results');
+            var mailTimer = null;
+            var mailSeq = 0;
+            function paintMailTo() {
+                chips.innerHTML = '';
+                mailTo.forEach(function (key) {
+                    var line = el('label', 'asset-tree-check');
+                    line.appendChild(document.createTextNode(key));
+                    line.appendChild(button('\u00D7', 'asset-tree-btn', function () {
+                        mailTo = mailTo.filter(function (item) { return item !== key; });
+                        paintMailTo();
+                    }));
+                    chips.appendChild(line);
+                });
+            }
+            paintMailTo();
+            finder.addEventListener('input', function () {
+                clearTimeout(mailTimer);
+                mailTimer = setTimeout(function () {
+                    var query = finder.value.trim();
+                    var mark = ++mailSeq;
+                    hits.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mark !== mailSeq) return;
+                        hits.innerHTML = '';
+                        (payload || []).forEach(function (user) {
+                            if (!user || !user.userKey) return;
+                            var label = user.displayName || user.userKey;
+                            if (user.email) label += ' \u00B7 ' + user.email;
+                            hits.appendChild(button(label, 'asset-tree-user-hit', function () {
+                                if (mailTo.indexOf(user.userKey) < 0 && mailTo.length < 5) mailTo.push(user.userKey);
+                                finder.value = '';
+                                hits.innerHTML = '';
+                                paintMailTo();
+                            }));
+                        });
+                    });
+                }, 200);
+            });
+            panel.appendChild(mailOn);
+            panel.appendChild(planField(t('reportMailEvery'), every));
+            panel.appendChild(dayField);
+            var who = planField(t('reportMailTo'), finder);
+            who.appendChild(chips);
+            who.appendChild(hits);
+            panel.appendChild(who);
+            var mailActions = el('div', 'asset-tree-inline-actions');
+            mailActions.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var hidden = [];
                 var boxes = reports.querySelectorAll('input');
                 for (var i = 0; i < boxes.length; i++) if (!boxes[i].checked) hidden.push(boxes[i].getAttribute('data-report'));
                 var next = moduleSetup();
                 next.reportHidden = hidden.join(',');
+                next.reportMail = mailBox.checked;
+                next.reportMailEvery = every.value;
+                next.reportMailDay = Number(day.value) || 1;
+                next.reportMailTo = mailTo.join(',');
                 saveSetup(next);
             }));
+            mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
+                if (!mailTo.length) {
+                    notify(t('reportMailNeed'));
+                    return;
+                }
+                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
+                    if (status >= 200 && status < 300) notify(t('reportMailQueued'));
+                    else notify((payload && payload.message) || t('errorTitle'));
+                });
+            }));
+            panel.appendChild(mailActions);
         }
         if (moduleKey === 'life') {
             var approval = el('label', 'asset-tree-check');
@@ -14721,7 +14824,34 @@
         return (name || 'report') + '.csv';
     }
 
+    function downloadReportBook() {
+        var frame = document.createElement('iframe');
+        frame.hidden = true;
+        frame.src = state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports.xlsx';
+        document.body.appendChild(frame);
+        setTimeout(function () {
+            if (frame.parentNode) frame.parentNode.removeChild(frame);
+        }, 60000);
+    }
+
     function downloadReport(view) {
+        var shown = (view.lines || []).length;
+        var lineTotal = view.lineTotal || shown;
+        if (view.capped && shown < lineTotal && !view.linesComplete) {
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
+                if (status === 200 && payload) {
+                    var full = {};
+                    var key;
+                    for (key in view) if (Object.prototype.hasOwnProperty.call(view, key)) full[key] = view[key];
+                    full.lines = payload.lines || [];
+                    full.lineTotal = payload.lineTotal || full.lines.length;
+                    full.capped = false;
+                    full.linesComplete = true;
+                    downloadReport(full);
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+            return;
+        }
         var money = reportMoney(view);
         var shareTotal = 0;
         (view.rows || []).forEach(function (row) {
@@ -14800,9 +14930,33 @@
                 state.reportChartFor = String(view.id || '');
                 state.reportChart = pair[0];
                 if (!paintReport()) renderFrame();
+                rememberReportChart(view, pair[0]);
             }));
         });
         return seg;
+    }
+
+    function rememberReportChart(view, kind) {
+        if (!state.canEdit || !view || !view.id) return;
+        var wire = kind === 'columns' ? 'bar' : kind;
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), { chart: wire }, function (status, payload) {
+            if (status >= 200 && status < 300 && state.reportView && String(state.reportView.id) === String(view.id)) {
+                state.reportView.chart = (payload && payload.chart) || wire;
+                (state.reportCatalog || []).forEach(function (item) {
+                    if (String(item.id) === String(view.id)) item.chart = state.reportView.chart;
+                });
+                if (view.standard) {
+                    var project = currentProject();
+                    if (project && project.setup) {
+                        var parts = String(project.setup.reportCharts || '').split(',').filter(function (part) {
+                            return part && part.indexOf(String(view.id) + ':') !== 0;
+                        });
+                        parts.push(String(view.id) + ':' + (state.reportView.chart || wire));
+                        project.setup.reportCharts = parts.filter(function (part) { return part; }).join(',');
+                    }
+                }
+            }
+        });
     }
 
     function reportLegend(rows, total, money) {
@@ -15009,6 +15163,7 @@
         var head = sheetHead('menuReports');
         var actions = el('div', 'asset-tree-inline-actions');
         if (state.canEdit) actions.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
+        actions.appendChild(button(t('reportBook'), 'asset-tree-btn', downloadReportBook));
         if (state.reportView) actions.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
         head.appendChild(actions);
         panel.appendChild(head);
@@ -15069,6 +15224,7 @@
         main.appendChild(facts);
         if (!rows.length) {
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
+            if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
         } else {
             var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '');
             if (chartPanel) main.appendChild(chartPanel);
@@ -15130,8 +15286,22 @@
             main.appendChild(lines);
         }
         var foot = el('div', 'asset-tree-report-foot');
-        var note = t('reportCounted');
-        if (view.capped) note += ' ' + t('reportLinesCut');
+        var shown = (view.lines || []).length;
+        var lineTotal = view.lineTotal || shown;
+        if (view.capped && shown < lineTotal) {
+            foot.appendChild(button(t('reportLinesMore'), 'asset-tree-btn', function () {
+                ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
+                    if (status === 200 && payload && state.reportView && String(state.reportView.id) === String(view.id)) {
+                        state.reportView.lines = payload.lines || [];
+                        state.reportView.lineTotal = payload.lineTotal || (payload.lines || []).length;
+                        state.reportView.capped = !!payload.capped;
+                        if (!paintReport()) renderFrame();
+                    } else notify((payload && payload.message) || t('errorTitle'));
+                });
+            }));
+        }
+        var note = view.hint || t('reportCounted');
+        if (view.capped && shown >= lineTotal) note += ' ' + t('reportLinesCut');
         foot.appendChild(el('p', null, note));
         if (!view.standard && state.canEdit) {
             foot.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
@@ -15163,7 +15333,7 @@
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
             var group = document.createElement('select');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder']].forEach(function (pair) {
+            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
@@ -15179,10 +15349,19 @@
             });
             chart.value = 'bar';
             var metric = document.createElement('select');
-            var countOption = document.createElement('option');
-            countOption.value = 'count';
-            countOption.textContent = t('reportCount');
-            metric.appendChild(countOption);
+            [['count', 'reportCount'], ['cost', 'lifeBook']].forEach(function (pair) {
+                var option = document.createElement('option');
+                option.value = pair[0];
+                option.textContent = t(pair[1]);
+                metric.appendChild(option);
+            });
+            function syncMetric() {
+                var cost = metric.querySelector('option[value="cost"]');
+                var kindGroup = group.value === 'kind';
+                if (cost) cost.disabled = kindGroup;
+                if (kindGroup && metric.value === 'cost') metric.value = 'count';
+            }
+            group.addEventListener('change', syncMetric);
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
             row.appendChild(planField(t('reportChart'), chart));
@@ -15220,6 +15399,43 @@
                 statuses.appendChild(label);
             });
             dialog.appendChild(statuses);
+            var pickedHolders = {};
+            var pickedPlaces = {};
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyHolders')));
+            var holders = el('div', 'asset-tree-check-list');
+            var holderSeen = {};
+            (state.assets || []).forEach(function (asset) {
+                var person = asset && asset.custodian;
+                if (!person || !person.userKey || holderSeen[person.userKey]) return;
+                holderSeen[person.userKey] = true;
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.addEventListener('change', function () {
+                    if (box.checked) pickedHolders[person.userKey] = true;
+                    else delete pickedHolders[person.userKey];
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(person.displayName || person.userKey));
+                holders.appendChild(label);
+            });
+            dialog.appendChild(holders);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyPlaces')));
+            var places = el('div', 'asset-tree-check-list');
+            (state.assets || []).forEach(function (asset) {
+                if (!asset || !typeOf(asset.typeKey).location) return;
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.addEventListener('change', function () {
+                    if (box.checked) pickedPlaces[String(asset.id)] = true;
+                    else delete pickedPlaces[String(asset.id)];
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(asset.name || String(asset.id)));
+                places.appendChild(label);
+            });
+            dialog.appendChild(places);
             var actions = el('div', 'asset-tree-inline-actions');
             var hold = dialog.parentNode;
             var save = button(t('save'), 'asset-tree-btn primary', function () {
@@ -15232,12 +15448,16 @@
                 save.disabled = true;
                 var typeKeys = Object.keys(pickedTypes);
                 var statusKeys = Object.keys(pickedStatuses);
+                var holderKeys = Object.keys(pickedHolders);
+                var placeKeys = Object.keys(pickedPlaces);
                 var body = { name: name.value.trim(), groupBy: group.value, chart: chart.value, metric: metric.value, filterField: '', filterValue: '' };
-                if (typeKeys.length || statusKeys.length) {
+                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length) {
                     body.filterField = 'mix';
                     var parts = [];
                     if (typeKeys.length) parts.push('t=' + typeKeys.join(','));
                     if (statusKeys.length) parts.push('s=' + statusKeys.join(','));
+                    if (holderKeys.length) parts.push('h=' + holderKeys.join(','));
+                    if (placeKeys.length) parts.push('p=' + placeKeys.join(','));
                     body.filterValue = parts.join(';');
                 }
                 ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', body, function (status, payload) {
@@ -15294,6 +15514,15 @@
             mapGrid: [8, 12, 16, 24, 32].indexOf(Number(setup.mapGrid)) >= 0 ? Number(setup.mapGrid) : 24,
             mapSnap: setup.mapSnap !== false,
             reportHidden: setup.reportHidden || '',
+            reportCharts: setup.reportCharts || '',
+            reportMail: !!setup.reportMail,
+            reportMailEvery: setup.reportMailEvery === 'month' ? 'month' : 'week',
+            reportMailDay: (function () {
+                var day = clampNum(setup.reportMailDay || 1, 1, setup.reportMailEvery === 'month' ? 28 : 7);
+                return day;
+            })(),
+            reportMailTo: setup.reportMailTo || '',
+            reportMailSent: setup.reportMailSent || '',
             lifeApproval: setup.lifeApproval !== false,
             lifeApprover: setup.lifeApprover || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',
