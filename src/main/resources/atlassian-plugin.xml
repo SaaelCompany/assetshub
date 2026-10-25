@@ -93,7 +93,7 @@
     <web-item key="asset-tree-project" name="Asset Tree Project Link" section="jira.project.sidebar.plugins.navigation" weight="300">
         <label key="asset-tree.nav.label"/>
         <link linkId="asset-tree-project-link">/plugins/servlet/asset-tree?project=$project.key&amp;view=all</link>
-        <param name="iconClass" value="aui-icon-large asset-tree-sidebar-icon"/>
+        <param name="iconClass" value="aui-icon aui-icon-large asset-tree-sidebar-icon"/>
         <condition class="com.assetstree.jira.web.AgentAssetsCondition"/>
     </web-item>
 

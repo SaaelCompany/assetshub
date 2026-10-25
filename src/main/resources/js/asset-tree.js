@@ -13493,31 +13493,65 @@
             }));
         }
         if (state.canEdit) {
-            var onceBox = el('label', 'asset-tree-mark-once' + (staffOnceHours() != null ? ' is-set' : ''));
-            onceBox.appendChild(el('span', null, t('staffOnce')));
+            var onceBox = el('div', 'asset-tree-mark-once' + (staffOnceHours() != null ? ' is-set' : ''));
+            var caption = el('span', 'asset-tree-mark-once-label', t('staffOnce'));
+            onceBox.appendChild(caption);
             var once = document.createElement('input');
-            once.type = 'number';
-            once.min = '0';
-            once.max = '24';
+            once.type = 'text';
+            once.inputMode = 'numeric';
+            once.maxLength = 2;
             once.placeholder = '2';
             once.title = t('staffOnceHint');
             once.setAttribute('aria-label', t('staffOnce'));
             if (staffOnceHours() != null) once.value = String(staffOnceHours());
-            function readOnce() {
-                var raw = String(once.value || '').trim();
+            var clearOnce = button('\u00D7', 'asset-tree-mark-once-clear', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                applyOnce('');
+            });
+            clearOnce.title = t('staffOnceHint');
+            clearOnce.setAttribute('aria-label', t('staffOnceHint'));
+            function applyOnce(raw) {
+                raw = String(raw == null ? '' : raw).trim();
                 if (!raw) {
                     state.staffOnce = null;
+                    once.value = '';
                     onceBox.classList.remove('is-set');
+                    clearOnce.classList.add('is-hidden');
+                    return;
+                }
+                if (!/^\d{1,2}$/.test(raw)) {
+                    once.value = staffOnceHours() == null ? '' : String(staffOnceHours());
                     return;
                 }
                 var value = parseInt(raw, 10);
-                if (isNaN(value) || value < 0 || value > 24) return;
+                if (value > 24) {
+                    once.value = staffOnceHours() == null ? '' : String(staffOnceHours());
+                    return;
+                }
                 state.staffOnce = value;
+                if (once.value !== String(value)) once.value = String(value);
                 onceBox.classList.add('is-set');
+                clearOnce.classList.remove('is-hidden');
             }
-            once.addEventListener('input', readOnce);
-            once.addEventListener('change', readOnce);
+            caption.addEventListener('mousedown', function (event) {
+                if (staffOnceHours() == null) {
+                    once.focus();
+                    return;
+                }
+                event.preventDefault();
+                applyOnce('');
+            });
+            once.addEventListener('input', function () { applyOnce(once.value); });
+            once.addEventListener('keydown', function (event) {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                applyOnce('');
+                once.blur();
+            });
+            if (staffOnceHours() == null) clearOnce.classList.add('is-hidden');
             onceBox.appendChild(once);
+            onceBox.appendChild(clearOnce);
             bar.appendChild(onceBox);
         }
         return bar;
