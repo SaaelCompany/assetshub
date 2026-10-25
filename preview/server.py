@@ -2712,6 +2712,30 @@ def apply_due(project_key=None):
                 STATE["mails"].append({"to": email, "subject": subject, "body": body, "assetId": asset["id"]})
 
 
+def clock_span(raw):
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if value == "-":
+        return "@-"
+    bits = value.split("-", 1)
+    start = bits[0].strip()
+    end = bits[1].strip() if len(bits) > 1 else ""
+    if not re.fullmatch(r"\d{2}:\d{2}", start):
+        return ""
+    hour, minute = int(start[:2]), int(start[3:])
+    if hour > 23 or minute > 59:
+        return ""
+    if end:
+        if not re.fullmatch(r"\d{2}:\d{2}", end):
+            return ""
+        end_hour, end_minute = int(end[:2]), int(end[3:])
+        if end_hour > 23 or end_minute > 59:
+            return ""
+        return "@" + start + "-" + end
+    return "@" + start
+
+
 def clean_moves(raw):
     parts = []
     for part in str(raw or "").split(","):
@@ -2722,14 +2746,22 @@ def clean_moves(raw):
         source_raw, target_raw = part.split(">", 1)
         source = parse_plan_date(source_raw.strip())
         target_text = target_raw.strip()
-        if target_text == "-":
+        timed = target_text.find("@")
+        day_text = target_text if timed < 0 else target_text[:timed].strip()
+        time_text = "" if timed < 0 else target_text[timed + 1 :].strip()
+        if day_text == "-":
             target = "-"
         else:
-            parsed = parse_plan_date(target_text)
+            parsed = parse_plan_date(day_text)
             target = parsed.isoformat() if parsed else ""
-        if not source or not target or source.isoformat() == target:
+        span = clock_span(time_text)
+        if time_text and not span:
             continue
-        parts.append(source.isoformat() + ">" + target)
+        if not source or not target or (source.isoformat() == target and not span):
+            continue
+        if target == "-":
+            span = ""
+        parts.append(source.isoformat() + ">" + target + span)
     return ",".join(parts)
 
 

@@ -5862,17 +5862,66 @@ public class AssetServiceImpl implements AssetService {
             }
             String source = FieldDates.canonical(part.substring(0, at).trim());
             String targetRaw = part.substring(at + 1).trim();
-            String target = "-".equals(targetRaw) ? "-" : FieldDates.canonical(targetRaw);
-            if (source == null || source.isEmpty() || target == null || target.isEmpty() || source.equals(target)) {
+            int timed = targetRaw.indexOf('@');
+            String dayRaw = timed < 0 ? targetRaw : targetRaw.substring(0, timed).trim();
+            String timeRaw = timed < 0 ? "" : targetRaw.substring(timed + 1).trim();
+            String target = "-".equals(dayRaw) ? "-" : FieldDates.canonical(dayRaw);
+            String time = clockSpan(timeRaw);
+            if (source == null || source.isEmpty() || target == null || target.isEmpty()) {
+                continue;
+            }
+            if ("-".equals(target)) {
+                time = "";
+            } else if (!timeRaw.isEmpty() && time.isEmpty()) {
+                continue;
+            }
+            if (source.equals(target) && time.isEmpty()) {
                 continue;
             }
             if (out.length() > 0) {
                 out.append(',');
             }
-            out.append(source).append('>').append(target);
+            out.append(source).append('>').append(target).append(time);
             kept++;
         }
         return out.toString();
+    }
+
+    /** {@code HH:MM-HH:MM} stored after the day. An empty value means the series time. */
+    private String clockSpan(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.isEmpty()) {
+            return "";
+        }
+        if ("-".equals(value)) {
+            return "@-";
+        }
+        int dash = value.indexOf('-');
+        String start = clockOrEmpty(dash < 0 ? value : value.substring(0, dash));
+        String end = dash < 0 ? "" : clockOrEmpty(value.substring(dash + 1));
+        if (start.isEmpty()) {
+            return "";
+        }
+        return "@" + start + (end.isEmpty() ? "" : "-" + end);
+    }
+
+    private String clockOrEmpty(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.length() != 5 || value.charAt(2) != ':') {
+            return "";
+        }
+        int hour;
+        int minute;
+        try {
+            hour = Integer.parseInt(value.substring(0, 2));
+            minute = Integer.parseInt(value.substring(3, 5));
+        } catch (NumberFormatException ex) {
+            return "";
+        }
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+            return "";
+        }
+        return value;
     }
 
     private String clock(String raw) {

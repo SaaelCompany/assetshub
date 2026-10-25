@@ -11486,11 +11486,24 @@
             var source = part.slice(0, at);
             var target = part.slice(at + 1);
             if (!/^\d{4}-\d{2}-\d{2}$/.test(source)) return;
-            if (target !== '-' && !/^\d{4}-\d{2}-\d{2}$/.test(target)) return;
-            if (target === source) return;
+            var day = target.indexOf('@') < 0 ? target : target.slice(0, target.indexOf('@'));
+            if (day !== '-' && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+            if (day === source && target.indexOf('@') < 0) return;
+            if (target.indexOf('@') >= 0) {
+                var spanText = target.slice(target.indexOf('@') + 1);
+                var span = spanText.split('-');
+                if (spanText !== '-' && !/^\d{2}:\d{2}$/.test(span[0] || '')) return;
+                if (spanText !== '-' && span[1] && !/^\d{2}:\d{2}$/.test(span[1])) return;
+            }
             map[source] = target;
         });
         return map;
+    }
+
+    function moveDay(value) {
+        if (!value) return '';
+        var at = value.indexOf('@');
+        return at < 0 ? value : value.slice(0, at);
     }
 
     function packPlanMoves(map) {
@@ -11508,7 +11521,7 @@
         var map = planMoveMap(plan);
         var source;
         for (source in map) {
-            if (Object.prototype.hasOwnProperty.call(map, source) && map[source] === displayIso) return source;
+            if (Object.prototype.hasOwnProperty.call(map, source) && moveDay(map[source]) === displayIso) return source;
         }
         return displayIso || '';
     }
@@ -11558,12 +11571,12 @@
             found.push(display);
         }
         dates.forEach(function (iso) {
-            var moved = Object.prototype.hasOwnProperty.call(map, iso) ? map[iso] : iso;
+            var moved = Object.prototype.hasOwnProperty.call(map, iso) ? moveDay(map[iso]) : iso;
             add(moved, iso);
         });
         Object.keys(map).forEach(function (source) {
             if (dates.indexOf(source) >= 0) return;
-            add(map[source], source);
+            add(moveDay(map[source]), source);
         });
         found.sort();
         return found;
@@ -11875,6 +11888,7 @@
             panel.appendChild(scheduleStaff());
         } else {
             panel.appendChild(scheduleLayers());
+            if (state.scheduleClockDay) panel.appendChild(scheduleClock(state.scheduleClockDay));
             panel.appendChild(scheduleCalendar());
         }
         return panel;
@@ -11964,6 +11978,7 @@
             state.scheduleYear += 1;
         }
         state.scheduleExpanded = '';
+        state.scheduleClockDay = '';
         renderFrame();
     }
 
@@ -11996,6 +12011,134 @@
         return select;
     }
 
+    function occurrenceClock(plan, displayIso) {
+        var map = planMoveMap(plan);
+        var source = seriesSource(plan, displayIso);
+        var raw = map[source] || '';
+        var at = raw.indexOf('@');
+        if (at >= 0) {
+            var spanText = raw.slice(at + 1);
+            if (spanText === '-') return { start: '', end: '' };
+            var span = spanText.split('-');
+            return { start: span[0] || '', end: span[1] || '' };
+        }
+        return { start: plan.startTime || '', end: plan.endTime || '' };
+    }
+
+    function timeMinutes(hhmm) {
+        if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return 24 * 60 + 1;
+        return parseInt(hhmm.slice(0, 2), 10) * 60 + parseInt(hhmm.slice(3), 10);
+    }
+
+    function addMinutes(hhmm, minutes) {
+        var total = timeMinutes(hhmm) + minutes;
+        if (total < 0) total = 0;
+        if (total > 23 * 60 + 59) total = 23 * 60 + 59;
+        var hour = Math.floor(total / 60);
+        var minute = total % 60;
+        return (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+    }
+
+    function clockDuration(clock) {
+        if (!clock || !clock.start || !clock.end) return 60;
+        var span = timeMinutes(clock.end) - timeMinutes(clock.start);
+        if (span < 30) return 60;
+        return span;
+    }
+
+    function sortDayPlans(plans, iso) {
+        plans.sort(function (a, b) {
+            var diff = timeMinutes(occurrenceClock(a, iso).start) - timeMinutes(occurrenceClock(b, iso).start);
+            if (diff) return diff;
+            var an = String(a.name || '');
+            var bn = String(b.name || '');
+            if (an < bn) return -1;
+            if (an > bn) return 1;
+            return (a.id || 0) - (b.id || 0);
+        });
+        return plans;
+    }
+
+    function dayTitle(iso) {
+        var parsed = parseIsoDate(iso);
+        if (!parsed) return iso || '';
+        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+        try {
+            return parsed.toLocaleDateString(locale, { day: 'numeric', month: 'long' });
+        } catch (error) {
+            return iso;
+        }
+    }
+
+    function scheduleClock(iso) {
+        var board = el('section', 'asset-tree-clock');
+        var head = el('div', 'asset-tree-clock-head');
+        head.appendChild(el('strong', null, dayTitle(iso)));
+        head.appendChild(el('span', null, t('schedulesDragTime')));
+        head.appendChild(button(t('schedulesClockClose'), 'asset-tree-btn slim', function () {
+            state.scheduleClockDay = '';
+            renderFrame();
+        }));
+        board.appendChild(head);
+        var plans = [];
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            var parsed = parseIsoDate(iso);
+            if (!parsed) return;
+            if (monthDates(plan, parsed.getFullYear(), parsed.getMonth() + 1).indexOf(iso) >= 0) plans.push(plan);
+        });
+        sortDayPlans(plans, iso);
+        board.appendChild(clockLane(iso, '', t('schedulesAllDay'), plans));
+        var first = 8;
+        var last = 20;
+        plans.forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            if (!start) return;
+            var hour = parseInt(start.slice(0, 2), 10);
+            if (hour < first) first = hour;
+            if (hour > last) last = hour;
+        });
+        var endMinute = last * 60;
+        plans.forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            if (!start) return;
+            var bucket = timeMinutes(timeBucket(start));
+            if (bucket > endMinute) endMinute = bucket;
+        });
+        var cursor;
+        for (cursor = first * 60; cursor <= endMinute; cursor += 30) {
+            var hour = Math.floor(cursor / 60);
+            var minute = cursor % 60;
+            var label = (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+            board.appendChild(clockLane(iso, label, minute === 0 ? label : '', plans));
+        }
+        return board;
+    }
+
+    function clockLane(iso, time, label, plans) {
+        var lane = el('div', 'asset-tree-slot' + (time ? '' : ' is-all'));
+        lane.setAttribute('data-day', iso);
+        lane.setAttribute('data-time', time);
+        lane.appendChild(el('span', 'asset-tree-slot-label', label));
+        var list = el('div', 'asset-tree-slot-list');
+        plans.forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            var bucket = start ? timeBucket(start) : '';
+            if (bucket !== time) return;
+            list.appendChild(scheduleEventCard(plan, iso));
+        });
+        lane.appendChild(list);
+        return lane;
+    }
+
+    function timeBucket(hhmm) {
+        var minutes = timeMinutes(hhmm);
+        if (minutes > 24 * 60) return '';
+        var snapped = Math.floor(minutes / 30) * 30;
+        var hour = Math.floor(snapped / 60);
+        var minute = snapped % 60;
+        return (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+    }
+
     function scheduleCalendar() {
         var byDay = {};
         (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
@@ -12021,9 +12164,13 @@
             var weekend = date.getDay() === 0 || date.getDay() === 6;
             var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''));
             cell.setAttribute('data-day', iso);
-            cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
             if (inMonth) {
-                var plans = byDay[iso] || [];
+                cell.appendChild(dayNumberButton(iso, date.getDate()));
+            } else {
+                cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
+            }
+            if (inMonth) {
+                var plans = sortDayPlans(byDay[iso] || [], iso);
                 var expanded = state.scheduleExpanded === iso;
                 var shown = !expanded && plans.length > 3 ? plans.slice(0, 2) : plans;
                 shown.forEach(function (plan) {
@@ -12056,6 +12203,17 @@
         return grid;
     }
 
+    function dayNumberButton(iso, day) {
+        var num = button(String(day), 'asset-tree-day-num' + (state.scheduleClockDay === iso ? ' is-on' : ''), function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            state.scheduleClockDay = state.scheduleClockDay === iso ? '' : iso;
+            renderFrame();
+        });
+        num.title = t('schedulesClock');
+        return num;
+    }
+
     function dayMoreButton(iso, label, expand) {
         var more = button(label, 'asset-tree-day-more', function (event) {
             event.preventDefault();
@@ -12083,7 +12241,8 @@
         var text = el('span', 'asset-tree-event-text');
         text.appendChild(el('strong', null, plan.name || kindName(plan.kind)));
         var meta = kindName(plan.kind);
-        if (plan.startTime) meta = plan.startTime + (plan.endTime ? '–' + plan.endTime : '') + ' · ' + meta;
+        var clock = occurrenceClock(plan, iso);
+        if (clock.start) meta = clock.start + (clock.end ? '–' + clock.end : '') + ' · ' + meta;
         if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
         if (plan.assetId) {
             var placeName = assetPlaceName(byId()[plan.assetId]);
@@ -12094,20 +12253,28 @@
         card.appendChild(text);
         card.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
         if (state.canEdit) {
-            var wholeSeries = !plan.everyUnit || plan.everyUnit === 'once';
-            card.title += ' · ' + t(wholeSeries ? 'schedulesDrag' : 'schedulesDragOne');
+            card.title += ' · ' + t('schedulesDragTime');
             card.addEventListener('mousedown', function (event) { beginPlanDrag(plan, iso, card, event); });
         }
         return card;
     }
 
-    function dayCellAt(x, y) {
+    function dropTargetAt(x, y) {
         var node = document.elementFromPoint(x, y);
+        var dayNode = null;
+        var slot = null;
         while (node && node !== document.body) {
-            if (node.getAttribute && node.getAttribute('data-day')) return node;
+            if (!slot && node.getAttribute && node.classList && node.classList.contains('asset-tree-slot')) slot = node;
+            if (!dayNode && node.getAttribute && node.classList && node.classList.contains('asset-tree-day')) dayNode = node;
             node = node.parentNode;
         }
-        return null;
+        var chosen = slot || dayNode;
+        if (!chosen) return null;
+        return {
+            node: chosen,
+            day: chosen.getAttribute('data-day') || '',
+            time: slot ? (slot.getAttribute('data-time') || '') : null
+        };
     }
 
     function planAnchorFor(plan, fromIso, toIso) {
@@ -12180,6 +12347,35 @@
         loadSchedules();
     }
 
+    function dropPlanAt(plan, fromIso, day, time) {
+        var current = occurrenceClock(plan, fromIso);
+        var timed = time != null;
+        if (!timed && (!day || day === fromIso)) return;
+        var start = timed ? (time || '') : (current.start || '');
+        var end = timed ? '' : (current.end || '');
+        if (timed && start) end = addMinutes(start, clockDuration(current));
+        if (!plan.everyUnit || plan.everyUnit === 'once') {
+            var patch = {};
+            if (day && day !== fromIso) patch.lastDone = day;
+            if (timed) {
+                patch.startTime = start;
+                patch.endTime = end;
+            }
+            if (!patch.lastDone && patch.startTime == null) return;
+            savePlan(plan, patch);
+            return;
+        }
+        var source = seriesSource(plan, fromIso);
+        var map = planMoveMap(plan);
+        var sameDay = day === source;
+        var sameClock = start === (plan.startTime || '') && end === (plan.endTime || '');
+        if (sameDay && sameClock) delete map[source];
+        else if (!start) map[source] = sameClock ? day : day + '@-';
+        else if (sameClock) map[source] = day;
+        else map[source] = day + '@' + start + (end ? '-' + end : '');
+        savePlan(plan, { moves: packPlanMoves(map) });
+    }
+
     function beginPlanDrag(plan, iso, card, event) {
         if (!state.canEdit || event.button !== 0) return;
         var startX = event.clientX;
@@ -12190,15 +12386,16 @@
             if (!dragging && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 5) return;
             dragging = true;
             card.classList.add('is-dragging');
-            var next = dayCellAt(ev.clientX, ev.clientY);
-            if (target && target !== next) target.classList.remove('is-drop');
+            var next = dropTargetAt(ev.clientX, ev.clientY);
+            var nextNode = next ? next.node : null;
+            if (target && target.node !== nextNode) target.node.classList.remove('is-drop');
             target = next;
-            if (target) target.classList.add('is-drop');
+            if (target) target.node.classList.add('is-drop');
         }
         function up(ev) {
             document.removeEventListener('mousemove', move);
             document.removeEventListener('mouseup', up);
-            if (target) target.classList.remove('is-drop');
+            if (target) target.node.classList.remove('is-drop');
             card.classList.remove('is-dragging');
             if (!dragging) return;
             state.scheduleSuppressClick = true;
@@ -12210,17 +12407,8 @@
             }
             document.addEventListener('click', eatClick, true);
             setTimeout(function () { document.removeEventListener('click', eatClick, true); }, 0);
-            var day = target ? target.getAttribute('data-day') : '';
-            if (!day || day === iso) return;
-            if (!plan.everyUnit || plan.everyUnit === 'once') {
-                savePlan(plan, { lastDone: day });
-                return;
-            }
-            var source = seriesSource(plan, iso);
-            var map = planMoveMap(plan);
-            if (day === source) delete map[source];
-            else map[source] = day;
-            savePlan(plan, { moves: packPlanMoves(map) });
+            if (!target || !target.day) return;
+            dropPlanAt(plan, iso, target.day, target.time);
         }
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', up);

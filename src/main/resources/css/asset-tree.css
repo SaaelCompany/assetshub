@@ -8379,9 +8379,94 @@ a.asset-tree-url {
     font-weight: 600;
 }
 
-#asset-tree-app .asset-tree-board .asset-tree-day.is-today .asset-tree-day-num {
-    background: #deebff;
-    color: #0052cc;
+#asset-tree-app .asset-tree-board .asset-tree-day.is-today .asset-tree-day-num,
+#asset-tree-app .asset-tree-board button.asset-tree-day-num.is-on {
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-day-num {
+    display: inline-flex !important;
+    width: auto;
+    min-width: 22px;
+    height: auto !important;
+    margin: 0;
+    padding: 0 4px !important;
+    border: 0 !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #6b778c !important;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-clock {
+    max-height: 440px;
+    margin: 0 0 12px;
+    overflow: auto;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-clock-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 8px 12px;
+    border-bottom: 1px solid #dfe1e6;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-clock-head strong {
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-clock-head span {
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-slot {
+    display: flex;
+    align-items: stretch;
+    min-height: 36px;
+    border-top: 1px solid #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-slot.is-all {
+    min-height: 40px;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-slot.is-drop {
+    outline: 2px solid #4c9aff;
+    outline-offset: -2px;
+}
+
+#asset-tree-app .asset-tree-slot-label {
+    flex: 0 0 84px;
+    padding: 6px 8px;
+    color: #6b778c;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-slot-list {
+    flex: 1;
+    min-width: 0;
+    padding: 0 8px 4px 0;
+}
+
+#asset-tree-app .asset-tree-slot-list .asset-tree-event {
+    max-width: 420px;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event {
@@ -8414,6 +8499,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-dragging {
     opacity: 0.45;
     cursor: grabbing;
+    pointer-events: none;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-due {
