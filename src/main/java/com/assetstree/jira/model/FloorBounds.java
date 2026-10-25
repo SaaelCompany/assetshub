@@ -19,6 +19,12 @@ public final class FloorBounds {
     public static final String STAIR = "stair";
     public static final String DESK = "desk";
     public static final String PARTITION = "partition";
+    public static final String TABLE = "table";
+    public static final String CHAIR = "chair";
+    public static final String CABINET = "cabinet";
+    public static final String SOFA = "sofa";
+    public static final String SEAT = "seat";
+    public static final String PEDESTAL = "pedestal";
 
     private FloorBounds() {
     }
@@ -36,7 +42,9 @@ public final class FloorBounds {
         }
         String value = raw.trim().toLowerCase(Locale.ROOT);
         if (WALL.equals(value) || DOOR.equals(value) || WINDOW.equals(value)
-                || COLUMN.equals(value) || STAIR.equals(value) || DESK.equals(value) || PARTITION.equals(value)) {
+                || COLUMN.equals(value) || STAIR.equals(value) || DESK.equals(value) || PARTITION.equals(value)
+                || TABLE.equals(value) || CHAIR.equals(value) || CABINET.equals(value)
+                || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)) {
             return value;
         }
         return ROOM;
@@ -47,7 +55,8 @@ public final class FloorBounds {
         if (ROOM.equals(value) || STAIR.equals(value)) {
             return MIN_ROOM;
         }
-        if (COLUMN.equals(value) || DESK.equals(value)) {
+        if (COLUMN.equals(value) || DESK.equals(value) || TABLE.equals(value) || CHAIR.equals(value)
+                || CABINET.equals(value) || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)) {
             return 8;
         }
         return MIN_PART;

@@ -1142,8 +1142,54 @@ def module_setup(stored, migrate=True):
         "staffPlaceOrder": pack_staff_places(stored.get("staffPlaceOrder")),
         "scheduleBoards": pack_boards(stored.get("scheduleBoards")),
         "scheduleOpen": pack_open(stored.get("scheduleOpen"), layer),
+        "furniture": pack_furniture(stored.get("furniture")),
         "scheduleKindVersion": 2,
     }
+
+
+def pack_furniture(raw):
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    kept = []
+    for template in text.split("|"):
+        if len(kept) >= 24:
+            break
+        head = template.split("^", 2)
+        if len(head) < 3:
+            continue
+        ident = head[0].strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9]{0,7}", ident):
+            continue
+        name = re.sub(r"\s+", " ", re.sub(r"[,;|^!=]", " ", head[1])).strip()[:40]
+        shapes = []
+        for part in head[2].split("!"):
+            if len(shapes) >= 16:
+                break
+            bits = part.split(",")
+            if len(bits) < 5:
+                continue
+            kind = bits[0].strip().lower()
+            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal"):
+                kind = "room"
+            def coord(value, limit):
+                try:
+                    number = int(value)
+                except (TypeError, ValueError):
+                    number = 0
+                return max(0, min(limit, number))
+            minimum = 16 if kind in ("room", "stair") else 8 if kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal") else 4
+            color = (bits[5] if len(bits) > 5 else "").strip().lower().lstrip("#")
+            if not re.fullmatch(r"[0-9a-f]{6}", color):
+                color = ""
+            label = re.sub(r"\s+", " ", re.sub(r"[,;|^!=]", " ", bits[6] if len(bits) > 6 else "")).strip()[:40]
+            shapes.append("%s,%s,%s,%s,%s,%s,%s" % (
+                kind, coord(bits[1], 2000), coord(bits[2], 2000),
+                max(minimum, coord(bits[3], 800)), max(minimum, coord(bits[4], 800)), color, label,
+            ))
+        if name and shapes and ident not in {item.split("^", 1)[0] for item in kept}:
+            kept.append(ident + "^" + name + "^" + "!".join(shapes))
+    return "|".join(kept)
 
 
 DEFAULT_STAFF_MARKS = (
@@ -2183,14 +2229,14 @@ def save_floor(project_key, floor_id, body, text):
     seq = 1
     for room in rooms:
         kind = (room.get("kind") or "room").strip().lower()
-        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition"):
+        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal"):
             kind = "room"
         label = (room.get("name") or "").strip()
         if not label and kind == "room":
             label = "Комната"
         if kind in ("room", "stair"):
             minimum = 16
-        elif kind in ("column", "desk"):
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal"):
             minimum = 8
         else:
             minimum = 4

@@ -454,6 +454,9 @@
         mapLoading: false,
         mapToken: 0,
         mapSelection: null,
+        mapGroup: [],
+        mapStamp: '',
+        mapNaming: false,
         mapEditing: false,
         mapDirty: false,
         mapZoom: 1,
@@ -8549,6 +8552,9 @@
         state.floorId = 0;
         state.mapPlaceId = 0;
         state.mapDraft = null;
+        state.mapGroup = [];
+        state.mapStamp = '';
+        state.mapNaming = false;
         state.mapLoading = false;
         state.mapToken++;
         state.mapSelection = null;
@@ -14568,7 +14574,8 @@
                 if (open === 'calendar' || open === 'roster') return open;
                 var layer = String(setup.scheduleLayer || '').toLowerCase();
                 return layer === 'roster' || layer === 'staff' ? 'roster' : 'calendar';
-            })()
+            })(),
+            furniture: setup.furniture || ''
         };
     }
 
@@ -14628,8 +14635,8 @@
 
     function roomMin(kind) {
         if (kind === 'room' || kind === 'stair') return 16;
-        if (kind === 'column' || kind === 'desk') return 8;
-        return 4;
+        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window') return 4;
+        return 8;
     }
 
     function ensureBuilding() {
@@ -14648,6 +14655,7 @@
         state.floorId = floors.length ? floors[0].id : 0;
         state.mapDraft = floors.length ? cloneFloor(floors[0]) : null;
         state.mapSelection = null;
+        state.mapGroup = [];
     }
 
     function chooseBuilding(id) {
@@ -14659,6 +14667,7 @@
         state.mapDraft = floors.length ? cloneFloor(floors[0]) : null;
         state.mapDirty = false;
         state.mapSelection = null;
+        state.mapGroup = [];
         if (!floors.length) state.mapEditing = false;
         renderFrame();
     }
@@ -14788,21 +14797,282 @@
         return found;
     }
 
+    function furnLabel(raw) {
+        return String(raw || '').replace(/[,;|^!=]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+
+    function builtinFurniture() {
+        function piece(id, key, kind, w, h) {
+            return { id: id, name: t(key), builtin: true, shapes: [{ kind: kind, name: t(key), color: '', x: 0, y: 0, w: w, h: h }] };
+        }
+        return [
+            piece('table', 'mapTable', 'table', 96, 48),
+            piece('chair', 'mapChair', 'chair', 32, 32),
+            piece('cabinet', 'mapCabinet', 'cabinet', 48, 32),
+            piece('pedestal', 'mapPedestal', 'pedestal', 32, 40),
+            piece('sofa', 'mapSofa', 'sofa', 120, 40),
+            piece('seat', 'mapSeat', 'seat', 40, 40)
+        ];
+    }
+
+    function parseFurniture(raw) {
+        var list = [];
+        String(raw || '').split('|').forEach(function (template) {
+            if (!template || list.length >= 24) return;
+            var head = template.split('^');
+            if (head.length < 3) return;
+            var id = String(head[0] || '').toLowerCase();
+            if (!/^[a-z][a-z0-9]{0,7}$/.test(id)) return;
+            var name = furnLabel(head[1]);
+            if (!name) return;
+            var shapes = [];
+            head.slice(2).join('^').split('!').forEach(function (part) {
+                if (!part || shapes.length >= 16) return;
+                var bits = part.split(',');
+                if (bits.length < 5) return;
+                var kind = bits[0] || 'desk';
+                var color = /^[0-9a-fA-F]{6}$/.test(bits[5] || '') ? '#' + String(bits[5]).toLowerCase() : '';
+                shapes.push({
+                    kind: kind,
+                    x: clampNum(bits[1], 0, 2000),
+                    y: clampNum(bits[2], 0, 2000),
+                    w: Math.max(roomMin(kind), clampNum(bits[3], 0, 800)),
+                    h: Math.max(roomMin(kind), clampNum(bits[4], 0, 800)),
+                    color: color,
+                    name: furnLabel(bits.slice(6).join(','))
+                });
+            });
+            if (shapes.length) list.push({ id: id, name: name, builtin: false, shapes: shapes });
+        });
+        return list;
+    }
+
+    function packFurniture(list) {
+        return (list || []).slice(0, 24).map(function (tpl) {
+            var shapes = (tpl.shapes || []).slice(0, 16).map(function (shape) {
+                return [shape.kind || 'desk', shape.x || 0, shape.y || 0, shape.w, shape.h, String(shape.color || '').replace('#', ''), furnLabel(shape.name)].join(',');
+            }).join('!');
+            return shapes ? (tpl.id + '^' + furnLabel(tpl.name) + '^' + shapes) : '';
+        }).filter(function (row) { return row; }).join('|');
+    }
+
+    function customFurniture() {
+        return parseFurniture(moduleSetup().furniture);
+    }
+
+    function furnitureLibrary() {
+        return builtinFurniture().concat(customFurniture());
+    }
+
+    function furnitureById(id) {
+        var found = null;
+        furnitureLibrary().forEach(function (item) { if (item.id === id) found = item; });
+        return found;
+    }
+
+    function selectedShapeList() {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var indexes = [];
+        if (state.mapSelection != null && rooms[state.mapSelection]) indexes.push(state.mapSelection);
+        (state.mapGroup || []).forEach(function (index) {
+            if (indexes.indexOf(index) < 0 && rooms[index]) indexes.push(index);
+        });
+        return indexes.map(function (index) { return rooms[index]; });
+    }
+
+    function removeMapSelection() {
+        if (!state.mapDraft || !state.mapDraft.rooms) return;
+        var indexes = [];
+        if (state.mapSelection != null) indexes.push(state.mapSelection);
+        (state.mapGroup || []).forEach(function (index) {
+            if (indexes.indexOf(index) < 0) indexes.push(index);
+        });
+        indexes.sort(function (left, right) { return right - left; });
+        indexes.forEach(function (index) {
+            if (state.mapDraft.rooms[index]) state.mapDraft.rooms.splice(index, 1);
+        });
+        state.mapSelection = null;
+        state.mapGroup = [];
+        state.mapNaming = false;
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function persistFurniture(list, quiet) {
+        var packed = packFurniture(list);
+        var next = moduleSetup();
+        next.furniture = packed;
+        var project = currentProject();
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.furniture = packed;
+        }
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                if (project && payload && payload.setup) {
+                    project.setup = payload.setup;
+                    if (!project.setup.furniture) project.setup.furniture = packed;
+                }
+                if (!quiet) notify(t('mapTemplateSaved'));
+            } else notify((payload && payload.message) || t('errorTitle'));
+            if (state.view === 'map') renderFrame();
+        });
+    }
+
+    function saveFurnitureTemplate(name) {
+        var label = furnLabel(name);
+        var shapes = selectedShapeList();
+        if (!label || !shapes.length) return;
+        var minX = shapes[0].x;
+        var minY = shapes[0].y;
+        shapes.forEach(function (shape) {
+            minX = Math.min(minX, shape.x);
+            minY = Math.min(minY, shape.y);
+        });
+        var custom = customFurniture();
+        var used = {};
+        custom.forEach(function (item) { used[item.id] = true; });
+        var number = 1;
+        while (used['c' + number]) number++;
+        custom.push({
+            id: 'c' + number,
+            name: label,
+            shapes: shapes.map(function (shape) {
+                return {
+                    kind: shape.kind || 'desk',
+                    name: shape.name || label,
+                    color: shape.color || '',
+                    x: shape.x - minX,
+                    y: shape.y - minY,
+                    w: shape.w,
+                    h: shape.h
+                };
+            })
+        });
+        state.mapNaming = false;
+        persistFurniture(custom, false);
+    }
+
+    function removeFurniture(id) {
+        if (state.mapStamp === id) {
+            state.mapStamp = '';
+            state.mapTool = 'select';
+        }
+        persistFurniture(customFurniture().filter(function (item) { return item.id !== id; }), true);
+    }
+
+    function placeStamp(floor, x, y) {
+        var tpl = furnitureById(state.mapStamp);
+        if (!tpl || !tpl.shapes.length) return;
+        var originX = snapCoord(x);
+        var originY = snapCoord(y);
+        var box = planSize(floor);
+        floor.rooms = floor.rooms || [];
+        var first = floor.rooms.length;
+        tpl.shapes.forEach(function (shape) {
+            floor.rooms.push(clampRoom({
+                kind: shape.kind,
+                name: shape.name || '',
+                color: shape.color || '',
+                x: originX + (Number(shape.x) || 0),
+                y: originY + (Number(shape.y) || 0),
+                w: shape.w,
+                h: shape.h
+            }, box));
+        });
+        state.mapSelection = first;
+        state.mapGroup = [];
+        var index;
+        for (index = first + 1; index < floor.rooms.length; index++) state.mapGroup.push(index);
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function shiftBuilding(delta) {
+        var buildings = buildingAssets();
+        if (!buildings.length) return;
+        var index = 0;
+        buildings.forEach(function (asset, at) { if (asset.id === state.mapPlaceId) index = at; });
+        var next = buildings[(index + delta + buildings.length) % buildings.length];
+        if (next) chooseBuilding(next.id);
+    }
+
+    function mapShapeOn(index) {
+        if (state.mapSelection === index) return true;
+        return (state.mapGroup || []).indexOf(index) >= 0;
+    }
+
     function renderMap() {
-        var panel = el('section', 'asset-tree-sheet');
-        var head = sheetHead('mapPageTitle');
+        var panel = el('section', 'asset-tree-sheet asset-tree-board asset-tree-map-board');
+        if (state.floors == null) {
+            panel.appendChild(mapBoardHead());
+            panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadFloors();
+            return panel;
+        }
+        ensureBuilding();
+        var buildings = buildingAssets();
+        var floors = floorsForBuilding(state.mapPlaceId);
+        panel.appendChild(mapBoardHead());
+        panel.appendChild(el('p', 'asset-tree-hint', t('mapHint')));
+        if (!buildings.length) {
+            panel.appendChild(el('p', 'asset-tree-map-empty', t('mapNoBuilding')));
+            return panel;
+        }
+        panel.appendChild(mapBuildingBar());
+        panel.appendChild(mapFloorBar(floors));
+        if (!floors.length) {
+            var empty = el('div', 'asset-tree-map-card');
+            empty.appendChild(el('p', 'asset-tree-map-empty', t('mapNoFloors')));
+            if (state.canEdit) empty.appendChild(button(t('mapAddFloor'), 'asset-tree-btn primary', function () { addFloor(true); }));
+            panel.appendChild(empty);
+            return panel;
+        }
+        if (state.mapEditing && state.canEdit && state.mapDraft) {
+            panel.appendChild(mapToolBar());
+            panel.appendChild(mapFurnitureBar());
+            if (state.mapStamp) panel.appendChild(el('p', 'asset-tree-hint', t('mapPlaceHint')));
+            else panel.appendChild(el('p', 'asset-tree-hint', t('mapDrawHint')));
+        }
+        var card = el('div', 'asset-tree-map-card');
+        if (state.mapEditing && state.mapDraft) {
+            card.appendChild(mapEditorBar());
+            card.appendChild(mapInspector());
+            card.appendChild(floorCanvas(state.mapDraft, true));
+        } else {
+            var floor = currentFloor();
+            if (floor) card.appendChild(floorCanvas(floor, false));
+        }
+        panel.appendChild(card);
+        if (state.mapEditing && state.canEdit) panel.appendChild(mapGearCard());
+        return panel;
+    }
+
+    function mapBoardHead() {
+        var head = el('div', 'asset-tree-board-head');
+        var nav = el('div', 'asset-tree-calendar-nav');
+        nav.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftBuilding(-1); }));
+        var building = currentBuilding();
+        nav.appendChild(el('strong', 'asset-tree-calendar-title', building ? (building.name || t('mapPageTitle')) : t('mapPageTitle')));
+        var forward = button('\u203A', 'asset-tree-month-btn', function () { shiftBuilding(1); });
+        nav.appendChild(forward);
+        head.appendChild(nav);
+        var filters = el('div', 'asset-tree-sheet-filters');
         if (state.mapEditing) {
-            head.appendChild(el('span', 'asset-tree-dirty', state.mapDirty ? t('mapDirty') : ''));
-            head.appendChild(button(t('save'), 'asset-tree-btn primary', saveMap));
-            head.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
+            if (state.mapDirty) filters.appendChild(el('span', 'asset-tree-dirty', t('mapDirty')));
+            filters.appendChild(button(t('save'), 'asset-tree-btn primary', saveMap));
+            filters.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
                 state.mapEditing = false;
                 state.mapDirty = false;
+                state.mapStamp = '';
+                state.mapNaming = false;
+                state.mapGroup = [];
                 var floor = currentFloor();
                 state.mapDraft = floor ? cloneFloor(floor) : null;
                 renderFrame();
             }));
-        } else {
-            head.appendChild(button(t('mapEdit'), 'asset-tree-linkish', function () {
+        } else if (state.canEdit) {
+            filters.appendChild(button(t('mapEdit'), 'asset-tree-btn primary', function () {
                 if (!state.mapPlaceId) {
                     notify(t('mapNoBuilding'));
                     return;
@@ -14815,140 +15085,149 @@
                 renderFrame();
             }));
         }
-        panel.appendChild(head);
-        panel.appendChild(el('p', 'asset-tree-hint', t('mapHint')));
-        if (state.floors == null) {
-            panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            loadFloors();
-            return panel;
-        }
-        ensureBuilding();
-        var buildings = buildingAssets();
-        var buildingFloors = floorsForBuilding(state.mapPlaceId);
-        var shell = el('div', 'asset-tree-map-shell');
-        shell.appendChild(mapRail());
-        var stage = el('div', 'asset-tree-map-stage');
-        if (!buildings.length) {
-            stage.appendChild(el('p', 'asset-tree-map-empty', t('mapNoBuilding')));
-        } else if (!buildingFloors.length) {
-            stage.appendChild(el('p', 'asset-tree-map-empty', t('mapNoFloors')));
-            if (state.canEdit) stage.appendChild(button(t('mapAddFloor'), 'asset-tree-btn primary', function () { addFloor(true); }));
-        } else if (state.mapEditing && state.mapDraft) {
-            stage.appendChild(mapEditorBar());
-            stage.appendChild(floorCanvas(state.mapDraft, true));
-        } else {
-            var floor = currentFloor();
-            if (floor) stage.appendChild(floorCanvas(floor, false));
-        }
-        shell.appendChild(stage);
-        panel.appendChild(shell);
-        return panel;
+        if (filters.childNodes.length) head.appendChild(filters);
+        return head;
     }
 
-    function mapRail() {
-        var rail = el('aside', 'asset-tree-map-rail');
-        rail.appendChild(el('h3', null, t('mapBuildings')));
-        rail.appendChild(el('p', 'asset-tree-hint', t('mapBuildingHint')));
-        var buildings = buildingAssets();
-        if (!buildings.length) rail.appendChild(el('p', 'asset-tree-hint', t('mapNoBuilding')));
-        buildings.forEach(function (asset) {
-            rail.appendChild(button(asset.name || asset.objectKey || '', 'asset-tree-report-link asset-tree-building-link' + (asset.id === state.mapPlaceId ? ' is-current' : ''), function () {
+    function mapBuildingBar() {
+        var bar = el('div', 'asset-tree-layers');
+        buildingAssets().forEach(function (asset) {
+            var on = asset.id === state.mapPlaceId;
+            var item = button(asset.name || asset.objectKey || '', 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
                 chooseBuilding(asset.id);
-            }));
+            });
+            item.setAttribute('aria-pressed', on ? 'true' : 'false');
+            bar.appendChild(item);
         });
-        rail.appendChild(el('h3', null, t('mapFloors')));
-        var search = document.createElement('input');
-        search.type = 'search';
-        search.placeholder = t('mapSearch');
-        search.addEventListener('input', function () {
-            var needle = search.value.trim().toLowerCase();
-            var nodes = rail.querySelectorAll('.asset-tree-floor-link');
-            for (var i = 0; i < nodes.length; i++) {
-                var text = (nodes[i].textContent || '').toLowerCase();
-                nodes[i].hidden = !!(needle && text.indexOf(needle) < 0);
-            }
-        });
-        rail.appendChild(search);
-        floorsForBuilding(state.mapPlaceId).forEach(function (floor) {
-            rail.appendChild(button(floor.name || t('mapFloorName'), 'asset-tree-report-link asset-tree-floor-link' + (floor.id === state.floorId ? ' is-current' : ''), function () {
+        return bar;
+    }
+
+    function mapFloorBar(floors) {
+        var bar = el('div', 'asset-tree-layers');
+        (floors || []).forEach(function (floor) {
+            var on = floor.id === state.floorId;
+            var item = button(floor.name || t('mapFloor'), 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
                 if (floor.id === state.floorId) return;
                 if (state.mapDirty && !window.confirm(t('mapDirty'))) return;
                 state.floorId = floor.id;
                 state.mapDraft = cloneFloor(floor);
                 state.mapDirty = false;
                 state.mapSelection = null;
+                state.mapGroup = [];
                 renderFrame();
-            }));
+            });
+            item.setAttribute('aria-pressed', on ? 'true' : 'false');
+            bar.appendChild(item);
         });
-        if (state.mapEditing && state.canEdit) {
-            rail.appendChild(button('+ ' + t('mapAddFloor'), 'asset-tree-linkish', function () { addFloor(false); }));
-            rail.appendChild(button(t('mapRename'), 'asset-tree-linkish', function () {
-                var input = document.querySelector('.asset-tree-floor-name');
-                if (input) input.focus();
-            }));
-            rail.appendChild(button(t('delete'), 'asset-tree-linkish', deleteCurrentFloor));
-            rail.appendChild(el('h3', null, t('mapEdit')));
-            var tools = el('div', 'asset-tree-map-tools');
-            [
-                ['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['partition', 'mapPartition'],
-                ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk']
-            ].forEach(function (pair) {
-                var tool = button('', 'asset-tree-btn asset-tree-tool' + (state.mapTool === pair[0] ? ' is-on' : ''), function () {
-                    state.mapTool = pair[0];
-                    renderFrame();
-                });
-                tool.title = t(pair[1]);
-                tool.setAttribute('aria-label', t(pair[1]));
-                tool.appendChild(mapToolIcon(pair[0]));
-                tool.appendChild(el('span', null, t(pair[1])));
-                tools.appendChild(tool);
-            });
-            rail.appendChild(tools);
-            rail.appendChild(el('p', 'asset-tree-hint', t('mapDrawHint')));
-            rail.appendChild(mapInspector());
-            rail.appendChild(el('h3', null, t('mapGear')));
-            var gearQuery = document.createElement('input');
-            gearQuery.type = 'search';
-            gearQuery.placeholder = t('schedulesFindAssets');
-            gearQuery.addEventListener('input', function () {
-                var needle = gearQuery.value.trim().toLowerCase();
-                var nodes = list.querySelectorAll('.asset-tree-gear-row');
-                for (var i = 0; i < nodes.length; i++) {
-                    var text = (nodes[i].textContent || '').toLowerCase();
-                    nodes[i].hidden = !!(needle && text.indexOf(needle) < 0);
-                }
-            });
-            rail.appendChild(gearQuery);
-            var list = el('div', 'asset-tree-schedule-assets');
-            var onFloor = 0;
-            var pins = (state.mapDraft && state.mapDraft.pins) || [];
-            equipmentAssets().forEach(function (asset) {
-                if (!assetInBuilding(asset, state.mapPlaceId)) return;
-                var placed = false;
-                pins.forEach(function (pin) { if (pin.assetId === asset.id) placed = true; });
-                if (placed) onFloor++;
-                var place = assetPlaceName(asset);
-                var typeLabel = typeFor(asset).label || '';
-                var row = button('', 'asset-tree-gear-row' + (state.mapAssetId === asset.id ? ' is-current' : ''), function () {
-                    state.mapAssetId = asset.id;
-                    state.mapTool = 'select';
-                    renderFrame();
-                });
-                row.appendChild(el('strong', null, asset.name || asset.objectKey || ''));
-                row.appendChild(el('span', null, [asset.objectKey || '', typeLabel, place].filter(function (part) { return part; }).join(' · ')));
-                list.appendChild(row);
-            });
-            rail.appendChild(list);
-            rail.appendChild(el('p', 'asset-tree-hint', t('mapOnFloor') + ': ' + onFloor));
+        if (state.canEdit) {
+            bar.appendChild(button('+ ' + t('mapAddFloor'), 'asset-tree-layer', function () { addFloor(!!state.mapEditing); }));
+            if (state.mapEditing && floors.length) bar.appendChild(button(t('delete'), 'asset-tree-layer', deleteCurrentFloor));
         }
-        return rail;
+        return bar;
     }
+
+    function mapToolBar() {
+        var bar = el('div', 'asset-tree-layers');
+        [
+            ['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['partition', 'mapPartition'],
+            ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk']
+        ].forEach(function (pair) {
+            var on = state.mapTool === pair[0] && !state.mapStamp;
+            var tool = button(t(pair[1]), 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
+                state.mapTool = pair[0];
+                state.mapStamp = '';
+                renderFrame();
+            });
+            tool.title = t(pair[1]);
+            tool.setAttribute('aria-label', t(pair[1]));
+            tool.setAttribute('aria-pressed', on ? 'true' : 'false');
+            bar.appendChild(tool);
+        });
+        return bar;
+    }
+
+    function mapFurnitureBar() {
+        var wrap = el('div', 'asset-tree-map-furn');
+        wrap.appendChild(el('p', 'asset-tree-hint', t('mapFurnHint')));
+        var bar = el('div', 'asset-tree-layers');
+        furnitureLibrary().forEach(function (tpl) {
+            var on = state.mapStamp === tpl.id;
+            var chip = button('', 'asset-tree-layer asset-tree-furn' + (on ? ' is-on' : ''), function (event) {
+                var target = event && event.target;
+                if (target && target.classList && target.classList.contains('asset-tree-furn-x')) {
+                    removeFurniture(tpl.id);
+                    return;
+                }
+                if (state.mapStamp === tpl.id) {
+                    state.mapStamp = '';
+                    state.mapTool = 'select';
+                } else {
+                    state.mapStamp = tpl.id;
+                    state.mapTool = 'stamp';
+                    state.mapAssetId = 0;
+                }
+                renderFrame();
+            });
+            chip.appendChild(document.createTextNode(tpl.name));
+            if (!tpl.builtin) {
+                var remove = el('span', 'asset-tree-furn-x', '\u00d7');
+                remove.title = t('mapRemoveTemplate');
+                chip.appendChild(remove);
+            }
+            chip.title = tpl.name;
+            chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+            bar.appendChild(chip);
+        });
+        wrap.appendChild(bar);
+        return wrap;
+    }
+
+    function mapGearCard() {
+        var card = el('div', 'asset-tree-map-card asset-tree-map-gear');
+        var pins = (state.mapDraft && state.mapDraft.pins) || [];
+        var onFloor = 0;
+        var rows = [];
+        equipmentAssets().forEach(function (asset) {
+            if (!assetInBuilding(asset, state.mapPlaceId)) return;
+            var placed = false;
+            pins.forEach(function (pin) { if (pin.assetId === asset.id) placed = true; });
+            if (placed) onFloor++;
+            rows.push({ asset: asset, placed: placed });
+        });
+        card.appendChild(el('strong', 'asset-tree-map-gear-title', t('mapGear') + ' · ' + t('mapOnFloor') + ': ' + onFloor));
+        var query = document.createElement('input');
+        query.type = 'search';
+        query.placeholder = t('schedulesFindAssets');
+        query.addEventListener('input', function () {
+            var needle = query.value.trim().toLowerCase();
+            var nodes = card.querySelectorAll('.asset-tree-gear-row');
+            for (var i = 0; i < nodes.length; i++) {
+                nodes[i].hidden = !!(needle && (nodes[i].textContent || '').toLowerCase().indexOf(needle) < 0);
+            }
+        });
+        card.appendChild(query);
+        var list = el('div', 'asset-tree-map-gear-list');
+        rows.forEach(function (row) {
+            var asset = row.asset;
+            var typeLabel = typeFor(asset).label || '';
+            var buttonRow = button('', 'asset-tree-gear-row' + (state.mapAssetId === asset.id ? ' is-current' : ''), function () {
+                state.mapAssetId = asset.id;
+                state.mapTool = 'select';
+                state.mapStamp = '';
+                renderFrame();
+            });
+            buttonRow.appendChild(el('strong', null, asset.name || asset.objectKey || ''));
+            buttonRow.appendChild(el('span', null, [asset.objectKey || '', typeLabel, row.placed ? t('mapOnFloor') : ''].filter(function (part) { return part; }).join(' · ')));
+            list.appendChild(buttonRow);
+        });
+        card.appendChild(list);
+        return card;
+    }
+
 
     function mapEditorBar() {
         var size = planSize(state.mapDraft);
         var bar = el('div', 'asset-tree-editor-bar');
-        var building = currentBuilding();
-        if (building) bar.appendChild(el('span', 'asset-tree-building-name', building.name || ''));
         var name = document.createElement('input');
         name.className = 'asset-tree-floor-name';
         name.value = state.mapDraft.name || '';
@@ -14964,13 +15243,13 @@
             state.mapZoom = 1;
             renderFrame();
         }));
-        var zoomOut = button('−', 'asset-tree-btn slim asset-tree-zoom', function () {
+        var zoomOut = button('−', 'asset-tree-month-btn asset-tree-zoom', function () {
             state.mapZoom = Math.max(0.5, Math.round(((state.mapZoom || 1) - 0.25) * 100) / 100);
             renderFrame();
         });
         zoomOut.title = t('mapZoomOut');
         zoomOut.setAttribute('aria-label', t('mapZoomOut'));
-        var zoomIn = button('+', 'asset-tree-btn slim asset-tree-zoom', function () {
+        var zoomIn = button('+', 'asset-tree-month-btn asset-tree-zoom', function () {
             state.mapZoom = Math.min(4, Math.round(((state.mapZoom || 1) + 0.25) * 100) / 100);
             renderFrame();
         });
@@ -15061,6 +15340,7 @@
                 state.mapDraft = left.length ? cloneFloor(left[0]) : null;
                 state.mapDirty = false;
                 state.mapSelection = null;
+                state.mapGroup = [];
                 if (!left.length) state.mapEditing = false;
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
@@ -15118,14 +15398,25 @@
             rect.setAttribute('y', String(room.y));
             rect.setAttribute('width', String(room.w));
             rect.setAttribute('height', String(room.h));
-            rect.setAttribute('class', 'asset-tree-room is-' + (room.kind || 'room') + (state.mapSelection === index ? ' is-selected' : ''));
+            rect.setAttribute('class', 'asset-tree-room is-' + (room.kind || 'room') + (mapShapeOn(index) ? ' is-selected' : ''));
             if ((room.kind || 'room') === 'room' && room.color) rect.setAttribute('fill', room.color);
             if (editing) {
                 rect.addEventListener('mousedown', function (event) {
                     if (state.mapTool !== 'select') return;
                     event.preventDefault();
                     event.stopPropagation();
+                    if (event.shiftKey) {
+                        var group = (state.mapGroup || []).slice();
+                        var at = group.indexOf(index);
+                        if (at >= 0) group.splice(at, 1);
+                        else if (state.mapSelection !== index) group.push(index);
+                        state.mapGroup = group;
+                        if (state.mapSelection == null) state.mapSelection = index;
+                        renderFrame();
+                        return;
+                    }
                     state.mapSelection = index;
+                    state.mapGroup = [];
                     var point = svgPoint(svg, event);
                     beginDrag(svg, { kind: 'move', index: index, dx: point.x - room.x, dy: point.y - room.y, moved: false, x0: point.x, y0: point.y }, function (move) {
                         var next = svgPoint(svg, move);
@@ -15161,7 +15452,7 @@
                 markLine.setAttribute('class', 'asset-tree-opening');
                 svg.appendChild(markLine);
             }
-            if ((kindName === 'room' || kindName === 'stair' || kindName === 'column' || kindName === 'desk') && room.name && room.h >= 12 && room.w >= 20) {
+            if ((kindName === 'room' || kindName === 'stair' || kindName === 'column' || kindName === 'desk' || kindName === 'table' || kindName === 'chair' || kindName === 'cabinet' || kindName === 'sofa' || kindName === 'seat' || kindName === 'pedestal') && room.name && room.h >= 12 && room.w >= 20) {
                 var label = svgEl('text');
                 var font = Math.max(8, Math.min(14, Math.floor(room.h / 2)));
                 label.setAttribute('x', String(room.x + Math.min(8, Math.floor(room.w / 5))));
@@ -15218,6 +15509,12 @@
                 renderFrame();
             });
             svg.addEventListener('mousedown', function (event) {
+                if (state.mapTool === 'stamp') {
+                    event.preventDefault();
+                    var stamped = svgPoint(svg, event);
+                    placeStamp(floor, stamped.x, stamped.y);
+                    return;
+                }
                 if (state.mapTool === 'select') return;
                 event.preventDefault();
                 var point = svgPoint(svg, event);
@@ -15278,7 +15575,7 @@
             svg.appendChild(lines);
             return;
         }
-        if (kind === 'desk') {
+        if (kind === 'desk' || kind === 'table') {
             var inner = svgEl('rect');
             var inset = Math.min(6, Math.floor(Math.min(room.w, room.h) / 5));
             inner.setAttribute('x', String(room.x + inset));
@@ -15287,6 +15584,39 @@
             inner.setAttribute('height', String(Math.max(1, room.h - inset * 2)));
             inner.setAttribute('class', 'asset-tree-mark');
             svg.appendChild(inner);
+            return;
+        }
+        if (kind === 'chair' || kind === 'seat') {
+            var seat = svgEl('circle');
+            seat.setAttribute('cx', String(room.x + room.w / 2));
+            seat.setAttribute('cy', String(room.y + room.h * 0.62));
+            seat.setAttribute('r', String(Math.max(3, Math.min(room.w, room.h) * 0.28)));
+            seat.setAttribute('class', 'asset-tree-mark');
+            svg.appendChild(seat);
+            var back = svgEl('path');
+            back.setAttribute('d', 'M ' + (room.x + 3) + ' ' + (room.y + Math.max(4, room.h * 0.28)) + ' L ' + (room.x + room.w - 3) + ' ' + (room.y + Math.max(4, room.h * 0.28)));
+            back.setAttribute('class', 'asset-tree-mark');
+            svg.appendChild(back);
+            return;
+        }
+        if (kind === 'cabinet' || kind === 'pedestal') {
+            var joints = svgEl('path');
+            var d = kind === 'cabinet'
+                ? ('M ' + (room.x + room.w / 2) + ' ' + room.y + ' L ' + (room.x + room.w / 2) + ' ' + (room.y + room.h))
+                : ('M ' + room.x + ' ' + (room.y + room.h / 3) + ' L ' + (room.x + room.w) + ' ' + (room.y + room.h / 3) + ' M ' + room.x + ' ' + (room.y + room.h * 2 / 3) + ' L ' + (room.x + room.w) + ' ' + (room.y + room.h * 2 / 3));
+            joints.setAttribute('d', d);
+            joints.setAttribute('class', 'asset-tree-mark');
+            svg.appendChild(joints);
+            return;
+        }
+        if (kind === 'sofa') {
+            var cushion = svgEl('rect');
+            cushion.setAttribute('x', String(room.x + 3));
+            cushion.setAttribute('y', String(room.y + 3));
+            cushion.setAttribute('width', String(Math.max(1, room.w - 6)));
+            cushion.setAttribute('height', String(Math.max(4, Math.round(room.h * 0.34))));
+            cushion.setAttribute('class', 'asset-tree-mark');
+            svg.appendChild(cushion);
         }
     }
 
@@ -15418,14 +15748,11 @@
     }
 
     function mapInspector() {
-        var block = el('div', 'asset-tree-inspector');
-        block.appendChild(el('h3', null, t('mapChosen')));
         var rooms = state.mapDraft && state.mapDraft.rooms;
         var room = rooms && state.mapSelection != null ? rooms[state.mapSelection] : null;
-        if (!room) {
-            block.appendChild(el('p', 'asset-tree-hint', '—'));
-            return block;
-        }
+        if (!room) return el('div');
+        var block = el('div', 'asset-tree-map-inspector');
+        block.appendChild(el('strong', null, mapSelectionLabel()));
         var name = document.createElement('input');
         name.value = room.name || '';
         name.setAttribute('aria-label', t('name'));
@@ -15450,7 +15777,6 @@
             });
             block.appendChild(colors);
         }
-        block.appendChild(el('p', 'asset-tree-hint', mapSelectionLabel()));
         var sizes = el('div', 'asset-tree-size-row');
         var width = document.createElement('input');
         width.type = 'number';
@@ -15497,27 +15823,47 @@
         actions.appendChild(button(t('mapDuplicate'), 'asset-tree-btn', function () {
             var step = state.mapStep || 8;
             var box = planSize(state.mapDraft);
-            var copy = clampRoom({
-                name: room.name,
-                kind: room.kind,
-                color: room.color,
-                x: Math.max(0, Math.min(room.x + step, box.w - room.w)),
-                y: Math.max(0, Math.min(room.y + step, box.h - room.h)),
-                w: room.w,
-                h: room.h
+            var copies = selectedShapeList();
+            var first = state.mapDraft.rooms.length;
+            copies.forEach(function (source) {
+                state.mapDraft.rooms.push(clampRoom({
+                    name: source.name,
+                    kind: source.kind,
+                    color: source.color,
+                    x: Math.max(0, Math.min(source.x + step, box.w - source.w)),
+                    y: Math.max(0, Math.min(source.y + step, box.h - source.h)),
+                    w: source.w,
+                    h: source.h
+                }));
             });
-            state.mapDraft.rooms.push(copy);
-            state.mapSelection = state.mapDraft.rooms.length - 1;
+            state.mapSelection = first;
+            state.mapGroup = [];
+            var index;
+            for (index = first + 1; index < state.mapDraft.rooms.length; index++) state.mapGroup.push(index);
             state.mapDirty = true;
+            renderFrame();
+        }));
+        actions.appendChild(button(t('mapSaveTemplate'), 'asset-tree-btn', function () {
+            state.mapNaming = true;
             renderFrame();
         }));
         actions.appendChild(button(t('mapDeleteShape'), 'asset-tree-btn', function () {
-            state.mapDraft.rooms.splice(state.mapSelection, 1);
-            state.mapSelection = null;
-            state.mapDirty = true;
-            renderFrame();
+            removeMapSelection();
         }));
         block.appendChild(actions);
+        if (state.mapNaming) {
+            var templateName = document.createElement('input');
+            templateName.maxLength = 40;
+            templateName.placeholder = t('mapTemplateName');
+            templateName.setAttribute('aria-label', t('mapTemplateName'));
+            templateName.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                saveFurnitureTemplate(templateName.value);
+            });
+            block.appendChild(templateName);
+            setTimeout(function () { if (templateName.parentNode) templateName.focus(); }, 0);
+        }
         return block;
     }
 
@@ -15532,6 +15878,12 @@
         if (kind === 'column') return room.name || t('mapColumn');
         if (kind === 'stair') return room.name || t('mapStair');
         if (kind === 'desk') return room.name || t('mapDesk');
+        if (kind === 'table') return room.name || t('mapTable');
+        if (kind === 'chair') return room.name || t('mapChair');
+        if (kind === 'cabinet') return room.name || t('mapCabinet');
+        if (kind === 'sofa') return room.name || t('mapSofa');
+        if (kind === 'seat') return room.name || t('mapSeat');
+        if (kind === 'pedestal') return room.name || t('mapPedestal');
         if (kind === 'partition') return t('mapPartition');
         return room.name || t('mapRoom');
     }
@@ -17378,10 +17730,7 @@
                 }
                 if (room && (event.key === 'Delete' || event.key === 'Backspace')) {
                     event.preventDefault();
-                    rooms.splice(state.mapSelection, 1);
-                    state.mapSelection = null;
-                    state.mapDirty = true;
-                    renderFrame();
+                    removeMapSelection();
                 }
             }
         }

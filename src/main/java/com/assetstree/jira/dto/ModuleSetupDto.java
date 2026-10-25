@@ -24,6 +24,7 @@ public class ModuleSetupDto {
     private String staffPlaceOrder;
     private String scheduleBoards;
     private String scheduleOpen;
+    private String furniture;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -61,4 +62,6 @@ public class ModuleSetupDto {
     public void setScheduleBoards(String scheduleBoards) { this.scheduleBoards = scheduleBoards; }
     public String getScheduleOpen() { return scheduleOpen; }
     public void setScheduleOpen(String scheduleOpen) { this.scheduleOpen = scheduleOpen; }
+    public String getFurniture() { return furniture; }
+    public void setFurniture(String furniture) { this.furniture = furniture; }
 }

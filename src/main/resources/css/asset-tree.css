@@ -7082,6 +7082,32 @@ a.asset-tree-url {
     stroke: #6b778c;
 }
 
+#asset-tree-app .asset-tree-room.is-table {
+    fill: #fff7d6;
+    stroke: #ffab00;
+}
+
+#asset-tree-app .asset-tree-room.is-chair,
+#asset-tree-app .asset-tree-room.is-seat {
+    fill: #f4f5f7;
+    stroke: #6b778c;
+}
+
+#asset-tree-app .asset-tree-room.is-cabinet {
+    fill: #eae6ff;
+    stroke: #6554c0;
+}
+
+#asset-tree-app .asset-tree-room.is-pedestal {
+    fill: #ffebe6;
+    stroke: #ff7452;
+}
+
+#asset-tree-app .asset-tree-room.is-sofa {
+    fill: #deebff;
+    stroke: #4c9aff;
+}
+
 #asset-tree-app .asset-tree-room.is-selected {
     stroke: #0052cc;
     stroke-width: 3;
@@ -8684,4 +8710,124 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-staff-phones {
     margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-map-card {
+    padding: 12px;
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-canvas {
+    display: block;
+    border: 0;
+    border-radius: 8px;
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-hint {
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-map-furn .asset-tree-hint {
+    margin: 0 0 6px;
+}
+
+#asset-tree-app .asset-tree-map-board button.asset-tree-furn {
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-furn-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 2px;
+    border-radius: 8px;
+    color: #6b778c;
+    font-size: 14px;
+    line-height: 1;
+}
+
+#asset-tree-app .asset-tree-map-inspector {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    background: #f7f8fa;
+    border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-map-inspector strong {
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-map-inspector input {
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 4px 8px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-editor-bar {
+    margin-bottom: 8px;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-floor-name,
+#asset-tree-app .asset-tree-map-board input.asset-tree-plan-size {
+    border-color: #e6e8ec;
+    border-radius: 8px;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-editor-bar button.asset-tree-btn.slim.is-on {
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 8px;
+    background: #fff !important;
+    color: #172b4d !important;
+}
+
+#asset-tree-app .asset-tree-map-gear-title {
+    display: block;
+    margin-bottom: 8px;
+    color: #172b4d;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-map-gear-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-map-board button.asset-tree-gear-row {
+    width: auto !important;
+    min-width: 180px;
+    margin: 0 !important;
+    padding: 6px 10px !important;
+    border-radius: 8px;
+    background: #f4f5f7 !important;
+}
+
+#asset-tree-app .asset-tree-map-board button.asset-tree-gear-row.is-current {
+    background: #deebff !important;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-map-empty {
+    margin: 28px auto;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-sheet-filters {
+    flex-wrap: wrap;
 }

@@ -43,6 +43,7 @@ public final class ModuleSetup {
         setup.setStaffPlaceOrder(staffPlaces(values.get("places")));
         setup.setScheduleBoards(boards(values.get("boards")));
         setup.setScheduleOpen(openBoard(values.get("open"), values.get("layer")));
+        setup.setFurniture(furniture(values.get("furn")));
         return setup;
     }
 
@@ -69,6 +70,7 @@ public final class ModuleSetup {
         append(stored, "places", staffPlaces(value.getStaffPlaceOrder()));
         append(stored, "boards", boards(value.getScheduleBoards()));
         append(stored, "open", openBoard(value.getScheduleOpen(), value.getScheduleLayer()));
+        append(stored, "furn", furniture(value.getFurniture()));
         return stored.toString();
     }
 
@@ -397,6 +399,90 @@ public final class ModuleSetup {
             return 0;
         }
         return value > 600 ? 600 : value;
+    }
+
+    /** id^name^kind,x,y,w,h,color,label!shape|next . Colors are stored without a hash. */
+    private static String furniture(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        StringBuilder stored = new StringBuilder();
+        String[] templates = raw.split("\\|");
+        int count = 0;
+        for (String template : templates) {
+            if (count >= 24) {
+                break;
+            }
+            String[] head = template.split("\\^", 3);
+            if (head.length < 3) {
+                continue;
+            }
+            String id = furnId(head[0]);
+            String name = furnLabel(head[1]);
+            String shapes = furnShapes(head[2]);
+            if (id.isEmpty() || name.isEmpty() || shapes.isEmpty()) {
+                continue;
+            }
+            if (stored.length() > 0) {
+                stored.append('|');
+            }
+            stored.append(id).append('^').append(name).append('^').append(shapes);
+            count++;
+        }
+        return stored.toString();
+    }
+
+    private static String furnId(String raw) {
+        String value = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        return value.matches("[a-z][a-z0-9]{0,7}") ? value : "";
+    }
+
+    private static String furnLabel(String raw) {
+        return clipLabel(raw).replace('^', ' ').replace('!', ' ').trim();
+    }
+
+    private static String furnShapes(String raw) {
+        StringBuilder stored = new StringBuilder();
+        String[] parts = raw.split("!");
+        int count = 0;
+        for (String part : parts) {
+            if (count >= 16) {
+                break;
+            }
+            String[] bits = part.split(",", -1);
+            if (bits.length < 5) {
+                continue;
+            }
+            String kind = FloorBounds.kind(bits[0]);
+            int x = furnCoord(bits[1], 2000);
+            int y = furnCoord(bits[2], 2000);
+            int w = Math.max(FloorBounds.minSize(kind), furnCoord(bits[3], 800));
+            int h = Math.max(FloorBounds.minSize(kind), furnCoord(bits[4], 800));
+            String color = "";
+            if (bits.length > 5 && bits[5] != null && !bits[5].trim().isEmpty()) {
+                String rawColor = bits[5].trim();
+                if (!rawColor.startsWith("#")) {
+                    rawColor = "#" + rawColor;
+                }
+                color = FloorBounds.color(rawColor).replace("#", "");
+            }
+            String label = bits.length > 6 ? furnLabel(bits[6]) : "";
+            if (stored.length() > 0) {
+                stored.append('!');
+            }
+            stored.append(kind).append(',').append(x).append(',').append(y).append(',').append(w).append(',').append(h)
+                    .append(',').append(color).append(',').append(label);
+            count++;
+        }
+        return stored.toString();
+    }
+
+    private static int furnCoord(String raw, int max) {
+        int value = number(raw);
+        if (value < 0) {
+            return 0;
+        }
+        return value > max ? max : value;
     }
 
     private static int number(String raw) {
