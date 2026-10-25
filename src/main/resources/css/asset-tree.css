@@ -7776,8 +7776,8 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-roster-scroll {
     overflow: auto;
     background: #fff;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    border: 1px solid #e6e8ec;
+    border-radius: 12px;
 }
 
 #asset-tree-app .asset-tree-roster {
@@ -7795,7 +7795,7 @@ a.asset-tree-url {
     min-height: 40px;
     padding: 0 2px;
     border: 0;
-    border-bottom: 1px solid #f4f5f7;
+    border-bottom: 1px solid #eef0f3;
     border-right: 1px solid #f4f5f7;
     font-weight: 400;
     text-align: center;
@@ -7817,10 +7817,13 @@ a.asset-tree-url {
     white-space: normal;
 }
 
-#asset-tree-app .asset-tree-roster thead .asset-tree-roster-name,
-#asset-tree-app .asset-tree-roster tr:first-child .asset-tree-roster-name {
+#asset-tree-app .asset-tree-roster thead .asset-tree-roster-name {
     z-index: 2;
     background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-person .asset-tree-roster-name {
+    background: #fff;
 }
 
 #asset-tree-app .asset-tree-roster .asset-tree-roster-day {
@@ -7834,7 +7837,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-roster td.asset-tree-roster-day.is-painting .asset-tree-roster-hit {
-    outline: 2px solid #4c9aff;
+    outline: 2px solid #172b4d;
     outline-offset: -2px;
 }
 
@@ -7849,7 +7852,7 @@ a.asset-tree-url {
     top: 0;
     z-index: 1;
     height: 36px;
-    background: #fafbfc;
+    background: #f7f8fa;
     font-weight: 600;
 }
 
@@ -7912,7 +7915,7 @@ a.asset-tree-url {
 #asset-tree-app tr.asset-tree-roster-head.is-drop-before td,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before th,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before td {
-    box-shadow: inset 0 2px 0 #4c9aff;
+    box-shadow: inset 0 2px 0 #172b4d;
 }
 
 #asset-tree-app tr.asset-tree-roster-person.is-drop-after th,
@@ -7921,7 +7924,7 @@ a.asset-tree-url {
 #asset-tree-app tr.asset-tree-roster-head.is-drop-after td,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after th,
 #asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after td {
-    box-shadow: inset 0 -2px 0 #4c9aff;
+    box-shadow: inset 0 -2px 0 #172b4d;
 }
 
 #asset-tree-app .asset-tree-roster-pattern,
@@ -7933,9 +7936,9 @@ a.asset-tree-url {
     min-height: 0;
     margin: 0 0 0 4px;
     padding: 0 5px !important;
-    border: 1px solid #dfe1e6 !important;
-    border-radius: 3px;
-    background: #fafbfc !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa !important;
     color: #172b4d !important;
     font-size: 11px;
     font-weight: 700;
@@ -7956,6 +7959,12 @@ a.asset-tree-url {
     min-height: 0 !important;
     margin-left: 6px;
     padding: 0 2px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px !important;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
+    font-size: 12px !important;
+    font-weight: 700;
     text-align: center;
 }
 
@@ -7999,8 +8008,8 @@ a.asset-tree-url {
     min-height: 0 !important;
     margin: 2px 0 0;
     padding: 0 4px !important;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
     background: #fff;
     color: #172b4d;
     font-size: 11px;
@@ -8008,8 +8017,8 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-staff-place-filter {
-    height: 32px;
-    border-radius: 3px;
+    height: 28px;
+    border-radius: 8px;
 }
 
 #asset-tree-app .asset-tree-roster thead .asset-tree-roster-name {
@@ -8047,10 +8056,10 @@ a.asset-tree-url {
     min-height: 0;
     margin: 0;
     padding: 0 !important;
-    border: 1px solid #dfe1e6 !important;
-    border-radius: 3px;
-    background: #fafbfc !important;
-    color: #42526e !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #fff !important;
+    color: #172b4d !important;
     font-size: 16px;
     font-weight: 700;
     line-height: 20px;
@@ -8067,7 +8076,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-total {
     height: 36px;
     min-height: 0;
-    background: #f4f5f7;
+    background: #f7f8fa;
 }
 
 #asset-tree-app .asset-tree-roster-branch-solo {
@@ -8077,7 +8086,7 @@ a.asset-tree-url {
     margin: 8px 0;
     padding: 4px 8px;
     background: #f4f5f7;
-    border-radius: 3px;
+    border-radius: 8px;
 }
 
 #asset-tree-app .asset-tree-branch-add {
@@ -8088,9 +8097,9 @@ a.asset-tree-url {
     max-height: 280px;
     overflow: auto;
     background: #fff;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(9, 30, 66, 0.12);
     padding: 8px;
 }
 
@@ -8110,11 +8119,11 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-branch-add input {
     width: 100%;
     box-sizing: border-box;
-    height: 32px;
+    height: 28px;
     margin-top: 6px;
     padding: 0 8px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
     background: #fff;
 }
 
@@ -8134,7 +8143,7 @@ a.asset-tree-url {
     margin: 0 auto;
     padding: 0 !important;
     border: 0 !important;
-    border-radius: 3px;
+    border-radius: 8px;
     background: transparent;
     color: #172b4d;
     font: inherit;
@@ -8595,21 +8604,20 @@ a.asset-tree-url {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    height: 32px;
+    height: 28px;
     margin: 0;
     padding: 0 8px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fafbfc;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
     color: #6b778c;
     font-size: 12px;
     font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-mark-once.is-set {
-    border-color: #4c9aff;
-    background: #deebff;
-    color: #0052cc;
+    border-color: #172b4d;
+    color: #172b4d;
 }
 
 #asset-tree-app .asset-tree-mark-once-label {
@@ -8639,7 +8647,7 @@ a.asset-tree-url {
     margin: 0;
     padding: 0 !important;
     border: 0 !important;
-    border-radius: 3px;
+    border-radius: 8px;
     background: transparent !important;
     color: #6b778c !important;
     font-size: 14px;
@@ -8656,7 +8664,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-head th {
     height: 36px;
     min-height: 0;
-    background: #fafbfc;
+    background: #f7f8fa;
     font-weight: 600;
     text-align: center;
 }
@@ -8671,12 +8679,12 @@ a.asset-tree-url {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 32px;
+    min-height: 28px;
     margin: 0;
     padding: 0 6px 0 8px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fafbfc;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
     color: #172b4d;
 }
 
@@ -8687,7 +8695,7 @@ a.asset-tree-url {
     margin: 0;
     padding: 0 8px !important;
     border: 0 !important;
-    border-radius: 3px;
+    border-radius: 8px;
     background: transparent !important;
     color: #172b4d !important;
     font-size: 12px;
@@ -8699,16 +8707,16 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick {
     padding: 0 10px !important;
-    border: 1px solid #dfe1e6 !important;
-    border-radius: 3px;
-    background: #fafbfc !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #fff !important;
 }
 
 #asset-tree-app .asset-tree-mark.is-on,
 #asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick.is-on {
-    border-color: #4c9aff !important;
-    background: #deebff !important;
-    color: #0052cc !important;
+    border-color: #172b4d !important;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
 }
 
 #asset-tree-app .asset-tree-mark-label {
@@ -8782,9 +8790,9 @@ a.asset-tree-url {
     min-height: 0;
     margin: 0;
     padding: 0 5px !important;
-    border: 1px solid #dfe1e6 !important;
-    border-radius: 3px;
-    background: #fafbfc !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa !important;
     color: #172b4d !important;
     font-size: 11px;
     font-weight: 700;
@@ -8815,15 +8823,15 @@ a.asset-tree-url {
     justify-content: center;
     width: 24px;
     height: 24px;
-    border-radius: 3px;
+    border-radius: 50%;
     color: #172b4d;
     font-size: 12px;
     font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-roster-num.is-today {
-    background: #deebff;
-    color: #0052cc;
+    background: #172b4d;
+    color: #fff;
 }
 
 #asset-tree-app .asset-tree-roster thead .is-weekend .asset-tree-roster-num,
@@ -8831,9 +8839,11 @@ a.asset-tree-url {
     color: #97a0af;
 }
 
+#asset-tree-app .asset-tree-roster thead .is-weekend .asset-tree-roster-num.is-today,
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-head .is-weekend .asset-tree-roster-num.is-today,
 #asset-tree-app .asset-tree-roster thead .asset-tree-roster-num.is-today {
-    background: #deebff;
-    color: #0052cc;
+    background: #172b4d;
+    color: #fff;
 }
 
 #asset-tree-app .asset-tree-staff-summary {
@@ -8849,8 +8859,8 @@ a.asset-tree-url {
     gap: 6px;
     min-height: 32px;
     padding: 4px 10px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    border: 1px solid #e6e8ec;
+    border-radius: 10px;
     background: #fff;
     color: #172b4d;
     font-size: 13px;
@@ -8866,7 +8876,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-staff-sum.is-total {
-    background: #f4f5f7;
+    background: #f7f8fa;
 }
 
 #asset-tree-app .asset-tree-staff-leaves {
