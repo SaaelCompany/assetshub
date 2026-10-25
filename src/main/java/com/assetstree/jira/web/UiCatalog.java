@@ -1132,6 +1132,8 @@ public final class UiCatalog {
             "reportChart",
             "reportColumns",
             "reportDonut",
+            "reportPie",
+            "reportBars",
             "reportMetric",
             "reportOnlyTypes",
             "reportOnlyStatuses",

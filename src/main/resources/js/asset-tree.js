@@ -458,6 +458,8 @@
         reportCatalog: null,
         reportKey: 'status',
         reportView: null,
+        reportChart: '',
+        reportChartFor: '',
         reportOpen: false,
         galleryToken: 0,
         galleryLoading: false,
@@ -14097,6 +14099,96 @@
         return track;
     }
 
+    function reportChartKind(view) {
+        var stored = view.chart === 'donut' ? 'donut' : view.chart === 'pie' ? 'pie' : view.chart === 'bars' ? 'bars' : 'columns';
+        if (state.reportChartFor === String(view.id || '') && state.reportChart) return state.reportChart;
+        return stored;
+    }
+
+    function reportChartSwitch(view, kind) {
+        var seg = el('div', 'asset-tree-seg asset-tree-report-switch');
+        [['donut', 'reportDonut'], ['pie', 'reportPie'], ['columns', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
+            seg.appendChild(button(t(pair[1]), 'asset-tree-seg-btn' + (kind === pair[0] ? ' is-on' : ''), function () {
+                state.reportChartFor = String(view.id || '');
+                state.reportChart = pair[0];
+                renderFrame();
+            }));
+        });
+        return seg;
+    }
+
+    function reportLegend(rows, total) {
+        var list = el('ul', 'asset-tree-report-legend');
+        rows.forEach(function (row) {
+            var item = el('li');
+            var swatch = el('i');
+            swatch.style.background = row.color || '#0052CC';
+            item.appendChild(swatch);
+            item.appendChild(el('span', null, row.label || ''));
+            item.appendChild(el('strong', null, String(row.count) + ' · ' + shareText(row.count, total)));
+            list.appendChild(item);
+        });
+        return list;
+    }
+
+    function reportColumnsChart(rows, max) {
+        var wrap = el('div', 'asset-tree-report-columns');
+        rows.forEach(function (row) {
+            var col = el('div', 'asset-tree-report-column');
+            col.appendChild(el('span', 'asset-tree-report-column-count', String(row.count)));
+            var shaft = el('span', 'asset-tree-report-shaft');
+            var fill = el('span');
+            var pct = max ? Math.round(100 * (row.count || 0) / max) : 0;
+            if (row.count && pct < 8) pct = 8;
+            fill.style.height = pct + '%';
+            fill.style.background = row.color || '#0052CC';
+            shaft.appendChild(fill);
+            col.appendChild(shaft);
+            var label = el('span', 'asset-tree-report-column-label', row.label || '');
+            label.title = row.label || '';
+            col.appendChild(label);
+            wrap.appendChild(col);
+        });
+        return wrap;
+    }
+
+    function reportBarsChart(rows, max) {
+        var list = el('div', 'asset-tree-report-bars');
+        rows.forEach(function (row) {
+            var line = el('div', 'asset-tree-report-bar');
+            var label = el('span', 'asset-tree-report-bar-label', row.label || '');
+            label.title = row.label || '';
+            line.appendChild(label);
+            var track = el('span', 'asset-tree-report-bar-track');
+            var fill = el('span');
+            fill.style.width = (max ? Math.round(100 * (row.count || 0) / max) : 0) + '%';
+            fill.style.background = row.color || '#0052CC';
+            track.appendChild(fill);
+            line.appendChild(track);
+            line.appendChild(el('strong', null, String(row.count)));
+            list.appendChild(line);
+        });
+        return list;
+    }
+
+    function reportChartPanel(rows, total, max, kind) {
+        if (!rows.length) return null;
+        if (kind === 'columns') {
+            var columns = el('div', 'asset-tree-report-chart');
+            columns.appendChild(reportColumnsChart(rows, max));
+            return columns;
+        }
+        if (kind === 'bars') {
+            var bars = el('div', 'asset-tree-report-chart');
+            bars.appendChild(reportBarsChart(rows, max));
+            return bars;
+        }
+        var round = el('div', 'asset-tree-report-chart is-round');
+        round.appendChild(kind === 'pie' ? reportPieChart(rows) : donutChart(rows));
+        round.appendChild(reportLegend(rows, total));
+        return round;
+    }
+
     function shareText(count, total) {
         if (!total) return '0 %';
         var pct = count * 100 / total;
@@ -14191,17 +14283,20 @@
             rows.forEach(function (row) {
                 if (row.count > maxCount) maxCount = row.count;
             });
+            var kind = reportChartKind(view);
             var titleRow = el('div', 'asset-tree-report-title');
             var titles = el('div');
             titles.appendChild(el('h3', null, view.title || ''));
             titles.appendChild(el('p', null, t('reportGroupBy') + ': ' + groupWord(view.groupBy)));
             titleRow.appendChild(titles);
-            if (view.chart === 'donut' && rows.length) titleRow.appendChild(donutChart(rows));
+            titleRow.appendChild(reportChartSwitch(view, kind));
             main.appendChild(titleRow);
             var facts = el('div', 'asset-tree-report-facts');
             facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
             if (view.sum) facts.appendChild(reportFact('', view.sum, ''));
             main.appendChild(facts);
+            var chartPanel = reportChartPanel(rows, view.total || 0, maxCount, kind);
+            if (chartPanel) main.appendChild(chartPanel);
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
             header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy)));
@@ -14290,12 +14385,13 @@
             });
             group.value = 'type';
             var chart = document.createElement('select');
-            [['bar', 'reportColumns'], ['donut', 'reportDonut']].forEach(function (pair) {
+            [['donut', 'reportDonut'], ['pie', 'reportPie'], ['bar', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
                 chart.appendChild(option);
             });
+            chart.value = 'bar';
             var metric = document.createElement('select');
             var countOption = document.createElement('option');
             countOption.value = 'count';
@@ -16706,6 +16802,54 @@
         title.textContent = row.label + ' (' + row.count + ')';
         node.appendChild(title);
         node.addEventListener('click', function () { row.activate(); });
+    }
+
+    function reportPieChart(rows) {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 120 120');
+        svg.setAttribute('class', 'asset-tree-donut');
+        svg.setAttribute('role', 'img');
+        var total = 0;
+        rows.forEach(function (row) { total += row.count; });
+        if (!total) return svg;
+        var angle = -Math.PI / 2;
+        var drawn = 0;
+        rows.forEach(function (row) {
+            if (!row.count) return;
+            var slice = (row.count / total) * Math.PI * 2;
+            if (rows.length === 1 || slice >= Math.PI * 2 - 0.0001) {
+                var disk = svgEl('circle');
+                disk.setAttribute('cx', '60');
+                disk.setAttribute('cy', '60');
+                disk.setAttribute('r', '52');
+                disk.setAttribute('fill', row.color || '#0052CC');
+                bindSlice(disk, row);
+                svg.appendChild(disk);
+                drawn += 1;
+                return;
+            }
+            var path = svgEl('path');
+            path.setAttribute('d', pieSlice(60, 60, 52, angle, angle + slice));
+            path.setAttribute('fill', row.color || '#0052CC');
+            bindSlice(path, row);
+            svg.appendChild(path);
+            angle += slice;
+            drawn += 1;
+        });
+        if (!drawn) return svg;
+        return svg;
+    }
+
+    function pieSlice(cx, cy, radius, start, end) {
+        var large = end - start > Math.PI ? 1 : 0;
+        var x1 = cx + Math.cos(start) * radius;
+        var y1 = cy + Math.sin(start) * radius;
+        var x2 = cx + Math.cos(end) * radius;
+        var y2 = cy + Math.sin(end) * radius;
+        return 'M ' + cx + ' ' + cy
+            + ' L ' + x1 + ' ' + y1
+            + ' A ' + radius + ' ' + radius + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2
+            + ' Z';
     }
 
     function donutSlice(cx, cy, outer, inner, start, end) {

@@ -2433,7 +2433,7 @@ def create_saved_report(project_key, body, text):
     if bool(filt) != bool(value) or len(value) > 255:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     chart = (body.get("chart") or "bar").strip().lower()
-    if chart not in ("bar", "donut"):
+    if chart not in ("bar", "bars", "donut", "pie"):
         chart = "bar"
     metric = (body.get("metric") or "count").strip().lower()
     if metric not in ("count", "cost"):

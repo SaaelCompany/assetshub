@@ -6596,7 +6596,8 @@ a.asset-tree-url {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 12px 16px;
     padding: 12px 14px 0;
 }
 
@@ -6614,14 +6615,186 @@ a.asset-tree-url {
     font-size: 12px;
 }
 
-#asset-tree-app .asset-tree-report-title svg.asset-tree-donut {
-    width: 72px !important;
-    height: 72px !important;
-    min-width: 72px !important;
-    max-width: 72px !important;
-    min-height: 72px !important;
-    max-height: 72px !important;
-    flex: 0 0 72px !important;
+#asset-tree-app .asset-tree-report-switch {
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+#asset-tree-app .asset-tree-report-switch button.asset-tree-seg-btn:last-child {
+    border-right: 0 !important;
+}
+
+#asset-tree-app .asset-tree-report-chart {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 4px 16px 16px;
+}
+
+#asset-tree-app .asset-tree-report-chart.is-round {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+}
+
+#asset-tree-app .asset-tree-report-chart svg.asset-tree-donut {
+    width: 240px !important;
+    height: 240px !important;
+    min-width: 240px !important;
+    max-width: 240px !important;
+    min-height: 240px !important;
+    max-height: 240px !important;
+    flex: 0 0 240px !important;
+}
+
+#asset-tree-app .asset-tree-report-chart svg.asset-tree-donut text.asset-tree-chart-value {
+    font-size: 32px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-report-legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    align-content: center;
+    gap: 10px 28px;
+    flex: 1 1 auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+#asset-tree-app .asset-tree-report-legend li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 28px;
+    color: #172b4d;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-report-legend i {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex: 0 0 14px;
+}
+
+#asset-tree-app .asset-tree-report-legend span {
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-report-legend strong {
+    margin-left: auto;
+    color: #42526e;
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-columns {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    width: 100%;
+    min-height: 220px;
+    overflow-x: auto;
+}
+
+#asset-tree-app .asset-tree-report-column {
+    display: flex;
+    flex: 1 1 72px;
+    flex-direction: column;
+    align-items: center;
+    min-width: 72px;
+}
+
+#asset-tree-app .asset-tree-report-column-count {
+    margin-bottom: 6px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+#asset-tree-app .asset-tree-report-shaft {
+    display: flex;
+    align-items: flex-end;
+    width: 44px;
+    height: 180px;
+    border-radius: 3px;
+    background: #f4f5f7;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-shaft span {
+    display: block;
+    width: 100%;
+    border-radius: 3px 3px 0 0;
+}
+
+#asset-tree-app .asset-tree-report-column-label {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    overflow: hidden;
+    color: #42526e;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    padding: 8px 0 4px;
+}
+
+#asset-tree-app .asset-tree-report-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
+#asset-tree-app .asset-tree-report-bar-label {
+    flex: 0 0 200px;
+    width: 200px;
+    overflow: hidden;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-bar-track {
+    display: block;
+    flex: 1 1 auto;
+    height: 20px;
+    border-radius: 3px;
+    background: #f4f5f7;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-bar-track span {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-report-bar strong {
+    flex: 0 0 48px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
 }
 
 #asset-tree-app .asset-tree-report-facts {
