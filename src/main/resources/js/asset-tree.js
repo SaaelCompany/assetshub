@@ -14204,7 +14204,7 @@
             main.appendChild(facts);
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
-            header.appendChild(el('th', null, groupWord(view.groupBy)));
+            header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy)));
             header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
             var countHead = el('th', 'is-num', t('reportCount'));
             var shareHead = el('th', 'is-num', t('reportShare'));
@@ -14236,7 +14236,7 @@
             if (view.lines && view.lines.length) {
                 var lines = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-lines');
                 var lineHead = el('tr');
-                lineHead.appendChild(el('th', null, t('keyLabel')));
+                lineHead.appendChild(el('th', 'asset-tree-report-key', t('keyLabel')));
                 lineHead.appendChild(el('th', null, t('name')));
                 lines.appendChild(lineHead);
                 view.lines.forEach(function (row) {

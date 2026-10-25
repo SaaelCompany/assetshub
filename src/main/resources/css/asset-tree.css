@@ -6660,7 +6660,8 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-report-table {
-    width: auto;
+    width: 100%;
+    table-layout: fixed;
     border-top: 1px solid #dfe1e6;
 }
 
@@ -6689,7 +6690,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-report-name {
-    width: 220px;
+    width: 240px;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -6704,12 +6705,12 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-report-meter {
-    width: 160px;
+    width: auto;
 }
 
 #asset-tree-app .asset-tree-report-track {
     display: block;
-    width: 140px;
+    width: 100%;
     height: 8px;
     border-radius: 4px;
     background: #f4f5f7;
