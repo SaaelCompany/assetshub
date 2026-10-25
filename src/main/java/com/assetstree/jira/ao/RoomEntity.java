@@ -33,7 +33,7 @@ public interface RoomEntity extends Entity {
 
     void setPosH(int posH);
 
-    /** room, wall, door, or window. Empty on rows drawn before kinds existed. */
+    /** room, wall, door, window, column, stair, desk, or partition. Empty on rows drawn before kinds existed. */
     @StringLength(16)
     String getKind();
 

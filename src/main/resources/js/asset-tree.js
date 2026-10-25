@@ -446,6 +446,8 @@
         staffError: '',
         floors: null,
         floorId: 0,
+        mapPlaceId: 0,
+        mapStep: 8,
         mapTool: 'select',
         mapAssetId: 0,
         mapDraft: null,
@@ -8545,6 +8547,7 @@
         state.staffError = '';
         state.floors = null;
         state.floorId = 0;
+        state.mapPlaceId = 0;
         state.mapDraft = null;
         state.mapLoading = false;
         state.mapToken++;
@@ -14581,6 +14584,85 @@
         return /^#[0-9a-fA-F]{6}$/.test(String(value || '')) ? String(value).toLowerCase() : '';
     }
 
+    function buildingAssets() {
+        return placeAssets().filter(function (asset) {
+            if (!asset || !asset.id) return false;
+            if (!asset.parentId) return true;
+            var parent = byId()[asset.parentId];
+            return !parent || !isFolder(parent);
+        }).sort(function (left, right) {
+            return String(left.name || '').localeCompare(String(right.name || ''), 'ru');
+        });
+    }
+
+    function floorsForBuilding(placeId) {
+        var buildings = buildingAssets();
+        var firstId = buildings.length ? buildings[0].id : 0;
+        return (state.floors || []).filter(function (floor) {
+            var id = floor.placeId || 0;
+            if (id === placeId) return true;
+            return !id && placeId && placeId === firstId;
+        });
+    }
+
+    function assetInBuilding(asset, placeId) {
+        if (!asset || !placeId) return false;
+        var guard = 0;
+        var current = asset;
+        while (current && guard < 24) {
+            if (current.id === placeId) return true;
+            if (!current.parentId) return false;
+            current = byId()[current.parentId];
+            guard++;
+        }
+        return false;
+    }
+
+    function currentBuilding() {
+        var found = null;
+        buildingAssets().forEach(function (asset) {
+            if (asset.id === state.mapPlaceId) found = asset;
+        });
+        return found;
+    }
+
+    function roomMin(kind) {
+        if (kind === 'room' || kind === 'stair') return 16;
+        if (kind === 'column' || kind === 'desk') return 8;
+        return 4;
+    }
+
+    function ensureBuilding() {
+        var buildings = buildingAssets();
+        var known = false;
+        buildings.forEach(function (item) { if (item.id === state.mapPlaceId) known = true; });
+        if (!known) state.mapPlaceId = buildings.length ? buildings[0].id : 0;
+        if (state.mapDirty) return;
+        var floors = floorsForBuilding(state.mapPlaceId);
+        var current = null;
+        floors.forEach(function (floor) { if (floor.id === state.floorId) current = floor; });
+        if (current) {
+            if (!state.mapDraft || state.mapDraft.id !== current.id) state.mapDraft = cloneFloor(current);
+            return;
+        }
+        state.floorId = floors.length ? floors[0].id : 0;
+        state.mapDraft = floors.length ? cloneFloor(floors[0]) : null;
+        state.mapSelection = null;
+    }
+
+    function chooseBuilding(id) {
+        if (id === state.mapPlaceId) return;
+        if (state.mapDirty && !window.confirm(t('mapDirty'))) return;
+        state.mapPlaceId = id;
+        var floors = floorsForBuilding(id);
+        state.floorId = floors.length ? floors[0].id : 0;
+        state.mapDraft = floors.length ? cloneFloor(floors[0]) : null;
+        state.mapDirty = false;
+        state.mapSelection = null;
+        if (!floors.length) state.mapEditing = false;
+        renderFrame();
+    }
+
     function planSize(floor) {
         var setup = moduleSetup();
         var source = floor || {};
@@ -14590,15 +14672,15 @@
     }
 
     function snapCoord(value) {
-        if (!moduleSetup().mapSnap) return Math.round(value);
-        var grid = moduleSetup().mapGrid || 24;
-        return Math.round(value / grid) * grid;
+        var step = state.mapStep || 8;
+        if (step < 1) step = 8;
+        return Math.round(value / step) * step;
     }
 
     function clampRoom(room, size) {
         var box = size || planSize(state.mapDraft || currentFloor());
         var kind = room.kind || 'room';
-        var min = kind === 'room' ? 36 : 6;
+        var min = roomMin(kind);
         var x = clampNum(room.x, 0, box.w - min);
         var y = clampNum(room.y, 0, box.h - min);
         var w = Math.max(min, Math.round(Number(room.w) || min));
@@ -14692,14 +14774,8 @@
             if (token !== state.mapToken) return;
             state.mapLoading = false;
             state.floors = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
-            var current = null;
-            state.floors.forEach(function (floor) {
-                if (floor.id === state.floorId) current = floor;
-            });
-            if (!current && state.floors.length) current = state.floors[0];
-            state.floorId = current ? current.id : 0;
-            state.mapDraft = current ? cloneFloor(current) : null;
             state.mapDirty = false;
+            ensureBuilding();
             if (state.view === 'map') renderFrame();
         });
     }
@@ -14727,7 +14803,11 @@
             }));
         } else {
             head.appendChild(button(t('mapEdit'), 'asset-tree-linkish', function () {
-                if (!(state.floors || []).length) {
+                if (!state.mapPlaceId) {
+                    notify(t('mapNoBuilding'));
+                    return;
+                }
+                if (!floorsForBuilding(state.mapPlaceId).length) {
                     addFloor(true);
                     return;
                 }
@@ -14742,11 +14822,16 @@
             loadFloors();
             return panel;
         }
+        ensureBuilding();
+        var buildings = buildingAssets();
+        var buildingFloors = floorsForBuilding(state.mapPlaceId);
         var shell = el('div', 'asset-tree-map-shell');
         shell.appendChild(mapRail());
         var stage = el('div', 'asset-tree-map-stage');
-        if (!(state.floors || []).length) {
-            stage.appendChild(el('p', 'asset-tree-map-empty', t('mapEmpty')));
+        if (!buildings.length) {
+            stage.appendChild(el('p', 'asset-tree-map-empty', t('mapNoBuilding')));
+        } else if (!buildingFloors.length) {
+            stage.appendChild(el('p', 'asset-tree-map-empty', t('mapNoFloors')));
             if (state.canEdit) stage.appendChild(button(t('mapAddFloor'), 'asset-tree-btn primary', function () { addFloor(true); }));
         } else if (state.mapEditing && state.mapDraft) {
             stage.appendChild(mapEditorBar());
@@ -14762,25 +14847,36 @@
 
     function mapRail() {
         var rail = el('aside', 'asset-tree-map-rail');
+        rail.appendChild(el('h3', null, t('mapBuildings')));
+        rail.appendChild(el('p', 'asset-tree-hint', t('mapBuildingHint')));
+        var buildings = buildingAssets();
+        if (!buildings.length) rail.appendChild(el('p', 'asset-tree-hint', t('mapNoBuilding')));
+        buildings.forEach(function (asset) {
+            rail.appendChild(button(asset.name || asset.objectKey || '', 'asset-tree-report-link asset-tree-building-link' + (asset.id === state.mapPlaceId ? ' is-current' : ''), function () {
+                chooseBuilding(asset.id);
+            }));
+        });
         rail.appendChild(el('h3', null, t('mapFloors')));
         var search = document.createElement('input');
         search.type = 'search';
         search.placeholder = t('mapSearch');
         search.addEventListener('input', function () {
             var needle = search.value.trim().toLowerCase();
-            var nodes = rail.querySelectorAll('.asset-tree-report-link');
+            var nodes = rail.querySelectorAll('.asset-tree-floor-link');
             for (var i = 0; i < nodes.length; i++) {
                 var text = (nodes[i].textContent || '').toLowerCase();
                 nodes[i].hidden = !!(needle && text.indexOf(needle) < 0);
             }
         });
         rail.appendChild(search);
-        (state.floors || []).forEach(function (floor) {
-            rail.appendChild(button(floor.name || t('mapFloorName'), 'asset-tree-report-link' + (floor.id === state.floorId ? ' is-current' : ''), function () {
-                state.floorId = floor.id;
+        floorsForBuilding(state.mapPlaceId).forEach(function (floor) {
+            rail.appendChild(button(floor.name || t('mapFloorName'), 'asset-tree-report-link asset-tree-floor-link' + (floor.id === state.floorId ? ' is-current' : ''), function () {
+                if (floor.id === state.floorId) return;
                 if (state.mapDirty && !window.confirm(t('mapDirty'))) return;
+                state.floorId = floor.id;
                 state.mapDraft = cloneFloor(floor);
                 state.mapDirty = false;
+                state.mapSelection = null;
                 renderFrame();
             }));
         });
@@ -14793,7 +14889,10 @@
             rail.appendChild(button(t('delete'), 'asset-tree-linkish', deleteCurrentFloor));
             rail.appendChild(el('h3', null, t('mapEdit')));
             var tools = el('div', 'asset-tree-map-tools');
-            [['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['door', 'mapDoor'], ['window', 'mapWindow']].forEach(function (pair) {
+            [
+                ['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['partition', 'mapPartition'],
+                ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk']
+            ].forEach(function (pair) {
                 var tool = button('', 'asset-tree-btn asset-tree-tool' + (state.mapTool === pair[0] ? ' is-on' : ''), function () {
                     state.mapTool = pair[0];
                     renderFrame();
@@ -14824,6 +14923,7 @@
             var onFloor = 0;
             var pins = (state.mapDraft && state.mapDraft.pins) || [];
             equipmentAssets().forEach(function (asset) {
+                if (!assetInBuilding(asset, state.mapPlaceId)) return;
                 var placed = false;
                 pins.forEach(function (pin) { if (pin.assetId === asset.id) placed = true; });
                 if (placed) onFloor++;
@@ -14847,6 +14947,8 @@
     function mapEditorBar() {
         var size = planSize(state.mapDraft);
         var bar = el('div', 'asset-tree-editor-bar');
+        var building = currentBuilding();
+        if (building) bar.appendChild(el('span', 'asset-tree-building-name', building.name || ''));
         var name = document.createElement('input');
         name.className = 'asset-tree-floor-name';
         name.value = state.mapDraft.name || '';
@@ -14869,13 +14971,22 @@
         zoomOut.title = t('mapZoomOut');
         zoomOut.setAttribute('aria-label', t('mapZoomOut'));
         var zoomIn = button('+', 'asset-tree-btn slim asset-tree-zoom', function () {
-            state.mapZoom = Math.min(2, Math.round(((state.mapZoom || 1) + 0.25) * 100) / 100);
+            state.mapZoom = Math.min(4, Math.round(((state.mapZoom || 1) + 0.25) * 100) / 100);
             renderFrame();
         });
         zoomIn.title = t('mapZoomIn');
         zoomIn.setAttribute('aria-label', t('mapZoomIn'));
         bar.appendChild(zoomOut);
         bar.appendChild(zoomIn);
+        bar.appendChild(el('span', 'asset-tree-plan-label', t('mapSnap')));
+        [4, 8, 16, 24].forEach(function (step) {
+            var snap = button(String(step), 'asset-tree-btn slim' + ((state.mapStep || 8) === step ? ' is-on' : ''), function () {
+                state.mapStep = step;
+                renderFrame();
+            });
+            snap.title = t('mapSnap') + ' ' + step;
+            bar.appendChild(snap);
+        });
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapPlanSize')));
         var width = document.createElement('input');
         width.type = 'number';
@@ -14913,9 +15024,19 @@
     }
 
     function addFloor(edit) {
-        var level = (state.floors || []).length + 1;
+        if (!state.mapPlaceId) {
+            notify(t('mapNoBuilding'));
+            return;
+        }
+        var level = floorsForBuilding(state.mapPlaceId).length + 1;
         var setup = moduleSetup();
-        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/floors', { name: t('mapFloor') + ' ' + level, level: level, planW: setup.mapWidth, planH: setup.mapHeight }, function (status, payload) {
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/floors', {
+            name: t('mapFloor') + ' ' + level,
+            level: level,
+            planW: setup.mapWidth,
+            planH: setup.mapHeight,
+            placeId: state.mapPlaceId
+        }, function (status, payload) {
             if (status >= 200 && status < 300 && payload) {
                 state.floors = state.floors || [];
                 state.floors.push(payload);
@@ -14935,10 +15056,12 @@
         ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/floors/' + floor.id, null, function (status, payload) {
             if (status >= 200 && status < 300) {
                 state.floors = (state.floors || []).filter(function (item) { return item.id !== floor.id; });
-                state.floorId = state.floors.length ? state.floors[0].id : 0;
-                state.mapDraft = state.floors.length ? cloneFloor(state.floors[0]) : null;
+                var left = floorsForBuilding(state.mapPlaceId);
+                state.floorId = left.length ? left[0].id : 0;
+                state.mapDraft = left.length ? cloneFloor(left[0]) : null;
                 state.mapDirty = false;
-                if (!state.floors.length) state.mapEditing = false;
+                state.mapSelection = null;
+                if (!left.length) state.mapEditing = false;
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
         });
@@ -14947,6 +15070,7 @@
     function saveMap() {
         var draft = state.mapDraft;
         if (!draft) return;
+        if (!draft.placeId) draft.placeId = state.mapPlaceId;
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/floors/' + draft.id, draft, function (status, payload) {
             if (status >= 200 && status < 300 && payload) {
                 storeFloor(payload);
@@ -14957,7 +15081,7 @@
 
     function floorCanvas(floor, editing) {
         var size = planSize(floor);
-        var step = moduleSetup().mapGrid || 24;
+        var step = editing ? (state.mapStep || 8) : (moduleSetup().mapGrid || 24);
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', '0 0 ' + size.w + ' ' + size.h);
         svg.setAttribute('class', 'asset-tree-canvas');
@@ -15009,8 +15133,8 @@
                         var dy = next.y - state.mapDrag.y0;
                         if (!state.mapDrag.moved && dx * dx + dy * dy < 16) return;
                         state.mapDrag.moved = true;
-                        room.x = clampNum(next.x - state.mapDrag.dx, 0, size.w - room.w);
-                        room.y = clampNum(next.y - state.mapDrag.dy, 0, size.h - room.h);
+                        room.x = clampNum(snapCoord(next.x - state.mapDrag.dx), 0, size.w - room.w);
+                        room.y = clampNum(snapCoord(next.y - state.mapDrag.dy), 0, size.h - room.h);
                         rect.setAttribute('x', String(room.x));
                         rect.setAttribute('y', String(room.y));
                         state.mapDirty = true;
@@ -15022,6 +15146,7 @@
             }
             svg.appendChild(rect);
             var kindName = room.kind || 'room';
+            decorateRoom(svg, room);
             if (kindName === 'door' || kindName === 'window') {
                 var markLine = svgEl('path');
                 var horizontal = room.w >= room.h;
@@ -15036,11 +15161,13 @@
                 markLine.setAttribute('class', 'asset-tree-opening');
                 svg.appendChild(markLine);
             }
-            if (kindName === 'room' && room.name) {
+            if ((kindName === 'room' || kindName === 'stair' || kindName === 'column' || kindName === 'desk') && room.name && room.h >= 12 && room.w >= 20) {
                 var label = svgEl('text');
-                label.setAttribute('x', String(room.x + 8));
-                label.setAttribute('y', String(room.y + 20));
+                var font = Math.max(8, Math.min(14, Math.floor(room.h / 2)));
+                label.setAttribute('x', String(room.x + Math.min(8, Math.floor(room.w / 5))));
+                label.setAttribute('y', String(room.y + Math.min(font + 4, room.h - 2)));
                 label.setAttribute('class', 'asset-tree-room-label');
+                label.style.fontSize = font + 'px';
                 label.textContent = room.name;
                 svg.appendChild(label);
             }
@@ -15111,8 +15238,134 @@
                     renderFrame();
                 });
             });
+            if (state.mapSelection != null && floor.rooms && floor.rooms[state.mapSelection]) {
+                drawRoomHandles(svg, floor.rooms[state.mapSelection], state.mapSelection, size);
+            }
         }
         return svg;
+    }
+
+    function decorateRoom(svg, room) {
+        var kind = room.kind || 'room';
+        if (kind === 'column') {
+            var mark = svgEl('circle');
+            var radius = Math.max(2, Math.min(room.w, room.h) / 2 - 2);
+            mark.setAttribute('cx', String(room.x + room.w / 2));
+            mark.setAttribute('cy', String(room.y + room.h / 2));
+            mark.setAttribute('r', String(radius));
+            mark.setAttribute('class', 'asset-tree-mark');
+            svg.appendChild(mark);
+            return;
+        }
+        if (kind === 'stair') {
+            var lines = svgEl('path');
+            var parts = [];
+            var count = Math.max(3, Math.floor((room.w >= room.h ? room.h : room.w) / 8));
+            var i;
+            if (room.w >= room.h) {
+                for (i = 1; i < count; i++) {
+                    var lineY = room.y + (room.h * i / count);
+                    parts.push('M ' + room.x + ' ' + lineY + ' L ' + (room.x + room.w) + ' ' + lineY);
+                }
+            } else {
+                for (i = 1; i < count; i++) {
+                    var lineX = room.x + (room.w * i / count);
+                    parts.push('M ' + lineX + ' ' + room.y + ' L ' + lineX + ' ' + (room.y + room.h));
+                }
+            }
+            lines.setAttribute('d', parts.join(' '));
+            lines.setAttribute('class', 'asset-tree-mark');
+            svg.appendChild(lines);
+            return;
+        }
+        if (kind === 'desk') {
+            var inner = svgEl('rect');
+            var inset = Math.min(6, Math.floor(Math.min(room.w, room.h) / 5));
+            inner.setAttribute('x', String(room.x + inset));
+            inner.setAttribute('y', String(room.y + inset));
+            inner.setAttribute('width', String(Math.max(1, room.w - inset * 2)));
+            inner.setAttribute('height', String(Math.max(1, room.h - inset * 2)));
+            inner.setAttribute('class', 'asset-tree-mark');
+            svg.appendChild(inner);
+        }
+    }
+
+    function applyResize(room, corner, point, size) {
+        var min = roomMin(room.kind || 'room');
+        var left = room.x;
+        var top = room.y;
+        var right = room.x + room.w;
+        var bottom = room.y + room.h;
+        var px = snapCoord(point.x);
+        var py = snapCoord(point.y);
+        var thin = room.kind === 'wall' || room.kind === 'partition' || room.kind === 'door' || room.kind === 'window';
+        var horizontal = room.w >= room.h;
+        if (!thin || horizontal) {
+            if (corner === 'nw' || corner === 'sw') left = Math.min(px, right - min);
+            if (corner === 'ne' || corner === 'se') right = Math.max(px, left + min);
+        }
+        if (!thin || !horizontal) {
+            if (corner === 'nw' || corner === 'ne') top = Math.min(py, bottom - min);
+            if (corner === 'sw' || corner === 'se') bottom = Math.max(py, top + min);
+        }
+        if (thin) {
+            var thick = room.kind === 'partition' ? 4 : (room.kind === 'wall' ? 8 : 10);
+            if (horizontal) {
+                top = room.y;
+                bottom = room.y + thick;
+            } else {
+                left = room.x;
+                right = room.x + thick;
+            }
+        }
+        if (room.kind === 'column') {
+            var side = Math.max(min, Math.max(right - left, bottom - top));
+            if (corner === 'nw' || corner === 'sw') left = right - side;
+            else right = left + side;
+            if (corner === 'nw' || corner === 'ne') top = bottom - side;
+            else bottom = top + side;
+        }
+        var next = clampRoom({
+            name: room.name, kind: room.kind, color: room.color,
+            x: left, y: top, w: Math.max(min, right - left), h: Math.max(min, bottom - top)
+        }, size);
+        room.x = next.x;
+        room.y = next.y;
+        room.w = next.w;
+        room.h = next.h;
+    }
+
+    function drawRoomHandles(svg, room, index, size) {
+        [
+            ['nw', room.x, room.y, 'nwse-resize'],
+            ['ne', room.x + room.w, room.y, 'nesw-resize'],
+            ['sw', room.x, room.y + room.h, 'nesw-resize'],
+            ['se', room.x + room.w, room.y + room.h, 'nwse-resize']
+        ].forEach(function (corner) {
+            var handle = svgEl('rect');
+            handle.setAttribute('x', String(corner[1] - 5));
+            handle.setAttribute('y', String(corner[2] - 5));
+            handle.setAttribute('width', '10');
+            handle.setAttribute('height', '10');
+            handle.setAttribute('class', 'asset-tree-handle');
+            handle.style.cursor = corner[3];
+            handle.addEventListener('mousedown', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var rect = svg.querySelectorAll('.asset-tree-room')[index];
+                beginDrag(svg, { kind: 'resize', corner: corner[0] }, function (move) {
+                    applyResize(room, corner[0], svgPoint(svg, move), size);
+                    if (rect) {
+                        rect.setAttribute('x', String(room.x));
+                        rect.setAttribute('y', String(room.y));
+                        rect.setAttribute('width', String(room.w));
+                        rect.setAttribute('height', String(room.h));
+                    }
+                    state.mapDirty = true;
+                }, function () { renderFrame(); });
+            });
+            svg.appendChild(handle);
+        });
     }
 
     function placeArmedPin(floor, x, y) {
@@ -15152,6 +15405,10 @@
         if (kind === 'wall') d = 'M3 10h18v4H3z';
         if (kind === 'door') d = 'M6 20V5h8v15M14 5a8 8 0 0 1 0 15';
         if (kind === 'window') d = 'M4 6h16v12H4zM12 6v12M4 12h16';
+        if (kind === 'column') d = 'M12 4a8 8 0 1 0 0.01 0z';
+        if (kind === 'stair') d = 'M4 20h6v-5h5V9h5V4';
+        if (kind === 'desk') d = 'M3 7h18v10H3zM6 10h12v4H6z';
+        if (kind === 'partition') d = 'M4 6h16M4 12h16M4 18h16';
         path.setAttribute('d', d);
         path.setAttribute('fill', kind === 'select' || kind === 'wall' ? 'currentColor' : 'none');
         path.setAttribute('stroke', 'currentColor');
@@ -15193,13 +15450,74 @@
             });
             block.appendChild(colors);
         }
-        block.appendChild(el('p', 'asset-tree-hint', mapSelectionLabel() + ' · ' + room.w + ' × ' + room.h));
-        block.appendChild(button(t('mapDeleteShape'), 'asset-tree-btn', function () {
+        block.appendChild(el('p', 'asset-tree-hint', mapSelectionLabel()));
+        var sizes = el('div', 'asset-tree-size-row');
+        var width = document.createElement('input');
+        width.type = 'number';
+        width.min = String(roomMin(room.kind || 'room'));
+        width.max = '2400';
+        width.value = String(room.w);
+        width.className = 'asset-tree-plan-size';
+        width.setAttribute('aria-label', t('setupPlanW'));
+        var height = document.createElement('input');
+        height.type = 'number';
+        height.min = String(roomMin(room.kind || 'room'));
+        height.max = '1600';
+        height.value = String(room.h);
+        height.className = 'asset-tree-plan-size';
+        height.setAttribute('aria-label', t('setupPlanH'));
+        function applySize() {
+            var next = clampRoom({
+                name: room.name,
+                kind: room.kind,
+                color: room.color,
+                x: room.x,
+                y: room.y,
+                w: Number(width.value),
+                h: Number(height.value)
+            });
+            if ((room.kind || 'room') === 'column') {
+                var side = Math.max(next.w, next.h);
+                next = clampRoom({ name: room.name, kind: room.kind, color: room.color, x: room.x, y: room.y, w: side, h: side });
+            }
+            room.x = next.x;
+            room.y = next.y;
+            room.w = next.w;
+            room.h = next.h;
+            state.mapDirty = true;
+            renderFrame();
+        }
+        width.addEventListener('change', applySize);
+        height.addEventListener('change', applySize);
+        sizes.appendChild(width);
+        sizes.appendChild(el('span', null, '×'));
+        sizes.appendChild(height);
+        block.appendChild(sizes);
+        var actions = el('div', 'asset-tree-inline-actions');
+        actions.appendChild(button(t('mapDuplicate'), 'asset-tree-btn', function () {
+            var step = state.mapStep || 8;
+            var box = planSize(state.mapDraft);
+            var copy = clampRoom({
+                name: room.name,
+                kind: room.kind,
+                color: room.color,
+                x: Math.max(0, Math.min(room.x + step, box.w - room.w)),
+                y: Math.max(0, Math.min(room.y + step, box.h - room.h)),
+                w: room.w,
+                h: room.h
+            });
+            state.mapDraft.rooms.push(copy);
+            state.mapSelection = state.mapDraft.rooms.length - 1;
+            state.mapDirty = true;
+            renderFrame();
+        }));
+        actions.appendChild(button(t('mapDeleteShape'), 'asset-tree-btn', function () {
             state.mapDraft.rooms.splice(state.mapSelection, 1);
             state.mapSelection = null;
             state.mapDirty = true;
             renderFrame();
         }));
+        block.appendChild(actions);
         return block;
     }
 
@@ -15211,13 +15529,17 @@
         if (kind === 'wall') return t('mapWall');
         if (kind === 'door') return t('mapDoor');
         if (kind === 'window') return t('mapWindow');
+        if (kind === 'column') return room.name || t('mapColumn');
+        if (kind === 'stair') return room.name || t('mapStair');
+        if (kind === 'desk') return room.name || t('mapDesk');
+        if (kind === 'partition') return t('mapPartition');
         return room.name || t('mapRoom');
     }
 
     function paintRoomPreview(svg) {
         var drag = state.mapDrag;
         var node = svg.querySelector('#asset-tree-room-preview');
-        if (!drag || drag.kind === 'move' || drag.kind === 'pin') {
+        if (!drag || drag.kind === 'move' || drag.kind === 'pin' || drag.kind === 'resize') {
             if (node && node.parentNode) node.parentNode.removeChild(node);
             return;
         }
@@ -15243,14 +15565,24 @@
         var y = Math.min(y0, y1);
         var w = Math.abs(x1 - x0);
         var h = Math.abs(y1 - y0);
-        if (tool === 'wall' || tool === 'door' || tool === 'window') {
-            var thick = tool === 'wall' ? 12 : 16;
+        if (tool === 'wall' || tool === 'partition' || tool === 'door' || tool === 'window') {
+            var thick = tool === 'partition' ? 4 : (tool === 'wall' ? 8 : 10);
             if (w >= h) h = thick;
             else w = thick;
         }
-        if (w < 6 || h < 6) return null;
-        if (tool === 'room' && (w < 36 || h < 36)) return null;
-        return clampRoom({ kind: tool, name: tool === 'room' ? t('mapRoom') : '', x: x, y: y, w: w, h: h });
+        if (tool === 'column') {
+            var side = Math.max(w, h);
+            w = side;
+            h = side;
+        }
+        var min = roomMin(tool);
+        if (w < min || h < min) return null;
+        var label = '';
+        if (tool === 'room') label = t('mapRoom');
+        else if (tool === 'stair') label = t('mapStair');
+        else if (tool === 'column') label = t('mapColumn');
+        else if (tool === 'desk') label = t('mapDesk');
+        return clampRoom({ kind: tool, name: label, x: x, y: y, w: w, h: h });
     }
 
     function moneyInput(value) {
@@ -17027,6 +17359,31 @@
         if (event.key === 'Escape') {
             closeColorMenu();
             closeModal();
+        }
+        if (state.view === 'map' && state.mapEditing && state.mapDraft && !document.querySelector('.asset-tree-backdrop')) {
+            var tag = event.target && event.target.tagName;
+            if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+                var rooms = state.mapDraft.rooms || [];
+                var room = state.mapSelection != null ? rooms[state.mapSelection] : null;
+                var step = state.mapStep || 8;
+                if (room && (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+                    event.preventDefault();
+                    var box = planSize(state.mapDraft);
+                    var dx = event.key === 'ArrowLeft' ? -step : (event.key === 'ArrowRight' ? step : 0);
+                    var dy = event.key === 'ArrowUp' ? -step : (event.key === 'ArrowDown' ? step : 0);
+                    room.x = clampNum(room.x + dx, 0, box.w - room.w);
+                    room.y = clampNum(room.y + dy, 0, box.h - room.h);
+                    state.mapDirty = true;
+                    renderFrame();
+                }
+                if (room && (event.key === 'Delete' || event.key === 'Backspace')) {
+                    event.preventDefault();
+                    rooms.splice(state.mapSelection, 1);
+                    state.mapSelection = null;
+                    state.mapDirty = true;
+                    renderFrame();
+                }
+            }
         }
     });
 

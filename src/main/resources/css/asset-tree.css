@@ -6532,10 +6532,16 @@ a.asset-tree-url {
     font-size: 13px;
 }
 
-#asset-tree-app .asset-tree-report-shell,
-#asset-tree-app .asset-tree-map-shell {
+#asset-tree-app .asset-tree-report-shell {
     display: grid;
     grid-template-columns: 240px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+#asset-tree-app .asset-tree-map-shell {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
     gap: 16px;
     align-items: start;
 }
@@ -7056,6 +7062,26 @@ a.asset-tree-url {
     stroke: #4c9aff;
 }
 
+#asset-tree-app .asset-tree-room.is-column {
+    fill: #6b778c;
+    stroke: #42526e;
+}
+
+#asset-tree-app .asset-tree-room.is-stair {
+    fill: #f4f5f7;
+    stroke: #6b778c;
+}
+
+#asset-tree-app .asset-tree-room.is-desk {
+    fill: #fff7d6;
+    stroke: #ffab00;
+}
+
+#asset-tree-app .asset-tree-room.is-partition {
+    fill: #97a0af;
+    stroke: #6b778c;
+}
+
 #asset-tree-app .asset-tree-room.is-selected {
     stroke: #0052cc;
     stroke-width: 3;
@@ -7299,6 +7325,51 @@ a.asset-tree-url {
     stroke: #172b4d;
     stroke-width: 1.5;
     pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-handle {
+    fill: #fff;
+    stroke: #0052cc;
+    stroke-width: 2;
+    cursor: nwse-resize;
+}
+
+#asset-tree-app .asset-tree-mark {
+    fill: none;
+    stroke: #42526e;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-editor-bar button.asset-tree-btn.slim.is-on {
+    background: #deebff !important;
+    color: #0052cc !important;
+    border-color: #4c9aff !important;
+}
+
+#asset-tree-app .asset-tree-building-name {
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-map-rail h3 {
+    margin: 10px 8px 2px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-size-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-size-row input {
+    width: 72px;
 }
 
 #asset-tree-app .asset-tree-pin-plate {

@@ -2174,7 +2174,7 @@ def save_floor(project_key, floor_id, body, text):
     plan_h = plan_limit(body.get("planH"), 760, 480, 1600)
     rooms = body.get("rooms") or []
     pins = body.get("pins") or []
-    if len(rooms) > 80 or len(pins) > 200:
+    if len(rooms) > 400 or len(pins) > 200:
         return 400, {"message": text.get("asset-tree.error.floor", "Floor")}
     place_id = int(body.get("placeId") or 0)
     if place_id and (place_id not in STATE["assets"] or not is_location_id(place_id)):
@@ -2183,12 +2183,17 @@ def save_floor(project_key, floor_id, body, text):
     seq = 1
     for room in rooms:
         kind = (room.get("kind") or "room").strip().lower()
-        if kind not in ("room", "wall", "door", "window"):
+        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition"):
             kind = "room"
         label = (room.get("name") or "").strip()
         if not label and kind == "room":
             label = "Комната"
-        minimum = 36 if kind == "room" else 6
+        if kind in ("room", "stair"):
+            minimum = 16
+        elif kind in ("column", "desk"):
+            minimum = 8
+        else:
+            minimum = 4
         x = max(0, min(plan_w - minimum, int(room.get("x") or 0)))
         y = max(0, min(plan_h - minimum, int(room.get("y") or 0)))
         w = max(minimum, int(room.get("w") or minimum))
