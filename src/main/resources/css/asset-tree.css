@@ -6665,6 +6665,13 @@ a.asset-tree-url {
     box-sizing: border-box;
 }
 
+#asset-tree-app .asset-tree-report-ring-value.is-tiny {
+    font-size: 16px !important;
+    padding: 0 64px;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
 #asset-tree-app .asset-tree-report-ring-value {
     position: absolute;
     left: 0;

@@ -14906,7 +14906,7 @@
             ring.appendChild(reportPieChart(drawn));
         } else {
             ring.appendChild(donutChart(drawn, true));
-            var figure = el('span', 'asset-tree-report-ring-value' + (center.length > 7 ? ' is-compact' : ''), center);
+            var figure = el('span', 'asset-tree-report-ring-value' + (center.length > 11 ? ' is-tiny' : center.length > 7 ? ' is-compact' : ''), center);
             ring.appendChild(figure);
         }
         round.appendChild(ring);
