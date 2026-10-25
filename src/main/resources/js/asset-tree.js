@@ -2180,6 +2180,7 @@
     function renderFrameContents() {
         closeStatusMenu();
         closeColorMenu();
+        closeStaffBranchAdd();
         var frame = document.getElementById('asset-tree-frame');
         if (!frame) {
             return;
@@ -12581,18 +12582,190 @@
     }
 
     function staffSections(grouped) {
-        var sections = [];
+        var buckets = {};
+        var order = [];
         grouped.order.forEach(function (key) {
             var person = grouped.people[key];
-            var name = String(person.department || '').trim();
-            var last = sections[sections.length - 1];
-            if (!last || last.name !== name) {
-                last = { name: name, people: [] };
-                sections.push(last);
+            var placeId = person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
+            var id = String(placeId);
+            if (!buckets[id]) {
+                buckets[id] = {
+                    placeId: placeId,
+                    name: placeId ? (placeNameById(placeId) || t('staffPlace')) : t('staffNoPlace'),
+                    people: []
+                };
+                order.push(id);
             }
-            last.people.push(person);
+            buckets[id].people.push(person);
         });
-        return sections;
+        order.sort(function (left, right) {
+            if (left === '0') return 1;
+            if (right === '0') return -1;
+            return buckets[left].name.localeCompare(buckets[right].name, state.locale || 'ru');
+        });
+        return order.map(function (id) { return buckets[id]; });
+    }
+
+    function usersAtPlace(placeId) {
+        var seen = {};
+        var list = [];
+        function add(custodian) {
+            if (!custodian || !custodian.userKey || seen[custodian.userKey] || staffHas(custodian.userKey)) return;
+            seen[custodian.userKey] = true;
+            list.push({ userKey: custodian.userKey, displayName: custodian.displayName || custodian.userKey });
+        }
+        if (!placeId) return list;
+        var place = byId()[placeId];
+        if (place) add(place.custodian);
+        equipmentUnder(placeId).forEach(function (asset) { add(asset.custodian); });
+        (state.assets || []).forEach(function (asset) {
+            if (!asset || !isFolder(asset) || asset.id === placeId) return;
+            if (assetUnderPlace(asset, placeId)) add(asset.custodian);
+        });
+        list.sort(function (left, right) {
+            return String(left.displayName).localeCompare(String(right.displayName), state.locale || 'ru');
+        });
+        return list;
+    }
+
+    function addStaffToPlace(userKey, placeId, displayName) {
+        var assigned = placeId || 0;
+        var row = staffHoursRow(userKey);
+        if (row) {
+            if ((parseInt(row.placeId, 10) || 0) === assigned) return;
+            saveStaffHours(userKey, row.weekdays, row.hours, undefined, row.startOn, assigned);
+            return;
+        }
+        if (displayName) {
+            rememberStaff({
+                id: 0,
+                userKey: userKey,
+                userName: displayName,
+                department: '',
+                phone: '',
+                kind: 'hours',
+                weekdays: 31,
+                hours: 8,
+                startOn: '',
+                endOn: '',
+                marks: '',
+                placeId: assigned
+            });
+        }
+        saveStaffHours(userKey, 31, 8, undefined, undefined, assigned);
+        var keys = staffOrderKeys();
+        if (keys.indexOf(userKey) < 0) keys.push(userKey);
+        saveStaffOrder(keys);
+    }
+
+    function closeStaffBranchAdd() {
+        var node = document.getElementById('asset-tree-branch-add');
+        if (!node) return;
+        if (node._outside) document.removeEventListener('mousedown', node._outside);
+        if (node.parentNode) node.parentNode.removeChild(node);
+    }
+
+    function openStaffBranchAdd(placeId, anchor) {
+        var existing = document.getElementById('asset-tree-branch-add');
+        var assigned = placeId || 0;
+        if (existing) {
+            var same = existing.getAttribute('data-place') === String(assigned);
+            closeStaffBranchAdd();
+            if (same) return;
+        }
+        var pop = el('div', 'asset-tree-branch-add');
+        pop.id = 'asset-tree-branch-add';
+        pop.setAttribute('data-place', String(assigned));
+        var people = usersAtPlace(assigned);
+        if (people.length) {
+            pop.appendChild(el('div', 'asset-tree-branch-add-title', t('staffPlaceSuggest')));
+            people.forEach(function (user) {
+                pop.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
+                    addStaffToPlace(user.userKey, assigned, user.displayName);
+                    closeStaffBranchAdd();
+                }));
+            });
+        } else {
+            pop.appendChild(el('p', 'asset-tree-branch-add-empty', t('staffPlaceEmptyPeople')));
+        }
+        var query = document.createElement('input');
+        query.type = 'search';
+        query.placeholder = t('schedulesFindUser');
+        query.setAttribute('aria-label', t('schedulesFindUser'));
+        var hits = el('div', 'asset-tree-branch-add-hits');
+        var timer = null;
+        query.addEventListener('input', function () {
+            clearTimeout(timer);
+            var value = query.value;
+            timer = setTimeout(function () {
+                hits.innerHTML = '';
+                if (!value.trim()) return;
+                ajax('GET', '/users?q=' + encodeURIComponent(value.trim()), null, function (status, payload) {
+                    if (!document.getElementById('asset-tree-branch-add')) return;
+                    hits.innerHTML = '';
+                    if (status !== 200) return;
+                    (payload || []).forEach(function (user) {
+                        if (!user || !user.userKey) return;
+                        hits.appendChild(button(user.displayName || user.userKey, 'asset-tree-user-hit', function () {
+                            addStaffToPlace(user.userKey, assigned, user.displayName || user.userKey);
+                            closeStaffBranchAdd();
+                        }));
+                    });
+                });
+            }, 200);
+        });
+        pop.appendChild(query);
+        pop.appendChild(hits);
+        var root = document.getElementById('asset-tree-app') || document.body;
+        root.appendChild(pop);
+        var rect = anchor.getBoundingClientRect();
+        var width = pop.offsetWidth || 240;
+        var height = pop.offsetHeight || 120;
+        var left = rect.left;
+        if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+        if (left < 8) left = 8;
+        var top = rect.bottom + 4;
+        if (top + height > window.innerHeight - 8 && rect.top > height + 8) top = rect.top - height - 4;
+        pop.style.left = left + 'px';
+        pop.style.top = top + 'px';
+        setTimeout(function () {
+            if (!document.getElementById('asset-tree-branch-add')) return;
+            function onDoc(event) {
+                var node = document.getElementById('asset-tree-branch-add');
+                if (!node) {
+                    document.removeEventListener('mousedown', onDoc);
+                    return;
+                }
+                var target = event.target;
+                while (target && target !== document.body) {
+                    if (target === node || target === anchor) return;
+                    target = target.parentNode;
+                }
+                closeStaffBranchAdd();
+            }
+            pop._outside = onDoc;
+            document.addEventListener('mousedown', onDoc);
+            try {
+                query.focus({ preventScroll: true });
+            } catch (ignore) {
+                query.focus();
+            }
+        }, 0);
+    }
+
+    function staffPlaceHead(placeId, label) {
+        var box = el('div', 'asset-tree-roster-branch');
+        box.appendChild(el('strong', null, label));
+        if (state.canEdit) {
+            var plus = button('+', 'asset-tree-roster-branch-add', function (event) {
+                event.stopPropagation();
+                openStaffBranchAdd(placeId, plus);
+            });
+            plus.title = t('staffPlaceAdd');
+            plus.setAttribute('aria-label', t('staffPlaceAdd'));
+            box.appendChild(plus);
+        }
+        return box;
     }
 
     function paintStaffDays(person, isos, erase) {
@@ -12790,41 +12963,6 @@
             meta.appendChild(remove);
         }
         name.appendChild(meta);
-        var places = sortedPlaces();
-        var assigned = person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
-        if (places.length && person.hours) {
-            if (state.canEdit) {
-                var place = document.createElement('select');
-                place.className = 'asset-tree-roster-place';
-                place.setAttribute('aria-label', t('staffPlace'));
-                var nonePlace = document.createElement('option');
-                nonePlace.value = '0';
-                nonePlace.textContent = t('staffNoPlace');
-                place.appendChild(nonePlace);
-                places.forEach(function (asset) {
-                    var option = document.createElement('option');
-                    option.value = String(asset.id);
-                    option.textContent = placeLabel(asset);
-                    place.appendChild(option);
-                });
-                if (assigned && !place.querySelector('option[value="' + assigned + '"]')) {
-                    var missing = document.createElement('option');
-                    missing.value = String(assigned);
-                    missing.textContent = placeNameById(assigned) || t('staffPlace');
-                    place.appendChild(missing);
-                }
-                place.value = String(assigned || 0);
-                place.addEventListener('change', function () {
-                    var nextPlace = parseInt(place.value, 10) || 0;
-                    if (nextPlace === assigned) return;
-                    saveStaffHours(person.userKey, person.hours.weekdays, person.hours.hours || 8, undefined, person.hours.startOn, nextPlace);
-                });
-                name.appendChild(place);
-            } else if (assigned) {
-                var placeText = el('span', 'asset-tree-roster-place', placeNameById(assigned) || t('staffPlace'));
-                name.appendChild(placeText);
-            }
-        }
         line.appendChild(name);
         var day;
         for (day = 1; day <= count; day++) {
@@ -12881,12 +13019,14 @@
         var count = new Date(year, month, 0).getDate();
         var today = isoDate(new Date());
         var sections = staffSections(grouped);
-        var named = false;
-        sections.forEach(function (section) { if (section.name) named = true; });
+        var places = sortedPlaces();
+        var single = !!(places.length && sections.length === 1);
         var scroll = el('div', 'asset-tree-roster-scroll');
         var table = el('table', 'asset-tree-roster');
         var head = el('tr');
-        head.appendChild(el('th', 'asset-tree-roster-name', ''));
+        var headName = el('th', 'asset-tree-roster-name');
+        if (single) headName.appendChild(staffPlaceHead(sections[0].placeId, sections[0].name));
+        head.appendChild(headName);
         var day;
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
@@ -12904,11 +13044,15 @@
         table.appendChild(thead);
         var body = el('tbody');
         sections.forEach(function (section) {
-            if (named) {
-                var banner = el('tr', 'asset-tree-roster-group');
-                var cell = el('th', null, section.name || t('staffNoDepartment'));
-                cell.colSpan = count + 3;
+            if (places.length && !single) {
+                var banner = el('tr', 'asset-tree-roster-branch-row');
+                var cell = el('th', 'asset-tree-roster-name');
+                cell.appendChild(staffPlaceHead(section.placeId, section.name));
                 banner.appendChild(cell);
+                var gap;
+                for (gap = 0; gap < count; gap++) banner.appendChild(el('td', 'asset-tree-roster-day'));
+                banner.appendChild(el('td', 'asset-tree-roster-total'));
+                banner.appendChild(el('td', 'asset-tree-roster-total'));
                 body.appendChild(banner);
             }
             section.people.forEach(function (person) {
@@ -13150,6 +13294,14 @@
             return wrap;
         }
         if (!grouped.order.length) {
+            var filterId = state.staffPlaceFilter || '';
+            if (filterId && sortedPlaces().length) {
+                var placeId = filterId === '__none__' ? 0 : (parseInt(filterId, 10) || 0);
+                var label = filterId === '__none__' ? t('staffNoPlace') : (placeNameById(placeId) || t('staffPlace'));
+                var solo = el('div', 'asset-tree-roster-branch-solo');
+                solo.appendChild(staffPlaceHead(placeId, label));
+                wrap.appendChild(solo);
+            }
             wrap.appendChild(el('p', 'asset-tree-hint', t('staffPlaceEmpty')));
             return wrap;
         }
