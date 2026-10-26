@@ -1461,9 +1461,12 @@ public class AssetServiceImpl implements AssetService {
                 ProjectGrantEntity row = findPrincipal(storedKey, groupName, userKey);
                 if (row == null) {
                     if (forUser) {
+                        // GROUP_NAME is required. Active Objects rejects a blank string,
+                        // so the directory key stands in for the group name. The row is
+                        // still a user grant because USER_KEY is set.
                         row = ao().create(ProjectGrantEntity.class,
                                 new DBParam("PROJECT_KEY", storedKey),
-                                new DBParam("GROUP_NAME", ""),
+                                new DBParam("GROUP_NAME", userKey),
                                 new DBParam("LEVEL", level),
                                 new DBParam("CAPS", caps),
                                 new DBParam("USER_KEY", userKey));
