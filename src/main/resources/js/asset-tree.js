@@ -2926,7 +2926,10 @@
         row.setAttribute('role', 'treeitem');
         row.setAttribute('data-asset-id', String(asset.id));
         if (state.selectedId === asset.id) row.classList.add('is-selected');
-        if (mayEdit(asset)) row.appendChild(dragGrip(asset));
+        if (mayEdit(asset)) {
+            row.classList.add('is-movable');
+            bindObjectDrag(row, asset);
+        }
         var spacer = el('span', 'asset-tree-chevron');
         spacer.setAttribute('aria-hidden', 'true');
         row.appendChild(spacer);
@@ -3173,28 +3176,41 @@
 
     var pointerDrag = null;
 
+    function beginAssetDrag(asset, event) {
+        if (event.button !== 0 || !mayEdit(asset) || pointerDrag) return;
+        event.preventDefault();
+        pointerDrag = {
+            id: asset.id,
+            object: !isFolder(asset),
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            active: false,
+            plan: null
+        };
+        document.addEventListener('pointermove', onGripMove, true);
+        document.addEventListener('pointerup', onGripUp, true);
+        document.addEventListener('pointercancel', onGripUp, true);
+    }
+
+    function bindObjectDrag(row, asset) {
+        row.addEventListener('selectstart', function (event) {
+            event.preventDefault();
+        });
+        row.addEventListener('pointerdown', function (event) {
+            if (event.target && event.target.closest && event.target.closest('button')) return;
+            beginAssetDrag(asset, event);
+        });
+    }
+
     function dragGrip(asset) {
         var grip = el('span', 'asset-tree-grip');
         grip.title = t('dragHint');
         grip.setAttribute('aria-label', t('dragHint'));
         grip.appendChild(gripIcon());
         grip.addEventListener('pointerdown', function (event) {
-            if (event.button !== 0 || !mayEdit(asset)) return;
-            event.preventDefault();
             event.stopPropagation();
-            if (grip.setPointerCapture) grip.setPointerCapture(event.pointerId);
-            pointerDrag = {
-                id: asset.id,
-                object: !isFolder(asset),
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startY: event.clientY,
-                active: false,
-                plan: null
-            };
-            document.addEventListener('pointermove', onGripMove, true);
-            document.addEventListener('pointerup', onGripUp, true);
-            document.addEventListener('pointercancel', onGripUp, true);
+            beginAssetDrag(asset, event);
         });
         grip.addEventListener('click', function (event) {
             event.preventDefault();
@@ -14518,7 +14534,42 @@
         document.addEventListener('mouseup', up);
     }
 
-    function staffRosterRow(person, year, month, count, today) {
+    function rosterShowsToday(year, month) {
+        var now = new Date();
+        return now.getFullYear() === year && (now.getMonth() + 1) === month;
+    }
+
+    function staffDayFace(person, iso, date) {
+        var row = person.hours || { weekdays: 31, hours: 8, marks: '' };
+        var marks = parseDayMarks(row.marks);
+        var per = parseInt(row.hours, 10) || 8;
+        var id = staffVisible(person, iso, date, marks);
+        var known = id === 'off' || id === 'work' || !!staffMarkById(id);
+        var custom = markCustom(marks, iso);
+        var hoursValue = known ? (custom != null ? custom : staffDayHours(id, per)) : 0;
+        var mark = staffMarkById(id);
+        var name = !known || id === 'off' ? t('staffOff') : staffMarkName(mark || { id: id });
+        return {
+            name: name,
+            hours: hoursValue,
+            color: known && id && id !== 'off' ? staffMarkColor(id) : ''
+        };
+    }
+
+    function staffNowCell(person, today) {
+        var parts = String(today || '').split('-');
+        var date = new Date(parseInt(parts[0], 10), (parseInt(parts[1], 10) || 1) - 1, parseInt(parts[2], 10) || 1);
+        var face = staffDayFace(person, today, date);
+        var cell = el('td', 'asset-tree-roster-now');
+        var label = el('span', 'asset-tree-roster-now-label', face.name);
+        if (face.color) label.style.color = '#' + face.color;
+        cell.appendChild(label);
+        if (face.hours > 0) cell.appendChild(el('span', 'asset-tree-roster-now-hours', t('staffHoursCount', face.hours)));
+        cell.title = face.hours > 0 ? face.name + ' · ' + t('staffHoursCount', face.hours) : face.name;
+        return cell;
+    }
+
+    function staffRosterRow(person, year, month, count, today, showNow) {
         var row = person.hours || { weekdays: 31, hours: 8, id: 0, marks: '' };
         var marks = parseDayMarks(row.marks);
         var tally = staffTally(person, year, month);
@@ -14539,6 +14590,17 @@
         var who = el('span', 'asset-tree-roster-who', person.userName);
         who.title = person.phone ? person.userName + ' \u00B7 ' + person.phone : person.userName;
         identity.appendChild(who);
+        var aside = el('span', 'asset-tree-roster-aside');
+        if (person.department) {
+            var dept = el('span', 'asset-tree-roster-dept', person.department);
+            dept.title = t('userDepartment') + ': ' + person.department;
+            aside.appendChild(dept);
+        }
+        if (person.phone) {
+            var phone = el('span', 'asset-tree-roster-phone', person.phone);
+            phone.title = t('userPhone') + ': ' + person.phone;
+            aside.appendChild(phone);
+        }
         if (state.canEdit && person.hours) {
             identity.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
@@ -14552,6 +14614,7 @@
         }
         var meta = el('span', 'asset-tree-roster-meta');
         meta.appendChild(identity);
+        if (aside.childNodes.length) meta.appendChild(aside);
         if (state.canEdit && person.hours) {
             var hours = document.createElement('input');
             hours.type = 'number';
@@ -14637,6 +14700,7 @@
                 line.appendChild(cell);
             })(day);
         }
+        if (showNow) line.appendChild(staffNowCell(person, today));
         var daysCell = el('td', 'asset-tree-roster-total', String(tally.days));
         var hoursCell = el('td', 'asset-tree-roster-total', String(tally.hours));
         var breakdown = [];
@@ -14657,7 +14721,7 @@
         return labels[index === 0 ? 6 : index - 1] || '';
     }
 
-    function staffDateHead(row, year, month, count, today) {
+    function staffDateHead(row, year, month, count, today, showNow) {
         var day;
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
@@ -14674,11 +14738,33 @@
             cell.appendChild(label);
             row.appendChild(cell);
         }
+        if (showNow) row.appendChild(el('th', 'asset-tree-roster-now', t('schedulesToday')));
         row.appendChild(el('th', 'asset-tree-roster-total', t('staffDaysCol')));
         row.appendChild(el('th', 'asset-tree-roster-total', t('staffHoursCol')));
     }
 
-    function staffSectionHead(section, year, month, count, today) {
+    function rosterColumns(count, showNow) {
+        var group = document.createElement('colgroup');
+        var name = document.createElement('col');
+        name.className = 'asset-tree-roster-col-name';
+        group.appendChild(name);
+        var day;
+        for (day = 0; day < count; day++) group.appendChild(document.createElement('col'));
+        if (showNow) {
+            var now = document.createElement('col');
+            now.className = 'asset-tree-roster-col-now';
+            group.appendChild(now);
+        }
+        var totals;
+        for (totals = 0; totals < 2; totals++) {
+            var total = document.createElement('col');
+            total.className = 'asset-tree-roster-col-total';
+            group.appendChild(total);
+        }
+        return group;
+    }
+
+    function staffSectionHead(section, year, month, count, today, showNow) {
         var row = el('tr', 'asset-tree-roster-head');
         var name = el('th', 'asset-tree-roster-name');
         if (section.name) {
@@ -14687,7 +14773,7 @@
             if (staffPlaceHidden(section.placeId)) row.className += ' is-folded';
         }
         row.appendChild(name);
-        staffDateHead(row, year, month, count, today);
+        staffDateHead(row, year, month, count, today, showNow);
         return row;
     }
 
@@ -14696,12 +14782,15 @@
         var month = state.scheduleMonth;
         var count = new Date(year, month, 0).getDate();
         var today = isoDate(new Date());
+        var showNow = rosterShowsToday(year, month);
         var sections = staffSections(grouped);
         var scroll = el('div', 'asset-tree-roster-scroll');
         var table = el('table', 'asset-tree-roster');
+        table.style.minWidth = (420 + count * 28 + (showNow ? 128 : 0) + 88) + 'px';
+        table.appendChild(rosterColumns(count, showNow));
         var thead = el('thead');
         var first = sections.length ? sections[0] : { placeId: 0, name: '', people: [] };
-        thead.appendChild(staffSectionHead(first, year, month, count, today));
+        thead.appendChild(staffSectionHead(first, year, month, count, today, showNow));
         table.appendChild(thead);
         var body = el('tbody');
         sections.forEach(function (section, index) {
@@ -14718,13 +14807,14 @@
                     var gapWeekend = gapDate.getDay() === 0 || gapDate.getDay() === 6;
                     banner.appendChild(el('td', 'asset-tree-roster-day' + (gapWeekend ? ' is-weekend' : '')));
                 }
+                if (showNow) banner.appendChild(el('td', 'asset-tree-roster-now'));
                 banner.appendChild(el('td', 'asset-tree-roster-total'));
                 banner.appendChild(el('td', 'asset-tree-roster-total'));
                 body.appendChild(banner);
             }
             if (staffPlaceHidden(section.placeId)) return;
             section.people.forEach(function (person) {
-                var line = staffRosterRow(person, year, month, count, today);
+                var line = staffRosterRow(person, year, month, count, today, showNow);
                 line.setAttribute('data-place', String(section.placeId || 0));
                 body.appendChild(line);
             });
