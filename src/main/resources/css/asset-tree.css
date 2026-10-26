@@ -8067,8 +8067,8 @@ a.asset-tree-url {
     position: sticky;
     left: 0;
     z-index: 1;
-    width: 420px;
-    min-width: 420px;
+    width: 360px;
+    min-width: 340px;
     max-width: none;
     height: 26px;
     padding: 0 6px;
@@ -8115,35 +8115,11 @@ a.asset-tree-url {
 }
 
 #asset-tree-app col.asset-tree-roster-col-name {
-    width: 420px;
-}
-
-#asset-tree-app col.asset-tree-roster-col-now {
-    width: 128px;
+    width: 360px;
 }
 
 #asset-tree-app col.asset-tree-roster-col-total {
     width: 44px;
-}
-
-#asset-tree-app .asset-tree-roster .asset-tree-roster-now {
-    padding: 0 8px;
-    background: #f7f8fa;
-    text-align: left;
-    font-weight: 600;
-    white-space: nowrap;
-}
-
-#asset-tree-app .asset-tree-roster-now-label,
-#asset-tree-app .asset-tree-roster-now-hours {
-    display: inline;
-    vertical-align: middle;
-}
-
-#asset-tree-app .asset-tree-roster-now-hours {
-    margin-left: 4px;
-    color: #6b778c;
-    font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-roster thead th {
@@ -8447,7 +8423,6 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row .asset-tree-roster-name,
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-day,
-#asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-now,
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-total {
     height: 24px;
     min-height: 0;

@@ -14534,42 +14534,7 @@
         document.addEventListener('mouseup', up);
     }
 
-    function rosterShowsToday(year, month) {
-        var now = new Date();
-        return now.getFullYear() === year && (now.getMonth() + 1) === month;
-    }
-
-    function staffDayFace(person, iso, date) {
-        var row = person.hours || { weekdays: 31, hours: 8, marks: '' };
-        var marks = parseDayMarks(row.marks);
-        var per = parseInt(row.hours, 10) || 8;
-        var id = staffVisible(person, iso, date, marks);
-        var known = id === 'off' || id === 'work' || !!staffMarkById(id);
-        var custom = markCustom(marks, iso);
-        var hoursValue = known ? (custom != null ? custom : staffDayHours(id, per)) : 0;
-        var mark = staffMarkById(id);
-        var name = !known || id === 'off' ? t('staffOff') : staffMarkName(mark || { id: id });
-        return {
-            name: name,
-            hours: hoursValue,
-            color: known && id && id !== 'off' ? staffMarkColor(id) : ''
-        };
-    }
-
-    function staffNowCell(person, today) {
-        var parts = String(today || '').split('-');
-        var date = new Date(parseInt(parts[0], 10), (parseInt(parts[1], 10) || 1) - 1, parseInt(parts[2], 10) || 1);
-        var face = staffDayFace(person, today, date);
-        var cell = el('td', 'asset-tree-roster-now');
-        var label = el('span', 'asset-tree-roster-now-label', face.name);
-        if (face.color) label.style.color = '#' + face.color;
-        cell.appendChild(label);
-        if (face.hours > 0) cell.appendChild(el('span', 'asset-tree-roster-now-hours', t('staffHoursCount', face.hours)));
-        cell.title = face.hours > 0 ? face.name + ' · ' + t('staffHoursCount', face.hours) : face.name;
-        return cell;
-    }
-
-    function staffRosterRow(person, year, month, count, today, showNow) {
+    function staffRosterRow(person, year, month, count, today) {
         var row = person.hours || { weekdays: 31, hours: 8, id: 0, marks: '' };
         var marks = parseDayMarks(row.marks);
         var tally = staffTally(person, year, month);
@@ -14700,7 +14665,6 @@
                 line.appendChild(cell);
             })(day);
         }
-        if (showNow) line.appendChild(staffNowCell(person, today));
         var daysCell = el('td', 'asset-tree-roster-total', String(tally.days));
         var hoursCell = el('td', 'asset-tree-roster-total', String(tally.hours));
         var breakdown = [];
@@ -14721,7 +14685,7 @@
         return labels[index === 0 ? 6 : index - 1] || '';
     }
 
-    function staffDateHead(row, year, month, count, today, showNow) {
+    function staffDateHead(row, year, month, count, today) {
         var day;
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
@@ -14738,23 +14702,17 @@
             cell.appendChild(label);
             row.appendChild(cell);
         }
-        if (showNow) row.appendChild(el('th', 'asset-tree-roster-now', t('schedulesToday')));
         row.appendChild(el('th', 'asset-tree-roster-total', t('staffDaysCol')));
         row.appendChild(el('th', 'asset-tree-roster-total', t('staffHoursCol')));
     }
 
-    function rosterColumns(count, showNow) {
+    function rosterColumns(count) {
         var group = document.createElement('colgroup');
         var name = document.createElement('col');
         name.className = 'asset-tree-roster-col-name';
         group.appendChild(name);
         var day;
         for (day = 0; day < count; day++) group.appendChild(document.createElement('col'));
-        if (showNow) {
-            var now = document.createElement('col');
-            now.className = 'asset-tree-roster-col-now';
-            group.appendChild(now);
-        }
         var totals;
         for (totals = 0; totals < 2; totals++) {
             var total = document.createElement('col');
@@ -14764,7 +14722,7 @@
         return group;
     }
 
-    function staffSectionHead(section, year, month, count, today, showNow) {
+    function staffSectionHead(section, year, month, count, today) {
         var row = el('tr', 'asset-tree-roster-head');
         var name = el('th', 'asset-tree-roster-name');
         if (section.name) {
@@ -14773,7 +14731,7 @@
             if (staffPlaceHidden(section.placeId)) row.className += ' is-folded';
         }
         row.appendChild(name);
-        staffDateHead(row, year, month, count, today, showNow);
+        staffDateHead(row, year, month, count, today);
         return row;
     }
 
@@ -14782,15 +14740,14 @@
         var month = state.scheduleMonth;
         var count = new Date(year, month, 0).getDate();
         var today = isoDate(new Date());
-        var showNow = rosterShowsToday(year, month);
         var sections = staffSections(grouped);
         var scroll = el('div', 'asset-tree-roster-scroll');
         var table = el('table', 'asset-tree-roster');
-        table.style.minWidth = (420 + count * 28 + (showNow ? 128 : 0) + 88) + 'px';
-        table.appendChild(rosterColumns(count, showNow));
+        table.style.minWidth = (360 + count * 28 + 88) + 'px';
+        table.appendChild(rosterColumns(count));
         var thead = el('thead');
         var first = sections.length ? sections[0] : { placeId: 0, name: '', people: [] };
-        thead.appendChild(staffSectionHead(first, year, month, count, today, showNow));
+        thead.appendChild(staffSectionHead(first, year, month, count, today));
         table.appendChild(thead);
         var body = el('tbody');
         sections.forEach(function (section, index) {
@@ -14807,14 +14764,13 @@
                     var gapWeekend = gapDate.getDay() === 0 || gapDate.getDay() === 6;
                     banner.appendChild(el('td', 'asset-tree-roster-day' + (gapWeekend ? ' is-weekend' : '')));
                 }
-                if (showNow) banner.appendChild(el('td', 'asset-tree-roster-now'));
                 banner.appendChild(el('td', 'asset-tree-roster-total'));
                 banner.appendChild(el('td', 'asset-tree-roster-total'));
                 body.appendChild(banner);
             }
             if (staffPlaceHidden(section.placeId)) return;
             section.people.forEach(function (person) {
-                var line = staffRosterRow(person, year, month, count, today, showNow);
+                var line = staffRosterRow(person, year, month, count, today);
                 line.setAttribute('data-place', String(section.placeId || 0));
                 body.appendChild(line);
             });
