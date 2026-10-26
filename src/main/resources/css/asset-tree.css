@@ -5908,6 +5908,10 @@ a.asset-tree-url {
 
 /* Headings: page 24, panels and dialogs 20, sections 16 */
 #asset-tree-app .asset-tree-heading h1 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     font-size: 24px;
     font-weight: 500;
     line-height: 1.2;
@@ -6038,18 +6042,27 @@ a.asset-tree-url {
     margin: 0 0 8px;
 }
 
-#asset-tree-app .asset-tree-beta {
+#asset-tree-app .asset-tree-beta,
+#asset-tree-app .asset-tree-alpha {
     display: inline-flex;
     align-items: center;
     padding: 0 6px;
     border-radius: 3px;
-    background: #eae6ff;
-    color: #403294;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.04em;
     line-height: 16px;
     text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-beta {
+    background: #eae6ff;
+    color: #403294;
+}
+
+#asset-tree-app .asset-tree-alpha {
+    background: #fff0b3;
+    color: #7f5f01;
 }
 
 #asset-tree-app .asset-tree-project-card > .asset-tree-hint {
@@ -6120,6 +6133,10 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-module-option strong {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     color: #172b4d;
     font-size: 14px;
     font-weight: 600;

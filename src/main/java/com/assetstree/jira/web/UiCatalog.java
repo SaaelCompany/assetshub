@@ -919,6 +919,7 @@ public final class UiCatalog {
             "projectTreeTitle",
             "modulesTitle",
             "modulesBeta",
+            "modulesAlpha",
             "modulesHint",
             "moduleService",
             "moduleServiceHint",

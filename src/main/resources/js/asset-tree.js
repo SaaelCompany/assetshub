@@ -2027,6 +2027,11 @@
         reloadTree(done);
     }
 
+    function stageMark(stage) {
+        if (stage === 'alpha') return el('span', 'asset-tree-alpha', t('modulesAlpha'));
+        return el('span', 'asset-tree-beta', t('modulesBeta'));
+    }
+
     function mount() {
         closeAllModals();
         app.innerHTML = '';
@@ -2035,9 +2040,8 @@
         var row = el('div', 'asset-tree-top-row');
         var titles = el('div', 'asset-tree-heading');
         var heading = el('h1', null, viewTitle(state.view));
-        if (state.view === 'schedules') {
-            heading.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
-        }
+        if (state.view === 'schedules') heading.appendChild(stageMark('beta'));
+        if (state.view === 'map') heading.appendChild(stageMark('alpha'));
         titles.appendChild(heading);
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
@@ -11458,17 +11462,16 @@
 
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
-        head.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
         modules.appendChild(head);
         modules.appendChild(el('p', 'asset-tree-hint', t('modulesHint')));
         var grid = el('div', 'asset-tree-module-grid');
         [
-            ['service', 'moduleService', 'moduleServiceHint', 'schedules'],
-            ['map', 'moduleMap', 'moduleMapHint', 'map'],
-            ['reports', 'moduleReports', 'moduleReportsHint', 'reports'],
-            ['life', 'moduleLife', 'moduleLifeHint', ''],
-            ['portal', 'modulePortal', 'modulePortalHint', ''],
-            ['card', 'moduleCard', 'moduleCardHint', '']
+            ['service', 'moduleService', 'moduleServiceHint', 'schedules', 'beta'],
+            ['map', 'moduleMap', 'moduleMapHint', 'map', 'alpha'],
+            ['reports', 'moduleReports', 'moduleReportsHint', 'reports', 'beta'],
+            ['life', 'moduleLife', 'moduleLifeHint', '', 'beta'],
+            ['portal', 'modulePortal', 'modulePortalHint', '', 'beta'],
+            ['card', 'moduleCard', 'moduleCardHint', '', 'beta']
         ].forEach(function (item) {
             var option = el('div', 'asset-tree-module-option');
             var label = el('label');
@@ -11499,7 +11502,10 @@
                 });
             });
             var text = el('span');
-            text.appendChild(el('strong', null, t(item[1])));
+            var title = el('strong');
+            title.appendChild(document.createTextNode(t(item[1])));
+            title.appendChild(stageMark(item[4]));
+            text.appendChild(title);
             text.appendChild(el('span', 'asset-tree-hint', t(item[2])));
             label.appendChild(box);
             label.appendChild(text);
@@ -11889,7 +11895,7 @@
     function sheetHead(titleKey, hintKey) {
         var head = el('div', 'asset-tree-sheet-head');
         var title = el('h2', null, t(titleKey));
-        title.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
+        title.appendChild(stageMark('beta'));
         head.appendChild(title);
         return head;
     }
@@ -19081,7 +19087,7 @@
         var title = block.querySelector('.asset-tree-module-head > span:last-child');
         if (title) {
             title.classList.add('asset-tree-life-heading');
-            title.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
+            title.appendChild(stageMark('beta'));
         }
         return block;
     }
