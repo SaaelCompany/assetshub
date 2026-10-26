@@ -6974,6 +6974,14 @@ a.asset-tree-url {
     border-top: 8px solid #f7f8fa;
 }
 
+#asset-tree-app .asset-tree-report-lines tr.is-open {
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-report-lines tr.is-open:hover td {
+    background: #f4f5f7;
+}
+
 #asset-tree-app .asset-tree-report-key {
     width: 120px;
     color: #6b778c;

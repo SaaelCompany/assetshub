@@ -11074,7 +11074,7 @@
                 var previous = day.value || String(setup.reportMailDay || 1);
                 day.innerHTML = '';
                 var names = ['reportMailMon', 'reportMailTue', 'reportMailWed', 'reportMailThu', 'reportMailFri', 'reportMailSat', 'reportMailSun'];
-                var count = month ? 28 : 7;
+                var count = month ? 31 : 7;
                 for (var i = 1; i <= count; i++) {
                     var option = document.createElement('option');
                     option.value = String(i);
@@ -11086,6 +11086,8 @@
             every.addEventListener('change', paintMailDay);
             paintMailDay();
             var mailTo = (setup.reportMailTo || '').split(',').filter(function (key) { return key; });
+            var mailNames = {};
+            var MAIL_LIMIT = 20;
             var chips = el('div', 'asset-tree-check-list');
             var finder = document.createElement('input');
             finder.type = 'search';
@@ -11098,7 +11100,7 @@
                 chips.innerHTML = '';
                 mailTo.forEach(function (key) {
                     var line = el('label', 'asset-tree-check');
-                    line.appendChild(document.createTextNode(key));
+                    line.appendChild(document.createTextNode(mailNames[key] || key));
                     line.appendChild(button('\u00D7', 'asset-tree-btn', function () {
                         mailTo = mailTo.filter(function (item) { return item !== key; });
                         paintMailTo();
@@ -11107,6 +11109,14 @@
                 });
             }
             paintMailTo();
+            mailTo.forEach(function (key) {
+                ajax('GET', '/users/' + encodeURIComponent(key), null, function (status, payload) {
+                    if (status === 200 && payload && payload.displayName) {
+                        mailNames[key] = payload.displayName;
+                        paintMailTo();
+                    }
+                });
+            });
             finder.addEventListener('input', function () {
                 clearTimeout(mailTimer);
                 mailTimer = setTimeout(function () {
@@ -11122,7 +11132,13 @@
                             var label = user.displayName || user.userKey;
                             if (user.email) label += ' \u00B7 ' + user.email;
                             hits.appendChild(button(label, 'asset-tree-user-hit', function () {
-                                if (mailTo.indexOf(user.userKey) < 0 && mailTo.length < 5) mailTo.push(user.userKey);
+                                if (mailTo.indexOf(user.userKey) >= 0) return;
+                                if (mailTo.length >= MAIL_LIMIT) {
+                                    notify(t('reportMailFull'));
+                                    return;
+                                }
+                                mailNames[user.userKey] = user.displayName || user.userKey;
+                                mailTo.push(user.userKey);
                                 finder.value = '';
                                 hits.innerHTML = '';
                                 paintMailTo();
@@ -14896,7 +14912,7 @@
                     for (key in view) if (Object.prototype.hasOwnProperty.call(view, key)) full[key] = view[key];
                     full.lines = payload.lines || [];
                     full.lineTotal = payload.lineTotal || full.lines.length;
-                    full.capped = false;
+                    full.capped = !!payload.capped;
                     full.linesComplete = true;
                     downloadReport(full);
                 } else notify((payload && payload.message) || t('errorTitle'));
@@ -14905,25 +14921,30 @@
         }
         var money = reportMoney(view);
         var shareTotal = 0;
+        var shareValues = [];
         (view.rows || []).forEach(function (row) {
-            shareTotal += money ? (Number(row.amount) || 0) : (row.count || 0);
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            shareTotal += value;
+            shareValues.push(value);
         });
         if (!money) shareTotal = view.total || 0;
+        var shares = shareLabels(shareValues);
         var head = [csvCell(groupWord(view.groupBy)), csvCell(t('reportCount'))];
         if (money) head.push(csvCell(t('lifeBook')));
         head.push(csvCell(t('reportShare')));
         var rows = [head.join(';')];
-        (view.rows || []).forEach(function (row) {
-            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+        (view.rows || []).forEach(function (row, index) {
             var cells = [csvCell(row.label), csvCell(row.count)];
             if (money) cells.push(csvCell(reportMoneyCsv(Number(row.amount) || 0)));
-            cells.push(csvCell(shareText(value, shareTotal)));
+            cells.push(csvCell(shares[index] || '0 %'));
             rows.push(cells.join(';'));
         });
         var totalCells = [csvCell(t('reportTotalRow')), csvCell(view.total || 0)];
         if (money) totalCells.push(csvCell(reportMoneyCsv(shareTotal)));
-        totalCells.push(csvCell(shareText(shareTotal, shareTotal)));
+        totalCells.push(csvCell(shareTotal ? '100 %' : '0 %'));
         rows.push(totalCells.join(';'));
+        if (!(view.rows || []).length) rows.push(csvCell(view.reason || t('reportEmptyLines')));
+        if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
         if (view.lines && view.lines.length) {
             rows.push('');
             var detailHead = money ? t('lifeBook') : detailWord(view.groupBy);
@@ -14968,9 +14989,35 @@
         return track;
     }
 
+    function viewerChartKey(projectKey, id) {
+        return 'assethub-report-chart:' + projectKey + ':' + id;
+    }
+
+    function viewerChart(projectKey, id) {
+        try {
+            var raw = window.localStorage.getItem(viewerChartKey(projectKey, id));
+            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'columns') return raw;
+        } catch (error) {
+            return '';
+        }
+        return '';
+    }
+
+    function rememberViewerChart(projectKey, id, kind) {
+        try {
+            window.localStorage.setItem(viewerChartKey(projectKey, id), kind);
+        } catch (error) {
+            return;
+        }
+    }
+
     function reportChartKind(view) {
         var stored = view.chart === 'donut' ? 'donut' : view.chart === 'pie' ? 'pie' : view.chart === 'bars' ? 'bars' : 'columns';
         if (state.reportChartFor === String(view.id || '') && state.reportChart) return state.reportChart;
+        if (!state.canEdit) {
+            var local = viewerChart(state.projectKey, view.id);
+            if (local) return local;
+        }
         return stored;
     }
 
@@ -14993,7 +15040,11 @@
     }
 
     function rememberReportChart(view, kind) {
-        if (!state.canEdit || !view || !view.id) return;
+        if (!view || !view.id) return;
+        if (!state.canEdit) {
+            rememberViewerChart(state.projectKey, view.id, kind);
+            return;
+        }
         state.reportChartPending = {
             view: view,
             kind: kind,
@@ -15053,9 +15104,9 @@
         });
     }
 
-    function reportLegend(rows, total, money) {
+    function reportLegend(rows, total, money, shares) {
         var list = el('ul', 'asset-tree-report-legend');
-        rows.forEach(function (row) {
+        rows.forEach(function (row, index) {
             var item = el('li');
             var swatch = el('i');
             swatch.style.background = row.color || '#0052CC';
@@ -15065,7 +15116,7 @@
             item.appendChild(name);
             var value = money ? (Number(row.amount) || 0) : (row.count || 0);
             var shown = money ? reportMoneyLabel(value) : String(row.count);
-            item.appendChild(el('strong', null, shown + ' · ' + shareText(value, total)));
+            item.appendChild(el('strong', null, shown + ' · ' + (shares && shares[index] ? shares[index] : '0 %')));
             list.appendChild(item);
         });
         return list;
@@ -15131,7 +15182,7 @@
         return next;
     }
 
-    function reportChartPanel(rows, total, max, kind, money, sumText) {
+    function reportChartPanel(rows, total, max, kind, money, sumText, shares) {
         var measured = measuredRows(rows, money);
         if (!measured.length) return null;
         var drawn = [];
@@ -15158,7 +15209,7 @@
             ring.appendChild(figure);
         }
         round.appendChild(ring);
-        round.appendChild(reportLegend(money ? rows : measured, money ? maxShare(rows) : total, money));
+        round.appendChild(reportLegend(money ? rows : measured, money ? maxShare(rows) : total, money, shares));
         return round;
     }
 
@@ -15168,11 +15219,44 @@
         return total;
     }
 
+    function shareLabels(values) {
+        var total = 0;
+        var i;
+        for (i = 0; i < values.length; i++) total += Number(values[i]) || 0;
+        var texts = [];
+        if (!total || !values.length) {
+            for (i = 0; i < values.length; i++) texts.push('0 %');
+            return texts;
+        }
+        var floors = [];
+        var remainders = [];
+        var assigned = 0;
+        for (i = 0; i < values.length; i++) {
+            var exact = (Number(values[i]) || 0) * 1000 / total;
+            var floor = Math.floor(exact + 1e-9);
+            floors.push(floor);
+            remainders.push(exact - floor);
+            assigned += floor;
+        }
+        var left = 1000 - assigned;
+        if (left < 0) left = 0;
+        while (left > 0) {
+            var best = 0;
+            for (i = 1; i < remainders.length; i++) if (remainders[i] > remainders[best]) best = i;
+            floors[best] += 1;
+            remainders[best] = -1;
+            left -= 1;
+        }
+        for (i = 0; i < floors.length; i++) {
+            var tenths = floors[i];
+            var text = tenths % 10 === 0 ? String(tenths / 10) : String(Math.floor(tenths / 10)) + '.' + String(tenths % 10);
+            texts.push(text + ' %');
+        }
+        return texts;
+    }
+
     function shareText(count, total) {
-        if (!total) return '0 %';
-        var pct = count * 100 / total;
-        var text = Math.abs(pct - Math.round(pct)) < 0.05 ? String(Math.round(pct)) : pct.toFixed(1);
-        return text + ' %';
+        return shareLabels([count, Math.max(0, total - count)])[0] || '0 %';
     }
 
     function groupWord(group) {
@@ -15336,13 +15420,16 @@
         var rows = view.rows || [];
         var money = reportMoney(view);
         var shareTotal = 0;
+        var shareValues = [];
         var maxValue = 1;
         rows.forEach(function (row) {
             var value = money ? (Number(row.amount) || 0) : (row.count || 0);
             shareTotal += value;
+            shareValues.push(value);
             if (value > maxValue) maxValue = value;
         });
         if (!money) shareTotal = view.total || 0;
+        var shares = shareLabels(shareValues);
         var kind = reportChartKind(view);
         var titleRow = el('div', 'asset-tree-report-title');
         var titles = el('div');
@@ -15359,7 +15446,7 @@
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
             if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
         } else {
-            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '');
+            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares);
             if (chartPanel) main.appendChild(chartPanel);
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
@@ -15369,7 +15456,7 @@
             if (money) header.appendChild(el('th', 'is-num is-money', t('lifeBook')));
             header.appendChild(el('th', 'is-num', t('reportShare')));
             table.appendChild(header);
-            rows.forEach(function (row) {
+            rows.forEach(function (row, index) {
                 var line = el('tr');
                 var name = el('td', 'asset-tree-report-name');
                 name.title = row.label || '';
@@ -15384,7 +15471,7 @@
                 line.appendChild(meter);
                 line.appendChild(el('td', 'is-num', String(row.count)));
                 if (money) line.appendChild(el('td', 'is-num is-money', reportMoneyLabel(Number(row.amount) || 0)));
-                line.appendChild(el('td', 'is-num', shareText(meterValue, shareTotal)));
+                line.appendChild(el('td', 'is-num', shares[index] || '0 %'));
                 table.appendChild(line);
             });
             var total = el('tr', 'is-total');
@@ -15392,7 +15479,7 @@
             total.appendChild(el('td', 'asset-tree-report-meter', ''));
             total.appendChild(el('td', 'is-num', String(view.total || 0)));
             if (money) total.appendChild(el('td', 'is-num is-money', reportMoneyLabel(shareTotal)));
-            total.appendChild(el('td', 'is-num', shareText(shareTotal, shareTotal)));
+            total.appendChild(el('td', 'is-num', shareTotal ? '100 %' : '0 %'));
             table.appendChild(total);
             main.appendChild(table);
         }
@@ -15404,6 +15491,12 @@
             lines.appendChild(lineHead);
             view.lines.forEach(function (row) {
                 var line = el('tr');
+                if (row.assetId) {
+                    line.className = 'is-open';
+                    line.addEventListener('click', function () {
+                        goToAsset(state.projectKey, row.assetId);
+                    });
+                }
                 line.appendChild(el('td', 'asset-tree-report-key', row.objectKey || ''));
                 var who = el('td', 'asset-tree-report-line');
                 who.appendChild(el('strong', null, row.name || ''));
@@ -15437,6 +15530,13 @@
         if (view.capped && shown >= lineTotal) note += ' ' + t('reportLinesCut');
         foot.appendChild(el('p', null, note));
         if (!view.standard && state.canEdit) {
+            var savedItem = null;
+            (state.reportCatalog || []).forEach(function (item) {
+                if (String(item.id) === String(view.id)) savedItem = item;
+            });
+            foot.appendChild(button(t('reportEdit'), 'asset-tree-btn', function () {
+                openReportDialog(savedItem || { id: view.id, name: view.title, groupBy: view.groupBy, chart: view.chart, metric: view.sum ? 'cost' : 'count', filterField: '', filterValue: '' });
+            }));
             foot.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
                 if (!window.confirm(t('reportDeleteConfirm', view.title || ''))) return;
                 ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), null, function (status, payload) {
@@ -15456,12 +15556,24 @@
         return main;
     }
 
-    function openReportDialog() {
+    function mixKeys(value, name) {
+        var parts = String(value || '').split(';');
+        var i;
+        for (i = 0; i < parts.length; i++) {
+            if (parts[i].indexOf(name + '=') === 0) {
+                return parts[i].slice(name.length + 1).split(',').filter(function (part) { return part; });
+            }
+        }
+        return [];
+    }
+
+    function openReportDialog(existing) {
+        var editing = !!(existing && existing.id);
         var pickedTypes = {};
         var pickedStatuses = {};
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
-            dialog.appendChild(el('h2', null, t('reportCreate')));
+            dialog.appendChild(el('h2', null, t(editing ? 'reportEdit' : 'reportCreate')));
             var name = document.createElement('input');
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
@@ -15472,7 +15584,7 @@
                 option.textContent = t(pair[1]);
                 group.appendChild(option);
             });
-            group.value = 'type';
+            group.value = editing && existing.groupBy ? existing.groupBy : 'type';
             var chart = document.createElement('select');
             [['donut', 'reportDonut'], ['pie', 'reportPie'], ['bar', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -15480,7 +15592,8 @@
                 option.textContent = t(pair[1]);
                 chart.appendChild(option);
             });
-            chart.value = 'bar';
+            chart.value = editing && existing.chart ? existing.chart : 'bar';
+            if (editing && existing.name) name.value = existing.name;
             var metric = document.createElement('select');
             [['count', 'reportCount'], ['cost', 'lifeBook']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -15488,6 +15601,13 @@
                 option.textContent = t(pair[1]);
                 metric.appendChild(option);
             });
+            if (editing && existing.metric === 'cost') metric.value = 'cost';
+            var initialTypes = editing ? mixKeys(existing.filterValue, 't') : [];
+            var initialStatuses = editing ? mixKeys(existing.filterValue, 's') : [];
+            var initialHolders = editing ? mixKeys(existing.filterValue, 'h') : [];
+            var initialPlaces = editing ? mixKeys(existing.filterValue, 'p') : [];
+            initialTypes.forEach(function (key) { pickedTypes[key] = true; });
+            initialStatuses.forEach(function (key) { pickedStatuses[key] = true; });
             function syncMetric() {
                 var cost = metric.querySelector('option[value="cost"]');
                 var kindGroup = group.value === 'kind';
@@ -15495,6 +15615,7 @@
                 if (kindGroup && metric.value === 'cost') metric.value = 'count';
             }
             group.addEventListener('change', syncMetric);
+            syncMetric();
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
             row.appendChild(planField(t('reportChart'), chart));
@@ -15508,6 +15629,7 @@
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
+                box.checked = !!pickedTypes[type.typeKey];
                 box.addEventListener('change', function () {
                     if (box.checked) pickedTypes[type.typeKey] = true;
                     else delete pickedTypes[type.typeKey];
@@ -15523,6 +15645,7 @@
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
+                box.checked = !!pickedStatuses[status.statusKey];
                 box.addEventListener('change', function () {
                     if (box.checked) pickedStatuses[status.statusKey] = true;
                     else delete pickedStatuses[status.statusKey];
@@ -15534,6 +15657,8 @@
             dialog.appendChild(statuses);
             var pickedHolders = {};
             var pickedPlaces = {};
+            initialHolders.forEach(function (key) { pickedHolders[key] = true; });
+            initialPlaces.forEach(function (key) { pickedPlaces[key] = true; });
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyHolders')));
             var holders = el('div', 'asset-tree-check-list');
             var holderSeen = {};
@@ -15544,6 +15669,7 @@
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
+                box.checked = !!pickedHolders[person.userKey];
                 box.addEventListener('change', function () {
                     if (box.checked) pickedHolders[person.userKey] = true;
                     else delete pickedHolders[person.userKey];
@@ -15560,6 +15686,7 @@
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
+                box.checked = !!pickedPlaces[String(asset.id)];
                 box.addEventListener('change', function () {
                     if (box.checked) pickedPlaces[String(asset.id)] = true;
                     else delete pickedPlaces[String(asset.id)];
@@ -15593,7 +15720,13 @@
                     if (placeKeys.length) parts.push('p=' + placeKeys.join(','));
                     body.filterValue = parts.join(';');
                 }
-                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', body, function (status, payload) {
+                if (body.filterValue && body.filterValue.length > 4000) {
+                    save.disabled = false;
+                    notify(t('reportFilterLong'));
+                    return;
+                }
+                var path = '/projects/' + encodeURIComponent(state.projectKey) + '/reports' + (editing ? '/' + encodeURIComponent(existing.id) : '');
+                ajax(editing ? 'PUT' : 'POST', path, body, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal(hold);
                         var created = payload && (payload.id || payload.key || '');
@@ -15651,11 +15784,12 @@
             reportMail: !!setup.reportMail,
             reportMailEvery: setup.reportMailEvery === 'month' ? 'month' : 'week',
             reportMailDay: (function () {
-                var day = clampNum(setup.reportMailDay || 1, 1, setup.reportMailEvery === 'month' ? 28 : 7);
+                var day = clampNum(setup.reportMailDay || 1, 1, setup.reportMailEvery === 'month' ? 31 : 7);
                 return day;
             })(),
             reportMailTo: setup.reportMailTo || '',
             reportMailSent: setup.reportMailSent || '',
+            reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,
             lifeApprover: setup.lifeApprover || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',

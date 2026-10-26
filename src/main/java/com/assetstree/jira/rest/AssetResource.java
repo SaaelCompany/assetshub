@@ -584,6 +584,11 @@ public class AssetResource {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
+                boolean editing = draft != null && ((draft.getName() != null && !draft.getName().trim().isEmpty())
+                        || (draft.getGroupBy() != null && !draft.getGroupBy().trim().isEmpty()));
+                if (editing) {
+                    return Response.ok(assetService.updateSavedReport(user(), projectKey, reportKey, draft)).build();
+                }
                 String chart = draft == null ? "" : draft.getChart();
                 return Response.ok(assetService.updateReportChart(user(), projectKey, reportKey, chart)).build();
             }

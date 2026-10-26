@@ -40,6 +40,7 @@ public final class ModuleSetup {
         setup.setReportMailDay(Integer.valueOf(mailDay(values.get("rday"), setup.getReportMailEvery())));
         setup.setReportMailTo(mailTo(values.get("rto")));
         setup.setReportMailSent(mailSent(values.get("rsent")));
+        setup.setReportMailPart(mailPart(values.get("rpart")));
         setup.setLifeApproval(Boolean.valueOf(!"0".equals(values.get("approve"))));
         setup.setLifeApprover(who(values.get("who")));
         setup.setLifeCurrency(currency(values.get("cur")));
@@ -74,6 +75,7 @@ public final class ModuleSetup {
         append(stored, "rday", String.valueOf(value.getReportMailDay() == null ? mailDay("", every) : mailDay(String.valueOf(value.getReportMailDay()), every)));
         append(stored, "rto", mailTo(value.getReportMailTo()));
         append(stored, "rsent", mailSent(value.getReportMailSent()));
+        append(stored, "rpart", mailPart(value.getReportMailPart()));
         append(stored, "approve", Boolean.FALSE.equals(value.getLifeApproval()) ? "0" : "1");
         append(stored, "who", who(value.getLifeApprover()));
         append(stored, "cur", currency(value.getLifeCurrency()));
@@ -426,7 +428,7 @@ public final class ModuleSetup {
             if (value < 1) {
                 return 1;
             }
-            return value > 28 ? 28 : value;
+            return value > 31 ? 31 : value;
         }
         if (value < 1 || value > 7) {
             return 1;
@@ -446,7 +448,7 @@ public final class ModuleSetup {
             if (key.isEmpty() || key.length() > 80 || !key.matches("[A-Za-z0-9._@-]+") || seen.contains(key)) {
                 continue;
             }
-            if (seen.size() >= 5) {
+            if (seen.size() >= 20) {
                 break;
             }
             seen.add(key);
@@ -461,6 +463,24 @@ public final class ModuleSetup {
     private static String mailSent(String raw) {
         String value = raw == null ? "" : raw.trim();
         return value.matches("\\d{4}-\\d{2}-\\d{2}") ? value : "";
+    }
+
+    /** {@code yyyy-mm-dd:user,user} — recipients already queued for that occurrence. */
+    private static String mailPart(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        int colon = value.indexOf(':');
+        if (colon != 10) {
+            return "";
+        }
+        String day = mailSent(value.substring(0, 10));
+        if (day.isEmpty()) {
+            return "";
+        }
+        String keys = mailTo(value.substring(11));
+        if (keys.isEmpty()) {
+            return "";
+        }
+        return day + ":" + keys;
     }
 
     private static String who(String raw) {

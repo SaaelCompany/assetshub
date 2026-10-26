@@ -21,6 +21,7 @@ public class ModuleSetupDto {
     private Integer reportMailDay;
     private String reportMailTo;
     private String reportMailSent;
+    private String reportMailPart;
     private Boolean lifeApproval;
     private String lifeApprover;
     private String lifeCurrency;
@@ -62,6 +63,8 @@ public class ModuleSetupDto {
     public void setReportMailTo(String reportMailTo) { this.reportMailTo = reportMailTo; }
     public String getReportMailSent() { return reportMailSent; }
     public void setReportMailSent(String reportMailSent) { this.reportMailSent = reportMailSent; }
+    public String getReportMailPart() { return reportMailPart; }
+    public void setReportMailPart(String reportMailPart) { this.reportMailPart = reportMailPart; }
     public Boolean getLifeApproval() { return lifeApproval; }
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }

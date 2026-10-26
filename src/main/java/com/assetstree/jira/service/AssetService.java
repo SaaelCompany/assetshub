@@ -232,6 +232,8 @@ public interface AssetService {
 
     SavedReportDto updateReportChart(ApplicationUser user, String projectKey, String reportKey, String chart);
 
+    SavedReportDto updateSavedReport(ApplicationUser user, String projectKey, String reportKey, SavedReportDraft draft);
+
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
 
     ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines);
