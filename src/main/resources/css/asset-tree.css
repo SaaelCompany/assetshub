@@ -8340,6 +8340,40 @@ a.asset-tree-url {
     background: #f4f5f7 !important;
 }
 
+#asset-tree-app button.asset-tree-roster-fold {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 4px;
+    background: transparent !important;
+    color: #6b778c !important;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 16px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-roster-fold:hover,
+#asset-tree-app button.asset-tree-roster-fold.is-hidden {
+    background: #fff !important;
+    color: #172b4d !important;
+}
+
+#asset-tree-app .asset-tree-roster-fold-count {
+    flex: 0 0 auto;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+}
+
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row .asset-tree-roster-name,
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-day,
 #asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-total {

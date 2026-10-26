@@ -447,6 +447,8 @@
         schedulePersonFilter: '',
         scheduleFocusAsset: 0,
         staffPlaceFilter: '',
+        staffHiddenPlaces: {},
+        staffHiddenProject: '',
         staffRows: null,
         staffLoading: false,
         staffToken: 0,
@@ -14043,8 +14045,41 @@
         }, 0);
     }
 
-    function staffPlaceHead(placeId, label) {
+    function staffHiddenKey() {
+        return 'asset-tree.rosterHidden.' + (state.projectKey || '');
+    }
+
+    function loadStaffHidden() {
+        if (state.staffHiddenProject === state.projectKey && state.staffHiddenPlaces) return;
+        var hidden = {};
+        try {
+            String(localStorage.getItem(staffHiddenKey()) || '').split(',').forEach(function (part) {
+                if (part) hidden[part] = true;
+            });
+        } catch (ignore) {}
+        state.staffHiddenPlaces = hidden;
+        state.staffHiddenProject = state.projectKey;
+    }
+
+    function staffPlaceHidden(placeId) {
+        loadStaffHidden();
+        return !!state.staffHiddenPlaces[String(placeId || 0)];
+    }
+
+    function toggleStaffPlace(placeId) {
+        loadStaffHidden();
+        var id = String(placeId || 0);
+        if (state.staffHiddenPlaces[id]) delete state.staffHiddenPlaces[id];
+        else state.staffHiddenPlaces[id] = true;
+        try {
+            localStorage.setItem(staffHiddenKey(), Object.keys(state.staffHiddenPlaces).join(','));
+        } catch (ignore) {}
+        renderFrame();
+    }
+
+    function staffPlaceHead(placeId, label, count) {
         var box = el('div', 'asset-tree-roster-branch');
+        var hidden = staffPlaceHidden(placeId);
         var movable = !!(state.canEdit && label);
         if (movable) {
             var grip = button('', 'asset-tree-roster-grip', function () {});
@@ -14054,6 +14089,15 @@
             grip.addEventListener('mousedown', function (event) { beginBranchReorder(placeId, event); });
             box.appendChild(grip);
         }
+        var fold = button(hidden ? '\u25B8' : '\u25BE', 'asset-tree-roster-fold' + (hidden ? ' is-hidden' : ''), function (event) {
+            event.stopPropagation();
+            toggleStaffPlace(placeId);
+        });
+        fold.title = hidden ? t('staffPlaceShow') : t('staffPlaceHide');
+        fold.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+        fold.setAttribute('aria-label', hidden ? t('staffPlaceShow') : t('staffPlaceHide'));
+        fold.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        box.appendChild(fold);
         var title = el('strong', movable ? 'is-drag' : null, label);
         if (movable) {
             title.addEventListener('mousedown', function (event) {
@@ -14062,6 +14106,11 @@
             });
         }
         box.appendChild(title);
+        if (hidden && count) {
+            var badge = el('span', 'asset-tree-roster-fold-count', String(count));
+            badge.title = t('staffPlaceHidden', count);
+            box.appendChild(badge);
+        }
         if (state.canEdit) {
             var plus = button('+', 'asset-tree-roster-branch-add', function (event) {
                 event.stopPropagation();
@@ -14469,7 +14518,8 @@
         var name = el('th', 'asset-tree-roster-name');
         if (section.name) {
             row.setAttribute('data-place', String(section.placeId || 0));
-            name.appendChild(staffPlaceHead(section.placeId, section.name));
+            name.appendChild(staffPlaceHead(section.placeId, section.name, section.people.length));
+            if (staffPlaceHidden(section.placeId)) row.className += ' is-folded';
         }
         row.appendChild(name);
         staffDateHead(row, year, month, count, today);
@@ -14494,7 +14544,8 @@
                 var banner = el('tr', 'asset-tree-roster-branch-row');
                 banner.setAttribute('data-place', String(section.placeId || 0));
                 var cell = el('th', 'asset-tree-roster-name');
-                cell.appendChild(staffPlaceHead(section.placeId, section.name));
+                cell.appendChild(staffPlaceHead(section.placeId, section.name, section.people.length));
+                if (staffPlaceHidden(section.placeId)) banner.className += ' is-folded';
                 banner.appendChild(cell);
                 var gap;
                 for (gap = 1; gap <= count; gap++) {
@@ -14506,6 +14557,7 @@
                 banner.appendChild(el('td', 'asset-tree-roster-total'));
                 body.appendChild(banner);
             }
+            if (staffPlaceHidden(section.placeId)) return;
             section.people.forEach(function (person) {
                 var line = staffRosterRow(person, year, month, count, today);
                 line.setAttribute('data-place', String(section.placeId || 0));
