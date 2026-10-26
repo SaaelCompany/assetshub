@@ -8273,8 +8273,14 @@ public class AssetServiceImpl implements AssetService {
         if ("kind".equals(group)) {
             return i18n().getText("asset-tree.ui.reportWorkDetail");
         }
-        if ("age".equals(group)) {
+        if ("age".equals(group) || "month".equals(group)) {
             return i18n().getText("asset-tree.ui.lifePurchase");
+        }
+        if (ReportCatalog.WARRANTY.equals(group)) {
+            return i18n().getText("asset-tree.ui.lifeWarranty");
+        }
+        if (ReportCatalog.WRITEOFF.equals(group)) {
+            return i18n().getText("asset-tree.ui.reportWriteoffDetail");
         }
         return groupHeading(group);
     }

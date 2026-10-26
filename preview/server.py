@@ -1947,25 +1947,6 @@ def jump_to(first, count, unit, start):
     return jumped
 
 
-def step_back(first, upcoming, count, unit):
-    if not first or not upcoming or upcoming <= first:
-        return None
-    if unit in ("day", "week"):
-        span = count * (7 if unit == "week" else 1)
-        if span < 1:
-            return None
-        prior = upcoming - datetime.timedelta(days=span)
-        return None if prior < first else prior
-    cursor = first
-    prior = None
-    guard = 0
-    while cursor and cursor < upcoming and guard < 600:
-        prior = cursor
-        cursor = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
-        guard += 1
-    return prior
-
-
 def display_of(series_day, moved):
     if not series_day:
         return None
@@ -2004,27 +1985,34 @@ def next_shown(plan, today=None):
         if target:
             return parse_plan_date(target)
         return first
-    upcoming = jump_to(first, count, unit, today) if first < today else first
-    shown_upcoming = display_of(upcoming, moved)
     overdue = None
-    if not (shown_upcoming and shown_upcoming == today):
-        if upcoming and upcoming > first:
-            prior = step_back(first, upcoming, count, unit)
-            if prior and after_anchor(prior, plan.get("lastDone") or ""):
-                shown = display_of(prior, moved)
-                if shown and shown <= today:
-                    overdue = shown
-        anchor = (plan.get("lastDone") or "").strip()[:10]
-        for source, target in moved.items():
-            if not target or target == "-":
-                continue
-            if anchor and source <= anchor:
-                continue
-            shown = parse_plan_date(target)
+    cursor = first
+    guard = 0
+    anchor_day = plan.get("lastDone") or ""
+    while cursor and guard < 20000:
+        if after_anchor(cursor, anchor_day):
+            shown = display_of(cursor, moved)
             if shown and shown <= today and (overdue is None or shown > overdue):
                 overdue = shown
+        if cursor >= today:
+            break
+        nxt = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        if not nxt or nxt <= cursor:
+            break
+        cursor = nxt
+        guard += 1
+    anchor = (plan.get("lastDone") or "").strip()[:10]
+    for source, target in moved.items():
+        if not target or target == "-":
+            continue
+        if anchor and source <= anchor:
+            continue
+        shown = parse_plan_date(target)
+        if shown and shown <= today and (overdue is None or shown > overdue):
+            overdue = shown
     if overdue:
         return overdue
+    upcoming = jump_to(first, count, unit, today) if first < today else first
     best = None
     anchor = (plan.get("lastDone") or "").strip()[:10]
     for source, target in moved.items():
@@ -3928,8 +3916,12 @@ def queue_report_mail(project_key, text, force):
 def detail_word(group, text):
     if group == "kind":
         return text.get("asset-tree.ui.reportWorkDetail", "Object and date")
-    if group == "age":
+    if group in ("age", "month"):
         return text.get("asset-tree.ui.lifePurchase", "Purchase date")
+    if group == "warranty":
+        return text.get("asset-tree.ui.lifeWarranty", "Warranty until")
+    if group == "writeoff":
+        return text.get("asset-tree.ui.reportWriteoffDetail", "Reason or decision date")
     return group_word(group, text)
 
 

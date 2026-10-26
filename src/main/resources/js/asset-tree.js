@@ -475,6 +475,9 @@
         reportView: null,
         reportChart: '',
         reportChartFor: '',
+        reportChartBusy: false,
+        reportChartPending: null,
+        reportChartEpoch: 0,
         reportEmptyNav: false,
         reportOpen: false,
         galleryToken: 0,
@@ -8595,6 +8598,9 @@
         state.reportView = null;
         state.reportChart = '';
         state.reportChartFor = '';
+        state.reportChartBusy = false;
+        state.reportChartPending = null;
+        state.reportChartEpoch += 1;
         state.reportEmptyNav = false;
         state.reportOpen = false;
         state.galleryToken++;
@@ -14972,54 +14978,78 @@
         var seg = el('div', 'asset-tree-seg asset-tree-report-switch');
         [['donut', 'reportDonut'], ['pie', 'reportPie'], ['columns', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
             seg.appendChild(button(t(pair[1]), 'asset-tree-seg-btn' + (kind === pair[0] ? ' is-on' : ''), function () {
-                var previousFor = state.reportChartFor;
-                var previousChart = state.reportChart;
                 state.reportChartFor = String(view.id || '');
                 state.reportChart = pair[0];
                 if (!paintReport()) renderFrame();
-                rememberReportChart(view, pair[0], function (ok) {
-                    if (ok) return;
-                    state.reportChartFor = previousFor;
-                    state.reportChart = previousChart;
-                    if (!paintReport()) renderFrame();
-                });
+                rememberReportChart(view, pair[0]);
             }));
         });
         return seg;
     }
 
-    function rememberReportChart(view, kind, done) {
-        if (!state.canEdit || !view || !view.id) {
-            if (done) done(true);
+    function reportChartSession(wire) {
+        if (wire === 'donut' || wire === 'pie' || wire === 'bars') return wire;
+        return 'columns';
+    }
+
+    function rememberReportChart(view, kind) {
+        if (!state.canEdit || !view || !view.id) return;
+        state.reportChartPending = {
+            view: view,
+            kind: kind,
+            projectKey: state.projectKey,
+            epoch: state.reportChartEpoch
+        };
+        if (state.reportChartBusy) return;
+        sendReportChart();
+    }
+
+    function sendReportChart() {
+        var job = state.reportChartPending;
+        if (!job) {
+            state.reportChartBusy = false;
             return;
         }
-        var projectKey = state.projectKey;
-        var wire = kind === 'columns' ? 'bar' : kind;
-        ajax('PUT', '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(view.id), { chart: wire }, function (status, payload) {
-            if (state.projectKey !== projectKey) {
-                if (done) done(true);
+        state.reportChartPending = null;
+        if (job.epoch !== state.reportChartEpoch || state.projectKey !== job.projectKey) {
+            state.reportChartBusy = false;
+            return;
+        }
+        state.reportChartBusy = true;
+        var wire = job.kind === 'columns' ? 'bar' : job.kind;
+        ajax('PUT', '/projects/' + encodeURIComponent(job.projectKey) + '/reports/' + encodeURIComponent(job.view.id), { chart: wire }, function (status, payload) {
+            if (job.epoch !== state.reportChartEpoch || state.projectKey !== job.projectKey) {
                 return;
             }
-            if (status >= 200 && status < 300 && state.reportView && String(state.reportView.id) === String(view.id)) {
-                state.reportView.chart = (payload && payload.chart) || wire;
+            state.reportChartBusy = false;
+            var saved = status >= 200 && status < 300;
+            var chart = (payload && payload.chart) || wire;
+            if (saved) {
+                job.view.chart = chart;
+                if (state.reportView && String(state.reportView.id) === String(job.view.id)) state.reportView.chart = chart;
                 (state.reportCatalog || []).forEach(function (item) {
-                    if (String(item.id) === String(view.id)) item.chart = state.reportView.chart;
+                    if (String(item.id) === String(job.view.id)) item.chart = chart;
                 });
-                if (view.standard) {
+                if (job.view.standard) {
                     var project = currentProject();
                     if (project && project.setup) {
                         var parts = String(project.setup.reportCharts || '').split(',').filter(function (part) {
-                            return part && part.indexOf(String(view.id) + ':') !== 0;
+                            return part && part.indexOf(String(job.view.id) + ':') !== 0;
                         });
-                        parts.push(String(view.id) + ':' + (state.reportView.chart || wire));
+                        parts.push(String(job.view.id) + ':' + chart);
                         project.setup.reportCharts = parts.filter(function (part) { return part; }).join(',');
                     }
                 }
-                if (done) done(true);
-            } else {
-                notify((payload && payload.message) || t('errorTitle'));
-                if (done) done(false);
             }
+            if (state.reportChartPending) {
+                sendReportChart();
+                return;
+            }
+            if (saved) return;
+            notify((payload && payload.message) || t('errorTitle'));
+            if (state.reportChartFor !== String(job.view.id) || state.reportChart !== job.kind) return;
+            state.reportChart = reportChartSession(job.view.chart);
+            if (state.reportView && String(state.reportView.id) === String(job.view.id) && !paintReport()) renderFrame();
         });
     }
 
@@ -15153,9 +15183,19 @@
         return t(map[group] || 'groupWordStatus');
     }
 
+    function groupPhrase(group) {
+        var map = {
+            status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder',
+            month: 'reportGroupMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind'
+        };
+        return t(map[group] || 'reportGroupStatus');
+    }
+
     function detailWord(group) {
         if (group === 'kind') return t('reportWorkDetail');
-        if (group === 'age') return t('lifePurchase');
+        if (group === 'age' || group === 'month') return t('lifePurchase');
+        if (group === 'warranty') return t('lifeWarranty');
+        if (group === 'writeoff') return t('reportWriteoffDetail');
         return groupWord(group);
     }
 
@@ -15307,7 +15347,7 @@
         var titleRow = el('div', 'asset-tree-report-title');
         var titles = el('div');
         titles.appendChild(el('h3', null, view.title || ''));
-        titles.appendChild(el('p', null, t('reportGroupBy') + ': ' + groupWord(view.groupBy)));
+        titles.appendChild(el('p', null, groupPhrase(view.groupBy)));
         titleRow.appendChild(titles);
         titleRow.appendChild(reportChartSwitch(view, kind));
         main.appendChild(titleRow);

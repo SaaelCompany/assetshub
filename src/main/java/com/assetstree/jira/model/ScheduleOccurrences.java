@@ -83,8 +83,8 @@ public final class ScheduleOccurrences {
 
     /**
      * The day a report line should show. A repeating plan keeps the latest
-     * open day on or before today, so a missed day that is still on the
-     * calendar stays in the line. A removed day is skipped. Otherwise the
+     * open day on or before today, including an earlier one when a later day
+     * was removed or dragged away. A removed day is skipped. Otherwise the
      * line uses the soonest later day, including one that was dragged. A
      * finished or skipped one-off, and a series with no day left, has none.
      */
@@ -109,30 +109,36 @@ public final class ScheduleOccurrences {
             }
             return first;
         }
-        LocalDate upcoming = first.isBefore(today) ? jumpTo(first, count, clean, today) : first;
-        LocalDate overdue = overdueDay(first, upcoming, count, clean, moved, lastDone, today);
+        LocalDate overdue = overdueDay(first, count, clean, moved, lastDone, today);
         if (overdue != null) {
             return overdue;
         }
+        LocalDate upcoming = first.isBefore(today) ? jumpTo(first, count, clean, today) : first;
         return soonestLater(upcoming, count, clean, moved, lastDone, today);
     }
 
-    /** Latest open day on or before today, when today itself is not that day. */
-    private static LocalDate overdueDay(LocalDate first, LocalDate upcoming, int count, String unit,
-            Map<String, String> moved, String lastDone, LocalDate today) {
-        LocalDate shownUpcoming = displayOf(upcoming, moved);
-        if (shownUpcoming != null && shownUpcoming.isEqual(today)) {
-            return null;
-        }
+    /** Latest open displayed day on or before today. Today wins when it is still shown. */
+    private static LocalDate overdueDay(LocalDate first, int count, String unit, Map<String, String> moved,
+            String lastDone, LocalDate today) {
         LocalDate best = null;
-        if (upcoming != null && first != null && upcoming.isAfter(first)) {
-            LocalDate prior = stepBack(first, upcoming, count, unit);
-            if (prior != null && afterAnchor(prior, lastDone)) {
-                LocalDate shown = displayOf(prior, moved);
-                if (shown != null && !shown.isAfter(today)) {
+        LocalDate cursor = first;
+        int guard = 0;
+        while (cursor != null && guard < 20000) {
+            if (afterAnchor(cursor, lastDone)) {
+                LocalDate shown = displayOf(cursor, moved);
+                if (shown != null && !shown.isAfter(today) && (best == null || shown.isAfter(best))) {
                     best = shown;
                 }
             }
+            if (!cursor.isBefore(today)) {
+                break;
+            }
+            LocalDate next = ServiceDue.next(cursor.toString(), count, unit);
+            if (next == null || !next.isAfter(cursor)) {
+                break;
+            }
+            cursor = next;
+            guard++;
         }
         String anchor = lastDone == null ? "" : lastDone.trim();
         for (Map.Entry<String, String> entry : moved.entrySet()) {
@@ -208,30 +214,6 @@ public final class ScheduleOccurrences {
             return true;
         }
         return day.isAfter(anchor);
-    }
-
-    /** The series day immediately before {@code upcoming}. */
-    private static LocalDate stepBack(LocalDate first, LocalDate upcoming, int count, String unit) {
-        if (first == null || upcoming == null || !upcoming.isAfter(first)) {
-            return null;
-        }
-        if (ServiceDue.DAY.equals(unit) || ServiceDue.WEEK.equals(unit)) {
-            int span = ServiceDue.WEEK.equals(unit) ? count * 7 : count;
-            if (span < 1) {
-                return null;
-            }
-            LocalDate prior = upcoming.minusDays(span);
-            return prior.isBefore(first) ? null : prior;
-        }
-        LocalDate cursor = first;
-        LocalDate prior = null;
-        int guard = 0;
-        while (cursor != null && cursor.isBefore(upcoming) && guard < 600) {
-            prior = cursor;
-            cursor = ServiceDue.next(cursor.toString(), count, unit);
-            guard++;
-        }
-        return prior;
     }
 
     /** Source day to the day it is shown on. {@code -} means that day was removed. */
