@@ -245,7 +245,7 @@ public interface AssetService {
 
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
 
-    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines);
+    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket);
 
     byte[] exportReports(ApplicationUser user, String projectKey);
 

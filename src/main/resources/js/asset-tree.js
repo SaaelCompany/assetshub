@@ -15604,7 +15604,7 @@
     function reportLegend(rows, total, money, shares) {
         var list = el('ul', 'asset-tree-report-legend');
         rows.forEach(function (row, index) {
-            var item = el('li');
+            var item = el('li', row.activate ? 'is-pick' : '');
             var swatch = el('i');
             swatch.style.background = row.color || '#0052CC';
             item.appendChild(swatch);
@@ -15614,6 +15614,16 @@
             var value = money ? (Number(row.amount) || 0) : (row.count || 0);
             var shown = money ? reportMoneyLabel(value) : String(row.count);
             item.appendChild(el('strong', null, shown + ' · ' + (shares && shares[index] ? shares[index] : '0 %')));
+            if (row.activate) {
+                item.tabIndex = 0;
+                item.addEventListener('click', function () { row.activate(); });
+                item.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
+            }
             list.appendChild(item);
         });
         return list;
@@ -15622,7 +15632,17 @@
     function reportColumnsChart(rows, max, money) {
         var wrap = el('div', 'asset-tree-report-columns' + (money ? ' is-money' : ''));
         rows.forEach(function (row) {
-            var col = el('div', 'asset-tree-report-column');
+            var col = el('div', 'asset-tree-report-column' + (row.activate ? ' is-pick' : ''));
+            if (row.activate) {
+                col.tabIndex = 0;
+                col.addEventListener('click', function () { row.activate(); });
+                col.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
+            }
             var shown = row.text || String(row.count);
             var count = el('span', 'asset-tree-report-column-count', shown);
             count.title = shown;
@@ -15646,7 +15666,17 @@
     function reportBarsChart(rows, max, money) {
         var list = el('div', 'asset-tree-report-bars' + (money ? ' is-money' : ''));
         rows.forEach(function (row) {
-            var line = el('div', 'asset-tree-report-bar');
+            var line = el('div', 'asset-tree-report-bar' + (row.activate ? ' is-pick' : ''));
+            if (row.activate) {
+                line.tabIndex = 0;
+                line.addEventListener('click', function () { row.activate(); });
+                line.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
+            }
             var label = el('span', 'asset-tree-report-bar-label', row.label || '');
             label.title = row.label || '';
             line.appendChild(label);
@@ -15670,10 +15700,12 @@
         var next = [];
         rows.forEach(function (row) {
             next.push({
+                key: row.key,
                 label: row.label,
                 color: row.color,
                 count: Number(row.amount) || 0,
-                text: reportMoneyLabel(Number(row.amount) || 0)
+                text: reportMoneyLabel(Number(row.amount) || 0),
+                activate: row.activate
             });
         });
         return next;
@@ -15854,6 +15886,7 @@
 
     function openGallery(id) {
         if (!id) return;
+        closeAllModals();
         state.reportKey = id;
         highlightReport(id);
         if (state.reportCatalog == null) return;
@@ -15915,6 +15948,83 @@
         return panel;
     }
 
+    var reportObjectToken = 0;
+
+    function paintReportObjectLines(host, view, payload, failed, reload) {
+        while (host.firstChild) host.removeChild(host.firstChild);
+        if (failed) {
+            host.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
+            return;
+        }
+        var lines = (payload && payload.lines) || [];
+        var lineTotal = (payload && payload.lineTotal) || lines.length;
+        var money = reportMoney(view);
+        if (!lines.length) {
+            host.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
+            return;
+        }
+        var table = el('table', 'asset-tree-report-object-table');
+        var head = el('tr');
+        head.appendChild(el('th', null, t('keyLabel')));
+        head.appendChild(el('th', null, t('name')));
+        table.appendChild(head);
+        lines.forEach(function (item) {
+            var line = el('tr', item.assetId ? 'is-open' : '');
+            if (item.assetId) {
+                line.addEventListener('click', function () {
+                    closeModal();
+                    goToAsset(state.projectKey, item.assetId);
+                });
+            }
+            line.appendChild(el('td', 'is-key', item.objectKey || ''));
+            var who = el('td');
+            who.appendChild(el('strong', null, item.name || ''));
+            var detail = item.detail || '';
+            if (money && detail) {
+                var minor = reportMoneyMinor(detail);
+                if (minor != null) detail = reportMoneyLabel(minor);
+            }
+            if (detail) who.appendChild(el('span', null, detail));
+            line.appendChild(who);
+            table.appendChild(line);
+        });
+        host.appendChild(table);
+        if (payload.capped && lines.length < lineTotal) {
+            host.appendChild(button(t('reportLinesMore'), 'asset-tree-btn', reload));
+        }
+        if (payload.capped && lines.length >= lineTotal) {
+            host.appendChild(el('p', 'asset-tree-hint', t('reportLinesCut')));
+        }
+    }
+
+    function openReportObjects(view, row) {
+        if (!view || !row) return;
+        var key = row.key == null ? '' : String(row.key);
+        var token = ++reportObjectToken;
+        closeAllModals();
+        openModal(function (dialog) {
+            dialog.className += ' asset-tree-report-objects';
+            var title = row.label || '';
+            var count = row.count == null ? '' : String(row.count);
+            dialog.appendChild(el('h2', null, count ? title + ' · ' + count : title));
+            var host = el('div', 'asset-tree-report-object-list');
+            host.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            dialog.appendChild(host);
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('close'), 'asset-tree-btn', closeModal));
+            dialog.appendChild(actions);
+            function load(all) {
+                var path = '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id)
+                    + '?bucket=' + encodeURIComponent(key) + (all ? '&lines=all' : '');
+                ajax('GET', path, null, function (status, payload) {
+                    if (token !== reportObjectToken) return;
+                    paintReportObjectLines(host, view, payload, status !== 200, function () { load(true); });
+                });
+            }
+            load(false);
+        });
+    }
+
     function reportCard() {
         var main = el('div', 'asset-tree-report-main');
         var view = state.reportView;
@@ -15927,6 +16037,9 @@
             return main;
         }
         var rows = view.rows || [];
+        rows.forEach(function (row) {
+            row.activate = function () { openReportObjects(view, row); };
+        });
         var money = reportMoney(view);
         var shareTotal = 0;
         var shareValues = [];
@@ -15966,7 +16079,15 @@
             header.appendChild(el('th', 'is-num', t('reportShare')));
             table.appendChild(header);
             rows.forEach(function (row, index) {
-                var line = el('tr');
+                var line = el('tr', 'is-pick');
+                line.tabIndex = 0;
+                line.addEventListener('click', function () { row.activate(); });
+                line.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
                 var name = el('td', 'asset-tree-report-name');
                 name.title = row.label || '';
                 var dot = el('i');
@@ -15992,51 +16113,9 @@
             table.appendChild(total);
             main.appendChild(table);
         }
-        if (view.lines && view.lines.length) {
-            var lines = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-lines');
-            var lineHead = el('tr');
-            lineHead.appendChild(el('th', 'asset-tree-report-key', t('keyLabel')));
-            lineHead.appendChild(el('th', null, t('name')));
-            lines.appendChild(lineHead);
-            view.lines.forEach(function (row) {
-                var line = el('tr');
-                if (row.assetId) {
-                    line.className = 'is-open';
-                    line.addEventListener('click', function () {
-                        goToAsset(state.projectKey, row.assetId);
-                    });
-                }
-                line.appendChild(el('td', 'asset-tree-report-key', row.objectKey || ''));
-                var who = el('td', 'asset-tree-report-line');
-                who.appendChild(el('strong', null, row.name || ''));
-                var detail = row.detail || '';
-                if (money && detail) {
-                    var minor = reportMoneyMinor(detail);
-                    if (minor != null) detail = reportMoneyLabel(minor);
-                }
-                if (detail) who.appendChild(el('span', null, detail));
-                line.appendChild(who);
-                lines.appendChild(line);
-            });
-            main.appendChild(lines);
-        }
         var foot = el('div', 'asset-tree-report-foot');
-        var shown = (view.lines || []).length;
-        var lineTotal = view.lineTotal || shown;
-        if (view.capped && shown < lineTotal) {
-            foot.appendChild(button(t('reportLinesMore'), 'asset-tree-btn', function () {
-                ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
-                    if (status === 200 && payload && state.reportView && String(state.reportView.id) === String(view.id)) {
-                        state.reportView.lines = payload.lines || [];
-                        state.reportView.lineTotal = payload.lineTotal || (payload.lines || []).length;
-                        state.reportView.capped = !!payload.capped;
-                        if (!paintReport()) renderFrame();
-                    } else notify((payload && payload.message) || t('errorTitle'));
-                });
-            }));
-        }
         var note = view.hint || t('reportCounted');
-        if (view.capped && shown >= lineTotal) note += ' ' + t('reportLinesCut');
+        if (rows.length) note += ' ' + t('reportClickValue');
         foot.appendChild(el('p', null, note));
         if (!view.standard && state.canEdit) {
             var savedItem = null;

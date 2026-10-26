@@ -638,13 +638,13 @@ public class AssetResource {
     @GET
     @Path("projects/{projectKey}/reports/{reportKey}")
     public Response reportView(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
-            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines) {
+            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines, @QueryParam("bucket") final String bucket) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
                 int lineFrom = from == null ? 0 : from.intValue();
                 boolean allLines = lines != null && "all".equalsIgnoreCase(lines.trim());
-                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines)).build();
+                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines, bucket)).build();
             }
         });
     }

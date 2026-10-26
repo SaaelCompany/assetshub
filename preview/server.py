@@ -3172,6 +3172,15 @@ def distinct_report_colors(rows):
         used.add(color)
 
 
+def lines_for_bucket(lines, keys, query):
+    query = query or {}
+    if "bucket" not in query:
+        return lines, False
+    wanted = (query.get("bucket") or [""])[0]
+    kept = [line for line, key in zip(lines, keys) if key == wanted]
+    return kept, True
+
+
 def report_line_page(lines, query, truncated):
     query = query or {}
     line_total = len(lines)
@@ -3246,6 +3255,10 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
     paired = list(zip(lines, line_keys))
     paired.sort(key=lambda item: (rank.get(item[1], len(rows)), (item[0].get("name") or "").lower(), (item[0].get("objectKey") or "").lower()))
     lines = [item[0] for item in paired]
+    keys = [item[1] for item in paired]
+    lines, filtered = lines_for_bucket(lines, keys, query)
+    if filtered:
+        truncated = False
     page, line_total, capped = report_line_page(lines, query, truncated)
     chart = spec.get("chart") or "bar"
     if spec.get("standard"):
@@ -3417,6 +3430,10 @@ def report_view(project_key, report_key, text, query=None):
         (item[0].get("objectKey") or "").lower(),
     ))
     lines = [item[0] for item in paired]
+    keys = [item[1] for item in paired]
+    lines, filtered = lines_for_bucket(lines, keys, query)
+    if filtered:
+        capped = False
     page, line_total, page_capped = report_line_page(lines, query, capped)
     chart = spec.get("chart") or ("donut" if report_key == "status" else "bar")
     if spec.get("standard"):

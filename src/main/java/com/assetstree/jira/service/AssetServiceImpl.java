@@ -7457,18 +7457,18 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public ReportViewDto reportView(ApplicationUser user, final String projectKey, final String reportKey, final int lineFrom, final boolean allLines) {
+    public ReportViewDto reportView(ApplicationUser user, final String projectKey, final String reportKey, final int lineFrom, final boolean allLines, final String bucket) {
         final Project project = requireReadableProject(user, projectKey);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         return ao().executeInTransaction(new TransactionCallback<ReportViewDto>() {
             @Override
             public ReportViewDto doInTransaction() {
-                return reportViewInside(project, reportKey, lineFrom, allLines);
+                return reportViewInside(project, reportKey, lineFrom, allLines, bucket);
             }
         });
     }
 
-    private ReportViewDto reportViewInside(Project project, String reportKey, int lineFrom, boolean allLines) {
+    private ReportViewDto reportViewInside(Project project, String reportKey, int lineFrom, boolean allLines, String bucket) {
         String group = ReportCatalog.group(reportKey);
         String filter = "";
         String value = "";
@@ -7505,7 +7505,7 @@ public class AssetServiceImpl implements AssetService {
         if ("kind".equals(group)) {
             metric = "count";
         }
-        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines);
+        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket);
         view.setGroupBy(group);
         view.setChart(chart);
         return view;
@@ -7650,7 +7650,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private ReportViewDto buildReport(Project project, String key, String title, boolean standard,
-            String group, String filter, String value, String metric, int lineFrom, boolean allLines) {
+            String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket) {
         AssetEntity[] assets = assetsIn(project.getKey());
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), assets));
         Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
@@ -7666,7 +7666,7 @@ public class AssetServiceImpl implements AssetService {
         boolean money = ReportCatalog.COST.equals(key) || "cost".equals(metric);
         boolean works = ReportCatalog.WORK.equals(key) || ReportCatalog.SERVICE.equals(key) || "kind".equals(group);
         if (works) {
-            return buildWorkReport(project, key, title, standard, group, filter, value, assets, types, index, statusNames, lineFrom, allLines);
+            return buildWorkReport(project, key, title, standard, group, filter, value, assets, types, index, statusNames, lineFrom, allLines, onlyBucket);
         }
         boolean needsLife = reportNeedsLife(key, group, money);
         List<Integer> lifeIds = new ArrayList<Integer>();
@@ -7742,13 +7742,15 @@ public class AssetServiceImpl implements AssetService {
                 detail = MoneyText.format(book);
             }
             if (lines.size() < 5000) {
-                lines.add(new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(), detail));
+                ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(), detail);
+                line.setBucket(bucketKey);
+                lines.add(line);
                 lineKeys.add(bucketKey);
             } else {
                 truncated = true;
             }
         }
-        return finishReport(key, title, standard, group, money, chosen.size(), sum, buckets, lines, lineKeys, lineFrom, allLines, truncated,
+        return finishReport(key, title, standard, group, money, chosen.size(), sum, buckets, lines, lineKeys, onlyBucket, lineFrom, allLines, truncated,
                 emptyReason(key, group, money, anyPurchase), placeSort);
     }
 
@@ -7772,7 +7774,7 @@ public class AssetServiceImpl implements AssetService {
 
     private ReportViewDto buildWorkReport(Project project, String key, String title, boolean standard, String group,
             String filter, String value, AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
-            Map<String, String> statusNames, int lineFrom, boolean allLines) {
+            Map<String, String> statusNames, int lineFrom, boolean allLines, String onlyBucket) {
         Map<String, String> kindNames = kindNames(project.getKey());
         List<ServicePlanEntity> plans = new ArrayList<ServicePlanEntity>();
         boolean filtered = filter != null && !filter.isEmpty();
@@ -7856,7 +7858,9 @@ public class AssetServiceImpl implements AssetService {
                     }
                 }
                 if (lines.size() < 5000) {
-                    lines.add(new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString()));
+                    ReportLineDto line = new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString());
+                    line.setBucket(bucketKey);
+                    lines.add(line);
                     lineKeys.add(bucketKey);
                 } else {
                     truncated = true;
@@ -7867,13 +7871,27 @@ public class AssetServiceImpl implements AssetService {
         for (ReportBucketDto bucket : buckets.values()) {
             total += bucket.getCount();
         }
-        return finishReport(key, title, standard, "kind", false, total, 0L, buckets, lines, lineKeys, lineFrom, allLines, truncated, "",
+        return finishReport(key, title, standard, "kind", false, total, 0L, buckets, lines, lineKeys, onlyBucket, lineFrom, allLines, truncated, "",
                 new HashMap<String, String>());
     }
 
     private ReportViewDto finishReport(String key, String title, boolean standard, String group, boolean money, int total, long sum,
-            Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines, List<String> lineKeys, int lineFrom, boolean allLines, boolean truncated,
+            Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines, List<String> lineKeys, String onlyBucket, int lineFrom, boolean allLines, boolean truncated,
             String reason, Map<String, String> placeSort) {
+        if (onlyBucket != null) {
+            List<ReportLineDto> keptLines = new ArrayList<ReportLineDto>();
+            List<String> keptKeys = new ArrayList<String>();
+            for (int i = 0; i < lines.size(); i++) {
+                String lineKey = i < lineKeys.size() && lineKeys.get(i) != null ? lineKeys.get(i) : "";
+                if (onlyBucket.equals(lineKey)) {
+                    keptLines.add(lines.get(i));
+                    keptKeys.add(lineKey);
+                }
+            }
+            lines = keptLines;
+            lineKeys = keptKeys;
+            truncated = false;
+        }
         List<ReportBucketDto> rows = new ArrayList<ReportBucketDto>(buckets.values());
         if (money) {
             for (ReportBucketDto bucket : rows) {
@@ -8275,7 +8293,7 @@ public class AssetServiceImpl implements AssetService {
             if (item.isStandard() && hidden != null && tokenHit(hidden, item.getId())) {
                 continue;
             }
-            ReportViewDto view = reportViewInside(project, item.getId(), 0, true);
+            ReportViewDto view = reportViewInside(project, item.getId(), 0, true, null);
             pages.add(reportPage(view));
         }
         if (pages.isEmpty()) {

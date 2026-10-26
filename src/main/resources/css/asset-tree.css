@@ -1384,6 +1384,58 @@ a.asset-tree-url {
     padding: 16px;
 }
 
+.asset-tree-dialog.asset-tree-report-objects {
+    width: min(720px, calc(100vw - 48px));
+}
+
+.asset-tree-report-object-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+}
+
+.asset-tree-report-object-table th,
+.asset-tree-report-object-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #ebecf0;
+    text-align: left;
+    vertical-align: top;
+    font-size: 13px;
+    color: #172b4d;
+}
+
+.asset-tree-report-object-table th {
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.asset-tree-report-object-table td.is-key {
+    width: 120px;
+    color: #6b778c;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.asset-tree-report-object-table td strong {
+    display: block;
+    font-weight: 600;
+}
+
+.asset-tree-report-object-table td span {
+    display: block;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+.asset-tree-report-object-table tr.is-open {
+    cursor: pointer;
+}
+
+.asset-tree-report-object-table tr.is-open:hover td {
+    background: #f4f5f7;
+}
+
 .asset-tree-dialog h2 {
     margin: 0 0 8px;
     font-size: 16px;
@@ -7160,6 +7212,20 @@ a.asset-tree-url {
     display: block;
     height: 100%;
     border-radius: 4px;
+}
+
+#asset-tree-app .asset-tree-report-table tr.is-pick {
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-report-table tr.is-pick:hover td {
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-report-legend li.is-pick,
+#asset-tree-app .asset-tree-report-column.is-pick,
+#asset-tree-app .asset-tree-report-bar.is-pick {
+    cursor: pointer;
 }
 
 #asset-tree-app .asset-tree-report-lines {

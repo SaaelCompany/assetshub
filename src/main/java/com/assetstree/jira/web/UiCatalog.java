@@ -1205,6 +1205,7 @@ public final class UiCatalog {
             "reportCounted",
             "reportLinesCut",
             "reportLinesMore",
+            "reportClickValue",
             "reportBook",
             "reportNone",
             "reportWorkDetail",
