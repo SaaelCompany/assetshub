@@ -14323,7 +14323,7 @@
             identity.appendChild(grip);
         }
         var who = el('span', 'asset-tree-roster-who', person.userName);
-        if (person.phone) who.title = person.phone;
+        who.title = person.phone ? person.userName + ' \u00B7 ' + person.phone : person.userName;
         identity.appendChild(who);
         if (state.canEdit && person.hours) {
             identity.addEventListener('mousedown', function (event) {
@@ -14437,14 +14437,26 @@
         return line;
     }
 
+    function rosterWeekday(date) {
+        var labels = weekdayLabels();
+        var index = date.getDay();
+        return labels[index === 0 ? 6 : index - 1] || '';
+    }
+
     function staffDateHead(row, year, month, count, today) {
         var day;
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
             var weekend = date.getDay() === 0 || date.getDay() === 6;
             var iso = isoDate(date);
-            var label = el('span', 'asset-tree-roster-num' + (iso === today ? ' is-today' : ''), String(day));
+            var label = el('span', 'asset-tree-roster-num' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''), String(day));
             var cell = el('th', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : ''));
+            if (weekend) {
+                var weekday = rosterWeekday(date);
+                cell.title = weekday;
+                label.title = weekday;
+                label.setAttribute('aria-label', day + ' ' + weekday);
+            }
             cell.appendChild(label);
             row.appendChild(cell);
         }
@@ -14485,7 +14497,11 @@
                 cell.appendChild(staffPlaceHead(section.placeId, section.name));
                 banner.appendChild(cell);
                 var gap;
-                for (gap = 0; gap < count; gap++) banner.appendChild(el('td', 'asset-tree-roster-day'));
+                for (gap = 1; gap <= count; gap++) {
+                    var gapDate = new Date(year, month - 1, gap);
+                    var gapWeekend = gapDate.getDay() === 0 || gapDate.getDay() === 6;
+                    banner.appendChild(el('td', 'asset-tree-roster-day' + (gapWeekend ? ' is-weekend' : '')));
+                }
                 banner.appendChild(el('td', 'asset-tree-roster-total'));
                 banner.appendChild(el('td', 'asset-tree-roster-total'));
                 body.appendChild(banner);
