@@ -1909,6 +1909,86 @@ def plan_next(row):
     return None
 
 
+def move_targets(moves):
+    found = {}
+    for part in str(moves or "").split(","):
+        at = part.find(">")
+        if at < 1:
+            continue
+        source = part[:at].strip()
+        if len(source) != 10 or source[4] != "-" or source[7] != "-":
+            continue
+        raw = part[at + 1:].strip()
+        timed = raw.find("@")
+        day = raw if timed < 0 else raw[:timed].strip()
+        if day == "-" or (len(day) == 10 and day[4] == "-" and day[7] == "-"):
+            found[source] = day
+    return found
+
+
+def jump_to(first, count, unit, start):
+    if first >= start:
+        return first
+    if unit in ("day", "week"):
+        span = count * (7 if unit == "week" else 1)
+        steps = (start - first).days // span
+        jumped = first + datetime.timedelta(days=steps * span)
+        if jumped < start:
+            jumped += datetime.timedelta(days=span)
+        return jumped
+    months = 12 if unit == "year" else 1
+    step = count * months
+    between = (start.year - first.year) * 12 + (start.month - first.month)
+    jumped = add_months(first, (between // step) * step if step else 0)
+    guard = 0
+    while jumped < start and guard < 24:
+        jumped = add_months(jumped, step)
+        guard += 1
+    return jumped
+
+
+def next_shown(plan, today=None):
+    today = today or datetime.date.today()
+    first = plan_next(plan)
+    if not first:
+        return None
+    moved = move_targets(plan.get("moves"))
+    unit = plan.get("everyUnit") or ""
+    count = int(plan.get("everyCount") or 0)
+    applied = plan.get("appliedFor") or ""
+    completed = applied == "done" or (unit == "once" and applied == first.isoformat())
+    if unit == "once":
+        if completed:
+            return None
+        target = moved.get(first.isoformat())
+        if target == "-":
+            return None
+        if target:
+            return parse_plan_date(target)
+        return first
+    upcoming = jump_to(first, count, unit, today) if first < today else first
+    best = None
+    anchor = (plan.get("lastDone") or "").strip()[:10]
+    for source, target in moved.items():
+        if not target or target == "-":
+            continue
+        if anchor and source <= anchor:
+            continue
+        shown = parse_plan_date(target)
+        if shown and shown >= today and (best is None or shown < best):
+            best = shown
+    cursor = upcoming
+    guard = 0
+    while cursor and guard < 500:
+        if cursor.isoformat() not in moved:
+            if best is None or cursor < best:
+                best = cursor
+            break
+        cursor = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        guard += 1
+    return best
+
+
 def plan_completed(row, nxt):
     applied = row.get("appliedFor") or ""
     if applied == "done":
@@ -2815,14 +2895,16 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         asset = STATE["assets"].get(plan.get("assetId")) if plan.get("assetId") else None
         if plan.get("assetId") and not asset:
             continue
+        shown = next_shown(plan)
+        if (plan.get("everyUnit") or "") == "once" and shown is None:
+            continue
         bucket = plan.get("kind") or "to"
         label = kind_label(project_key, bucket)
         color = "#6554C0" if bucket == "verify" else "#FF8B00" if bucket == "kts" else "#0052CC"
         slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
         slot["count"] += 1
-        nxt = plan_next(plan)
         who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
-        detail = who + (" · " + nxt.isoformat() if nxt else "")
+        detail = who + (" · " + shown.isoformat() if shown else "")
         name = (plan.get("name") or "").strip() or label
         if len(lines) < 5000:
             lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail})
@@ -2883,11 +2965,13 @@ def report_view(project_key, report_key, text, query=None):
             elif part.startswith("p="):
                 places = part[2:]
 
-        def place_token(asset):
-            place_id = place_container(asset["id"])
-            return str(place_id or "")
+        def place_hit(asset):
+            if not places:
+                return True
+            wanted = [part for part in places.split(",") if part]
+            return any(part in wanted for part in place_chain(asset["id"]))
 
-        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and (not places or token_hit(places, place_token(asset)))]
+        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset)]
     metric = spec.get("metric") or ("cost" if report_key == "cost" else "count")
     if group == "kind":
         metric = "count"
@@ -2958,10 +3042,12 @@ def report_view(project_key, report_key, text, query=None):
             person = USERS.get(bucket) or {}
             label = text.get("asset-tree.ui.reportUnassigned", "None") if not bucket else (person.get("displayName") or bucket)
         elif group == "place":
-            place_id = place_container(asset["id"])
+            place_id = place_root(asset["id"])
             place = STATE["assets"].get(place_id) if place_id else None
             bucket = str(place["id"]) if place else ""
             label = (place.get("name") if place else "") or text.get("asset-tree.ui.root", "Root")
+            if not money:
+                detail = place_path(asset["id"]) or label
         else:
             bucket = canonical(asset.get("status"))
             label = status_names.get(bucket) or bucket
@@ -3203,6 +3289,35 @@ def is_location_id(asset_id):
     if not asset:
         return False
     return bool((STATE["types"].get(asset["typeKey"]) or {}).get("location"))
+
+
+def place_chain(asset_id):
+    asset = STATE["assets"].get(asset_id) or {}
+    current = normalize_parent(asset.get("parentId"))
+    found = []
+    seen = set()
+    while current and current not in seen:
+        seen.add(current)
+        node = STATE["assets"].get(current)
+        if not node:
+            break
+        if is_location_id(current):
+            found.append(str(current))
+        current = normalize_parent(node.get("parentId"))
+    return found
+
+
+def place_root(asset_id):
+    chain = place_chain(asset_id)
+    return int(chain[-1]) if chain else None
+
+
+def place_path(asset_id):
+    names = []
+    for place_id in reversed(place_chain(asset_id)):
+        node = STATE["assets"].get(int(place_id)) or {}
+        names.append(node.get("name") or place_id)
+    return " / ".join(names)
 
 
 def place_container(start_id, skip=None):
@@ -3669,7 +3784,7 @@ def report_sheet(view, text, used):
     lines.append([
         text.get("asset-tree.ui.keyLabel", "Key"),
         text.get("asset-tree.ui.name", "Name"),
-        text.get("asset-tree.ui.lifeBook", "Book value") if money else (view.get("groupBy") or ""),
+        text.get("asset-tree.ui.lifeBook", "Book value") if money else group_word(view.get("groupBy"), text),
     ])
     for line in view.get("lines") or []:
         detail = line.get("detail") or ""
@@ -3717,7 +3832,9 @@ def queue_report_mail(project_key, text, force):
         return 204, None
     recipients = [key for key in (setup.get("reportMailTo") or "").split(",") if key]
     if not recipients:
-        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+        if force:
+            return 400, {"message": text.get("asset-tree.error.report.mail", "The report letter was not queued.")}
+        return 204, None
     book = reports_xlsx(project_key, text)
     subject = text.get("asset-tree.mail.reports.subject", "Reports for {0}").replace("{0}", project_key)
     body = text.get("asset-tree.mail.reports.body", "The report workbook is attached.")
@@ -3733,10 +3850,27 @@ def queue_report_mail(project_key, text, force):
         })
         sent = True
     if not sent:
-        return 400, {"message": text.get("asset-tree.error.report", "Report")}
-    setup["reportMailSent"] = today.isoformat()
-    view["setup"] = module_setup(setup, migrate=False)
+        if force:
+            return 400, {"message": text.get("asset-tree.error.report.mail", "The report letter was not queued.")}
+        return 204, None
+    if not force:
+        setup["reportMailSent"] = today.isoformat()
+        view["setup"] = module_setup(setup, migrate=False)
     return 204, None
+
+
+def group_word(group, text):
+    keys = {
+        "type": "asset-tree.ui.groupWordType",
+        "place": "asset-tree.ui.groupWordPlace",
+        "holder": "asset-tree.ui.groupWordHolder",
+        "month": "asset-tree.ui.groupWordMonth",
+        "age": "asset-tree.ui.groupWordAge",
+        "warranty": "asset-tree.ui.groupWordWarranty",
+        "writeoff": "asset-tree.ui.groupWordWriteoff",
+        "kind": "asset-tree.ui.groupWordKind",
+    }
+    return text.get(keys.get(group or "", "asset-tree.ui.groupWordStatus"), group or "")
 
 
 def dispatch_due_report_mail(text):

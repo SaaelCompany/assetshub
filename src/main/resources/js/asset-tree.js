@@ -11146,10 +11146,22 @@
                     notify(t('reportMailNeed'));
                     return;
                 }
-                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
-                    if (status >= 200 && status < 300) notify(t('reportMailQueued'));
-                    else notify((payload && payload.message) || t('errorTitle'));
-                });
+                var hidden = [];
+                var boxes = reports.querySelectorAll('input');
+                for (var i = 0; i < boxes.length; i++) if (!boxes[i].checked) hidden.push(boxes[i].getAttribute('data-report'));
+                var next = moduleSetup();
+                next.reportHidden = hidden.join(',');
+                next.reportMail = mailBox.checked;
+                next.reportMailEvery = every.value;
+                next.reportMailDay = Number(day.value) || 1;
+                next.reportMailTo = mailTo.join(',');
+                saveProjectView({ setup: next }, function (ok) {
+                    if (!ok) return;
+                    ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
+                        if (status >= 200 && status < 300) notify(t('reportMailQueued'));
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }, true);
             }));
             panel.appendChild(mailActions);
         }
@@ -11254,7 +11266,7 @@
         return panel;
     }
 
-    function saveProjectView(patch, done) {
+    function saveProjectView(patch, done, quiet) {
         setBusy(true);
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', patch, function (status, payload) {
             if (status < 200 || status >= 300) {
@@ -11272,7 +11284,7 @@
             }
             setBusy(false);
             if (done) done(true);
-            notify(t('viewSaved'));
+            if (!quiet) notify(t('viewSaved'));
         });
     }
 
@@ -15096,6 +15108,10 @@
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            if (!reportVisible(state.reportKey)) {
+                var opened = firstVisibleReport();
+                if (opened) state.reportKey = opened;
+            }
             fetchGalleryView(token);
         });
     }
@@ -15556,6 +15572,22 @@
 
     function reportHidden(id) {
         return String(moduleSetup().reportHidden || '').split(',').indexOf(id) >= 0;
+    }
+
+    function reportVisible(id) {
+        var items = state.reportCatalog || [];
+        for (var i = 0; i < items.length; i++) {
+            if (String(items[i].id) === String(id)) return !items[i].standard || !reportHidden(items[i].id);
+        }
+        return false;
+    }
+
+    function firstVisibleReport() {
+        var items = state.reportCatalog || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i] && (!items[i].standard || !reportHidden(items[i].id))) return items[i].id;
+        }
+        return '';
     }
 
     function roomColor(value) {

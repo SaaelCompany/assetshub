@@ -155,6 +155,7 @@ import com.assetstree.jira.model.MoneyText;
 import com.assetstree.jira.model.ReportCatalog;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleAnchor;
+import com.assetstree.jira.model.ScheduleOccurrences;
 import com.assetstree.jira.model.ScheduleDraft;
 import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServiceDue;
@@ -7241,6 +7242,12 @@ public class AssetServiceImpl implements AssetService {
             }
             bucket.setCount(bucket.getCount() + 1);
             String detail = reportDetail(key, group, asset, lives, nextPlan, today, kindNames);
+            if (ReportCatalog.PLACE.equals(group)) {
+                String path = placePath(asset, types, index);
+                if (!path.isEmpty()) {
+                    detail = path;
+                }
+            }
             if (detail.isEmpty()) {
                 detail = label;
             }
@@ -7311,6 +7318,13 @@ public class AssetServiceImpl implements AssetService {
             if (plan.getAssetId() > 0 && asset == null) {
                 continue;
             }
+            LocalDate series = ServiceDue.next(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit());
+            boolean once = ServiceDue.ONCE.equals(plan.getEveryUnit());
+            LocalDate shown = ScheduleOccurrences.nextShown(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit(),
+                    plan.getMoves(), today, planCompleted(plan, series));
+            if (once && shown == null) {
+                continue;
+            }
             String bucketKey = WorkKind.clean(plan.getKind());
             if (bucketKey.isEmpty()) {
                 bucketKey = WorkKind.TO;
@@ -7322,9 +7336,8 @@ public class AssetServiceImpl implements AssetService {
                 buckets.put(bucketKey, bucket);
             }
             bucket.setCount(bucket.getCount() + 1);
-            LocalDate next = ServiceDue.next(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit());
             String who = asset == null ? i18n().getText("asset-tree.ui.reportNoAsset") : asset.getName();
-            String detail = who + (next == null ? "" : " · " + next.toString());
+            String detail = who + (shown == null ? "" : " · " + shown.toString());
             String name = plan.getName() == null || plan.getName().trim().isEmpty() ? label : plan.getName().trim();
             if (lines.size() < 5000) {
                 lines.add(new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail));
@@ -7466,7 +7479,9 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
-        dispatchReportMail(notices);
+        if (dispatchReportMail(notices).isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.report.mail");
+        }
     }
 
     @Override
@@ -7503,7 +7518,21 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             log.warn("Report mail was not prepared", ex);
         }
-        dispatchReportMail(notices);
+        final Set<String> queued = dispatchReportMail(notices);
+        if (queued.isEmpty()) {
+            return;
+        }
+        try {
+            ao().executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    markReportMailSent(queued);
+                    return null;
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.warn("Report mail day was not stored", ex);
+        }
     }
 
     private void queueReportMail(Project project, boolean force, List<ServiceNotice> notices) {
@@ -7522,7 +7551,7 @@ public class AssetServiceImpl implements AssetService {
         String recipients = setup.getReportMailTo() == null ? "" : setup.getReportMailTo();
         if (recipients.isEmpty()) {
             if (force) {
-                throw new AssetException(400, "asset-tree.error.report");
+                throw new AssetException(400, "asset-tree.error.report.mail");
             }
             return;
         }
@@ -7538,18 +7567,26 @@ public class AssetServiceImpl implements AssetService {
             if (email.isEmpty()) {
                 continue;
             }
-            notices.add(new ServiceNotice(email, subject, body, book, "reports-" + project.getKey() + ".xlsx"));
+            notices.add(new ServiceNotice(email, subject, body, book, "reports-" + project.getKey() + ".xlsx", project.getKey()));
             queued = true;
         }
-        if (!queued) {
-            if (force) {
-                throw new AssetException(400, "asset-tree.error.report");
-            }
-            return;
+        if (!queued && force) {
+            throw new AssetException(400, "asset-tree.error.report.mail");
         }
-        setup.setReportMailSent(today.toString());
-        row.setOptionList(ModuleSetup.write(setup));
-        row.save();
+    }
+
+    private void markReportMailSent(Set<String> projectKeys) {
+        String today = LocalDate.now().toString();
+        for (String projectKey : projectKeys) {
+            ProjectViewEntity row = viewRow(projectKey);
+            if (row == null) {
+                continue;
+            }
+            ModuleSetupDto setup = ModuleSetup.read(row.getOptionList());
+            setup.setReportMailSent(today);
+            row.setOptionList(ModuleSetup.write(setup));
+            row.save();
+        }
     }
 
     private boolean reportMailDue(ModuleSetupDto setup, LocalDate today) {
@@ -7627,7 +7664,7 @@ public class AssetServiceImpl implements AssetService {
         List<String> detailHead = new ArrayList<String>();
         detailHead.add(i18n().getText("asset-tree.ui.keyLabel"));
         detailHead.add(i18n().getText("asset-tree.ui.name"));
-        detailHead.add(money ? i18n().getText("asset-tree.ui.lifeBook") : (view.getGroupBy() == null ? "" : view.getGroupBy()));
+        detailHead.add(money ? i18n().getText("asset-tree.ui.lifeBook") : groupHeading(view.getGroupBy()));
         lines.add(detailHead);
         if (view.getLines() != null) {
             for (ReportLineDto line : view.getLines()) {
@@ -7671,9 +7708,10 @@ public class AssetServiceImpl implements AssetService {
         return String.format(Locale.US, "%.1f %%", Double.valueOf(pct));
     }
 
-    private void dispatchReportMail(List<ServiceNotice> notices) {
+    private Set<String> dispatchReportMail(List<ServiceNotice> notices) {
+        Set<String> queued = new HashSet<String>();
         if (notices == null) {
-            return;
+            return queued;
         }
         for (ServiceNotice notice : notices) {
             try {
@@ -7694,13 +7732,19 @@ public class AssetServiceImpl implements AssetService {
                     email.setMimeType("text/plain; charset=UTF-8");
                 }
                 MailQueue queue = ComponentAccessor.getComponent(MailQueue.class);
-                if (queue != null) {
-                    queue.addItem(new SingleMailQueueItem(email));
+                if (queue == null) {
+                    log.warn("Report mail was not queued");
+                    continue;
+                }
+                queue.addItem(new SingleMailQueueItem(email));
+                if (notice.projectKey != null && !notice.projectKey.isEmpty()) {
+                    queued.add(notice.projectKey);
                 }
             } catch (Exception ex) {
                 log.warn("Report mail was not queued", ex);
             }
         }
+        return queued;
     }
 
     private boolean reportFilterMatches(AssetEntity asset, String filter, String value, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
@@ -7721,7 +7765,7 @@ public class AssetServiceImpl implements AssetService {
             if (!holders.isEmpty() && !tokenHit(holders, asset.getCustodianKey() == null ? "" : asset.getCustodianKey())) {
                 return false;
             }
-            return places.isEmpty() || tokenHit(places, placeKey(asset, types, index));
+            return placeListed(asset, places, types, index);
         }
         if (ReportCatalog.STATUS.equals(filter)) {
             return tokenHit(value, Statuses.canonical(asset.getStatus()));
@@ -8106,7 +8150,9 @@ public class AssetServiceImpl implements AssetService {
         return "";
     }
 
+    /** The outermost place, so a laptop in a room is counted with the building. */
     private String placeKey(AssetEntity asset, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        String found = "";
         Integer parent = asset.getParentId();
         int guard = 0;
         while (parent != null && parent.intValue() > 0 && guard < 40) {
@@ -8116,12 +8162,89 @@ public class AssetServiceImpl implements AssetService {
             }
             AssetTypeDto type = types.get(node.getTypeKey());
             if (type != null && type.isLocation()) {
-                return String.valueOf(node.getID());
+                found = String.valueOf(node.getID());
             }
             parent = node.getParentId();
             guard++;
         }
-        return "";
+        return found;
+    }
+
+    /** A checked place keeps the object when that place is the room or any place above it. */
+    private boolean placeListed(AssetEntity asset, String places, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        if (places == null || places.isEmpty()) {
+            return true;
+        }
+        Integer parent = asset.getParentId();
+        int guard = 0;
+        while (parent != null && parent.intValue() > 0 && guard < 40) {
+            AssetEntity node = index.get(parent);
+            if (node == null) {
+                break;
+            }
+            AssetTypeDto type = types.get(node.getTypeKey());
+            if (type != null && type.isLocation() && tokenHit(places, String.valueOf(node.getID()))) {
+                return true;
+            }
+            parent = node.getParentId();
+            guard++;
+        }
+        return false;
+    }
+
+    private String placePath(AssetEntity asset, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        List<String> names = new ArrayList<String>();
+        Integer parent = asset.getParentId();
+        int guard = 0;
+        while (parent != null && parent.intValue() > 0 && guard < 40) {
+            AssetEntity node = index.get(parent);
+            if (node == null) {
+                break;
+            }
+            AssetTypeDto type = types.get(node.getTypeKey());
+            if (type != null && type.isLocation()) {
+                names.add(node.getName() == null || node.getName().isEmpty() ? String.valueOf(node.getID()) : node.getName());
+            }
+            parent = node.getParentId();
+            guard++;
+        }
+        Collections.reverse(names);
+        StringBuilder path = new StringBuilder();
+        for (int i = 0; i < names.size(); i++) {
+            if (path.length() > 0) {
+                path.append(" / ");
+            }
+            path.append(names.get(i));
+        }
+        return path.toString();
+    }
+
+    private String groupHeading(String group) {
+        if (ReportCatalog.TYPE.equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordType");
+        }
+        if (ReportCatalog.PLACE.equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordPlace");
+        }
+        if (ReportCatalog.HOLDER.equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordHolder");
+        }
+        if ("month".equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordMonth");
+        }
+        if ("age".equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordAge");
+        }
+        if (ReportCatalog.WARRANTY.equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordWarranty");
+        }
+        if (ReportCatalog.WRITEOFF.equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordWriteoff");
+        }
+        if ("kind".equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordKind");
+        }
+        return i18n().getText("asset-tree.ui.groupWordStatus");
     }
 
     private String warrantyBand(LifecycleEntity life, LocalDate today) {
@@ -8406,17 +8529,19 @@ public class AssetServiceImpl implements AssetService {
         private final String body;
         private final byte[] file;
         private final String fileName;
+        private final String projectKey;
 
         private ServiceNotice(String email, String subject, String body) {
-            this(email, subject, body, null, "");
+            this(email, subject, body, null, "", "");
         }
 
-        private ServiceNotice(String email, String subject, String body, byte[] file, String fileName) {
+        private ServiceNotice(String email, String subject, String body, byte[] file, String fileName, String projectKey) {
             this.email = email;
             this.subject = subject;
             this.body = body;
             this.file = file;
             this.fileName = fileName;
+            this.projectKey = projectKey == null ? "" : projectKey;
         }
     }
 
