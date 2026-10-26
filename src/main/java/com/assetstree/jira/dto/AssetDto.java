@@ -32,6 +32,7 @@ public class AssetDto {
     private String holderRole;
     private List<AttributeDto> attributes = new ArrayList<AttributeDto>();
     private List<IssueRefDto> issues;
+    private List<AssetPeerDto> peers;
     private List<CommentDto> comments;
     private List<FileDto> files;
     private List<ActivityDto> activities;
@@ -229,6 +230,14 @@ public class AssetDto {
 
     public void setIssues(List<IssueRefDto> issues) {
         this.issues = issues;
+    }
+
+    public List<AssetPeerDto> getPeers() {
+        return peers;
+    }
+
+    public void setPeers(List<AssetPeerDto> peers) {
+        this.peers = peers;
     }
 
     public List<CommentDto> getComments() {

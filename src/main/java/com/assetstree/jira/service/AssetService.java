@@ -3,6 +3,7 @@ package com.assetstree.jira.service;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.dto.AssetDto;
+import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ProjectViewDto;
@@ -124,6 +125,12 @@ public interface AssetService {
     IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey);
 
     void unlinkIssue(ApplicationUser user, int assetId, long issueId);
+
+    AssetPeerDto linkPeer(ApplicationUser user, int assetId, int otherId);
+
+    void unlinkPeer(ApplicationUser user, int assetId, int otherId);
+
+    List<AssetPeerDto> searchPeers(ApplicationUser user, int assetId, String query);
 
     List<AssetDto> assetsForIssue(ApplicationUser user, long issueId);
 

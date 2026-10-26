@@ -320,6 +320,46 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("assets/{id}/peers")
+    public Response linkPeer(@PathParam("id") final int id, final IssueLinkDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                Integer otherId = draft == null ? null : draft.getAssetId();
+                if (otherId == null) {
+                    throw new AssetException(400, "asset-tree.error.peer.notFound");
+                }
+                return Response.status(Response.Status.CREATED)
+                        .entity(assetService.linkPeer(user(), id, otherId.intValue()))
+                        .build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/peers/{otherId}")
+    public Response unlinkPeer(@PathParam("id") final int id, @PathParam("otherId") final int otherId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.unlinkPeer(user(), id, otherId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("assets/{id}/peers/search")
+    public Response searchPeers(@PathParam("id") final int id, @QueryParam("q") final String query) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.searchPeers(user(), id, query)).build();
+            }
+        });
+    }
+
     @GET
     @Path("issues/{issueId}/assets")
     public Response assetsForIssue(@PathParam("issueId") final long issueId) {

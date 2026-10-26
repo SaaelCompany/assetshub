@@ -5340,6 +5340,8 @@
         if (item.action === 'place_in') return t('actPlaceIn');
         if (item.action === 'place_out') return t('actPlaceOut');
         if (item.action === 'service_due') return t('actServiceDue');
+        if (item.action === 'peer_add') return t('actPeerAdd');
+        if (item.action === 'peer_remove') return t('actPeerRemove');
         return t('actUpdated');
     }
 
@@ -5370,7 +5372,7 @@
         }
         row.appendChild(head);
         if (item.action === 'created' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
-        if (placeKind(item.action)) {
+        if (placeKind(item.action) || item.action === 'peer_add' || item.action === 'peer_remove') {
             var placeChange = el('div', 'asset-tree-history-change');
             var placeLabel = item.newValue || item.oldValue || '';
             var placeKey = item.field || '';
@@ -6384,6 +6386,7 @@
             });
         }
         main.appendChild(moduleBlock(t('issues'), issues));
+        main.appendChild(peerBlock(asset));
         main.appendChild(activityBlock(asset));
 
         var error = el('div', 'asset-tree-form-error');
@@ -6532,6 +6535,7 @@
         }
         issues.appendChild(issueList);
         main.appendChild(issues);
+        if (!placePage) main.appendChild(peerBlock(asset));
 
         var error = el('div', 'asset-tree-form-error');
         error.id = 'asset-tree-form-error';
@@ -6678,6 +6682,112 @@
         if (names.length) {
             names[names.length - 1].focus();
         }
+    }
+
+    function peerSummary(peer) {
+        var parts = [];
+        if (peer.projectName || peer.projectKey) parts.push(peer.projectName || peer.projectKey);
+        if (peer.objectKey) parts.push(peer.objectKey);
+        if (peer.typeLabel) parts.push(peer.typeLabel);
+        if (peer.location) parts.push(peer.location);
+        return parts.join(' \u00b7 ');
+    }
+
+    function peerRow(asset, peer) {
+        var summary = peerSummary(peer);
+        var row = el('div', 'asset-tree-issue' + (peer.open ? '' : ' is-locked'));
+        row.appendChild(issueMark('#0052cc'));
+        var title = null;
+        if (peer.open) {
+            title = button(peer.name || peer.objectKey || '', 'asset-tree-linkish', function () {
+                goToAsset(peer.projectKey, peer.id);
+            });
+            row.appendChild(title);
+            row.addEventListener('click', function (event) {
+                var node = event.target;
+                while (node && node !== row) {
+                    if (node === title) return;
+                    if (node.classList && node.classList.contains('asset-tree-linkish')) return;
+                    node = node.parentNode;
+                }
+                goToAsset(peer.projectKey, peer.id);
+            });
+        } else {
+            row.appendChild(el('span', 'asset-tree-peer-name', peer.name || peer.objectKey || ''));
+        }
+        if (summary) row.appendChild(el('span', 'asset-tree-issuelink-summary', summary));
+        if (mayEdit(asset)) {
+            row.appendChild(button(t('unlink'), 'asset-tree-linkish', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                ajax('DELETE', '/assets/' + asset.id + '/peers/' + peer.id, null, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            }));
+        }
+        return row;
+    }
+
+    function peerBlock(asset) {
+        var body = el('div');
+        body.appendChild(el('p', 'asset-tree-hint', t('peersHint')));
+        if (mayEdit(asset)) {
+            var linker = el('div', 'asset-tree-linkrow');
+            var input = el('input');
+            input.type = 'search';
+            input.placeholder = t('peerSearch');
+            linker.appendChild(input);
+            body.appendChild(linker);
+            var results = el('div', 'asset-tree-user-results');
+            body.appendChild(results);
+            var timer = null;
+            var seq = 0;
+            input.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var query = input.value.trim();
+                    var token = ++seq;
+                    results.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (token !== seq || input.value.trim() !== query) return;
+                        results.innerHTML = '';
+                        if (status !== 200) {
+                            results.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
+                            return;
+                        }
+                        if (!payload || !payload.length) {
+                            results.appendChild(el('p', 'asset-tree-hint', t('noResults')));
+                            return;
+                        }
+                        payload.forEach(function (peer) {
+                            var caption = peer.name || peer.objectKey || '';
+                            var extra = peerSummary(peer);
+                            results.appendChild(button(extra ? caption + ' \u00b7 ' + extra : caption, 'asset-tree-user-hit', function () {
+                                ajax('POST', '/assets/' + asset.id + '/peers', { assetId: peer.id }, function (st, answer) {
+                                    if (st >= 200 && st < 300) {
+                                        notify(t('peerAdded'));
+                                        selectAsset(asset.id, true);
+                                    } else {
+                                        setFormError((answer && answer.message) || t('errorTitle'));
+                                    }
+                                });
+                            }));
+                        });
+                    });
+                }, 220);
+            });
+        }
+        if (asset.peers == null) {
+            body.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        } else if (!asset.peers.length) {
+            body.appendChild(el('p', 'asset-tree-hint', t('peerEmpty')));
+        } else {
+            asset.peers.forEach(function (peer) {
+                body.appendChild(peerRow(asset, peer));
+            });
+        }
+        return moduleBlock(t('peers'), body);
     }
 
     function issueRow(assetId, issue) {

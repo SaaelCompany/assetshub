@@ -15,6 +15,7 @@
         <entity>com.assetstree.jira.ao.AssetEntity</entity>
         <entity>com.assetstree.jira.ao.AssetAttributeEntity</entity>
         <entity>com.assetstree.jira.ao.AssetIssueLinkEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetPeerEntity</entity>
         <entity>com.assetstree.jira.ao.AssetTypeEntity</entity>
         <entity>com.assetstree.jira.ao.AssetCounterEntity</entity>
         <entity>com.assetstree.jira.ao.ProjectAssetKeyEntity</entity>

@@ -47,6 +47,7 @@ import com.assetstree.jira.ao.FlowGraphEntity;
 import com.assetstree.jira.ao.FlowRuleEntity;
 import com.assetstree.jira.ao.AssetFileEntity;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
+import com.assetstree.jira.ao.AssetPeerEntity;
 import com.assetstree.jira.ao.InventoryMarkEntity;
 import com.assetstree.jira.ao.PortalRuleConditionEntity;
 import com.assetstree.jira.ao.PortalRuleEntity;
@@ -64,6 +65,7 @@ import com.assetstree.jira.ao.StaffDutyEntity;
 import com.assetstree.jira.ao.AssetTypeEntity;
 import com.assetstree.jira.dto.ActivityDto;
 import com.assetstree.jira.dto.AssetDto;
+import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ModuleSetupDto;
@@ -856,6 +858,7 @@ public class AssetServiceImpl implements AssetService {
                 }
                 deleteRows(AssetAttributeEntity.class, "ASSET_ID", toDelete);
                 deleteRows(AssetIssueLinkEntity.class, "ASSET_ID", toDelete);
+                deletePeerLinks(user, toDelete);
                 deleteRows(InventoryMarkEntity.class, "ASSET_ID", toDelete);
                 deleteRows(AssetCommentEntity.class, "ASSET_ID", toDelete);
                 deleteRows(AssetFileEntity.class, "ASSET_ID", toDelete);
@@ -1547,6 +1550,106 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
+    }
+
+    @Override
+    public AssetPeerDto linkPeer(ApplicationUser user, int assetId, int otherId) {
+        return ao().executeInTransaction(new TransactionCallback<AssetPeerDto>() {
+            @Override
+            public AssetPeerDto doInTransaction() {
+                AssetEntity source = requireAssetCap(user, assetId, GrantCaps.OBJECT);
+                if (isLocation(source)) {
+                    throw new AssetException(400, "asset-tree.error.peer.place");
+                }
+                if (assetId == otherId) {
+                    throw new AssetException(400, "asset-tree.error.peer.self");
+                }
+                AssetEntity target = requireVisible(user, otherId);
+                if (isLocation(target)) {
+                    throw new AssetException(400, "asset-tree.error.peer.place");
+                }
+                int low = Math.min(assetId, otherId);
+                int high = Math.max(assetId, otherId);
+                AssetPeerEntity[] existing = ao().find(AssetPeerEntity.class,
+                        Query.select().where("LOW_ID = ? AND HIGH_ID = ?", low, high));
+                if (existing != null && existing.length > 0) {
+                    throw new AssetException(409, "asset-tree.error.peer.exists");
+                }
+                ao().create(AssetPeerEntity.class, new DBParam("LOW_ID", low), new DBParam("HIGH_ID", high));
+                recordActivity(source.getID(), user.getKey(), "peer_add", objectKey(target), "", peerHistory(target));
+                recordActivity(target.getID(), user.getKey(), "peer_add", objectKey(source), "", peerHistory(source));
+                return peerDto(user, target);
+            }
+        });
+    }
+
+    @Override
+    public void unlinkPeer(ApplicationUser user, int assetId, int otherId) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity source = requireAssetCap(user, assetId, GrantCaps.OBJECT);
+                int low = Math.min(assetId, otherId);
+                int high = Math.max(assetId, otherId);
+                AssetPeerEntity[] existing = ao().find(AssetPeerEntity.class,
+                        Query.select().where("LOW_ID = ? AND HIGH_ID = ?", low, high));
+                if (existing == null || existing.length == 0) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                AssetEntity target = ao().get(AssetEntity.class, otherId);
+                for (AssetPeerEntity row : existing) {
+                    ao().delete(row);
+                }
+                recordActivity(source.getID(), user.getKey(), "peer_remove", objectKey(target), peerHistory(target), "");
+                if (target != null) {
+                    recordActivity(target.getID(), user.getKey(), "peer_remove", objectKey(source), peerHistory(source), "");
+                }
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public List<AssetPeerDto> searchPeers(ApplicationUser user, int assetId, String query) {
+        AssetEntity source = requireVisible(user, assetId);
+        if (isLocation(source)) {
+            return new ArrayList<AssetPeerDto>();
+        }
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        if (needle.length() < 2) {
+            return new ArrayList<AssetPeerDto>();
+        }
+        Set<Integer> linked = linkedPeerIds(assetId);
+        List<AssetPeerDto> found = new ArrayList<AssetPeerDto>();
+        for (ProjectDto visible : visibleProjects(user)) {
+            if (visible == null || visible.getKey() == null) {
+                continue;
+            }
+            AssetEntity[] rows = assetsIn(visible.getKey());
+            if (rows == null) {
+                continue;
+            }
+            for (AssetEntity row : rows) {
+                if (row == null || row.getID() == assetId || linked.contains(Integer.valueOf(row.getID()))) {
+                    continue;
+                }
+                if (isLocation(row) || !peerMatches(row, visible, needle)) {
+                    continue;
+                }
+                found.add(peerDto(user, row));
+                if (found.size() >= 80) {
+                    break;
+                }
+            }
+            if (found.size() >= 80) {
+                break;
+            }
+        }
+        sortPeers(found);
+        if (found.size() > 15) {
+            return new ArrayList<AssetPeerDto>(found.subList(0, 15));
+        }
+        return found;
     }
 
     @Override
@@ -4904,6 +5007,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setOfferedTypes(type != null && type.isLocation() ? offeredLines(entity.getOfferedTypes()) : new ArrayList<String>());
         if (withIssues) {
             dto.setIssues(issuesFor(entity.getID()));
+            dto.setPeers(peersFor(entity.getID()));
             dto.setComments(commentDtos(entity.getID()));
             dto.setFiles(fileDtos(entity.getID()));
             dto.setActivities(activityDtos(entity.getID()));
@@ -5148,6 +5252,160 @@ public class AssetServiceImpl implements AssetService {
             builder.append(names.get(i));
         }
         return builder.toString();
+    }
+
+    private void deletePeerLinks(ApplicationUser user, List<Integer> toDelete) {
+        if (toDelete == null || toDelete.isEmpty()) {
+            return;
+        }
+        Set<Integer> doomed = new HashSet<Integer>(toDelete);
+        List<AssetPeerEntity> rows = new ArrayList<AssetPeerEntity>();
+        rows.addAll(findIn(AssetPeerEntity.class, "LOW_ID", toDelete, null));
+        rows.addAll(findIn(AssetPeerEntity.class, "HIGH_ID", toDelete, null));
+        Set<Integer> seen = new HashSet<Integer>();
+        for (AssetPeerEntity row : rows) {
+            if (row == null || !seen.add(Integer.valueOf(row.getID()))) {
+                continue;
+            }
+            int low = row.getLowId();
+            int high = row.getHighId();
+            boolean lowGone = doomed.contains(Integer.valueOf(low));
+            boolean highGone = doomed.contains(Integer.valueOf(high));
+            if (lowGone ^ highGone) {
+                int other = lowGone ? high : low;
+                int gone = lowGone ? low : high;
+                AssetEntity removed = ao().get(AssetEntity.class, gone);
+                if (user != null) {
+                    recordActivity(other, user.getKey(), "peer_remove", objectKey(removed), peerHistory(removed), "");
+                }
+            }
+            ao().delete(row);
+        }
+    }
+
+    private List<AssetPeerDto> peersFor(int assetId) {
+        ApplicationUser user = authenticationContext().getLoggedInUser();
+        List<AssetPeerDto> peers = new ArrayList<AssetPeerDto>();
+        Set<Integer> seen = new HashSet<Integer>();
+        appendPeers(user, assetId, ao().find(AssetPeerEntity.class, Query.select().where("LOW_ID = ?", assetId)), peers, seen);
+        appendPeers(user, assetId, ao().find(AssetPeerEntity.class, Query.select().where("HIGH_ID = ?", assetId)), peers, seen);
+        sortPeers(peers);
+        return peers;
+    }
+
+    private void appendPeers(ApplicationUser user, int assetId, AssetPeerEntity[] rows, List<AssetPeerDto> peers, Set<Integer> seen) {
+        if (rows == null) {
+            return;
+        }
+        for (AssetPeerEntity row : rows) {
+            if (row == null) {
+                continue;
+            }
+            int otherId = row.getLowId() == assetId ? row.getHighId() : row.getLowId();
+            if (!seen.add(Integer.valueOf(otherId))) {
+                continue;
+            }
+            AssetEntity other = ao().get(AssetEntity.class, otherId);
+            if (other != null) {
+                peers.add(peerDto(user, other));
+            }
+        }
+    }
+
+    private Set<Integer> linkedPeerIds(int assetId) {
+        Set<Integer> ids = new HashSet<Integer>();
+        AssetPeerEntity[] lows = ao().find(AssetPeerEntity.class, Query.select().where("LOW_ID = ?", assetId));
+        AssetPeerEntity[] highs = ao().find(AssetPeerEntity.class, Query.select().where("HIGH_ID = ?", assetId));
+        if (lows != null) {
+            for (AssetPeerEntity row : lows) {
+                if (row != null) {
+                    ids.add(Integer.valueOf(row.getHighId()));
+                }
+            }
+        }
+        if (highs != null) {
+            for (AssetPeerEntity row : highs) {
+                if (row != null) {
+                    ids.add(Integer.valueOf(row.getLowId()));
+                }
+            }
+        }
+        return ids;
+    }
+
+    private AssetPeerDto peerDto(ApplicationUser user, AssetEntity entity) {
+        AssetPeerDto dto = new AssetPeerDto();
+        dto.setId(entity.getID());
+        dto.setObjectKey(objectKey(entity));
+        dto.setName(entity.getName() == null ? "" : entity.getName());
+        dto.setProjectKey(entity.getProjectKey() == null ? "" : entity.getProjectKey());
+        Project owner = project(entity.getProjectKey());
+        dto.setProjectName(owner == null || owner.getName() == null ? dto.getProjectKey() : owner.getName());
+        dto.setTypeLabel(typeLabel(findType(entity.getTypeKey())));
+        dto.setLocation(locationChain(entity));
+        dto.setOpen(canOpen(user, owner));
+        return dto;
+    }
+
+    private String locationChain(AssetEntity entity) {
+        Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
+        AssetEntity cursor = entity;
+        int guard = 0;
+        while (cursor != null && guard < 80) {
+            index.put(Integer.valueOf(cursor.getID()), cursor);
+            Integer parentId = TreeLogic.normalizeParent(cursor.getParentId());
+            if (parentId == null || index.containsKey(parentId)) {
+                break;
+            }
+            cursor = ao().get(AssetEntity.class, parentId.intValue());
+            guard++;
+        }
+        return location(entity, index);
+    }
+
+    private boolean peerMatches(AssetEntity row, ProjectDto visible, String needle) {
+        return contains(row.getName(), needle)
+                || contains(row.getObjectKey(), needle)
+                || contains(row.getProjectKey(), needle)
+                || (visible != null && (contains(visible.getName(), needle) || contains(visible.getKey(), needle)));
+    }
+
+    private void sortPeers(List<AssetPeerDto> peers) {
+        Collections.sort(peers, new Comparator<AssetPeerDto>() {
+            @Override
+            public int compare(AssetPeerDto left, AssetPeerDto right) {
+                String leftName = left.getName() == null ? "" : left.getName();
+                String rightName = right.getName() == null ? "" : right.getName();
+                int byName = leftName.compareToIgnoreCase(rightName);
+                if (byName != 0) {
+                    return byName;
+                }
+                return Integer.compare(left.getId(), right.getId());
+            }
+        });
+    }
+
+    private String peerHistory(AssetEntity entity) {
+        if (entity == null) {
+            return "";
+        }
+        String name = entity.getName() == null ? "" : entity.getName().trim();
+        Project owner = project(entity.getProjectKey());
+        String projectName = owner == null || owner.getName() == null ? "" : owner.getName();
+        if (name.isEmpty()) {
+            return projectName;
+        }
+        if (projectName.isEmpty()) {
+            return name;
+        }
+        return name + " · " + projectName;
+    }
+
+    private String objectKey(AssetEntity entity) {
+        if (entity == null || entity.getObjectKey() == null) {
+            return "";
+        }
+        return entity.getObjectKey();
     }
 
     private List<IssueRefDto> issuesFor(int assetId) {

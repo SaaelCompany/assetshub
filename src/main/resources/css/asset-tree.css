@@ -2490,12 +2490,19 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > a,
-#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > button.asset-tree-linkish {
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > button.asset-tree-linkish,
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > span.asset-tree-peer-name {
     flex: 0 0 auto;
     height: auto !important;
     font-size: 14px !important;
     font-weight: 600;
     white-space: nowrap !important;
+}
+
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue.is-locked,
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue.is-locked:hover {
+    cursor: default;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-issuelink-summary {

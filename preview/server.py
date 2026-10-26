@@ -498,6 +498,7 @@ STATE = {
     "lives": {},
     "cards": {}, "card_images": {},
     "assetKeys": {}, "ready": False, "views": {},
+    "peers": [],
 }
 
 
@@ -1805,6 +1806,7 @@ def asset_dto(asset, text, with_issues):
         dto["comments"] = [comment_dto(row) for row in comments_of(asset["id"])]
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
+        dto["peers"] = peers_for(asset["id"])
     return dto
 
 
@@ -1868,6 +1870,146 @@ def log_activity(asset_id, kind, field, old_value, new_value, author="ivanov"):
     if left == right:
         return
     record_activity(asset_id, kind, field, left, right, author)
+
+
+def peer_rows():
+    return STATE.setdefault("peers", [])
+
+
+def linked_peer_ids(asset_id):
+    found = set()
+    for pair in peer_rows():
+        if pair["low"] == asset_id:
+            found.add(pair["high"])
+        elif pair["high"] == asset_id:
+            found.add(pair["low"])
+    return found
+
+
+def peer_history(asset):
+    if not asset:
+        return ""
+    name = (asset.get("name") or "").strip()
+    project = next((item["name"] for item in PROJECTS if item["key"] == asset.get("projectKey")), asset.get("projectKey") or "")
+    if name and project:
+        return "%s · %s" % (name, project)
+    return name or project or ""
+
+
+def peer_dto(asset):
+    row = type_row(asset["typeKey"]) or {}
+    project_name = next((item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]), asset.get("projectKey") or "")
+    return {
+        "id": asset["id"],
+        "objectKey": asset.get("objectKey") or "",
+        "name": asset.get("name") or "",
+        "projectKey": asset.get("projectKey") or "",
+        "projectName": project_name,
+        "typeLabel": row.get("label") or asset.get("typeKey") or "",
+        "location": location_of(asset),
+        "open": True,
+    }
+
+
+def peers_for(asset_id):
+    rows = []
+    for other_id in linked_peer_ids(asset_id):
+        other = STATE["assets"].get(other_id)
+        if other:
+            rows.append(peer_dto(other))
+    rows.sort(key=lambda item: ((item.get("name") or "").lower(), item["id"]))
+    return rows
+
+
+def peer_matches(asset, needle):
+    project_name = next((item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]), "")
+    hay = " ".join([
+        asset.get("name") or "",
+        asset.get("objectKey") or "",
+        asset.get("projectKey") or "",
+        project_name,
+    ]).lower()
+    return needle in hay
+
+
+def search_peers(asset_id, query, text):
+    asset = STATE["assets"].get(asset_id)
+    if not asset:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(asset_id):
+        return 200, []
+    needle = (query or "").strip().lower()
+    if len(needle) < 2:
+        return 200, []
+    linked = linked_peer_ids(asset_id)
+    found = []
+    for other in STATE["assets"].values():
+        if other["id"] == asset_id or other["id"] in linked or is_location_id(other["id"]):
+            continue
+        if not peer_matches(other, needle):
+            continue
+        found.append(peer_dto(other))
+        if len(found) >= 80:
+            break
+    found.sort(key=lambda item: ((item.get("name") or "").lower(), item["id"]))
+    return 200, found[:15]
+
+
+def link_peers(asset_id, other_id, text):
+    source = STATE["assets"].get(asset_id)
+    if not source:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(asset_id):
+        return 400, {"message": text["asset-tree.error.peer.place"]}
+    if not other_id:
+        return 400, {"message": text["asset-tree.error.peer.notFound"]}
+    if asset_id == other_id:
+        return 400, {"message": text["asset-tree.error.peer.self"]}
+    target = STATE["assets"].get(other_id)
+    if not target:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(other_id):
+        return 400, {"message": text["asset-tree.error.peer.place"]}
+    low, high = (asset_id, other_id) if asset_id < other_id else (other_id, asset_id)
+    if any(pair["low"] == low and pair["high"] == high for pair in peer_rows()):
+        return 409, {"message": text["asset-tree.error.peer.exists"]}
+    peer_rows().append({"low": low, "high": high})
+    record_activity(asset_id, "peer_add", target.get("objectKey") or "", "", peer_history(target))
+    record_activity(other_id, "peer_add", source.get("objectKey") or "", "", peer_history(source))
+    return 201, peer_dto(target)
+
+
+def unlink_peers(asset_id, other_id, text):
+    source = STATE["assets"].get(asset_id)
+    if not source:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    low, high = (asset_id, other_id) if asset_id < other_id else (other_id, asset_id)
+    before = list(peer_rows())
+    STATE["peers"] = [pair for pair in before if not (pair["low"] == low and pair["high"] == high)]
+    if len(STATE["peers"]) == len(before):
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    target = STATE["assets"].get(other_id)
+    record_activity(asset_id, "peer_remove", (target or {}).get("objectKey") or "", peer_history(target), "")
+    if target:
+        record_activity(other_id, "peer_remove", source.get("objectKey") or "", peer_history(source), "")
+    return 204, None
+
+
+def drop_peers(doomed):
+    kept = []
+    for pair in peer_rows():
+        low, high = pair["low"], pair["high"]
+        low_gone = low in doomed
+        high_gone = high in doomed
+        if not low_gone and not high_gone:
+            kept.append(pair)
+            continue
+        if low_gone != high_gone:
+            other = high if low_gone else low
+            gone = STATE["assets"].get(low if low_gone else high)
+            if other in STATE["assets"]:
+                record_activity(other, "peer_remove", (gone or {}).get("objectKey") or "", peer_history(gone), "")
+    STATE["peers"] = kept
 
 
 def plan_rows(asset_id):
@@ -6242,6 +6384,20 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/move", path)
         if match and method == "POST":
             return self.move_asset(int(match.group(1)), self.read_json(), text)
+        match = re.fullmatch(r"/assets/(\d+)/peers/search", path)
+        if match and method == "GET":
+            return search_peers(int(match.group(1)), (query.get("q") or [""])[0], text)
+        match = re.fullmatch(r"/assets/(\d+)/peers/(\d+)", path)
+        if match and method == "DELETE":
+            return unlink_peers(int(match.group(1)), int(match.group(2)), text)
+        match = re.fullmatch(r"/assets/(\d+)/peers", path)
+        if match and method == "POST":
+            body = self.read_json() or {}
+            try:
+                other_id = int(body.get("assetId") or 0)
+            except (TypeError, ValueError):
+                other_id = 0
+            return link_peers(int(match.group(1)), other_id, text)
         match = re.fullmatch(r"/assets/(\d+)/issues", path)
         if match and method == "POST":
             return self.link_issue(int(match.group(1)), (self.read_json() or {}).get("issueKey"), text)
@@ -6770,6 +6926,7 @@ setTimeout(function () {
         if nested and not cascade:
             return 409, {"message": text["asset-tree.error.hasChildren"].replace("{0}", str(len(nested)))}
         doomed = set(nested + [asset_id])
+        drop_peers(doomed)
         for current in nested + [asset_id]:
             gone = STATE["assets"].get(current)
             if gone:
