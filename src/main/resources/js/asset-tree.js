@@ -397,6 +397,10 @@
         sortDir: 'asc',
         treeSort: 'order',
         treeSortDir: 'asc',
+        mineColumns: null,
+        mineSortKey: '',
+        mineSortDir: 'asc',
+        columnScope: '',
         rules: [],
         savedFilters: [],
         activeFilterId: '',
@@ -2066,6 +2070,12 @@
     }
 
     function showView(view) {
+        var nextScope = view === 'mine' ? 'mine' : 'project';
+        if (state.columnScope && state.columnScope !== nextScope) {
+            state.columnDraft = null;
+            state.columnPicker = null;
+            state.columnScope = '';
+        }
         if (view === 'mine') {
             var entering = state.view !== 'mine';
             state.view = 'mine';
@@ -4106,6 +4116,8 @@
 
     var DEFAULT_COLUMNS = ['key', 'type', 'status', 'custodian'];
     var BASE_COLUMNS = ['key', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated'];
+    var MINE_DEFAULT_COLUMNS = ['key', 'project', 'status', 'location'];
+    var MINE_BASE_COLUMNS = ['key', 'project', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated', 'role'];
 
     function typeFieldColumn(key) {
         var parts = key.split(':');
@@ -4126,6 +4138,182 @@
         if (key === 'location') return t('columnLocation');
         if (key.indexOf('attr:') === 0) return fieldSpec(key).label;
         return t(key);
+    }
+
+    function mineAttrKey(name) {
+        return 'mineattr:' + String(name || '').trim().toLowerCase();
+    }
+
+    function mineAttrLabels() {
+        var labels = {};
+        function keep(name) {
+            var text = String(name || '').trim();
+            if (!text) return;
+            var key = mineAttrKey(text);
+            if (!labels[key]) labels[key] = text;
+        }
+        (state.mineAssets || []).forEach(function (asset) {
+            (asset.attributes || []).forEach(function (attribute) { keep(attribute.name); });
+        });
+        if (state.types && state.types.length) {
+            state.types.forEach(function (type) {
+                (type.fields || []).forEach(function (field) { keep(field.label); });
+            });
+        }
+        (state.mineColumns || []).forEach(function (key) {
+            if (key.indexOf('mineattr:') === 0 && !labels[key]) labels[key] = key.slice('mineattr:'.length);
+        });
+        if (state.columnScope === 'mine' && state.columnDraft) {
+            state.columnDraft.forEach(function (key) {
+                if (key.indexOf('mineattr:') === 0 && !labels[key]) labels[key] = key.slice('mineattr:'.length);
+            });
+        }
+        return labels;
+    }
+
+    function mineColumnLabel(key) {
+        if (key === 'location') return t('parent');
+        if (key === 'project') return t('project');
+        if (key === 'role') return t('mineRole');
+        if (key.indexOf('mineattr:') === 0) return mineAttrLabels()[key] || key.slice('mineattr:'.length);
+        return columnLabel(key);
+    }
+
+    function mineColumnChoices() {
+        var labels = mineAttrLabels();
+        var extra = Object.keys(labels).map(function (key) {
+            return { key: key, label: labels[key] };
+        });
+        extra.sort(function (left, right) { return compareNames(left.label, right.label); });
+        return MINE_BASE_COLUMNS.map(function (key) {
+            return { key: key, label: mineColumnLabel(key) };
+        }).concat(extra);
+    }
+
+    function minePrefsKey() {
+        return 'asset-tree.mineColumns:' + (state.userKey || '');
+    }
+
+    function loadMinePrefs() {
+        state.mineColumns = null;
+        state.mineSortKey = '';
+        state.mineSortDir = 'asc';
+        try {
+            var raw = localStorage.getItem(minePrefsKey());
+            var parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && parsed.columns && parsed.columns.concat) state.mineColumns = parsed.columns;
+            if (parsed && typeof parsed.sortKey === 'string') state.mineSortKey = parsed.sortKey;
+            if (parsed && parsed.sortDir === 'desc') state.mineSortDir = 'desc';
+        } catch (error) {
+            state.mineColumns = null;
+        }
+    }
+
+    function rememberMinePrefs() {
+        try {
+            var payload = {
+                sortKey: state.mineSortKey || '',
+                sortDir: state.mineSortDir === 'desc' ? 'desc' : 'asc'
+            };
+            if (state.mineColumns) payload.columns = state.mineColumns;
+            localStorage.setItem(minePrefsKey(), JSON.stringify(payload));
+        } catch (error) {
+            /* local storage can be unavailable */
+        }
+    }
+
+    function activeColumnLabel(key) {
+        if (state.columnScope === 'mine') return mineColumnLabel(key);
+        return columnLabel(key);
+    }
+
+    function shownMineColumns() {
+        var saved = state.columnScope === 'mine' && state.columnDraft ? state.columnDraft : state.mineColumns;
+        if (!saved) saved = MINE_DEFAULT_COLUMNS;
+        var known = {};
+        mineColumnChoices().forEach(function (choice) { known[choice.key] = true; });
+        var result = [];
+        saved.forEach(function (key) {
+            if (known[key] && result.indexOf(key) < 0) result.push(key);
+        });
+        return result;
+    }
+
+    function mineFieldText(asset, key) {
+        if (!asset) return '';
+        if (key === 'name') return asset.name || '';
+        if (key === 'key') return asset.objectKey || '';
+        if (key === 'project') return asset.projectName || asset.projectKey || '';
+        if (key === 'role') return asset.holderRole || '';
+        if (key === 'location') return asset.location || '';
+        if (key === 'type') return asset.typeLabel || typeOf(asset.typeKey).label || '';
+        if (key === 'status') return statusLabel(asset.status);
+        if (key === 'custodian') return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        if (key === 'description') return asset.description || '';
+        if (key === 'created' || key === 'updated') return asset[key] || '';
+        if (key.indexOf('mineattr:') === 0) {
+            var wanted = key.slice('mineattr:'.length);
+            var attrs = asset.attributes || [];
+            var blank = '';
+            for (var i = 0; i < attrs.length; i++) {
+                if (String(attrs[i].name || '').trim().toLowerCase() !== wanted) continue;
+                var text = attrs[i].displayValue || attrs[i].value || '';
+                if (text) return text;
+                blank = text;
+            }
+            return blank;
+        }
+        return '';
+    }
+
+    function mineCell(asset, key) {
+        if (key === 'status') return lozenge(asset.status);
+        if (key === 'type') return typeBadge(typeFor(asset), asset.typeLabel || typeOf(asset.typeKey).label);
+        if (key === 'location') return asset.location || t('root');
+        if (key === 'custodian') {
+            return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone');
+        }
+        if (key === 'description') {
+            var text = asset.description || '';
+            return text.length > 120 ? text.slice(0, 117) + '...' : text;
+        }
+        if (key === 'created' || key === 'updated') return asset[key] ? stamp(asset[key]) : '';
+        return mineFieldText(asset, key);
+    }
+
+    function mineSorted(rows) {
+        var key = state.mineSortKey;
+        if (!key) return rows.slice();
+        var dir = state.mineSortDir === 'desc' ? -1 : 1;
+        return rows.slice().sort(function (left, right) {
+            var a = String(mineFieldText(left, key) || '').trim();
+            var b = String(mineFieldText(right, key) || '').trim();
+            if (!a || !b) {
+                if (!a && !b) return (left.id || 0) - (right.id || 0);
+                return a ? -1 : 1;
+            }
+            var cmp = compareNames(a, b);
+            if (!cmp) return (left.id || 0) - (right.id || 0);
+            return cmp * dir;
+        });
+    }
+
+    function mineSortHeader(label, key) {
+        var active = state.mineSortKey === key;
+        var buttonNode = button(label, 'asset-tree-th-sort' + (active ? ' is-active' : ''), function () {
+            if (state.mineSortKey === key) {
+                state.mineSortDir = state.mineSortDir === 'desc' ? 'asc' : 'desc';
+            } else {
+                state.mineSortKey = key;
+                state.mineSortDir = 'asc';
+            }
+            rememberMinePrefs();
+            renderFrame();
+        });
+        if (active) buttonNode.appendChild(document.createTextNode(state.mineSortDir === 'desc' ? ' \u2193' : ' \u2191'));
+        buttonNode.title = t('sortBy') + ': ' + label;
+        buttonNode.setAttribute('aria-pressed', active ? 'true' : 'false');
+        return buttonNode;
     }
 
     function columnHeaders(columns) {
@@ -4185,22 +4373,26 @@
     }
 
     function columnsButton() {
-        var node = button(t('columns'), 'asset-tree-btn' + (state.columnDraft ? ' is-active' : ''), function () {
-            if (state.columnDraft) {
+        var mine = state.view === 'mine';
+        var openHere = state.columnDraft && state.columnScope === (mine ? 'mine' : 'project');
+        var node = button(t('columns'), 'asset-tree-btn' + (openHere ? ' is-active' : ''), function () {
+            if (openHere) {
                 closeColumnsEditor();
                 return;
             }
-            state.columnDraft = tableColumns([]);
+            state.columnScope = mine ? 'mine' : 'project';
+            state.columnDraft = mine ? shownMineColumns().slice() : tableColumns([]);
             state.columnPicker = { open: false, query: '' };
             replaceDetail();
         });
-        node.setAttribute('aria-pressed', state.columnDraft ? 'true' : 'false');
+        node.setAttribute('aria-pressed', openHere ? 'true' : 'false');
         return node;
     }
 
     function closeColumnsEditor() {
         state.columnDraft = null;
         state.columnPicker = null;
+        state.columnScope = '';
         replaceDetail();
     }
 
@@ -4240,7 +4432,7 @@
             chip.setAttribute('data-column', key);
             chip.setAttribute('tabindex', '0');
             chip.draggable = true;
-            var label = columnLabel(key);
+            var label = activeColumnLabel(key);
             var types = key.indexOf('attr:') === 0 ? columnTypesText(key) : '';
             chip.title = types ? label + ' \u2014 ' + types : label;
             chip.setAttribute('aria-label', label + '. ' + t('columnsDragHint'));
@@ -4316,17 +4508,27 @@
         top.appendChild(chips);
         bar.appendChild(top);
         var foot = el('div', 'asset-tree-coledit-row asset-tree-coledit-foot');
-        foot.appendChild(el('span', 'asset-tree-hint', t('columnsHint')));
+        foot.appendChild(el('span', 'asset-tree-hint', t(state.columnScope === 'mine' ? 'mineColumnsHint' : 'columnsHint')));
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+            if (state.columnScope === 'mine') {
+                state.mineColumns = state.columnDraft.slice();
+                state.columnDraft = null;
+                state.columnPicker = null;
+                state.columnScope = '';
+                rememberMinePrefs();
+                renderFrame();
+                return;
+            }
             saveProjectView({ columns: state.columnDraft.slice() }, function () {
                 state.columnDraft = null;
                 state.columnPicker = null;
+                state.columnScope = '';
                 renderFrame();
             });
         }));
         actions.appendChild(button(t('columnsReset'), 'asset-tree-btn', function () {
-            state.columnDraft = DEFAULT_COLUMNS.slice();
+            state.columnDraft = (state.columnScope === 'mine' ? MINE_DEFAULT_COLUMNS : DEFAULT_COLUMNS).slice();
             replaceDetail();
         }));
         actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeColumnsEditor));
@@ -4350,7 +4552,10 @@
         var empty = el('p', 'asset-tree-hint', t('schemaNoMatch'));
         pop.appendChild(empty);
         var rows = [];
-        columnChoices().forEach(function (key) {
+        var choices = state.columnScope === 'mine'
+            ? mineColumnChoices().map(function (item) { return item.key; })
+            : columnChoices();
+        choices.forEach(function (key) {
             var item = el('li');
             var label = el('label', 'asset-tree-check');
             var box = el('input');
@@ -4365,7 +4570,7 @@
                 refocusColumns('.asset-tree-coledit-list input[data-column="' + key + '"]');
             });
             label.appendChild(box);
-            var name = columnLabel(key);
+            var name = activeColumnLabel(key);
             label.appendChild(el('span', null, name));
             var types = key.indexOf('attr:') === 0 ? columnTypesText(key) : '';
             if (types) label.appendChild(el('span', 'asset-tree-coledit-types', types));
@@ -5000,7 +5205,8 @@
         var head = el('thead');
         var hr = el('tr');
         headers.forEach(function (label) {
-            var th = el('th', label && label.nodeType ? 'asset-tree-pick' : null);
+            var pickHead = label && label.nodeType && label.classList && label.classList.contains('asset-tree-pick-box');
+            var th = el('th', pickHead ? 'asset-tree-pick' : null);
             if (label && label.nodeType) th.appendChild(label);
             else th.textContent = label == null ? '' : String(label);
             hr.appendChild(th);
@@ -9922,8 +10128,15 @@
     function renderMine() {
         var panel = el('section', 'asset-tree-report');
         var title = state.displayName ? t('menuMine') + ' · ' + state.displayName : t('menuMine');
-        panel.appendChild(el('h2', null, title));
+        var head = el('div', 'asset-tree-mine-head');
+        head.appendChild(el('h2', null, title));
+        if (state.mineAssets !== null) head.appendChild(columnsButton());
+        panel.appendChild(head);
         panel.appendChild(el('p', 'asset-tree-hint', t('mineHint')));
+        if (state.columnScope === 'mine') {
+            var editor = columnsEditor();
+            if (editor) panel.appendChild(editor);
+        }
         if (state.mineAssets === null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             return panel;
@@ -9932,20 +10145,19 @@
             panel.appendChild(el('p', 'asset-tree-hint', t('mineEmpty')));
             return panel;
         }
-        var rows = mineVisible(state.mineAssets);
+        var rows = mineSorted(mineVisible(state.mineAssets));
         if (!rows.length) {
             panel.appendChild(el('p', 'asset-tree-hint', t('noResults')));
             return panel;
         }
+        var columns = shownMineColumns();
         panel.appendChild(selectableTable(rows.map(function (asset) {
-            return [
-                nameCell(asset, function () { goToAsset(asset.projectKey, asset.id); }),
-                asset.objectKey || '',
-                asset.projectName || asset.projectKey || '',
-                lozenge(asset.status),
-                asset.location || t('root')
-            ];
-        }), [t('name'), t('keyLabel'), t('project'), t('status'), t('parent')], {
+            return [nameCell(asset, function () { goToAsset(asset.projectKey, asset.id); })].concat(columns.map(function (key) {
+                return mineCell(asset, key);
+            }));
+        }), [mineSortHeader(t('name'), 'name')].concat(columns.map(function (key) {
+            return mineSortHeader(mineColumnLabel(key), key);
+        })), {
             scope: 'mine',
             rows: rows.map(function (asset) {
                 return {
@@ -21113,6 +21325,7 @@
             state.locale = payload.locale || 'ru';
             state.userKey = payload.userKey || '';
             state.displayName = payload.displayName || '';
+            loadMinePrefs();
             chooseProject();
             if (state.view === 'mine') {
                 mount();

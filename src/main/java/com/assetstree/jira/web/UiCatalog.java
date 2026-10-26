@@ -1024,6 +1024,8 @@ public final class UiCatalog {
             "columnLocation",
             "columns",
             "columnsHint",
+            "mineColumnsHint",
+            "mineRole",
             "columnsReset",
             "columnsMore",
             "columnsDragHint",

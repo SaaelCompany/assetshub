@@ -2084,6 +2084,46 @@ a.asset-tree-url {
     border-bottom: 2px solid #dfe1e6;
 }
 
+.asset-tree-mine-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.asset-tree-mine-head h2 {
+    margin: 0;
+}
+
+#asset-tree-app th button.asset-tree-th-sort {
+    display: inline-flex !important;
+    visibility: visible !important;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    color: inherit !important;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+#asset-tree-app th button.asset-tree-th-sort:hover,
+#asset-tree-app th button.asset-tree-th-sort.is-active {
+    color: #0052cc !important;
+    background: transparent !important;
+}
+
 #asset-tree-app table.asset-tree-table td {
     padding: 8px 10px;
     border-bottom: 1px solid #ebecf0;
