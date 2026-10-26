@@ -402,6 +402,7 @@
         mineSortDir: 'asc',
         columnScope: '',
         rules: [],
+        objectsOnly: false,
         savedFilters: [],
         activeFilterId: '',
         focusSearch: String(app.getAttribute('data-view') || '').toLowerCase() === 'search',
@@ -1282,9 +1283,60 @@
         return fieldRaw(asset, rule.field);
     }
 
+    function nearestPlaceId(asset) {
+        var parent = asset && asset.parentId;
+        var guard = 0;
+        while (parent && guard < 40) {
+            var node = byId()[parent];
+            if (!node) break;
+            if (isFolder(node)) return String(node.id);
+            parent = node.parentId;
+            guard++;
+        }
+        return '';
+    }
+
+    function placeRulePasses(asset, rule) {
+        if (rule.op === 'in') {
+            var wanted = {};
+            (rule.values || []).forEach(function (id) { wanted[String(id)] = true; });
+            var parent = asset && asset.parentId;
+            var guard = 0;
+            while (parent && guard < 40) {
+                var node = byId()[parent];
+                if (!node) break;
+                if (isFolder(node) && wanted[String(node.id)]) return true;
+                parent = node.parentId;
+                guard++;
+            }
+            return false;
+        }
+        return nearestPlaceId(asset) === String(rule.value || '');
+    }
+
+    function holderKey(asset) {
+        return asset && asset.custodian && asset.custodian.userKey ? asset.custodian.userKey : '';
+    }
+
     function rulePasses(asset, rule) {
+        if (rule && rule.ids) {
+            return !!(rule.ids[asset.id] || rule.ids[String(asset.id)]);
+        }
         if (rule && rule.keys && rule.keys.length) {
             return attrGroupPasses(asset, rule);
+        }
+        if (rule && rule.field === 'place') {
+            return placeRulePasses(asset, rule);
+        }
+        if (rule && rule.field === 'custodian' && (rule.userKey || (rule.userKeys && rule.userKeys.length))) {
+            var person = holderKey(asset);
+            if (rule.userKeys && rule.userKeys.length) {
+                for (var holder = 0; holder < rule.userKeys.length; holder++) {
+                    if (rule.userKeys[holder] === person) return true;
+                }
+                return false;
+            }
+            return person === rule.userKey;
         }
         var value = String(ruleStored(asset, rule) || '').trim();
         var expected = String(rule.value || '').trim();
@@ -1309,6 +1361,13 @@
         if (op === 'eq') {
             if (rule.field === 'type' || rule.field === 'status') return value === expected;
             return value.toLowerCase() === expected.toLowerCase();
+        }
+        if (op === 'in' && (rule.field === 'type' || rule.field === 'status')) {
+            var accepted = rule.values || [];
+            for (var index = 0; index < accepted.length; index++) {
+                if (value === String(accepted[index])) return true;
+            }
+            return false;
         }
         return value.toLowerCase().indexOf(expected.toLowerCase()) >= 0;
     }
@@ -1356,6 +1415,7 @@
             var query = textQuery().toLowerCase();
             if (query && haystack(asset).indexOf(query) < 0) return false;
         }
+        if (state.objectsOnly && isFolder(asset)) return false;
         var rules = state.rules || [];
         for (var i = 0; i < rules.length; i++) {
             if (!rulePasses(asset, rules[i])) return false;
@@ -9042,6 +9102,7 @@
         state.selectedId = selectedId || null;
         state.query = '';
         state.rules = [];
+        state.objectsOnly = false;
         state.activeFilterId = '';
         state.searchHits = null;
         state.searching = false;
@@ -9365,7 +9426,12 @@
     }
 
     function focusMatches(rule) {
-        state.rules = [rule];
+        showAssetRules(rule ? [rule] : [], false);
+    }
+
+    function showAssetRules(rules, objectsOnly) {
+        state.rules = rules || [];
+        state.objectsOnly = !!objectsOnly;
         state.activeFilterId = '';
         state.query = '';
         state.searchHits = null;
@@ -9386,6 +9452,7 @@
 
     function showAllAssets() {
         state.rules = [];
+        state.objectsOnly = false;
         state.activeFilterId = '';
         state.query = '';
         state.searchHits = null;
@@ -10044,6 +10111,7 @@
         rows.forEach(function (place) {
             var line = button(place.name, 'asset-tree-dash-link', function () {
                 state.rules = [];
+                state.objectsOnly = false;
                 state.activeFilterId = '';
                 state.query = '';
                 state.searchHits = null;
@@ -10183,7 +10251,18 @@
         if (rule.kind) copy.kind = rule.kind;
         if (rule.label) copy.label = rule.label;
         if (rule.caption) copy.caption = rule.caption;
+        if (rule.userKey) copy.userKey = rule.userKey;
+        if (rule.userKeys && rule.userKeys.length) copy.userKeys = rule.userKeys.slice();
+        if (rule.ids) copy.ids = rule.ids;
         return copy;
+    }
+
+    function ruleLocked(rule) {
+        if (!rule) return false;
+        if (rule.ids || rule.userKey || (rule.userKeys && rule.userKeys.length)) return true;
+        if (rule.field === 'place') return true;
+        if (rule.keys && rule.keys.length) return true;
+        return rule.op === 'in' && rule.values && rule.values.length;
     }
 
     function filterBar() {
@@ -10218,6 +10297,7 @@
                 if (filter.id === picker.value) chosen = filter;
             });
             state.rules = chosen ? chosen.rules.map(copyRule) : [];
+            state.objectsOnly = false;
             refreshBrowse();
         });
         bar.appendChild(picker);
@@ -10225,6 +10305,7 @@
         if ((state.rules && state.rules.length) || state.activeFilterId) {
             bar.appendChild(button(t('clearFilters'), 'asset-tree-btn', function () {
                 state.rules = [];
+                state.objectsOnly = false;
                 state.activeFilterId = '';
                 refreshBrowse();
             }));
@@ -10319,7 +10400,7 @@
                 if (!draft.rules.length) draft.rules.push({ field: 'name', op: 'contains', value: '' });
                 list.innerHTML = '';
                 draft.rules.forEach(function (rule, index) {
-                    if (rule.keys && rule.keys.length) {
+                    if (ruleLocked(rule)) {
                         var locked = el('div', 'asset-tree-rule');
                         locked.setAttribute('data-rule', String(index));
                         locked._kept = copyRule(rule);
@@ -10416,7 +10497,7 @@
             form.appendChild(error);
             function applyRules(save) {
                 var rules = readRules().filter(function (rule) {
-                    if (rule.keys && rule.keys.length) return true;
+                    if (ruleLocked(rule)) return true;
                     if (rule.op === 'empty' || rule.op === 'notEmpty') return true;
                     if (rule.op === 'in' && rule.values && rule.values.length) return true;
                     return String(rule.value || '').trim().length > 0;
@@ -10431,6 +10512,7 @@
                     return;
                 }
                 state.rules = rules;
+                state.objectsOnly = false;
                 if (save) {
                     var id = draft.id || ('f' + Date.now());
                     var next = (state.savedFilters || []).filter(function (filter) { return filter.id !== id; });
@@ -10453,6 +10535,7 @@
                     if (state.activeFilterId === draft.id) {
                         state.activeFilterId = '';
                         state.rules = [];
+                        state.objectsOnly = false;
                     }
                     closeModal();
                     refreshBrowse();
@@ -15948,80 +16031,175 @@
         return panel;
     }
 
-    var reportObjectToken = 0;
+    var reportAssetToken = 0;
 
-    function paintReportObjectLines(host, view, payload, failed, reload) {
-        while (host.firstChild) host.removeChild(host.firstChild);
-        if (failed) {
-            host.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
-            return;
-        }
-        var lines = (payload && payload.lines) || [];
-        var lineTotal = (payload && payload.lineTotal) || lines.length;
-        var money = reportMoney(view);
-        if (!lines.length) {
-            host.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
-            return;
-        }
-        var table = el('table', 'asset-tree-report-object-table');
-        var head = el('tr');
-        head.appendChild(el('th', null, t('keyLabel')));
-        head.appendChild(el('th', null, t('name')));
-        table.appendChild(head);
-        lines.forEach(function (item) {
-            var line = el('tr', item.assetId ? 'is-open' : '');
-            if (item.assetId) {
-                line.addEventListener('click', function () {
-                    closeModal();
-                    goToAsset(state.projectKey, item.assetId);
-                });
-            }
-            line.appendChild(el('td', 'is-key', item.objectKey || ''));
-            var who = el('td');
-            who.appendChild(el('strong', null, item.name || ''));
-            var detail = item.detail || '';
-            if (money && detail) {
-                var minor = reportMoneyMinor(detail);
-                if (minor != null) detail = reportMoneyLabel(minor);
-            }
-            if (detail) who.appendChild(el('span', null, detail));
-            line.appendChild(who);
-            table.appendChild(line);
+    function reportSavedItem(view) {
+        var found = null;
+        (state.reportCatalog || []).forEach(function (item) {
+            if (view && String(item.id) === String(view.id)) found = item;
         });
-        host.appendChild(table);
-        if (payload.capped && lines.length < lineTotal) {
-            host.appendChild(button(t('reportLinesMore'), 'asset-tree-btn', reload));
-        }
-        if (payload.capped && lines.length >= lineTotal) {
-            host.appendChild(el('p', 'asset-tree-hint', t('reportLinesCut')));
-        }
+        return found;
     }
 
-    function openReportObjects(view, row) {
-        if (!view || !row) return;
+    function reportNeedsLines(view, saved) {
+        var group = (view && view.groupBy) || (saved && saved.groupBy) || '';
+        if (view && view.sum) return true;
+        if (saved && saved.metric === 'cost') return true;
+        if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind') return true;
+        var id = String((view && view.id) || '');
+        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'service';
+    }
+
+    function reportJoin(labels) {
+        var text = [];
+        (labels || []).forEach(function (label) {
+            if (label) text.push(label);
+        });
+        return text.join(', ');
+    }
+
+    function reportHolderName(key) {
+        if (!key) return t('reportUnassigned');
+        var name = '';
+        (state.assets || []).some(function (asset) {
+            if (holderKey(asset) !== key) return false;
+            name = (asset.custodian && asset.custodian.displayName) || key;
+            return true;
+        });
+        return name || key;
+    }
+
+    function reportPlaceName(id) {
+        if (!id) return t('root');
+        var node = byId()[id] || byId()[parseInt(id, 10)];
+        return node && node.name ? node.name : String(id);
+    }
+
+    function reportSplit(value) {
+        return String(value || '').split(',').filter(function (part) { return part; });
+    }
+
+    function reportMixRules(saved) {
+        var rules = [];
+        if (!saved) return rules;
+        var field = saved.filterField || '';
+        var value = saved.filterValue || '';
+        var types = [];
+        var statuses = [];
+        var holders = [];
+        var places = [];
+        if (field === 'mix') {
+            types = mixKeys(value, 't');
+            statuses = mixKeys(value, 's');
+            holders = mixKeys(value, 'h');
+            places = mixKeys(value, 'p');
+        } else if (field === 'type') {
+            types = reportSplit(value);
+        } else if (field === 'status') {
+            statuses = reportSplit(value);
+        } else if (field === 'holder') {
+            holders = reportSplit(value);
+        } else {
+            return rules;
+        }
+        if (types.length) {
+            rules.push({
+                field: 'type',
+                op: types.length === 1 ? 'eq' : 'in',
+                value: types.length === 1 ? types[0] : '',
+                values: types,
+                caption: t('type') + ': ' + reportJoin(types.map(function (key) { return typeOf(key).label || key; }))
+            });
+        }
+        if (statuses.length) {
+            rules.push({
+                field: 'status',
+                op: statuses.length === 1 ? 'eq' : 'in',
+                value: statuses.length === 1 ? statuses[0] : '',
+                values: statuses,
+                caption: t('status') + ': ' + reportJoin(statuses.map(function (key) { return statusLabel(key); }))
+            });
+        }
+        if (holders.length) {
+            rules.push({
+                field: 'custodian',
+                op: holders.length === 1 ? 'eq' : 'in',
+                userKey: holders.length === 1 ? holders[0] : '',
+                userKeys: holders,
+                caption: t('custodian') + ': ' + reportJoin(holders.map(reportHolderName))
+            });
+        }
+        if (places.length) {
+            rules.push({
+                field: 'place',
+                op: 'in',
+                values: places,
+                caption: groupWord('place') + ': ' + reportJoin(places.map(reportPlaceName))
+            });
+        }
+        return rules;
+    }
+
+    function reportBucketRule(view, row) {
+        var group = (view && view.groupBy) || 'status';
         var key = row.key == null ? '' : String(row.key);
-        var token = ++reportObjectToken;
-        closeAllModals();
-        openModal(function (dialog) {
-            dialog.className += ' asset-tree-report-objects';
-            var title = row.label || '';
-            var count = row.count == null ? '' : String(row.count);
-            dialog.appendChild(el('h2', null, count ? title + ' · ' + count : title));
-            var host = el('div', 'asset-tree-report-object-list');
-            host.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            dialog.appendChild(host);
-            var actions = el('div', 'asset-tree-dialog-actions');
-            actions.appendChild(button(t('close'), 'asset-tree-btn', closeModal));
-            dialog.appendChild(actions);
-            function load(all) {
-                var path = '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id)
-                    + '?bucket=' + encodeURIComponent(key) + (all ? '&lines=all' : '');
-                ajax('GET', path, null, function (status, payload) {
-                    if (token !== reportObjectToken) return;
-                    paintReportObjectLines(host, view, payload, status !== 200, function () { load(true); });
-                });
+        var label = row.label || '';
+        if (group === 'type') {
+            return { field: 'type', op: 'eq', value: key, caption: t('type') + ': ' + (label || typeOf(key).label || key) };
+        }
+        if (group === 'place') {
+            return { field: 'place', op: 'eq', value: key, caption: groupWord('place') + ': ' + (label || reportPlaceName(key)) };
+        }
+        if (group === 'holder') {
+            if (!key) return { field: 'custodian', op: 'empty', value: '', caption: t('custodian') + ' ' + t('opEmpty') };
+            return { field: 'custodian', op: 'eq', userKey: key, caption: t('custodian') + ': ' + (label || reportHolderName(key)) };
+        }
+        return { field: 'status', op: 'eq', value: key, caption: t('status') + ': ' + (label || statusLabel(key)) };
+    }
+
+    function reportAssetRules(view, row, saved) {
+        var bucket = reportBucketRule(view, row);
+        var group = (view && view.groupBy) || 'status';
+        var rules = reportMixRules(saved).filter(function (rule) {
+            if (group === 'status' && rule.field === 'status') return false;
+            if (group === 'type' && rule.field === 'type') return false;
+            if (group === 'holder' && rule.field === 'custodian') return false;
+            return true;
+        });
+        rules.push(bucket);
+        return rules;
+    }
+
+    function reportValueCaption(view, row) {
+        var title = (view && view.title) || '';
+        var label = (row && row.label) || '';
+        if (title && label) return title + ' · ' + label;
+        return label || title;
+    }
+
+    function openReportInAssets(view, row) {
+        if (!view || !row) return;
+        var saved = reportSavedItem(view);
+        if (!reportNeedsLines(view, saved)) {
+            showAssetRules(reportAssetRules(view, row, saved), true);
+            return;
+        }
+        var key = row.key == null ? '' : String(row.key);
+        var token = ++reportAssetToken;
+        var projectKey = state.projectKey;
+        var path = '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(view.id)
+            + '?bucket=' + encodeURIComponent(key) + '&lines=all';
+        ajax('GET', path, null, function (status, payload) {
+            if (token !== reportAssetToken || state.projectKey !== projectKey) return;
+            if (status !== 200 || !payload) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
             }
-            load(false);
+            var ids = {};
+            ((payload && payload.lines) || []).forEach(function (line) {
+                if (line && line.assetId) ids[line.assetId] = true;
+            });
+            showAssetRules([{ ids: ids, caption: reportValueCaption(view, row) }], true);
         });
     }
 
@@ -16038,7 +16216,7 @@
         }
         var rows = view.rows || [];
         rows.forEach(function (row) {
-            row.activate = function () { openReportObjects(view, row); };
+            row.activate = function () { openReportInAssets(view, row); };
         });
         var money = reportMoney(view);
         var shareTotal = 0;
