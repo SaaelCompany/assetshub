@@ -2512,7 +2512,13 @@ a.asset-tree-url {
     white-space: nowrap;
 }
 
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-request-aside .asset-tree-issue > button.asset-tree-linkish:last-of-type:not(:first-of-type) {
+    order: 3;
+    flex: 0 0 auto;
+}
+
 #asset-tree-app .asset-tree-detail.is-issue .asset-tree-request-aside .asset-tree-issue > .asset-tree-issuelink-summary {
+    order: 4;
     flex: 1 0 100%;
     margin-left: 24px;
     white-space: nowrap;
