@@ -231,6 +231,7 @@ public final class UiCatalog {
             "profileTitle",
             "switchProject",
             "dragHint",
+            "confirmTypeMove",
             "chartEmpty",
             "chartTitle",
             "chartUnset",

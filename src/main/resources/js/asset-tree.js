@@ -633,46 +633,15 @@
         return 0;
     }
 
-    function hierarchyLabel(item, kind) {
-        if (!item) return '';
-        if (kind === 'type') return item.label || item.typeKey || '';
-        return item.name || '';
-    }
-
-    function hierarchySorted(list, kind) {
-        if (!list || state.treeSort !== 'name' || list.length < 2) return list;
-        var dir = state.treeSortDir === 'desc' ? -1 : 1;
-        return list.slice().sort(function (left, right) {
-            var cmp = compareNames(hierarchyLabel(left, kind), hierarchyLabel(right, kind));
-            if (cmp) return cmp * dir;
-            var leftOrder = left && left.sortOrder !== undefined && left.sortOrder !== null ? left.sortOrder : 0;
-            var rightOrder = right && right.sortOrder !== undefined && right.sortOrder !== null ? right.sortOrder : 0;
-            if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-            var leftId = left && left.id ? left.id : 0;
-            var rightId = right && right.id ? right.id : 0;
-            return leftId - rightId;
-        });
+    function hierarchySorted(list) {
+        return list;
     }
 
     function loadTreeSort() {
         state.treeSort = 'order';
         state.treeSortDir = 'asc';
         try {
-            var raw = localStorage.getItem('asset-tree.treeSort');
-            if (raw === 'name' || raw === 'name-desc') {
-                state.treeSort = 'name';
-                state.treeSortDir = raw === 'name-desc' ? 'desc' : 'asc';
-            }
-        } catch (error) {
-            state.treeSort = 'order';
-        }
-    }
-
-    function rememberTreeSort() {
-        try {
-            var value = 'order';
-            if (state.treeSort === 'name') value = state.treeSortDir === 'desc' ? 'name-desc' : 'name';
-            localStorage.setItem('asset-tree.treeSort', value);
+            localStorage.removeItem('asset-tree.treeSort');
         } catch (error) {
             /* local storage can be unavailable */
         }
@@ -2552,30 +2521,9 @@
         count.id = 'asset-tree-count';
         count.hidden = true;
         tools.appendChild(count);
-        var sortValue = state.treeSort === 'name' ? (state.treeSortDir === 'desc' ? 'name-desc' : 'name') : 'order';
-        var treeSort = selectBox('asset-tree-tree-sort', [
-            { value: 'order', label: t('treeSortOrder') },
-            { value: 'name', label: t('treeSortName') },
-            { value: 'name-desc', label: t('treeSortNameDesc') }
-        ], sortValue, false);
-        treeSort.className = 'asset-tree-tree-sort';
-        treeSort.setAttribute('aria-label', t('sortBy'));
-        tools.appendChild(treeSort);
         bar.appendChild(tools);
         var dragHint = el('p', 'asset-tree-draghint', t('dragHint'));
-        dragHint.hidden = !state.canPlaces || state.treeSort === 'name';
-        treeSort.addEventListener('change', function () {
-            if (treeSort.value === 'name' || treeSort.value === 'name-desc') {
-                state.treeSort = 'name';
-                state.treeSortDir = treeSort.value === 'name-desc' ? 'desc' : 'asc';
-            } else {
-                state.treeSort = 'order';
-                state.treeSortDir = 'asc';
-            }
-            rememberTreeSort();
-            dragHint.hidden = !state.canPlaces || state.treeSort === 'name';
-            renderNodes();
-        });
+        dragHint.hidden = !(state.canPlaces || state.canObjects);
         bar.appendChild(dragHint);
         side.appendChild(bar);
         var scroll = el('div', 'asset-tree-scroll');
@@ -2728,7 +2676,7 @@
             if (matches && matches[asset.id]) {
                 row.classList.add('is-match');
             }
-            if (state.canPlaces && isFolder(asset) && state.treeSort !== 'name') {
+            if (state.canPlaces && isFolder(asset)) {
                 row.appendChild(dragGrip(asset));
             }
             var chevron = el('button', 'asset-tree-chevron', expandable ? (isExpanded(asset.id) ? '▾' : '▸') : '');
@@ -2936,7 +2884,7 @@
         row.appendChild(name);
         var count = typeFolderCount(placeId, type);
         if (count) row.appendChild(el('span', 'asset-tree-qcount', '(' + count + ')'));
-        if (state.canArrange && state.treeSort !== 'name') {
+        if (state.canArrange) {
             row.classList.add('is-movable');
             bindTypeDrag(row, placeId, type.typeKey, type.label);
         }
@@ -2978,6 +2926,7 @@
         row.setAttribute('role', 'treeitem');
         row.setAttribute('data-asset-id', String(asset.id));
         if (state.selectedId === asset.id) row.classList.add('is-selected');
+        if (mayEdit(asset)) row.appendChild(dragGrip(asset));
         var spacer = el('span', 'asset-tree-chevron');
         spacer.setAttribute('aria-hidden', 'true');
         row.appendChild(spacer);
@@ -3236,6 +3185,7 @@
             if (grip.setPointerCapture) grip.setPointerCapture(event.pointerId);
             pointerDrag = {
                 id: asset.id,
+                object: !isFolder(asset),
                 pointerId: event.pointerId,
                 startX: event.clientX,
                 startY: event.clientY,
@@ -3262,10 +3212,13 @@
             pointerDrag.active = true;
             state.draggingId = pointerDrag.id;
             app.classList.add('is-dragging');
+            if (pointerDrag.object) app.classList.add('is-object-drag');
             document.documentElement.classList.add('asset-tree-dragging');
             clearTextSelection();
             var moving = byId()[pointerDrag.id];
-            var ghost = el('div', 'asset-tree-drag-ghost', moving ? moving.name : '');
+            var ghostLabel = '';
+            if (moving) ghostLabel = moving.objectKey && !isFolder(moving) ? moving.objectKey + '  ' + (moving.name || '') : (moving.name || '');
+            var ghost = el('div', 'asset-tree-drag-ghost', ghostLabel);
             ghost.id = 'asset-tree-drag-ghost';
             document.body.appendChild(ghost);
         }
@@ -3292,14 +3245,28 @@
         var commit = event.type !== 'pointercancel' && pointerDrag.active;
         var plan = commit ? (pointerDrag.plan || planDrop(event.clientX, event.clientY, pointerDrag.id)) : null;
         var movingId = pointerDrag.id;
+        var objectDrag = !!pointerDrag.object;
+        if (pointerDrag.active) suppressNextClick();
         endPointerDrag();
-        if (plan) moveAsset(movingId, plan.parentId, plan.index);
+        if (!plan) return;
+        if (objectDrag) relocateObject(movingId, plan);
+        else moveAsset(movingId, plan.parentId, plan.index);
+    }
+
+    function suppressNextClick() {
+        function eat(event) {
+            document.removeEventListener('click', eat, true);
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        document.addEventListener('click', eat, true);
     }
 
     function endPointerDrag() {
         pointerDrag = null;
         state.draggingId = null;
         app.classList.remove('is-dragging');
+        app.classList.remove('is-object-drag');
         document.documentElement.classList.remove('asset-tree-dragging');
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
@@ -3309,6 +3276,8 @@
     }
 
     function planDrop(x, y, movingId) {
+        var moving = byId()[movingId];
+        if (moving && !isFolder(moving)) return planObjectDrop(x, y, moving);
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
         if (root) root.classList.remove('is-over');
@@ -3353,6 +3322,191 @@
         var target = byId()[targetId];
         var parentId = target && target.parentId ? target.parentId : null;
         return { parentId: parentId, index: destinationIndex(parentId, targetId, mode, movingId) };
+    }
+
+    function planObjectDrop(x, y, moving) {
+        clearDropClasses();
+        var root = document.getElementById('asset-tree-rootdrop');
+        if (root) root.classList.remove('is-over');
+        var stack = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)];
+        var row = null;
+        for (var i = 0; i < stack.length; i++) {
+            var node = stack[i];
+            if (!node || !node.closest) continue;
+            if (node.id === 'asset-tree-drag-ghost' || node.closest('#asset-tree-drag-ghost')) continue;
+            if (node.classList && node.classList.contains('asset-tree-draghint')) continue;
+            var hitRow = node.closest('.asset-tree-row');
+            if (hitRow && app.contains(hitRow)) {
+                row = hitRow;
+                break;
+            }
+        }
+        if (!row || !moving) return null;
+        var assetId = row.getAttribute('data-asset-id');
+        if (assetId) {
+            var targetId = parseInt(assetId, 10);
+            if (targetId === moving.id) return null;
+            var target = byId()[targetId];
+            if (!target || isFolder(target)) return null;
+            var rect = row.getBoundingClientRect();
+            var mode = (y - rect.top) < rect.height / 2 ? 'before' : 'after';
+            row.classList.add(mode === 'before' ? 'is-drop-before' : 'is-drop-after');
+            var parentId = target.parentId ? target.parentId : null;
+            return {
+                parentId: parentId,
+                index: destinationIndex(parentId, targetId, mode, moving.id),
+                typeKey: target.typeKey
+            };
+        }
+        var typeKey = row.getAttribute('data-type-key');
+        var typePlace = row.getAttribute('data-place-id');
+        if (typeKey && typePlace) {
+            var placeId = parseInt(typePlace, 10);
+            if (!placeId) return null;
+            var typeRect = row.getBoundingClientRect();
+            var ratio = typeRect.height ? (y - typeRect.top) / typeRect.height : 1;
+            var slot = ratio < 0.28 ? 'before' : 'after';
+            row.classList.add(slot === 'before' ? 'is-drop-before' : (ratio > 0.72 ? 'is-drop-after' : 'is-drop-inside'));
+            return {
+                parentId: placeId,
+                index: typeSlotIndex(placeId, typeKey, slot, moving.id),
+                typeKey: typeKey
+            };
+        }
+        var placeKey = row.getAttribute('data-id');
+        if (!placeKey) return null;
+        var into = parseInt(placeKey, 10);
+        var place = byId()[into];
+        if (!place || !isFolder(place)) return null;
+        row.classList.add('is-drop-inside');
+        return {
+            parentId: into,
+            index: typeSlotIndex(into, moving.typeKey, 'after', moving.id),
+            typeKey: moving.typeKey
+        };
+    }
+
+    function typeSlotIndex(parentId, typeKey, mode, movingId) {
+        var siblings = childrenOf(parentId).filter(function (asset) {
+            return asset.id !== movingId;
+        });
+        var first = -1;
+        var last = -1;
+        for (var i = 0; i < siblings.length; i++) {
+            if (!isFolder(siblings[i]) && siblings[i].typeKey === typeKey) {
+                if (first < 0) first = i;
+                last = i;
+            }
+        }
+        if (first < 0) return siblings.length;
+        return mode === 'before' ? first : last + 1;
+    }
+
+    function objectAlreadyThere(moving, plan) {
+        if (!plan || (plan.typeKey || moving.typeKey) !== moving.typeKey) return false;
+        var parentId = plan.parentId || null;
+        if ((moving.parentId || null) !== parentId) return false;
+        var siblings = childrenOf(parentId);
+        for (var i = 0; i < siblings.length; i++) {
+            if (siblings[i].id === moving.id) return plan.index === i;
+        }
+        return false;
+    }
+
+    function expandObjectBranch(parentId, typeKey) {
+        if (!parentId || !typeKey) return;
+        state.expanded[parentId] = true;
+        state.expanded[typeExpandKey(parentId, typeKey)] = true;
+        var local = localParent(parentId, typeKey);
+        if (local) state.expanded[typeExpandKey(parentId, local)] = true;
+        var schema = parentKeyOf(typeOf(typeKey));
+        if (schema) state.expanded[typeExpandKey(parentId, schema)] = true;
+        rememberExpanded();
+    }
+
+    function assetWriteBody(source, typeKey) {
+        var attributes = (source.attributes || []).map(function (attribute) {
+            return { fieldKey: attribute.fieldKey, value: attribute.value || '' };
+        });
+        return {
+            name: source.name,
+            projectKey: source.projectKey || state.projectKey,
+            typeKey: typeKey,
+            status: source.status,
+            description: source.description || '',
+            custodianKey: source.custodian && source.custodian.userKey ? source.custodian.userKey : '',
+            issuedKey: source.issued && source.issued.userKey ? source.issued.userKey : '',
+            attributes: attributes
+        };
+    }
+
+    function changeObjectType(asset, typeKey, done) {
+        function send(source) {
+            ajax('PUT', '/assets/' + asset.id, assetWriteBody(source, typeKey), function (code, payload) {
+                done(code, payload);
+            });
+        }
+        if (asset.attributes) {
+            send(asset);
+            return;
+        }
+        ajax('GET', '/assets/' + asset.id, null, function (code, payload) {
+            if (code < 200 || code >= 300 || !payload) {
+                done(code, payload);
+                return;
+            }
+            send(payload);
+        });
+    }
+
+    function relocateObject(movingId, plan) {
+        var moving = byId()[movingId];
+        if (!moving || isFolder(moving) || !mayEdit(moving) || !plan) return;
+        if (objectAlreadyThere(moving, plan)) return;
+        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        var nextType = plan.typeKey || moving.typeKey;
+        var typeChanges = nextType !== moving.typeKey;
+        if (typeChanges) {
+            var label = typeOf(nextType).label || nextType;
+            var name = moving.objectKey || moving.name || '';
+            if (!window.confirm(t('confirmTypeMove', name).split('{1}').join(label))) return;
+        }
+        if (wouldCycle(movingId, plan.parentId)) {
+            notify(t('errorTitle'));
+            return;
+        }
+        state.dirty = false;
+        function finishMove() {
+            ajax('POST', '/assets/' + movingId + '/move', { parentId: plan.parentId, index: plan.index }, function (status, payload) {
+                if (status < 200 || status >= 300) {
+                    setBusy(false);
+                    notify((payload && payload.message) || t('errorTitle'));
+                    if (typeChanges) reloadTree(function () { selectAsset(movingId, true); });
+                    return;
+                }
+                assetsChanged();
+                reloadTree(function () {
+                    setBusy(false);
+                    var placed = byId()[movingId];
+                    if (placed) expandObjectBranch(placed.parentId, placed.typeKey);
+                    selectAsset(movingId, true);
+                    notify(t('moved'));
+                });
+            });
+        }
+        setBusy(true);
+        if (!typeChanges) {
+            finishMove();
+            return;
+        }
+        changeObjectType(moving, nextType, function (code, payload) {
+            if (code < 200 || code >= 300) {
+                setBusy(false);
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            finishMove();
+        });
     }
 
     function gripIcon() {

@@ -662,6 +662,10 @@
     display: block;
 }
 
+.asset-tree.is-dragging.is-object-drag .asset-tree-rootdrop {
+    display: none;
+}
+
 #asset-tree-app .asset-tree-grip {
     display: inline-flex !important;
     align-items: center;
