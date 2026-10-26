@@ -475,6 +475,7 @@
         reportView: null,
         reportChart: '',
         reportChartFor: '',
+        reportEmptyNav: false,
         reportOpen: false,
         galleryToken: 0,
         galleryLoading: false,
@@ -8592,6 +8593,9 @@
         state.reportCatalog = null;
         state.reportKey = 'status';
         state.reportView = null;
+        state.reportChart = '';
+        state.reportChartFor = '';
+        state.reportEmptyNav = false;
         state.reportOpen = false;
         state.galleryToken++;
         state.galleryLoading = false;
@@ -14837,13 +14841,42 @@
     }
 
     function downloadReportBook() {
-        var frame = document.createElement('iframe');
-        frame.hidden = true;
-        frame.src = state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports.xlsx';
-        document.body.appendChild(frame);
-        setTimeout(function () {
-            if (frame.parentNode) frame.parentNode.removeChild(frame);
-        }, 60000);
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports.xlsx', true);
+        xhr.responseType = 'blob';
+        xhr.setRequestHeader('Accept', '*/*');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(xhr.response);
+                link.download = 'reports-' + state.projectKey + '.xlsx';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                return;
+            }
+            var blob = xhr.response;
+            if (!blob || !blob.size) {
+                notify(t('errorTitle'));
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () {
+                var payload = null;
+                try {
+                    payload = JSON.parse(String(reader.result || ''));
+                } catch (error) {
+                    payload = null;
+                }
+                notify((payload && payload.message) || t('errorTitle'));
+            };
+            reader.onerror = function () { notify(t('errorTitle')); };
+            reader.readAsText(blob);
+        };
+        xhr.onerror = function () { notify(t('errorTitle')); };
+        xhr.send();
     }
 
     function downloadReport(view) {
@@ -14887,7 +14920,7 @@
         rows.push(totalCells.join(';'));
         if (view.lines && view.lines.length) {
             rows.push('');
-            var detailHead = money ? t('lifeBook') : groupWord(view.groupBy);
+            var detailHead = money ? t('lifeBook') : detailWord(view.groupBy);
             rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
             view.lines.forEach(function (row) {
                 var detail = row.detail;
@@ -14939,19 +14972,34 @@
         var seg = el('div', 'asset-tree-seg asset-tree-report-switch');
         [['donut', 'reportDonut'], ['pie', 'reportPie'], ['columns', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
             seg.appendChild(button(t(pair[1]), 'asset-tree-seg-btn' + (kind === pair[0] ? ' is-on' : ''), function () {
+                var previousFor = state.reportChartFor;
+                var previousChart = state.reportChart;
                 state.reportChartFor = String(view.id || '');
                 state.reportChart = pair[0];
                 if (!paintReport()) renderFrame();
-                rememberReportChart(view, pair[0]);
+                rememberReportChart(view, pair[0], function (ok) {
+                    if (ok) return;
+                    state.reportChartFor = previousFor;
+                    state.reportChart = previousChart;
+                    if (!paintReport()) renderFrame();
+                });
             }));
         });
         return seg;
     }
 
-    function rememberReportChart(view, kind) {
-        if (!state.canEdit || !view || !view.id) return;
+    function rememberReportChart(view, kind, done) {
+        if (!state.canEdit || !view || !view.id) {
+            if (done) done(true);
+            return;
+        }
+        var projectKey = state.projectKey;
         var wire = kind === 'columns' ? 'bar' : kind;
-        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), { chart: wire }, function (status, payload) {
+        ajax('PUT', '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(view.id), { chart: wire }, function (status, payload) {
+            if (state.projectKey !== projectKey) {
+                if (done) done(true);
+                return;
+            }
             if (status >= 200 && status < 300 && state.reportView && String(state.reportView.id) === String(view.id)) {
                 state.reportView.chart = (payload && payload.chart) || wire;
                 (state.reportCatalog || []).forEach(function (item) {
@@ -14967,6 +15015,10 @@
                         project.setup.reportCharts = parts.filter(function (part) { return part; }).join(',');
                     }
                 }
+                if (done) done(true);
+            } else {
+                notify((payload && payload.message) || t('errorTitle'));
+                if (done) done(false);
             }
         });
     }
@@ -15101,6 +15153,12 @@
         return t(map[group] || 'groupWordStatus');
     }
 
+    function detailWord(group) {
+        if (group === 'kind') return t('reportWorkDetail');
+        if (group === 'age') return t('lifePurchase');
+        return groupWord(group);
+    }
+
     function loadGallery() {
         if (state.galleryLoading) return;
         state.galleryLoading = true;
@@ -15108,9 +15166,24 @@
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            state.reportEmptyNav = false;
+            if (status !== 200) {
+                state.galleryLoading = false;
+                state.reportView = null;
+                state.reportError = (payload && payload.message) || t('errorTitle');
+                if (state.view === 'reports' && !paintReport()) renderFrame();
+                return;
+            }
             if (!reportVisible(state.reportKey)) {
-                var opened = firstVisibleReport();
-                if (opened) state.reportKey = opened;
+                state.reportKey = firstVisibleReport() || '';
+            }
+            if (!state.reportKey) {
+                state.galleryLoading = false;
+                state.reportView = null;
+                state.reportError = '';
+                state.reportEmptyNav = true;
+                if (state.view === 'reports' && !paintReport()) renderFrame();
+                return;
             }
             fetchGalleryView(token);
         });
@@ -15212,6 +15285,10 @@
     function reportCard() {
         var main = el('div', 'asset-tree-report-main');
         var view = state.reportView;
+        if (state.reportEmptyNav) {
+            main.appendChild(el('p', 'asset-tree-hint', t('reportNone')));
+            return main;
+        }
         if (state.galleryLoading || !view) {
             main.appendChild(el('p', 'asset-tree-hint', state.reportError || t('loading')));
             return main;

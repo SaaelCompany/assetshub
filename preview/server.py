@@ -1947,6 +1947,44 @@ def jump_to(first, count, unit, start):
     return jumped
 
 
+def step_back(first, upcoming, count, unit):
+    if not first or not upcoming or upcoming <= first:
+        return None
+    if unit in ("day", "week"):
+        span = count * (7 if unit == "week" else 1)
+        if span < 1:
+            return None
+        prior = upcoming - datetime.timedelta(days=span)
+        return None if prior < first else prior
+    cursor = first
+    prior = None
+    guard = 0
+    while cursor and cursor < upcoming and guard < 600:
+        prior = cursor
+        cursor = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        guard += 1
+    return prior
+
+
+def display_of(series_day, moved):
+    if not series_day:
+        return None
+    key = series_day.isoformat()
+    if key not in moved:
+        return series_day
+    target = moved.get(key)
+    if target == "-":
+        return None
+    return parse_plan_date(target)
+
+
+def after_anchor(day, last_done):
+    anchor = parse_plan_date((last_done or "").strip()[:10])
+    if not anchor:
+        return True
+    return day > anchor
+
+
 def next_shown(plan, today=None):
     today = today or datetime.date.today()
     first = plan_next(plan)
@@ -1967,6 +2005,26 @@ def next_shown(plan, today=None):
             return parse_plan_date(target)
         return first
     upcoming = jump_to(first, count, unit, today) if first < today else first
+    shown_upcoming = display_of(upcoming, moved)
+    overdue = None
+    if not (shown_upcoming and shown_upcoming == today):
+        if upcoming and upcoming > first:
+            prior = step_back(first, upcoming, count, unit)
+            if prior and after_anchor(prior, plan.get("lastDone") or ""):
+                shown = display_of(prior, moved)
+                if shown and shown <= today:
+                    overdue = shown
+        anchor = (plan.get("lastDone") or "").strip()[:10]
+        for source, target in moved.items():
+            if not target or target == "-":
+                continue
+            if anchor and source <= anchor:
+                continue
+            shown = parse_plan_date(target)
+            if shown and shown <= today and (overdue is None or shown > overdue):
+                overdue = shown
+    if overdue:
+        return overdue
     best = None
     anchor = (plan.get("lastDone") or "").strip()[:10]
     for source, target in moved.items():
@@ -2867,13 +2925,15 @@ def report_line_page(lines, query, truncated):
     return page, line_total, bool(truncated) or start + len(page) < line_total
 
 
-def empty_reason(report_key, group, money, text):
+def empty_reason(report_key, group, money, text, any_purchase=False):
     if report_key == "warranty" or group == "warranty":
         return text.get("asset-tree.ui.reportEmptyWarranty", "")
     if report_key == "age" or group == "age":
         return text.get("asset-tree.ui.reportEmptyAge", "")
     if report_key == "writeoff" or group == "writeoff":
         return text.get("asset-tree.ui.reportEmptyWriteoff", "")
+    if (report_key == "receipts" or group == "month") and (not any_purchase or not money):
+        return text.get("asset-tree.ui.reportEmptyMonth", "")
     if money:
         return text.get("asset-tree.ui.reportEmptyCost", "")
     return ""
@@ -2896,7 +2956,7 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         if plan.get("assetId") and not asset:
             continue
         shown = next_shown(plan)
-        if (plan.get("everyUnit") or "") == "once" and shown is None:
+        if shown is None:
             continue
         bucket = plan.get("kind") or "to"
         label = kind_label(project_key, bucket)
@@ -2986,8 +3046,11 @@ def report_view(project_key, report_key, text, query=None):
     capped = False
     today = datetime.date.today()
     chosen = 0
+    any_purchase = False
     for asset in assets:
         life = life_row(asset["id"]) or {}
+        if life.get("purchased"):
+            any_purchase = True
         if (report_key == "warranty" or group == "warranty") and not life.get("warrantyUntil"):
             continue
         if money and not life.get("priceMinor"):
@@ -3101,7 +3164,7 @@ def report_view(project_key, report_key, text, query=None):
         "chart": chart,
         "capped": page_capped,
         "lineTotal": line_total,
-        "reason": empty_reason(report_key, group, money, text) if not rows else "",
+        "reason": empty_reason(report_key, group, money, text, any_purchase) if not rows else "",
         "rows": rows,
         "lines": page,
     }
@@ -3784,7 +3847,7 @@ def report_sheet(view, text, used):
     lines.append([
         text.get("asset-tree.ui.keyLabel", "Key"),
         text.get("asset-tree.ui.name", "Name"),
-        text.get("asset-tree.ui.lifeBook", "Book value") if money else group_word(view.get("groupBy"), text),
+        text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
     ])
     for line in view.get("lines") or []:
         detail = line.get("detail") or ""
@@ -3804,6 +3867,10 @@ def reports_xlsx(project_key, text):
         if status != 200:
             continue
         pages.append(report_sheet(view, text, used))
+    if not pages:
+        title = text.get("asset-tree.ui.menuReports", "Reports")
+        note = text.get("asset-tree.ui.reportNone", "All reports are hidden in the module settings.")
+        pages.append((sheet_title(title, used), [title], [[note]]))
     return workbook_bytes(pages)
 
 
@@ -3835,28 +3902,35 @@ def queue_report_mail(project_key, text, force):
         if force:
             return 400, {"message": text.get("asset-tree.error.report.mail", "The report letter was not queued.")}
         return 204, None
-    book = reports_xlsx(project_key, text)
-    subject = text.get("asset-tree.mail.reports.subject", "Reports for {0}").replace("{0}", project_key)
-    body = text.get("asset-tree.mail.reports.body", "The report workbook is attached.")
-    sent = False
+    emails = []
     for key in recipients:
         user = USERS.get(key) or {}
         email = (user.get("email") or "").strip()
         if not email:
-            continue
+            if force:
+                return 400, {"message": text.get("asset-tree.error.report.mail.recipient", "A recipient has no email address.")}
+            return 204, None
+        emails.append(email)
+    book = reports_xlsx(project_key, text)
+    subject = text.get("asset-tree.mail.reports.subject", "Reports for {0}").replace("{0}", project_key)
+    body = text.get("asset-tree.mail.reports.body", "The report workbook is attached.")
+    for email in emails:
         STATE["mails"].append({
             "to": email, "subject": subject, "body": body,
             "attachment": "reports-%s.xlsx" % project_key, "bytes": len(book),
         })
-        sent = True
-    if not sent:
-        if force:
-            return 400, {"message": text.get("asset-tree.error.report.mail", "The report letter was not queued.")}
-        return 204, None
     if not force:
         setup["reportMailSent"] = today.isoformat()
         view["setup"] = module_setup(setup, migrate=False)
     return 204, None
+
+
+def detail_word(group, text):
+    if group == "kind":
+        return text.get("asset-tree.ui.reportWorkDetail", "Object and date")
+    if group == "age":
+        return text.get("asset-tree.ui.lifePurchase", "Purchase date")
+    return group_word(group, text)
 
 
 def group_word(group, text):

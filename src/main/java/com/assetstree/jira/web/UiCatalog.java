@@ -1186,6 +1186,8 @@ public final class UiCatalog {
             "reportLinesCut",
             "reportLinesMore",
             "reportBook",
+            "reportNone",
+            "reportWorkDetail",
             "reportGroupMonth",
             "reportGroupAge",
             "reportGroupWarranty",

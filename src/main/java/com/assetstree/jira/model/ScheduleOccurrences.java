@@ -82,9 +82,11 @@ public final class ScheduleOccurrences {
     }
 
     /**
-     * The day a report line should show. A repeating plan uses the soonest
-     * calendar day from today, including a day that was dragged and skipping
-     * a day that was removed. A finished or skipped one-off has no day.
+     * The day a report line should show. A repeating plan keeps the latest
+     * open day on or before today, so a missed day that is still on the
+     * calendar stays in the line. A removed day is skipped. Otherwise the
+     * line uses the soonest later day, including one that was dragged. A
+     * finished or skipped one-off, and a series with no day left, has none.
      */
     public static LocalDate nextShown(String lastDone, int count, String unit, String moves, LocalDate today, boolean completed) {
         String clean = ServiceDue.unit(unit);
@@ -108,6 +110,50 @@ public final class ScheduleOccurrences {
             return first;
         }
         LocalDate upcoming = first.isBefore(today) ? jumpTo(first, count, clean, today) : first;
+        LocalDate overdue = overdueDay(first, upcoming, count, clean, moved, lastDone, today);
+        if (overdue != null) {
+            return overdue;
+        }
+        return soonestLater(upcoming, count, clean, moved, lastDone, today);
+    }
+
+    /** Latest open day on or before today, when today itself is not that day. */
+    private static LocalDate overdueDay(LocalDate first, LocalDate upcoming, int count, String unit,
+            Map<String, String> moved, String lastDone, LocalDate today) {
+        LocalDate shownUpcoming = displayOf(upcoming, moved);
+        if (shownUpcoming != null && shownUpcoming.isEqual(today)) {
+            return null;
+        }
+        LocalDate best = null;
+        if (upcoming != null && first != null && upcoming.isAfter(first)) {
+            LocalDate prior = stepBack(first, upcoming, count, unit);
+            if (prior != null && afterAnchor(prior, lastDone)) {
+                LocalDate shown = displayOf(prior, moved);
+                if (shown != null && !shown.isAfter(today)) {
+                    best = shown;
+                }
+            }
+        }
+        String anchor = lastDone == null ? "" : lastDone.trim();
+        for (Map.Entry<String, String> entry : moved.entrySet()) {
+            String source = entry.getKey();
+            String target = entry.getValue();
+            if (target == null || "-".equals(target)) {
+                continue;
+            }
+            if (!anchor.isEmpty() && source.compareTo(anchor) <= 0) {
+                continue;
+            }
+            LocalDate shown = parseDay(target);
+            if (shown != null && !shown.isAfter(today) && (best == null || shown.isAfter(best))) {
+                best = shown;
+            }
+        }
+        return best;
+    }
+
+    private static LocalDate soonestLater(LocalDate upcoming, int count, String unit, Map<String, String> moved,
+            String lastDone, LocalDate today) {
         LocalDate best = null;
         String anchor = lastDone == null ? "" : lastDone.trim();
         for (Map.Entry<String, String> entry : moved.entrySet()) {
@@ -133,10 +179,59 @@ public final class ScheduleOccurrences {
                 }
                 break;
             }
-            cursor = ServiceDue.next(cursor.toString(), count, clean);
+            cursor = ServiceDue.next(cursor.toString(), count, unit);
             guard++;
         }
         return best;
+    }
+
+    private static LocalDate displayOf(LocalDate seriesDay, Map<String, String> moved) {
+        if (seriesDay == null) {
+            return null;
+        }
+        if (!moved.containsKey(seriesDay.toString())) {
+            return seriesDay;
+        }
+        String target = moved.get(seriesDay.toString());
+        if ("-".equals(target)) {
+            return null;
+        }
+        return parseDay(target);
+    }
+
+    private static boolean afterAnchor(LocalDate day, String lastDone) {
+        if (lastDone == null || lastDone.trim().isEmpty()) {
+            return true;
+        }
+        LocalDate anchor = parseDay(lastDone.trim());
+        if (anchor == null) {
+            return true;
+        }
+        return day.isAfter(anchor);
+    }
+
+    /** The series day immediately before {@code upcoming}. */
+    private static LocalDate stepBack(LocalDate first, LocalDate upcoming, int count, String unit) {
+        if (first == null || upcoming == null || !upcoming.isAfter(first)) {
+            return null;
+        }
+        if (ServiceDue.DAY.equals(unit) || ServiceDue.WEEK.equals(unit)) {
+            int span = ServiceDue.WEEK.equals(unit) ? count * 7 : count;
+            if (span < 1) {
+                return null;
+            }
+            LocalDate prior = upcoming.minusDays(span);
+            return prior.isBefore(first) ? null : prior;
+        }
+        LocalDate cursor = first;
+        LocalDate prior = null;
+        int guard = 0;
+        while (cursor != null && cursor.isBefore(upcoming) && guard < 600) {
+            prior = cursor;
+            cursor = ServiceDue.next(cursor.toString(), count, unit);
+            guard++;
+        }
+        return prior;
     }
 
     /** Source day to the day it is shown on. {@code -} means that day was removed. */
