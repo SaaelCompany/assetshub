@@ -395,6 +395,8 @@
         searchScope: 'project',
         sortKey: 'tree',
         sortDir: 'asc',
+        treeSort: 'order',
+        treeSortDir: 'asc',
         rules: [],
         savedFilters: [],
         activeFilterId: '',
@@ -600,6 +602,73 @@
             return left.sortOrder - right.sortOrder;
         }
         return left.id - right.id;
+    }
+
+    function compareNames(left, right) {
+        var a = String(left || '').toLowerCase();
+        var b = String(right || '').toLowerCase();
+        var aParts = a.match(/(\d+|\D+)/g) || [];
+        var bParts = b.match(/(\d+|\D+)/g) || [];
+        var count = aParts.length > bParts.length ? aParts.length : bParts.length;
+        for (var i = 0; i < count; i++) {
+            var ap = aParts[i] || '';
+            var bp = bParts[i] || '';
+            if (/^\d+$/.test(ap) && /^\d+$/.test(bp)) {
+                var an = parseInt(ap, 10);
+                var bn = parseInt(bp, 10);
+                if (an !== bn) return an < bn ? -1 : 1;
+                if (ap.length !== bp.length) return ap.length < bp.length ? -1 : 1;
+            } else {
+                var cmp = ap.localeCompare(bp);
+                if (cmp) return cmp;
+            }
+        }
+        return 0;
+    }
+
+    function hierarchyLabel(item, kind) {
+        if (!item) return '';
+        if (kind === 'type') return item.label || item.typeKey || '';
+        return item.name || '';
+    }
+
+    function hierarchySorted(list, kind) {
+        if (!list || state.treeSort !== 'name' || list.length < 2) return list;
+        var dir = state.treeSortDir === 'desc' ? -1 : 1;
+        return list.slice().sort(function (left, right) {
+            var cmp = compareNames(hierarchyLabel(left, kind), hierarchyLabel(right, kind));
+            if (cmp) return cmp * dir;
+            var leftOrder = left && left.sortOrder !== undefined && left.sortOrder !== null ? left.sortOrder : 0;
+            var rightOrder = right && right.sortOrder !== undefined && right.sortOrder !== null ? right.sortOrder : 0;
+            if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+            var leftId = left && left.id ? left.id : 0;
+            var rightId = right && right.id ? right.id : 0;
+            return leftId - rightId;
+        });
+    }
+
+    function loadTreeSort() {
+        state.treeSort = 'order';
+        state.treeSortDir = 'asc';
+        try {
+            var raw = localStorage.getItem('asset-tree.treeSort');
+            if (raw === 'name' || raw === 'name-desc') {
+                state.treeSort = 'name';
+                state.treeSortDir = raw === 'name-desc' ? 'desc' : 'asc';
+            }
+        } catch (error) {
+            state.treeSort = 'order';
+        }
+    }
+
+    function rememberTreeSort() {
+        try {
+            var value = 'order';
+            if (state.treeSort === 'name') value = state.treeSortDir === 'desc' ? 'name-desc' : 'name';
+            localStorage.setItem('asset-tree.treeSort', value);
+        } catch (error) {
+            /* local storage can be unavailable */
+        }
     }
 
     function childrenOf(parentId) {
@@ -2411,9 +2480,30 @@
         count.id = 'asset-tree-count';
         count.hidden = true;
         tools.appendChild(count);
+        var sortValue = state.treeSort === 'name' ? (state.treeSortDir === 'desc' ? 'name-desc' : 'name') : 'order';
+        var treeSort = selectBox('asset-tree-tree-sort', [
+            { value: 'order', label: t('treeSortOrder') },
+            { value: 'name', label: t('treeSortName') },
+            { value: 'name-desc', label: t('treeSortNameDesc') }
+        ], sortValue, false);
+        treeSort.className = 'asset-tree-tree-sort';
+        treeSort.setAttribute('aria-label', t('sortBy'));
+        tools.appendChild(treeSort);
         bar.appendChild(tools);
         var dragHint = el('p', 'asset-tree-draghint', t('dragHint'));
-        dragHint.hidden = !state.canPlaces;
+        dragHint.hidden = !state.canPlaces || state.treeSort === 'name';
+        treeSort.addEventListener('change', function () {
+            if (treeSort.value === 'name' || treeSort.value === 'name-desc') {
+                state.treeSort = 'name';
+                state.treeSortDir = treeSort.value === 'name-desc' ? 'desc' : 'asc';
+            } else {
+                state.treeSort = 'order';
+                state.treeSortDir = 'asc';
+            }
+            rememberTreeSort();
+            dragHint.hidden = !state.canPlaces || state.treeSort === 'name';
+            renderNodes();
+        });
         bar.appendChild(dragHint);
         side.appendChild(bar);
         var scroll = el('div', 'asset-tree-scroll');
@@ -2552,7 +2642,7 @@
     }
 
     function appendLevel(container, parentId, visible, matches) {
-        treeChildren(parentId, visible).forEach(function (asset) {
+        hierarchySorted(treeChildren(parentId, visible), 'asset').forEach(function (asset) {
             var groups = isFolder(asset) ? typeGroupsFor(asset.id) : [];
             var kids = treeChildren(asset.id, visible);
             var expandable = !!(kids.length || groups.length);
@@ -2566,7 +2656,7 @@
             if (matches && matches[asset.id]) {
                 row.classList.add('is-match');
             }
-            if (state.canPlaces && isFolder(asset)) {
+            if (state.canPlaces && isFolder(asset) && state.treeSort !== 'name') {
                 row.appendChild(dragGrip(asset));
             }
             var chevron = el('button', 'asset-tree-chevron', expandable ? (isExpanded(asset.id) ? '▾' : '▸') : '');
@@ -2599,7 +2689,7 @@
             container.appendChild(branch);
         });
         if (parentId && byId()[parentId] && isFolder(byId()[parentId])) {
-            typeGroupsFor(parentId).forEach(function (type) {
+            hierarchySorted(typeGroupsFor(parentId), 'type').forEach(function (type) {
                 container.appendChild(typeGroupRow(parentId, type));
             });
         }
@@ -2774,7 +2864,7 @@
         row.appendChild(name);
         var count = typeFolderCount(placeId, type);
         if (count) row.appendChild(el('span', 'asset-tree-qcount', '(' + count + ')'));
-        if (state.canArrange) {
+        if (state.canArrange && state.treeSort !== 'name') {
             row.classList.add('is-movable');
             bindTypeDrag(row, placeId, type.typeKey, type.label);
         }
@@ -2795,10 +2885,10 @@
         branch.appendChild(row);
         if (open) {
             var nested = el('div', 'asset-tree-children');
-            kids.forEach(function (child) {
+            hierarchySorted(kids, 'type').forEach(function (child) {
                 nested.appendChild(typeGroupRow(placeId, child));
             });
-            objects.forEach(function (asset) {
+            hierarchySorted(objects, 'asset').forEach(function (asset) {
                 nested.appendChild(objectTreeRow(asset));
             });
             branch.appendChild(nested);
@@ -21000,6 +21090,7 @@
     }
 
     function boot() {
+        loadTreeSort();
         state.loading = true;
         state.error = null;
         renderFrame();
