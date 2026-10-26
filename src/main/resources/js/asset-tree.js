@@ -6739,39 +6739,58 @@
         return parts.join(' \u00b7 ');
     }
 
+    function peerCaption(peer) {
+        var caption = ((peer.objectKey || '') + '  ' + (peer.name || '')).replace(/^\s+|\s+$/g, '');
+        if (peer.location) caption += ' \u00b7 ' + peer.location;
+        return caption;
+    }
+
+    function peerCardRow(label, value) {
+        var row = el('div', 'asset-tree-peer-card-row');
+        row.appendChild(el('span', null, label));
+        row.appendChild(el('span', null, value || ''));
+        return row;
+    }
+
+    function peerCard(peer) {
+        var card = el('div', 'asset-tree-peer-card');
+        card.appendChild(el('strong', null, peer.name || ''));
+        (peer.attributes || []).forEach(function (attr) {
+            if (!attr || !attr.name || attr.showOnIssue === false) return;
+            card.appendChild(peerCardRow(attr.name, attr.displayValue || attr.value || ''));
+        });
+        var holder = peer.custodian && peer.custodian.displayName ? peer.custodian.displayName : '';
+        if (holder) card.appendChild(peerCardRow(t('custodian'), holder));
+        var issued = peer.issued && peer.issued.displayName ? peer.issued.displayName : '';
+        if (issued) card.appendChild(peerCardRow(t('issuedTo'), issued));
+        return card;
+    }
+
     function peerRow(asset, peer) {
-        var summary = peerSummary(peer);
-        var row = el('div', 'asset-tree-issue' + (peer.open ? '' : ' is-locked'));
-        row.appendChild(issueMark('#0052cc'));
-        var title = null;
+        var block = el('div', 'asset-tree-peer' + (peer.open ? '' : ' is-locked'));
+        var line = el('div', 'asset-tree-peer-line');
+        var caption = peerCaption(peer);
         if (peer.open) {
-            title = button(peer.name || peer.objectKey || '', 'asset-tree-linkish', function () {
+            line.appendChild(button(caption, 'asset-tree-linkish', function () {
                 goToAsset(peer.projectKey, peer.id);
-            });
-            row.appendChild(title);
-            row.addEventListener('click', function (event) {
-                var node = event.target;
-                while (node && node !== row) {
-                    if (node === title) return;
-                    if (node.classList && node.classList.contains('asset-tree-linkish')) return;
-                    node = node.parentNode;
-                }
-                goToAsset(peer.projectKey, peer.id);
-            });
+            }));
         } else {
-            row.appendChild(el('span', 'asset-tree-peer-name', peer.name || peer.objectKey || ''));
+            line.appendChild(el('span', 'asset-tree-peer-name', caption));
         }
-        if (summary) row.appendChild(el('span', 'asset-tree-issuelink-summary', summary));
         if (mayEdit(asset)) {
-            row.appendChild(button(t('unlink'), 'asset-tree-linkish', function (event) {
+            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
                 if (event && event.stopPropagation) event.stopPropagation();
                 ajax('DELETE', '/assets/' + asset.id + '/peers/' + peer.id, null, function (status, payload) {
                     if (status >= 200 && status < 300) selectAsset(asset.id, true);
                     else setFormError((payload && payload.message) || t('errorTitle'));
                 });
-            }));
+            });
+            remove.setAttribute('aria-label', t('unlink'));
+            line.appendChild(remove);
         }
-        return row;
+        block.appendChild(line);
+        block.appendChild(peerCard(peer));
+        return block;
     }
 
     function peerBlock(asset) {

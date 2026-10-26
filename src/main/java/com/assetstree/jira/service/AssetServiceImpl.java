@@ -5472,9 +5472,17 @@ public class AssetServiceImpl implements AssetService {
         dto.setProjectKey(entity.getProjectKey() == null ? "" : entity.getProjectKey());
         Project owner = project(entity.getProjectKey());
         dto.setProjectName(owner == null || owner.getName() == null ? dto.getProjectKey() : owner.getName());
-        dto.setTypeLabel(typeLabel(findType(entity.getTypeKey())));
+        AssetTypeEntity type = findType(entity.getTypeKey());
+        dto.setTypeLabel(typeLabel(type));
         dto.setLocation(locationChain(entity));
         dto.setOpen(canOpen(user, owner));
+        if (type == null) {
+            dto.setAttributes(new ArrayList<AttributeDto>());
+        } else {
+            dto.setAttributes(attributeDtos(toTypeDto(type, i18n(), 0), attributesFor(entity.getID())));
+        }
+        dto.setCustodian(profile(entity.getCustodianKey()));
+        dto.setIssued(profile(entity.getIssuedKey()));
         return dto;
     }
 

@@ -1807,7 +1807,7 @@ def asset_dto(asset, text, with_issues):
         dto["comments"] = [comment_dto(row) for row in comments_of(asset["id"])]
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
-        dto["peers"] = peers_for(asset["id"])
+        dto["peers"] = peers_for(asset["id"], text)
     return dto
 
 
@@ -1897,9 +1897,32 @@ def peer_history(asset):
     return name or project or ""
 
 
-def peer_dto(asset):
+def peer_field_label(field, text):
+    label = (field or {}).get("label") or (field or {}).get("fieldKey") or ""
+    if text and label in text:
+        return text[label]
+    return label
+
+
+def peer_dto(asset, text=None):
+    text = text or {}
     row = type_row(asset["typeKey"]) or {}
     project_name = next((item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]), asset.get("projectKey") or "")
+    attributes = []
+    values = asset.get("values") or {}
+    for field in row.get("fields") or []:
+        raw = values.get(field["fieldKey"], "")
+        display = raw
+        if field.get("kind") == "user":
+            display = (USERS.get(raw) or {}).get("displayName") or raw
+        attributes.append({
+            "fieldKey": field["fieldKey"],
+            "name": peer_field_label(field, text),
+            "kind": field.get("kind") or "text",
+            "showOnIssue": field["showOnIssue"] if "showOnIssue" in field else True,
+            "value": raw,
+            "displayValue": display,
+        })
     return {
         "id": asset["id"],
         "objectKey": asset.get("objectKey") or "",
@@ -1909,15 +1932,18 @@ def peer_dto(asset):
         "typeLabel": row.get("label") or asset.get("typeKey") or "",
         "location": location_of(asset),
         "open": True,
+        "custodian": USERS.get(asset.get("custodianKey") or ""),
+        "issued": USERS.get(asset.get("issuedKey") or ""),
+        "attributes": attributes,
     }
 
 
-def peers_for(asset_id):
+def peers_for(asset_id, text=None):
     rows = []
     for other_id in linked_peer_ids(asset_id):
         other = STATE["assets"].get(other_id)
         if other:
-            rows.append(peer_dto(other))
+            rows.append(peer_dto(other, text))
     rows.sort(key=lambda item: ((item.get("name") or "").lower(), item["id"]))
     return rows
 
@@ -1949,7 +1975,7 @@ def search_peers(asset_id, query, text):
             continue
         if not peer_matches(other, needle):
             continue
-        found.append(peer_dto(other))
+        found.append(peer_dto(other, text))
         if len(found) >= 80:
             break
     found.sort(key=lambda item: ((item.get("name") or "").lower(), item["id"]))
@@ -1977,7 +2003,7 @@ def link_peers(asset_id, other_id, text):
     peer_rows().append({"low": low, "high": high})
     record_activity(asset_id, "peer_add", target.get("objectKey") or "", "", peer_history(target))
     record_activity(other_id, "peer_add", source.get("objectKey") or "", "", peer_history(source))
-    return 201, peer_dto(target)
+    return 201, peer_dto(target, text)
 
 
 def unlink_peers(asset_id, other_id, text):

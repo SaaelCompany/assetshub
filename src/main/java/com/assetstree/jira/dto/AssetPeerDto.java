@@ -1,5 +1,7 @@
 package com.assetstree.jira.dto;
 
+import java.util.ArrayList;
+import java.util.List;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 
@@ -13,6 +15,9 @@ public class AssetPeerDto {
     private String typeLabel;
     private String location;
     private boolean open;
+    private UserProfileDto custodian;
+    private UserProfileDto issued;
+    private List<AttributeDto> attributes = new ArrayList<AttributeDto>();
 
     public int getId() {
         return id;
@@ -76,5 +81,29 @@ public class AssetPeerDto {
 
     public void setOpen(boolean open) {
         this.open = open;
+    }
+
+    public UserProfileDto getCustodian() {
+        return custodian;
+    }
+
+    public void setCustodian(UserProfileDto custodian) {
+        this.custodian = custodian;
+    }
+
+    public UserProfileDto getIssued() {
+        return issued;
+    }
+
+    public void setIssued(UserProfileDto issued) {
+        this.issued = issued;
+    }
+
+    public List<AttributeDto> getAttributes() {
+        return attributes;
+    }
+
+    public void setAttributes(List<AttributeDto> attributes) {
+        this.attributes = attributes == null ? new ArrayList<AttributeDto>() : attributes;
     }
 }
