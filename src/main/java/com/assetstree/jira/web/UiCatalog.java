@@ -91,6 +91,7 @@ public final class UiCatalog {
             "viewHolders",
             "viewReport",
             "custodian",
+            "issuedTo",
             "custodianSearch",
             "custodianEmpty",
             "custodianNone",

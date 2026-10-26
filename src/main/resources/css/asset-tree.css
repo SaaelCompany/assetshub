@@ -2499,6 +2499,14 @@ a.asset-tree-url {
     white-space: nowrap !important;
 }
 
+#asset-tree-app .asset-tree-request-aside .asset-tree-issue > button.asset-tree-linkish,
+#asset-tree-app .asset-tree-request-aside .asset-tree-issue > span.asset-tree-peer-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 #asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue.is-locked,
 #asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue.is-locked:hover {
     cursor: default;

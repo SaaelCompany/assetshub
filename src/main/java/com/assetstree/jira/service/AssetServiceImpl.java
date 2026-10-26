@@ -470,6 +470,7 @@ public class AssetServiceImpl implements AssetService {
                     throw new AssetException(400, "asset-tree.error.depth");
                 }
                 String custodian = normalizeCustodian(draft.getCustodianKey());
+                String issued = type.isLocation() ? null : normalizeCustodian(draft.getIssuedKey());
                 Date now = new Date();
                 AssetEntity entity = ao().create(AssetEntity.class,
                         new DBParam("NAME", draft.getName().trim()),
@@ -487,6 +488,7 @@ public class AssetServiceImpl implements AssetService {
                     entity.setParentId(parentId);
                 }
                 entity.setCustodianKey(custodian);
+                entity.setIssuedKey(issued);
                 entity.save();
                 replaceAttributes(entity, draft.getAttributes());
                 AssetEntity[] rows = assetsIn(project.getKey());
@@ -522,6 +524,7 @@ public class AssetServiceImpl implements AssetService {
                 copy.setParentId(source.getParentId());
                 copy.setProjectKey(source.getProjectKey());
                 copy.setCustodianKey(source.getCustodianKey());
+                copy.setIssuedKey(source.getIssuedKey());
                 List<AttributeDraft> attributes = new ArrayList<AttributeDraft>();
                 for (Map.Entry<String, String> entry : attributeValues(id).entrySet()) {
                     AttributeDraft item = new AttributeDraft();
@@ -557,17 +560,21 @@ public class AssetServiceImpl implements AssetService {
                 String oldTypeKey = entity.getTypeKey() == null ? "" : entity.getTypeKey();
                 String oldStatus = Statuses.canonical(entity.getStatus());
                 String oldCustodian = entity.getCustodianKey() == null ? "" : entity.getCustodianKey();
+                String oldIssued = entity.getIssuedKey() == null ? "" : entity.getIssuedKey();
                 Map<String, String> oldAttributes = attributeValues(id);
                 String newName = draft.getName().trim();
                 String newDescription = draft.getDescription() == null ? "" : draft.getDescription();
                 String newStatus = resolveStatus(entity.getProjectKey(), draft.getStatus() == null ? entity.getStatus() : draft.getStatus());
                 String newCustodian = normalizeCustodian(draft.getCustodianKey());
                 String storedCustodian = newCustodian == null ? "" : newCustodian;
+                String newIssued = type.isLocation() ? null : normalizeCustodian(draft.getIssuedKey());
+                String storedIssued = newIssued == null ? "" : newIssued;
                 entity.setName(newName);
                 entity.setDescription(newDescription);
                 entity.setTypeKey(type.getTypeKey());
                 entity.setStatus(newStatus);
                 entity.setCustodianKey(newCustodian);
+                entity.setIssuedKey(newIssued);
                 entity.setUpdated(new Date());
                 entity.setUpdatedBy(user.getKey());
                 entity.save();
@@ -579,6 +586,7 @@ public class AssetServiceImpl implements AssetService {
                 logActivity(id, user.getKey(), "type", "", typeLabel(requireType(oldTypeKey)), typeLabel(type));
                 logActivity(id, user.getKey(), "status", "", oldStatus, newStatus);
                 logActivity(id, user.getKey(), "custodian", "", displayName(oldCustodian), displayName(storedCustodian));
+                logActivity(id, user.getKey(), "issued", "", displayName(oldIssued), displayName(storedIssued));
                 if (draft.getAttributes() != null) {
                     logAttributeChanges(id, user.getKey(), entity.getTypeKey(), oldAttributes);
                 }
@@ -4005,6 +4013,9 @@ public class AssetServiceImpl implements AssetService {
         if (userKey.equals(asset.getCustodianKey())) {
             return i18n().getText("asset-tree.ui.custodian");
         }
+        if (userKey.equals(asset.getIssuedKey())) {
+            return i18n().getText("asset-tree.ui.issuedTo");
+        }
         if (attributes == null || type == null || type.getFields() == null) {
             return null;
         }
@@ -4517,6 +4528,9 @@ public class AssetServiceImpl implements AssetService {
             return true;
         }
         if (holderMatches(asset.getCustodianKey(), needle, holders)) {
+            return true;
+        }
+        if (holderMatches(asset.getIssuedKey(), needle, holders)) {
             return true;
         }
         if (attributes == null) {
@@ -5107,6 +5121,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setCardImage(cardImage != null && !cardImage.isEmpty());
         dto.setLocation(location(entity, index));
         dto.setCustodian(profile(entity.getCustodianKey()));
+        dto.setIssued(profile(entity.getIssuedKey()));
         AssetTypeDto type = types.get(entity.getTypeKey());
         if (type != null) {
             dto.setTypeLabel(type.getLabel());

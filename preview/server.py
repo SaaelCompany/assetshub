@@ -1441,7 +1441,7 @@ def add_asset(project, type_key, name, parent, status, custodian, values, object
     STATE["assets"][asset_id] = {
         "id": asset_id, "objectKey": key, "projectKey": project, "name": name,
         "description": "", "typeKey": type_key, "status": status, "parentId": parent,
-        "sortOrder": asset_id, "custodianKey": custodian, "created": "2026-09-26T09:00:00Z",
+        "sortOrder": asset_id, "custodianKey": custodian, "issuedKey": None, "created": "2026-09-26T09:00:00Z",
         "updated": "2026-09-26T09:00:00Z", "values": values, "offeredTypes": [],
     }
     return asset_id
@@ -1787,6 +1787,7 @@ def asset_dto(asset, text, with_issues):
             if field["kind"] == "user" else asset["values"].get(field["fieldKey"], ""),
         })
     holder = USERS.get(asset.get("custodianKey") or "")
+    issued = USERS.get(asset.get("issuedKey") or "")
     dto = {
         "id": asset["id"], "objectKey": asset["objectKey"], "name": asset["name"], "description": asset["description"],
         "typeKey": asset["typeKey"], "typeLabel": typed["label"], "color": typed["color"], "icon": typed["icon"],
@@ -1796,7 +1797,7 @@ def asset_dto(asset, text, with_issues):
         "projectName": next(item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]),
         "location": location_of(asset), "editable": True,
         "cardImage": asset["id"] in STATE["card_images"],
-        "custodian": holder, "attributes": attributes,
+        "custodian": holder, "issued": issued, "attributes": attributes,
         "serviceDue": service_due_names(asset["id"]),
         "offeredTypes": list(asset.get("offeredTypes") or []) if is_location_id(asset["id"]) else [],
     }
@@ -5980,7 +5981,12 @@ setTimeout(function () {
             for asset in STATE["assets"].values():
                 if is_location_id(asset["id"]):
                     continue
-                role = text["asset-tree.ui.custodian"] if asset.get("custodianKey") == user_key else None
+                if asset.get("custodianKey") == user_key:
+                    role = text["asset-tree.ui.custodian"]
+                elif asset.get("issuedKey") == user_key:
+                    role = text.get("asset-tree.ui.issuedTo", "Issued to")
+                else:
+                    role = None
                 if role:
                     dto = asset_dto(asset, text, False)
                     dto["holderRole"] = role
@@ -6868,6 +6874,11 @@ setTimeout(function () {
         custodian = (body.get("custodianKey") or "").strip() or None
         if custodian and custodian not in USERS:
             return 400, {"message": text["asset-tree.error.user"]}
+        issued = (body.get("issuedKey") or "").strip() or None
+        if row.get("location"):
+            issued = None
+        elif issued and issued not in USERS:
+            return 400, {"message": text["asset-tree.error.user"]}
         error, values = self.values_from(body, type_key, text)
         if error:
             return 400, {"message": error}
@@ -6877,6 +6888,7 @@ setTimeout(function () {
         asset_id = add_asset(project_key, type_key, body["name"].strip(), parent_id, status, custodian, values)
         if not asset_id:
             return 400, {"message": text.get("asset-tree.error.assetKey.required", "Key")}
+        STATE["assets"][asset_id]["issuedKey"] = issued
         STATE["assets"][asset_id]["description"] = body.get("description") or ""
         log_activity(asset_id, "created", "", "", body["name"].strip())
         log_place(place_container(parent_id), "place_add", STATE["assets"][asset_id])
@@ -6901,6 +6913,7 @@ setTimeout(function () {
         )
         if not new_id:
             return 400, {"message": text.get("asset-tree.error.assetKey.required", "Key")}
+        STATE["assets"][new_id]["issuedKey"] = asset.get("issuedKey")
         STATE["assets"][new_id]["description"] = asset.get("description") or ""
         log_activity(new_id, "created", "", "", name)
         log_place(place_container(parent_id), "place_add", STATE["assets"][new_id])
@@ -6922,6 +6935,11 @@ setTimeout(function () {
         custodian = (body.get("custodianKey") or "").strip() or None
         if custodian and custodian not in USERS:
             return 400, {"message": text["asset-tree.error.user"]}
+        issued = (body.get("issuedKey") or "").strip() or None
+        if row.get("location"):
+            issued = None
+        elif issued and issued not in USERS:
+            return 400, {"message": text["asset-tree.error.user"]}
         error, values = self.values_from(body, type_key, text)
         if error:
             return 400, {"message": error}
@@ -6930,12 +6948,14 @@ setTimeout(function () {
         old_type = asset["typeKey"]
         old_status = canonical(asset["status"])
         old_custodian = asset.get("custodianKey") or ""
+        old_issued = asset.get("issuedKey") or ""
         old_values = dict(asset.get("values") or {})
         new_name = body["name"].strip()
         new_description = body.get("description") or ""
         new_status = canonical(status)
         new_custodian = custodian or ""
-        asset.update({"name": new_name, "description": new_description, "typeKey": type_key, "status": new_status, "custodianKey": custodian, "values": values, "updated": now_stamp()})
+        new_issued = issued or ""
+        asset.update({"name": new_name, "description": new_description, "typeKey": type_key, "status": new_status, "custodianKey": custodian, "issuedKey": issued, "values": values, "updated": now_stamp()})
         log_activity(asset_id, "name", "", old_name, new_name)
         log_activity(asset_id, "description", "", old_description, new_description)
         old_type_row = type_row(old_type)
@@ -6945,6 +6965,9 @@ setTimeout(function () {
         old_person = USERS.get(old_custodian)
         new_person = USERS.get(new_custodian)
         log_activity(asset_id, "custodian", "", old_person["displayName"] if old_person else "", new_person["displayName"] if new_person else "")
+        old_holder = USERS.get(old_issued)
+        new_holder = USERS.get(new_issued)
+        log_activity(asset_id, "issued", "", old_holder["displayName"] if old_holder else "", new_holder["displayName"] if new_holder else "")
         labels = {}
         for field in (new_type_row or {}).get("fields") or []:
             labels[field["fieldKey"]] = label_of(field["label"], text)

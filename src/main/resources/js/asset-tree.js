@@ -5127,6 +5127,10 @@
         if (changes && Object.prototype.hasOwnProperty.call(changes, 'custodianKey')) {
             custodianKey = changes.custodianKey || '';
         }
+        var issuedKey = source.issued && source.issued.userKey ? source.issued.userKey : '';
+        if (changes && Object.prototype.hasOwnProperty.call(changes, 'issuedKey')) {
+            issuedKey = changes.issuedKey || '';
+        }
         var nextType = changes && changes.typeKey ? changes.typeKey : (source.typeKey || asset.typeKey);
         var typeMoved = nextType !== (source.typeKey || asset.typeKey);
         setBusy(true);
@@ -5137,6 +5141,7 @@
             status: changes && changes.status ? changes.status : source.status,
             description: changes && Object.prototype.hasOwnProperty.call(changes, 'description') ? changes.description : (source.description || ''),
             custodianKey: custodianKey,
+            issuedKey: issuedKey,
             attributes: attributes
         }, function (code, payload) {
             setBusy(false);
@@ -5206,23 +5211,46 @@
         return moduleBlock(t('description'), host);
     }
 
+    function changeIssued(asset, userKey) {
+        persistAsset(asset, { issuedKey: userKey || '' });
+    }
+
     function custodianPicker(asset) {
+        return personAssign(asset, {
+            profile: asset.custodian,
+            label: t('custodian'),
+            boxId: 'asset-tree-assign',
+            onPick: function (userKey) { changeCustodian(asset, userKey); }
+        });
+    }
+
+    function issuedPicker(asset) {
+        return personAssign(asset, {
+            profile: asset.issued,
+            label: t('issuedTo'),
+            boxId: 'asset-tree-issued',
+            onPick: function (userKey) { changeIssued(asset, userKey); }
+        });
+    }
+
+    function personAssign(asset, options) {
+        var profile = options.profile;
         var field = el('div', 'asset-tree-people-field');
-        field.appendChild(el('div', 'asset-tree-people-label', t('custodian')));
-        var who = asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        field.appendChild(el('div', 'asset-tree-people-label', options.label));
+        var who = profile && profile.displayName ? profile.displayName : '';
         var person = el('div', 'asset-tree-person');
         person.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
         var personText = el('div', 'asset-tree-person-text');
         personText.appendChild(el('strong', null, who || t('custodianNone')));
-        if (asset.custodian && asset.custodian.email) personText.appendChild(el('span', null, asset.custodian.email));
-        if (state.canEdit && state.userKey && (!asset.custodian || asset.custodian.userKey !== state.userKey)) {
+        if (profile && profile.email) personText.appendChild(el('span', null, profile.email));
+        if (state.canEdit && state.userKey && (!profile || profile.userKey !== state.userKey)) {
             personText.appendChild(button(t('assignMe'), 'asset-tree-linkish', function () {
-                changeCustodian(asset, state.userKey);
+                options.onPick(state.userKey);
             }));
         }
         person.appendChild(personText);
         var box = el('div', 'asset-tree-assign');
-        box.id = 'asset-tree-assign';
+        box.id = options.boxId;
         if (!state.canEdit) {
             field.appendChild(person);
             return field;
@@ -5254,7 +5282,7 @@
                     if (status !== 200) return;
                     (payload || []).forEach(function (user) {
                         results.appendChild(button(user.displayName + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
-                            changeCustodian(asset, user.userKey);
+                            options.onPick(user.userKey);
                         }));
                     });
                 });
@@ -5264,7 +5292,7 @@
         search.appendChild(results);
         if (who) {
             search.appendChild(button(t('unassign'), 'asset-tree-linkish', function () {
-                changeCustodian(asset, '');
+                options.onPick('');
             }));
         }
         box.appendChild(search);
@@ -5330,6 +5358,7 @@
         if (item.field) return item.field;
         if (item.action === 'status') return t('status');
         if (item.action === 'custodian') return t('custodian');
+        if (item.action === 'issued') return t('issuedTo');
         if (item.action === 'name') return t('name');
         if (item.action === 'description') return t('description');
         if (item.action === 'type') return t('type');
@@ -5408,8 +5437,8 @@
             if (item.oldValue) change.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(item.oldValue), statusLabel(item.oldValue)));
             change.appendChild(el('span', 'asset-tree-history-arrow', '\u2192'));
             if (item.newValue) change.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(item.newValue), statusLabel(item.newValue)));
-        } else if (oldText || newText || item.action === 'custodian') {
-            var missing = item.action === 'custodian' ? t('custodianNone') : t('emptyValue');
+        } else if (oldText || newText || item.action === 'custodian' || item.action === 'issued') {
+            var missing = item.action === 'custodian' || item.action === 'issued' ? t('custodianNone') : t('emptyValue');
             change.appendChild(el('span', 'is-old', oldText || missing));
             change.appendChild(el('span', 'asset-tree-history-arrow', '\u2192'));
             change.appendChild(el('span', 'is-new', newText || missing));
@@ -6401,7 +6430,6 @@
             });
         }
         main.appendChild(moduleBlock(t('issues'), issues));
-        main.appendChild(peerBlock(asset));
         main.appendChild(activityBlock(asset));
 
         var error = el('div', 'asset-tree-form-error');
@@ -6411,8 +6439,10 @@
 
         var people = el('div');
         people.appendChild(custodianPicker(asset));
+        people.appendChild(issuedPicker(asset));
         people.appendChild(personField(t('author'), asset.createdBy || '', null));
         aside.appendChild(moduleBlock(t('people'), people));
+        aside.appendChild(peerBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
         form.appendChild(main);
@@ -6550,7 +6580,6 @@
         }
         issues.appendChild(issueList);
         main.appendChild(issues);
-        if (!placePage) main.appendChild(peerBlock(asset));
 
         var error = el('div', 'asset-tree-form-error');
         error.id = 'asset-tree-form-error';
@@ -6559,6 +6588,8 @@
 
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
+        if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
+        if (!placePage) aside.appendChild(peerBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
             ? state.types.map(function (type) { return { value: type.typeKey, label: type.label }; })
@@ -6884,6 +6915,11 @@
             status: statusBox ? statusBox.value : ((current && current.status) || 'in_stock'),
             description: document.getElementById('asset-field-description').value,
             custodianKey: document.getElementById('asset-field-custodian').value,
+            issuedKey: (function () {
+                var issuedBox = document.getElementById('asset-field-issued');
+                if (issuedBox) return issuedBox.value || '';
+                return current && current.issued && current.issued.userKey ? current.issued.userKey : '';
+            }()),
             attributes: collectAttributes(document.getElementById('asset-detail-form'))
         }, function (status, payload) {
             if (status < 200 || status >= 300) {
@@ -8875,11 +8911,19 @@
     }
 
     function custodianField(id, profile) {
+        return personFieldBox(id, t('custodian'), profile);
+    }
+
+    function issuedField(id, profile) {
+        return personFieldBox(id, t('issuedTo'), profile);
+    }
+
+    function personFieldBox(id, label, profile) {
         var box = userBox(profile ? profile.userKey : '', !state.canEdit, profile ? (profile.displayName || '') : '');
         box.querySelector('.asset-tree-field-value').id = id;
         var text = box.querySelector('input[type="search"]');
         if (profile && text && !text.value) text.value = profile.displayName || '';
-        var wrap = field(t('custodian'), box, true);
+        var wrap = field(label, box, true);
         if (profile) wrap.appendChild(profileCard(profile));
         return wrap;
     }
