@@ -4632,20 +4632,27 @@ def find_preview_user(raw):
     return ""
 
 
-def find_preview_place(project_key, path):
+def preview_place_index(project_key):
+    types = {row["typeKey"]: row for row in STATE["types"].values()}
+    index = {}
+    for asset in project_assets(project_key):
+        kind = types.get(asset["typeKey"]) or {}
+        if not kind.get("location"):
+            continue
+        parent = normalize_parent(asset.get("parentId"))
+        name = (asset.get("name") or "").lower()
+        index.setdefault((parent, name), []).append(asset)
+    return index
+
+
+def find_preview_place(project_key, path, index=None):
     parts = [part.strip() for part in (path or "").split("/") if part.strip()]
     if not parts:
         return None
+    places = preview_place_index(project_key) if index is None else index
     parent = None
-    types = {row["typeKey"]: row for row in STATE["types"].values()}
     for part in parts:
-        matches = []
-        for asset in project_assets(project_key):
-            kind = types.get(asset["typeKey"]) or {}
-            if not kind.get("location") or asset["name"].lower() != part.lower():
-                continue
-            if normalize_parent(asset["parentId"]) == parent:
-                matches.append(asset)
+        matches = places.get((parent, part.lower()), [])
         if len(matches) != 1:
             return None
         parent = matches[0]["id"]
@@ -4788,6 +4795,8 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
     types = [row for row in STATE["types"].values() if row["projectKey"] == project_key]
     statuses = status_dtos(project_key, text)
     by_key = {asset["objectKey"].lower(): asset for asset in project_assets(project_key)}
+    places = preview_place_index(project_key)
+    known_users = {}
     created = 0
     updated = 0
     errors = []
@@ -4843,14 +4852,16 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         if not status_key:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.status", "Status").replace("{0}", status_name)})
             continue
-        parent = find_preview_place(project_key, place)
+        parent = find_preview_place(project_key, place, places)
         if not parent:
             message = text.get("asset-tree.error.import.place.required" if not place else "asset-tree.error.import.place", "Place")
             errors.append({"row": row_number, "message": message.replace("{0}", place)})
             continue
         custodian = None
         if custodian_name:
-            custodian = find_preview_user(custodian_name)
+            if custodian_name not in known_users:
+                known_users[custodian_name] = find_preview_user(custodian_name)
+            custodian = known_users[custodian_name]
             if not custodian:
                 errors.append({"row": row_number, "message": text.get("asset-tree.error.import.user", "User").replace("{0}", custodian_name)})
                 continue

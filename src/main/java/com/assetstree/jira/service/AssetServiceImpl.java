@@ -1871,12 +1871,26 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.assetKey.required");
         }
         final List<EquipmentSheet.Sheet> sheets = equipmentSheets(draft);
-        return ao().executeInTransaction(new TransactionCallback<ImportResultDto>() {
+        final String storedKey = project.getKey();
+        final ImportMemory memory = new ImportMemory();
+        // Read the project once. People are resolved after this transaction
+        // closes: a directory search must not sit inside the database transaction,
+        // or the whole Jira waits on the held connection.
+        final PreparedImport prepared = ao().executeInTransaction(new TransactionCallback<PreparedImport>() {
             @Override
-            public ImportResultDto doInTransaction() {
-                return applyEquipmentSheets(user, project.getKey(), sheets);
+            public PreparedImport doInTransaction() {
+                return prepareEquipmentImport(storedKey, memory);
             }
         });
+        rememberProjectPeople(memory);
+        EquipmentExchange.Plan plan = EquipmentExchange.planBook(sheets, prepared.types, prepared.statuses, prepared.nodes,
+                Statuses.IN_USE, prepared.headerLabels, new EquipmentExchange.Directory() {
+                    @Override
+                    public EquipmentExchange.Person find(String raw) {
+                        return lookupPerson(raw, memory);
+                    }
+                });
+        return applyPlannedImport(user, storedKey, plan, memory);
     }
 
     @Override
@@ -3435,7 +3449,7 @@ public class AssetServiceImpl implements AssetService {
         return WorkbookSheet.write(pages);
     }
 
-    private ImportResultDto applyEquipmentSheets(ApplicationUser user, String projectKey, List<EquipmentSheet.Sheet> sheets) {
+    private PreparedImport prepareEquipmentImport(String projectKey, ImportMemory memory) {
         ensureStatuses(projectKey);
         AssetEntity[] rows = assetsIn(projectKey);
         List<AssetTypeDto> typeDtos = typeDtos(projectKey, rows);
@@ -3460,11 +3474,21 @@ public class AssetServiceImpl implements AssetService {
             locationByType.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
         }
         List<EquipmentExchange.Node> nodes = new ArrayList<EquipmentExchange.Node>();
-        Map<Integer, AssetEntity> index = indexAssets(rows);
         for (AssetEntity row : rows) {
             Boolean location = locationByType.get(row.getTypeKey());
-            nodes.add(new EquipmentExchange.Node(row.getID(), TreeLogic.normalizeParent(row.getParentId()), row.getName(),
-                    row.getObjectKey(), location != null && location.booleanValue()));
+            boolean place = location != null && location.booleanValue();
+            Integer id = Integer.valueOf(row.getID());
+            Integer parentId = TreeLogic.normalizeParent(row.getParentId());
+            nodes.add(new EquipmentExchange.Node(row.getID(), parentId, row.getName(), row.getObjectKey(), place));
+            memory.locations.put(id, Boolean.valueOf(place));
+            memory.parents.put(id, parentId);
+            memory.names.put(id, row.getName() == null ? "" : row.getName());
+            Integer max = memory.sortMax.get(parentId);
+            if (max == null || row.getSortOrder() > max.intValue()) {
+                memory.sortMax.put(parentId, Integer.valueOf(row.getSortOrder()));
+            }
+            memory.keepUser(row.getCustodianKey());
+            memory.keepUser(row.getIssuedKey());
         }
         I18nHelper labels = i18n();
         Map<String, String> headerLabels = new LinkedHashMap<String, String>();
@@ -3475,13 +3499,31 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("place", labels.getText("asset-tree.ui.exchangePlace"));
         headerLabels.put("custodian", labels.getText("asset-tree.ui.custodian"));
         headerLabels.put("description", labels.getText("asset-tree.ui.description"));
-        EquipmentExchange.Plan plan = EquipmentExchange.planBook(sheets, types, statuses, nodes,
-                Statuses.IN_USE, headerLabels, new EquipmentExchange.Directory() {
-                    @Override
-                    public EquipmentExchange.Person find(String raw) {
-                        return lookupPerson(raw);
-                    }
-                });
+        return new PreparedImport(types, statuses, nodes, headerLabels);
+    }
+
+    private void rememberProjectPeople(ImportMemory memory) {
+        for (String userKey : memory.directoryKeys) {
+            ApplicationUser person;
+            try {
+                person = userManager().getUserByKey(userKey);
+            } catch (RuntimeException ex) {
+                log.debug("User {} was not resolved", userKey, ex);
+                continue;
+            }
+            if (person == null) {
+                continue;
+            }
+            memory.rememberLabel(person.getKey(), person.getKey());
+            memory.rememberLabel(person.getUsername(), person.getKey());
+            memory.rememberLabel(person.getName(), person.getKey());
+            memory.rememberLabel(person.getEmailAddress(), person.getKey());
+            memory.rememberLabel(person.getDisplayName(), person.getKey());
+        }
+    }
+
+    private ImportResultDto applyPlannedImport(ApplicationUser user, String projectKey, EquipmentExchange.Plan plan, ImportMemory memory) {
+        I18nHelper labels = i18n();
         ImportResultDto result = new ImportResultDto();
         List<ImportIssueDto> errors = new ArrayList<ImportIssueDto>();
         for (EquipmentExchange.Issue issue : plan.getIssues()) {
@@ -3498,18 +3540,17 @@ public class AssetServiceImpl implements AssetService {
         if (!headerOnly) {
             for (EquipmentExchange.Change change : plan.getChanges()) {
                 try {
+                    applyImportedChange(user, projectKey, change, memory);
                     if (change.getExistingId() == null) {
-                        createImported(user, projectKey, change);
                         created++;
                     } else {
-                        updateImported(user, change, index);
                         updated++;
                     }
                 } catch (AssetException ex) {
-                    String text = ex.getArgs() == null || ex.getArgs().length == 0
-                            ? labels.getText(ex.getMessageKey())
-                            : labels.getText(ex.getMessageKey(), ex.getArgs());
-                    errors.add(new ImportIssueDto(change.getRow(), text));
+                    errors.add(new ImportIssueDto(change.getRow(), exceptionText(labels, ex)));
+                } catch (RuntimeException ex) {
+                    log.warn("Equipment import row {} failed", Integer.valueOf(change.getRow()), ex);
+                    errors.add(new ImportIssueDto(change.getRow(), labels.getText("asset-tree.error.unexpected")));
                 }
             }
         }
@@ -3517,6 +3558,104 @@ public class AssetServiceImpl implements AssetService {
         result.setUpdated(updated);
         result.setErrors(errors);
         return result;
+    }
+
+    private void applyImportedChange(final ApplicationUser user, final String projectKey,
+                                     final EquipmentExchange.Change change, final ImportMemory memory) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                if (change.getExistingId() == null) {
+                    createImported(user, projectKey, change, memory);
+                } else {
+                    updateImported(user, change, memory);
+                }
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Plain copies of the project read once before the book is written.
+     * Active Objects entities are not kept: each saved row loads what it needs
+     * inside its own short transaction.
+     */
+    private static final class PreparedImport {
+        private final List<EquipmentExchange.TypeRef> types;
+        private final List<EquipmentExchange.Named> statuses;
+        private final List<EquipmentExchange.Node> nodes;
+        private final Map<String, String> headerLabels;
+
+        private PreparedImport(List<EquipmentExchange.TypeRef> types, List<EquipmentExchange.Named> statuses,
+                               List<EquipmentExchange.Node> nodes, Map<String, String> headerLabels) {
+            this.types = types;
+            this.statuses = statuses;
+            this.nodes = nodes;
+            this.headerLabels = headerLabels;
+        }
+    }
+
+    /**
+     * Sort order, places and people for one import. The root parent is stored
+     * as a null map key. A display name already used in the project is resolved
+     * from that copy, so the directory is asked only for a name that is new.
+     */
+    private static final class ImportMemory {
+        private final Map<Integer, Boolean> locations = new HashMap<Integer, Boolean>();
+        private final Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+        private final Map<Integer, String> names = new HashMap<Integer, String>();
+        private final Map<Integer, Integer> sortMax = new HashMap<Integer, Integer>();
+        private final Set<String> directoryKeys = new LinkedHashSet<String>();
+        private final Map<String, List<String>> known = new HashMap<String, List<String>>();
+        private final Map<String, EquipmentExchange.Person> people = new HashMap<String, EquipmentExchange.Person>();
+
+        private void keepUser(String userKey) {
+            if (userKey == null) {
+                return;
+            }
+            String trimmed = userKey.trim();
+            if (!trimmed.isEmpty()) {
+                directoryKeys.add(trimmed);
+            }
+        }
+
+        private void rememberLabel(String label, String userKey) {
+            if (label == null || userKey == null || userKey.isEmpty()) {
+                return;
+            }
+            String marker = label.trim().toLowerCase(Locale.ROOT);
+            if (marker.isEmpty()) {
+                return;
+            }
+            List<String> keys = known.get(marker);
+            if (keys == null) {
+                keys = new ArrayList<String>();
+                known.put(marker, keys);
+            }
+            if (!keys.contains(userKey)) {
+                keys.add(userKey);
+            }
+        }
+
+        private int takeSort(Integer parentId) {
+            Integer parent = TreeLogic.normalizeParent(parentId);
+            Integer max = sortMax.get(parent);
+            int next = max == null ? 0 : max.intValue() + 1;
+            sortMax.put(parent, Integer.valueOf(next));
+            return next;
+        }
+
+        private String name(Integer id) {
+            if (id == null) {
+                return "";
+            }
+            String stored = names.get(id);
+            return stored == null ? "" : stored;
+        }
+
+        private Integer place(Integer startId) {
+            return PlaceHistory.container(startId, locations, parents, null);
+        }
     }
 
     private BulkResultDto bulkTypes(ApplicationUser user, Project project, String action, List<String> keys) {
@@ -3719,7 +3858,7 @@ public class AssetServiceImpl implements AssetService {
         return text;
     }
 
-    private void createImported(ApplicationUser user, String projectKey, EquipmentExchange.Change change) {
+    private void createImported(ApplicationUser user, String projectKey, EquipmentExchange.Change change, ImportMemory memory) {
         Date now = new Date();
         Integer parentId = Integer.valueOf(change.getParentId());
         AssetEntity entity = ao().create(AssetEntity.class,
@@ -3728,7 +3867,7 @@ public class AssetServiceImpl implements AssetService {
                 new DBParam("DESCRIPTION", change.getDescription() == null ? "" : change.getDescription()),
                 new DBParam("TYPE_KEY", change.getTypeKey()),
                 new DBParam("STATUS", change.getStatusKey()),
-                new DBParam("SORT_ORDER", nextSort(parentId, projectKey)),
+                new DBParam("SORT_ORDER", memory.takeSort(parentId)),
                 new DBParam("CREATED", now),
                 new DBParam("UPDATED", now),
                 new DBParam("CREATED_BY", user.getKey()),
@@ -3739,14 +3878,11 @@ public class AssetServiceImpl implements AssetService {
         entity.save();
         replaceAttributes(entity, drafts(change));
         logActivity(entity.getID(), user.getKey(), "created", "", "", entity.getName());
-        logPlaceChange(user, placeContainer(parentId, assetsIn(projectKey), null), "place_add", entity);
+        logPlaceChange(user, memory.place(parentId), "place_add", entity);
     }
 
-    private void updateImported(ApplicationUser user, EquipmentExchange.Change change, Map<Integer, AssetEntity> index) {
-        AssetEntity entity = index.get(change.getExistingId());
-        if (entity == null) {
-            entity = ao().get(AssetEntity.class, change.getExistingId().intValue());
-        }
+    private void updateImported(ApplicationUser user, EquipmentExchange.Change change, ImportMemory memory) {
+        AssetEntity entity = ao().get(AssetEntity.class, change.getExistingId().intValue());
         if (entity == null) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
@@ -3756,9 +3892,8 @@ public class AssetServiceImpl implements AssetService {
         String oldStatus = Statuses.canonical(entity.getStatus());
         String oldCustodian = entity.getCustodianKey() == null ? "" : entity.getCustodianKey();
         Integer oldParent = TreeLogic.normalizeParent(entity.getParentId());
-        AssetEntity[] projectRows = assetsIn(entity.getProjectKey());
-        Integer fromPlace = placeContainer(oldParent, projectRows, null);
-        Integer toPlace = placeContainer(Integer.valueOf(change.getParentId()), projectRows, null);
+        Integer fromPlace = memory.place(oldParent);
+        Integer toPlace = memory.place(Integer.valueOf(change.getParentId()));
         Map<String, String> oldAttributes = attributeValues(entity.getID());
         String newDescription = change.getDescription() == null ? oldDescription : change.getDescription();
         String newCustodian = change.isCustodianPresent()
@@ -3779,11 +3914,11 @@ public class AssetServiceImpl implements AssetService {
         logActivity(id, user.getKey(), "description", "", clip(oldDescription), clip(newDescription));
         logActivity(id, user.getKey(), "type", "", oldType, change.getTypeKey());
         logActivity(id, user.getKey(), "status", "", oldStatus, change.getStatusKey());
-        logActivity(id, user.getKey(), "custodian", "", displayName(oldCustodian), displayName(newCustodian));
+        // userLabel reads the cached Jira user. displayName also asks the
+        // directory for phone and department, which is wasted on an import row.
+        logActivity(id, user.getKey(), "custodian", "", userLabel(oldCustodian), userLabel(newCustodian));
         if (oldParent == null || oldParent.intValue() != change.getParentId()) {
-            AssetEntity previous = oldParent == null ? null : index.get(oldParent);
-            AssetEntity next = index.get(Integer.valueOf(change.getParentId()));
-            logActivity(id, user.getKey(), "move", "", previous == null ? "" : previous.getName(), next == null ? "" : next.getName());
+            logActivity(id, user.getKey(), "move", "", memory.name(oldParent), memory.name(Integer.valueOf(change.getParentId())));
         }
         if (fromPlace != null && !fromPlace.equals(toPlace)) {
             logPlaceChange(user, fromPlace, "place_out", entity);
@@ -3833,6 +3968,42 @@ public class AssetServiceImpl implements AssetService {
             text = issue.getSheet() + ": " + text;
         }
         return new ImportIssueDto(issue.getRow(), text);
+    }
+
+    private EquipmentExchange.Person lookupPerson(String raw, ImportMemory memory) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return EquipmentExchange.Person.blank();
+        }
+        String text = raw.trim();
+        String marker = text.toLowerCase(Locale.ROOT);
+        EquipmentExchange.Person cached = memory.people.get(marker);
+        if (cached != null) {
+            return cached;
+        }
+        ApplicationUser direct = null;
+        try {
+            direct = userManager().getUserByKey(text);
+            if (direct == null) {
+                direct = userManager().getUserByName(text);
+            }
+        } catch (RuntimeException ex) {
+            log.debug("User {} was not resolved", text, ex);
+        }
+        EquipmentExchange.Person person;
+        if (direct != null) {
+            person = EquipmentExchange.Person.found(direct.getKey());
+        } else {
+            List<String> known = memory.known.get(marker);
+            if (known != null && known.size() == 1) {
+                person = EquipmentExchange.Person.found(known.get(0));
+            } else if (known != null && known.size() > 1) {
+                person = EquipmentExchange.Person.ambiguous();
+            } else {
+                person = lookupPerson(text);
+            }
+        }
+        memory.people.put(marker, person);
+        return person;
     }
 
     private EquipmentExchange.Person lookupPerson(String raw) {
