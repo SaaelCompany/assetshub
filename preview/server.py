@@ -4792,6 +4792,9 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": text.get("asset-tree.error.import.header", "Header")}]})
     if not records:
         return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": text.get("asset-tree.error.import.empty", "Empty")}]})
+    if len(records) > 2000:
+        message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "2000")
+        return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}]})
     types = [row for row in STATE["types"].values() if row["projectKey"] == project_key]
     statuses = status_dtos(project_key, text)
     by_key = {asset["objectKey"].lower(): asset for asset in project_assets(project_key)}
