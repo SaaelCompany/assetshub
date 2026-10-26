@@ -8142,16 +8142,16 @@ a.asset-tree-url {
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
-    max-width: 52%;
+    max-width: none;
 }
 
 #asset-tree-app .asset-tree-roster-who {
     display: block;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
-    max-width: 180px;
+    max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -8180,13 +8180,13 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-roster-dept {
-    flex: 0 1 auto;
-    max-width: 110px;
+    flex: 1 1 0;
+    max-width: 120px;
 }
 
 #asset-tree-app .asset-tree-roster-phone {
-    flex: 0 1 118px;
-    max-width: 118px;
+    flex: 0 1 auto;
+    max-width: 130px;
 }
 
 #asset-tree-app button.asset-tree-roster-grip {
