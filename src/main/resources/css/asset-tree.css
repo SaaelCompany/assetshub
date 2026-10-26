@@ -6615,6 +6615,18 @@ a.asset-tree-url {
     overflow: hidden;
 }
 
+#asset-tree-app .asset-tree-report-main > .asset-tree-hint {
+    margin: 0 14px 8px;
+}
+
+#asset-tree-app .asset-tree-report-main > .asset-tree-hint:last-child {
+    margin-bottom: 16px;
+}
+
+#asset-tree-app .asset-tree-top-row .asset-tree-report-tools {
+    flex: 0 0 auto;
+}
+
 #asset-tree-app .asset-tree-report-title {
     display: flex;
     align-items: center;

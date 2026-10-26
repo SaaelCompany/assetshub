@@ -2040,13 +2040,14 @@
         var row = el('div', 'asset-tree-top-row');
         var titles = el('div', 'asset-tree-heading');
         var heading = el('h1', null, viewTitle(state.view));
-        if (state.view === 'schedules') heading.appendChild(stageMark('beta'));
+        if (state.view === 'schedules' || state.view === 'reports') heading.appendChild(stageMark('beta'));
         if (state.view === 'map') heading.appendChild(stageMark('alpha'));
         titles.appendChild(heading);
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
         }
         var actions = el('div', 'asset-tree-actions');
+        if (state.view === 'reports') actions.appendChild(reportToolButtons());
         var projectLabel = el('label', 'asset-tree-project-label', t('project'));
         projectLabel.setAttribute('for', 'asset-tree-project');
         var projectPicker = el('select', 'asset-tree-project');
@@ -15349,6 +15350,7 @@
     function paintReport() {
         var current = document.querySelector('#asset-tree-app .asset-tree-report-main');
         if (!current || !current.parentNode || state.reportCatalog == null) return false;
+        paintReportTools();
         current.parentNode.replaceChild(reportCard(), current);
         return true;
     }
@@ -15377,16 +15379,27 @@
         return link;
     }
 
+    function reportToolButtons() {
+        var tools = el('div', 'asset-tree-inline-actions asset-tree-report-tools');
+        tools.id = 'asset-tree-report-tools';
+        if (state.canEdit) tools.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
+        tools.appendChild(button(t('reportBook'), 'asset-tree-btn', downloadReportBook));
+        if (state.reportView) {
+            tools.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
+        }
+        return tools;
+    }
+
+    function paintReportTools() {
+        var current = document.getElementById('asset-tree-report-tools');
+        if (!current || !current.parentNode) return;
+        current.parentNode.replaceChild(reportToolButtons(), current);
+    }
+
     function renderReports() {
         var panel = el('section', 'asset-tree-sheet');
-        var head = sheetHead('menuReports');
-        var actions = el('div', 'asset-tree-inline-actions');
-        if (state.canEdit) actions.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
-        actions.appendChild(button(t('reportBook'), 'asset-tree-btn', downloadReportBook));
-        if (state.reportView) actions.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
-        head.appendChild(actions);
-        panel.appendChild(head);
         panel.appendChild(el('p', 'asset-tree-hint', t('reportPageHint')));
+        paintReportTools();
         if (state.reportCatalog == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadGallery();
