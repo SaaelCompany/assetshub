@@ -2499,12 +2499,22 @@ a.asset-tree-url {
     white-space: nowrap !important;
 }
 
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-request-aside .asset-tree-issue {
+    flex-wrap: wrap;
+}
+
 #asset-tree-app .asset-tree-detail.is-issue .asset-tree-request-aside .asset-tree-issue > button.asset-tree-linkish:first-of-type,
 #asset-tree-app .asset-tree-detail.is-issue .asset-tree-request-aside .asset-tree-issue > span.asset-tree-peer-name {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-request-aside .asset-tree-issue > .asset-tree-issuelink-summary {
+    flex: 1 0 100%;
+    margin-left: 24px;
     white-space: nowrap;
 }
 
