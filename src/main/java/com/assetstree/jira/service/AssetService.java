@@ -120,6 +120,8 @@ public interface AssetService {
 
     void deleteGrant(ApplicationUser user, String projectKey, String groupName);
 
+    void deleteUserGrant(ApplicationUser user, String projectKey, String userKey);
+
     List<GrantDto> searchGroups(ApplicationUser user, String query);
 
     IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey);

@@ -3929,6 +3929,33 @@ a.asset-tree-url {
     gap: 8px;
 }
 
+.asset-tree-grant-kind {
+    display: flex;
+    gap: 6px;
+}
+
+.asset-tree-grant-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.asset-tree-grant-head .asset-tree-grant-title strong {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset-tree-grant-title span {
+    flex: 0 0 auto;
+    color: #6b778c;
+    font-size: 12px;
+}
+
 .asset-tree-grant-head strong {
     flex: 1;
     min-width: 0;

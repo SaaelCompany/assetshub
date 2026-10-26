@@ -6549,7 +6549,7 @@ setTimeout(function () {
         if match and method == "POST":
             return self.add_grant(match.group(1), self.read_json(), text)
         if match and method == "DELETE":
-            return self.delete_grant(match.group(1), (query.get("group") or [""])[0], text)
+            return self.delete_grant(match.group(1), query, text)
         if path == "/groups" and method == "GET":
             needle = (query.get("q") or [""])[0].strip().lower()
             found = [{"groupName": name} for name in GROUPS if needle and needle in name.lower()]
@@ -6629,27 +6629,65 @@ setTimeout(function () {
     def add_grant(self, project_key, body, text):
         if project_key not in {item["key"] for item in PROJECTS}:
             return 404, {"message": text["asset-tree.error.project.notFound"]}
+        user_key = ((body or {}).get("userKey") or "").strip()
         group_name = ((body or {}).get("groupName") or "").strip()
         raw_caps = (body or {}).get("caps")
         level = ((body or {}).get("level") or "").strip()
         caps = normalize_caps(raw_caps) if raw_caps else caps_from_level(level)
+        rows = STATE["grants"].setdefault(project_key, [])
+        if user_key:
+            person = USERS.get(user_key)
+            if person is None:
+                needle = user_key.lower()
+                person = next((
+                    user for user in USERS.values()
+                    if user["username"].lower() == needle or user["displayName"].lower() == needle
+                ), None)
+            if person is None or not caps:
+                return 400, {"message": text["asset-tree.error.user"]}
+            row = {
+                "userKey": person["userKey"],
+                "username": person["username"],
+                "displayName": person["displayName"],
+                "level": level_of(caps),
+                "caps": caps,
+            }
+            current = next((item for item in rows if item.get("userKey") == person["userKey"]), None)
+            if current:
+                current.clear()
+                current.update(row)
+                saved = current
+            else:
+                rows.append(row)
+                saved = row
+            rows.sort(key=lambda item: (item.get("displayName") or item.get("groupName") or "").lower())
+            return 201, saved
         if group_name not in GROUPS or not caps:
             return 400, {"message": text["asset-tree.error.group"]}
         row = {"groupName": group_name, "level": level_of(caps), "caps": caps}
-        rows = STATE["grants"].setdefault(project_key, [])
-        current = next((item for item in rows if item["groupName"] == group_name), None)
+        current = next((item for item in rows if not item.get("userKey") and item.get("groupName") == group_name), None)
         if current:
+            current.clear()
             current.update(row)
-            return 201, current
-        rows.append(row)
-        rows.sort(key=lambda item: item["groupName"].lower())
-        return 201, row
+            saved = current
+        else:
+            rows.append(row)
+            saved = row
+        rows.sort(key=lambda item: (item.get("displayName") or item.get("groupName") or "").lower())
+        return 201, saved
 
-    def delete_grant(self, project_key, group_name, text):
+    def delete_grant(self, project_key, query, text):
+        user_key = ((query or {}).get("user") or [""])[0].strip()
+        group_name = ((query or {}).get("group") or [""])[0].strip()
         rows = STATE["grants"].get(project_key, [])
-        match = next((item for item in rows if item["groupName"] == (group_name or "").strip()), None)
-        if not match:
-            return 404, {"message": text["asset-tree.error.group"]}
+        if user_key:
+            match = next((item for item in rows if item.get("userKey") == user_key), None)
+            if not match:
+                return 404, {"message": text["asset-tree.error.user"]}
+        else:
+            match = next((item for item in rows if not item.get("userKey") and item.get("groupName") == group_name), None)
+            if not match:
+                return 404, {"message": text["asset-tree.error.group"]}
         STATE["grants"][project_key] = [item for item in rows if item is not match]
         return 204, None
 

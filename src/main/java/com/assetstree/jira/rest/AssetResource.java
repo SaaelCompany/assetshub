@@ -819,11 +819,17 @@ public class AssetResource {
 
     @DELETE
     @Path("projects/{projectKey}/grants")
-    public Response deleteGrant(@PathParam("projectKey") final String projectKey, @QueryParam("group") final String group) {
+    public Response deleteGrant(@PathParam("projectKey") final String projectKey,
+                                @QueryParam("group") final String group,
+                                @QueryParam("user") final String userKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                assetService.deleteGrant(user(), projectKey, group);
+                if (userKey != null && !userKey.trim().isEmpty()) {
+                    assetService.deleteUserGrant(user(), projectKey, userKey);
+                } else {
+                    assetService.deleteGrant(user(), projectKey, group);
+                }
                 return Response.noContent().build();
             }
         });

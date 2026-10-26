@@ -10,8 +10,8 @@ import com.assetstree.jira.service.JiraServices;
 import net.java.ao.Query;
 
 /**
- * Menu visibility for group grants stored on a project.
- * A failure here hides the extra item and leaves the Jira permission checks in place.
+ * Menu visibility for grants stored on a project.
+ * A row names a group or one user. A failure here hides the extra item and leaves the Jira permission checks in place.
  */
 final class GrantSignals {
     private GrantSignals() {
@@ -39,7 +39,7 @@ final class GrantSignals {
                     ? ao.find(ProjectGrantEntity.class)
                     : ao.find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
             for (ProjectGrantEntity row : rows) {
-                if (row == null || row.getGroupName() == null) {
+                if (row == null) {
                     continue;
                 }
                 String caps = row.getCaps();
@@ -49,10 +49,10 @@ final class GrantSignals {
                 if (manageOnly && !GrantCaps.has(caps, GrantCaps.TYPES) && !GrantCaps.has(caps, GrantCaps.ASSETS)) {
                     continue;
                 }
-                if (caps.isEmpty()) {
+                if (caps == null || caps.isEmpty()) {
                     continue;
                 }
-                if (groups.isUserInGroup(user, row.getGroupName())) {
+                if (grantApplies(user, row, groups)) {
                     return true;
                 }
             }
@@ -60,5 +60,21 @@ final class GrantSignals {
             return false;
         }
         return false;
+    }
+
+    private static boolean grantApplies(ApplicationUser user, ProjectGrantEntity row, GroupManager groups) {
+        String userKey = row.getUserKey();
+        if (userKey != null && !userKey.trim().isEmpty()) {
+            return user.getKey() != null && user.getKey().equals(userKey.trim());
+        }
+        String groupName = row.getGroupName();
+        if (groupName == null || groupName.trim().isEmpty() || groups == null) {
+            return false;
+        }
+        try {
+            return groups.isUserInGroup(user, groupName.trim());
+        } catch (RuntimeException ex) {
+            return false;
+        }
     }
 }

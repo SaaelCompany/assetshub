@@ -941,22 +941,37 @@
         return visible.join(',');
     }
 
+    function grantIdentity(item) {
+        if (item && item.userKey) return 'user:' + item.userKey;
+        return 'group:' + ((item && item.groupName) || '');
+    }
+
+    function grantLabel(grant) {
+        if (!grant) return '';
+        if (grant.userKey) return grant.displayName || grant.username || grant.userKey;
+        return grant.groupName || '';
+    }
+
+    function grantBody(grant) {
+        if (grant && grant.userKey) return { userKey: grant.userKey };
+        return { groupName: grant ? grant.groupName : '' };
+    }
+
     function rememberGrant(payload) {
         var next = (state.grants || []).filter(function (item) {
-            return item.groupName !== payload.groupName;
+            return grantIdentity(item) !== grantIdentity(payload);
         });
         next.push(payload);
         next.sort(function (left, right) {
-            return String(left.groupName || '').localeCompare(String(right.groupName || ''));
+            return grantLabel(left).localeCompare(grantLabel(right));
         });
         state.grants = next;
     }
 
-    function postGrant(groupName, caps, errorNode) {
-        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', {
-            groupName: groupName,
-            caps: caps
-        }, function (status, payload) {
+    function postGrant(principal, caps, errorNode) {
+        var body = grantBody(principal);
+        body.caps = caps;
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', body, function (status, payload) {
             if (status >= 200 && status < 300) {
                 rememberGrant(payload);
                 renderFrame();
@@ -20463,14 +20478,24 @@
         }
         state.grants.forEach(function (grant) {
             var row = el('div', 'asset-tree-grant');
-            row.setAttribute('data-name', grant.groupName || '');
+            var label = grantLabel(grant);
+            row.setAttribute('data-name', [label, grant.username, grant.groupName, grant.userKey].filter(Boolean).join(' '));
             var head = el('div', 'asset-tree-grant-head');
-            head.appendChild(el('strong', null, grant.groupName));
+            var title = el('span', 'asset-tree-grant-title');
+            title.appendChild(el('strong', null, label));
+            if (grant.userKey && grant.username && grant.username !== label) {
+                title.appendChild(el('span', null, grant.username));
+            }
+            head.appendChild(title);
+            head.appendChild(el('span', 'asset-tree-key', grant.userKey ? t('accessUser') : t('accessGroup')));
             head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/grants?group=' + encodeURIComponent(grant.groupName), null, function (status, payload) {
+                var suffix = grant.userKey
+                    ? '?user=' + encodeURIComponent(grant.userKey)
+                    : '?group=' + encodeURIComponent(grant.groupName || '');
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/grants' + suffix, null, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         state.grants = (state.grants || []).filter(function (item) {
-                            return item.groupName !== grant.groupName;
+                            return grantIdentity(item) !== grantIdentity(grant);
                         });
                         renderFrame();
                     } else {
@@ -20488,7 +20513,7 @@
                     renderFrame();
                     return;
                 }
-                postGrant(grant.groupName, caps, null);
+                postGrant(grant, caps, null);
             }));
             grantList.appendChild(row);
             grantRows.push(row);
@@ -20496,9 +20521,19 @@
         grantList.appendChild(grantEmpty);
         applyListFilter(state.grantQuery, grantRows, grantEmpty);
         var form = el('form', 'asset-tree-grant asset-tree-grant-add');
-        var groupInput = input('grant-group', '', false);
-        groupInput.placeholder = t('groupSearch');
-        form.appendChild(field(t('accessGroup'), groupInput, true));
+        var mode = 'group';
+        var pickedUser = null;
+        var kind = el('div', 'asset-tree-grant-kind');
+        var groupMode = button(t('accessGroup'), 'asset-tree-btn primary', function () { setMode('group'); });
+        var userMode = button(t('accessUser'), 'asset-tree-btn', function () { setMode('user'); });
+        kind.appendChild(groupMode);
+        kind.appendChild(userMode);
+        form.appendChild(kind);
+        var principalInput = input('grant-principal', '', false);
+        principalInput.placeholder = t('groupSearch');
+        var principalField = field(t('accessGroup'), principalInput, true);
+        var principalLabel = principalField.querySelector('span');
+        form.appendChild(principalField);
         var suggest = el('div', 'asset-tree-suggest');
         form.appendChild(suggest);
         var chosen = { view: true };
@@ -20529,39 +20564,97 @@
         var error = el('div', 'asset-tree-form-error');
         error.hidden = true;
         form.appendChild(error);
-        groupInput.addEventListener('input', function () {
-            var query = groupInput.value.trim();
+        var userTimer = null;
+        principalInput.addEventListener('input', function () {
+            pickedUser = null;
+            var query = principalInput.value.trim();
             suggest.innerHTML = '';
             if (!query) return;
+            if (mode === 'user') {
+                clearTimeout(userTimer);
+                userTimer = setTimeout(function () {
+                    if (principalInput.value.trim() !== query || query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mode !== 'user' || principalInput.value.trim() !== query) return;
+                        suggest.innerHTML = '';
+                        if (status !== 200) return;
+                        (payload || []).forEach(function (user) {
+                            if (!user || !user.userKey) return;
+                            var text = user.displayName || user.username || user.userKey;
+                            if (user.department) text += ' · ' + user.department;
+                            suggest.appendChild(button(text, 'asset-tree-btn', function () {
+                                principalInput.value = user.displayName || user.username || user.userKey;
+                                pickedUser = user;
+                                suggest.innerHTML = '';
+                            }));
+                        });
+                    });
+                }, 220);
+                return;
+            }
             ajax('GET', '/groups?q=' + encodeURIComponent(query), null, function (status, payload) {
-                if (groupInput.value.trim() !== query) return;
+                if (mode !== 'group' || principalInput.value.trim() !== query) return;
                 suggest.innerHTML = '';
                 (payload || []).forEach(function (item) {
                     var name = typeof item === 'string' ? item : (item.groupName || item.name || '');
                     if (!name) return;
                     suggest.appendChild(button(name, 'asset-tree-btn', function () {
-                        groupInput.value = name;
+                        principalInput.value = name;
                         suggest.innerHTML = '';
                     }));
                 });
             });
         });
-        form.appendChild(button(t('accessAdd'), 'asset-tree-btn primary', function () {
-            var groupName = groupInput.value.trim();
+        var addButton = button(t('accessAdd'), 'asset-tree-btn primary', function () {
+            var caps = capsJoined(CAP_KEYS.filter(function (key) { return chosen[key]; }));
+            if (mode === 'user') {
+                var userKey = pickedUser && pickedUser.userKey ? pickedUser.userKey : principalInput.value.trim();
+                if (!userKey) {
+                    error.hidden = false;
+                    error.textContent = t('userSearch');
+                    return;
+                }
+                if (!caps) {
+                    error.hidden = false;
+                    error.textContent = t('capRequired');
+                    return;
+                }
+                error.hidden = true;
+                postGrant({ userKey: userKey }, caps, error);
+                return;
+            }
+            var groupName = principalInput.value.trim();
             if (!groupName) {
                 error.hidden = false;
                 error.textContent = t('groupSearch');
                 return;
             }
-            var caps = capsJoined(CAP_KEYS.filter(function (key) { return chosen[key]; }));
             if (!caps) {
                 error.hidden = false;
                 error.textContent = t('capRequired');
                 return;
             }
             error.hidden = true;
-            postGrant(groupName, caps, error);
-        }));
+            postGrant({ groupName: groupName }, caps, error);
+        });
+        function paintMode() {
+            groupMode.className = 'asset-tree-btn' + (mode === 'group' ? ' primary' : '');
+            userMode.className = 'asset-tree-btn' + (mode === 'user' ? ' primary' : '');
+            principalInput.placeholder = mode === 'user' ? t('userSearch') : t('groupSearch');
+            if (principalLabel) principalLabel.textContent = mode === 'user' ? t('accessUser') : t('accessGroup');
+            addButton.textContent = mode === 'user' ? t('accessAddUser') : t('accessAdd');
+        }
+        function setMode(next) {
+            if (mode === next) return;
+            mode = next;
+            pickedUser = null;
+            principalInput.value = '';
+            suggest.innerHTML = '';
+            error.hidden = true;
+            paintMode();
+        }
+        paintMode();
+        form.appendChild(addButton);
         form.addEventListener('submit', function (event) {
             event.preventDefault();
         });
