@@ -35,29 +35,43 @@ final class GrantSignals {
             if (ao == null || groups == null) {
                 return false;
             }
-            ProjectGrantEntity[] rows = projectKey == null || projectKey.isEmpty()
+            if (listed(user, groups, manageOnly, projectKey == null || projectKey.isEmpty()
                     ? ao.find(ProjectGrantEntity.class)
-                    : ao.find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
-            for (ProjectGrantEntity row : rows) {
-                if (row == null) {
-                    continue;
-                }
-                String caps = row.getCaps();
-                if (caps == null || caps.trim().isEmpty()) {
-                    caps = GrantCaps.fromLevel(row.getLevel());
-                }
-                if (manageOnly && !GrantCaps.has(caps, GrantCaps.TYPES) && !GrantCaps.has(caps, GrantCaps.ASSETS)) {
-                    continue;
-                }
-                if (caps == null || caps.isEmpty()) {
-                    continue;
-                }
-                if (grantApplies(user, row, groups)) {
-                    return true;
-                }
+                    : ao.find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey)))) {
+                return true;
+            }
+            if (projectKey != null && !projectKey.isEmpty()
+                    && listed(user, groups, manageOnly, ao.find(ProjectGrantEntity.class,
+                    Query.select().where("PROJECT_KEY = ?", GrantCaps.ALL_PROJECTS)))) {
+                return true;
             }
         } catch (RuntimeException ex) {
             return false;
+        }
+        return false;
+    }
+
+    private static boolean listed(ApplicationUser user, GroupManager groups, boolean manageOnly, ProjectGrantEntity[] rows) {
+        if (rows == null) {
+            return false;
+        }
+        for (ProjectGrantEntity row : rows) {
+            if (row == null) {
+                continue;
+            }
+            String caps = row.getCaps();
+            if (caps == null || caps.trim().isEmpty()) {
+                caps = GrantCaps.fromLevel(row.getLevel());
+            }
+            if (manageOnly && !GrantCaps.has(caps, GrantCaps.TYPES) && !GrantCaps.has(caps, GrantCaps.ASSETS)) {
+                continue;
+            }
+            if (caps == null || caps.isEmpty()) {
+                continue;
+            }
+            if (grantApplies(user, row, groups)) {
+                return true;
+            }
         }
         return false;
     }

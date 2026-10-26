@@ -6,7 +6,7 @@
 
     <groupId>com.assetstree.jira</groupId>
     <artifactId>asset-tree</artifactId>
-    <version>1.3.82</version>
+    <version>1.3.83</version>
     <packaging>atlassian-plugin</packaging>
 
     <name>Niout AssetHub for JSM</name>

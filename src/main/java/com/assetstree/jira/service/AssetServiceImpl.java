@@ -5308,7 +5308,7 @@ public class AssetServiceImpl implements AssetService {
         }
         dto.setAttributes(attributeDtos(type, attributes));
         List<ServicePlanEntity> plans = plansOf(entity.getID());
-        dto.setServiceDue(dueNames(plans, LocalDate.now()));
+        dto.setServiceDue(dueNames(plans, businessToday()));
         dto.setOfferedTypes(type != null && type.isLocation() ? offeredLines(entity.getOfferedTypes()) : new ArrayList<String>());
         if (withIssues) {
             dto.setIssues(issuesFor(entity.getID()));
@@ -5316,7 +5316,7 @@ public class AssetServiceImpl implements AssetService {
             dto.setComments(commentDtos(entity.getID()));
             dto.setFiles(fileDtos(entity.getID()));
             dto.setActivities(activityDtos(entity.getID()));
-            dto.setPlans(planDtos(plans, LocalDate.now()));
+            dto.setPlans(planDtos(plans, businessToday()));
         }
         return dto;
     }
@@ -5890,7 +5890,7 @@ public class AssetServiceImpl implements AssetService {
                 fillPlan(row, asset, draft, true);
                 row.save();
                 applyDueQuietly(asset.getProjectKey(), notices);
-                return planDto(row, LocalDate.now());
+                return planDto(row, businessToday());
             }
         });
         dispatchNotices(notices);
@@ -5914,7 +5914,7 @@ public class AssetServiceImpl implements AssetService {
                 fillPlan(row, asset, draft, false);
                 row.save();
                 applyDueQuietly(asset.getProjectKey(), notices);
-                return planDto(row, LocalDate.now());
+                return planDto(row, businessToday());
             }
         });
         dispatchNotices(notices);
@@ -6150,7 +6150,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void applyDueInside(String projectKey, Map<Integer, AssetEntity> known, List<ServiceNotice> notices) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = businessToday();
         ServicePlanEntity[] rows = ao().find(ServicePlanEntity.class);
         if (rows == null) {
             return;
@@ -6327,13 +6327,13 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.service");
         }
         if (Boolean.TRUE.equals(draft.getDone())) {
-            row.setCompletedOn(LocalDate.now().toString());
+            row.setCompletedOn(businessToday().toString());
             if (ServiceDue.ONCE.equals(row.getEveryUnit())) {
                 row.setAppliedFor("done");
             } else {
                 String doneOn = FieldDates.canonical(draft.getDoneOn());
                 if (doneOn == null || doneOn.isEmpty()) {
-                    doneOn = LocalDate.now().toString();
+                    doneOn = businessToday().toString();
                 }
                 row.setLastDone(doneOn);
                 row.setAppliedFor("");
@@ -6608,7 +6608,7 @@ public class AssetServiceImpl implements AssetService {
         if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || hhmm.charAt(2) != ':') {
             return false;
         }
-        LocalTime now = LocalTime.now();
+        LocalTime now = businessClock();
         return hour > now.getHour() || (hour == now.getHour() && minute > now.getMinute());
     }
 
@@ -6707,7 +6707,7 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public List<ScheduleRowDto> doInTransaction() {
                 List<ScheduleRowDto> rows = new ArrayList<ScheduleRowDto>();
-                LocalDate today = LocalDate.now();
+                LocalDate today = businessToday();
                 if (unbound) {
                     ServicePlanEntity[] loose = ao().find(ServicePlanEntity.class,
                             Query.select().where("ASSET_ID = ? AND PROJECT_KEY = ?", Integer.valueOf(0), project.getKey()));
@@ -7075,7 +7075,7 @@ public class AssetServiceImpl implements AssetService {
                 fillPlan(row, null, draft, false);
                 row.save();
                 applyDueQuietly(project.getKey(), notices);
-                return planDto(row, LocalDate.now());
+                return planDto(row, businessToday());
             }
         });
         dispatchNotices(notices);
@@ -7106,7 +7106,7 @@ public class AssetServiceImpl implements AssetService {
         }
         ServicePlanEntity[] plans = ao().find(ServicePlanEntity.class);
         List<ScheduleRowDto> rows = new ArrayList<ScheduleRowDto>();
-        LocalDate today = LocalDate.now();
+        LocalDate today = businessToday();
         if (plans != null) {
             for (ServicePlanEntity plan : plans) {
                 if (plan.getAssetId() == 0) {
@@ -8446,7 +8446,7 @@ public class AssetServiceImpl implements AssetService {
         return keys;
     }
 
-    private LocalDate businessToday() {
+    private ZoneId businessZone() {
         ZoneId zone = ZoneId.systemDefault();
         try {
             String id = ComponentAccessor.getApplicationProperties().getString("jira.default.timezone");
@@ -8456,7 +8456,15 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             zone = ZoneId.systemDefault();
         }
-        return LocalDate.now(zone);
+        return zone;
+    }
+
+    private LocalDate businessToday() {
+        return LocalDate.now(businessZone());
+    }
+
+    private LocalTime businessClock() {
+        return LocalTime.now(businessZone());
     }
 
     private byte[] reportBook(Project project) {
@@ -9473,7 +9481,7 @@ public class AssetServiceImpl implements AssetService {
                     throw new AssetException(403, "asset-tree.error.writeoff.approver");
                 }
                 row.setWriteoffState(approve ? "approved" : "rejected");
-                row.setDecidedAt(LocalDate.now().toString());
+                row.setDecidedAt(businessToday().toString());
                 row.save();
                 if (approve) {
                     String previous = asset.getStatus();
@@ -9518,7 +9526,7 @@ public class AssetServiceImpl implements AssetService {
     private LifecycleDto lifecycleDto(AssetEntity asset, LifecycleEntity row) {
         LifecycleDto dto = new LifecycleDto();
         dto.setAssetId(asset.getID());
-        LocalDate today = LocalDate.now();
+        LocalDate today = businessToday();
         if (row == null) {
             dto.setPurchased("");
             dto.setSupplier("");

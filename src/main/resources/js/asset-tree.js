@@ -10130,8 +10130,19 @@
     function holderList(rows) {
         var list = el('div', 'asset-tree-dash-list');
         rows.forEach(function (holder) {
-            var name = holder.user && holder.user.displayName ? holder.user.displayName : '';
-            var line = button(name, 'asset-tree-dash-link', function () {
+            var user = holder.user || {};
+            var name = user.displayName || '';
+            var line = button(name || user.userKey || '', 'asset-tree-dash-link', function () {
+                if (user.userKey) {
+                    focusMatches({
+                        field: 'custodian',
+                        op: 'eq',
+                        userKey: user.userKey,
+                        value: name,
+                        caption: t('custodian') + ': ' + (name || user.userKey)
+                    });
+                    return;
+                }
                 focusMatches({ field: 'custodian', op: 'eq', value: name });
             });
             line.appendChild(el('strong', null, String(holder.count)));
@@ -14800,6 +14811,8 @@
         var any = false;
         grouped.order.forEach(function (key) {
             var person = grouped.people[key];
+            var placeId = person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
+            if (staffPlaceHidden(placeId)) return;
             person.leaves.forEach(function (leave) {
                 any = true;
                 var text = person.userName + ' · ' + t('staffLeave') + ' ' + staffDayShort(leave.startOn) + '–' + staffDayShort(leave.endOn);
