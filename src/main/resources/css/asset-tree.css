@@ -8224,13 +8224,13 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-roster-hours {
-    width: 32px !important;
-    min-width: 32px !important;
+    width: 36px !important;
+    min-width: 36px !important;
     height: 18px !important;
     min-height: 0 !important;
     flex: 0 0 auto;
     margin-left: 0;
-    padding: 0 2px !important;
+    padding: 0 !important;
     border: 1px solid #e6e8ec !important;
     border-radius: 8px !important;
     background: #f7f8fa !important;
@@ -8238,6 +8238,14 @@ a.asset-tree-url {
     font-size: 12px !important;
     font-weight: 700;
     text-align: center;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+#asset-tree-app .asset-tree-roster-hours::-webkit-outer-spin-button,
+#asset-tree-app .asset-tree-roster-hours::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 #asset-tree-app button.asset-tree-roster-remove {

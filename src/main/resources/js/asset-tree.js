@@ -13911,6 +13911,7 @@
             if (!by[id]) by[id] = { days: 0, hours: 0 };
             by[id].days += 1;
             by[id].hours += hours;
+            if (staffMarkFactor(id) === 0 && !(custom != null && custom > 0)) continue;
             totalDays += 1;
             totalHours += hours;
         }
