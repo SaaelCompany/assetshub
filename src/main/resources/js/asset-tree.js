@@ -14555,17 +14555,6 @@
         var who = el('span', 'asset-tree-roster-who', person.userName);
         who.title = person.phone ? person.userName + ' \u00B7 ' + person.phone : person.userName;
         identity.appendChild(who);
-        var aside = el('span', 'asset-tree-roster-aside');
-        if (person.department) {
-            var dept = el('span', 'asset-tree-roster-dept', person.department);
-            dept.title = t('userDepartment') + ': ' + person.department;
-            aside.appendChild(dept);
-        }
-        if (person.phone) {
-            var phone = el('span', 'asset-tree-roster-phone', person.phone);
-            phone.title = t('userPhone') + ': ' + person.phone;
-            aside.appendChild(phone);
-        }
         if (state.canEdit && person.hours) {
             identity.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
@@ -14579,7 +14568,6 @@
         }
         var meta = el('span', 'asset-tree-roster-meta');
         meta.appendChild(identity);
-        if (aside.childNodes.length) meta.appendChild(aside);
         if (state.canEdit && person.hours) {
             var hours = document.createElement('input');
             hours.type = 'number';
@@ -14706,22 +14694,6 @@
         row.appendChild(el('th', 'asset-tree-roster-total', t('staffHoursCol')));
     }
 
-    function rosterColumns(count) {
-        var group = document.createElement('colgroup');
-        var name = document.createElement('col');
-        name.className = 'asset-tree-roster-col-name';
-        group.appendChild(name);
-        var day;
-        for (day = 0; day < count; day++) group.appendChild(document.createElement('col'));
-        var totals;
-        for (totals = 0; totals < 2; totals++) {
-            var total = document.createElement('col');
-            total.className = 'asset-tree-roster-col-total';
-            group.appendChild(total);
-        }
-        return group;
-    }
-
     function staffSectionHead(section, year, month, count, today) {
         var row = el('tr', 'asset-tree-roster-head');
         var name = el('th', 'asset-tree-roster-name');
@@ -14743,8 +14715,6 @@
         var sections = staffSections(grouped);
         var scroll = el('div', 'asset-tree-roster-scroll');
         var table = el('table', 'asset-tree-roster');
-        table.style.minWidth = (360 + count * 28 + 88) + 'px';
-        table.appendChild(rosterColumns(count));
         var thead = el('thead');
         var first = sections.length ? sections[0] : { placeId: 0, name: '', people: [] };
         thead.appendChild(staffSectionHead(first, year, month, count, today));
