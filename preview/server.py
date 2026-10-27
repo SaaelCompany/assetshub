@@ -2622,6 +2622,16 @@ def room_angle(value):
     return number
 
 
+def room_place(place_id):
+    try:
+        place_id = int(place_id or 0)
+    except (TypeError, ValueError):
+        return 0
+    if place_id and place_id in STATE["assets"] and is_location_id(place_id):
+        return place_id
+    return 0
+
+
 def floor_dto(row):
     rooms = []
     for room in row.get("rooms") or []:
@@ -2630,6 +2640,7 @@ def floor_dto(row):
             "color": room_color(room.get("color")), "x": room["x"], "y": room["y"], "w": room["w"], "h": room["h"],
             "angle": room_angle(room.get("angle")),
             "points": room_points(room.get("points")),
+            "placeId": room_place(room.get("placeId")),
         })
     pins = []
     for pin in row.get("pins") or []:
@@ -2735,6 +2746,7 @@ def save_floor(project_key, floor_id, body, text):
             "id": seq, "name": label[:80], "kind": kind, "color": room_color(room.get("color")),
             "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
             "points": room_points(room.get("points")),
+            "placeId": room_place(room.get("placeId")),
         })
         seq += 1
     stored_pins = []

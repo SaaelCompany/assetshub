@@ -55,4 +55,9 @@ public interface RoomEntity extends Entity {
     String getPoints();
 
     void setPoints(String points);
+
+    /** Place in the building tree. Zero when the room is not linked. */
+    int getPlaceId();
+
+    void setPlaceId(int placeId);
 }

@@ -2168,7 +2168,7 @@
         var titles = el('div', 'asset-tree-heading');
         var heading = el('h1', null, viewTitle(state.view));
         if (state.view === 'schedules' || state.view === 'reports') heading.appendChild(stageMark('beta'));
-        if (state.view === 'map') heading.appendChild(stageMark('alpha'));
+        if (state.view === 'map') heading.appendChild(stageMark('beta'));
         titles.appendChild(heading);
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
@@ -12258,7 +12258,7 @@
         var grid = el('div', 'asset-tree-module-grid');
         [
             ['service', 'moduleService', 'moduleServiceHint', 'schedules', 'beta'],
-            ['map', 'moduleMap', 'moduleMapHint', 'map', 'alpha'],
+            ['map', 'moduleMap', 'moduleMapHint', 'map', 'beta'],
             ['reports', 'moduleReports', 'moduleReportsHint', 'reports', 'beta'],
             ['life', 'moduleLife', 'moduleLifeHint', '', 'beta'],
             ['portal', 'modulePortal', 'modulePortalHint', '', 'beta'],
@@ -17438,6 +17438,7 @@
             color: roomColor(room.color),
             angle: normalizeAngle(room.angle),
             points: roomPoints(room),
+            placeId: parseInt(room.placeId, 10) || 0,
             x: x, y: y, w: w, h: h
         };
     }
@@ -18096,15 +18097,17 @@
         ensureBuilding();
         var buildings = buildingAssets();
         var floors = floorsForBuilding(state.mapPlaceId);
+        var editing = !!(state.mapEditing && state.canEdit && state.mapDraft);
+        if (buildings.length) prepareShownPlan(editing);
         panel.appendChild(mapTopBar(floors));
         if (!buildings.length) {
             panel.appendChild(el('p', 'asset-tree-map-empty', t('mapNoBuilding')));
             setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
             return panel;
         }
-        var editing = !!(state.mapEditing && state.canEdit && state.mapDraft);
         var body = el('div', 'asset-tree-floorplan-body' + (editing ? '' : ' is-view'));
         if (editing) body.appendChild(mapCatalog());
+        else body.appendChild(mapViewSide());
         body.appendChild(mapStage(floors, editing));
         panel.appendChild(body);
         setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
@@ -18240,9 +18243,76 @@
         return t('mapDrawHint');
     }
 
+    function shownPlan() {
+        if (state.mapEditing && state.mapDraft) return state.mapDraft;
+        return state.mapShown || currentFloor();
+    }
+
+    function prepareShownPlan(editing) {
+        if (editing && state.mapDraft) {
+            syncClosedRooms(state.mapDraft, true);
+            state.mapShown = state.mapDraft;
+            return;
+        }
+        var source = currentFloor();
+        if (!source) {
+            state.mapShown = null;
+            return;
+        }
+        var copy = cloneFloor(source);
+        syncClosedRooms(copy, false);
+        state.mapShown = copy;
+    }
+
+    function mapViewSide() {
+        var side = el('aside', 'asset-tree-catalog');
+        side.appendChild(mapExplication());
+        return side;
+    }
+
+    function mapExplication() {
+        var block = el('div', 'asset-tree-explic');
+        block.appendChild(el('h3', null, t('mapExplic')));
+        var plan = shownPlan();
+        var rooms = (plan && plan.rooms) || [];
+        var rows = [];
+        var total = 0;
+        rooms.forEach(function (room, index) {
+            if ((room.kind || 'room') !== 'room') return;
+            var points = roomPoints(room);
+            if (points.length < 3) return;
+            var meters = Math.abs(polygonArea(points)) / 10000;
+            total += meters;
+            rows.push({
+                index: index,
+                name: room.name || t('mapRoom'),
+                area: (Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq')
+            });
+        });
+        if (!rows.length) {
+            block.appendChild(el('p', 'asset-tree-catalog-hint', t('mapExplicEmpty')));
+            return block;
+        }
+        rows.forEach(function (row) {
+            var line = button('', 'asset-tree-explic-row' + (state.mapSelection === row.index ? ' is-on' : ''), function () {
+                state.mapTool = 'select';
+                state.mapStamp = '';
+                state.mapSelection = row.index;
+                state.mapGroup = [];
+                renderFrame();
+            });
+            line.appendChild(el('span', null, row.name));
+            line.appendChild(el('span', null, row.area));
+            block.appendChild(line);
+        });
+        block.appendChild(el('p', 'asset-tree-catalog-hint', t('mapExplicTotal') + ' ' + (Math.round(total * 10) / 10).toFixed(1) + ' ' + t('mapSq')));
+        return block;
+    }
+
     function mapCatalog() {
         var side = el('aside', 'asset-tree-catalog');
         side.appendChild(mapToolGrid());
+        side.appendChild(mapExplication());
         side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
         side.appendChild(el('h3', null, t('mapFurnReady')));
         var ready = el('div', 'asset-tree-thumb-grid');
@@ -18502,7 +18572,7 @@
             stage.appendChild(empty);
             return stage;
         }
-        var floor = editing ? state.mapDraft : currentFloor();
+        var floor = editing ? state.mapDraft : state.mapShown;
         var view = el('div', 'asset-tree-floorplan-view');
         if (floor) view.appendChild(floorCanvas(floor, editing));
         stage.appendChild(view);
@@ -18740,7 +18810,8 @@
                     color: room.color || '',
                     angle: normalizeAngle(room.angle),
                     x: room.x, y: room.y, w: room.w, h: room.h,
-                    points: packPoints(room.points)
+                    points: packPoints(room.points),
+                    placeId: parseInt(room.placeId, 10) || 0
                 };
             })
         };
@@ -19109,7 +19180,7 @@
 
     function placeDimension(node, room) {
         var long = room.w >= room.h ? room.w : room.h;
-        node.textContent = String(Math.round(long));
+        node.textContent = planMeters(long) + ' ' + t('mapMeter');
         node.setAttribute('text-anchor', 'middle');
         if (room.w >= room.h) {
             node.setAttribute('x', String(room.w / 2));
@@ -19237,6 +19308,115 @@
         return packPoints(seq) <= packPoints(rev) ? seq : rev;
     }
 
+    function planMeters(units) {
+        var meters = Math.abs(Number(units) || 0) / 100;
+        var text = (Math.round(meters * 100) / 100).toFixed(2);
+        text = text.replace(/0$/, '').replace(/\.0$/, '');
+        return text || '0';
+    }
+
+    function planAreaText(points) {
+        var meters = Math.abs(polygonArea(points)) / 10000;
+        return (Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq');
+    }
+
+    function segmentCross(a, b, c, d) {
+        var rx = b.x - a.x;
+        var ry = b.y - a.y;
+        var sx = d.x - c.x;
+        var sy = d.y - c.y;
+        var den = rx * sy - ry * sx;
+        if (Math.abs(den) < 1) return null;
+        var t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / den;
+        var u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / den;
+        if (t <= 0.04 || t >= 0.96 || u <= 0.04 || u >= 0.96) return null;
+        return { t: t, u: u, x: a.x + t * rx, y: a.y + t * ry };
+    }
+
+    function shiftMapIndex(index, at, extra) {
+        if (index == null || index < 0) return index;
+        if (index > at) return index + extra;
+        return index;
+    }
+
+    function splitJunctions(rooms) {
+        if (!rooms) return false;
+        var guard = 0;
+        var any = false;
+        var changed = true;
+        while (changed && guard < 6) {
+            changed = false;
+            guard++;
+            var walls = [];
+            rooms.forEach(function (room, index) {
+                if (!isSegmentKind(room.kind)) return;
+                var ends = segmentEnds(room);
+                walls.push({ index: index, a: ends[0], b: ends[1] });
+            });
+            var cuts = {};
+            function addCut(index, t, x, y) {
+                if (t < 0.04 || t > 0.96) return;
+                var bucket = cuts[index] || (cuts[index] = []);
+                var n;
+                for (n = 0; n < bucket.length; n++) {
+                    if (Math.abs(bucket[n].t - t) < 0.02) return;
+                }
+                bucket.push({ t: t, x: x, y: y });
+                changed = true;
+            }
+            var i;
+            var j;
+            for (i = 0; i < walls.length; i++) {
+                for (j = i + 1; j < walls.length; j++) {
+                    var left = walls[i];
+                    var right = walls[j];
+                    [right.a, right.b].forEach(function (point) {
+                        var hit = projectOnSegment(left.a.x, left.a.y, left.b.x, left.b.y, point.x, point.y);
+                        if (hit && hit.dist <= 12) addCut(left.index, hit.t, hit.x, hit.y);
+                    });
+                    [left.a, left.b].forEach(function (point) {
+                        var hit = projectOnSegment(right.a.x, right.a.y, right.b.x, right.b.y, point.x, point.y);
+                        if (hit && hit.dist <= 12) addCut(right.index, hit.t, hit.x, hit.y);
+                    });
+                    var cross = segmentCross(left.a, left.b, right.a, right.b);
+                    if (cross) {
+                        addCut(left.index, cross.t, cross.x, cross.y);
+                        addCut(right.index, cross.u, cross.x, cross.y);
+                    }
+                }
+            }
+            if (!changed) break;
+            any = true;
+            Object.keys(cuts).map(Number).sort(function (a, b) { return b - a; }).forEach(function (index) {
+                var room = rooms[index];
+                if (!room) return;
+                var ends = segmentEnds(room);
+                var points = [{ x: ends[0].x, y: ends[0].y }].concat(cuts[index].slice().sort(function (a, b) {
+                    return a.t - b.t;
+                })).concat([{ x: ends[1].x, y: ends[1].y }]);
+                var pieces = [];
+                var k;
+                for (k = 0; k < points.length - 1; k++) {
+                    var piece = applySegment(room, points[k].x, points[k].y, points[k + 1].x, points[k + 1].y);
+                    if (piece) pieces.push(piece);
+                }
+                if (pieces.length < 2) return;
+                var first = pieces[0];
+                room.x = first.x;
+                room.y = first.y;
+                room.w = first.w;
+                room.h = first.h;
+                room.angle = first.angle;
+                var extra = pieces.slice(1);
+                Array.prototype.splice.apply(rooms, [index + 1, 0].concat(extra));
+                var added = extra.length;
+                state.mapSelection = shiftMapIndex(state.mapSelection, index, added);
+                state.mapGroup = (state.mapGroup || []).map(function (item) { return shiftMapIndex(item, index, added); });
+            });
+        }
+        return any;
+    }
+
     function closedFaces(rooms) {
         var nodes = [];
         var adj = [];
@@ -19260,53 +19440,56 @@
             if (adj[a].indexOf(b) < 0) adj[a].push(b);
             if (adj[b].indexOf(a) < 0) adj[b].push(a);
         });
-        function cycleKey(ids) {
-            var best = null;
-            var seqs = [ids, ids.slice().reverse()];
-            seqs.forEach(function (seq) {
-                var start = 0;
-                var i;
-                for (i = 1; i < seq.length; i++) if (seq[i] < seq[start]) start = i;
-                var norm = [];
-                for (i = 0; i < seq.length; i++) norm.push(seq[(start + i) % seq.length]);
-                var key = norm.join(',');
-                if (!best || key < best) best = key;
-            });
-            return best;
-        }
-        var found = {};
-        var faces = [];
-        var budget = 4000;
-        function walk(start, current, path, seen) {
-            if (budget <= 0 || faces.length >= 24) return;
-            var nexts = adj[current] || [];
-            var i;
-            for (i = 0; i < nexts.length; i++) {
-                if (budget-- <= 0) return;
-                var nxt = nexts[i];
-                if (nxt === start && path.length >= 3) {
-                    var key = cycleKey(path);
-                    if (!found[key]) {
-                        found[key] = true;
-                        var pts = path.map(function (id) { return { x: nodes[id].x, y: nodes[id].y }; });
-                        if (Math.abs(polygonArea(pts)) >= 200) faces.push(orderedFace(pts));
-                    }
-                    continue;
-                }
-                if (seen[nxt] || path.length >= 8) continue;
-                seen[nxt] = true;
-                path.push(nxt);
-                walk(start, nxt, path, seen);
-                path.pop();
-                seen[nxt] = false;
+        var half = [];
+        var i;
+        var j;
+        for (i = 0; i < nodes.length; i++) {
+            for (j = 0; j < adj[i].length; j++) {
+                var to = adj[i][j];
+                half.push({
+                    from: i,
+                    to: to,
+                    ang: Math.atan2(nodes[to].y - nodes[i].y, nodes[to].x - nodes[i].x)
+                });
             }
         }
-        var s;
-        for (s = 0; s < nodes.length; s++) {
-            var seen = {};
-            seen[s] = true;
-            walk(s, s, [s], seen);
-        }
+        var outgoing = [];
+        for (i = 0; i < nodes.length; i++) outgoing.push([]);
+        half.forEach(function (edge, id) { outgoing[edge.from].push(id); });
+        outgoing.forEach(function (list) {
+            list.sort(function (left, right) { return half[left].ang - half[right].ang; });
+        });
+        var used = {};
+        var faces = [];
+        half.forEach(function (edge, startId) {
+            if (used[startId] || faces.length >= 80) return;
+            var loop = [];
+            var id = startId;
+            var guard = 0;
+            var closed = false;
+            while (guard < half.length + 2) {
+                if (used[id] && id !== startId) break;
+                used[id] = true;
+                loop.push(half[id].from);
+                var arrive = half[id].to;
+                var list = outgoing[arrive] || [];
+                var rev = -1;
+                var k;
+                for (k = 0; k < list.length; k++) {
+                    if (half[list[k]].to === half[id].from) rev = k;
+                }
+                if (rev < 0 || !list.length) break;
+                id = list[(rev - 1 + list.length) % list.length];
+                guard++;
+                if (id === startId) {
+                    closed = true;
+                    break;
+                }
+            }
+            if (!closed || loop.length < 3) return;
+            var pts = loop.map(function (nid) { return { x: nodes[nid].x, y: nodes[nid].y }; });
+            if (polygonArea(pts) > 2500) faces.push(orderedFace(pts));
+        });
         return faces.filter(function (face, index) {
             var area = Math.abs(polygonArea(face));
             var holdsAnother = false;
@@ -19321,6 +19504,7 @@
 
     function syncClosedRooms(floor, editing) {
         if (!floor) return;
+        if (splitJunctions(floor.rooms || []) && editing) state.mapDirty = true;
         var faces = closedFaces(floor.rooms || []);
         var rooms = floor.rooms || [];
         floor.rooms = rooms;
@@ -19381,6 +19565,31 @@
         if (state.mapSelection != null && state.mapSelection >= rooms.length) state.mapSelection = null;
     }
 
+    function roomUnder(x, y) {
+        var plan = shownPlan();
+        var rooms = (plan && plan.rooms) || [];
+        var best = '';
+        var bestArea = Infinity;
+        rooms.forEach(function (room) {
+            if (!isPolygonRoom(room)) return;
+            var points = roomPoints(room);
+            if (!pointInPoly(x, y, points)) return;
+            var area = Math.abs(polygonArea(points));
+            if (area < bestArea) {
+                bestArea = area;
+                best = room.name || t('mapRoom');
+            }
+        });
+        return best;
+    }
+
+    function placesForPlan() {
+        var placeId = state.mapPlaceId;
+        return placeAssets().filter(function (asset) {
+            return assetInBuilding(asset, placeId);
+        });
+    }
+
     function floorCanvas(floor, editing) {
         syncClosedRooms(floor, editing);
         var size = planSize(floor);
@@ -19429,7 +19638,7 @@
         var shapeOptions = function (room, index) {
             return {
                 editing: editing,
-                selected: !!(editing && mapShapeOn(index)),
+                selected: editing ? !!mapShapeOn(index) : !!(isPolygonRoom(room) && state.mapSelection === index),
                 primary: state.mapSelection === index,
                 index: index,
                 floor: floor,
@@ -19478,10 +19687,14 @@
             }
             svg.appendChild(mark);
             var caption = svgEl('text');
-            caption.setAttribute('x', String(pin.x + 16));
-            caption.setAttribute('y', String(pin.y + 4));
+            var inside = roomUnder(pin.x, pin.y);
+            caption.setAttribute('x', String(inside ? pin.x : pin.x + 16));
+            caption.setAttribute('y', String(pin.y + (inside ? 28 : 4)));
+            caption.setAttribute('text-anchor', inside ? 'middle' : 'start');
             caption.setAttribute('class', 'asset-tree-pin-label');
-            caption.textContent = pin.assetName || pin.objectKey || '';
+            var pinLabel = pin.assetName || pin.objectKey || '';
+            if (inside) pinLabel += ' · ' + inside;
+            caption.textContent = pinLabel;
             svg.appendChild(caption);
         });
         paper.addEventListener('mousedown', function (event) {
@@ -19663,16 +19876,31 @@
         poly.setAttribute('class', 'asset-tree-room is-room' + (options && options.selected ? ' is-selected' : ''));
         if (room.color) poly.setAttribute('fill', room.color);
         group.appendChild(poly);
+        var center = polygonCenter(points);
+        var lifted = false;
+        ((shownPlan() && shownPlan().pins) || []).forEach(function (pin) {
+            var dx = (pin.x || 0) - center.x;
+            var dy = (pin.y || 0) - center.y;
+            if (dx * dx + dy * dy < 1600) lifted = true;
+        });
+        var label = svgEl('text');
+        label.setAttribute('x', String(Math.round(center.x)));
+        label.setAttribute('y', String(Math.round(center.y) - (room.name ? (lifted ? 30 : 6) : 0)));
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('class', 'asset-tree-room-label');
         if (room.name) {
-            var center = polygonCenter(points);
-            var label = svgEl('text');
-            label.setAttribute('x', String(Math.round(center.x)));
-            label.setAttribute('y', String(Math.round(center.y)));
-            label.setAttribute('text-anchor', 'middle');
-            label.setAttribute('class', 'asset-tree-room-label');
-            label.textContent = room.name;
-            group.appendChild(label);
+            var title = svgEl('tspan');
+            title.setAttribute('x', String(Math.round(center.x)));
+            title.textContent = room.name;
+            label.appendChild(title);
         }
+        var area = svgEl('tspan');
+        area.setAttribute('x', String(Math.round(center.x)));
+        area.setAttribute('dy', room.name ? '14' : '0');
+        area.setAttribute('class', 'asset-tree-room-area');
+        area.textContent = planAreaText(points);
+        label.appendChild(area);
+        group.appendChild(label);
         if (options && options.editing) {
             poly.addEventListener('mousedown', function (event) {
                 if (event.button !== 0 || state.mapTool !== 'select') return;
@@ -20248,6 +20476,68 @@
             renderFrame();
         });
         block.appendChild(name);
+        if (isPolygonRoom(room)) {
+            block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(roomPoints(room))));
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapPlace')));
+            var placePick = document.createElement('select');
+            placePick.setAttribute('aria-label', t('mapPlace'));
+            var none = document.createElement('option');
+            none.value = '0';
+            none.textContent = t('mapPlaceNone');
+            placePick.appendChild(none);
+            placesForPlan().forEach(function (place) {
+                var option = document.createElement('option');
+                option.value = String(place.id);
+                option.textContent = place.name || '';
+                placePick.appendChild(option);
+            });
+            placePick.value = String(parseInt(room.placeId, 10) || 0);
+            placePick.addEventListener('change', function () {
+                rememberMap();
+                room.placeId = parseInt(placePick.value, 10) || 0;
+                if (room.placeId && !room.name) {
+                    var linked = byId()[room.placeId];
+                    if (linked && linked.name) room.name = linked.name;
+                }
+                state.mapDirty = true;
+                renderFrame();
+            });
+            block.appendChild(placePick);
+        }
+        if (isSegmentKind(room.kind)) {
+            var ends = segmentEnds(room);
+            var thick = room.w >= room.h ? room.h : room.w;
+            block.appendChild(el('span', 'asset-tree-plan-label', planMeters(Math.max(room.w, room.h)) + ' ' + t('mapMeter')));
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapThick')));
+            var thickInput = document.createElement('input');
+            thickInput.type = 'number';
+            thickInput.min = '4';
+            thickInput.max = '80';
+            thickInput.value = String(thick);
+            thickInput.className = 'asset-tree-plan-size';
+            thickInput.setAttribute('aria-label', t('mapThick'));
+            thickInput.addEventListener('change', function () {
+                var attached = openingsOnWall(state.mapSelection);
+                rememberMap();
+                var next = applySegment({
+                    kind: room.kind,
+                    name: room.name,
+                    color: room.color,
+                    h: Number(thickInput.value),
+                    w: Number(thickInput.value)
+                }, ends[0].x, ends[0].y, ends[1].x, ends[1].y);
+                if (!next) return;
+                room.x = next.x;
+                room.y = next.y;
+                room.w = next.w;
+                room.h = next.h;
+                room.angle = next.angle;
+                if (attached) reseatOpenings(null, state.mapSelection, attached);
+                state.mapDirty = true;
+                renderFrame();
+            });
+            block.appendChild(thickInput);
+        }
         if ((room.kind || 'room') === 'room') {
             var colors = el('div', 'asset-tree-swatches');
             ['', '#deebff', '#e3fcef', '#fff0b3', '#ffebe6', '#eae6ff'].forEach(function (color) {
@@ -20324,7 +20614,7 @@
         sizes.appendChild(height);
         sizes.appendChild(el('span', 'asset-tree-plan-label', t('mapAngle')));
         sizes.appendChild(angle);
-        if (!isPolygonRoom(room)) block.appendChild(sizes);
+        if (!isPolygonRoom(room) && !isSegmentKind(room.kind)) block.appendChild(sizes);
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('mapDuplicate'), 'asset-tree-btn', duplicateMapSelection));
         actions.appendChild(button(t('mapSaveTemplate'), 'asset-tree-btn', function () {

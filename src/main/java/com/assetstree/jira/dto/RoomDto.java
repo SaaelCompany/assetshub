@@ -15,6 +15,7 @@ public class RoomDto {
     private String color;
     private int angle;
     private String points;
+    private int placeId;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -36,4 +37,6 @@ public class RoomDto {
     public void setAngle(int angle) { this.angle = angle; }
     public String getPoints() { return points; }
     public void setPoints(String points) { this.points = points; }
+    public int getPlaceId() { return placeId; }
+    public void setPlaceId(int placeId) { this.placeId = placeId; }
 }

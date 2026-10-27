@@ -7423,6 +7423,11 @@ a.asset-tree-url {
     pointer-events: none;
 }
 
+#asset-tree-app .asset-tree-room-area {
+    fill: #6b778c;
+    font-size: 12px;
+}
+
 #asset-tree-app .asset-tree-pin {
     fill: #0052cc;
     stroke: #fff;
@@ -9785,7 +9790,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-floorplan-body.is-view {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
 }
 
 #asset-tree-app .asset-tree-catalog {
@@ -9808,6 +9813,48 @@ a.asset-tree-url {
     color: #6b778c;
     font-size: 14px;
     line-height: 1.4;
+}
+
+#asset-tree-app .asset-tree-explic h3 {
+    margin-top: 4px;
+}
+
+#asset-tree-app button.asset-tree-explic-row {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    box-sizing: border-box;
+    width: 100% !important;
+    min-height: 28px;
+    margin: 0 0 4px !important;
+    padding: 4px 8px !important;
+    border: 1px solid transparent !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    line-height: 18px !important;
+    text-align: left;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-explic-row span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app button.asset-tree-explic-row span:last-child {
+    flex: 0 0 auto;
+    color: #6b778c;
+    white-space: nowrap;
+}
+
+#asset-tree-app button.asset-tree-explic-row.is-on {
+    border-color: #4c9aff !important;
+    background: #deebff !important;
 }
 
 #asset-tree-app .asset-tree-tool-grid,
@@ -10131,7 +10178,8 @@ a.asset-tree-url {
     font-weight: 600;
 }
 
-#asset-tree-app .asset-tree-plan-inspector input {
+#asset-tree-app .asset-tree-plan-inspector input,
+#asset-tree-app .asset-tree-plan-inspector select {
     box-sizing: border-box;
     min-height: 32px;
     padding: 4px 8px;

@@ -7338,6 +7338,7 @@ public class AssetServiceImpl implements AssetService {
                         stored.setPosH(h);
                         stored.setAngle(angle);
                         stored.setPoints(FloorBounds.points(room.getPoints()));
+                        stored.setPlaceId(roomPlace(project.getKey(), room.getPlaceId()));
                         stored.save();
                     }
                 }
@@ -7397,6 +7398,17 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.floor");
         }
         return name;
+    }
+
+    private int roomPlace(String projectKey, int placeId) {
+        if (placeId <= 0) {
+            return 0;
+        }
+        AssetEntity place = ao().get(AssetEntity.class, placeId);
+        if (place == null || !ProjectKeys.same(place.getProjectKey(), projectKey) || !isLocation(place)) {
+            return 0;
+        }
+        return place.getID();
     }
 
     private int checkedPlace(String projectKey, int placeId) {
@@ -7475,6 +7487,7 @@ public class AssetServiceImpl implements AssetService {
                 item.setColor(FloorBounds.color(room.getColor()));
                 item.setAngle(FloorBounds.angle(room.getAngle()));
                 item.setPoints(FloorBounds.points(room.getPoints()));
+                item.setPlaceId(room.getPlaceId());
                 roomDtos.add(item);
             }
         }
