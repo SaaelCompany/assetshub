@@ -22312,7 +22312,14 @@
                     placeStamp(floor, stamped.x, stamped.y);
                     return;
                 }
-                if (state.mapTool === 'select') return;
+                if (state.mapTool === 'select') {
+                    if (event.target === svg && !state.mapArmId) {
+                        state.mapAssetId = 0;
+                        if (event.altKey) startPan(svg, event);
+                        else startMarquee(svg, floor, event);
+                    }
+                    return;
+                }
                 if (state.mapTool === 'route' && !isRouteKind(state.mapLayer)) {
                     state.mapTool = 'select';
                     return;
