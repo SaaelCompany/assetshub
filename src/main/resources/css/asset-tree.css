@@ -54,6 +54,9 @@
 }
 
 .asset-tree h1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     font-size: 20px;
     line-height: 1.2;
@@ -459,6 +462,18 @@
     margin-top: 8px;
 }
 
+#asset-tree-app select.asset-tree-tree-sort {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+    height: 28px;
+    min-height: 28px;
+    margin: 0;
+    padding: 0 6px;
+    font-size: 12px;
+    line-height: 24px;
+}
+
 .asset-tree-count {
     margin-left: auto;
     color: var(--faint);
@@ -645,6 +660,10 @@
 
 .asset-tree.is-dragging .asset-tree-rootdrop {
     display: block;
+}
+
+.asset-tree.is-dragging.is-object-drag .asset-tree-rootdrop {
+    display: none;
 }
 
 #asset-tree-app .asset-tree-grip {
@@ -1141,7 +1160,7 @@ html.asset-tree-dragging * {
     position: fixed;
     inset: 0;
     background: rgba(18, 24, 38, 0.46);
-    z-index: 40;
+    z-index: 5000;
     display: grid;
     place-items: center;
     padding: 24px;
@@ -2069,6 +2088,46 @@ a.asset-tree-url {
     border-bottom: 2px solid #dfe1e6;
 }
 
+.asset-tree-mine-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.asset-tree-mine-head h2 {
+    margin: 0;
+}
+
+#asset-tree-app th button.asset-tree-th-sort {
+    display: inline-flex !important;
+    visibility: visible !important;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    color: inherit !important;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+#asset-tree-app th button.asset-tree-th-sort:hover,
+#asset-tree-app th button.asset-tree-th-sort.is-active {
+    color: #0052cc !important;
+    background: transparent !important;
+}
+
 #asset-tree-app table.asset-tree-table td {
     padding: 8px 10px;
     border-bottom: 1px solid #ebecf0;
@@ -2487,12 +2546,96 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > a,
-#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > button.asset-tree-linkish {
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > button.asset-tree-linkish,
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue > span.asset-tree-peer-name {
     flex: 0 0 auto;
     height: auto !important;
     font-size: 14px !important;
     font-weight: 600;
     white-space: nowrap !important;
+}
+
+#asset-tree-app .asset-tree-peer {
+    padding: 6px 0;
+    border-bottom: 1px solid #eef1f5;
+}
+
+#asset-tree-app .asset-tree-peer-line {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+#asset-tree-app .asset-tree-peer-line > button.asset-tree-linkish,
+#asset-tree-app .asset-tree-peer-line > .asset-tree-peer-name {
+    display: block !important;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: #0052cc;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+}
+
+#asset-tree-app .asset-tree-peer.is-locked .asset-tree-peer-name {
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-peer-remove {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: #6b778c;
+    font: inherit;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-peer-card {
+    margin-top: 6px;
+    padding: 8px 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-peer-card strong {
+    display: block;
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-peer-card-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+#asset-tree-app .asset-tree-peer-card-row span:first-child {
+    color: #6b778c;
+}
+
+#asset-tree-app .asset-tree-peer-card-row span:last-child {
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue.is-locked,
+#asset-tree-app .asset-tree-detail.is-issue .asset-tree-issue.is-locked:hover {
+    cursor: default;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-issuelink-summary {
@@ -3919,6 +4062,33 @@ a.asset-tree-url {
     gap: 8px;
 }
 
+.asset-tree-grant-kind {
+    display: flex;
+    gap: 6px;
+}
+
+.asset-tree-grant-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.asset-tree-grant-head .asset-tree-grant-title strong {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset-tree-grant-title span {
+    flex: 0 0 auto;
+    color: #6b778c;
+    font-size: 12px;
+}
+
 .asset-tree-grant-head strong {
     flex: 1;
     min-width: 0;
@@ -4110,11 +4280,26 @@ a.asset-tree-url {
     box-sizing: border-box;
 }
 
-#asset-tree-app button.asset-tree-user-hit {
+#asset-tree-app button.asset-tree-user-hit,
+.asset-tree-backdrop button.asset-tree-user-hit {
+    display: flex !important;
+    visibility: visible !important;
+    align-items: center;
+    justify-content: flex-start;
     height: auto !important;
     min-height: 0 !important;
     width: 100% !important;
+    margin: 0;
+    padding: 6px 8px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fff !important;
+    color: #172b4d !important;
+    font-size: 14px;
+    font-weight: 400;
+    text-align: left;
     white-space: normal !important;
+    cursor: pointer;
 }
 
 #asset-tree-app .asset-tree-comment {
@@ -5154,6 +5339,36 @@ a.asset-tree-url {
     background: #fffae6;
 }
 
+#asset-tree-app form.asset-tree-plan.is-done,
+#asset-tree-app .asset-tree-plan.is-done {
+    border-color: #abf5d1;
+    background: #f3fcf7;
+}
+
+#asset-tree-app .asset-tree-plan-result {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    margin: 0;
+    padding: 6px 10px;
+    border: 1px solid #abf5d1;
+    border-radius: 3px;
+    background: #e3fcef;
+    color: #006644;
+    font-size: 13px;
+    line-height: 18px;
+}
+
+#asset-tree-app .asset-tree-plan.is-read .asset-tree-plan-result {
+    flex: 1 0 100%;
+}
+
+#asset-tree-app .asset-tree-plan-result strong {
+    font-weight: 600;
+}
+
 #asset-tree-app .asset-tree-plan.is-read {
     display: flex !important;
     flex-wrap: wrap;
@@ -5890,6 +6105,10 @@ a.asset-tree-url {
 
 /* Headings: page 24, panels and dialogs 20, sections 16 */
 #asset-tree-app .asset-tree-heading h1 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     font-size: 24px;
     font-weight: 500;
     line-height: 1.2;
@@ -6020,18 +6239,27 @@ a.asset-tree-url {
     margin: 0 0 8px;
 }
 
-#asset-tree-app .asset-tree-beta {
+#asset-tree-app .asset-tree-beta,
+#asset-tree-app .asset-tree-alpha {
     display: inline-flex;
     align-items: center;
     padding: 0 6px;
     border-radius: 3px;
-    background: #eae6ff;
-    color: #403294;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.04em;
     line-height: 16px;
     text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-beta {
+    background: #eae6ff;
+    color: #403294;
+}
+
+#asset-tree-app .asset-tree-alpha {
+    background: #fff0b3;
+    color: #7f5f01;
 }
 
 #asset-tree-app .asset-tree-project-card > .asset-tree-hint {
@@ -6102,6 +6330,10 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-module-option strong {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     color: #172b4d;
     font-size: 14px;
     font-weight: 600;
@@ -6230,11 +6462,49 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-calendar-nav,
 #asset-tree-app .asset-tree-editor-bar,
 #asset-tree-app .asset-tree-time-row,
-#asset-tree-app .asset-tree-inline-actions {
+.asset-tree-backdrop .asset-tree-time-row,
+#asset-tree-app .asset-tree-inline-actions,
+#asset-tree-app .asset-tree-sheet-filters {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+}
+
+#asset-tree-app .asset-tree-sheet-filters {
+    flex-wrap: nowrap;
+    margin-left: auto;
+}
+
+#asset-tree-app .asset-tree-layers {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+#asset-tree-app button.asset-tree-layer {
+    display: inline-flex !important;
+    align-items: center;
+    height: 32px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 12px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #42526e !important;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-layer.is-on {
+    background: #deebff !important;
+    border-color: #4c9aff !important;
+    color: #0052cc !important;
 }
 
 #asset-tree-app .asset-tree-calendar-title {
@@ -6422,6 +6692,11 @@ a.asset-tree-url {
     background: #deebff !important;
 }
 
+#asset-tree-app button.asset-tree-gear-row.is-armed {
+    background: #fff7d6 !important;
+    box-shadow: inset 0 0 0 1px #ffab00;
+}
+
 #asset-tree-app .asset-tree-map-tools {
     display: flex;
     flex-wrap: wrap;
@@ -6434,13 +6709,15 @@ a.asset-tree-url {
     pointer-events: none;
 }
 
-#asset-tree-app .asset-tree-work-dialog {
+#asset-tree-app .asset-tree-work-dialog,
+.asset-tree-backdrop .asset-tree-work-dialog {
     width: min(560px, calc(100vw - 32px));
     max-height: calc(100vh - 48px);
     overflow: auto;
 }
 
 #asset-tree-app .asset-tree-schedule-assets,
+.asset-tree-backdrop .asset-tree-schedule-assets,
 #asset-tree-app .asset-tree-check-list {
     display: flex;
     flex-direction: column;
@@ -6453,28 +6730,37 @@ a.asset-tree-url {
     background: #fff;
 }
 
-#asset-tree-app .asset-tree-asset-row {
+#asset-tree-app .asset-tree-asset-row,
+.asset-tree-backdrop .asset-tree-asset-row {
     display: flex;
     gap: 8px;
     align-items: flex-start;
 }
 
-#asset-tree-app .asset-tree-asset-row span {
+#asset-tree-app .asset-tree-asset-row span,
+.asset-tree-backdrop .asset-tree-asset-row span {
     display: flex;
     flex-direction: column;
     color: #6b778c;
     font-size: 12px;
 }
 
-#asset-tree-app .asset-tree-asset-row strong {
+#asset-tree-app .asset-tree-asset-row strong,
+.asset-tree-backdrop .asset-tree-asset-row strong {
     color: #172b4d;
     font-size: 13px;
 }
 
-#asset-tree-app .asset-tree-report-shell,
-#asset-tree-app .asset-tree-map-shell {
+#asset-tree-app .asset-tree-report-shell {
     display: grid;
     grid-template-columns: 240px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+#asset-tree-app .asset-tree-map-shell {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
     gap: 16px;
     align-items: start;
 }
@@ -6519,9 +6805,467 @@ a.asset-tree-url {
 #asset-tree-app button.asset-tree-report-link.is-current {
     background: #deebff !important;
     color: #0052cc !important;
+    font-weight: 600;
 }
 
-#asset-tree-app .asset-tree-report-main,
+#asset-tree-app .asset-tree-report-main {
+    min-height: 0;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-main > .asset-tree-hint {
+    margin: 0 14px 8px;
+}
+
+#asset-tree-app .asset-tree-report-main > .asset-tree-hint:last-child {
+    margin-bottom: 16px;
+}
+
+#asset-tree-app .asset-tree-top-row .asset-tree-report-tools {
+    flex: 0 0 auto;
+}
+
+#asset-tree-app .asset-tree-report-title {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+    padding: 12px 14px 0;
+}
+
+#asset-tree-app .asset-tree-report-title h3 {
+    margin: 0;
+    color: #172b4d;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+#asset-tree-app .asset-tree-report-title p {
+    margin: 2px 0 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-switch {
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+#asset-tree-app .asset-tree-report-switch button.asset-tree-seg-btn:last-child {
+    border-right: 0 !important;
+}
+
+#asset-tree-app .asset-tree-report-chart {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 4px 16px 16px;
+}
+
+#asset-tree-app .asset-tree-report-chart.is-round {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+}
+
+#asset-tree-app .asset-tree-report-chart svg.asset-tree-donut {
+    width: 240px !important;
+    height: 240px !important;
+    min-width: 240px !important;
+    max-width: 240px !important;
+    min-height: 240px !important;
+    max-height: 240px !important;
+    flex: 0 0 240px !important;
+}
+
+#asset-tree-app .asset-tree-report-ring {
+    position: relative;
+    width: 240px;
+    height: 240px;
+    flex: 0 0 240px;
+}
+
+#asset-tree-app .asset-tree-report-ring-value.is-compact {
+    font-size: 22px !important;
+    padding: 0 36px;
+    box-sizing: border-box;
+}
+
+#asset-tree-app .asset-tree-report-ring-value.is-tiny {
+    font-size: 16px !important;
+    padding: 0 64px;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-ring-value {
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 240px;
+    height: 240px;
+    margin: 0;
+    padding: 0;
+    color: #172b4d;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif !important;
+    font-size: 36px !important;
+    font-weight: 600 !important;
+    font-style: normal !important;
+    font-stretch: normal !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    text-align: center;
+    text-transform: none !important;
+    transform: none !important;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-report-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    align-content: center;
+    gap: 8px 22px;
+    flex: 1 1 auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+#asset-tree-app .asset-tree-report-legend li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 28px;
+    color: #172b4d;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-report-legend i {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex: 0 0 14px;
+}
+
+#asset-tree-app .asset-tree-report-legend span {
+    min-width: 0;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-legend strong {
+    margin-left: 8px;
+    color: #42526e;
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-columns {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    width: 100%;
+    min-height: 220px;
+    overflow-x: auto;
+}
+
+#asset-tree-app .asset-tree-report-column {
+    display: flex;
+    flex: 1 1 72px;
+    flex-direction: column;
+    align-items: center;
+    min-width: 72px;
+}
+
+#asset-tree-app .asset-tree-report-column-count {
+    margin-bottom: 6px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+#asset-tree-app .asset-tree-report-shaft {
+    display: flex;
+    align-items: flex-end;
+    width: 44px;
+    height: 180px;
+    border-radius: 3px;
+    background: #f4f5f7;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-shaft span {
+    display: block;
+    width: 100%;
+    border-radius: 3px 3px 0 0;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-money .asset-tree-report-column {
+    min-width: 128px;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-money .asset-tree-report-column-count {
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-column-label {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    overflow: hidden;
+    color: #42526e;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    padding: 8px 0 4px;
+}
+
+#asset-tree-app .asset-tree-report-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
+#asset-tree-app .asset-tree-report-bar-label {
+    flex: 0 0 200px;
+    width: 200px;
+    overflow: hidden;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-bar-track {
+    display: block;
+    flex: 1 1 auto;
+    height: 20px;
+    border-radius: 3px;
+    background: #f4f5f7;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-bar-track span {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-report-bar strong {
+    flex: 0 0 48px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+#asset-tree-app .asset-tree-report-bars.is-money .asset-tree-report-bar strong {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 128px;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px 12px;
+}
+
+#asset-tree-app .asset-tree-report-fact {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    margin: 0;
+    padding: 0 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 14px;
+    background: #fff;
+    color: #42526e;
+    font-size: 12px;
+    line-height: 1;
+}
+
+#asset-tree-app .asset-tree-report-fact strong {
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-report-fact i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+#asset-tree-app .asset-tree-report-table {
+    width: 100%;
+    table-layout: fixed;
+    border-top: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-report-table th {
+    height: 36px;
+    background: #f7f8fa;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-report-table th,
+#asset-tree-app .asset-tree-report-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid #f4f5f7;
+    font-size: 13px;
+    vertical-align: middle;
+}
+
+#asset-tree-app .asset-tree-report-table th.is-num,
+#asset-tree-app .asset-tree-report-table td.is-num {
+    width: 96px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-table th.is-money,
+#asset-tree-app .asset-tree-report-table td.is-money {
+    width: 168px;
+}
+
+#asset-tree-app .asset-tree-report-name {
+    width: 240px;
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-name i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 8px;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+#asset-tree-app .asset-tree-report-meter {
+    width: auto;
+}
+
+#asset-tree-app .asset-tree-report-track {
+    display: block;
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: #f4f5f7;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-report-track span {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+}
+
+#asset-tree-app .asset-tree-report-table tr.is-pick {
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-report-table tr.is-pick:hover td {
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-report-legend li.is-pick,
+#asset-tree-app .asset-tree-report-column.is-pick,
+#asset-tree-app .asset-tree-report-bar.is-pick {
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-report-lines {
+    border-top: 8px solid #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-report-lines tr.is-open {
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-report-lines tr.is-open:hover td {
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-report-key {
+    width: 120px;
+    color: #6b778c;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-line strong {
+    display: block;
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-report-line span {
+    display: block;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+#asset-tree-app .asset-tree-report-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 12px;
+}
+
+#asset-tree-app .asset-tree-report-foot p {
+    margin: 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-foot .asset-tree-btn {
+    margin-left: auto;
+}
+
 #asset-tree-app .asset-tree-map-stage {
     min-height: 420px;
     padding: 16px;
@@ -6590,37 +7334,148 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-room {
-    fill: rgba(222, 235, 255, 0.55);
-    stroke: #4c9aff;
-    stroke-width: 2;
+    fill: #e7ebf0;
+    stroke: none;
+    stroke-width: 0;
     cursor: pointer;
 }
 
-#asset-tree-app .asset-tree-room.is-wall {
-    fill: #172b4d;
-    stroke: #172b4d;
+#asset-tree-app .asset-tree-room.is-wall,
+#asset-tree-app .asset-tree-room.is-partition,
+#asset-tree-app .asset-tree-room.is-door,
+#asset-tree-app .asset-tree-room.is-window,
+#asset-tree-app .asset-tree-room.is-power,
+#asset-tree-app .asset-tree-room.is-scs,
+#asset-tree-app .asset-tree-room.is-comm,
+#asset-tree-app .asset-tree-room.is-vent,
+#asset-tree-app .asset-tree-room.is-water {
+    fill: transparent;
+    stroke: none;
+    pointer-events: all;
 }
 
-#asset-tree-app .asset-tree-room.is-door {
-    fill: #ffab00;
-    stroke: #ff8b00;
+#asset-tree-app .asset-tree-room.is-column {
+    fill: #ffffff;
+    stroke: none;
 }
 
-#asset-tree-app .asset-tree-room.is-window {
-    fill: #b3d4ff;
-    stroke: #4c9aff;
+#asset-tree-app .asset-tree-room.is-stair {
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
+}
+
+#asset-tree-app .asset-tree-room.is-desk {
+    fill: #ffffff;
+    stroke: none;
+}
+
+#asset-tree-app .asset-tree-wall-fill {
+    fill: #ffffff;
+    stroke: none;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-room.is-table,
+#asset-tree-app .asset-tree-room.is-chair,
+#asset-tree-app .asset-tree-room.is-seat,
+#asset-tree-app .asset-tree-room.is-cabinet,
+#asset-tree-app .asset-tree-room.is-pedestal,
+#asset-tree-app .asset-tree-room.is-sofa,
+#asset-tree-app .asset-tree-room.is-bed,
+#asset-tree-app .asset-tree-room.is-bath,
+#asset-tree-app .asset-tree-room.is-toilet,
+#asset-tree-app .asset-tree-room.is-sink,
+#asset-tree-app .asset-tree-room.is-stove,
+#asset-tree-app .asset-tree-room.is-rug {
+    fill: #ffffff;
+    stroke: none;
+}
+
+#asset-tree-app .asset-tree-room.is-plant {
+    fill: rgba(255, 255, 255, 0.01);
+    stroke: none;
 }
 
 #asset-tree-app .asset-tree-room.is-selected {
     stroke: #0052cc;
-    stroke-width: 3;
+    stroke-width: 2;
+}
+
+#asset-tree-app .asset-tree-room.is-wall.is-selected,
+#asset-tree-app .asset-tree-room.is-partition.is-selected,
+#asset-tree-app .asset-tree-room.is-door.is-selected,
+#asset-tree-app .asset-tree-room.is-window.is-selected,
+#asset-tree-app .asset-tree-room.is-power.is-selected,
+#asset-tree-app .asset-tree-room.is-scs.is-selected,
+#asset-tree-app .asset-tree-room.is-comm.is-selected,
+#asset-tree-app .asset-tree-room.is-vent.is-selected,
+#asset-tree-app .asset-tree-room.is-water.is-selected {
+    stroke: none;
+    stroke-width: 0;
+}
+
+#asset-tree-app .asset-tree-route,
+#asset-tree-app .asset-tree-route-halo {
+    fill: none;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-pin.is-ghost {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-map-layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-map-layer {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    width: auto !important;
+    min-height: 24px;
+    margin: 0;
+    padding: 2px 6px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fff !important;
+    color: #172b4d !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 16px !important;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-map-layer.is-on {
+    background: #deebff !important;
+    border-color: #4c9aff !important;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-map-layer.is-off {
+    color: #97a0af !important;
+}
+
+#asset-tree-app .asset-tree-map-eye,
+#asset-tree-app .asset-tree-map-swatch {
+    display: inline-block;
+    flex: 0 0 auto;
+    font-style: normal;
+}
+
+#asset-tree-app .asset-tree-map-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
 }
 
 #asset-tree-app #asset-tree-room-preview {
-    fill: rgba(0, 82, 204, 0.12);
-    stroke: #0052cc;
-    stroke-width: 2;
-    stroke-dasharray: 6 4;
+    stroke-width: 1;
+    pointer-events: none;
 }
 
 #asset-tree-app .asset-tree-room-label,
@@ -6628,6 +7483,11 @@ a.asset-tree-url {
     fill: #172b4d;
     font-size: 14px;
     pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-room-area {
+    fill: #6b778c;
+    font-size: 12px;
 }
 
 #asset-tree-app .asset-tree-pin {
@@ -6648,38 +7508,53 @@ a.asset-tree-url {
     font-weight: 600;
 }
 
-#asset-tree-app .asset-tree-life-block {
-    margin-top: 16px;
-    padding-top: 12px;
-    border-top: 1px solid #dfe1e6;
+#asset-tree-app .asset-tree-life-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
 
 #asset-tree-app .asset-tree-steps {
     display: flex;
     align-items: flex-start;
-    gap: 0;
-    margin: 12px 0;
+    margin: 4px 0 12px;
     padding: 0;
     list-style: none;
 }
 
 #asset-tree-app .asset-tree-step {
+    position: relative;
+    flex: 1 1 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    width: 120px;
+    gap: 8px;
+    min-width: 0;
     color: #6b778c;
     font-size: 12px;
+    line-height: 1.3;
     text-align: center;
 }
 
 #asset-tree-app .asset-tree-step-dot {
-    width: 16px;
-    height: 16px;
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    width: 14px;
+    height: 14px;
     border: 2px solid #c1c7d0;
     border-radius: 50%;
     background: #fff;
+}
+
+#asset-tree-app .asset-tree-step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: calc(50% + 12px);
+    width: calc(100% - 24px);
+    height: 1px;
+    background: #dfe1e6;
 }
 
 #asset-tree-app .asset-tree-step.is-on {
@@ -6691,25 +7566,52 @@ a.asset-tree-url {
     background: #6554c0;
 }
 
-#asset-tree-app .asset-tree-step-line {
-    flex: 1;
-    height: 2px;
-    margin-top: 8px;
-    background: #dfe1e6;
-    list-style: none;
-}
-
-#asset-tree-app .asset-tree-step-line.is-on {
+#asset-tree-app .asset-tree-step.is-on::after {
     background: #6554c0;
 }
 
-#asset-tree-app .asset-tree-life-form h4 {
-    margin: 12px 0 8px;
-    color: #172b4d;
-    font-size: 14px;
+#asset-tree-app .asset-tree-life-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
 }
 
-#asset-tree-app .asset-tree-life-grid,
+#asset-tree-app .asset-tree-life-panel {
+    margin: 0 0 12px;
+    padding: 12px 12px 14px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-life-panel h4 {
+    margin: 0 0 10px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-life-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+}
+
+#asset-tree-app .asset-tree-life-grid.is-three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#asset-tree-app .asset-tree-life-grid .is-wide {
+    grid-column: 1 / -1;
+}
+
+#asset-tree-app .asset-tree-life-form .asset-tree-inline-actions {
+    justify-content: flex-start;
+}
+
 #asset-tree-app .asset-tree-report-picks {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6734,6 +7636,7 @@ a.asset-tree-url {
     #asset-tree-app .asset-tree-report-shell,
     #asset-tree-app .asset-tree-map-shell,
     #asset-tree-app .asset-tree-life-grid,
+    #asset-tree-app .asset-tree-life-grid.is-three,
     #asset-tree-app .asset-tree-report-picks {
         grid-template-columns: 1fr;
     }
@@ -6808,9 +7711,124 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-opening {
     fill: none;
-    stroke: #172b4d;
-    stroke-width: 1.5;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
     pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-handle {
+    fill: #fff;
+    stroke: #0052cc;
+    stroke-width: 2;
+    cursor: nwse-resize;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark {
+    fill: none;
+    stroke: #1c1c1c;
+    stroke-width: 1.25;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-solid,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-solid {
+    fill: #1c1c1c;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill,
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-fabric,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-fabric,
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-wood,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-wood,
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-ceramic,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-ceramic {
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.15;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-face,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-face {
+    fill: none;
+    stroke: #1c1c1c;
+    stroke-width: 1.6;
+    stroke-linecap: square;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-face.is-partition,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-face.is-partition {
+    stroke: #5e6c84;
+    stroke-width: 1.15;
+}
+
+#asset-tree-app .asset-tree-dim-line {
+    fill: none;
+    stroke: #6b778c;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-arc,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-arc {
+    stroke: #1c1c1c;
+    stroke-width: 2.4;
+}
+
+#asset-tree-app .asset-tree-room.is-arc,
+#asset-tree-app .asset-tree-room.is-dim,
+#asset-tree-app .asset-tree-room.is-text {
+    fill: transparent;
+    stroke: none;
+}
+
+#asset-tree-app .asset-tree-plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 8px 0 4px;
+}
+
+#asset-tree-app .asset-tree-plan-file {
+    display: none;
+}
+
+#asset-tree-app .asset-tree-editor-bar button.asset-tree-btn.slim.is-on {
+    background: #deebff !important;
+    color: #0052cc !important;
+    border-color: #4c9aff !important;
+}
+
+#asset-tree-app .asset-tree-building-name {
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-map-rail h3 {
+    margin: 10px 8px 2px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-size-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-size-row input {
+    width: 72px;
 }
 
 #asset-tree-app .asset-tree-pin-plate {
@@ -6905,6 +7923,111 @@ a.asset-tree-url {
     gap: 8px;
 }
 
+#asset-tree-app .asset-tree-life-setup-head,
+.asset-tree-backdrop .asset-tree-life-setup-head,
+.asset-tree-backdrop .asset-tree-approver-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.asset-tree-backdrop .asset-tree-approver-pick {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    width: 100%;
+    margin: 0 0 12px;
+}
+
+.asset-tree-backdrop .asset-tree-approver-head > span,
+.asset-tree-backdrop .asset-tree-plan-field > span {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b778c;
+}
+
+.asset-tree-backdrop button.asset-tree-linkish {
+    display: inline !important;
+    width: auto !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #0052cc !important;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: right;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+.asset-tree-backdrop .asset-tree-approver-pick .asset-tree-userpick-name {
+    min-height: 18px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.asset-tree-backdrop .asset-tree-approver-pick .asset-tree-userpick-name.is-empty {
+    color: #6b778c;
+    font-weight: 400;
+}
+
+.asset-tree-backdrop .asset-tree-approver-pick .asset-tree-user-results,
+.asset-tree-backdrop .asset-tree-plan-field {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+}
+
+.asset-tree-backdrop .asset-tree-plan-field {
+    margin: 0 0 12px;
+}
+
+.asset-tree-dialog .asset-tree-kind-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 280px;
+    overflow: auto;
+}
+
+.asset-tree-dialog .asset-tree-kind-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.asset-tree-dialog .asset-tree-kind-row input {
+    flex: 1 1 auto;
+    width: auto !important;
+    min-width: 0;
+}
+
+.asset-tree-dialog .asset-tree-kind-row button {
+    flex: 0 0 auto;
+}
+
+#asset-tree-app .asset-tree-module-setup .asset-tree-user-results,
+.asset-tree-backdrop .asset-tree-module-setup .asset-tree-user-results {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#asset-tree-app .asset-tree-module-setup .asset-tree-userpick-name,
+.asset-tree-backdrop .asset-tree-module-setup .asset-tree-userpick-name {
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
 .asset-tree-dialog .asset-tree-check-list,
 .asset-tree-backdrop .asset-tree-check-list {
     display: flex;
@@ -6920,23 +8043,76 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-service > .asset-tree-plan-actions {
     margin-top: 8px;
+    justify-content: flex-start;
 }
 
 #asset-tree-app .asset-tree-staff-find {
+    position: relative;
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 12px;
+    margin: 0 0 12px;
 }
 
-#asset-tree-app .asset-tree-staff-find input {
-    width: 280px !important;
-    max-width: 100% !important;
+#asset-tree-app .asset-tree-staff-find-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    min-width: 280px;
+    margin: 0;
+    padding: 0 10px 0 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-staff-find-field span {
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-staff-find-field input {
+    width: 150px !important;
+    height: 22px !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-staff-find-field input:focus {
+    outline: none;
+}
+
+#asset-tree-app .asset-tree-staff-find-field:focus-within {
+    border-color: #4c9aff;
 }
 
 #asset-tree-app .asset-tree-staff-hits {
-    flex: 1 0 100%;
+    position: absolute;
+    left: 0;
+    top: 32px;
+    z-index: 4;
+    min-width: 280px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+}
+
+#asset-tree-app .asset-tree-staff-hits:empty {
+    display: none;
 }
 
 #asset-tree-app .asset-tree-staff-card {
@@ -7011,4 +8187,2510 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-staff-leave input {
     width: 148px !important;
     max-width: 100% !important;
+}
+
+#asset-tree-app .asset-tree-roster-pair {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: 100%;
+}
+
+#asset-tree-app .asset-tree-roster-scroll {
+    overflow: auto;
+    width: max-content;
+    max-width: 100%;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-roster-pair > .asset-tree-roster-scroll {
+    flex: 0 1 auto;
+    min-width: 0;
+    width: auto;
+    max-width: calc(100% - 268px);
+}
+
+#asset-tree-app .asset-tree-notes {
+    flex: 0 0 260px;
+    width: 260px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-notes .asset-tree-roster {
+    width: 260px;
+}
+
+#asset-tree-app .asset-tree-notes th.asset-tree-notes-label,
+#asset-tree-app .asset-tree-notes td.asset-tree-notes-cell {
+    width: 260px;
+    min-width: 260px;
+    max-width: 260px;
+    padding: 0 8px;
+    text-align: left;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-notes thead th.asset-tree-notes-label {
+    height: 28px;
+    padding: 0 8px;
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-notes-title {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-notes tr.asset-tree-roster-branch-row td.asset-tree-notes-cell {
+    height: 24px;
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-notes td.asset-tree-notes-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#asset-tree-app .asset-tree-notes input.asset-tree-notes-input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]):not([type="range"]):not([type="hidden"]) {
+    display: block;
+    width: 100%;
+    height: 20px !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 2px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #172b4d;
+    font-size: 12px !important;
+    font-weight: 400;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-notes input.asset-tree-notes-input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]):not([type="range"]):not([type="hidden"]):focus {
+    background: #fff !important;
+    outline: 1px solid #172b4d;
+    outline-offset: -1px;
+}
+
+#asset-tree-app .asset-tree-notes input.asset-tree-notes-input::placeholder {
+    color: #97a0af;
+}
+
+#asset-tree-app .asset-tree-roster {
+    border-collapse: collapse;
+    width: max-content;
+    background: #fff;
+    color: #172b4d;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-roster th,
+#asset-tree-app .asset-tree-roster td {
+    height: 26px;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid #eef0f3;
+    border-right: 1px solid #f4f5f7;
+    font-weight: 400;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-name {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    width: 460px;
+    min-width: 420px;
+    max-width: 520px;
+    height: 26px;
+    padding: 0 6px;
+    background: #fff;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-roster thead .asset-tree-roster-name {
+    z-index: 2;
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-person .asset-tree-roster-name {
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-day {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-day.is-weekend,
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day.is-weekend {
+    background: #fff1c2;
+    color: #5c4a12;
+}
+
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day.is-painting .asset-tree-roster-hit {
+    outline: 2px solid #172b4d;
+    outline-offset: -2px;
+}
+
+#asset-tree-app .asset-tree-roster .asset-tree-roster-total {
+    width: 40px;
+    min-width: 36px;
+    max-width: 48px;
+    background: #fff;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-roster thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 28px;
+    background: #f7f8fa;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-roster-group th {
+    padding: 4px 8px;
+    background: #f4f5f7;
+    text-align: left;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-roster-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+}
+
+#asset-tree-app .asset-tree-roster-who {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-roster-grip {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 14px;
+    height: 20px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    cursor: grab;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-roster-grip i {
+    width: 8px;
+    height: 12px;
+    background-image: radial-gradient(#97a0af 1.15px, transparent 1.25px);
+    background-size: 4px 4px;
+    background-position: 0 0;
+}
+
+#asset-tree-app tr.asset-tree-roster-person.is-dragging,
+#asset-tree-app tr.asset-tree-roster-head.is-dragging,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-dragging {
+    opacity: 0.45;
+}
+
+#asset-tree-app tr.asset-tree-roster-person.is-drop-before th,
+#asset-tree-app tr.asset-tree-roster-person.is-drop-before td,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-before th,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-before td,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before th,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-before td {
+    box-shadow: inset 0 2px 0 #172b4d;
+}
+
+#asset-tree-app tr.asset-tree-roster-person.is-drop-after th,
+#asset-tree-app tr.asset-tree-roster-person.is-drop-after td,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-after th,
+#asset-tree-app tr.asset-tree-roster-head.is-drop-after td,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after th,
+#asset-tree-app tr.asset-tree-roster-branch-row.is-drop-after td {
+    box-shadow: inset 0 -2px 0 #172b4d;
+}
+
+#asset-tree-app .asset-tree-roster-pattern,
+#asset-tree-app button.asset-tree-roster-pattern {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    height: 18px;
+    min-height: 0;
+    margin: 0 0 0 4px;
+    padding: 0 5px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-roster-pattern.is-week {
+    color: #6b778c !important;
+    cursor: default;
+}
+
+#asset-tree-app select.asset-tree-roster-pattern {
+    width: auto;
+    max-width: 64px;
+    height: 18px;
+    min-height: 0;
+    margin: 0 0 0 4px;
+    padding: 0 2px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa;
+    color: #172b4d;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
+}
+
+#asset-tree-app .asset-tree-roster-pattern-wrap {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+}
+
+#asset-tree-app .asset-tree-roster-pattern-custom {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2px;
+}
+
+#asset-tree-app .asset-tree-roster-pattern-num,
+#asset-tree-app .asset-tree-roster-hour-edit {
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 18px !important;
+    min-height: 0 !important;
+    margin: 0 1px;
+    padding: 0 !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 6px !important;
+    background: #fff !important;
+    color: #172b4d;
+    font-size: 11px;
+    text-align: center;
+}
+
+#asset-tree-app td.asset-tree-roster-day.is-selected {
+    box-shadow: none;
+}
+
+#asset-tree-app td.asset-tree-roster-day.is-selected button.asset-tree-roster-hit {
+    border-radius: 9px;
+    box-shadow: inset 0 0 0 1px #172b4d;
+}
+
+#asset-tree-app td.asset-tree-roster-day.is-selected button.asset-tree-roster-hit:not([style*="background"]) {
+    background: #deebff;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-roster thead th.asset-tree-roster-day {
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-roster thead th.asset-tree-roster-day.is-selected {
+    box-shadow: none;
+}
+
+#asset-tree-app .asset-tree-roster thead th.asset-tree-roster-day.is-selected .asset-tree-roster-num {
+    border-radius: 9px;
+    box-shadow: inset 0 0 0 1px #172b4d;
+}
+
+#asset-tree-app th.asset-tree-roster-name.is-selected {
+    box-shadow: inset 3px 0 0 #172b4d;
+}
+
+#asset-tree-app .asset-tree-staff-sheet-tools button.asset-tree-btn.slim.is-on {
+    border-radius: 3px;
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-roster-pattern-from {
+    margin-left: 4px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-staff-fill-hint {
+    flex: 1 1 240px;
+    margin: 0;
+    color: #6b778c;
+    font-size: 12px;
+    line-height: 16px;
+}
+
+#asset-tree-app .asset-tree-staff-sheet-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app select.asset-tree-staff-branch-add {
+    max-width: 240px;
+}
+
+#asset-tree-app .asset-tree-staff-excel {
+    height: 32px;
+}
+
+#asset-tree-app .asset-tree-roster-hours {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 18px !important;
+    min-height: 0 !important;
+    flex: 0 0 auto;
+    margin-left: 0;
+    padding: 0 !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px !important;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
+    font-size: 12px !important;
+    font-weight: 700;
+    text-align: center;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+#asset-tree-app .asset-tree-roster-hours::-webkit-outer-spin-button,
+#asset-tree-app .asset-tree-roster-hours::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#asset-tree-app button.asset-tree-roster-remove {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #6b778c !important;
+    font-size: 16px;
+    line-height: 18px;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day,
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-total {
+    height: 26px;
+}
+
+#asset-tree-app .asset-tree-roster td.asset-tree-roster-day {
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-roster-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 4px;
+    min-height: 0;
+}
+
+#asset-tree-app select.asset-tree-roster-place,
+#asset-tree-app .asset-tree-roster-place {
+    display: block;
+    width: 100%;
+    max-width: 220px;
+    height: 22px !important;
+    min-height: 0 !important;
+    margin: 2px 0 0;
+    padding: 0 4px !important;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #172b4d;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-staff-place-filter {
+    height: 28px;
+    border-radius: 8px;
+}
+
+#asset-tree-app .asset-tree-roster thead .asset-tree-roster-name {
+    height: auto;
+    text-align: left;
+}
+
+#asset-tree-app .asset-tree-roster-branch {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 0;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-roster-branch strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-roster-branch strong.is-drag {
+    cursor: grab;
+}
+
+#asset-tree-app button.asset-tree-roster-branch-add {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #fff !important;
+    color: #172b4d !important;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 20px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-roster-branch-add:hover {
+    background: #f4f5f7 !important;
+}
+
+#asset-tree-app button.asset-tree-roster-fold {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 4px;
+    background: transparent !important;
+    color: #6b778c !important;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 16px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-roster-fold:hover,
+#asset-tree-app button.asset-tree-roster-fold.is-hidden {
+    background: #fff !important;
+    color: #172b4d !important;
+}
+
+#asset-tree-app .asset-tree-roster-fold-count {
+    flex: 0 0 auto;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row .asset-tree-roster-name,
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-day,
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-total {
+    height: 24px;
+    min-height: 0;
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-branch-row td.asset-tree-roster-day.is-weekend {
+    background: #f5c451;
+}
+
+#asset-tree-app .asset-tree-roster-branch-solo {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+    margin: 8px 0;
+    padding: 4px 8px;
+    background: #f4f5f7;
+    border-radius: 8px;
+}
+
+#asset-tree-app .asset-tree-branch-add {
+    position: fixed;
+    z-index: 40;
+    min-width: 220px;
+    max-width: 280px;
+    max-height: 280px;
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(9, 30, 66, 0.12);
+    padding: 8px;
+}
+
+#asset-tree-app .asset-tree-branch-add-title {
+    margin-bottom: 4px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-branch-add-empty {
+    margin: 0 0 8px;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-branch-add input {
+    width: 100%;
+    box-sizing: border-box;
+    height: 28px;
+    margin-top: 6px;
+    padding: 0 8px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-branch-add-hits {
+    margin-top: 6px;
+}
+
+#asset-tree-app .asset-tree-branch-add-hits:empty {
+    display: none;
+}
+
+#asset-tree-app button.asset-tree-roster-hit {
+    position: relative;
+    display: block;
+    width: 24px;
+    height: 18px;
+    min-height: 0;
+    margin: 0 auto;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 9px;
+    background: transparent;
+    color: #172b4d;
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 18px;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-roster-note {
+    min-width: 280px;
+    text-align: left;
+}
+
+#asset-tree-app .asset-tree-roster-leave,
+#asset-tree-app button.asset-tree-roster-leave {
+    display: block;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #de350b !important;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-roster-leave-add {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+#asset-tree-app .asset-tree-roster-leave-add input {
+    width: 118px !important;
+    height: 22px !important;
+    min-height: 0 !important;
+    padding: 0 4px !important;
+}
+
+#asset-tree-app .asset-tree-staff-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-staff-legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-roster-swatch {
+    width: 28px;
+    height: 16px;
+    background: #ffff00;
+    border: 1px solid #d0d0d0;
+}
+
+#asset-tree-app .asset-tree-staff-phones-title {
+    margin-bottom: 4px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-board button,
+#asset-tree-app .asset-tree-board input,
+#asset-tree-app .asset-tree-board select,
+#asset-tree-app .asset-tree-board strong {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
+
+#asset-tree-app .asset-tree-board-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin: 0 0 14px;
+}
+
+#asset-tree-app .asset-tree-board-head .asset-tree-calendar-nav {
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-board-head .asset-tree-calendar-title {
+    min-width: 240px;
+    color: #172b4d;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-align: center;
+    text-transform: capitalize !important;
+}
+
+#asset-tree-app button.asset-tree-month-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #42526e !important;
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-board-switch {
+    display: inline-flex;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#asset-tree-app button.asset-tree-board-tab {
+    height: 32px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 12px !important;
+    border: 0 !important;
+    border-right: 1px solid #dfe1e6 !important;
+    border-radius: 0;
+    background: #fafbfc !important;
+    color: #42526e !important;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-board-tab:last-child {
+    border-right: 0 !important;
+}
+
+#asset-tree-app button.asset-tree-board-tab.is-on {
+    background: #deebff !important;
+    color: #0052cc !important;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-layers {
+    margin: 0 0 12px;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-layer {
+    height: 32px;
+    padding: 0 10px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #42526e !important;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-layer.is-on {
+    background: #deebff !important;
+    border-color: #4c9aff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-layer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-calendar {
+    gap: 0;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-weekday {
+    padding: 8px;
+    background: #fafbfc;
+    border: 0;
+    border-bottom: 1px solid #dfe1e6;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-weekday.is-weekend {
+    color: #97a0af;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day {
+    min-height: 108px;
+    padding: 6px;
+    background: #fff;
+    border: 0;
+    border-top: 1px solid #f4f5f7;
+    border-left: 1px solid #f4f5f7;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-weekend {
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-out {
+    background: #fafbfc;
+    border-top-color: #f4f5f7;
+    border-left-color: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-out .asset-tree-day-num {
+    color: #97a0af;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    min-width: 22px;
+    height: auto;
+    padding: 0 4px;
+    border-radius: 3px;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-today .asset-tree-day-num,
+#asset-tree-app .asset-tree-board button.asset-tree-day-num.is-on {
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-day-num {
+    display: inline-flex !important;
+    width: auto;
+    min-width: 22px;
+    height: auto !important;
+    margin: 0;
+    padding: 0 4px !important;
+    border: 0 !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #6b778c !important;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-clock {
+    max-height: calc(100vh - 220px);
+    margin: 0;
+    overflow: auto;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-clock-pair,
+.asset-tree-backdrop .asset-tree-clock-pair {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#asset-tree-app .asset-tree-work-dialog select.asset-tree-clock-part,
+.asset-tree-backdrop .asset-tree-work-dialog select.asset-tree-clock-part {
+    width: 72px;
+    min-width: 72px;
+    padding: 4px 6px;
+}
+
+#asset-tree-app .asset-tree-clock-colon,
+#asset-tree-app .asset-tree-clock-dash,
+.asset-tree-backdrop .asset-tree-clock-colon,
+.asset-tree-backdrop .asset-tree-clock-dash {
+    color: #6b778c;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-clock-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 8px 12px;
+    border-bottom: 1px solid #dfe1e6;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-clock-head strong {
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-clock-head span {
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-slot {
+    display: flex;
+    align-items: stretch;
+    min-height: 36px;
+    border-top: 1px solid #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-slot.is-all {
+    min-height: 40px;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-slot.is-drop {
+    outline: 2px solid #4c9aff;
+    outline-offset: -2px;
+}
+
+#asset-tree-app .asset-tree-slot-label {
+    flex: 0 0 84px;
+    padding: 6px 8px;
+    color: #6b778c;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-slot-list {
+    flex: 1;
+    min-width: 0;
+    padding: 0 8px 4px 0;
+}
+
+#asset-tree-app .asset-tree-slot-list .asset-tree-event {
+    max-width: 420px;
+}
+
+#asset-tree-app .asset-tree-outlook {
+    display: grid;
+    max-height: calc(100vh - 220px);
+    overflow: auto;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-outlook-corner {
+    position: sticky;
+    top: 0;
+    left: 0;
+    z-index: 4;
+    background: #fafbfc;
+    border-bottom: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    width: 100%;
+    height: auto !important;
+    min-height: 48px;
+    margin: 0;
+    padding: 6px 4px !important;
+    border: 0 !important;
+    border-left: 1px solid #f4f5f7 !important;
+    border-bottom: 1px solid #dfe1e6 !important;
+    border-radius: 0;
+    background: #fafbfc !important;
+    color: #172b4d !important;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head.is-weekend {
+    background: #fffaf3 !important;
+}
+
+#asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head.is-today {
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-outlook-dow {
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+#asset-tree-app .asset-tree-outlook-head.is-today .asset-tree-outlook-dow {
+    color: #0052cc;
+}
+
+#asset-tree-app .asset-tree-outlook-date {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 4px;
+    border-radius: 11px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-outlook-head.is-today .asset-tree-outlook-date {
+    background: #0052cc;
+    color: #fff;
+}
+
+#asset-tree-app .asset-tree-outlook-gutter {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    min-height: 22px;
+    padding: 0 6px;
+    background: #fff;
+    color: #97a0af;
+    font-size: 11px;
+    line-height: 16px;
+}
+
+#asset-tree-app .asset-tree-outlook-gutter.is-hour,
+#asset-tree-app .asset-tree-outlook-gutter.is-all {
+    color: #6b778c;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell {
+    display: block;
+    position: relative;
+    min-height: 22px;
+    height: auto;
+    padding: 0;
+    overflow: hidden;
+    border-top: 1px solid transparent;
+    border-left: 1px solid #f4f5f7;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-hour {
+    border-top-color: #ebecf0;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-all {
+    min-height: 36px;
+    background: #fafbfc;
+    border-top: 0;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-weekend {
+    background: #fffaf3;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-today {
+    background: #f4f8ff;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-all.is-weekend {
+    background: #fff6e8;
+}
+
+#asset-tree-app .asset-tree-outlook-now {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    height: 0;
+    border-top: 2px solid #de350b;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-outlook-now:before {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: -4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #de350b;
+}
+
+#asset-tree-app .asset-tree-outlook-list {
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook {
+    min-height: 18px;
+    margin: 1px 2px 2px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-text {
+    padding: 1px 4px 2px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-text em {
+    display: none;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event {
+    display: flex !important;
+    align-items: stretch;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    margin: 6px 0 0;
+    padding: 0 !important;
+    overflow: hidden;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #172b4d !important;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-focus {
+    outline: 2px solid #4c9aff;
+    outline-offset: 1px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event {
+    cursor: grab;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-due {
+    border-color: #ff5630 !important;
+    background: #ffebe6 !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-done {
+    background: #f4f5f7 !important;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-done .asset-tree-event-text strong {
+    color: #6b778c;
+    text-decoration: line-through;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day.is-drop {
+    outline: 2px solid #4c9aff;
+    outline-offset: -2px;
+}
+
+#asset-tree-app .asset-tree-event-mark {
+    width: 4px;
+    flex: 0 0 4px;
+}
+
+#asset-tree-app .asset-tree-event-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 4px 6px 5px;
+}
+
+#asset-tree-app .asset-tree-event-text strong,
+#asset-tree-app .asset-tree-event-text em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: normal;
+}
+
+#asset-tree-app .asset-tree-event-text strong {
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-event-text em {
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+#asset-tree-app .asset-tree-day-more {
+    display: block;
+    margin-top: 4px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-day-more {
+    display: inline-flex !important;
+    width: auto;
+    height: auto !important;
+    min-height: 0;
+    margin: 4px 0 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    color: #0052cc !important;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: left;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-every-count {
+    width: 72px;
+}
+
+#asset-tree-app .asset-tree-mark-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-mark-once {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-mark-once.is-set {
+    border-color: #172b4d;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-mark-once-label {
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-mark-once input {
+    width: 28px;
+    height: 20px !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 2px !important;
+    border: 0;
+    background: transparent;
+    color: #172b4d;
+    text-align: center;
+    font-weight: 700;
+}
+
+#asset-tree-app button.asset-tree-mark-once-clear {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 8px;
+    background: transparent !important;
+    color: #6b778c !important;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 16px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-mark-once-clear.is-hidden {
+    display: none !important;
+}
+
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-head th {
+    height: 28px;
+    min-height: 0;
+    background: #f7f8fa;
+    font-weight: 600;
+    text-align: center;
+}
+
+#asset-tree-app .asset-tree-roster thead th.asset-tree-roster-day.is-weekend,
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-head th.asset-tree-roster-day.is-weekend {
+    background: #ffe08a;
+}
+
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-head th.asset-tree-roster-name {
+    background: #f4f5f7;
+    text-align: left;
+}
+
+#asset-tree-app .asset-tree-mark,
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    margin: 0;
+    padding: 0 6px 0 8px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick,
+#asset-tree-app .asset-tree-mark button.asset-tree-mark-pick {
+    height: 28px;
+    min-height: 28px;
+    margin: 0;
+    padding: 0 8px !important;
+    border: 0 !important;
+    border-radius: 8px;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: none !important;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick {
+    padding: 0 10px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #fff !important;
+}
+
+#asset-tree-app .asset-tree-mark.is-on,
+#asset-tree-app .asset-tree-mark-bar > button.asset-tree-mark-pick.is-on {
+    border-color: #172b4d !important;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
+}
+
+#asset-tree-app .asset-tree-mark-label {
+    max-width: 108px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-mark-swatch {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    margin: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px rgba(23, 43, 77, 0.28);
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-mark-swatch input.asset-tree-mark-color {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+#asset-tree-app .asset-tree-mark button.asset-tree-mark-pick {
+    position: relative;
+    z-index: 0;
+    flex: 0 1 auto;
+    padding: 0 2px 0 0 !important;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-mark-name {
+    width: 108px;
+    height: 24px;
+    min-height: 0;
+    margin: 0 4px;
+    padding: 0 4px;
+    border: 0;
+    background: transparent;
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-mark .asset-tree-roster-remove {
+    width: 16px;
+    height: 16px;
+    margin: 0 4px 0 0;
+}
+
+#asset-tree-app button.asset-tree-mark-factor {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 5px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa !important;
+    color: #172b4d !important;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-mark-factor.is-off {
+    color: #6b778c !important;
+}
+
+#asset-tree-app button.asset-tree-mark-factor.is-double {
+    color: #4338ca !important;
+    border-color: #c7d2fe !important;
+}
+
+#asset-tree-app .asset-tree-roster-unit {
+    flex: 0 0 auto;
+    margin-left: 0;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-roster-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    color: #172b4d;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-roster-num.is-today {
+    border-radius: 50%;
+    background: #172b4d;
+    color: #fff;
+}
+
+#asset-tree-app .asset-tree-roster thead .is-weekend .asset-tree-roster-num,
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-head .is-weekend .asset-tree-roster-num {
+    background: #f5c451;
+    color: #3d2e04;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-roster thead .is-weekend .asset-tree-roster-num.is-today,
+#asset-tree-app .asset-tree-roster tr.asset-tree-roster-head .is-weekend .asset-tree-roster-num.is-today,
+#asset-tree-app .asset-tree-roster thead .asset-tree-roster-num.is-today {
+    border-radius: 50%;
+    background: #172b4d;
+    color: #fff;
+}
+
+#asset-tree-app .asset-tree-staff-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-staff-sum {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid #e6e8ec;
+    border-radius: 10px;
+    background: #fff;
+    color: #172b4d;
+    font-size: 13px;
+}
+
+#asset-tree-app .asset-tree-staff-sum strong {
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-staff-sum span,
+#asset-tree-app .asset-tree-staff-phones {
+    color: #6b778c;
+}
+
+#asset-tree-app .asset-tree-staff-sum.is-total {
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-staff-leaves {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-staff-phones {
+    margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-map-card {
+    padding: 12px;
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-canvas {
+    display: block;
+    border: 0;
+    border-radius: 8px;
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-hint {
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-map-furn .asset-tree-hint {
+    margin: 0 0 6px;
+}
+
+#asset-tree-app .asset-tree-map-board button.asset-tree-furn {
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-furn-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 2px;
+    border-radius: 8px;
+    color: #6b778c;
+    font-size: 14px;
+    line-height: 1;
+}
+
+#asset-tree-app .asset-tree-map-inspector {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    background: #f7f8fa;
+    border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-map-inspector strong {
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-map-inspector input {
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 4px 8px;
+    border: 1px solid #e6e8ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-editor-bar {
+    margin-bottom: 8px;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-floor-name,
+#asset-tree-app .asset-tree-map-board input.asset-tree-plan-size {
+    border-color: #e6e8ec;
+    border-radius: 8px;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-editor-bar button.asset-tree-btn.slim.is-on {
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 8px;
+    background: #fff !important;
+    color: #172b4d !important;
+}
+
+#asset-tree-app .asset-tree-map-gear-title {
+    display: block;
+    margin-bottom: 8px;
+    color: #172b4d;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-map-gear-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-map-board button.asset-tree-gear-row {
+    width: auto !important;
+    min-width: 180px;
+    margin: 0 !important;
+    padding: 6px 10px !important;
+    border-radius: 8px;
+    background: #f4f5f7 !important;
+}
+
+#asset-tree-app .asset-tree-map-board button.asset-tree-gear-row.is-current {
+    background: #deebff !important;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-map-empty {
+    margin: 28px auto;
+}
+
+#asset-tree-app .asset-tree-map-board .asset-tree-sheet-filters {
+    flex-wrap: wrap;
+}
+
+#asset-tree-app:has(.asset-tree-floorplan) {
+    padding-bottom: 0;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-floorplan {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 230px);
+    min-height: 480px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    user-select: none;
+}
+
+#asset-tree-app .asset-tree-plan-top {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    background: #fff;
+    border-bottom: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-plan-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-plan-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-floorplan button,
+#asset-tree-app .asset-tree-floorplan input,
+#asset-tree-app .asset-tree-floorplan select,
+#asset-tree-app .asset-tree-floorplan strong,
+#asset-tree-app .asset-tree-floorplan .asset-tree-catalog-hint {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
+
+#asset-tree-app .asset-tree-plan-title strong {
+    max-width: 280px;
+    overflow: hidden;
+    font-size: 16px !important;
+    font-weight: 600;
+    line-height: 32px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-plan-title .asset-tree-month-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px !important;
+    height: 32px;
+    min-height: 0;
+    padding: 0 !important;
+    border-radius: 3px;
+    line-height: 0 !important;
+    font-size: 0 !important;
+}
+
+#asset-tree-app .asset-tree-plan-title .asset-tree-month-btn svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-plan-floors {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: auto;
+}
+
+#asset-tree-app button.asset-tree-floor-chip {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    height: 28px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 10px !important;
+    border: 1px solid transparent !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #172b4d !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    line-height: 20px !important;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-floor-chip.is-on {
+    border-color: #4c9aff !important;
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-plan-top .asset-tree-editor-bar {
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-floorplan-body {
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#asset-tree-app .asset-tree-floorplan-body.is-view {
+    grid-template-columns: 220px minmax(0, 1fr);
+}
+
+#asset-tree-app .asset-tree-catalog {
+    min-height: 0;
+    overflow: auto;
+    padding: 10px;
+    background: #fff;
+    border-right: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-catalog h3 {
+    margin: 8px 0 4px;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-catalog-hint {
+    margin: 8px 0 0;
+    color: #6b778c;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+#asset-tree-app .asset-tree-explic h3 {
+    margin-top: 4px;
+}
+
+#asset-tree-app button.asset-tree-explic-row {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    box-sizing: border-box;
+    width: 100% !important;
+    min-height: 28px;
+    margin: 0 0 4px !important;
+    padding: 4px 8px !important;
+    border: 1px solid transparent !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    line-height: 18px !important;
+    text-align: left;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-explic-row span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app button.asset-tree-explic-row span:last-child {
+    flex: 0 0 auto;
+    color: #6b778c;
+    white-space: nowrap;
+}
+
+#asset-tree-app button.asset-tree-explic-row.is-on {
+    border-color: #4c9aff !important;
+    background: #deebff !important;
+}
+
+#asset-tree-app .asset-tree-tool-grid,
+#asset-tree-app .asset-tree-thumb-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-tool-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool {
+    display: grid !important;
+    grid-template-rows: 22px 16px !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-items: center !important;
+    justify-items: center !important;
+    align-content: center !important;
+    justify-content: center !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    gap: 2px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    height: 46px !important;
+    min-height: 46px !important;
+    max-height: 46px !important;
+    margin: 0 !important;
+    padding: 4px 2px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fafbfc !important;
+    color: #172b4d !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 0 !important;
+    text-align: center !important;
+    text-indent: 0 !important;
+    white-space: nowrap !important;
+    cursor: pointer;
+    float: none !important;
+    overflow: hidden !important;
+    vertical-align: top !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool::before,
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool::after {
+    content: none !important;
+    display: none !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-glyph {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 24px !important;
+    height: 24px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 0 !important;
+    float: none !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-glyph svg,
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-icon {
+    display: block !important;
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0 !important;
+    float: none !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool .asset-tree-tool-label {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden;
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 16px !important;
+    letter-spacing: 0 !important;
+    text-align: center !important;
+    text-indent: 0 !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis;
+    float: none !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-tool.is-on,
+#asset-tree-app .asset-tree-floorplan button.asset-tree-thumb-card.is-on {
+    border-color: #4c9aff !important;
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-thumb-card {
+    position: relative;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 4px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 112px !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 6px 4px 8px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fff !important;
+    color: #172b4d !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 16px !important;
+    text-align: center !important;
+    float: none !important;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-tool-icon,
+#asset-tree-app .asset-tree-thumb {
+    display: block;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-tool-icon {
+    width: 22px;
+    height: 22px;
+}
+
+#asset-tree-app .asset-tree-thumb {
+    width: 100%;
+    height: 72px;
+}
+
+#asset-tree-app .asset-tree-thumb-name {
+    max-width: 100%;
+    overflow: hidden;
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-template-save {
+    margin: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-btn:disabled {
+    opacity: 0.45 !important;
+    color: #97a0af !important;
+    background: #fafbfc !important;
+    cursor: default;
+}
+
+#asset-tree-app .asset-tree-template-save button.asset-tree-btn,
+#asset-tree-app .asset-tree-floorplan input.asset-tree-template-name {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-height: 32px;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    line-height: 20px !important;
+}
+
+#asset-tree-app .asset-tree-floorplan input.asset-tree-template-name {
+    margin: 0 0 8px;
+    padding: 4px 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-thumb-card .asset-tree-furn-x {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    pointer-events: auto;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-catalog-gear {
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-catalog input[type="search"] {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 32px;
+    margin: 0 0 6px;
+    padding: 4px 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-catalog .asset-tree-map-gear-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-gear-row {
+    width: 100% !important;
+    min-width: 0;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-floorplan-stage {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+}
+
+#asset-tree-app .asset-tree-floorplan-view {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-floorplan-view .asset-tree-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-canvas.is-pan {
+    cursor: grab;
+}
+
+#asset-tree-app .asset-tree-canvas.is-draw {
+    cursor: crosshair;
+}
+
+#asset-tree-app .asset-tree-canvas.is-stamp {
+    cursor: copy;
+}
+
+#asset-tree-app .asset-tree-zoom-dock {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+}
+
+#asset-tree-app button.asset-tree-zoom-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px !important;
+    min-width: 32px;
+    height: 32px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-zoom-btn svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+    pointer-events: none;
+}
+
+#asset-tree-app button.asset-tree-zoom-btn:hover {
+    background: #f4f5f7 !important;
+}
+
+#asset-tree-app .asset-tree-zoom-readout {
+    min-width: 48px;
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+}
+
+#asset-tree-app .asset-tree-plan-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #fff;
+    border: 0;
+    border-bottom: 1px solid #dfe1e6;
+    border-radius: 0;
+}
+
+#asset-tree-app .asset-tree-plan-inspector strong {
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-plan-inspector input,
+#asset-tree-app .asset-tree-plan-inspector select {
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 4px 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-rotate {
+    fill: #fff;
+    stroke: #0052cc;
+    stroke-width: 2;
+    cursor: grab;
+}
+
+#asset-tree-app .asset-tree-rotate-stem {
+    fill: none;
+    stroke: #0052cc;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-end {
+    fill: #fff;
+    stroke: #0052cc;
+    stroke-width: 2;
+    cursor: grab;
+}
+
+#asset-tree-app .asset-tree-dim {
+    fill: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+    stroke: #ffffff;
+    stroke-width: 3px;
+    paint-order: stroke fill;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-anchor {
+    fill: #0052cc;
+    stroke: #fff;
+    stroke-width: 2;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-grid-dots {
+    fill: #a8b0bd;
+    stroke: none;
+}
+
+#asset-tree-app .asset-tree-rubber {
+    fill: none;
+    stroke: #0052cc;
+    stroke-width: 1.75;
+    stroke-dasharray: 10 7;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-rubber.is-edge {
+    stroke: #5e6c84;
+    stroke-width: 1;
+    stroke-dasharray: 5 5;
+}
+
+#asset-tree-app .asset-tree-rubber.is-box,
+#asset-tree-app .asset-tree-rubber.is-marquee {
+    fill: rgba(0, 82, 204, 0.08);
+    stroke: #0052cc;
+    stroke-width: 1.25;
+    stroke-dasharray: 8 6;
+}
+
+#asset-tree-app .asset-tree-rubber-label {
+    fill: #0052cc;
+    font-size: 13px;
+    font-weight: 600;
+    stroke: #ffffff;
+    stroke-width: 3px;
+    paint-order: stroke fill;
+    pointer-events: none;
+}
+
+#asset-tree-app select.asset-tree-building-pick {
+    max-width: 420px;
+    height: 32px;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-catalog-hint.is-steps {
+    white-space: pre-line;
+}
+
+.asset-tree-plan-ghost {
+    position: fixed;
+    z-index: 4000;
+    width: 84px;
+    height: 56px;
+    padding: 4px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+    pointer-events: none;
+    opacity: 0.92;
+}
+
+.asset-tree-plan-ghost .asset-tree-thumb {
+    display: block;
+    width: 76px;
+    height: 48px;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-floorplan .asset-tree-map-empty {
+    margin: auto;
+    padding: 24px;
+}
+
+.asset-tree-plan-menu-back {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30000;
+    background: transparent;
+}
+
+.asset-tree-plan-menu {
+    position: fixed;
+    z-index: 30001;
+    min-width: 196px;
+    margin: 0;
+    padding: 4px 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+}
+
+.asset-tree-plan-menu button.asset-tree-plan-menu-item {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 6px 12px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-family: inherit !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    line-height: 20px !important;
+    letter-spacing: 0 !important;
+    text-align: left !important;
+    text-transform: none !important;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+.asset-tree-plan-menu button.asset-tree-plan-menu-item:hover:not(:disabled) {
+    background: #f4f5f7 !important;
+}
+
+.asset-tree-plan-menu button.asset-tree-plan-menu-item:disabled {
+    color: #97a0af !important;
+    cursor: default;
+}
+
+.asset-tree-plan-menu button.asset-tree-plan-menu-item.is-danger:not(:disabled) {
+    color: #de350b !important;
+}
+
+.asset-tree-roster-menu-back {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30000;
+    background: transparent;
+}
+
+.asset-tree-roster-menu {
+    position: fixed;
+    z-index: 30001;
+    min-width: 196px;
+    margin: 0;
+    padding: 4px 0;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+}
+
+.asset-tree-roster-menu button.asset-tree-roster-menu-item {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 6px 12px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-family: inherit !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    line-height: 20px !important;
+    letter-spacing: 0 !important;
+    text-align: left !important;
+    text-transform: none !important;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+.asset-tree-roster-menu button.asset-tree-roster-menu-item:hover:not(:disabled) {
+    background: #f4f5f7 !important;
+}
+
+.asset-tree-roster-menu button.asset-tree-roster-menu-item:disabled {
+    color: #97a0af !important;
+    cursor: default;
+}
+
+.asset-tree-roster-menu button.asset-tree-roster-menu-item.is-danger:not(:disabled) {
+    color: #de350b !important;
+}
+
+.asset-tree-roster-menu .asset-tree-roster-menu-hours {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 0;
+    padding: 6px 12px;
+    border-top: 1px solid #dfe1e6;
+    color: #172b4d;
+    font-size: 14px;
+}
+
+.asset-tree-roster-menu .asset-tree-roster-menu-hours input {
+    width: 56px;
+    height: 28px;
+    margin: 0;
+    padding: 0 6px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font-size: 14px;
+    text-align: center;
+}
+
+@media (max-width: 860px) {
+    #asset-tree-app .asset-tree-floorplan-body {
+        grid-template-columns: 196px minmax(0, 1fr);
+    }
 }

@@ -15,6 +15,7 @@
         <entity>com.assetstree.jira.ao.AssetEntity</entity>
         <entity>com.assetstree.jira.ao.AssetAttributeEntity</entity>
         <entity>com.assetstree.jira.ao.AssetIssueLinkEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetPeerEntity</entity>
         <entity>com.assetstree.jira.ao.AssetTypeEntity</entity>
         <entity>com.assetstree.jira.ao.AssetCounterEntity</entity>
         <entity>com.assetstree.jira.ao.ProjectAssetKeyEntity</entity>
@@ -93,7 +94,7 @@
     <web-item key="asset-tree-project" name="Asset Tree Project Link" section="jira.project.sidebar.plugins.navigation" weight="300">
         <label key="asset-tree.nav.label"/>
         <link linkId="asset-tree-project-link">/plugins/servlet/asset-tree?project=$project.key&amp;view=all</link>
-        <param name="iconClass" value="aui-icon-large asset-tree-sidebar-icon"/>
+        <param name="iconClass" value="aui-icon aui-icon-large asset-tree-sidebar-icon"/>
         <condition class="com.assetstree.jira.web.AgentAssetsCondition"/>
     </web-item>
 
@@ -113,6 +114,7 @@
     <web-resource key="asset-tree-web" name="Asset Tree Page Resources">
         <resource type="download" name="asset-tree.css" location="css/asset-tree.css"/>
         <resource type="download" name="qr-code.js" location="js/qr-code.js"/>
+        <resource type="download" name="plan-exchange.js" location="js/plan-exchange.js"/>
         <resource type="download" name="asset-tree.js" location="js/asset-tree.js"/>
     </web-resource>
 

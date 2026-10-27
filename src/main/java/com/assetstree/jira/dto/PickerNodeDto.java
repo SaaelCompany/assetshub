@@ -11,6 +11,7 @@ public class PickerNodeDto {
     private String objectKey;
     private String typeLabel;
     private String status;
+    private String search;
     private boolean group;
 
     public int getId() {
@@ -59,6 +60,14 @@ public class PickerNodeDto {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getSearch() {
+        return search;
+    }
+
+    public void setSearch(String search) {
+        this.search = search;
     }
 
     public boolean getGroup() {

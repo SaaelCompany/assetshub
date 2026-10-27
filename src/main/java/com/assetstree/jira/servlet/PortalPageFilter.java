@@ -5,6 +5,7 @@ import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.model.ProjectModules;
+import com.assetstree.jira.service.JiraServices;
 import com.assetstree.jira.web.PortalLookup;
 import net.java.ao.Query;
 import org.slf4j.Logger;
@@ -113,7 +114,7 @@ public class PortalPageFilter implements Filter {
             return false;
         }
         try {
-            ActiveObjects ao = ComponentAccessor.getOSGiComponentInstanceOfType(ActiveObjects.class);
+            ActiveObjects ao = JiraServices.activeObjects();
             if (ao == null) {
                 return false;
             }

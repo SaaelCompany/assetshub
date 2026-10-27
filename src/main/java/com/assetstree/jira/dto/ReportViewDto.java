@@ -16,6 +16,9 @@ public class ReportViewDto {
     private boolean standard;
     private String groupBy;
     private String chart;
+    private boolean capped;
+    private int lineTotal;
+    private String reason;
     private List<ReportBucketDto> rows = new ArrayList<ReportBucketDto>();
     private List<ReportLineDto> lines = new ArrayList<ReportLineDto>();
 
@@ -35,6 +38,12 @@ public class ReportViewDto {
     public void setGroupBy(String groupBy) { this.groupBy = groupBy; }
     public String getChart() { return chart; }
     public void setChart(String chart) { this.chart = chart; }
+    public boolean isCapped() { return capped; }
+    public void setCapped(boolean capped) { this.capped = capped; }
+    public int getLineTotal() { return lineTotal; }
+    public void setLineTotal(int lineTotal) { this.lineTotal = lineTotal; }
+    public String getReason() { return reason; }
+    public void setReason(String reason) { this.reason = reason; }
     public List<ReportBucketDto> getRows() { return rows; }
     public void setRows(List<ReportBucketDto> rows) { this.rows = rows; }
     public List<ReportLineDto> getLines() { return lines; }

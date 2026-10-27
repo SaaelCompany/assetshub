@@ -23,6 +23,8 @@ public class ScheduleRowDto {
     private String endTime;
     private String completedOn;
     private boolean completed;
+    private boolean notify;
+    private String moves;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -60,4 +62,8 @@ public class ScheduleRowDto {
     public void setCompletedOn(String completedOn) { this.completedOn = completedOn; }
     public boolean isCompleted() { return completed; }
     public void setCompleted(boolean completed) { this.completed = completed; }
+    public boolean isNotify() { return notify; }
+    public void setNotify(boolean notify) { this.notify = notify; }
+    public String getMoves() { return moves; }
+    public void setMoves(String moves) { this.moves = moves; }
 }

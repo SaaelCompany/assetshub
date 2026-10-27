@@ -14,6 +14,7 @@ public class AssetDraft {
     private Integer parentId;
     private String projectKey;
     private String custodianKey;
+    private String issuedKey;
     private List<AttributeDraft> attributes;
 
     public String getName() {
@@ -70,6 +71,14 @@ public class AssetDraft {
 
     public void setCustodianKey(String custodianKey) {
         this.custodianKey = custodianKey;
+    }
+
+    public String getIssuedKey() {
+        return issuedKey;
+    }
+
+    public void setIssuedKey(String issuedKey) {
+        this.issuedKey = issuedKey;
     }
 
     public List<AttributeDraft> getAttributes() {

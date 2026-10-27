@@ -13,6 +13,12 @@ public class RoomDto {
     private int h;
     private String kind;
     private String color;
+    private int angle;
+    private String points;
+    private int placeId;
+    private int swing;
+    private int groupId;
+    private int assetId;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -30,4 +36,16 @@ public class RoomDto {
     public void setKind(String kind) { this.kind = kind; }
     public String getColor() { return color; }
     public void setColor(String color) { this.color = color; }
+    public int getAngle() { return angle; }
+    public void setAngle(int angle) { this.angle = angle; }
+    public String getPoints() { return points; }
+    public void setPoints(String points) { this.points = points; }
+    public int getPlaceId() { return placeId; }
+    public void setPlaceId(int placeId) { this.placeId = placeId; }
+    public int getSwing() { return swing; }
+    public void setSwing(int swing) { this.swing = swing; }
+    public int getGroupId() { return groupId; }
+    public void setGroupId(int groupId) { this.groupId = groupId; }
+    public int getAssetId() { return assetId; }
+    public void setAssetId(int assetId) { this.assetId = assetId; }
 }

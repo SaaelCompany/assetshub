@@ -33,6 +33,12 @@ public interface SavedReportEntity extends Entity {
 
     void setFilterValue(String filterValue);
 
+    /** Full filter when it does not fit in {@link #getFilterValue()}. */
+    @StringLength(StringLength.UNLIMITED)
+    String getFilterText();
+
+    void setFilterText(String filterText);
+
     @StringLength(16)
     String getChart();
 

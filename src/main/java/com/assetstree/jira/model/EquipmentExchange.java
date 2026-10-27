@@ -1,6 +1,7 @@
 package com.assetstree.jira.model;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -433,9 +434,13 @@ public final class EquipmentExchange {
                 byKey.put(norm(node.getObjectKey()), node);
             }
         }
+        // One place index and one parent map for the whole sheet. Matching a path
+        // used to scan every asset once per segment of every row.
+        Map<String, List<Node>> places = indexPlaces(nodes);
+        Map<Integer, Integer> parentById = parents(nodes);
         Map<String, Integer> keys = seenKeys == null ? new LinkedHashMap<String, Integer>() : seenKeys;
         for (EquipmentSheet.Record record : sheet.getRecords()) {
-            Change change = readRow(record, roleColumn, fieldColumns, headers, types, statuses, nodes, byKey,
+            Change change = readRow(record, roleColumn, fieldColumns, headers, types, statuses, places, parentById, byKey,
                     keys, defaultStatus, people, issues);
             if (change != null) {
                 changes.add(change);
@@ -445,7 +450,8 @@ public final class EquipmentExchange {
     }
 
     private static Change readRow(EquipmentSheet.Record record, int[] roleColumn, List<Integer> fieldColumns,
-                                  List<String> headers, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
+                                  List<String> headers, List<TypeRef> types, List<Named> statuses,
+                                  Map<String, List<Node>> places, Map<Integer, Integer> parentById,
                                   Map<String, Node> byKey, Map<String, Integer> seenKeys, String defaultStatus,
                                   Directory people, List<Issue> issues) {
         int row = record.getRow();
@@ -508,15 +514,15 @@ public final class EquipmentExchange {
             issues.add(new Issue(row, "asset-tree.error.import.status", statusName));
             return null;
         }
-        Integer parentId = matchPlace(place, nodes, row, issues);
+        Integer parentId = matchPlace(place, places, row, issues);
         if (parentId == null) {
             return null;
         }
-        if (existing != null && TreeLogic.wouldCycle(parents(nodes), existing.getId(), parentId)) {
+        if (existing != null && TreeLogic.wouldCycle(parentById, existing.getId(), parentId)) {
             issues.add(new Issue(row, "asset-tree.error.import.cycle", place));
             return null;
         }
-        if (TreeLogic.depth(parents(nodes), parentId.intValue()) + 1 >= TreeLogic.MAX_DEPTH) {
+        if (TreeLogic.depth(parentById, parentId.intValue()) + 1 >= TreeLogic.MAX_DEPTH) {
             issues.add(new Issue(row, "asset-tree.error.import.depth", place));
             return null;
         }
@@ -607,7 +613,33 @@ public final class EquipmentExchange {
                 description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey, attributes);
     }
 
-    private static Integer matchPlace(String place, List<Node> nodes, int row, List<Issue> issues) {
+    private static Map<String, List<Node>> indexPlaces(List<Node> nodes) {
+        Map<String, List<Node>> index = new HashMap<String, List<Node>>();
+        if (nodes == null) {
+            return index;
+        }
+        for (Node node : nodes) {
+            if (node == null || !node.isLocation()) {
+                continue;
+            }
+            String key = placeKey(node.getParentId(), node.getName());
+            List<Node> bucket = index.get(key);
+            if (bucket == null) {
+                bucket = new ArrayList<Node>();
+                index.put(key, bucket);
+            }
+            bucket.add(node);
+        }
+        return index;
+    }
+
+    private static String placeKey(Integer parentId, String name) {
+        Integer parent = TreeLogic.normalizeParent(parentId);
+        String parentKey = parent == null ? "" : String.valueOf(parent.intValue());
+        return parentKey + "\n" + norm(name);
+    }
+
+    private static Integer matchPlace(String place, Map<String, List<Node>> places, int row, List<Issue> issues) {
         if (place.trim().isEmpty()) {
             issues.add(new Issue(row, "asset-tree.error.import.place.required", ""));
             return null;
@@ -619,16 +651,8 @@ public final class EquipmentExchange {
             if (name.isEmpty()) {
                 continue;
             }
-            List<Node> matches = new ArrayList<Node>();
-            for (Node node : nodes) {
-                if (!node.isLocation() || !same(node.getName(), name)) {
-                    continue;
-                }
-                if ((parent == null && node.getParentId() == null) || (parent != null && parent.equals(node.getParentId()))) {
-                    matches.add(node);
-                }
-            }
-            if (matches.isEmpty()) {
+            List<Node> matches = places == null ? null : places.get(placeKey(parent, name));
+            if (matches == null || matches.isEmpty()) {
                 issues.add(new Issue(row, "asset-tree.error.import.place", place.trim()));
                 return null;
             }
