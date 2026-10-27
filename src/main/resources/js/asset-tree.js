@@ -14841,7 +14841,21 @@
 
     function staffClearSelection() {
         state.staffSelection = null;
+        state.staffSelectAdd = false;
         if (state.view === 'schedules') renderFrame();
+    }
+
+    if (!state.staffOutsideBound) {
+        state.staffOutsideBound = true;
+        document.addEventListener('mousedown', function (event) {
+            if (!state.staffSelection || event.button !== 0) return;
+            var target = event.target;
+            if (!target || !target.closest) return;
+            if (target.closest('.asset-tree-roster-menu, .asset-tree-roster-menu-back')) return;
+            if (target.closest('.asset-tree-staff-sheet-tools, .asset-tree-roster-pattern-wrap')) return;
+            if (target.closest('td[data-staff-day], th.asset-tree-roster-day, th.asset-tree-roster-name')) return;
+            staffClearSelection();
+        }, true);
     }
 
     function staffPersonBundle(userKey) {
@@ -15046,6 +15060,7 @@
         if (!pairs.length) return;
         var last = pairs[pairs.length - 1];
         staffCommitPairs(pairs, staffCellKey(pairs[0].userKey, iso), staffCellKey(last.userKey, iso), state.staffSelectAdd);
+        state.staffSelectAdd = false;
         if (state.view === 'schedules') renderFrame();
     }
 
@@ -15057,6 +15072,7 @@
         });
         if (!pairs.length) return;
         staffCommitPairs(pairs, staffCellKey(userKey, grid.days[0]), staffCellKey(userKey, grid.days[grid.days.length - 1]), state.staffSelectAdd);
+        state.staffSelectAdd = false;
         if (state.view === 'schedules') renderFrame();
     }
 
@@ -15068,7 +15084,7 @@
     function staffApplyPattern(person, startIso, weekdays) {
         if (!person || !person.hours || !startIso) return;
         var pattern = staffPatternOf(person);
-        var packed = weekdays || staffEncodePattern(pattern.work, pattern.rest);
+        var packed = weekdays || (pattern.kind === 'week' ? pattern.weekdays : staffEncodePattern(pattern.work, pattern.rest));
         var asShift = staffShiftPacked(packed);
         if (asShift && asShift.work === 5 && asShift.rest === 2) packed = 31;
         var marks = parseDayMarks(person.hours.marks);
@@ -15082,7 +15098,8 @@
         var grid = staffVisibleGrid();
         var found = [];
         grid.people.forEach(function (person) {
-            var start = staffEarliestSelected(person.userKey);
+            if (!person || !person.hours) return;
+            var start = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
             if (start) found.push({ person: person, start: start });
         });
         if (!found.length) {
@@ -15244,6 +15261,10 @@
             return;
         }
         var adding = !!state.staffSelectAdd;
+        if (!adding) {
+            state.staffSelection = null;
+            staffMarkSelectedCells();
+        }
         var startKey = staffCellKey(person.userKey, iso);
         var base = {};
         if (adding && state.staffSelection && state.staffSelection.map) {
@@ -15267,6 +15288,7 @@
         function finish() {
             document.removeEventListener('mousemove', extend);
             document.removeEventListener('mouseup', finish);
+            if (adding) state.staffSelectAdd = false;
             if (moved) {
                 renderFrame();
                 return;
@@ -15621,8 +15643,9 @@
         nudge.title = t('staffShiftHint');
         nudge.addEventListener('mousedown', function (event) { event.stopPropagation(); });
         var fill = button(t('staffFillRow'), 'asset-tree-roster-pattern', function () {
-            var start = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
-            staffApplyPattern(person, start);
+            var fresh = staffPersonBundle(person.userKey) || person;
+            var start = staffEarliestSelected(fresh.userKey) || (fresh.hours && fresh.hours.startOn) || staffMonthStart();
+            staffApplyPattern(fresh, start);
         });
         fill.title = t('staffFillHint');
         fill.addEventListener('mousedown', function (event) { event.stopPropagation(); });
@@ -16001,22 +16024,6 @@
 
     function staffSheetTools() {
         var bar = el('div', 'asset-tree-staff-sheet-tools');
-        bar.appendChild(button(t('staffSelectAll'), 'asset-tree-btn slim', function () { staffSelectAll(); }));
-        var addSelect = button(t('staffSelectAdd'), 'asset-tree-btn slim' + (state.staffSelectAdd ? ' is-on' : ''), function () {
-            state.staffSelectAdd = !state.staffSelectAdd;
-            renderFrame();
-        });
-        addSelect.title = t('staffSelectAddHint');
-        addSelect.setAttribute('aria-pressed', state.staffSelectAdd ? 'true' : 'false');
-        bar.appendChild(addSelect);
-        var clearSelect = button(t('staffSelectClear'), 'asset-tree-btn slim', function () { staffClearSelection(); });
-        clearSelect.title = t('staffSelectClearHint');
-        bar.appendChild(clearSelect);
-        if (state.canEdit) {
-            var erase = button(t('staffSelectErase'), 'asset-tree-btn slim', function () { staffEraseSelection(); });
-            erase.title = t('staffSelectEraseHint');
-            bar.appendChild(erase);
-        }
         bar.appendChild(button(t('staffCopy'), 'asset-tree-btn slim', function () { staffCopySelection(); }));
         if (state.canEdit) bar.appendChild(button(t('staffPaste'), 'asset-tree-btn slim', function () { staffPasteSelection(); }));
         if (state.canEdit) {

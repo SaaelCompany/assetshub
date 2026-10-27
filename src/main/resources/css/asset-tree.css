@@ -8446,7 +8446,7 @@ a.asset-tree-url {
 
 #asset-tree-app td.asset-tree-roster-day.is-selected button.asset-tree-roster-hit {
     border-radius: 9px;
-    box-shadow: inset 0 0 0 2px #172b4d;
+    box-shadow: inset 0 0 0 1px #172b4d;
 }
 
 #asset-tree-app td.asset-tree-roster-day.is-selected button.asset-tree-roster-hit:not([style*="background"]) {
@@ -8464,7 +8464,7 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-roster thead th.asset-tree-roster-day.is-selected .asset-tree-roster-num {
     border-radius: 9px;
-    box-shadow: inset 0 0 0 2px #172b4d;
+    box-shadow: inset 0 0 0 1px #172b4d;
 }
 
 #asset-tree-app th.asset-tree-roster-name.is-selected {
