@@ -457,6 +457,7 @@
         staffError: '',
         staffSelection: null,
         staffSelectAdd: false,
+        staffClickTimer: null,
         staffClip: null,
         floors: null,
         floorId: 0,
@@ -13959,8 +13960,10 @@
     }
 
     function saveStaffHours(userKey, weekdays, hours, marks, startOn, placeId, note) {
-        var shift = staffKeepsAnchor(weekdays, hours);
-        var anchor = shift ? (startOn || '2024-01-01') : '';
+        var currentRow = staffHoursRow(userKey);
+        var anchor = '';
+        if (startOn !== undefined && startOn !== null) anchor = startOn || '';
+        else if (currentRow && currentRow.startOn) anchor = currentRow.startOn;
         var body = {
             userKey: userKey,
             weekdays: weekdays || 31,
@@ -13970,7 +13973,7 @@
         if (marks !== undefined) body.marks = marks;
         if (placeId !== undefined) body.placeId = placeId;
         if (note !== undefined) body.note = cleanStaffNote(note);
-        var current = staffHoursRow(userKey);
+        var current = currentRow;
         rememberStaff({
             id: current ? current.id : 0,
             userKey: userKey,
@@ -14076,20 +14079,23 @@
         return 128 + work * 16 + rest;
     }
 
+    function staffEncodePattern(work, rest) {
+        work = parseInt(work, 10) || 0;
+        rest = parseInt(rest, 10) || 0;
+        if (work === 5 && rest === 2) return 31;
+        return packStaffShift(work, rest);
+    }
+
     function staffPatternOf(person) {
         var row = person && person.hours ? person.hours : null;
         var packed = staffShiftPacked(row ? row.weekdays : 0);
+        if (packed && packed.work === 5 && packed.rest === 2) return { kind: 'week', weekdays: 31, work: 5, rest: 2 };
         if (packed) return { kind: 'shift', work: packed.work, rest: packed.rest };
         var hours = row ? parseInt(row.hours, 10) || 0 : 0;
         if (hours >= 12) return { kind: 'shift', work: 2, rest: 2 };
         var weekdays = row && row.weekdays ? parseInt(row.weekdays, 10) || 31 : 31;
         if (weekdays < 1 || weekdays > 127) weekdays = 31;
         return { kind: 'week', weekdays: weekdays, work: 5, rest: 2 };
-    }
-
-    function staffKeepsAnchor(weekdays, hours) {
-        if (staffShiftPacked(weekdays)) return true;
-        return (parseInt(hours, 10) || 0) >= 12;
     }
 
     function staffMarkById(id) {
@@ -14204,14 +14210,18 @@
 
     function staffNatural(person, iso, date) {
         if (staffLeaveOn(person, iso)) return 'leave';
+        var startOn = person.hours && person.hours.startOn ? String(person.hours.startOn) : '';
+        if (startOn && iso < startOn) return 'off';
         var pattern = staffPatternOf(person);
         if (pattern.kind === 'shift') {
-            var anchor = parseIsoDate(person.hours && person.hours.startOn) || parseIsoDate('2024-01-01');
+            var anchor = parseIsoDate(startOn);
+            if (!anchor) return 'off';
             var span = pattern.work + pattern.rest;
             var delta = dayNumber(date) - dayNumber(anchor);
             var phase = ((delta % span) + span) % span;
             return phase < pattern.work ? 'work' : 'off';
         }
+        if (!startOn) return 'off';
         var bit = (date.getDay() + 6) % 7;
         var weekdays = pattern.weekdays || 31;
         return (weekdays & (1 << bit)) ? 'work' : 'off';
@@ -14834,33 +14844,126 @@
         if (state.view === 'schedules') renderFrame();
     }
 
-    function staffEraseSelection() {
-        var grid = staffVisibleGrid();
+    function staffPersonBundle(userKey) {
+        var row = staffHoursRow(userKey);
+        if (!row) return null;
+        var person = { userKey: userKey, hours: row, leaves: [] };
+        (state.staffRows || []).forEach(function (item) {
+            if (item && item.userKey === userKey && item.kind === 'leave') person.leaves.push(item);
+        });
+        return person;
+    }
+
+    function staffDropDay(marks, person, iso) {
+        var date = parseIsoDate(iso);
+        var natural = date ? staffNatural(person, iso, date) : 'off';
+        delete marks._hours[iso];
+        if (natural && natural !== 'off') marks[iso] = 'off';
+        else delete marks[iso];
+    }
+
+    function staffEraseDays(pairs) {
         var byUser = {};
         var order = [];
-        grid.people.forEach(function (person) {
-            grid.days.forEach(function (iso) {
-                if (!staffCellSelected(person.userKey, iso)) return;
-                if (!byUser[person.userKey]) {
-                    byUser[person.userKey] = person;
-                    order.push(person.userKey);
-                }
-            });
+        (pairs || []).forEach(function (pair) {
+            if (!pair || !pair.userKey || !pair.iso) return;
+            if (!byUser[pair.userKey]) {
+                byUser[pair.userKey] = [];
+                order.push(pair.userKey);
+            }
+            if (byUser[pair.userKey].indexOf(pair.iso) < 0) byUser[pair.userKey].push(pair.iso);
         });
         if (!order.length) {
             notify(t('staffEraseNeed'));
             return;
         }
         order.forEach(function (userKey) {
-            var person = byUser[userKey];
+            var person = staffPersonBundle(userKey);
+            if (!person) return;
             var marks = parseDayMarks(person.hours.marks);
-            grid.days.forEach(function (iso) {
-                if (!staffCellSelected(userKey, iso)) return;
-                marks[iso] = 'off';
-                delete marks._hours[iso];
-            });
-            saveStaffHours(userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks), person.hours.startOn);
+            byUser[userKey].forEach(function (iso) { staffDropDay(marks, person, iso); });
+            saveStaffHours(userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks), person.hours.startOn || '');
         });
+    }
+
+    function staffEraseSelection() {
+        staffEraseDays(staffSelectionCells());
+    }
+
+    function staffPlaceDay(person, iso) {
+        if (!person || !person.hours || staffLeaveOn(person, iso)) return;
+        var row = person.hours;
+        var marks = parseDayMarks(row.marks);
+        var date = parseIsoDate(iso);
+        if (!date) return;
+        var id = staffVisible(person, iso, date, marks);
+        if (id && id !== 'off') {
+            staffDropDay(marks, person, iso);
+            saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), row.startOn || '');
+            return;
+        }
+        var brush = state.staffBrush || 'work';
+        if (brush === 'off') return;
+        var spec = staffOnceSpec();
+        var per = parseInt(row.hours, 10) || 8;
+        if (per < 1) per = 1;
+        if (per > 24) per = 24;
+        var startOn = row.startOn || '';
+        var mark = staffMarkById(brush);
+        var startsPattern = brush === 'work' || (mark && mark.factor !== 0);
+        if (!startOn && startsPattern) {
+            startOn = iso;
+            row.startOn = startOn;
+        }
+        if (spec) {
+            staffApplyOnce(marks, iso, brush, per, spec);
+        } else {
+            var natural = staffNatural(person, iso, date);
+            if (brush === natural) {
+                delete marks[iso];
+                delete marks._hours[iso];
+            } else {
+                marks[iso] = brush;
+                delete marks._hours[iso];
+            }
+        }
+        saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), startOn);
+    }
+
+    function staffSetDayHours(person, iso, raw) {
+        if (!person || !person.hours) return;
+        var row = person.hours;
+        var marks = parseDayMarks(row.marks);
+        var date = parseIsoDate(iso) || new Date();
+        var startOn = row.startOn || '';
+        var text = String(raw || '').replace(/^\s+|\s+$/g, '');
+        if (!text) {
+            delete marks._hours[iso];
+            saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), startOn);
+            return;
+        }
+        var per = parseInt(row.hours, 10) || 8;
+        if (per < 1) per = 1;
+        if (per > 24) per = 24;
+        var id = staffVisible(person, iso, date, marks);
+        var brush = state.staffBrush && state.staffBrush !== 'off' ? state.staffBrush : 'work';
+        if (!id || id === 'off') {
+            id = brush;
+            var mark = staffMarkById(id);
+            if (!startOn && (id === 'work' || (mark && mark.factor !== 0))) {
+                startOn = iso;
+                row.startOn = startOn;
+            }
+        }
+        var next = null;
+        if (/^[+-]\d{1,2}(\.\d{1,2})?$/.test(text)) next = staffDayHours(id, per) + parseFloat(text);
+        else if (/^\d{1,2}(\.\d{1,2})?$/.test(text)) next = parseFloat(text);
+        if (next == null || !isFinite(next)) return;
+        if (next < 0) next = 0;
+        if (next > 24) next = 24;
+        marks[iso] = id;
+        marks._hours[iso] = Math.round(next * 100) / 100;
+        saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), startOn);
     }
 
     function staffToggleCell(userKey, iso) {
@@ -14965,24 +15068,13 @@
     function staffApplyPattern(person, startIso, weekdays) {
         if (!person || !person.hours || !startIso) return;
         var pattern = staffPatternOf(person);
-        var packed = weekdays || packStaffShift(pattern.work, pattern.rest);
+        var packed = weekdays || staffEncodePattern(pattern.work, pattern.rest);
+        var asShift = staffShiftPacked(packed);
+        if (asShift && asShift.work === 5 && asShift.rest === 2) packed = 31;
         var marks = parseDayMarks(person.hours.marks);
         person.hours.weekdays = packed;
         person.hours.startOn = startIso;
-        var year = state.scheduleYear;
-        var month = state.scheduleMonth;
-        var count = new Date(year, month, 0).getDate();
-        var day;
-        for (day = 1; day <= count; day++) {
-            var date = new Date(year, month - 1, day);
-            var iso = isoDate(date);
-            if (iso < startIso) continue;
-            if (!marks[iso] || markCustom(marks, iso) != null) continue;
-            if (marks[iso] === 'work' || marks[iso] === 'off') {
-                delete marks[iso];
-                delete marks._hours[iso];
-            }
-        }
+        staffStripMatchedMarks(person, marks);
         saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
     }
 
@@ -15023,7 +15115,7 @@
         for (index = 1; index < sorted.length; index++) {
             if (isoDate(shiftDays(first, index)) !== sorted[index]) return null;
         }
-        return { weekdays: packStaffShift(work, rest), startOn: sorted[0] };
+        return { weekdays: staffEncodePattern(work, rest), startOn: sorted[0] };
     }
 
     function staffStripMatchedMarks(person, marks) {
@@ -15091,15 +15183,18 @@
         });
         var weekdays = person.hours.weekdays;
         var startOn = person.hours.startOn;
-        if (!erase && !spec && paintedWork.length) {
+        if (!erase && !spec && brush === 'work' && paintedWork.length && !startOn) {
             var anchored = staffAnchorFromPaint(person, paintedWork);
-            if (anchored) {
-                weekdays = anchored.weekdays;
-                startOn = anchored.startOn;
-                person.hours.weekdays = weekdays;
-                person.hours.startOn = startOn;
-                staffStripMatchedMarks(person, marks);
+            if (!anchored) {
+                var sortedPaint = paintedWork.slice().sort();
+                var pattern = staffPatternOf(person);
+                anchored = { weekdays: staffEncodePattern(pattern.work, pattern.rest), startOn: sortedPaint[0] };
             }
+            weekdays = anchored.weekdays;
+            startOn = anchored.startOn;
+            person.hours.weekdays = weekdays;
+            person.hours.startOn = startOn;
+            staffStripMatchedMarks(person, marks);
         }
         saveStaffHours(person.userKey, weekdays, person.hours.hours || 8, packDayMarks(marks), startOn);
     }
@@ -15127,56 +15222,155 @@
         });
     }
 
-    function staffPaintRange(userKey, iso, anchor, base) {
-        var range = staffRangePairs(userKey, iso, anchor);
-        var map = {};
-        Object.keys(base || {}).forEach(function (key) { map[key] = true; });
-        range.pairs.forEach(function (pair) {
-            map[staffCellKey(pair.userKey, pair.iso)] = true;
-        });
-        state.staffSelection = { map: map, anchor: range.anchor, active: range.active };
-        staffMarkSelectedCells();
+    function staffClearClickTimer() {
+        if (state.staffClickTimer) {
+            clearTimeout(state.staffClickTimer);
+            state.staffClickTimer = null;
+        }
     }
 
     function beginStaffPaint(person, iso, event) {
         if (!person.hours || event.button !== 0) return;
         event.preventDefault();
+        if (event.detail > 1) {
+            staffClearClickTimer();
+            openStaffHourEditor(person, iso, event.currentTarget);
+            return;
+        }
         if (event.ctrlKey || event.metaKey) {
+            staffClearClickTimer();
             staffToggleCell(person.userKey, iso);
             renderFrame();
             return;
         }
         var adding = !!state.staffSelectAdd;
         var startKey = staffCellKey(person.userKey, iso);
-        var wasSelected = staffCellSelected(person.userKey, iso);
         var base = {};
         if (adding && state.staffSelection && state.staffSelection.map) {
             Object.keys(state.staffSelection.map).forEach(function (key) { base[key] = true; });
         }
-        var anchor = (event.shiftKey && state.staffSelection && state.staffSelection.anchor)
-            ? state.staffSelection.anchor
-            : startKey;
         var moved = false;
         function extend(ev) {
             var node = staffCellFromPoint(ev.clientX, ev.clientY);
             if (!node) return;
             var user = node.getAttribute('data-staff-user');
             var day = node.getAttribute('data-staff-day');
-            if (staffCellKey(user, day) !== startKey) moved = true;
-            staffPaintRange(user, day, anchor, base);
+            var key = staffCellKey(user, day);
+            if (key === startKey && !moved) return;
+            moved = true;
+            staffClearClickTimer();
+            base[startKey] = true;
+            base[key] = true;
+            state.staffSelection = { map: base, anchor: startKey, active: key };
+            staffMarkSelectedCells();
         }
         function finish() {
             document.removeEventListener('mousemove', extend);
             document.removeEventListener('mouseup', finish);
-            if (adding && !moved && wasSelected && state.staffSelection && state.staffSelection.map) {
-                delete state.staffSelection.map[startKey];
-                if (!Object.keys(state.staffSelection.map).length) state.staffSelection = null;
+            if (moved) {
+                renderFrame();
+                return;
             }
-            renderFrame();
+            state.staffClickTimer = setTimeout(function () {
+                state.staffClickTimer = null;
+                var fresh = staffPersonBundle(person.userKey);
+                if (fresh) staffPlaceDay(fresh, iso);
+            }, 240);
         }
-        staffPaintRange(person.userKey, iso, anchor, base);
         document.addEventListener('mousemove', extend);
         document.addEventListener('mouseup', finish);
+    }
+
+    function closeStaffCellMenu() {
+        var menu = document.querySelector('.asset-tree-roster-menu');
+        var back = document.querySelector('.asset-tree-roster-menu-back');
+        if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+        if (back && back.parentNode) back.parentNode.removeChild(back);
+    }
+
+    function openStaffCellMenu(person, iso, x, y) {
+        closeStaffCellMenu();
+        staffClearClickTimer();
+        if (!state.staffMenuBound) {
+            state.staffMenuBound = true;
+            function dismiss(event) {
+                var menu = document.querySelector('.asset-tree-roster-menu');
+                if (!menu) return;
+                if (event && event.target && menu.contains(event.target)) return;
+                closeStaffCellMenu();
+            }
+            document.addEventListener('mousedown', dismiss, true);
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' || event.keyCode === 27) closeStaffCellMenu();
+            }, true);
+            document.addEventListener('scroll', function () { closeStaffCellMenu(); }, true);
+            window.addEventListener('resize', closeStaffCellMenu);
+        }
+        var back = el('div', 'asset-tree-roster-menu-back');
+        back.addEventListener('contextmenu', function (event) {
+            event.preventDefault();
+            closeStaffCellMenu();
+        });
+        document.body.appendChild(back);
+        var menu = el('div', 'asset-tree-roster-menu');
+        function item(label, enabled, danger, action) {
+            var node = button(label, 'asset-tree-roster-menu-item' + (danger ? ' is-danger' : ''), function () {
+                closeStaffCellMenu();
+                if (enabled) action();
+            });
+            node.disabled = !enabled;
+            menu.appendChild(node);
+        }
+        var key = staffCellKey(person.userKey, iso);
+        item(t('staffSelectClear'), true, false, function () { staffClearSelection(); });
+        item(t('staffMenuSelect'), true, false, function () {
+            staffSetSelection([{ userKey: person.userKey, iso: iso }], key, key);
+            if (state.view === 'schedules') renderFrame();
+        });
+        item(t('staffMenuDelete'), !!state.canEdit, true, function () {
+            var cells = staffCellSelected(person.userKey, iso) ? staffSelectionCells() : [{ userKey: person.userKey, iso: iso }];
+            staffEraseDays(cells);
+        });
+        item(t('staffSelectAdd'), true, false, function () {
+            state.staffSelectAdd = true;
+            staffCommitPairs([{ userKey: person.userKey, iso: iso }], key, key, true);
+            if (state.view === 'schedules') renderFrame();
+        });
+        item(t('staffSelectAll'), true, false, function () { staffSelectAll(); });
+        if (state.canEdit && person.hours) {
+            var hoursRow = el('label', 'asset-tree-roster-menu-hours');
+            hoursRow.appendChild(el('span', null, t('staffMenuHours')));
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.maxLength = 5;
+            input.placeholder = '8';
+            input.title = t('staffMenuHoursHint');
+            input.setAttribute('aria-label', t('staffMenuHoursHint'));
+            var marks = parseDayMarks(person.hours.marks);
+            var custom = markCustom(marks, iso);
+            var shown = staffDayValue(person, iso, parseIsoDate(iso), marks);
+            if (custom != null) input.value = formatStaffHours(custom);
+            else if (shown && !shown.blank && shown.value > 0) input.value = formatStaffHours(shown.value);
+            input.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            input.addEventListener('keydown', function (event) {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    var fresh = staffPersonBundle(person.userKey);
+                    closeStaffCellMenu();
+                    if (fresh) staffSetDayHours(fresh, iso, input.value);
+                }
+                if (event.key === 'Escape') closeStaffCellMenu();
+            });
+            hoursRow.appendChild(input);
+            menu.appendChild(hoursRow);
+        }
+        document.body.appendChild(menu);
+        var rect = menu.getBoundingClientRect();
+        var left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+        var top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
     }
 
     function staffMarkSelectedCells() {
@@ -15376,8 +15570,10 @@
             var nextWork = parseInt(workInput.value, 10) || 0;
             var nextRest = parseInt(restInput.value, 10) || 0;
             if (nextWork < 1 || nextWork > 15 || nextRest < 1 || nextRest > 15) return;
-            var anchor = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
-            staffApplyPattern(person, anchor, packStaffShift(nextWork, nextRest));
+            var packed = staffEncodePattern(nextWork, nextRest);
+            var anchor = person.hours.startOn || '';
+            if (anchor) staffApplyPattern(person, anchor, packed);
+            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
         }
         workInput.addEventListener('change', commit);
         restInput.addEventListener('change', commit);
@@ -15416,9 +15612,11 @@
         select.value = known ? current : 'custom';
         select.addEventListener('mousedown', function (event) { event.stopPropagation(); });
         var nudge = button('+1', 'asset-tree-roster-pattern', function () {
+            if (!person.hours.startOn) return;
             var currentPattern = staffPatternOf(person);
-            var anchor = parseIsoDate(person.hours.startOn) || parseIsoDate(staffMonthStart());
-            saveStaffHours(person.userKey, packStaffShift(currentPattern.work, currentPattern.rest), person.hours.hours || 8, undefined, isoDate(shiftDays(anchor, 1)));
+            var anchor = parseIsoDate(person.hours.startOn);
+            if (!anchor) return;
+            saveStaffHours(person.userKey, staffEncodePattern(currentPattern.work, currentPattern.rest), person.hours.hours || 8, undefined, isoDate(shiftDays(anchor, 1)));
         });
         nudge.title = t('staffShiftHint');
         nudge.addEventListener('mousedown', function (event) { event.stopPropagation(); });
@@ -15436,8 +15634,10 @@
                 return;
             }
             var bits = select.value.split('/');
-            var anchor = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
-            staffApplyPattern(person, anchor, packStaffShift(bits[0], bits[1]));
+            var packed = staffEncodePattern(bits[0], bits[1]);
+            var anchor = person.hours.startOn || '';
+            if (anchor) staffApplyPattern(person, anchor, packed);
+            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
         });
         wrap.appendChild(select);
         if (!known) wrap.appendChild(staffPatternNumbers(person, pattern.work, pattern.rest));
@@ -15939,12 +16139,7 @@
                         hit.style.color = '#' + staffMarkColor(id);
                     }
                     hit.addEventListener('mousedown', function (event) {
-                        if (event.detail > 1) {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            openStaffHourEditor(person, iso, hit);
-                            return;
-                        }
+                        if (event.button !== 0) return;
                         beginStaffPaint(person, iso, event);
                     });
                     cell.appendChild(hit);
@@ -15953,6 +16148,11 @@
                     cell.title = title;
                     if (id && id !== 'off' && known) cell.style.color = '#' + staffMarkColor(id);
                 }
+                cell.addEventListener('contextmenu', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openStaffCellMenu(person, iso, event.clientX, event.clientY);
+                });
                 line.appendChild(cell);
             })(day);
         }

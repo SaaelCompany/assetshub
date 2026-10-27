@@ -2480,14 +2480,12 @@ def save_staff(project_key, body, text):
     existing["weekdays"] = weekdays
     existing["hours"] = hours
     anchor = existing.get("startOn") or ""
-    if "startOn" in body:
+    explicit_start = "startOn" in body
+    if explicit_start:
         parsed = parse_staff_day(body.get("startOn"))
         anchor = parsed.isoformat() if parsed else ""
-    if staff_shift_pattern(weekdays) or hours >= 12:
-        if not anchor:
-            anchor = "2024-01-01"
-    else:
-        anchor = ""
+    if (staff_shift_pattern(weekdays) or hours >= 12) and not anchor and not explicit_start:
+        anchor = "2024-01-01"
     existing["startOn"] = anchor
     existing["endOn"] = ""
     if "marks" in body:

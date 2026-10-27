@@ -6800,16 +6800,13 @@ public class AssetServiceImpl implements AssetService {
                 hoursRow.setWeekdays(weekdays);
                 hoursRow.setHours(hours);
                 String anchor = hoursRow.getStartOn() == null ? "" : hoursRow.getStartOn();
-                if (draft != null && draft.getStartOn() != null) {
+                boolean explicitStart = draft != null && draft.getStartOn() != null;
+                if (explicitStart) {
                     LocalDate parsed = staffDay(draft.getStartOn());
                     anchor = parsed == null ? "" : parsed.toString();
                 }
-                if (staffShiftPattern(weekdays) || hours >= 12) {
-                    if (anchor.isEmpty()) {
-                        anchor = "2024-01-01";
-                    }
-                } else {
-                    anchor = "";
+                if (anchor.isEmpty() && (staffShiftPattern(weekdays) || hours >= 12) && !explicitStart) {
+                    anchor = "2024-01-01";
                 }
                 hoursRow.setStartOn(anchor);
                 hoursRow.setEndOn("");
