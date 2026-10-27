@@ -200,24 +200,24 @@ public final class ModuleSetup {
         return stored.toString();
     }
 
-    /** Keeps a short formula. The client evaluates it; an empty field leaves the factor in charge. */
+    /** Keeps an Excel-style formula. The client evaluates it; an empty field leaves the factor in charge. */
     private static String markFormula(String raw) {
         if (raw == null) {
             return "";
         }
         String text = raw.replace(" ", "").trim().toLowerCase(Locale.ROOT);
-        if (text.isEmpty() || text.length() > 48) {
+        if (text.startsWith("=")) {
+            text = text.substring(1).trim();
+        }
+        if (text.isEmpty() || text.length() > 96) {
             return "";
         }
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c >= '0' && c <= '9') {
+            if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) {
                 continue;
             }
-            if (c == 'h' || c == 'm' || c == 'i' || c == 'n' || c == 'a' || c == 'x') {
-                continue;
-            }
-            if (c == '+' || c == '-' || c == '*' || c == '/' || c == '(' || c == ')' || c == '.' || c == ';') {
+            if ("+-*/^().;=<>$:%".indexOf(c) >= 0) {
                 continue;
             }
             return "";

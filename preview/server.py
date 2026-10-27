@@ -1258,11 +1258,21 @@ def pack_open(raw, layer):
 
 def clean_staff_formula(raw):
     text = re.sub(r"\s+", "", str(raw or "")).lower()
-    if not text or len(text) > 48:
+    if text.startswith("="):
+        text = text[1:]
+    if not text or len(text) > 96:
         return ""
-    if not re.fullmatch(r"[0-9h+\-*/().;minax]+", text):
+    if not re.fullmatch(r"[0-9a-z+\-*/^().;=<>$:%]+", text):
         return ""
     return text
+
+
+def format_mark_hours(value):
+    rounded = round(float(value) * 100) / 100
+    if abs(rounded - round(rounded)) < 0.001:
+        return str(int(round(rounded)))
+    text = ("%s" % rounded).rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def mark_factor(piece, hours, ident):
@@ -1357,18 +1367,23 @@ def clean_day_marks(raw):
         day = day.strip()
         token = token.strip().lower()
         ident = token
-        custom = None
+        suffix = ""
         if "@" in token:
-            ident, hours_text = token.split("@", 1)
-            if re.fullmatch(r"\d{1,2}", hours_text.strip()):
-                value = int(hours_text)
+            ident, rest = token.split("@", 1)
+            rest = rest.strip()
+            if rest.startswith("="):
+                formula = clean_staff_formula(rest[1:])
+                if formula:
+                    suffix = "@=" + formula
+            elif re.fullmatch(r"\d{1,2}(\.\d{1,2})?", rest):
+                value = float(rest)
                 if 0 <= value <= 24:
-                    custom = value
+                    suffix = "@" + format_mark_hours(value)
         if parse_staff_day(day) is None:
             continue
         if ident != "off" and not re.fullmatch(r"[a-z][a-z0-9]{0,15}", ident):
             continue
-        marks[day] = ident if ident == "off" or custom is None else "%s@%s" % (ident, custom)
+        marks[day] = ident if ident == "off" else ident + suffix
     return ",".join(f"{day}:{marks[day]}" for day in sorted(marks))
 
 

@@ -7002,15 +7002,20 @@ public class AssetServiceImpl implements AssetService {
             String day = part.substring(0, colon).trim();
             String token = part.substring(colon + 1).trim().toLowerCase(java.util.Locale.ROOT);
             String id = token;
-            Integer custom = null;
+            String suffix = "";
             int at = token.indexOf('@');
             if (at >= 0) {
                 id = token.substring(0, at);
-                String hoursText = token.substring(at + 1).trim();
-                if (hoursText.matches("\\d{1,2}")) {
-                    int value = Integer.parseInt(hoursText);
+                String rest = token.substring(at + 1).trim();
+                if (rest.startsWith("=")) {
+                    String formula = markCellFormula(rest.substring(1));
+                    if (!formula.isEmpty()) {
+                        suffix = "@=" + formula;
+                    }
+                } else if (rest.matches("\\d{1,2}(\\.\\d{1,2})?")) {
+                    double value = Double.parseDouble(rest);
                     if (value >= 0 && value <= 24) {
-                        custom = Integer.valueOf(value);
+                        suffix = "@" + formatMarkHours(value);
                     }
                 }
             }
@@ -7020,7 +7025,7 @@ public class AssetServiceImpl implements AssetService {
             if (!"off".equals(id) && !id.matches("[a-z][a-z0-9]{0,15}")) {
                 continue;
             }
-            marks.put(day, "off".equals(id) || custom == null ? id : id + "@" + custom.intValue());
+            marks.put(day, "off".equals(id) ? id : id + suffix);
             if (marks.size() >= 400) {
                 break;
             }
@@ -7033,6 +7038,43 @@ public class AssetServiceImpl implements AssetService {
             stored.append(entry.getKey()).append(':').append(entry.getValue());
         }
         return stored.toString();
+    }
+
+    /** Excel-style cell formula stored after @=. The client evaluates it. */
+    private static String markCellFormula(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String text = raw.replace(" ", "").trim().toLowerCase(java.util.Locale.ROOT);
+        if (text.startsWith("=")) {
+            text = text.substring(1).trim();
+        }
+        if (text.isEmpty() || text.length() > 96) {
+            return "";
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) {
+                continue;
+            }
+            if ("+-*/^().;=<>$:%".indexOf(c) >= 0) {
+                continue;
+            }
+            return "";
+        }
+        return text;
+    }
+
+    private static String formatMarkHours(double value) {
+        double rounded = Math.round(value * 100.0) / 100.0;
+        if (Math.abs(rounded - Math.rint(rounded)) < 0.001) {
+            return String.valueOf((int) Math.rint(rounded));
+        }
+        String text = String.valueOf(rounded);
+        if (text.endsWith(".0")) {
+            return text.substring(0, text.length() - 2);
+        }
+        return text;
     }
 
     private ServicePlanDraft scheduleDraft(ScheduleDraft draft, String name, String kind, String assignee) {

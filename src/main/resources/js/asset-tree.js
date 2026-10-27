@@ -455,6 +455,8 @@
         staffLoading: false,
         staffToken: 0,
         staffError: '',
+        staffFx: null,
+        staffPaintTimer: 0,
         floors: null,
         floorId: 0,
         mapPlaceId: 0,
@@ -14049,7 +14051,7 @@
     }
 
     function parseDayMarks(raw) {
-        var map = { _hours: {} };
+        var map = { _hours: {}, _formula: {} };
         String(raw || '').split(',').forEach(function (part) {
             var colon = part.indexOf(':');
             if (colon <= 0) return;
@@ -14059,26 +14061,40 @@
             var at = token.indexOf('@');
             var id = at < 0 ? token : token.slice(0, at);
             var custom = null;
+            var formula = '';
             if (at >= 0) {
-                var value = parseInt(token.slice(at + 1), 10);
-                if (!isNaN(value) && value >= 0 && value <= 24) custom = value;
+                var rest = token.slice(at + 1);
+                if (rest.charAt(0) === '=') formula = cleanStaffFormula(rest.slice(1));
+                else if (/^\d{1,2}(\.\d{1,2})?$/.test(rest)) {
+                    var value = parseFloat(rest);
+                    if (value >= 0 && value <= 24) custom = Math.round(value * 100) / 100;
+                }
             }
             if (id !== 'off' && !/^[a-z][a-z0-9]{0,15}$/.test(id)) return;
             map[day] = id;
-            if (custom != null && id !== 'off') map._hours[day] = custom;
+            if (id !== 'off' && formula) map._formula[day] = formula;
+            else if (custom != null && id !== 'off') map._hours[day] = custom;
         });
         return map;
     }
 
     function packDayMarks(map) {
         var hours = map && map._hours ? map._hours : {};
+        var formulas = map && map._formula ? map._formula : {};
         return Object.keys(map || {}).filter(function (day) {
             return /^\d{4}-\d{2}-\d{2}$/.test(day);
         }).sort().map(function (day) {
             var token = map[day];
-            if (hours[day] != null && token && token !== 'off') token += '@' + hours[day];
+            var formula = token && token !== 'off' ? cleanStaffFormula(formulas[day]) : '';
+            if (formula) token += '@=' + formula;
+            else if (hours[day] != null && token && token !== 'off') token += '@' + formatStaffHours(hours[day]);
             return day + ':' + token;
         }).join(',');
+    }
+
+    function markFormula(marks, iso) {
+        if (!marks || !marks._formula || !marks._formula[iso]) return '';
+        return marks._formula[iso];
     }
 
     function markCustom(marks, iso) {
@@ -14141,9 +14157,128 @@
         return personHours * factor;
     }
 
-    function evalStaffFormula(formula, hours, syntaxOnly) {
-        var text = String(formula || '').replace(/\s+/g, '').toLowerCase();
-        if (!text || text.length > 48) return null;
+    var STAFF_FN = {
+        sum: 'sum', '\u0441\u0443\u043c\u043c': 'sum',
+        average: 'average', '\u0441\u0440\u0437\u043d\u0430\u0447': 'average',
+        min: 'min', '\u043c\u0438\u043d': 'min',
+        max: 'max', '\u043c\u0430\u043a\u0441': 'max',
+        round: 'round', '\u043e\u043a\u0440\u0443\u0433\u043b': 'round',
+        int: 'int', '\u0446\u0435\u043b\u043e\u0435': 'int',
+        abs: 'abs', '\u043c\u043e\u0434\u0443\u043b\u044c': 'abs',
+        mod: 'mod', '\u043e\u0441\u0442\u0430\u0442': 'mod',
+        if: 'if', '\u0435\u0441\u043b\u0438': 'if',
+        and: 'and', '\u0438': 'and',
+        or: 'or', '\u0438\u043b\u0438': 'or',
+        not: 'not', '\u043d\u0435': 'not',
+        count: 'count', '\u0441\u0447\u0435\u0442': 'count', '\u0441\u0447\u0451\u0442': 'count',
+        iferror: 'iferror', '\u0435\u0441\u043b\u0438\u043e\u0448\u0438\u0431\u043a\u0430': 'iferror'
+    };
+
+    function isFormulaLetter(ch) {
+        return (ch >= 'a' && ch <= 'z') || (ch >= '\u0430' && ch <= '\u044f') || ch === '\u0451';
+    }
+
+    function columnIndex(letters) {
+        var n = 0;
+        var k;
+        for (k = 0; k < letters.length; k++) n = n * 26 + (letters.charCodeAt(k) - 96);
+        return n;
+    }
+
+    function columnLetters(index) {
+        var s = '';
+        var n = index;
+        while (n > 0) {
+            var rem = (n - 1) % 26;
+            s = String.fromCharCode(97 + rem) + s;
+            n = Math.floor((n - 1) / 26);
+        }
+        return s;
+    }
+
+    function canonicalizeFormulaBody(raw) {
+        var text = String(raw || '').trim().toLowerCase();
+        if (text.charAt(0) === '=') text = text.slice(1).trim();
+        var out = '';
+        var i = 0;
+        while (i < text.length) {
+            var ch = text.charAt(i);
+            if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+                i += 1;
+                continue;
+            }
+            if (ch >= '0' && ch <= '9') {
+                var start = i;
+                while (i < text.length && text.charAt(i) >= '0' && text.charAt(i) <= '9') i += 1;
+                var sep = text.charAt(i);
+                if ((sep === ',' || sep === '.') && i + 1 < text.length && text.charAt(i + 1) >= '0' && text.charAt(i + 1) <= '9') {
+                    i += 1;
+                    var frac = i;
+                    while (i < text.length && text.charAt(i) >= '0' && text.charAt(i) <= '9') i += 1;
+                    out += text.slice(start, frac - 1) + '.' + text.slice(frac, i);
+                } else out += text.slice(start, i);
+                continue;
+            }
+            if (ch === ',') {
+                out += ';';
+                i += 1;
+                continue;
+            }
+            if (isFormulaLetter(ch)) {
+                var w0 = i;
+                while (i < text.length && isFormulaLetter(text.charAt(i))) i += 1;
+                var word = text.slice(w0, i);
+                if (STAFF_FN[word]) out += STAFF_FN[word];
+                else if (word === '\u0447') out += 'h';
+                else out += word;
+                continue;
+            }
+            out += ch;
+            i += 1;
+        }
+        return out;
+    }
+
+    function displayStaffFormula(formula) {
+        var ru = String(state.locale || '').toLowerCase().indexOf('ru') === 0;
+        var names = ru ? {
+            sum: '\u0421\u0423\u041c\u041c', average: '\u0421\u0420\u0417\u041d\u0410\u0427', min: '\u041c\u0418\u041d', max: '\u041c\u0410\u041a\u0421',
+            round: '\u041e\u041a\u0420\u0423\u0413\u041b', int: '\u0426\u0415\u041b\u041e\u0415', abs: '\u041c\u041e\u0414\u0423\u041b\u042c', mod: '\u041e\u0421\u0422\u0410\u0422',
+            if: '\u0415\u0421\u041b\u0418', and: '\u0418', or: '\u0418\u041b\u0418', not: '\u041d\u0415', count: '\u0421\u0427\u0401\u0422', iferror: '\u0415\u0421\u041b\u0418\u041e\u0428\u0418\u0411\u041a\u0410'
+        } : {
+            sum: 'SUM', average: 'AVERAGE', min: 'MIN', max: 'MAX', round: 'ROUND', int: 'INT',
+            abs: 'ABS', mod: 'MOD', if: 'IF', and: 'AND', or: 'OR', not: 'NOT', count: 'COUNT', iferror: 'IFERROR'
+        };
+        var text = String(formula || '');
+        var out = '=';
+        var i = 0;
+        while (i < text.length) {
+            var ch = text.charAt(i);
+            if (ch >= 'a' && ch <= 'z') {
+                var start = i;
+                while (i < text.length && text.charAt(i) >= 'a' && text.charAt(i) <= 'z') i += 1;
+                var word = text.slice(start, i);
+                out += names[word] || word.toUpperCase();
+            } else {
+                out += ch;
+                i += 1;
+            }
+        }
+        if (ru) out = out.replace(/(\d)\.(\d)/g, '$1,$2');
+        return out;
+    }
+
+    function bareStaffHours(raw) {
+        var text = String(raw || '').trim().replace(',', '.');
+        if (!/^\d{1,2}(\.\d{1,2})?$/.test(text)) return null;
+        var value = parseFloat(text);
+        if (isNaN(value) || value < 0 || value > 24) return null;
+        return Math.round(value * 100) / 100;
+    }
+
+    function evalStaffFormula(formula, hours, syntaxOnly, lookup) {
+        var text = canonicalizeFormulaBody(formula);
+        if (!text || text.length > 96) return null;
         var i = 0;
         function peek() { return text.charAt(i); }
         function eat(ch) {
@@ -14151,7 +14286,27 @@
             i += 1;
             return true;
         }
-        function parseExpr() {
+        function parseExpr() { return parseComparison(); }
+        function parseComparison() {
+            var left = parseAdditive();
+            if (left == null) return null;
+            while (true) {
+                var op = '';
+                var two = text.slice(i, i + 2);
+                if (two === '<>' || two === '<=' || two === '>=') {
+                    op = two;
+                    i += 2;
+                } else if (peek() === '<' || peek() === '>' || peek() === '=') {
+                    op = peek();
+                    i += 1;
+                } else break;
+                var right = parseAdditive();
+                if (right == null) return null;
+                left = { t: 'b', op: op, a: left, b: right };
+            }
+            return left;
+        }
+        function parseAdditive() {
             var left = parseTerm();
             if (left == null) return null;
             while (peek() === '+' || peek() === '-') {
@@ -14159,7 +14314,7 @@
                 i += 1;
                 var right = parseTerm();
                 if (right == null) return null;
-                left = op === '+' ? left + right : left - right;
+                left = { t: 'b', op: op, a: left, b: right };
             }
             return left;
         }
@@ -14171,23 +14326,80 @@
                 i += 1;
                 var right = parseUnary();
                 if (right == null) return null;
-                if (op === '/') {
-                    if (!right) {
-                        if (!syntaxOnly) return null;
-                        left = 0;
-                    } else left = left / right;
-                } else left = left * right;
+                left = { t: 'b', op: op, a: left, b: right };
             }
             return left;
         }
         function parseUnary() {
             if (eat('+') || eat('-')) {
-                var minus = text.charAt(i - 1) === '-';
-                var value = parseUnary();
-                if (value == null) return null;
-                return minus ? -value : value;
+                var op = text.charAt(i - 1);
+                var node = parseUnary();
+                if (node == null) return null;
+                return { t: 'u', op: op, a: node };
             }
-            return parsePrimary();
+            return parsePower();
+        }
+        function parsePower() {
+            var left = parsePostfix();
+            if (left == null) return null;
+            if (!eat('^')) return left;
+            var right = parseUnary();
+            if (right == null) return null;
+            return { t: 'b', op: '^', a: left, b: right };
+        }
+        function parsePostfix() {
+            var node = parsePrimary();
+            if (node == null) return null;
+            while (eat('%')) node = { t: 'f', name: 'percent', args: [node] };
+            return node;
+        }
+        function parseRef() {
+            var start = i;
+            var absC = eat('$');
+            var c0 = i;
+            while (peek() >= 'a' && peek() <= 'z') i += 1;
+            var clen = i - c0;
+            if (clen < 1 || clen > 2) {
+                i = start;
+                return null;
+            }
+            var absR = eat('$');
+            var r0 = i;
+            while (peek() >= '0' && peek() <= '9') i += 1;
+            if (i === r0 || i - r0 > 3) {
+                i = start;
+                return null;
+            }
+            var col = columnIndex(text.slice(c0, c0 + clen));
+            var row = parseInt(text.slice(r0, i), 10);
+            if (col < 1 || col > 31 || row < 1 || row > 500) {
+                i = start;
+                return null;
+            }
+            return { t: 'ref', c: col, r: row, absC: absC, absR: absR };
+        }
+        function parseArgs() {
+            var args = [];
+            if (eat(')')) return args;
+            while (true) {
+                var arg = parseArg();
+                if (arg == null) return null;
+                args.push(arg);
+                if (eat(';')) continue;
+                if (eat(')')) return args;
+                return null;
+            }
+        }
+        function parseArg() {
+            var start = i;
+            var ref = parseRef();
+            if (ref && eat(':')) {
+                var ref2 = parseRef();
+                if (!ref2) return null;
+                return { t: 'range', c1: ref.c, r1: ref.r, c2: ref2.c, r2: ref2.r };
+            }
+            i = start;
+            return parseExpr();
         }
         function parsePrimary() {
             if (eat('(')) {
@@ -14195,40 +14407,231 @@
                 if (inner == null || !eat(')')) return null;
                 return inner;
             }
-            if (text.slice(i, i + 3) === 'min' || text.slice(i, i + 3) === 'max') {
-                var fn = text.slice(i, i + 3);
-                i += 3;
-                if (!eat('(')) return null;
-                var left = parseExpr();
-                if (left == null || !eat(';')) return null;
-                var right = parseExpr();
-                if (right == null || !eat(')')) return null;
-                return fn === 'min' ? Math.min(left, right) : Math.max(left, right);
+            var ref = parseRef();
+            if (ref) return ref;
+            if (isFormulaLetter(peek()) && peek() <= 'z') {
+                var start = i;
+                while (peek() >= 'a' && peek() <= 'z') i += 1;
+                var word = text.slice(start, i);
+                if (eat('(')) {
+                    var args = parseArgs();
+                    if (args == null) return null;
+                    return { t: 'f', name: word, args: args };
+                }
+                if (word === 'h') return { t: 'h' };
+                return null;
             }
-            if (eat('h')) return hours;
-            var start = i;
+            var n0 = i;
             while (peek() >= '0' && peek() <= '9') i += 1;
-            if (peek() === '.' && i > start) {
+            if (peek() === '.' && i > n0) {
                 i += 1;
                 var frac = i;
                 while (peek() >= '0' && peek() <= '9') i += 1;
                 if (i === frac) return null;
             }
-            if (i === start) return null;
-            var num = parseFloat(text.slice(start, i));
+            if (i === n0) return null;
+            var num = parseFloat(text.slice(n0, i));
             if (isNaN(num)) return null;
-            return num;
+            return { t: 'n', v: num };
         }
-        var result = parseExpr();
-        if (result == null || i !== text.length || !isFinite(result)) return null;
+        function rangeCells(node) {
+            var c1 = Math.min(node.c1, node.c2);
+            var c2 = Math.max(node.c1, node.c2);
+            var r1 = Math.min(node.r1, node.r2);
+            var r2 = Math.max(node.r1, node.r2);
+            if ((c2 - c1 + 1) * (r2 - r1 + 1) > 2500) return null;
+            var cells = [];
+            var r;
+            var c;
+            for (r = r1; r <= r2; r++) {
+                for (c = c1; c <= c2; c++) cells.push({ c: c, r: r });
+            }
+            return cells;
+        }
+        function gather(args, into) {
+            var a;
+            for (a = 0; a < args.length; a++) {
+                var arg = args[a];
+                if (arg.t === 'range') {
+                    var cells = rangeCells(arg);
+                    if (!cells) return false;
+                    var n;
+                    for (n = 0; n < cells.length; n++) {
+                        if (syntaxOnly) {
+                            into.push({ value: 1, blank: false, error: false });
+                            continue;
+                        }
+                        var cell = lookup ? lookup(cells[n].c, cells[n].r) : null;
+                        if (!cell) return false;
+                        into.push(cell);
+                    }
+                } else {
+                    var value = evalScalar(arg);
+                    if (value == null) return false;
+                    into.push({ value: value, blank: false, error: false });
+                }
+            }
+            return true;
+        }
+        function evalScalar(node) {
+            if (!node || node.t === 'range') return null;
+            return evalNode(node);
+        }
+        function evalNode(node) {
+            if (!node) return null;
+            if (node.t === 'n') return node.v;
+            if (node.t === 'h') return hours;
+            if (node.t === 'u') {
+                var inner = evalNode(node.a);
+                if (inner == null) return null;
+                return node.op === '-' ? -inner : inner;
+            }
+            if (node.t === 'ref') {
+                if (syntaxOnly) return 1;
+                var cell = lookup ? lookup(node.c, node.r) : null;
+                if (!cell || cell.error) return null;
+                return cell.blank ? 0 : cell.value;
+            }
+            if (node.t === 'b') {
+                var left = evalNode(node.a);
+                var right = evalNode(node.b);
+                if (left == null || right == null) return null;
+                if (node.op === '+') return left + right;
+                if (node.op === '-') return left - right;
+                if (node.op === '*') return left * right;
+                if (node.op === '/') {
+                    if (!right) return syntaxOnly ? 0 : null;
+                    return left / right;
+                }
+                if (node.op === '^') {
+                    var pow = Math.pow(left, right);
+                    if (!isFinite(pow)) return syntaxOnly ? 0 : null;
+                    return pow;
+                }
+                if (node.op === '=') return left === right ? 1 : 0;
+                if (node.op === '<>') return left !== right ? 1 : 0;
+                if (node.op === '<') return left < right ? 1 : 0;
+                if (node.op === '>') return left > right ? 1 : 0;
+                if (node.op === '<=') return left <= right ? 1 : 0;
+                if (node.op === '>=') return left >= right ? 1 : 0;
+                return null;
+            }
+            if (node.t === 'f') return evalFunc(node.name, node.args);
+            return null;
+        }
+        function evalFunc(name, args) {
+            var items;
+            var k;
+            if (name === 'percent') {
+                var base = evalScalar(args[0]);
+                if (base == null) return null;
+                return base / 100;
+            }
+            if (name === 'if') {
+                if (args.length < 2 || args.length > 3) return null;
+                var cond = evalScalar(args[0]);
+                if (cond == null) return null;
+                if (cond) return evalScalar(args[1]);
+                if (args.length === 2) return 0;
+                return evalScalar(args[2]);
+            }
+            if (name === 'iferror') {
+                if (args.length !== 2) return null;
+                var first = evalScalar(args[0]);
+                if (first == null) return evalScalar(args[1]);
+                return first;
+            }
+            if (name === 'round') {
+                if (args.length < 1 || args.length > 2) return null;
+                var rounded = evalScalar(args[0]);
+                if (rounded == null) return null;
+                var digits = 0;
+                if (args.length === 2) {
+                    digits = evalScalar(args[1]);
+                    if (digits == null) return null;
+                    digits = Math.round(digits);
+                    if (digits > 10) digits = 10;
+                    if (digits < -10) digits = -10;
+                }
+                var scale = Math.pow(10, digits);
+                if (!isFinite(scale) || !scale) return null;
+                return Math.round(rounded * scale) / scale;
+            }
+            if (name === 'int' || name === 'abs' || name === 'not') {
+                if (args.length !== 1) return null;
+                var one = evalScalar(args[0]);
+                if (one == null) return null;
+                if (name === 'int') return Math.floor(one);
+                if (name === 'abs') return Math.abs(one);
+                return one ? 0 : 1;
+            }
+            if (name === 'mod') {
+                if (args.length !== 2) return null;
+                var dividend = evalScalar(args[0]);
+                var divisor = evalScalar(args[1]);
+                if (dividend == null || divisor == null) return null;
+                if (!divisor) return syntaxOnly ? 0 : null;
+                return dividend - divisor * Math.floor(dividend / divisor);
+            }
+            if (name === 'sum' || name === 'average' || name === 'min' || name === 'max' || name === 'count' || name === 'and' || name === 'or') {
+                items = [];
+                if (!gather(args, items)) return null;
+                if (name === 'sum') {
+                    var total = 0;
+                    for (k = 0; k < items.length; k++) {
+                        if (items[k].error) return null;
+                        if (!items[k].blank) total += items[k].value;
+                    }
+                    return total;
+                }
+                if (name === 'count') {
+                    var counted = 0;
+                    for (k = 0; k < items.length; k++) {
+                        if (items[k].error) return null;
+                        if (!items[k].blank) counted += 1;
+                    }
+                    return counted;
+                }
+                if (name === 'and' || name === 'or') {
+                    if (!items.length) return null;
+                    var flag = name === 'and' ? 1 : 0;
+                    for (k = 0; k < items.length; k++) {
+                        if (items[k].error) return null;
+                        var truth = !items[k].blank && !!items[k].value;
+                        if (name === 'and') flag = flag && truth ? 1 : 0;
+                        else if (truth) flag = 1;
+                    }
+                    return flag;
+                }
+                var seen = 0;
+                var acc = 0;
+                for (k = 0; k < items.length; k++) {
+                    if (items[k].error) return null;
+                    if (items[k].blank) continue;
+                    if (!seen) acc = items[k].value;
+                    else if (name === 'min') acc = Math.min(acc, items[k].value);
+                    else if (name === 'max') acc = Math.max(acc, items[k].value);
+                    else acc += items[k].value;
+                    seen += 1;
+                }
+                if (!seen) return null;
+                if (name === 'average') return acc / seen;
+                return acc;
+            }
+            return null;
+        }
+        var tree = parseExpr();
+        if (tree == null || i !== text.length) return null;
+        var result = evalNode(tree);
+        if (result == null || !isFinite(result)) return null;
         return result;
     }
 
     function cleanStaffFormula(raw) {
-        var text = String(raw || '').replace(/\s+/g, '').toLowerCase();
-        if (!text) return '';
-        if (text.length > 48) return '';
-        if (evalStaffFormula(text, 8, true) == null) return '';
+        var text = canonicalizeFormulaBody(raw);
+        if (!text || text.length > 96) return '';
+        if (!/^[0-9a-z+\-*/^().;=<>$:%]+$/.test(text)) return '';
+        if (evalStaffFormula(text, 8, true, null) == null) return '';
         return text;
     }
 
@@ -14251,13 +14654,75 @@
         return String(rounded);
     }
 
+    function staffSheetPeople() {
+        var sections = staffSections(staffGroups());
+        var people = [];
+        sections.forEach(function (section) {
+            section.people.forEach(function (person) { people.push(person); });
+        });
+        return people;
+    }
+
+    function staffCalcContext(year, month) {
+        return { stack: {}, people: null, marks: {}, year: year, month: month };
+    }
+
+    function staffRefValue(col, row, ctx) {
+        if (!ctx.people) ctx.people = staffSheetPeople();
+        var count = new Date(ctx.year, ctx.month, 0).getDate();
+        var person = ctx.people[row - 1];
+        if (!person || !person.hours || col < 1 || col > count) return { value: 0, blank: true, error: false };
+        var date = new Date(ctx.year, ctx.month - 1, col);
+        var iso = isoDate(date);
+        if (!ctx.marks[person.userKey]) ctx.marks[person.userKey] = parseDayMarks(person.hours.marks);
+        return staffDayValue(person, iso, date, ctx.marks[person.userKey], ctx);
+    }
+
+    function staffDayValue(person, iso, date, marks, ctx) {
+        var per = person && person.hours ? parseInt(person.hours.hours, 10) || 0 : 0;
+        if (per < 1) per = 1;
+        if (per > 24) per = 24;
+        var id = staffVisible(person, iso, date, marks);
+        var known = id === 'off' || id === 'work' || !!staffMarkById(id);
+        if (!known) return { value: 0, blank: true, error: false, id: id || '' };
+        var formula = markFormula(marks, iso);
+        var key = (person.userKey || '') + '|' + iso;
+        if (formula) {
+            if (ctx && ctx.stack[key]) return { value: 0, blank: false, error: true, id: id, formula: formula };
+            if (ctx) ctx.stack[key] = true;
+            var fromCell = evalStaffFormula(formula, per, false, ctx ? function (col, row) {
+                return staffRefValue(col, row, ctx);
+            } : null);
+            if (ctx) delete ctx.stack[key];
+            if (fromCell == null) return { value: 0, blank: false, error: true, id: id, formula: formula };
+            if (fromCell < 0) fromCell = 0;
+            return { value: Math.round(fromCell * 100) / 100, blank: false, error: false, id: id, formula: formula };
+        }
+        var custom = markCustom(marks, iso);
+        if (custom != null) return { value: custom, blank: false, error: false, id: id };
+        if (!id || id === 'off') return { value: 0, blank: true, error: false, id: 'off' };
+        var mark = staffMarkById(id);
+        if (mark && mark.formula) {
+            if (ctx && ctx.stack[key]) return { value: 0, blank: false, error: true, id: id };
+            if (ctx) ctx.stack[key] = true;
+            var fromMark = evalStaffFormula(mark.formula, per, false, ctx ? function (col, row) {
+                return staffRefValue(col, row, ctx);
+            } : null);
+            if (ctx) delete ctx.stack[key];
+            if (fromMark == null) return { value: 0, blank: false, error: true, id: id };
+            if (fromMark < 0) fromMark = 0;
+            return { value: Math.round(fromMark * 100) / 100, blank: false, error: false, id: id };
+        }
+        var hours = staffDayHours(id, per);
+        if (!(hours > 0)) return { value: 0, blank: false, error: false, id: id };
+        return { value: hours, blank: false, error: false, id: id };
+    }
+
     function staffTally(person, year, month) {
         var count = new Date(year, month, 0).getDate();
         var row = person.hours || { weekdays: 31, hours: 8, marks: '' };
         var marks = parseDayMarks(row.marks);
-        var per = parseInt(row.hours, 10) || 0;
-        if (per < 1) per = 1;
-        if (per > 24) per = 24;
+        var ctx = staffCalcContext(year, month);
         var by = {};
         var totalDays = 0;
         var totalHours = 0;
@@ -14265,16 +14730,15 @@
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
             var iso = isoDate(date);
-            var id = staffVisible(person, iso, date, marks);
+            var cell = staffDayValue(person, iso, date, marks, ctx);
+            var id = cell.id;
             if (!id || id === 'off' || (id !== 'work' && !staffMarkById(id))) continue;
-            var custom = markCustom(marks, iso);
-            var hours = custom != null ? custom : staffFormulaHours(id, per);
             if (!by[id]) by[id] = { days: 0, hours: 0 };
             by[id].days += 1;
-            by[id].hours += hours;
-            if (!(hours > 0)) continue;
+            by[id].hours += cell.value;
+            if (!(cell.value > 0)) continue;
             totalDays += 1;
-            totalHours += hours;
+            totalHours += cell.value;
         }
         return { by: by, days: totalDays, hours: totalHours };
     }
@@ -14680,16 +15144,20 @@
             if (erase) {
                 delete marks[iso];
                 delete marks._hours[iso];
+                delete marks._formula[iso];
                 if (natural === brush) marks[iso] = 'off';
             } else if (once != null && brush !== 'off') {
                 marks[iso] = brush;
                 marks._hours[iso] = once;
+                delete marks._formula[iso];
             } else if (brush === natural) {
                 delete marks[iso];
                 delete marks._hours[iso];
+                delete marks._formula[iso];
             } else {
                 marks[iso] = brush;
                 delete marks._hours[iso];
+                delete marks._formula[iso];
             }
         });
         saveStaffHours(person.userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks), person.hours.startOn);
@@ -14698,6 +15166,10 @@
     function beginStaffPaint(person, iso, event) {
         if (!state.canEdit || !person.hours || event.button !== 0) return;
         event.preventDefault();
+        if (state.staffPaintTimer) {
+            clearTimeout(state.staffPaintTimer);
+            state.staffPaintTimer = 0;
+        }
         var brush = state.staffBrush || 'work';
         var existing = parseDayMarks(person.hours.marks);
         var start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
@@ -14705,8 +15177,12 @@
         var once = staffOnceHours();
         var visible = staffVisible(person, iso, startDate, existing);
         var erase = visible === brush && (once == null || brush === 'off' || markCustom(existing, iso) === once);
+        var startX = event.clientX;
+        var startY = event.clientY;
+        var moved = false;
         state.staffDrag = { userKey: person.userKey, isos: [iso], erase: erase };
         function move(ev) {
+            if (Math.abs(ev.clientX - startX) > 3 || Math.abs(ev.clientY - startY) > 3) moved = true;
             var node = ev.target;
             while (node && node !== document.body) {
                 if (node.getAttribute && node.getAttribute('data-staff-user') === person.userKey && node.getAttribute('data-staff-day')) {
@@ -14724,6 +15200,16 @@
             var isos = state.staffDrag ? state.staffDrag.isos.slice() : [];
             var clear = state.staffDrag ? state.staffDrag.erase : false;
             state.staffDrag = null;
+            if (!moved && isos.length === 1) {
+                state.staffFx = { userKey: person.userKey, iso: iso };
+                state.staffPaintTimer = setTimeout(function () {
+                    state.staffPaintTimer = 0;
+                    paintStaffDays(person, [iso], clear);
+                }, 260);
+                markStaffFxCell();
+                syncStaffFormulaBar();
+                return;
+            }
             if (isos.length) paintStaffDays(person, isos, clear);
         }
         document.addEventListener('mousemove', move);
@@ -14901,6 +15387,7 @@
         var marks = parseDayMarks(row.marks);
         var tally = staffTally(person, year, month);
         var per = parseInt(row.hours, 10) || 8;
+        var ctx = staffCalcContext(year, month);
         var line = el('tr', 'asset-tree-roster-person');
         line.setAttribute('data-staff-user', person.userKey);
         var name = el('th', 'asset-tree-roster-name');
@@ -14988,24 +15475,41 @@
                 var id = staffVisible(person, iso, date, marks);
                 var known = id === 'off' || id === 'work' || !!staffMarkById(id);
                 var custom = markCustom(marks, iso);
-                var hoursValue = known ? (custom != null ? custom : staffFormulaHours(id, per)) : 0;
-                var cell = el('td', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : '') + (id && id !== 'off' && known ? ' is-mark' : ''));
+                var cellValue = known ? staffDayValue(person, iso, date, marks, ctx) : { value: 0, blank: true, error: false, id: id };
+                var hoursValue = cellValue.value || 0;
+                var selected = state.staffFx && state.staffFx.userKey === person.userKey && state.staffFx.iso === iso;
+                var cell = el('td', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : '') + (id && id !== 'off' && known ? ' is-mark' : '') + (selected ? ' is-fx-on' : ''));
                 cell.setAttribute('data-staff-day', iso);
                 cell.setAttribute('data-staff-user', person.userKey);
                 var mark = staffMarkById(id);
                 var caption = '';
-                if (id && id !== 'off' && known) caption = custom != null ? String(custom) : (hoursValue > 0 ? formatStaffHours(hoursValue) : staffMarkName(mark || { id: id }).slice(0, 3));
+                if (cellValue.error) caption = '#';
+                else if (id && id !== 'off' && known) caption = (custom != null || cellValue.formula || hoursValue > 0) ? formatStaffHours(hoursValue) : staffMarkName(mark || { id: id }).slice(0, 3);
                 var title = id === 'off' || !known ? t('staffOff') : staffMarkName(mark || { id: id });
-                if (custom != null || hoursValue > 0) title += ' · ' + t('staffHoursCount', hoursValue);
+                if (cellValue.formula) title += ' · ' + displayStaffFormula(cellValue.formula);
+                if (!cellValue.error && (custom != null || hoursValue > 0)) title += ' · ' + t('staffHoursCount', hoursValue);
+                if (cellValue.error) title += ' · ' + t('staffFxBad');
                 if (state.canEdit && person.hours) {
-                    var hit = button(caption, 'asset-tree-roster-hit', function () {});
+                    var hit = button(caption, 'asset-tree-roster-hit' + (cellValue.formula ? ' is-fx' : ''), function () {});
                     hit.title = title;
                     hit.setAttribute('aria-label', String(dayNumber) + ' ' + title);
                     if (id && id !== 'off' && known) {
                         hit.style.background = staffMarkTint(staffMarkColor(id));
                         hit.style.color = '#' + staffMarkColor(id);
                     }
-                    hit.addEventListener('mousedown', function (event) { beginStaffPaint(person, iso, event); });
+                    hit.addEventListener('mousedown', function (event) {
+                        if (event.detail > 1) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            return;
+                        }
+                        beginStaffPaint(person, iso, event);
+                    });
+                    hit.addEventListener('dblclick', function (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openStaffFormula(person, iso);
+                    });
                     cell.appendChild(hit);
                 } else if (caption) {
                     cell.textContent = caption;
@@ -15043,12 +15547,14 @@
             var iso = isoDate(date);
             var label = el('span', 'asset-tree-roster-num' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''), String(day));
             var cell = el('th', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : ''));
+            var letter = el('span', 'asset-tree-roster-col', columnLetters(day).toUpperCase());
             if (weekend) {
                 var weekday = rosterWeekday(date);
-                cell.title = weekday;
+                cell.title = columnLetters(day).toUpperCase() + ' · ' + weekday;
                 label.title = weekday;
                 label.setAttribute('aria-label', day + ' ' + weekday);
-            }
+            } else cell.title = columnLetters(day).toUpperCase();
+            cell.appendChild(letter);
             cell.appendChild(label);
             row.appendChild(cell);
         }
@@ -15216,23 +15722,23 @@
                 var formula = document.createElement('input');
                 formula.type = 'text';
                 formula.className = 'asset-tree-mark-formula';
-                formula.maxLength = 48;
-                formula.placeholder = 'h';
-                formula.value = row.formula || '';
+                formula.maxLength = 180;
+                formula.placeholder = '=H*1,5';
+                formula.value = row.formula ? displayStaffFormula(row.formula) : '';
                 formula.title = t('staffFormulaHint');
                 formula.setAttribute('aria-label', t('staffFormula'));
                 formula.addEventListener('mousedown', function (event) { event.stopPropagation(); });
                 formula.addEventListener('click', function (event) { event.stopPropagation(); });
                 formula.addEventListener('keydown', function (event) { event.stopPropagation(); });
                 formula.addEventListener('change', function () {
-                    var raw = String(formula.value || '').replace(/\s+/g, '').toLowerCase();
+                    var raw = String(formula.value || '').trim();
                     var next = raw ? cleanStaffFormula(raw) : '';
                     if (raw && !next) {
-                        formula.value = row.formula || '';
+                        formula.value = row.formula ? displayStaffFormula(row.formula) : '';
                         return;
                     }
                     if (next === (row.formula || '')) {
-                        formula.value = next;
+                        formula.value = next ? displayStaffFormula(next) : '';
                         return;
                     }
                     var copy = staffMarkList();
@@ -15417,6 +15923,199 @@
         return list;
     }
 
+    function staffFxTarget() {
+        var picked = state.staffFx;
+        if (!picked || !picked.userKey || !/^\d{4}-\d{2}-\d{2}$/.test(picked.iso || '')) return null;
+        var person = staffGroups().people[picked.userKey];
+        if (!person || !person.hours) return null;
+        return { person: person, iso: picked.iso };
+    }
+
+    function staffAddress(userKey, iso) {
+        var people = staffSheetPeople();
+        var row = 0;
+        var index;
+        for (index = 0; index < people.length; index++) {
+            if (people[index].userKey === userKey) {
+                row = index + 1;
+                break;
+            }
+        }
+        var day = parseInt(String(iso || '').slice(8, 10), 10);
+        if (!row || !day) return '';
+        return columnLetters(day).toUpperCase() + row;
+    }
+
+    function staffFormulaDraft(person, iso) {
+        var marks = parseDayMarks(person.hours.marks);
+        var formula = markFormula(marks, iso);
+        if (formula) return displayStaffFormula(formula);
+        var custom = markCustom(marks, iso);
+        if (custom != null) return formatStaffHours(custom);
+        var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+        var date = match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date();
+        var cell = staffDayValue(person, iso, date, marks, staffCalcContext(state.scheduleYear, state.scheduleMonth));
+        if (cell.error) return '#';
+        if (cell.blank || !(cell.value > 0)) return '';
+        return formatStaffHours(cell.value);
+    }
+
+    function staffEnsureMark(person, iso, marks) {
+        if (marks[iso] && marks[iso] !== 'off') return;
+        var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+        var date = match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date();
+        var visible = staffVisible(person, iso, date, marks);
+        if (visible && visible !== 'off') marks[iso] = visible;
+        else marks[iso] = state.staffBrush && state.staffBrush !== 'off' ? state.staffBrush : 'work';
+    }
+
+    function markStaffFxCell() {
+        var cells = document.querySelectorAll('#asset-tree-app td.asset-tree-roster-day.is-fx-on');
+        var index;
+        for (index = 0; index < cells.length; index++) cells[index].classList.remove('is-fx-on');
+        var picked = state.staffFx;
+        if (!picked) return;
+        var days = document.querySelectorAll('#asset-tree-app td.asset-tree-roster-day[data-staff-day]');
+        for (index = 0; index < days.length; index++) {
+            if (days[index].getAttribute('data-staff-user') === picked.userKey && days[index].getAttribute('data-staff-day') === picked.iso) {
+                days[index].classList.add('is-fx-on');
+                return;
+            }
+        }
+    }
+
+    function syncStaffFormulaBar() {
+        var addr = document.querySelector('#asset-tree-app .asset-tree-fx-addr');
+        var input = document.querySelector('#asset-tree-app .asset-tree-fx-input');
+        if (!addr || !input || document.activeElement === input) return;
+        var picked = staffFxTarget();
+        if (!picked) {
+            addr.textContent = '';
+            input.value = '';
+            input.disabled = true;
+            return;
+        }
+        input.disabled = false;
+        addr.textContent = staffAddress(picked.person.userKey, picked.iso);
+        addr.title = picked.person.userName + ' · ' + staffDayShort(picked.iso);
+        input.value = staffFormulaDraft(picked.person, picked.iso);
+        input.classList.remove('is-bad');
+        input.title = t('staffFxHint');
+    }
+
+    function commitStaffFormula(input) {
+        var picked = staffFxTarget();
+        if (!picked || !input) return;
+        var raw = String(input.value || '').trim();
+        var draft = staffFormulaDraft(picked.person, picked.iso);
+        var marks = parseDayMarks(picked.person.hours.marks);
+        var same = raw === draft || (raw && draft && cleanStaffFormula(raw) && cleanStaffFormula(raw) === cleanStaffFormula(draft));
+        if (same) {
+            input.classList.remove('is-bad');
+            input.title = t('staffFxHint');
+            return;
+        }
+        if (!raw) {
+            if (!markFormula(marks, picked.iso) && markCustom(marks, picked.iso) == null) {
+                input.value = draft;
+                return;
+            }
+            delete marks._formula[picked.iso];
+            delete marks._hours[picked.iso];
+            saveStaffHours(picked.person.userKey, picked.person.hours.weekdays, picked.person.hours.hours || 8, packDayMarks(marks), picked.person.hours.startOn);
+            return;
+        }
+        if (raw.charAt(0) !== '=') {
+            var bare = bareStaffHours(raw);
+            if (bare == null) {
+                input.classList.add('is-bad');
+                input.title = t('staffFxBad');
+                return;
+            }
+            delete marks._formula[picked.iso];
+            staffEnsureMark(picked.person, picked.iso, marks);
+            marks._hours[picked.iso] = bare;
+            saveStaffHours(picked.person.userKey, picked.person.hours.weekdays, picked.person.hours.hours || 8, packDayMarks(marks), picked.person.hours.startOn);
+            return;
+        }
+        var formula = cleanStaffFormula(raw);
+        if (!formula) {
+            input.classList.add('is-bad');
+            input.title = t('staffFxBad');
+            return;
+        }
+        delete marks._hours[picked.iso];
+        staffEnsureMark(picked.person, picked.iso, marks);
+        marks._formula[picked.iso] = formula;
+        saveStaffHours(picked.person.userKey, picked.person.hours.weekdays, picked.person.hours.hours || 8, packDayMarks(marks), picked.person.hours.startOn);
+    }
+
+    function openStaffFormula(person, iso) {
+        if (state.staffPaintTimer) {
+            clearTimeout(state.staffPaintTimer);
+            state.staffPaintTimer = 0;
+        }
+        state.staffFx = { userKey: person.userKey, iso: iso };
+        renderFrame();
+        var input = document.querySelector('#asset-tree-app .asset-tree-fx-input');
+        if (!input) return;
+        input.focus();
+        input.select();
+    }
+
+    function staffFormulaBar() {
+        if (!state.canEdit) return null;
+        var bar = el('div', 'asset-tree-fx');
+        var addr = el('span', 'asset-tree-fx-addr', '');
+        var label = el('span', 'asset-tree-fx-label', 'fx');
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'asset-tree-fx-input';
+        input.maxLength = 180;
+        input.placeholder = '=H*1,5';
+        input.spellcheck = false;
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('aria-label', t('staffFx'));
+        input.title = t('staffFxHint');
+        addr.title = t('staffFxHint');
+        function paint() {
+            var picked = staffFxTarget();
+            if (!picked) {
+                addr.textContent = '';
+                input.value = '';
+                input.disabled = true;
+                return;
+            }
+            input.disabled = false;
+            addr.textContent = staffAddress(picked.person.userKey, picked.iso);
+            addr.title = picked.person.userName + ' · ' + staffDayShort(picked.iso);
+            input.value = staffFormulaDraft(picked.person, picked.iso);
+            input.classList.remove('is-bad');
+        }
+        paint();
+        input.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        input.addEventListener('input', function () {
+            input.classList.remove('is-bad');
+            input.title = t('staffFxHint');
+        });
+        input.addEventListener('keydown', function (event) {
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                commitStaffFormula(input);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                paint();
+                input.blur();
+            }
+        });
+        input.addEventListener('change', function () { commitStaffFormula(input); });
+        bar.appendChild(addr);
+        bar.appendChild(label);
+        bar.appendChild(input);
+        return bar;
+    }
+
     function scheduleStaff() {
         var wrap = el('div', 'asset-tree-staff');
         if (state.staffRows == null) {
@@ -15442,6 +16141,8 @@
             wrap.appendChild(el('p', 'asset-tree-hint', t('staffEmpty')));
             return wrap;
         }
+        var formulaBar = staffFormulaBar();
+        if (formulaBar) wrap.appendChild(formulaBar);
         wrap.appendChild(staffRoster(grouped));
         if (!grouped.order.length) {
             wrap.appendChild(el('p', 'asset-tree-hint', places.length ? t('staffPlaceEmpty') : t('staffEmpty')));
