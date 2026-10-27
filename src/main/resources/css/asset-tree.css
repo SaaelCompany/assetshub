@@ -8552,7 +8552,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-board-head .asset-tree-calendar-title {
-    min-width: 180px;
+    min-width: 240px;
     color: #172b4d;
     font-size: 20px;
     font-weight: 600;
@@ -8818,6 +8818,181 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-slot-list .asset-tree-event {
     max-width: 420px;
+}
+
+#asset-tree-app .asset-tree-outlook {
+    display: grid;
+    max-height: calc(100vh - 220px);
+    overflow: auto;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-outlook-corner {
+    position: sticky;
+    top: 0;
+    left: 0;
+    z-index: 4;
+    background: #fafbfc;
+    border-bottom: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    width: 100%;
+    height: auto !important;
+    min-height: 48px;
+    margin: 0;
+    padding: 6px 4px !important;
+    border: 0 !important;
+    border-left: 1px solid #f4f5f7 !important;
+    border-bottom: 1px solid #dfe1e6 !important;
+    border-radius: 0;
+    background: #fafbfc !important;
+    color: #172b4d !important;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head.is-weekend {
+    background: #fffaf3 !important;
+}
+
+#asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head.is-today {
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-outlook-dow {
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+#asset-tree-app .asset-tree-outlook-head.is-today .asset-tree-outlook-dow {
+    color: #0052cc;
+}
+
+#asset-tree-app .asset-tree-outlook-date {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 4px;
+    border-radius: 11px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-outlook-head.is-today .asset-tree-outlook-date {
+    background: #0052cc;
+    color: #fff;
+}
+
+#asset-tree-app .asset-tree-outlook-gutter {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    min-height: 22px;
+    padding: 0 6px;
+    background: #fff;
+    color: #97a0af;
+    font-size: 11px;
+    line-height: 16px;
+}
+
+#asset-tree-app .asset-tree-outlook-gutter.is-hour,
+#asset-tree-app .asset-tree-outlook-gutter.is-all {
+    color: #6b778c;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell {
+    display: block;
+    position: relative;
+    min-height: 22px;
+    height: auto;
+    padding: 0;
+    overflow: hidden;
+    border-top: 1px solid transparent;
+    border-left: 1px solid #f4f5f7;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-hour {
+    border-top-color: #ebecf0;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-all {
+    min-height: 36px;
+    background: #fafbfc;
+    border-top: 0;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-weekend {
+    background: #fffaf3;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-today {
+    background: #f4f8ff;
+}
+
+#asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-all.is-weekend {
+    background: #fff6e8;
+}
+
+#asset-tree-app .asset-tree-outlook-now {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    height: 0;
+    border-top: 2px solid #de350b;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-outlook-now:before {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: -4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #de350b;
+}
+
+#asset-tree-app .asset-tree-outlook-list {
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook {
+    min-height: 18px;
+    margin: 1px 2px 2px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-text {
+    padding: 1px 4px 2px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-text em {
+    display: none;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event {
@@ -9155,6 +9330,20 @@ a.asset-tree-url {
 #asset-tree-app button.asset-tree-mark-factor.is-double {
     color: #4338ca !important;
     border-color: #c7d2fe !important;
+}
+
+#asset-tree-app .asset-tree-mark input.asset-tree-mark-formula:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]):not([type="range"]):not([type="hidden"]) {
+    width: 88px;
+    height: 22px !important;
+    min-height: 0;
+    margin: 0;
+    padding: 0 4px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px !important;
+    background: #fff !important;
+    color: #172b4d;
+    font-size: 11px !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
 }
 
 #asset-tree-app .asset-tree-roster-unit {

@@ -436,6 +436,8 @@
         cardSelected: '',
         scheduleYear: 0,
         scheduleMonth: 0,
+        scheduleSpan: 'month',
+        scheduleAnchor: '',
         scheduleRows: null,
         scheduleOpen: false,
         scheduleLoading: false,
@@ -2310,11 +2312,13 @@
             }
         }
         var clock = root ? root.querySelector('.asset-tree-clock') : null;
+        var outlook = root ? root.querySelector('.asset-tree-outlook') : null;
         return {
             x: window.pageXOffset || document.documentElement.scrollLeft || 0,
             y: window.pageYOffset || document.documentElement.scrollTop || 0,
             nodes: nodes,
-            clock: clock ? clock.scrollTop : null
+            clock: clock ? clock.scrollTop : null,
+            outlook: outlook ? outlook.scrollTop : null
         };
     }
 
@@ -2332,6 +2336,10 @@
         if (kept.clock != null && root) {
             var clock = root.querySelector('.asset-tree-clock');
             if (clock) clock.scrollTop = kept.clock;
+        }
+        if (kept.outlook != null && root) {
+            var outlook = root.querySelector('.asset-tree-outlook');
+            if (outlook) outlook.scrollTop = kept.outlook;
         }
         if (kept.x || kept.y) window.scrollTo(kept.x, kept.y);
     }
@@ -12809,8 +12817,8 @@
             panel.appendChild(scheduleStaff());
         } else {
             panel.appendChild(scheduleLayers());
-            if (state.scheduleClockDay) panel.appendChild(scheduleClock(state.scheduleClockDay));
-            else panel.appendChild(scheduleCalendar());
+            if (scheduleSpanName() === 'month') panel.appendChild(scheduleCalendar());
+            else panel.appendChild(scheduleOutlook());
         }
         return panel;
     }
@@ -12818,19 +12826,20 @@
     function scheduleBoardHead() {
         var head = el('div', 'asset-tree-board-head');
         var nav = el('div', 'asset-tree-calendar-nav');
-        nav.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftScheduleMonth(-1); }));
-        nav.appendChild(el('strong', 'asset-tree-calendar-title', monthTitle(state.scheduleYear, state.scheduleMonth)));
-        nav.appendChild(button('\u203A', 'asset-tree-month-btn', function () { shiftScheduleMonth(1); }));
+        nav.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftScheduleView(-1); }));
+        nav.appendChild(el('strong', 'asset-tree-calendar-title', scheduleViewTitle()));
+        nav.appendChild(button('\u203A', 'asset-tree-month-btn', function () { shiftScheduleView(1); }));
         nav.appendChild(button(t('schedulesToday'), 'asset-tree-btn slim', function () {
             var now = new Date();
             state.scheduleYear = now.getFullYear();
             state.scheduleMonth = now.getMonth() + 1;
             state.scheduleExpanded = '';
-            if (state.scheduleClockDay) state.scheduleClockDay = isoDate(now);
+            state.scheduleAnchor = isoDate(now);
+            state.scheduleClockDay = '';
             renderFrame();
-            if (state.scheduleClockDay) revealScheduleClock();
         }));
         head.appendChild(nav);
+        if (!rosterOn()) head.appendChild(scheduleSpanSwitch());
         var boards = scheduleBoards();
         if (boards.calendar && boards.roster) {
             var seg = el('div', 'asset-tree-board-switch');
@@ -12901,9 +12910,132 @@
             state.scheduleMonth = 1;
             state.scheduleYear += 1;
         }
+        var anchor = parseIsoDate(state.scheduleAnchor);
+        var day = anchor ? anchor.getDate() : 1;
+        var last = new Date(state.scheduleYear, state.scheduleMonth, 0).getDate();
+        if (day > last) day = last;
+        state.scheduleAnchor = isoDate(new Date(state.scheduleYear, state.scheduleMonth - 1, day));
         state.scheduleExpanded = '';
         state.scheduleClockDay = '';
         renderFrame();
+    }
+
+    function scheduleSpanName() {
+        var span = state.scheduleSpan;
+        if (span === 'week' || span === 'work' || span === 'day') return span;
+        return 'month';
+    }
+
+    function viewAnchorDate() {
+        var parsed = parseIsoDate(state.scheduleAnchor);
+        if (parsed) return parsed;
+        var now = new Date();
+        if (state.scheduleYear === now.getFullYear() && state.scheduleMonth === now.getMonth() + 1) {
+            state.scheduleAnchor = isoDate(now);
+            return now;
+        }
+        var first = new Date(state.scheduleYear || now.getFullYear(), (state.scheduleMonth || (now.getMonth() + 1)) - 1, 1);
+        state.scheduleAnchor = isoDate(first);
+        return first;
+    }
+
+    function mondayOf(date) {
+        return shiftDays(date, -((date.getDay() + 6) % 7));
+    }
+
+    function scheduleViewDays() {
+        var anchor = viewAnchorDate();
+        var span = scheduleSpanName();
+        if (span === 'day') return [anchor];
+        var start = mondayOf(anchor);
+        var count = span === 'work' ? 5 : 7;
+        var days = [];
+        var index;
+        for (index = 0; index < count; index++) days.push(shiftDays(start, index));
+        return days;
+    }
+
+    function scheduleDateText(date, withYear) {
+        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+        var options = { day: 'numeric', month: 'long' };
+        if (withYear) options.year = 'numeric';
+        try {
+            return date.toLocaleDateString(locale, options);
+        } catch (error) {
+            return isoDate(date);
+        }
+    }
+
+    function scheduleViewTitle() {
+        if (scheduleSpanName() === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
+        var days = scheduleViewDays();
+        var first = days[0];
+        var last = days[days.length - 1];
+        if (days.length === 1) {
+            var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+            try {
+                return first.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            } catch (error) {
+                return isoDate(first);
+            }
+        }
+        if (first.getFullYear() === last.getFullYear() && first.getMonth() === last.getMonth()) {
+            return first.getDate() + '\u2013' + scheduleDateText(last, true);
+        }
+        if (first.getFullYear() === last.getFullYear()) {
+            return scheduleDateText(first, false) + ' \u2013 ' + scheduleDateText(last, true);
+        }
+        return scheduleDateText(first, true) + ' \u2013 ' + scheduleDateText(last, true);
+    }
+
+    function shiftScheduleView(delta) {
+        if (scheduleSpanName() === 'month') {
+            shiftScheduleMonth(delta);
+            return;
+        }
+        var anchor = viewAnchorDate();
+        var step = scheduleSpanName() === 'day' ? delta : delta * 7;
+        var next = shiftDays(anchor, step);
+        state.scheduleAnchor = isoDate(next);
+        state.scheduleYear = next.getFullYear();
+        state.scheduleMonth = next.getMonth() + 1;
+        state.scheduleExpanded = '';
+        state.scheduleClockDay = '';
+        renderFrame();
+    }
+
+    function setScheduleSpan(span) {
+        state.scheduleSpan = span === 'week' || span === 'work' || span === 'day' ? span : 'month';
+        state.scheduleClockDay = '';
+        var anchor = viewAnchorDate();
+        state.scheduleYear = anchor.getFullYear();
+        state.scheduleMonth = anchor.getMonth() + 1;
+        renderFrame();
+    }
+
+    function scheduleSpanSwitch() {
+        var seg = el('div', 'asset-tree-board-switch asset-tree-span-switch');
+        [['month', 'schedulesSpanMonth'], ['week', 'schedulesSpanWeek'], ['work', 'schedulesSpanWork'], ['day', 'schedulesSpanDay']].forEach(function (pair) {
+            var on = scheduleSpanName() === pair[0];
+            var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
+                setScheduleSpan(pair[0]);
+            });
+            item.setAttribute('aria-pressed', on ? 'true' : 'false');
+            seg.appendChild(item);
+        });
+        return seg;
+    }
+
+    function plansOnIso(iso) {
+        var parsed = parseIsoDate(iso);
+        var plans = [];
+        if (!parsed) return plans;
+        var year = parsed.getFullYear();
+        var month = parsed.getMonth() + 1;
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            if (monthDates(plan, year, month).indexOf(iso) >= 0) plans.push(plan);
+        });
+        return sortDayPlans(plans, iso);
     }
 
     function schedulePersonSelect() {
@@ -13148,15 +13280,130 @@
     }
 
     function dayNumberButton(iso, day) {
-        var num = button(String(day), 'asset-tree-day-num' + (state.scheduleClockDay === iso ? ' is-on' : ''), function (event) {
+        var num = button(String(day), 'asset-tree-day-num', function (event) {
             event.preventDefault();
             event.stopPropagation();
-            state.scheduleClockDay = state.scheduleClockDay === iso ? '' : iso;
+            var parsed = parseIsoDate(iso);
+            state.scheduleSpan = 'day';
+            state.scheduleAnchor = iso;
+            state.scheduleClockDay = '';
+            if (parsed) {
+                state.scheduleYear = parsed.getFullYear();
+                state.scheduleMonth = parsed.getMonth() + 1;
+            }
             renderFrame();
-            if (state.scheduleClockDay) revealScheduleClock();
         });
-        num.title = t('schedulesClock');
+        num.title = t('schedulesSpanDay');
         return num;
+    }
+
+    function scheduleOutlook() {
+        var days = scheduleViewDays();
+        var byDay = {};
+        var firstMin = 8 * 60;
+        var lastMin = 20 * 60;
+        days.forEach(function (date) {
+            var iso = isoDate(date);
+            var plans = plansOnIso(iso);
+            byDay[iso] = plans;
+            plans.forEach(function (plan) {
+                var clock = occurrenceClock(plan, iso);
+                if (!clock.start) return;
+                var start = timeMinutes(timeBucket(clock.start));
+                if (start > 24 * 60) return;
+                var end = clock.end ? timeMinutes(clock.end) : start + 60;
+                var endBucket = Math.ceil(end / 30) * 30;
+                if (start < firstMin) firstMin = start;
+                if (endBucket > lastMin) lastMin = endBucket;
+            });
+        });
+        var today = isoDate(new Date());
+        var todayShown = false;
+        days.forEach(function (date) { if (isoDate(date) === today) todayShown = true; });
+        if (todayShown) {
+            var now = new Date();
+            var nowBucket = Math.floor((now.getHours() * 60 + now.getMinutes()) / 30) * 30;
+            if (nowBucket < firstMin) firstMin = nowBucket;
+            if (nowBucket + 30 > lastMin) lastMin = nowBucket + 30;
+        }
+        if (firstMin < 0) firstMin = 0;
+        if (lastMin > 24 * 60) lastMin = 24 * 60;
+        if (lastMin <= firstMin) lastMin = Math.min(24 * 60, firstMin + 30);
+        var labels = weekdayLabels();
+        var board = el('div', 'asset-tree-outlook');
+        board.style.gridTemplateColumns = '76px repeat(' + days.length + ', minmax(120px, 1fr))';
+        board.appendChild(el('div', 'asset-tree-outlook-corner'));
+        days.forEach(function (date) {
+            var iso = isoDate(date);
+            var weekend = date.getDay() === 0 || date.getDay() === 6;
+            var head = button('', 'asset-tree-outlook-head' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''), function () {
+                state.scheduleSpan = 'day';
+                state.scheduleAnchor = iso;
+                state.scheduleYear = date.getFullYear();
+                state.scheduleMonth = date.getMonth() + 1;
+                state.scheduleClockDay = '';
+                renderFrame();
+            });
+            head.appendChild(el('span', 'asset-tree-outlook-dow', labels[(date.getDay() + 6) % 7] || ''));
+            head.appendChild(el('span', 'asset-tree-outlook-date', String(date.getDate())));
+            board.appendChild(head);
+        });
+        board.appendChild(el('div', 'asset-tree-outlook-gutter is-all', t('schedulesAllDay')));
+        days.forEach(function (date) {
+            var iso = isoDate(date);
+            board.appendChild(outlookCell(iso, '', byDay[iso], date.getDay() === 0 || date.getDay() === 6, iso === today, false));
+        });
+        var cursor;
+        for (cursor = firstMin; cursor < lastMin; cursor += 30) {
+            var onHour = cursor % 60 === 0;
+            board.appendChild(el('div', 'asset-tree-outlook-gutter' + (onHour ? ' is-hour' : ''), onHour ? minutesClock(cursor) : ''));
+            days.forEach(function (date) {
+                var iso = isoDate(date);
+                board.appendChild(outlookCell(iso, minutesClock(cursor), byDay[iso], date.getDay() === 0 || date.getDay() === 6, iso === today, onHour));
+            });
+        }
+        return board;
+    }
+
+    function outlookCell(iso, time, plans, weekend, today, onHour) {
+        var cell = el('div', 'asset-tree-slot asset-tree-outlook-cell' + (time ? '' : ' is-all') + (onHour ? ' is-hour' : '') + (weekend ? ' is-weekend' : '') + (today ? ' is-today' : ''));
+        cell.setAttribute('data-day', iso);
+        cell.setAttribute('data-time', time);
+        var list = el('div', 'asset-tree-outlook-list');
+        (plans || []).forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            var bucket = start ? timeBucket(start) : '';
+            if (bucket !== time) return;
+            var card = scheduleEventCard(plan, iso, true);
+            card.className += ' is-outlook';
+            list.appendChild(card);
+        });
+        cell.appendChild(list);
+        if (time && today) {
+            var now = new Date();
+            var minutes = now.getHours() * 60 + now.getMinutes();
+            var startMin = timeMinutes(time);
+            if (minutes >= startMin && minutes < startMin + 30) {
+                var mark = el('i', 'asset-tree-outlook-now');
+                mark.style.top = ((minutes - startMin) / 30 * 100) + '%';
+                cell.appendChild(mark);
+            }
+        }
+        if (state.canEdit) {
+            cell.addEventListener('click', function (event) {
+                if (state.scheduleSuppressClick) {
+                    state.scheduleSuppressClick = false;
+                    return;
+                }
+                var node = event.target;
+                while (node && node !== cell) {
+                    if (node.tagName === 'BUTTON') return;
+                    node = node.parentNode;
+                }
+                openScheduleDialog(iso, time);
+            });
+        }
+        return cell;
     }
 
     function revealScheduleClock() {
@@ -13374,7 +13621,7 @@
             if (!dragging && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 5) return;
             dragging = true;
             card.classList.add('is-dragging');
-            var clockBoard = document.querySelector('.asset-tree-clock');
+            var clockBoard = document.querySelector('.asset-tree-clock, .asset-tree-outlook');
             if (clockBoard) {
                 var bounds = clockBoard.getBoundingClientRect();
                 if (ev.clientY < bounds.top + 36) clockBoard.scrollTop -= 18;
@@ -13748,16 +13995,20 @@
                 else if (id === 'night') factor = 2;
                 else factor = 1;
             }
-            rows.push({ id: id, label: label, color: color, hours: hours, factor: factor });
+            var formula = cleanStaffFormula(piece.length > 5 ? piece[5] : '');
+            rows.push({ id: id, label: label, color: color, hours: hours, factor: factor, formula: formula });
         });
-        if (!seen.work) rows.unshift({ id: 'work', label: '', color: '172b4d', hours: 8, factor: 1 });
+        if (!seen.work) rows.unshift({ id: 'work', label: '', color: '172b4d', hours: 8, factor: 1, formula: '' });
         return rows.slice(0, 12);
     }
 
     function packStaffMarks(rows) {
         return rows.map(function (row) {
             var factor = row.factor === 0 || row.factor === 2 ? row.factor : 1;
-            return row.id + '|' + (row.label || '') + '|' + row.color + '|' + row.hours + '|' + factor;
+            var packed = row.id + '|' + (row.label || '') + '|' + row.color + '|' + row.hours + '|' + factor;
+            var formula = cleanStaffFormula(row.formula);
+            if (formula) packed += '|' + formula;
+            return packed;
         }).join(',');
     }
 
@@ -13890,6 +14141,116 @@
         return personHours * factor;
     }
 
+    function evalStaffFormula(formula, hours, syntaxOnly) {
+        var text = String(formula || '').replace(/\s+/g, '').toLowerCase();
+        if (!text || text.length > 48) return null;
+        var i = 0;
+        function peek() { return text.charAt(i); }
+        function eat(ch) {
+            if (peek() !== ch) return false;
+            i += 1;
+            return true;
+        }
+        function parseExpr() {
+            var left = parseTerm();
+            if (left == null) return null;
+            while (peek() === '+' || peek() === '-') {
+                var op = peek();
+                i += 1;
+                var right = parseTerm();
+                if (right == null) return null;
+                left = op === '+' ? left + right : left - right;
+            }
+            return left;
+        }
+        function parseTerm() {
+            var left = parseUnary();
+            if (left == null) return null;
+            while (peek() === '*' || peek() === '/') {
+                var op = peek();
+                i += 1;
+                var right = parseUnary();
+                if (right == null) return null;
+                if (op === '/') {
+                    if (!right) {
+                        if (!syntaxOnly) return null;
+                        left = 0;
+                    } else left = left / right;
+                } else left = left * right;
+            }
+            return left;
+        }
+        function parseUnary() {
+            if (eat('+') || eat('-')) {
+                var minus = text.charAt(i - 1) === '-';
+                var value = parseUnary();
+                if (value == null) return null;
+                return minus ? -value : value;
+            }
+            return parsePrimary();
+        }
+        function parsePrimary() {
+            if (eat('(')) {
+                var inner = parseExpr();
+                if (inner == null || !eat(')')) return null;
+                return inner;
+            }
+            if (text.slice(i, i + 3) === 'min' || text.slice(i, i + 3) === 'max') {
+                var fn = text.slice(i, i + 3);
+                i += 3;
+                if (!eat('(')) return null;
+                var left = parseExpr();
+                if (left == null || !eat(';')) return null;
+                var right = parseExpr();
+                if (right == null || !eat(')')) return null;
+                return fn === 'min' ? Math.min(left, right) : Math.max(left, right);
+            }
+            if (eat('h')) return hours;
+            var start = i;
+            while (peek() >= '0' && peek() <= '9') i += 1;
+            if (peek() === '.' && i > start) {
+                i += 1;
+                var frac = i;
+                while (peek() >= '0' && peek() <= '9') i += 1;
+                if (i === frac) return null;
+            }
+            if (i === start) return null;
+            var num = parseFloat(text.slice(start, i));
+            if (isNaN(num)) return null;
+            return num;
+        }
+        var result = parseExpr();
+        if (result == null || i !== text.length || !isFinite(result)) return null;
+        return result;
+    }
+
+    function cleanStaffFormula(raw) {
+        var text = String(raw || '').replace(/\s+/g, '').toLowerCase();
+        if (!text) return '';
+        if (text.length > 48) return '';
+        if (evalStaffFormula(text, 8, true) == null) return '';
+        return text;
+    }
+
+    function staffFormulaHours(id, personHours) {
+        var mark = staffMarkById(id);
+        if (mark && mark.formula) {
+            var value = evalStaffFormula(mark.formula, personHours, false);
+            if (value != null) {
+                if (value < 0) value = 0;
+                return Math.round(value * 100) / 100;
+            }
+        }
+        return staffDayHours(id, personHours);
+    }
+
+    function formatStaffHours(value) {
+        var rounded = Math.round(Number(value) * 100) / 100;
+        if (!isFinite(rounded)) return '0';
+        if (Math.abs(rounded - Math.round(rounded)) < 0.001) return String(Math.round(rounded));
+        return String(rounded);
+    }
+
     function staffTally(person, year, month) {
         var count = new Date(year, month, 0).getDate();
         var row = person.hours || { weekdays: 31, hours: 8, marks: '' };
@@ -13907,11 +14268,11 @@
             var id = staffVisible(person, iso, date, marks);
             if (!id || id === 'off' || (id !== 'work' && !staffMarkById(id))) continue;
             var custom = markCustom(marks, iso);
-            var hours = custom != null ? custom : staffDayHours(id, per);
+            var hours = custom != null ? custom : staffFormulaHours(id, per);
             if (!by[id]) by[id] = { days: 0, hours: 0 };
             by[id].days += 1;
             by[id].hours += hours;
-            if (staffMarkFactor(id) === 0 && !(custom != null && custom > 0)) continue;
+            if (!(hours > 0)) continue;
             totalDays += 1;
             totalHours += hours;
         }
@@ -14627,13 +14988,13 @@
                 var id = staffVisible(person, iso, date, marks);
                 var known = id === 'off' || id === 'work' || !!staffMarkById(id);
                 var custom = markCustom(marks, iso);
-                var hoursValue = known ? (custom != null ? custom : staffDayHours(id, per)) : 0;
+                var hoursValue = known ? (custom != null ? custom : staffFormulaHours(id, per)) : 0;
                 var cell = el('td', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : '') + (id && id !== 'off' && known ? ' is-mark' : ''));
                 cell.setAttribute('data-staff-day', iso);
                 cell.setAttribute('data-staff-user', person.userKey);
                 var mark = staffMarkById(id);
                 var caption = '';
-                if (id && id !== 'off' && known) caption = custom != null ? String(custom) : (hoursValue > 0 ? String(hoursValue) : staffMarkName(mark || { id: id }).slice(0, 3));
+                if (id && id !== 'off' && known) caption = custom != null ? String(custom) : (hoursValue > 0 ? formatStaffHours(hoursValue) : staffMarkName(mark || { id: id }).slice(0, 3));
                 var title = id === 'off' || !known ? t('staffOff') : staffMarkName(mark || { id: id });
                 if (custom != null || hoursValue > 0) title += ' · ' + t('staffHoursCount', hoursValue);
                 if (state.canEdit && person.hours) {
@@ -14654,8 +15015,8 @@
                 line.appendChild(cell);
             })(day);
         }
-        var daysCell = el('td', 'asset-tree-roster-total', String(tally.days));
-        var hoursCell = el('td', 'asset-tree-roster-total', String(tally.hours));
+        var daysCell = el('td', 'asset-tree-roster-total', formatStaffHours(tally.days));
+        var hoursCell = el('td', 'asset-tree-roster-total', formatStaffHours(tally.hours));
         var breakdown = [];
         staffMarkList().forEach(function (mark) {
             var item = tally.by[mark.id];
@@ -14842,13 +15203,45 @@
                     var nextFactor = factor === 1 ? 2 : factor === 2 ? 0 : 1;
                     var copy = staffMarkList();
                     copy.forEach(function (item) {
-                        if (item.id === row.id) item.factor = nextFactor;
+                        if (item.id === row.id) {
+                            item.factor = nextFactor;
+                            item.formula = '';
+                        }
                     });
                     saveStaffPalette(copy);
                 });
                 factorButton.title = t('staffFactorHint');
                 factorButton.setAttribute('aria-label', staffMarkName(row) + ' ' + t('staffFactorHint'));
                 chip.appendChild(factorButton);
+                var formula = document.createElement('input');
+                formula.type = 'text';
+                formula.className = 'asset-tree-mark-formula';
+                formula.maxLength = 48;
+                formula.placeholder = 'h';
+                formula.value = row.formula || '';
+                formula.title = t('staffFormulaHint');
+                formula.setAttribute('aria-label', t('staffFormula'));
+                formula.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+                formula.addEventListener('click', function (event) { event.stopPropagation(); });
+                formula.addEventListener('keydown', function (event) { event.stopPropagation(); });
+                formula.addEventListener('change', function () {
+                    var raw = String(formula.value || '').replace(/\s+/g, '').toLowerCase();
+                    var next = raw ? cleanStaffFormula(raw) : '';
+                    if (raw && !next) {
+                        formula.value = row.formula || '';
+                        return;
+                    }
+                    if (next === (row.formula || '')) {
+                        formula.value = next;
+                        return;
+                    }
+                    var copy = staffMarkList();
+                    copy.forEach(function (item) {
+                        if (item.id === row.id) item.formula = next;
+                    });
+                    saveStaffPalette(copy);
+                });
+                chip.appendChild(formula);
                 pick.addEventListener('dblclick', function (event) {
                     event.preventDefault();
                     event.stopPropagation();
@@ -14907,7 +15300,7 @@
                     n += 1;
                     id = 'm' + n;
                 }
-                copy.push({ id: id, label: t('staffMarkNew'), color: '64748b', hours: 8, factor: 1 });
+                copy.push({ id: id, label: t('staffMarkNew'), color: '64748b', hours: 8, factor: 1, formula: '' });
                 state.staffBrush = id;
                 saveStaffPalette(copy);
             }));
@@ -15372,9 +15765,12 @@
         });
     }
 
-    function openScheduleDialog(presetDate) {
+    function openScheduleDialog(presetDate, presetTime) {
+        var timed = typeof presetTime === 'string' && /^\d{2}:\d{2}$/.test(presetTime);
+        var startText = timed ? presetTime : '';
+        var endText = timed ? addMinutes(presetTime, 60) : '';
         var draft = {
-            name: '', kind: 'to', first: typeof presetDate === 'string' ? presetDate : isoDate(new Date()), allDay: true, startTime: '', endTime: '',
+            name: '', kind: 'to', first: typeof presetDate === 'string' ? presetDate : isoDate(new Date()), allDay: !timed, startTime: startText, endTime: endText,
             repeat: 'once', assigneeKey: '', assigneeName: '', assetIds: {}, note: '', assetQuery: ''
         };
         openModal(function (dialog) {
@@ -15397,12 +15793,13 @@
             var allDay = document.createElement('input');
             allDay.type = 'radio';
             allDay.name = 'asset-tree-when';
-            allDay.checked = true;
+            allDay.checked = !timed;
             var ranged = document.createElement('input');
             ranged.type = 'radio';
             ranged.name = 'asset-tree-when';
-            var clock = clockPair('', '');
-            clock.setDisabled(true);
+            ranged.checked = timed;
+            var clock = clockPair(startText, endText);
+            clock.setDisabled(!timed);
             allDay.addEventListener('change', function () {
                 draft.allDay = true;
                 clock.setDisabled(true);

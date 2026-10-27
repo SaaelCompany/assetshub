@@ -1256,6 +1256,15 @@ def pack_open(raw, layer):
     return "calendar"
 
 
+def clean_staff_formula(raw):
+    text = re.sub(r"\s+", "", str(raw or "")).lower()
+    if not text or len(text) > 48:
+        return ""
+    if not re.fullmatch(r"[0-9h+\-*/().;minax]+", text):
+        return ""
+    return text
+
+
 def mark_factor(piece, hours, ident):
     if len(piece) > 4 and str(piece[4]).strip() != "":
         try:
@@ -1322,13 +1331,20 @@ def pack_staff_marks(raw):
             hours = 8
         hours = max(0, min(24, hours))
         factor = mark_factor(piece, hours, ident)
-        rows.append((ident, label, color, hours, factor))
+        formula = clean_staff_formula(piece[5] if len(piece) > 5 else "")
+        rows.append((ident, label, color, hours, factor, formula))
     if not any(item[0] == "work" for item in rows):
-        rows.insert(0, ("work", "", "172b4d", 8, 1))
+        rows.insert(0, ("work", "", "172b4d", 8, 1, ""))
         rows = rows[:12]
     if not rows:
-        rows = list(DEFAULT_STAFF_MARKS)
-    return ",".join(f"{ident}|{label}|{color}|{hours}|{factor}" for ident, label, color, hours, factor in rows)
+        rows = [item if len(item) > 5 else item + ("",) for item in DEFAULT_STAFF_MARKS]
+    packed = []
+    for ident, label, color, hours, factor, formula in rows:
+        text = f"{ident}|{label}|{color}|{hours}|{factor}"
+        if formula:
+            text += "|" + formula
+        packed.append(text)
+    return ",".join(packed)
 
 
 def clean_day_marks(raw):
