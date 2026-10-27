@@ -7030,10 +7030,7 @@ public class AssetServiceImpl implements AssetService {
                 id = token.substring(0, at);
                 String rest = token.substring(at + 1).trim();
                 if (rest.startsWith("=")) {
-                    String formula = markCellFormula(rest.substring(1));
-                    if (!formula.isEmpty()) {
-                        suffix = "@=" + formula;
-                    }
+                    suffix = "";
                 } else if (rest.matches("\\d{1,2}(\\.\\d{1,2})?")) {
                     double value = Double.parseDouble(rest);
                     if (value >= 0 && value <= 24) {
@@ -7060,31 +7057,6 @@ public class AssetServiceImpl implements AssetService {
             stored.append(entry.getKey()).append(':').append(entry.getValue());
         }
         return stored.toString();
-    }
-
-    /** Excel-style cell formula stored after @=. The client evaluates it. */
-    private static String markCellFormula(String raw) {
-        if (raw == null) {
-            return "";
-        }
-        String text = raw.replace(" ", "").trim().toLowerCase(java.util.Locale.ROOT);
-        if (text.startsWith("=")) {
-            text = text.substring(1).trim();
-        }
-        if (text.isEmpty() || text.length() > 96) {
-            return "";
-        }
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) {
-                continue;
-            }
-            if ("+-*/^().;=<>$:%".indexOf(c) >= 0) {
-                continue;
-            }
-            return "";
-        }
-        return text;
     }
 
     private static String formatMarkHours(double value) {

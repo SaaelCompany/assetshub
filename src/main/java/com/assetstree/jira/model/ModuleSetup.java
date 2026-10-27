@@ -169,12 +169,11 @@ public final class ModuleSetup {
             String color = markColor(piece.length > 2 ? piece[2] : "");
             int hours = markHours(piece.length > 3 ? piece[3] : "8");
             int factor = markFactor(piece, hours, id);
-            String formula = markFormula(piece.length > 5 ? piece[5] : "");
-            rows.put(id, new String[] { label, color, String.valueOf(hours), String.valueOf(factor), formula });
+            rows.put(id, new String[] { label, color, String.valueOf(hours), String.valueOf(factor) });
         }
         if (!rows.containsKey("work")) {
             Map<String, String[]> withWork = new LinkedHashMap<String, String[]>();
-            withWork.put("work", new String[] { "", "172b4d", "8", "1", "" });
+            withWork.put("work", new String[] { "", "172b4d", "8", "1" });
             for (Map.Entry<String, String[]> entry : rows.entrySet()) {
                 if (withWork.size() >= 12) {
                     break;
@@ -193,36 +192,8 @@ public final class ModuleSetup {
             }
             String[] value = entry.getValue();
             stored.append(entry.getKey()).append('|').append(value[0]).append('|').append(value[1]).append('|').append(value[2]).append('|').append(value[3]);
-            if (value.length > 4 && value[4] != null && !value[4].isEmpty()) {
-                stored.append('|').append(value[4]);
-            }
         }
         return stored.toString();
-    }
-
-    /** Keeps an Excel-style formula. The client evaluates it; an empty field leaves the factor in charge. */
-    private static String markFormula(String raw) {
-        if (raw == null) {
-            return "";
-        }
-        String text = raw.replace(" ", "").trim().toLowerCase(Locale.ROOT);
-        if (text.startsWith("=")) {
-            text = text.substring(1).trim();
-        }
-        if (text.isEmpty() || text.length() > 96) {
-            return "";
-        }
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) {
-                continue;
-            }
-            if ("+-*/^().;=<>$:%".indexOf(c) >= 0) {
-                continue;
-            }
-            return "";
-        }
-        return text;
     }
 
     /** 0 leaves the day out of the totals, 1 uses the person's hours, 2 doubles them. A missing field keeps the old meaning. */

@@ -1256,17 +1256,6 @@ def pack_open(raw, layer):
     return "calendar"
 
 
-def clean_staff_formula(raw):
-    text = re.sub(r"\s+", "", str(raw or "")).lower()
-    if text.startswith("="):
-        text = text[1:]
-    if not text or len(text) > 96:
-        return ""
-    if not re.fullmatch(r"[0-9a-z+\-*/^().;=<>$:%]+", text):
-        return ""
-    return text
-
-
 def format_mark_hours(value):
     rounded = round(float(value) * 100) / 100
     if abs(rounded - round(rounded)) < 0.001:
@@ -1341,20 +1330,13 @@ def pack_staff_marks(raw):
             hours = 8
         hours = max(0, min(24, hours))
         factor = mark_factor(piece, hours, ident)
-        formula = clean_staff_formula(piece[5] if len(piece) > 5 else "")
-        rows.append((ident, label, color, hours, factor, formula))
+        rows.append((ident, label, color, hours, factor))
     if not any(item[0] == "work" for item in rows):
-        rows.insert(0, ("work", "", "172b4d", 8, 1, ""))
+        rows.insert(0, ("work", "", "172b4d", 8, 1))
         rows = rows[:12]
     if not rows:
-        rows = [item if len(item) > 5 else item + ("",) for item in DEFAULT_STAFF_MARKS]
-    packed = []
-    for ident, label, color, hours, factor, formula in rows:
-        text = f"{ident}|{label}|{color}|{hours}|{factor}"
-        if formula:
-            text += "|" + formula
-        packed.append(text)
-    return ",".join(packed)
+        rows = list(DEFAULT_STAFF_MARKS)
+    return ",".join(f"{ident}|{label}|{color}|{hours}|{factor}" for ident, label, color, hours, factor in rows)
 
 
 def clean_day_marks(raw):
@@ -1372,9 +1354,7 @@ def clean_day_marks(raw):
             ident, rest = token.split("@", 1)
             rest = rest.strip()
             if rest.startswith("="):
-                formula = clean_staff_formula(rest[1:])
-                if formula:
-                    suffix = "@=" + formula
+                suffix = ""
             elif re.fullmatch(r"\d{1,2}(\.\d{1,2})?", rest):
                 value = float(rest)
                 if 0 <= value <= 24:
