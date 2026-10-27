@@ -12,6 +12,7 @@ public class StaffDutyDraft {
     private String endOn;
     private String marks;
     private Integer placeId;
+    private String note;
 
     public String getUserKey() { return userKey; }
     public void setUserKey(String userKey) { this.userKey = userKey; }
@@ -27,4 +28,6 @@ public class StaffDutyDraft {
     public void setMarks(String marks) { this.marks = marks; }
     public Integer getPlaceId() { return placeId; }
     public void setPlaceId(Integer placeId) { this.placeId = placeId; }
+    public String getNote() { return note; }
+    public void setNote(String note) { this.note = note; }
 }

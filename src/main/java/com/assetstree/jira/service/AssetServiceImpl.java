@@ -6815,6 +6815,11 @@ public class AssetServiceImpl implements AssetService {
                 if (draft != null && draft.getPlaceId() != null) {
                     hoursRow.setPlaceId(checkedStaffPlace(project.getKey(), draft.getPlaceId().intValue()));
                 }
+                if (draft != null && draft.getNote() != null) {
+                    hoursRow.setNote(cleanStaffNote(draft.getNote()));
+                } else if (hoursRow.getNote() == null) {
+                    hoursRow.setNote("");
+                }
                 hoursRow.save();
                 return staffDto(hoursRow);
             }
@@ -6973,7 +6978,24 @@ public class AssetServiceImpl implements AssetService {
         dto.setEndOn(row.getEndOn() == null ? "" : row.getEndOn());
         dto.setMarks(row.getMarks() == null ? "" : row.getMarks());
         dto.setPlaceId(row.getPlaceId());
+        dto.setNote(row.getNote() == null ? "" : row.getNote());
         return dto;
+    }
+
+    private String cleanStaffNote(String raw) {
+        String text = raw == null ? "" : raw.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ');
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 32) {
+                out.append(c);
+            }
+        }
+        String trimmed = out.toString().trim();
+        if (trimmed.length() > 240) {
+            trimmed = trimmed.substring(0, 240).trim();
+        }
+        return trimmed;
     }
 
     private int checkedStaffPlace(String projectKey, int placeId) {

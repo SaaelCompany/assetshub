@@ -2439,6 +2439,7 @@ def staff_dto(row):
         "endOn": row.get("endOn") or "",
         "marks": row.get("marks") or "",
         "placeId": int(row.get("placeId") or 0),
+        "note": row.get("note") or "",
     }
 
 
@@ -2512,7 +2513,17 @@ def save_staff(project_key, body, text):
         existing["placeId"] = place_id
     elif "placeId" not in existing:
         existing["placeId"] = 0
+    if "note" in body:
+        existing["note"] = clean_staff_note(body.get("note"))
+    elif "note" not in existing:
+        existing["note"] = ""
     return 200, staff_dto(existing)
+
+
+def clean_staff_note(raw):
+    text = (raw or "").replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    text = "".join(ch for ch in text if ord(ch) >= 32).strip()
+    return text[:240].strip()
 
 
 def add_staff_leave(project_key, body, text):

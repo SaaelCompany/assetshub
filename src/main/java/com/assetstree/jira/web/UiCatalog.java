@@ -1102,6 +1102,8 @@ public final class UiCatalog {
             "staffLeaveLabel",
             "staffDaysCol",
             "staffHoursCol",
+            "staffNotes",
+            "staffNoteHint",
             "staffNoDepartment",
             "staffLegendWork",
             "staffLegendLeave",

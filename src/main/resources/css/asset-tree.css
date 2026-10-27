@@ -8031,6 +8031,13 @@ a.asset-tree-url {
     max-width: 100% !important;
 }
 
+#asset-tree-app .asset-tree-roster-pair {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: 100%;
+}
+
 #asset-tree-app .asset-tree-roster-scroll {
     overflow: auto;
     width: max-content;
@@ -8038,6 +8045,87 @@ a.asset-tree-url {
     background: #fff;
     border: 1px solid #e6e8ec;
     border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-roster-pair > .asset-tree-roster-scroll {
+    flex: 0 1 auto;
+    min-width: 0;
+    width: auto;
+    max-width: calc(100% - 268px);
+}
+
+#asset-tree-app .asset-tree-notes {
+    flex: 0 0 260px;
+    width: 260px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #e6e8ec;
+    border-radius: 12px;
+}
+
+#asset-tree-app .asset-tree-notes .asset-tree-roster {
+    width: 260px;
+}
+
+#asset-tree-app .asset-tree-notes th.asset-tree-notes-label,
+#asset-tree-app .asset-tree-notes td.asset-tree-notes-cell {
+    width: 260px;
+    min-width: 260px;
+    max-width: 260px;
+    padding: 0 8px;
+    text-align: left;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-notes thead th.asset-tree-notes-label {
+    height: auto;
+    padding: 2px 8px;
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-notes-title {
+    display: flex;
+    align-items: center;
+    height: 18px;
+    color: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-notes tr.asset-tree-roster-branch-row td.asset-tree-notes-cell {
+    height: 24px;
+    background: #f7f8fa;
+}
+
+#asset-tree-app .asset-tree-notes td.asset-tree-notes-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#asset-tree-app .asset-tree-notes input.asset-tree-notes-input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]):not([type="range"]):not([type="hidden"]) {
+    display: block;
+    width: 100%;
+    height: 20px !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 2px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #172b4d;
+    font-size: 12px !important;
+    font-weight: 400;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-notes input.asset-tree-notes-input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]):not([type="range"]):not([type="hidden"]):focus {
+    background: #fff !important;
+    outline: 1px solid #172b4d;
+    outline-offset: -1px;
+}
+
+#asset-tree-app .asset-tree-notes input.asset-tree-notes-input::placeholder {
+    color: #97a0af;
 }
 
 #asset-tree-app .asset-tree-roster {

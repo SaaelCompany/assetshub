@@ -58,4 +58,10 @@ public interface StaffDutyEntity extends Entity {
     int getPlaceId();
 
     void setPlaceId(int placeId);
+
+    /** Free note shown on the timesheet, on the same row as this person. */
+    @StringLength(255)
+    String getNote();
+
+    void setNote(String note);
 }

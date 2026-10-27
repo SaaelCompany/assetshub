@@ -17,6 +17,7 @@ public class StaffDutyDto {
     private String department;
     private String phone;
     private int placeId;
+    private String note;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -42,4 +43,6 @@ public class StaffDutyDto {
     public void setPhone(String phone) { this.phone = phone; }
     public int getPlaceId() { return placeId; }
     public void setPlaceId(int placeId) { this.placeId = placeId; }
+    public String getNote() { return note; }
+    public void setNote(String note) { this.note = note; }
 }
