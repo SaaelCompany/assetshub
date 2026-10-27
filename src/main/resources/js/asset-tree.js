@@ -19452,6 +19452,25 @@
         parent.appendChild(node);
     }
 
+    function wallInkNode(room) {
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-ink-wall');
+        group.setAttribute('transform', shapeTransform(room));
+        group.setAttribute('pointer-events', 'none');
+        var face = svgEl('path');
+        var outline;
+        if (room.w >= room.h) {
+            outline = 'M ' + (-room.h / 2) + ' 0 L ' + (room.w + room.h / 2) + ' 0 M ' + (-room.h / 2) + ' ' + room.h + ' L ' + (room.w + room.h / 2) + ' ' + room.h;
+        } else {
+            outline = 'M 0 ' + (-room.w / 2) + ' L 0 ' + (room.h + room.w / 2) + ' M ' + room.w + ' ' + (-room.w / 2) + ' L ' + room.w + ' ' + (room.h + room.w / 2);
+        }
+        face.setAttribute('d', outline);
+        face.setAttribute('class', 'asset-tree-plan-mark is-face' + (room.kind === 'partition' ? ' is-partition' : ''));
+        group.appendChild(face);
+        appendDimension(group, room);
+        return group;
+    }
+
     function roomPoints(room) {
         var raw = room && room.points;
         var list = [];
@@ -19879,8 +19898,8 @@
         var grid = svgEl('circle');
         grid.setAttribute('cx', String(gridStep / 2));
         grid.setAttribute('cy', String(gridStep / 2));
-        grid.setAttribute('r', '2.15');
-        grid.setAttribute('fill', '#9aa3b2');
+        grid.setAttribute('r', '1.6');
+        grid.setAttribute('fill', '#a8b0bd');
         pattern.appendChild(grid);
         defs.appendChild(pattern);
         svg.appendChild(defs);
@@ -19910,13 +19929,29 @@
                 svg: svg
             };
         };
-        var drawnLater = [];
+        var drawnRooms = [];
+        var drawnWalls = [];
+        var drawnRest = [];
         (floor.rooms || []).forEach(function (room, index) {
-            if (isPolygonRoom(room)) svg.appendChild(shapeNode(room, shapeOptions(room, index)));
-            else drawnLater.push([room, index]);
+            var kind = room.kind || 'room';
+            if (kind === 'room') drawnRooms.push([room, index]);
+            else if (isSegmentKind(kind)) drawnWalls.push([room, index]);
+            else drawnRest.push([room, index]);
+        });
+        drawnRooms.forEach(function (pair) {
+            svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
         });
         svg.appendChild(gridPaper);
-        drawnLater.forEach(function (pair) {
+        drawnWalls.forEach(function (pair) {
+            svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
+        });
+        var ink = svgEl('g');
+        ink.setAttribute('class', 'asset-tree-ink');
+        drawnWalls.forEach(function (pair) {
+            ink.appendChild(wallInkNode(pair[0]));
+        });
+        svg.appendChild(ink);
+        drawnRest.forEach(function (pair) {
             svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
         });
         (floor.pins || []).forEach(function (pin) {
@@ -20221,7 +20256,6 @@
         decorateRoom(group, room);
         appendOpening(group, room);
         appendLabel(group, room);
-        if (isSegmentKind(room.kind) || (options && options.selected)) appendDimension(group, room);
         if (options && options.editing) {
             rect.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
@@ -20321,19 +20355,6 @@
             measure.setAttribute('class', 'asset-tree-room-area');
             measure.textContent = planMeters(room.w) + ' ' + t('mapMeters');
             parent.appendChild(measure);
-            return;
-        }
-        if (kind === 'wall' || kind === 'partition') {
-            var face = svgEl('path');
-            var outline;
-            if (w >= h) {
-                outline = 'M ' + (-h / 2) + ' 0 L ' + (w + h / 2) + ' 0 M ' + (-h / 2) + ' ' + h + ' L ' + (w + h / 2) + ' ' + h;
-            } else {
-                outline = 'M 0 ' + (-w / 2) + ' L 0 ' + (h + w / 2) + ' M ' + w + ' ' + (-w / 2) + ' L ' + w + ' ' + (h + w / 2);
-            }
-            face.setAttribute('d', outline);
-            face.setAttribute('class', 'asset-tree-plan-mark is-face' + (kind === 'partition' ? ' is-partition' : ''));
-            parent.appendChild(face);
             return;
         }
         if (kind === 'arc' && window.AssetTreePlan) {
