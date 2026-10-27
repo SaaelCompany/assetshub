@@ -503,8 +503,12 @@ var AssetTreePlan = (function () {
         var pageH = page ? parseFloat(page[4]) : 595;
         if (!planH) planH = pageH;
         var rooms = [];
+        var skipped = 0;
         pdfStreams(text).forEach(function (stream) {
-            if (/FlateDecode/.test(stream.dict)) return;
+            if (/FlateDecode/.test(stream.dict)) {
+                skipped += 1;
+                return;
+            }
             pdfPaths(stream.data).forEach(function (line) {
                 var x1;
                 var y1;
@@ -525,6 +529,7 @@ var AssetTreePlan = (function () {
                 if (edge) rooms.push(edge);
             });
         });
+        if (!rooms.length && skipped) return { rooms: [], error: 'mapPdfCompressed' };
         return { rooms: meta ? rooms : fitRooms(rooms) };
     }
 

@@ -60,4 +60,14 @@ public interface RoomEntity extends Entity {
     int getPlaceId();
 
     void setPlaceId(int placeId);
+
+    /** Door swing. 1 opens the opposite way from the default leaf. */
+    int getSwing();
+
+    void setSwing(int swing);
+
+    /** Furniture placed together. Zero when the shape stands alone. */
+    int getGroupId();
+
+    void setGroupId(int groupId);
 }

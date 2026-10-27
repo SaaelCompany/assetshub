@@ -7339,6 +7339,15 @@ public class AssetServiceImpl implements AssetService {
                         stored.setAngle(angle);
                         stored.setPoints(FloorBounds.points(room.getPoints()));
                         stored.setPlaceId(roomPlace(project.getKey(), room.getPlaceId()));
+                        stored.setSwing(room.getSwing() == 1 ? 1 : 0);
+                        int groupId = room.getGroupId();
+                        if (groupId < 0) {
+                            groupId = 0;
+                        }
+                        if (groupId > 1000000) {
+                            groupId = 1000000;
+                        }
+                        stored.setGroupId(groupId);
                         stored.save();
                     }
                 }
@@ -7488,6 +7497,8 @@ public class AssetServiceImpl implements AssetService {
                 item.setAngle(FloorBounds.angle(room.getAngle()));
                 item.setPoints(FloorBounds.points(room.getPoints()));
                 item.setPlaceId(room.getPlaceId());
+                item.setSwing(room.getSwing() == 1 ? 1 : 0);
+                item.setGroupId(Math.max(0, room.getGroupId()));
                 roomDtos.add(item);
             }
         }

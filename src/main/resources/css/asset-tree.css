@@ -7336,17 +7336,12 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-room.is-wall,
-#asset-tree-app .asset-tree-room.is-partition {
-    fill: #ffffff;
-    stroke: none;
-}
-
+#asset-tree-app .asset-tree-room.is-partition,
 #asset-tree-app .asset-tree-room.is-door,
 #asset-tree-app .asset-tree-room.is-window {
-    fill: #ffffff;
-    stroke: #1c1c1c;
-    stroke-width: 1.25;
-    vector-effect: non-scaling-stroke;
+    fill: transparent;
+    stroke: none;
+    pointer-events: all;
 }
 
 #asset-tree-app .asset-tree-room.is-column {
@@ -7366,9 +7361,10 @@ a.asset-tree-url {
     stroke: none;
 }
 
-#asset-tree-app .asset-tree-room.is-partition {
+#asset-tree-app .asset-tree-wall-fill {
     fill: #ffffff;
     stroke: none;
+    pointer-events: none;
 }
 
 #asset-tree-app .asset-tree-room.is-table,

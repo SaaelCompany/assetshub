@@ -17434,6 +17434,9 @@
             if (w > 4800) w = 4800;
             if (h > 4800) h = 4800;
         }
+        var groupId = parseInt(room.groupId, 10) || 0;
+        if (groupId < 0) groupId = 0;
+        if (groupId > 1000000) groupId = 1000000;
         return {
             name: room.name || '',
             kind: kind,
@@ -17441,6 +17444,8 @@
             angle: normalizeAngle(room.angle),
             points: roomPoints(room),
             placeId: parseInt(room.placeId, 10) || 0,
+            swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
+            groupId: groupId,
             x: x, y: y, w: w, h: h
         };
     }
@@ -17824,6 +17829,7 @@
         var step = state.mapStep || 8;
         var box = planSize(state.mapDraft);
         var first = state.mapDraft.rooms.length;
+        var groups = freshGroupIds(copies);
         copies.forEach(function (source) {
             var shifted = roomPoints(source).map(function (point) {
                 return { x: point.x + step, y: point.y + step };
@@ -17834,6 +17840,8 @@
                 color: source.color,
                 angle: source.angle,
                 points: shifted,
+                swing: source.swing,
+                groupId: groups[parseInt(source.groupId, 10) || 0] || 0,
                 x: Math.max(0, Math.min(source.x + step, box.w - source.w)),
                 y: Math.max(0, Math.min(source.y + step, box.h - source.h)),
                 w: source.w,
@@ -17858,6 +17866,8 @@
                 color: shape.color || '',
                 angle: normalizeAngle(shape.angle),
                 points: roomPoints(shape),
+                swing: parseInt(shape.swing, 10) === 1 ? 1 : 0,
+                groupId: parseInt(shape.groupId, 10) || 0,
                 x: shape.x,
                 y: shape.y,
                 w: shape.w,
@@ -17881,6 +17891,7 @@
         var box = planSize(state.mapDraft);
         state.mapDraft.rooms = state.mapDraft.rooms || [];
         var first = state.mapDraft.rooms.length;
+        var groups = freshGroupIds(copies);
         copies.forEach(function (source) {
             var shifted = roomPoints(source).map(function (point) {
                 return { x: point.x - minX + originX, y: point.y - minY + originY };
@@ -17891,6 +17902,8 @@
                 color: source.color,
                 angle: source.angle,
                 points: shifted,
+                swing: source.swing,
+                groupId: groups[parseInt(source.groupId, 10) || 0] || 0,
                 x: originX + (source.x - minX),
                 y: originY + (source.y - minY),
                 w: source.w,
@@ -18039,30 +18052,255 @@
         persistFurniture(customFurniture().filter(function (item) { return item.id !== id; }), true);
     }
 
+    function isFurnKind(kind) {
+        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug';
+    }
+
+    function nextGroupId(floor) {
+        var max = 0;
+        ((floor && floor.rooms) || []).forEach(function (room) {
+            var id = parseInt(room.groupId, 10) || 0;
+            if (id > max) max = id;
+        });
+        return max + 1;
+    }
+
+    function freshGroupIds(copies) {
+        var counts = {};
+        copies.forEach(function (source) {
+            var id = parseInt(source.groupId, 10) || 0;
+            if (id) counts[id] = (counts[id] || 0) + 1;
+        });
+        var map = {};
+        var next = nextGroupId(state.mapDraft);
+        copies.forEach(function (source) {
+            var id = parseInt(source.groupId, 10) || 0;
+            if (id && counts[id] > 1 && !map[id]) {
+                map[id] = next;
+                next += 1;
+            }
+        });
+        return map;
+    }
+
+    function groupIndexes(rooms, index) {
+        var room = rooms && rooms[index];
+        var list = [];
+        if (!room) return list;
+        list.push(index);
+        var id = parseInt(room.groupId, 10) || 0;
+        if (!id) return list;
+        rooms.forEach(function (item, at) {
+            if (at !== index && (parseInt(item.groupId, 10) || 0) === id) list.push(at);
+        });
+        return list;
+    }
+
+    function groupCenter(rooms, indexes) {
+        var sx = 0;
+        var sy = 0;
+        var count = 0;
+        indexes.forEach(function (at) {
+            var room = rooms[at];
+            if (!room) return;
+            sx += room.x + room.w / 2;
+            sy += room.y + room.h / 2;
+            count += 1;
+        });
+        if (!count) return { x: 0, y: 0 };
+        return { x: sx / count, y: sy / count };
+    }
+
+    function rotateMembers(rooms, indexes, deg, px, py) {
+        var rad = deg * Math.PI / 180;
+        var cos = Math.cos(rad);
+        var sin = Math.sin(rad);
+        indexes.forEach(function (at) {
+            var room = rooms[at];
+            if (!room) return;
+            var rcx = room.x + room.w / 2;
+            var rcy = room.y + room.h / 2;
+            var dx = rcx - px;
+            var dy = rcy - py;
+            var nx = px + dx * cos - dy * sin;
+            var ny = py + dx * sin + dy * cos;
+            room.x = nx - room.w / 2;
+            room.y = ny - room.h / 2;
+            room.angle = normalizeAngle((room.angle || 0) + deg);
+        });
+    }
+
+    function shapeCorners(room) {
+        return [
+            localToWorld(room, 0, 0),
+            localToWorld(room, room.w, 0),
+            localToWorld(room, 0, room.h),
+            localToWorld(room, room.w, room.h)
+        ];
+    }
+
+    function pointHitsWall(x, y, rooms) {
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (!isSegmentKind(rooms[i].kind)) continue;
+            var ends = segmentEnds(rooms[i]);
+            var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, x, y);
+            if (!hit || hit.t < -0.02 || hit.t > 1.02) continue;
+            var thick = rooms[i].w >= rooms[i].h ? rooms[i].h : rooms[i].w;
+            if (hit.dist < thick / 2 - 0.5) return true;
+        }
+        return false;
+    }
+
+    function groupHitsWall(rooms, indexes) {
+        var i;
+        var c;
+        for (i = 0; i < indexes.length; i++) {
+            var room = rooms[indexes[i]];
+            if (!room || !isFurnKind(room.kind)) continue;
+            var corners = shapeCorners(room);
+            for (c = 0; c < corners.length; c++) {
+                if (pointHitsWall(corners[c].x, corners[c].y, rooms)) return true;
+            }
+        }
+        return false;
+    }
+
+    function centerGroupInRoom(floor, indexes) {
+        var rooms = floor.rooms || [];
+        var center = groupCenter(rooms, indexes);
+        var poly = null;
+        var best = Infinity;
+        rooms.forEach(function (room) {
+            if (!isPolygonRoom(room)) return;
+            var points = roomPoints(room);
+            if (!pointInPoly(center.x, center.y, points)) return;
+            var area = Math.abs(polygonArea(points));
+            if (area < best) {
+                best = area;
+                poly = points;
+            }
+        });
+        if (!poly || !poly.length) return;
+        var sx = 0;
+        var sy = 0;
+        var i;
+        for (i = 0; i < poly.length; i++) {
+            sx += poly[i].x;
+            sy += poly[i].y;
+        }
+        var dx = sx / poly.length - center.x;
+        var dy = sy / poly.length - center.y;
+        indexes.forEach(function (at) {
+            if (!rooms[at]) return;
+            rooms[at].x += dx;
+            rooms[at].y += dy;
+        });
+    }
+
+    function settleFurniture(floor, indexes) {
+        var rooms = floor.rooms || [];
+        var furn = false;
+        indexes.forEach(function (at) {
+            if (rooms[at] && isFurnKind(rooms[at].kind)) furn = true;
+        });
+        if (!furn) return;
+        var guard = 0;
+        while (guard < 48 && groupHitsWall(rooms, indexes)) {
+            var center = groupCenter(rooms, indexes);
+            var near = nearestWall(center.x, center.y, 800);
+            if (!near) break;
+            var ends = segmentEnds(near.room);
+            var proj = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, center.x, center.y);
+            if (!proj) break;
+            var dx = center.x - proj.x;
+            var dy = center.y - proj.y;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            indexes.forEach(function (at) {
+                if (!rooms[at]) return;
+                rooms[at].x += dx / len * 4;
+                rooms[at].y += dy / len * 4;
+            });
+            guard += 1;
+        }
+        if (groupHitsWall(rooms, indexes)) centerGroupInRoom(floor, indexes);
+        indexes.forEach(function (at) {
+            if (!rooms[at]) return;
+            rooms[at].x = Math.round(rooms[at].x);
+            rooms[at].y = Math.round(rooms[at].y);
+            rooms[at].angle = normalizeAngle(rooms[at].angle);
+        });
+    }
+
     function placeStamp(floor, x, y) {
         var tpl = furnitureById(state.mapStamp);
         if (!tpl || !tpl.shapes.length) return;
         var originX = snapCoord(x);
         var originY = snapCoord(y);
         var box = planSize(floor);
+        var minX = Infinity;
+        var minY = Infinity;
+        var maxX = -Infinity;
+        var maxY = -Infinity;
+        tpl.shapes.forEach(function (shape) {
+            var sx = Number(shape.x) || 0;
+            var sy = Number(shape.y) || 0;
+            minX = Math.min(minX, sx);
+            minY = Math.min(minY, sy);
+            maxX = Math.max(maxX, sx + (Number(shape.w) || 0));
+            maxY = Math.max(maxY, sy + (Number(shape.h) || 0));
+        });
         rememberMap();
         floor.rooms = floor.rooms || [];
         var first = floor.rooms.length;
+        var groupId = tpl.shapes.length > 1 ? nextGroupId(floor) : 0;
         tpl.shapes.forEach(function (shape) {
             floor.rooms.push(clampRoom({
                 kind: shape.kind,
                 name: shape.name || '',
                 color: shape.color || '',
                 angle: shape.angle || 0,
+                groupId: groupId,
                 x: originX + (Number(shape.x) || 0),
                 y: originY + (Number(shape.y) || 0),
                 w: shape.w,
                 h: shape.h
             }, box));
         });
+        var indexes = [];
+        var index;
+        for (index = first; index < floor.rooms.length; index++) indexes.push(index);
+        var anchorX = originX + (minX + maxX) / 2;
+        var anchorY = originY + (minY + maxY) / 2;
+        var backExtent = (maxY - minY) / 2;
+        var hit = nearestWall(x, y, 56);
+        if (hit) {
+            var ends = segmentEnds(hit.room);
+            var proj = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, x, y);
+            var thick = hit.room.w >= hit.room.h ? hit.room.h : hit.room.w;
+            if (proj && proj.dist <= 30 + thick / 2) {
+                var vx = proj.x - x;
+                var vy = proj.y - y;
+                var span = Math.sqrt(vx * vx + vy * vy);
+                if (span > 1) {
+                    var bx = vx / span;
+                    var by = vy / span;
+                    var turn = Math.atan2(bx, -by) * 180 / Math.PI;
+                    rotateMembers(floor.rooms, indexes, turn, anchorX, anchorY);
+                    var inwardX = -bx;
+                    var inwardY = -by;
+                    var wantX = proj.x + inwardX * (thick / 2 + backExtent);
+                    var wantY = proj.y + inwardY * (thick / 2 + backExtent);
+                    indexes.forEach(function (at) {
+                        floor.rooms[at].x += wantX - anchorX;
+                        floor.rooms[at].y += wantY - anchorY;
+                    });
+                }
+            }
+        }
+        settleFurniture(floor, indexes);
         state.mapSelection = first;
         state.mapGroup = [];
-        var index;
         for (index = first + 1; index < floor.rooms.length; index++) state.mapGroup.push(index);
         state.mapDirty = true;
         renderFrame();
@@ -18281,6 +18519,7 @@
 
     function mapViewSide() {
         var side = el('aside', 'asset-tree-catalog');
+        side.appendChild(button(t('mapPrint'), 'asset-tree-btn', printPlanSheet));
         side.appendChild(mapExplication());
         return side;
     }
@@ -18412,6 +18651,86 @@
         if (kind === 'pdf') downloadPlanFile(base + '.pdf', window.AssetTreePlan.exportPdf(model), 'application/pdf');
         else if (kind === 'dwg') downloadPlanFile(base + '.dwg', window.AssetTreePlan.exportDwg(model), 'application/acad');
         else downloadPlanFile(base + '.dxf', window.AssetTreePlan.exportDxf(model), 'application/dxf');
+    }
+
+    function printPlanSheet() {
+        var source = shownPlan();
+        if (!source) return;
+        var plan = cloneFloor(source);
+        var size = planSize(plan);
+        var node = floorCanvas(plan, false);
+        node.setAttribute('viewBox', '-28 -28 ' + (size.w + 56) + ' ' + (size.h + 56));
+        node.setAttribute('width', '1100');
+        node.setAttribute('height', '700');
+        var rooms = plan.rooms || [];
+        var explic = [];
+        var total = 0;
+        rooms.forEach(function (room) {
+            if ((room.kind || 'room') !== 'room') return;
+            var points = roomPoints(room);
+            if (points.length < 3) return;
+            var meters = Math.abs(polygonArea(points)) / 10000;
+            total += meters;
+            explic.push('<tr><td>' + htmlEscape(room.name || t('mapRoom')) + '</td><td>' + htmlEscape((Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq')) + '</td></tr>');
+        });
+        function nameAt(x, y) {
+            var best = '';
+            var bestArea = Infinity;
+            rooms.forEach(function (room) {
+                if (!isPolygonRoom(room)) return;
+                var points = roomPoints(room);
+                if (!pointInPoly(x, y, points)) return;
+                var area = Math.abs(polygonArea(points));
+                if (area < bestArea) {
+                    bestArea = area;
+                    best = room.name || t('mapRoom');
+                }
+            });
+            return best;
+        }
+        var openings = [];
+        rooms.forEach(function (room) {
+            if (room.kind !== 'door' && room.kind !== 'window') return;
+            var angle = normalizeAngle(room.angle) * Math.PI / 180;
+            var cx = room.x + room.w / 2;
+            var cy = room.y + room.h / 2;
+            var nx = -Math.sin(angle);
+            var ny = Math.cos(angle);
+            var left = nameAt(cx + nx * 36, cy + ny * 36);
+            var right = nameAt(cx - nx * 36, cy - ny * 36);
+            var where = left && right && left !== right ? left + ' / ' + right : (left || right || '');
+            var width = Math.round(room.w >= room.h ? room.w : room.h);
+            var side = room.kind === 'door' ? (parseInt(room.swing, 10) === 1 ? t('mapSideB') : t('mapSideA')) : '';
+            openings.push('<tr><td>' + htmlEscape(room.kind === 'door' ? t('mapDoor') : t('mapWindow')) + '</td><td>' + htmlEscape(where) + '</td><td>' + width + '</td><td>' + htmlEscape(side) + '</td></tr>');
+        });
+        var sheet = window.open('', '_blank');
+        if (!sheet) {
+            notify(t('printBlocked'));
+            return;
+        }
+        var title = (plan.name || t('mapFloor')) + '';
+        sheet.document.open();
+        sheet.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + htmlEscape(title) + '</title><style>'
+            + 'body{margin:0;font:14px Arial,sans-serif;color:#172b4d;background:#fff}'
+            + '.bar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #dfe1e6}'
+            + 'button{font:14px Arial,sans-serif;padding:6px 12px}'
+            + '.sheet{padding:16px 20px 28px}'
+            + 'h1{font-size:20px;margin:0 0 12px}'
+            + 'h2{font-size:15px;margin:18px 0 8px}'
+            + 'table{border-collapse:collapse;width:100%;max-width:720px}'
+            + 'td,th{border-bottom:1px solid #dfe1e6;text-align:left;padding:4px 8px}'
+            + 'svg{width:100%;height:auto;border:1px solid #dfe1e6;background:#fff}'
+            + '@media print{.bar{display:none} .sheet{padding:0}}'
+            + '</style></head><body><div class="bar"><p>' + htmlEscape(t('mapSheet')) + '</p>'
+            + '<button type="button" onclick="window.print()">' + htmlEscape(t('mapPrint')) + '</button></div><div class="sheet">'
+            + '<h1>' + htmlEscape(title) + '</h1>' + node.outerHTML
+            + '<h2>' + htmlEscape(t('mapExplic')) + '</h2><table><tr><th>' + htmlEscape(t('name')) + '</th><th>' + htmlEscape(t('mapSq')) + '</th></tr>'
+            + (explic.join('') || '<tr><td colspan="2">' + htmlEscape(t('mapExplicEmpty')) + '</td></tr>')
+            + '<tr><td>' + htmlEscape(t('mapExplicTotal')) + '</td><td>' + htmlEscape((Math.round(total * 10) / 10).toFixed(1) + ' ' + t('mapSq')) + '</td></tr></table>'
+            + '<h2>' + htmlEscape(t('mapOpenings')) + '</h2><table><tr><th></th><th>' + htmlEscape(t('mapOpeningWhere')) + '</th><th>' + htmlEscape(t('mapOpeningWidth')) + '</th><th>' + htmlEscape(t('mapSwing')) + '</th></tr>'
+            + (openings.join('') || '<tr><td colspan="4">—</td></tr>')
+            + '</table></div></body></html>');
+        sheet.document.close();
     }
 
     function applyPlanImport(name, raw) {
@@ -18580,6 +18899,7 @@
         row.appendChild(button(t('mapExportDxf'), 'asset-tree-btn slim', function () { exportPlan('dxf'); }));
         row.appendChild(button(t('mapExportDwg'), 'asset-tree-btn slim', function () { exportPlan('dwg'); }));
         row.appendChild(button(t('mapExportPdf'), 'asset-tree-btn slim', function () { exportPlan('pdf'); }));
+        row.appendChild(button(t('mapPrint'), 'asset-tree-btn slim', printPlanSheet));
         window.AssetTreePlanApply = function (name, raw) { applyPlanImport(name, raw); };
         return row;
     }
@@ -19039,7 +19359,9 @@
                     angle: normalizeAngle(room.angle),
                     x: room.x, y: room.y, w: room.w, h: room.h,
                     points: packPoints(room.points),
-                    placeId: parseInt(room.placeId, 10) || 0
+                    placeId: parseInt(room.placeId, 10) || 0,
+                    swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
+                    groupId: Math.max(0, parseInt(room.groupId, 10) || 0)
                 };
             })
         };
@@ -19240,6 +19562,7 @@
             name: '',
             color: '',
             angle: wallAngle(wall),
+            swing: 0,
             x: px - len / 2,
             y: py - thick / 2,
             w: Math.round(len),
@@ -19247,8 +19570,8 @@
         });
     }
 
-    function openingsOnWall(wallIndex) {
-        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+    function openingsOnWall(wallIndex, rooms) {
+        rooms = rooms || (state.mapDraft && state.mapDraft.rooms) || [];
         var wall = rooms[wallIndex];
         var list = [];
         if (!wall || !isSegmentKind(wall.kind)) return list;
@@ -19452,23 +19775,336 @@
         parent.appendChild(node);
     }
 
-    function wallInkNode(room) {
-        var group = svgEl('g');
-        group.setAttribute('class', 'asset-tree-ink-wall');
-        group.setAttribute('transform', shapeTransform(room));
-        group.setAttribute('pointer-events', 'none');
-        var face = svgEl('path');
-        var outline;
-        if (room.w >= room.h) {
-            outline = 'M ' + (-room.h / 2) + ' 0 L ' + (room.w + room.h / 2) + ' 0 M ' + (-room.h / 2) + ' ' + room.h + ' L ' + (room.w + room.h / 2) + ' ' + room.h;
-        } else {
-            outline = 'M 0 ' + (-room.w / 2) + ' L 0 ' + (room.h + room.w / 2) + ' M ' + room.w + ' ' + (-room.w / 2) + ' L ' + room.w + ' ' + (room.h + room.w / 2);
+    function wallBody(room) {
+        var ends = segmentEnds(room);
+        var ax = ends[0].x;
+        var ay = ends[0].y;
+        var bx = ends[1].x;
+        var by = ends[1].y;
+        var dx = bx - ax;
+        var dy = by - ay;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var thick = room.w >= room.h ? room.h : room.w;
+        return {
+            room: room,
+            a: { x: ax, y: ay },
+            b: { x: bx, y: by },
+            ux: dx / len,
+            uy: dy / len,
+            nx: -dy / len,
+            ny: dx / len,
+            len: len,
+            thick: thick,
+            half: thick / 2
+        };
+    }
+
+    function planRound(value) {
+        return Math.round(value * 10) / 10;
+    }
+
+    function pathPoint(command, point) {
+        return command + ' ' + planRound(point.x) + ' ' + planRound(point.y);
+    }
+
+    function lineMeet(p, d, q, e) {
+        var det = d.x * e.y - d.y * e.x;
+        if (Math.abs(det) < 1e-6) return null;
+        var t = ((q.x - p.x) * e.y - (q.y - p.y) * e.x) / det;
+        return { x: p.x + d.x * t, y: p.y + d.y * t, t: t };
+    }
+
+    function axesParallel(left, right) {
+        return Math.abs(left.ux * right.uy - left.uy * right.ux) < 0.14;
+    }
+
+    function nearPoint(p, q) {
+        var dx = p.x - q.x;
+        var dy = p.y - q.y;
+        return dx * dx + dy * dy <= 144;
+    }
+
+    function wallJoins(bodies, index, point) {
+        var list = [];
+        bodies.forEach(function (body, at) {
+            if (at === index) return;
+            if (nearPoint(body.a, point)) list.push({ body: body, atStart: true });
+            else if (nearPoint(body.b, point)) list.push({ body: body, atStart: false });
+        });
+        return list;
+    }
+
+    function offsetAt(body, s, side) {
+        return {
+            x: body.a.x + body.ux * s + body.nx * body.half * side,
+            y: body.a.y + body.uy * s + body.ny * body.half * side
+        };
+    }
+
+    function wallCap(body, atStart, bodies, index) {
+        var point = atStart ? body.a : body.b;
+        var joins = wallJoins(bodies, index, point);
+        var parallel = [];
+        var angled = [];
+        joins.forEach(function (join) {
+            if (axesParallel(body, join.body)) parallel.push(join);
+            else angled.push(join);
+        });
+        var left = offsetAt(body, atStart ? 0 : body.len, 1);
+        var right = offsetAt(body, atStart ? 0 : body.len, -1);
+        if (parallel.length) return { left: left, right: right, cap: false };
+        if (angled.length >= 2) {
+            var through = false;
+            var i;
+            var j;
+            for (i = 0; i < angled.length; i++) {
+                for (j = i + 1; j < angled.length; j++) {
+                    if (axesParallel(angled[i].body, angled[j].body)) through = true;
+                }
+            }
+            if (through) {
+                var other = angled[0].body;
+                var sin = Math.abs(body.ux * other.uy - body.uy * other.ux);
+                if (sin < 0.2) sin = 0.2;
+                var back = Math.min(body.len * 0.45, other.half / sin);
+                var s = atStart ? back : body.len - back;
+                return { left: offsetAt(body, s, 1), right: offsetAt(body, s, -1), cap: false };
+            }
         }
-        face.setAttribute('d', outline);
-        face.setAttribute('class', 'asset-tree-plan-mark is-face' + (room.kind === 'partition' ? ' is-partition' : ''));
-        group.appendChild(face);
-        appendDimension(group, room);
+        if (!angled.length) return { left: left, right: right, cap: true };
+        var best = angled[0];
+        var bestTurn = 999;
+        angled.forEach(function (join) {
+            var dirx = join.atStart ? join.body.ux : -join.body.ux;
+            var diry = join.atStart ? join.body.uy : -join.body.uy;
+            var ours = atStart ? { x: -body.ux, y: -body.uy } : { x: body.ux, y: body.uy };
+            var cross = ours.x * diry - ours.y * dirx;
+            var dot = ours.x * dirx + ours.y * diry;
+            var turn = Math.abs(Math.atan2(cross, dot));
+            if (turn < bestTurn) {
+                bestTurn = turn;
+                best = join;
+            }
+        });
+        var self = atStart
+            ? { x: -body.ux, y: -body.uy, nx: -body.nx, ny: -body.ny }
+            : { x: body.ux, y: body.uy, nx: body.nx, ny: body.ny };
+        var otherDir = best.atStart
+            ? { x: best.body.ux, y: best.body.uy, nx: best.body.nx, ny: best.body.ny }
+            : { x: -best.body.ux, y: -best.body.uy, nx: -best.body.nx, ny: -best.body.ny };
+        var meetL = lineMeet(
+            { x: point.x + self.nx * body.half, y: point.y + self.ny * body.half },
+            self,
+            { x: point.x + otherDir.nx * best.body.half, y: point.y + otherDir.ny * best.body.half },
+            otherDir
+        );
+        var meetR = lineMeet(
+            { x: point.x - self.nx * body.half, y: point.y - self.ny * body.half },
+            self,
+            { x: point.x - otherDir.nx * best.body.half, y: point.y - otherDir.ny * best.body.half },
+            otherDir
+        );
+        function extension(meet) {
+            if (!meet) return 9999;
+            var along = (meet.x - point.x) * body.ux + (meet.y - point.y) * body.uy;
+            return atStart ? -along : along;
+        }
+        var limit = body.thick * 3;
+        if (!meetL || !meetR || extension(meetL) > limit || extension(meetR) > limit || extension(meetL) < -body.len + 4 || extension(meetR) < -body.len + 4) {
+            return { left: left, right: right, cap: true };
+        }
+        if (atStart) return { left: meetR, right: meetL, cap: false };
+        return { left: meetL, right: meetR, cap: false };
+    }
+
+    function openingSpans(body, index, rooms) {
+        var spans = [];
+        openingsOnWall(index, rooms).forEach(function (item) {
+            var mid = item.t * body.len;
+            var half = item.length / 2;
+            var a = Math.max(0, mid - half);
+            var b = Math.min(body.len, mid + half);
+            if (b - a > 2) spans.push([a, b]);
+        });
+        spans.sort(function (p, q) { return p[0] - q[0]; });
+        var merged = [];
+        spans.forEach(function (span) {
+            if (!merged.length || span[0] > merged[merged.length - 1][1]) merged.push(span);
+            else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], span[1]);
+        });
+        return merged;
+    }
+
+    function solidSpans(len, gaps) {
+        var solids = [];
+        var cursor = 0;
+        gaps.forEach(function (gap) {
+            if (gap[0] > cursor + 1) solids.push([cursor, gap[0]]);
+            cursor = Math.max(cursor, gap[1]);
+        });
+        if (cursor < len - 1) solids.push([cursor, len]);
+        return solids;
+    }
+
+    function pieceCorners(body, span, startCap, endCap) {
+        var atStart = span[0] <= 0.5;
+        var atEnd = span[1] >= body.len - 0.5;
+        return {
+            left0: atStart ? startCap.left : offsetAt(body, span[0], 1),
+            left1: atEnd ? endCap.left : offsetAt(body, span[1], 1),
+            right0: atStart ? startCap.right : offsetAt(body, span[0], -1),
+            right1: atEnd ? endCap.right : offsetAt(body, span[1], -1),
+            atStart: atStart,
+            atEnd: atEnd
+        };
+    }
+
+    function insidePlanRoom(x, y, rooms) {
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (!isPolygonRoom(rooms[i])) continue;
+            if (pointInPoly(x, y, roomPoints(rooms[i]))) return true;
+        }
+        return false;
+    }
+
+    function wallInkLayer(rooms) {
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-ink');
+        group.setAttribute('pointer-events', 'none');
+        var bodies = [];
+        var indexes = [];
+        (rooms || []).forEach(function (room, index) {
+            if (!isSegmentKind(room.kind)) return;
+            bodies.push(wallBody(room));
+            indexes.push(index);
+        });
+        bodies.forEach(function (body, at) {
+            var index = indexes[at];
+            var startCap = wallCap(body, true, bodies, at);
+            var endCap = wallCap(body, false, bodies, at);
+            var gaps = openingSpans(body, index, rooms);
+            var solids = solidSpans(body.len, gaps);
+            var faceClass = 'asset-tree-plan-mark is-face' + (body.room.kind === 'partition' ? ' is-partition' : '');
+            var fillD = [];
+            var faceD = [];
+            solids.forEach(function (span) {
+                var piece = pieceCorners(body, span, startCap, endCap);
+                fillD.push(pathPoint('M', piece.left0) + ' ' + pathPoint('L', piece.left1) + ' ' + pathPoint('L', piece.right1) + ' ' + pathPoint('L', piece.right0) + ' Z');
+                faceD.push(pathPoint('M', piece.left0) + ' ' + pathPoint('L', piece.left1));
+                faceD.push(pathPoint('M', piece.right0) + ' ' + pathPoint('L', piece.right1));
+                if (piece.atStart && startCap.cap) faceD.push(pathPoint('M', piece.left0) + ' ' + pathPoint('L', piece.right0));
+                if (piece.atEnd && endCap.cap) faceD.push(pathPoint('M', piece.left1) + ' ' + pathPoint('L', piece.right1));
+            });
+            gaps.forEach(function (gap) {
+                if (gap[0] > 1 && gap[0] < body.len - 1) faceD.push(pathPoint('M', offsetAt(body, gap[0], 1)) + ' ' + pathPoint('L', offsetAt(body, gap[0], -1)));
+                if (gap[1] > 1 && gap[1] < body.len - 1) faceD.push(pathPoint('M', offsetAt(body, gap[1], 1)) + ' ' + pathPoint('L', offsetAt(body, gap[1], -1)));
+            });
+            if (fillD.length) {
+                var fill = svgEl('path');
+                fill.setAttribute('class', 'asset-tree-wall-fill');
+                fill.setAttribute('d', fillD.join(' '));
+                group.appendChild(fill);
+            }
+            if (faceD.length) {
+                var face = svgEl('path');
+                face.setAttribute('class', faceClass);
+                face.setAttribute('d', faceD.join(' '));
+                group.appendChild(face);
+            }
+        });
+        appendRunDimensions(group, bodies, rooms);
         return group;
+    }
+
+    function appendRunDimensions(parent, bodies, rooms) {
+        var parentOf = [];
+        var i;
+        for (i = 0; i < bodies.length; i++) parentOf.push(i);
+        function find(id) {
+            while (parentOf[id] !== id) id = parentOf[id];
+            return id;
+        }
+        function unite(a, b) {
+            var pa = find(a);
+            var pb = find(b);
+            if (pa !== pb) parentOf[pb] = pa;
+        }
+        for (i = 0; i < bodies.length; i++) {
+            var j;
+            for (j = i + 1; j < bodies.length; j++) {
+                if (!axesParallel(bodies[i], bodies[j])) continue;
+                var linked = (nearPoint(bodies[i].a, bodies[j].a) || nearPoint(bodies[i].a, bodies[j].b) || nearPoint(bodies[i].b, bodies[j].a) || nearPoint(bodies[i].b, bodies[j].b));
+                if (!linked) continue;
+                var onLine = true;
+                [bodies[j].a, bodies[j].b].forEach(function (point) {
+                    var off = (point.x - bodies[i].a.x) * bodies[i].nx + (point.y - bodies[i].a.y) * bodies[i].ny;
+                    if (Math.abs(off) > 10) onLine = false;
+                });
+                if (onLine) unite(i, j);
+            }
+        }
+        var runs = {};
+        for (i = 0; i < bodies.length; i++) {
+            var root = find(i);
+            if (!runs[root]) runs[root] = [];
+            runs[root].push(i);
+        }
+        Object.keys(runs).forEach(function (key) {
+            var members = runs[key].map(function (id) { return bodies[id]; });
+            var axis = members[0];
+            var minS = Infinity;
+            var maxS = -Infinity;
+            var minP = axis.a;
+            var maxP = axis.b;
+            members.forEach(function (body) {
+                [body.a, body.b].forEach(function (point) {
+                    var s = point.x * axis.ux + point.y * axis.uy;
+                    if (s < minS) {
+                        minS = s;
+                        minP = point;
+                    }
+                    if (s > maxS) {
+                        maxS = s;
+                        maxP = point;
+                    }
+                });
+            });
+            var length = maxS - minS;
+            if (length < 40) return;
+            var mid = { x: (minP.x + maxP.x) / 2, y: (minP.y + maxP.y) / 2 };
+            var probe = axis.half + 24;
+            var plusIn = insidePlanRoom(mid.x + axis.nx * probe, mid.y + axis.ny * probe, rooms);
+            var minusIn = insidePlanRoom(mid.x - axis.nx * probe, mid.y - axis.ny * probe, rooms);
+            if (plusIn && minusIn) return;
+            var nx = axis.nx;
+            var ny = axis.ny;
+            if (plusIn || (!plusIn && !minusIn)) {
+                nx = -axis.nx;
+                ny = -axis.ny;
+            }
+            var off = axis.half + 18;
+            var textOff = axis.half + 30;
+            var line = svgEl('path');
+            var a = { x: minP.x + nx * off, y: minP.y + ny * off };
+            var b = { x: maxP.x + nx * off, y: maxP.y + ny * off };
+            var tick = 7;
+            line.setAttribute('class', 'asset-tree-dim-line');
+            line.setAttribute('d', pathPoint('M', a) + ' ' + pathPoint('L', b)
+                + ' ' + pathPoint('M', { x: a.x - nx * tick, y: a.y - ny * tick }) + ' ' + pathPoint('L', { x: a.x + nx * tick, y: a.y + ny * tick })
+                + ' ' + pathPoint('M', { x: b.x - nx * tick, y: b.y - ny * tick }) + ' ' + pathPoint('L', { x: b.x + nx * tick, y: b.y + ny * tick }));
+            parent.appendChild(line);
+            var node = svgEl('text');
+            node.setAttribute('class', 'asset-tree-dim');
+            node.setAttribute('text-anchor', 'middle');
+            node.setAttribute('dominant-baseline', 'middle');
+            var deg = Math.atan2(axis.uy, axis.ux) * 180 / Math.PI;
+            while (deg > 90) deg -= 180;
+            while (deg < -90) deg += 180;
+            node.setAttribute('transform', 'translate(' + planRound(mid.x + nx * textOff) + ' ' + planRound(mid.y + ny * textOff) + ') rotate(' + planRound(deg) + ')');
+            node.textContent = String(Math.round(length));
+            parent.appendChild(node);
+        });
     }
 
     function roomPoints(room) {
@@ -19945,12 +20581,7 @@
         drawnWalls.forEach(function (pair) {
             svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
         });
-        var ink = svgEl('g');
-        ink.setAttribute('class', 'asset-tree-ink');
-        drawnWalls.forEach(function (pair) {
-            ink.appendChild(wallInkNode(pair[0]));
-        });
-        svg.appendChild(ink);
+        svg.appendChild(wallInkLayer(floor.rooms || []));
         drawnRest.forEach(function (pair) {
             svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
         });
@@ -20274,7 +20905,12 @@
                     return;
                 }
                 state.mapSelection = index;
-                state.mapGroup = [];
+                var mates = isFurnKind(room.kind) ? groupIndexes(options.floor.rooms, index) : [index];
+                state.mapGroup = mates.filter(function (at) { return at !== index; });
+                var origins = {};
+                mates.forEach(function (at) {
+                    origins[at] = { x: options.floor.rooms[at].x, y: options.floor.rooms[at].y };
+                });
                 var point = svgPoint(options.svg, event);
                 beginDrag(options.svg, {
                     kind: 'move',
@@ -20309,13 +20945,26 @@
                             }
                         }
                     }
-                    room.x = clampNum(snapCoord(next.x - state.mapDrag.dx), 0, options.size.w - room.w);
-                    room.y = clampNum(snapCoord(next.y - state.mapDrag.dy), 0, options.size.h - room.h);
-                    group.setAttribute('transform', shapeTransform(room));
-                    if (state.mapDrag.attached) reseatOpenings(options.svg, index, state.mapDrag.attached);
+                    if (mates.length > 1) {
+                        var shiftX = snapCoord(next.x) - snapCoord(state.mapDrag.x0);
+                        var shiftY = snapCoord(next.y) - snapCoord(state.mapDrag.y0);
+                        mates.forEach(function (at) {
+                            var item = options.floor.rooms[at];
+                            item.x = origins[at].x + shiftX;
+                            item.y = origins[at].y + shiftY;
+                            var node = options.svg.querySelector('.asset-tree-shape[data-index="' + at + '"]');
+                            if (node) node.setAttribute('transform', shapeTransform(item));
+                        });
+                    } else {
+                        room.x = clampNum(snapCoord(next.x - state.mapDrag.dx), 0, options.size.w - room.w);
+                        room.y = clampNum(snapCoord(next.y - state.mapDrag.dy), 0, options.size.h - room.h);
+                        group.setAttribute('transform', shapeTransform(room));
+                        if (state.mapDrag.attached) reseatOpenings(options.svg, index, state.mapDrag.attached);
+                    }
                     state.mapDirty = true;
                 }, function (finished) {
                     if (finished && !finished.moved && state.mapAssetId) placeArmedPin(options.floor, finished.x0, finished.y0);
+                    if (finished && finished.moved && isFurnKind(room.kind)) settleFurniture(options.floor, mates);
                     renderFrame();
                 });
             });
@@ -20353,7 +21002,7 @@
             measure.setAttribute('x', String((x1 + x2) / 2));
             measure.setAttribute('y', String((y1 + y2) / 2 - 6));
             measure.setAttribute('class', 'asset-tree-room-area');
-            measure.textContent = planMeters(room.w) + ' ' + t('mapMeters');
+            measure.textContent = String(Math.round(Math.max(room.w, room.h)));
             parent.appendChild(measure);
             return;
         }
@@ -20553,9 +21202,15 @@
                 : 'M ' + (x + w * 0.28) + ' ' + y + ' L ' + (x + w * 0.28) + ' ' + (y + h)
                     + ' M ' + (x + w * 0.5) + ' ' + y + ' L ' + (x + w * 0.5) + ' ' + (y + h)
                     + ' M ' + (x + w * 0.72) + ' ' + y + ' L ' + (x + w * 0.72) + ' ' + (y + h);
+        } else if (alongX && parseInt(room.swing, 10) === 1) {
+            d = 'M ' + x + ' ' + y + ' L ' + x + ' ' + (y - w)
+                + ' M ' + x + ' ' + (y - w) + ' A ' + w + ' ' + w + ' 0 0 1 ' + (x + w) + ' ' + y;
         } else if (alongX) {
             d = 'M ' + x + ' ' + (y + h) + ' L ' + x + ' ' + (y + h + w)
                 + ' M ' + x + ' ' + (y + h + w) + ' A ' + w + ' ' + w + ' 0 0 0 ' + (x + w) + ' ' + (y + h);
+        } else if (parseInt(room.swing, 10) === 1) {
+            d = 'M ' + x + ' ' + y + ' L ' + (x - h) + ' ' + y
+                + ' M ' + (x - h) + ' ' + y + ' A ' + h + ' ' + h + ' 0 0 0 ' + x + ' ' + (y + h);
         } else {
             d = 'M ' + (x + w) + ' ' + y + ' L ' + (x + w + h) + ' ' + y
                 + ' M ' + (x + w + h) + ' ' + y + ' A ' + h + ' ' + h + ' 0 0 1 ' + (x + w) + ' ' + (y + h);
@@ -20758,15 +21413,51 @@
         knob.addEventListener('mousedown', function (event) {
             event.preventDefault();
             event.stopPropagation();
-            beginDrag(options.svg, { kind: 'rotate' }, function (move) {
+            var members = isFurnKind(room.kind) ? groupIndexes(options.floor.rooms, options.index) : [options.index];
+            var center = members.length > 1
+                ? groupCenter(options.floor.rooms, members)
+                : { x: room.x + room.w / 2, y: room.y + room.h / 2 };
+            var baseMembers = members.map(function (at) {
+                var item = options.floor.rooms[at];
+                return { index: at, x: item.x, y: item.y, w: item.w, h: item.h, angle: item.angle || 0 };
+            });
+            var pointer = svgPoint(options.svg, event);
+            beginDrag(options.svg, {
+                kind: 'rotate',
+                base: Math.atan2(pointer.y - center.y, pointer.x - center.x)
+            }, function (move) {
                 var point = svgPoint(options.svg, move);
-                var cx = room.x + room.w / 2;
-                var cy = room.y + room.h / 2;
-                var deg = Math.atan2(point.y - cy, point.x - cx) * 180 / Math.PI + 90;
-                room.angle = snapAngle(deg, move.shiftKey);
-                group.setAttribute('transform', shapeTransform(room));
+                if (members.length < 2) {
+                    var deg = Math.atan2(point.y - center.y, point.x - center.x) * 180 / Math.PI + 90;
+                    room.angle = snapAngle(deg, move.shiftKey);
+                    group.setAttribute('transform', shapeTransform(room));
+                } else {
+                    var now = Math.atan2(point.y - center.y, point.x - center.x);
+                    var delta = (now - state.mapDrag.base) * 180 / Math.PI;
+                    var stepped = move.shiftKey ? Math.round(delta) : Math.round(delta / 15) * 15;
+                    baseMembers.forEach(function (item) {
+                        var target = options.floor.rooms[item.index];
+                        var rcx = item.x + item.w / 2;
+                        var rcy = item.y + item.h / 2;
+                        var rad = stepped * Math.PI / 180;
+                        var cos = Math.cos(rad);
+                        var sin = Math.sin(rad);
+                        var dx = rcx - center.x;
+                        var dy = rcy - center.y;
+                        var nx = center.x + dx * cos - dy * sin;
+                        var ny = center.y + dx * sin + dy * cos;
+                        target.x = nx - item.w / 2;
+                        target.y = ny - item.h / 2;
+                        target.angle = normalizeAngle(item.angle + stepped);
+                        var node = options.svg.querySelector('.asset-tree-shape[data-index="' + item.index + '"]');
+                        if (node) node.setAttribute('transform', shapeTransform(target));
+                    });
+                }
                 state.mapDirty = true;
-            }, function () { renderFrame(); });
+            }, function () {
+                if (members.length > 1) settleFurniture(options.floor, members);
+                renderFrame();
+            });
         });
         group.appendChild(knob);
     }
@@ -20883,7 +21574,7 @@
         if (isSegmentKind(room.kind)) {
             var ends = segmentEnds(room);
             var thick = room.w >= room.h ? room.h : room.w;
-            block.appendChild(el('span', 'asset-tree-plan-label', planMeters(Math.max(room.w, room.h)) + ' ' + t('mapMeter')));
+            block.appendChild(el('span', 'asset-tree-plan-label', Math.round(Math.max(room.w, room.h)) + ' ' + t('mapCm')));
             block.appendChild(el('span', 'asset-tree-plan-label', t('mapThick')));
             var thickInput = document.createElement('input');
             thickInput.type = 'number';
@@ -20913,6 +21604,17 @@
                 renderFrame();
             });
             block.appendChild(thickInput);
+        }
+        if (room.kind === 'door') {
+            var swingBtn = button(t('mapSwing'), 'asset-tree-btn slim', function () {
+                rememberMap();
+                room.swing = parseInt(room.swing, 10) === 1 ? 0 : 1;
+                state.mapDirty = true;
+                renderFrame();
+            });
+            swingBtn.title = t('mapSwing');
+            block.appendChild(el('span', 'asset-tree-plan-label', parseInt(room.swing, 10) === 1 ? t('mapSideB') : t('mapSideA')));
+            block.appendChild(swingBtn);
         }
         if ((room.kind || 'room') === 'room') {
             var colors = el('div', 'asset-tree-swatches');

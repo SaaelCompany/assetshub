@@ -16,6 +16,8 @@ public class RoomDto {
     private int angle;
     private String points;
     private int placeId;
+    private int swing;
+    private int groupId;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -39,4 +41,8 @@ public class RoomDto {
     public void setPoints(String points) { this.points = points; }
     public int getPlaceId() { return placeId; }
     public void setPlaceId(int placeId) { this.placeId = placeId; }
+    public int getSwing() { return swing; }
+    public void setSwing(int swing) { this.swing = swing; }
+    public int getGroupId() { return groupId; }
+    public void setGroupId(int groupId) { this.groupId = groupId; }
 }

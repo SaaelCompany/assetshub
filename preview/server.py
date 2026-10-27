@@ -2641,6 +2641,8 @@ def floor_dto(row):
             "angle": room_angle(room.get("angle")),
             "points": room_points(room.get("points")),
             "placeId": room_place(room.get("placeId")),
+            "swing": 1 if int(room.get("swing") or 0) == 1 else 0,
+            "groupId": max(0, min(1000000, int(room.get("groupId") or 0))),
         })
     pins = []
     for pin in row.get("pins") or []:
@@ -2747,6 +2749,8 @@ def save_floor(project_key, floor_id, body, text):
             "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
             "points": room_points(room.get("points")),
             "placeId": room_place(room.get("placeId")),
+            "swing": 1 if int(room.get("swing") or 0) == 1 else 0,
+            "groupId": max(0, min(1000000, int(room.get("groupId") or 0))),
         })
         seq += 1
     stored_pins = []
