@@ -17297,12 +17297,9 @@
 
     function buildingAssets() {
         return placeAssets().filter(function (asset) {
-            if (!asset || !asset.id) return false;
-            if (!asset.parentId) return true;
-            var parent = byId()[asset.parentId];
-            return !parent || !isFolder(parent);
+            return !!(asset && asset.id);
         }).sort(function (left, right) {
-            return String(left.name || '').localeCompare(String(right.name || ''), 'ru');
+            return crumbs(left).localeCompare(crumbs(right), 'ru');
         });
     }
 
@@ -17444,6 +17441,7 @@
             angle: normalizeAngle(room.angle),
             points: roomPoints(room),
             placeId: parseInt(room.placeId, 10) || 0,
+            assetId: Math.max(0, parseInt(room.assetId, 10) || 0),
             swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
             groupId: groupId,
             x: x, y: y, w: w, h: h
@@ -17563,6 +17561,132 @@
         }, factor);
     }
 
+    function shapeBounds(room) {
+        var points = isPolygonRoom(room) ? roomPoints(room) : shapeCorners(room);
+        var minX = points[0] ? points[0].x : 0;
+        var minY = points[0] ? points[0].y : 0;
+        var maxX = minX;
+        var maxY = minY;
+        points.forEach(function (point) {
+            minX = Math.min(minX, point.x);
+            minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x);
+            maxY = Math.max(maxY, point.y);
+        });
+        return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+    }
+
+    function boundsHit(left, right) {
+        return left.x < right.x + right.w && left.x + left.w > right.x && left.y < right.y + right.h && left.y + left.h > right.y;
+    }
+
+    function selectionMembers(rooms, index) {
+        var already = index === state.mapSelection || (state.mapGroup || []).indexOf(index) >= 0;
+        var seed = already ? [state.mapSelection].concat(state.mapGroup || []) : [index];
+        var set = [];
+        function add(at) {
+            if (at == null || at < 0 || !rooms[at] || set.indexOf(at) >= 0) return;
+            set.push(at);
+        }
+        seed.forEach(add);
+        var extra = [];
+        set.forEach(function (at) {
+            if (rooms[at] && isFurnKind(rooms[at].kind)) {
+                groupIndexes(rooms, at).forEach(function (mate) { extra.push(mate); });
+            }
+        });
+        extra.forEach(add);
+        return set;
+    }
+
+    function paintMarquee(svg, drag) {
+        var node = svg.querySelector('#asset-tree-marquee');
+        if (!drag || !drag.moved) {
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+            return;
+        }
+        if (!node) {
+            node = svgEl('rect');
+            node.id = 'asset-tree-marquee';
+            node.setAttribute('class', 'asset-tree-rubber is-marquee');
+            svg.appendChild(node);
+        }
+        node.setAttribute('x', String(Math.min(drag.x0, drag.x1)));
+        node.setAttribute('y', String(Math.min(drag.y0, drag.y1)));
+        node.setAttribute('width', String(Math.abs(drag.x1 - drag.x0)));
+        node.setAttribute('height', String(Math.abs(drag.y1 - drag.y0)));
+    }
+
+    function applyMarquee(floor, drag) {
+        var box = {
+            x: Math.min(drag.x0, drag.x1),
+            y: Math.min(drag.y0, drag.y1),
+            w: Math.abs(drag.x1 - drag.x0),
+            h: Math.abs(drag.y1 - drag.y0)
+        };
+        var hits = [];
+        (floor.rooms || []).forEach(function (room, index) {
+            if ((room.kind || 'room') === 'room') return;
+            if (boundsHit(shapeBounds(room), box)) hits.push(index);
+        });
+        if (drag.shift) {
+            if (state.mapSelection != null && hits.indexOf(state.mapSelection) < 0) hits.unshift(state.mapSelection);
+            (state.mapGroup || []).forEach(function (index) {
+                if (hits.indexOf(index) < 0) hits.push(index);
+            });
+        }
+        if (!hits.length) {
+            if (!drag.shift) {
+                state.mapSelection = null;
+                state.mapGroup = [];
+            }
+            return;
+        }
+        state.mapSelection = hits[0];
+        state.mapGroup = hits.slice(1);
+    }
+
+    function startMarquee(svg, floor, event, clickIndex) {
+        event.preventDefault();
+        event.stopPropagation();
+        var point = svgPoint(svg, event);
+        beginDrag(svg, {
+            kind: 'marquee',
+            x0: point.x,
+            y0: point.y,
+            x1: point.x,
+            y1: point.y,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            shift: !!event.shiftKey,
+            moved: false,
+            clickIndex: clickIndex == null ? -1 : clickIndex
+        }, function (move) {
+            var next = svgPoint(svg, move);
+            var cdx = move.clientX - state.mapDrag.clientX;
+            var cdy = move.clientY - state.mapDrag.clientY;
+            if (cdx * cdx + cdy * cdy > 16) state.mapDrag.moved = true;
+            state.mapDrag.x1 = next.x;
+            state.mapDrag.y1 = next.y;
+            paintMarquee(svg, state.mapDrag);
+        }, function (finished) {
+            paintMarquee(svg, null);
+            if (!finished || !finished.moved) {
+                if (finished && finished.clickIndex >= 0) {
+                    state.mapSelection = finished.clickIndex;
+                    state.mapGroup = [];
+                } else if (!finished || !finished.shift) {
+                    state.mapSelection = null;
+                    state.mapGroup = [];
+                }
+                renderFrame();
+                return;
+            }
+            applyMarquee(floor, finished);
+            renderFrame();
+        });
+    }
+
     function startPan(svg, event) {
         event.preventDefault();
         event.stopPropagation();
@@ -17658,12 +17782,13 @@
 
     function builtinFurniture() {
         function piece(id, key, kind, w, h) {
-            return { id: id, name: t(key), builtin: true, shapes: [{ kind: kind, name: '', color: '', angle: 0, x: 0, y: 0, w: w, h: h }] };
+            return { id: id, name: t(key), builtin: true, shapes: [{ kind: kind, name: t(key), color: '', angle: 0, x: 0, y: 0, w: w, h: h }] };
         }
         function bit(kind, x, y, w, h, angle) {
             return { kind: kind, name: '', color: '', angle: angle || 0, x: x, y: y, w: w, h: h };
         }
         function group(id, key, shapes) {
+            if (shapes.length && !shapes[0].name) shapes[0].name = t(key);
             return { id: id, name: t(key), builtin: true, shapes: shapes };
         }
         return [
@@ -17725,7 +17850,36 @@
                 bit('cabinet', 0, 0, 72, 36, 0),
                 bit('cabinet', 80, 0, 72, 36, 0),
                 bit('pedestal', 160, 0, 36, 48, 0)
-            ])
+            ]),
+            piece('wardrobe', 'mapWardrobe', 'cabinet', 90, 56),
+            group('shelf', 'mapShelf', [
+                bit('cabinet', 0, 0, 140, 28, 0),
+                bit('cabinet', 0, 36, 140, 28, 0),
+                bit('cabinet', 0, 72, 140, 28, 0)
+            ]),
+            group('filing', 'mapFiling', [
+                bit('pedestal', 0, 0, 36, 52, 0),
+                bit('pedestal', 40, 0, 36, 52, 0),
+                bit('pedestal', 80, 0, 36, 52, 0)
+            ]),
+            group('printer', 'mapPrinter', [
+                bit('desk', 0, 16, 90, 50, 0),
+                bit('pedestal', 26, 0, 38, 22, 0)
+            ]),
+            piece('cooler', 'mapCooler', 'pedestal', 40, 40),
+            piece('board', 'mapBoard', 'cabinet', 160, 12),
+            group('locker', 'mapLocker', [
+                bit('cabinet', 0, 0, 32, 48, 0),
+                bit('cabinet', 36, 0, 32, 48, 0),
+                bit('cabinet', 72, 0, 32, 48, 0),
+                bit('cabinet', 108, 0, 32, 48, 0)
+            ]),
+            piece('bench', 'mapBench', 'sofa', 140, 40),
+            piece('coffee', 'mapCoffee', 'table', 80, 48),
+            piece('armchair', 'mapArmchair', 'seat', 64, 64),
+            piece('fridge', 'mapFridge', 'cabinet', 60, 64),
+            piece('safe', 'mapSafe', 'cabinet', 48, 48),
+            piece('screen', 'mapScreen', 'cabinet', 180, 10)
         ];
     }
 
@@ -17841,6 +17995,7 @@
                 angle: source.angle,
                 points: shifted,
                 swing: source.swing,
+                assetId: 0,
                 groupId: groups[parseInt(source.groupId, 10) || 0] || 0,
                 x: Math.max(0, Math.min(source.x + step, box.w - source.w)),
                 y: Math.max(0, Math.min(source.y + step, box.h - source.h)),
@@ -17903,6 +18058,7 @@
                 angle: source.angle,
                 points: shifted,
                 swing: source.swing,
+                assetId: 0,
                 groupId: groups[parseInt(source.groupId, 10) || 0] || 0,
                 x: originX + (source.x - minX),
                 y: originY + (source.y - minY),
@@ -18481,10 +18637,21 @@
         var row = el('div', 'asset-tree-plan-row');
         var title = el('div', 'asset-tree-plan-title');
         title.appendChild(mapNavButton('prev', function () { shiftBuilding(-1); }));
-        var building = currentBuilding();
-        var buildingName = el('strong', null, building ? (building.name || t('mapPageTitle')) : t('mapPageTitle'));
-        buildingName.title = buildingName.textContent;
-        title.appendChild(buildingName);
+        var buildings = buildingAssets();
+        var buildingPick = document.createElement('select');
+        buildingPick.className = 'asset-tree-building-pick';
+        buildingPick.setAttribute('aria-label', t('mapBuildings'));
+        buildings.forEach(function (asset) {
+            var option = document.createElement('option');
+            option.value = String(asset.id);
+            option.textContent = crumbs(asset);
+            buildingPick.appendChild(option);
+        });
+        if (state.mapPlaceId) buildingPick.value = String(state.mapPlaceId);
+        buildingPick.addEventListener('change', function () {
+            chooseBuilding(parseInt(buildingPick.value, 10) || 0);
+        });
+        title.appendChild(buildingPick);
         title.appendChild(mapNavButton('next', function () { shiftBuilding(1); }));
         row.appendChild(title);
         var chips = el('div', 'asset-tree-plan-floors');
@@ -18604,13 +18771,8 @@
         var side = el('aside', 'asset-tree-catalog');
         side.appendChild(mapToolGrid());
         side.appendChild(mapPlanActions());
-        side.appendChild(mapExplication());
-        side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
         side.appendChild(el('h3', null, t('mapFurnReady')));
-        var ready = el('div', 'asset-tree-thumb-grid');
-        builtinFurniture().forEach(function (tpl) { ready.appendChild(thumbCard(tpl)); });
-        side.appendChild(ready);
-        side.appendChild(el('h3', null, t('mapMyTemplates')));
+        side.appendChild(el('p', 'asset-tree-catalog-hint is-steps', t('mapFurnHint')));
         var saveRow = el('div', 'asset-tree-template-save');
         var saveTpl = button(t('mapSaveTemplate'), 'asset-tree-btn', function () {
             if (!selectedShapeList().length) return;
@@ -18618,9 +18780,9 @@
             renderFrame();
         });
         saveTpl.disabled = !selectedShapeList().length;
+        saveTpl.title = t('mapFurnHint');
         saveRow.appendChild(saveTpl);
         side.appendChild(saveRow);
-        side.appendChild(el('p', 'asset-tree-catalog-hint', t('mapFurnHint')));
         if (state.mapNaming && selectedShapeList().length) {
             var templateName = document.createElement('input');
             templateName.className = 'asset-tree-template-name';
@@ -18635,10 +18797,17 @@
             side.appendChild(templateName);
             setTimeout(function () { if (templateName.parentNode) templateName.focus(); }, 0);
         }
+        var ready = el('div', 'asset-tree-thumb-grid');
+        builtinFurniture().forEach(function (tpl) { ready.appendChild(thumbCard(tpl)); });
+        side.appendChild(ready);
+        side.appendChild(el('h3', null, t('mapMyTemplates')));
         var mine = el('div', 'asset-tree-thumb-grid');
         var custom = customFurniture();
         custom.forEach(function (tpl) { mine.appendChild(thumbCard(tpl)); });
         side.appendChild(mine);
+        side.appendChild(el('p', 'asset-tree-catalog-hint', t('mapObjectHint')));
+        side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
+        side.appendChild(mapExplication());
         side.appendChild(mapGearCard());
         return side;
     }
@@ -18959,7 +19128,7 @@
             });
             pinStyle(tool, {
                 display: 'grid',
-                'grid-template-rows': '24px 18px',
+                'grid-template-rows': '22px 16px',
                 'grid-template-columns': 'minmax(0, 1fr)',
                 'align-items': 'center',
                 'justify-items': 'center',
@@ -18969,9 +19138,9 @@
                 'flex-wrap': 'nowrap',
                 gap: '2px',
                 width: '100%',
-                height: '56px',
-                'min-height': '56px',
-                'max-height': '56px',
+                height: '46px',
+                'min-height': '46px',
+                'max-height': '46px',
                 margin: '0',
                 padding: '4px 2px',
                 'box-sizing': 'border-box',
@@ -18989,8 +19158,8 @@
                 display: 'flex',
                 'align-items': 'center',
                 'justify-content': 'center',
-                width: '24px',
-                height: '24px',
+                width: '20px',
+                height: '20px',
                 margin: '0',
                 padding: '0',
                 'line-height': '0',
@@ -19007,13 +19176,13 @@
                 'align-items': 'center',
                 'justify-content': 'center',
                 width: '100%',
-                height: '18px',
+                height: '16px',
                 margin: '0',
                 padding: '0',
                 overflow: 'hidden',
-                'font-size': '12px',
+                'font-size': '11px',
                 'font-weight': '400',
-                'line-height': '18px',
+                'line-height': '16px',
                 'letter-spacing': '0',
                 'text-align': 'center',
                 'text-indent': '0',
@@ -19214,6 +19383,9 @@
             if (!assetInBuilding(asset, state.mapPlaceId)) return;
             var placed = false;
             pins.forEach(function (pin) { if (pin.assetId === asset.id) placed = true; });
+            ((state.mapDraft && state.mapDraft.rooms) || []).forEach(function (room) {
+                if (parseInt(room.assetId, 10) === asset.id) placed = true;
+            });
             if (placed) onFloor++;
             rows.push({ asset: asset, placed: placed });
         });
@@ -19397,6 +19569,7 @@
                     x: room.x, y: room.y, w: room.w, h: room.h,
                     points: packPoints(room.points),
                     placeId: parseInt(room.placeId, 10) || 0,
+                    assetId: Math.max(0, parseInt(room.assetId, 10) || 0),
                     swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
                     groupId: Math.max(0, parseInt(room.groupId, 10) || 0)
                 };
@@ -20545,10 +20718,26 @@
         });
     }
 
+    function gridDotPath(size) {
+        var path = svgEl('path');
+        var step = 20;
+        var parts = [];
+        var x;
+        var y;
+        for (x = step; x < size.w; x += step) {
+            for (y = step; y < size.h; y += step) {
+                parts.push('M' + x + ' ' + y + 'm-1.2 0a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0');
+            }
+        }
+        path.setAttribute('d', parts.join(''));
+        path.setAttribute('class', 'asset-tree-grid-dots');
+        path.setAttribute('pointer-events', 'none');
+        return path;
+    }
+
     function floorCanvas(floor, editing) {
         syncClosedRooms(floor, editing);
         var size = planSize(floor);
-        var step = editing ? (state.mapStep || 8) : (moduleSetup().mapGrid || 24);
         var cam = activeCamera(size);
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
@@ -20559,23 +20748,6 @@
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.setAttribute('width', '100%');
         svg.setAttribute('height', '100%');
-        var defs = svgEl('defs');
-        var pattern = svgEl('pattern');
-        pattern.setAttribute('id', 'asset-tree-grid');
-        pattern.setAttribute('width', String(step));
-        pattern.setAttribute('height', String(step));
-        pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-        var gridStep = 20;
-        pattern.setAttribute('width', String(gridStep));
-        pattern.setAttribute('height', String(gridStep));
-        var grid = svgEl('circle');
-        grid.setAttribute('cx', String(gridStep / 2));
-        grid.setAttribute('cy', String(gridStep / 2));
-        grid.setAttribute('r', '1.6');
-        grid.setAttribute('fill', '#a8b0bd');
-        pattern.appendChild(grid);
-        defs.appendChild(pattern);
-        svg.appendChild(defs);
         var paper = svgEl('rect');
         paper.setAttribute('x', '0');
         paper.setAttribute('y', '0');
@@ -20584,13 +20756,7 @@
         paper.setAttribute('class', 'asset-tree-paper');
         paper.setAttribute('fill', '#ffffff');
         svg.appendChild(paper);
-        var gridPaper = svgEl('rect');
-        gridPaper.setAttribute('x', '0');
-        gridPaper.setAttribute('y', '0');
-        gridPaper.setAttribute('width', String(size.w));
-        gridPaper.setAttribute('height', String(size.h));
-        gridPaper.setAttribute('fill', 'url(#asset-tree-grid)');
-        gridPaper.setAttribute('pointer-events', 'none');
+        var gridPaper = gridDotPath(size);
         var shapeOptions = function (room, index) {
             return {
                 editing: editing,
@@ -20667,15 +20833,23 @@
         });
         paper.addEventListener('mousedown', function (event) {
             if (event.button !== 0) return;
-            if (!editing || state.mapTool === 'select') {
-                if (editing && state.mapTool === 'select' && state.mapAssetId) {
+            if (!editing) {
+                startPan(svg, event);
+                return;
+            }
+            if (state.mapTool === 'select') {
+                if (state.mapAssetId) {
                     event.preventDefault();
                     event.stopPropagation();
                     var point = svgPoint(svg, event);
                     if (placeArmedPin(floor, point.x, point.y)) renderFrame();
                     return;
                 }
-                startPan(svg, event);
+                if (event.altKey) {
+                    startPan(svg, event);
+                    return;
+                }
+                startMarquee(svg, floor, event);
             }
         });
         if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room')) {
@@ -20895,9 +21069,16 @@
                 if (event.button !== 0 || state.mapTool !== 'select') return;
                 event.preventDefault();
                 event.stopPropagation();
-                state.mapSelection = options.index;
-                state.mapGroup = [];
-                renderFrame();
+                if (state.mapAssetId) {
+                    var point = svgPoint(options.svg, event);
+                    if (placeArmedPin(options.floor, point.x, point.y)) renderFrame();
+                    return;
+                }
+                if (event.altKey) {
+                    startPan(options.svg, event);
+                    return;
+                }
+                startMarquee(options.svg, options.floor, event, options.index);
             });
         }
         return group;
@@ -20941,8 +21122,8 @@
                     renderFrame();
                     return;
                 }
+                var mates = selectionMembers(options.floor.rooms, index);
                 state.mapSelection = index;
-                var mates = isFurnKind(room.kind) ? groupIndexes(options.floor.rooms, index) : [index];
                 state.mapGroup = mates.filter(function (at) { return at !== index; });
                 var origins = {};
                 mates.forEach(function (at) {
@@ -20964,7 +21145,7 @@
                     var dy = next.y - state.mapDrag.y0;
                     if (!state.mapDrag.moved && dx * dx + dy * dy < 16) return;
                     state.mapDrag.moved = true;
-                    if (room.kind === 'door' || room.kind === 'window') {
+                    if (mates.length === 1 && (room.kind === 'door' || room.kind === 'window')) {
                         var hit = nearestWall(next.x, next.y, 40);
                         if (hit) {
                             var seated = seatOpening(room.kind, hit.room, hit.t, room.w >= room.h ? room.w : room.h);
@@ -21001,7 +21182,12 @@
                     state.mapDirty = true;
                 }, function (finished) {
                     if (finished && !finished.moved && state.mapAssetId) placeArmedPin(options.floor, finished.x0, finished.y0);
-                    if (finished && finished.moved && isFurnKind(room.kind)) settleFurniture(options.floor, mates);
+                    if (finished && finished.moved) {
+                        var furn = mates.filter(function (at) {
+                            return options.floor.rooms[at] && isFurnKind(options.floor.rooms[at].kind);
+                        });
+                        if (furn.length) settleFurniture(options.floor, furn);
+                    }
                     renderFrame();
                 });
             });
@@ -21258,17 +21444,29 @@
         parent.appendChild(markLine);
     }
 
+    function furnitureCaption(room) {
+        var asset = room && room.assetId ? byId()[room.assetId] : null;
+        if (asset) {
+            var key = asset.objectKey || '';
+            var name = asset.name || room.name || '';
+            if (key && name) return key + ' ' + name;
+            return key || name;
+        }
+        return room && room.name ? room.name : '';
+    }
+
     function appendLabel(parent, room) {
         var kindName = room.kind || 'room';
-        var named = kindName === 'room' || kindName === 'stair' || kindName === 'column' || kindName === 'desk' || kindName === 'table' || kindName === 'chair' || kindName === 'cabinet' || kindName === 'sofa' || kindName === 'seat' || kindName === 'pedestal';
-        if (!named || !room.name || room.h < 12 || room.w < 20) return;
+        var named = kindName === 'room' || kindName === 'stair' || kindName === 'column' || isFurnKind(kindName);
+        var caption = isFurnKind(kindName) ? furnitureCaption(room) : (room.name || '');
+        if (!named || !caption || room.h < 12 || room.w < 20) return;
         var label = svgEl('text');
         var font = Math.max(8, Math.min(14, Math.floor(room.h / 2)));
         label.setAttribute('x', String(Math.min(8, Math.floor(room.w / 5))));
         label.setAttribute('y', String(Math.min(font + 4, room.h - 2)));
         label.setAttribute('class', 'asset-tree-room-label');
         label.style.fontSize = font + 'px';
-        label.textContent = room.name;
+        label.textContent = caption;
         parent.appendChild(label);
     }
 
@@ -21580,6 +21778,94 @@
             renderFrame();
         });
         block.appendChild(name);
+        if (isFurnKind(room.kind)) {
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapObject')));
+            var objectPick = document.createElement('select');
+            objectPick.setAttribute('aria-label', t('mapObject'));
+            var emptyObject = document.createElement('option');
+            emptyObject.value = '0';
+            emptyObject.textContent = t('mapObjectNone');
+            objectPick.appendChild(emptyObject);
+            var objectChoices = [];
+            equipmentAssets().forEach(function (asset) {
+                if (assetInBuilding(asset, state.mapPlaceId)) objectChoices.push(asset);
+            });
+            if (room.assetId && byId()[room.assetId] && !objectChoices.some(function (asset) { return asset.id === room.assetId; })) {
+                objectChoices.push(byId()[room.assetId]);
+            }
+            objectChoices.forEach(function (asset) {
+                var option = document.createElement('option');
+                option.value = String(asset.id);
+                option.textContent = [asset.objectKey || '', asset.name || ''].filter(function (part) { return part; }).join(' ');
+                objectPick.appendChild(option);
+            });
+            objectPick.value = String(parseInt(room.assetId, 10) || 0);
+            objectPick.addEventListener('change', function () {
+                rememberMap();
+                var nextId = parseInt(objectPick.value, 10) || 0;
+                (state.mapDraft.rooms || []).forEach(function (other) {
+                    if (other !== room && nextId && parseInt(other.assetId, 10) === nextId) other.assetId = 0;
+                });
+                room.assetId = nextId;
+                var linkedAsset = byId()[nextId];
+                if (linkedAsset && !room.name) room.name = linkedAsset.name || '';
+                state.mapDirty = true;
+                renderFrame();
+            });
+            block.appendChild(objectPick);
+            if (state.canObjects) {
+                block.appendChild(button(t('mapObjectCreate'), 'asset-tree-btn slim', function () {
+                    state.mapMakingAsset = !state.mapMakingAsset;
+                    renderFrame();
+                }));
+            }
+            if (state.mapMakingAsset && state.canObjects) {
+                var objectName = document.createElement('input');
+                objectName.value = room.name || furnitureCaption(room) || mapSelectionLabel();
+                objectName.setAttribute('aria-label', t('mapObjectName'));
+                objectName.placeholder = t('mapObjectName');
+                var typePick = document.createElement('select');
+                typePick.setAttribute('aria-label', t('mapObjectType'));
+                state.types.filter(function (type) { return !type.location; }).forEach(function (type) {
+                    var option = document.createElement('option');
+                    option.value = type.typeKey;
+                    option.textContent = type.label || type.typeKey;
+                    typePick.appendChild(option);
+                });
+                var createObject = button(t('mapObjectCreate'), 'asset-tree-btn slim primary', function () {
+                    if (!typePick.value || !state.mapPlaceId) {
+                        notify(t('needType'));
+                        return;
+                    }
+                    ajax('POST', '/assets', {
+                        name: objectName.value || t('mapObject'),
+                        projectKey: state.projectKey,
+                        typeKey: typePick.value,
+                        status: 'in_use',
+                        description: '',
+                        custodianKey: '',
+                        parentId: state.mapPlaceId,
+                        attributes: {}
+                    }, function (status, payload) {
+                        if (status < 200 || status >= 300 || !payload || !payload.id) {
+                            notify((payload && payload.message) || t('errorTitle'));
+                            return;
+                        }
+                        reloadTree(function () {
+                            rememberMap();
+                            room.assetId = payload.id;
+                            if (!room.name) room.name = payload.name || objectName.value;
+                            state.mapMakingAsset = false;
+                            state.mapDirty = true;
+                            renderFrame();
+                        });
+                    });
+                });
+                block.appendChild(objectName);
+                block.appendChild(typePick);
+                block.appendChild(createObject);
+            }
+        }
         if (isPolygonRoom(room)) {
             block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(roomPoints(room))));
             block.appendChild(el('span', 'asset-tree-plan-label', t('mapPlace')));
@@ -21789,37 +22075,63 @@
     function paintPreviewBox(svg, shape) {
         var node = svg.querySelector('#asset-tree-room-preview');
         var aim = svg.querySelector('#asset-tree-aim');
+        if (aim && aim.parentNode) aim.parentNode.removeChild(aim);
         if (!shape) {
             if (node && node.parentNode) node.parentNode.removeChild(node);
-            if (aim && aim.parentNode) aim.parentNode.removeChild(aim);
             return;
         }
-        if (!node) {
-            node = svgEl('rect');
+        if (!node || node.tagName.toLowerCase() !== 'g') {
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+            node = svgEl('g');
             node.id = 'asset-tree-room-preview';
+            node.setAttribute('pointer-events', 'none');
             svg.appendChild(node);
         }
-        node.setAttribute('class', 'asset-tree-room is-' + (shape.kind || 'room'));
-        node.setAttribute('x', String(shape.x));
-        node.setAttribute('y', String(shape.y));
-        node.setAttribute('width', String(shape.w));
-        node.setAttribute('height', String(shape.h));
-        var angle = normalizeAngle(shape.angle);
-        if (angle) node.setAttribute('transform', 'rotate(' + angle + ' ' + (shape.x + shape.w / 2) + ' ' + (shape.y + shape.h / 2) + ')');
-        else node.removeAttribute('transform');
-        if (shape.kind === 'wall' || shape.kind === 'partition' || shape.kind === 'dim') {
-            if (!aim) {
-                aim = svgEl('text');
-                aim.id = 'asset-tree-aim';
-                aim.setAttribute('class', 'asset-tree-room-area');
-                svg.appendChild(aim);
+        while (node.firstChild) node.removeChild(node.firstChild);
+        if (isThinKind(shape.kind)) {
+            var ends = segmentEnds(shape);
+            var dx = ends[1].x - ends[0].x;
+            var dy = ends[1].y - ends[0].y;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var thick = shape.w >= shape.h ? shape.h : shape.w;
+            var nx = -dy / len * thick / 2;
+            var ny = dx / len * thick / 2;
+            function rubberLine(x1, y1, x2, y2, edge) {
+                var line = svgEl('line');
+                line.setAttribute('x1', String(x1));
+                line.setAttribute('y1', String(y1));
+                line.setAttribute('x2', String(x2));
+                line.setAttribute('y2', String(y2));
+                line.setAttribute('class', 'asset-tree-rubber' + (edge ? ' is-edge' : ''));
+                node.appendChild(line);
             }
-            aim.textContent = angle + '\u00b0  ' + planMeters(shape.w) + ' ' + t('mapMeters');
-            aim.setAttribute('x', String(shape.x + shape.w / 2));
-            aim.setAttribute('y', String(Math.max(12, shape.y - 6)));
-        } else if (aim && aim.parentNode) {
-            aim.parentNode.removeChild(aim);
+            rubberLine(ends[0].x, ends[0].y, ends[1].x, ends[1].y, false);
+            rubberLine(ends[0].x + nx, ends[0].y + ny, ends[1].x + nx, ends[1].y + ny, true);
+            rubberLine(ends[0].x - nx, ends[0].y - ny, ends[1].x - nx, ends[1].y - ny, true);
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(ends[1].x));
+            dot.setAttribute('cy', String(ends[1].y));
+            dot.setAttribute('r', '5');
+            dot.setAttribute('class', 'asset-tree-anchor');
+            node.appendChild(dot);
+            var label = svgEl('text');
+            var deg = Math.round(normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI));
+            label.setAttribute('class', 'asset-tree-rubber-label');
+            label.setAttribute('x', String((ends[0].x + ends[1].x) / 2));
+            label.setAttribute('y', String((ends[0].y + ends[1].y) / 2 - 10));
+            label.textContent = deg + '\u00b0  ' + Math.round(len) + ' ' + t('mapCm');
+            node.appendChild(label);
+            return;
         }
+        var rect = svgEl('rect');
+        rect.setAttribute('class', 'asset-tree-rubber is-box');
+        rect.setAttribute('x', String(shape.x));
+        rect.setAttribute('y', String(shape.y));
+        rect.setAttribute('width', String(shape.w));
+        rect.setAttribute('height', String(shape.h));
+        var angle = normalizeAngle(shape.angle);
+        if (angle) rect.setAttribute('transform', 'rotate(' + angle + ' ' + (shape.x + shape.w / 2) + ' ' + (shape.y + shape.h / 2) + ')');
+        node.appendChild(rect);
     }
 
     function paintRoomPreview(svg) {
@@ -23773,6 +24085,19 @@
                 if ((event.ctrlKey || event.metaKey) && (event.key === 'v' || event.key === 'V')) {
                     event.preventDefault();
                     pasteMapClipboard(null, null);
+                    return;
+                }
+                if ((event.ctrlKey || event.metaKey) && (event.key === 'a' || event.key === 'A')) {
+                    event.preventDefault();
+                    var every = [];
+                    (state.mapDraft.rooms || []).forEach(function (item, at) {
+                        if ((item.kind || 'room') !== 'room') every.push(at);
+                    });
+                    state.mapSelection = every.length ? every[0] : null;
+                    state.mapGroup = every.slice(1);
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    renderFrame();
                     return;
                 }
                 if (event.key === 'Escape' && state.mapAnchor) {

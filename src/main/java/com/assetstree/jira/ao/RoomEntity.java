@@ -70,4 +70,9 @@ public interface RoomEntity extends Entity {
     int getGroupId();
 
     void setGroupId(int groupId);
+
+    /** Asset drawn by this furniture shape. Zero when the shape is only a symbol. */
+    int getAssetId();
+
+    void setAssetId(int assetId);
 }

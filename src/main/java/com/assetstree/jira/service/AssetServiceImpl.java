@@ -7348,6 +7348,7 @@ public class AssetServiceImpl implements AssetService {
                             groupId = 1000000;
                         }
                         stored.setGroupId(groupId);
+                        stored.setAssetId(roomAsset(project.getKey(), room.getAssetId()));
                         stored.save();
                     }
                 }
@@ -7407,6 +7408,17 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.floor");
         }
         return name;
+    }
+
+    private int roomAsset(String projectKey, int assetId) {
+        if (assetId <= 0) {
+            return 0;
+        }
+        AssetEntity asset = ao().get(AssetEntity.class, assetId);
+        if (asset == null || !ProjectKeys.same(asset.getProjectKey(), projectKey) || isLocation(asset)) {
+            return 0;
+        }
+        return asset.getID();
     }
 
     private int roomPlace(String projectKey, int placeId) {
@@ -7499,6 +7511,7 @@ public class AssetServiceImpl implements AssetService {
                 item.setPlaceId(room.getPlaceId());
                 item.setSwing(room.getSwing() == 1 ? 1 : 0);
                 item.setGroupId(Math.max(0, room.getGroupId()));
+                item.setAssetId(roomAsset(row.getProjectKey(), room.getAssetId()));
                 roomDtos.add(item);
             }
         }

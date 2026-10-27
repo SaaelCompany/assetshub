@@ -18,6 +18,7 @@ public class RoomDto {
     private int placeId;
     private int swing;
     private int groupId;
+    private int assetId;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -45,4 +46,6 @@ public class RoomDto {
     public void setSwing(int swing) { this.swing = swing; }
     public int getGroupId() { return groupId; }
     public void setGroupId(int groupId) { this.groupId = groupId; }
+    public int getAssetId() { return assetId; }
+    public void setAssetId(int assetId) { this.assetId = assetId; }
 }

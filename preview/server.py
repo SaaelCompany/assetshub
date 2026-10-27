@@ -2622,6 +2622,17 @@ def room_angle(value):
     return number
 
 
+def room_asset(asset_id):
+    try:
+        asset_id = int(asset_id or 0)
+    except (TypeError, ValueError):
+        return 0
+    asset = STATE["assets"].get(asset_id)
+    if asset and not is_location_id(asset_id):
+        return asset_id
+    return 0
+
+
 def room_place(place_id):
     try:
         place_id = int(place_id or 0)
@@ -2641,6 +2652,7 @@ def floor_dto(row):
             "angle": room_angle(room.get("angle")),
             "points": room_points(room.get("points")),
             "placeId": room_place(room.get("placeId")),
+            "assetId": room_asset(room.get("assetId")),
             "swing": 1 if int(room.get("swing") or 0) == 1 else 0,
             "groupId": max(0, min(1000000, int(room.get("groupId") or 0))),
         })
@@ -2749,6 +2761,7 @@ def save_floor(project_key, floor_id, body, text):
             "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
             "points": room_points(room.get("points")),
             "placeId": room_place(room.get("placeId")),
+            "assetId": room_asset(room.get("assetId")),
             "swing": 1 if int(room.get("swing") or 0) == 1 else 0,
             "groupId": max(0, min(1000000, int(room.get("groupId") or 0))),
         })
