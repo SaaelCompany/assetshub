@@ -465,6 +465,9 @@
         mapStep: 8,
         mapTool: 'select',
         mapAssetId: 0,
+        mapArmId: 0,
+        mapLayer: 'plan',
+        mapLayerShow: {},
         mapDraft: null,
         mapLoading: false,
         mapToken: 0,
@@ -9340,6 +9343,9 @@
         state.mapDraft = null;
         state.mapGroup = [];
         state.mapStamp = '';
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
+        state.mapLayer = 'plan';
         state.mapNaming = false;
         state.mapLoading = false;
         state.mapToken++;
@@ -18610,7 +18616,7 @@
 
     function roomMin(kind) {
         if (kind === 'room' || kind === 'stair') return 16;
-        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim') return 4;
+        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || isRouteKind(kind)) return 4;
         return 8;
     }
 
@@ -18652,6 +18658,8 @@
         state.mapCam = null;
         state.mapAnchor = null;
         state.mapClickAt = 0;
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
         resetMapHistory();
         if (!floors.length) state.mapEditing = false;
         renderFrame();
@@ -18900,7 +18908,7 @@
         };
         var hits = [];
         (floor.rooms || []).forEach(function (room, index) {
-            if ((room.kind || 'room') === 'room') return;
+            if ((room.kind || 'room') === 'room' || !shapeShown(room)) return;
             if (boundsHit(shapeBounds(room), box)) hits.push(index);
         });
         if (drag.shift) {
@@ -18981,7 +18989,8 @@
             };
             applyCamera(svg);
         }, function () {
-            if (!moved && state.mapEditing && state.mapTool === 'select' && !state.mapAssetId) {
+            if (!moved && state.mapEditing && state.mapTool === 'select' && !state.mapArmId) {
+                state.mapAssetId = 0;
                 state.mapSelection = null;
                 state.mapGroup = [];
                 renderFrame();
@@ -19851,6 +19860,8 @@
         state.mapEditing = false;
         state.mapDirty = false;
         state.mapStamp = '';
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
         state.mapNaming = false;
         state.mapGroup = [];
         state.mapSelection = null;
@@ -19942,6 +19953,8 @@
                 state.mapCam = null;
                 state.mapAnchor = null;
                 state.mapClickAt = 0;
+                state.mapArmId = 0;
+                state.mapAssetId = 0;
                 resetMapHistory();
                 closeMapMenu();
                 renderFrame();
@@ -19969,7 +19982,8 @@
     }
 
     function mapHint() {
-        if (state.mapStamp) return t('mapPlaceHint');
+        if (state.mapArmId || state.mapStamp) return t('mapPlaceHint');
+        if (state.mapTool === 'route') return state.mapAnchor ? t('mapRouteHint') : t('mapRouteIdle');
         if (state.mapAnchor && (state.mapTool === 'wall' || state.mapTool === 'partition' || state.mapTool === 'room')) return t('mapChainHint');
         return t('mapDrawHint');
     }
@@ -19995,8 +20009,95 @@
         state.mapShown = copy;
     }
 
+    function mapLayerIds() {
+        return ['plan', 'power', 'scs', 'comm', 'vent', 'water'];
+    }
+
+    function mapLayerLabel(id) {
+        if (id === 'power') return t('mapLayerPower');
+        if (id === 'scs') return t('mapLayerScs');
+        if (id === 'comm') return t('mapLayerComm');
+        if (id === 'vent') return t('mapLayerVent');
+        if (id === 'water') return t('mapLayerWater');
+        return t('mapLayerPlan');
+    }
+
+    function mapLayerOn(id) {
+        var show = state.mapLayerShow || {};
+        return show[id] !== false;
+    }
+
+    function shapeShown(room) {
+        if (!room) return false;
+        if (isRouteKind(room.kind)) return mapLayerOn(room.kind);
+        return mapLayerOn('plan');
+    }
+
+    function activateMapLayer(id) {
+        var show = state.mapLayerShow || {};
+        show[id] = true;
+        state.mapLayerShow = show;
+        state.mapLayer = id;
+        state.mapAnchor = null;
+        state.mapArc = null;
+        state.mapClickAt = 0;
+        state.mapArmId = 0;
+        state.mapStamp = '';
+        if (isRouteKind(id)) state.mapTool = 'route';
+        else if (state.mapTool === 'route') state.mapTool = 'select';
+        renderFrame();
+    }
+
+    function toggleMapLayer(id) {
+        var show = state.mapLayerShow || {};
+        var next = !mapLayerOn(id);
+        show[id] = next;
+        state.mapLayerShow = show;
+        if (!next && state.mapLayer === id) {
+            state.mapLayer = 'plan';
+            if (state.mapTool === 'route') state.mapTool = 'select';
+            state.mapAnchor = null;
+            state.mapClickAt = 0;
+        }
+        renderFrame();
+    }
+
+    function mapLayerBar(editing) {
+        var bar = el('div', 'asset-tree-map-layers');
+        mapLayerIds().forEach(function (id) {
+            var active = !!(editing && state.mapLayer === id);
+            var shown = mapLayerOn(id);
+            var chip = button('', 'asset-tree-map-layer' + (active ? ' is-on' : '') + (shown ? '' : ' is-off'), function () {
+                if (!editing) {
+                    toggleMapLayer(id);
+                    return;
+                }
+                activateMapLayer(id);
+            });
+            var eye = el('i', 'asset-tree-map-eye', shown ? '\u25CF' : '\u25CB');
+            eye.title = t('mapLayerEye');
+            eye.addEventListener('mousedown', function (event) {
+                event.stopPropagation();
+            });
+            eye.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleMapLayer(id);
+            });
+            var swatch = el('i', 'asset-tree-map-swatch');
+            swatch.style.background = id === 'plan' ? '#172b4d' : routeColor(id);
+            chip.appendChild(eye);
+            chip.appendChild(swatch);
+            chip.appendChild(el('span', null, mapLayerLabel(id)));
+            chip.title = mapLayerLabel(id);
+            bar.appendChild(chip);
+        });
+        return bar;
+    }
+
     function mapViewSide() {
         var side = el('aside', 'asset-tree-catalog');
+        side.appendChild(mapLayerBar(false));
         side.appendChild(button(t('mapPrint'), 'asset-tree-btn', printPlanSheet));
         side.appendChild(mapExplication());
         return side;
@@ -20043,6 +20144,8 @@
 
     function mapCatalog() {
         var side = el('aside', 'asset-tree-catalog');
+        side.appendChild(mapLayerBar(true));
+        side.appendChild(el('p', 'asset-tree-catalog-hint', t('mapLayersHint')));
         side.appendChild(mapToolGrid());
         side.appendChild(mapPlanActions());
         side.appendChild(el('h3', null, t('mapFurnReady')));
@@ -20097,7 +20200,7 @@
         var size = planSize(floor);
         var items = [];
         (floor.rooms || []).forEach(function (room) {
-            if (isSegmentKind(room.kind) || room.kind === 'dim' || room.kind === 'door' || room.kind === 'window') {
+            if (isSegmentKind(room.kind) || isRouteKind(room.kind) || room.kind === 'dim' || room.kind === 'door' || room.kind === 'window') {
                 var ends = segmentEnds(room);
                 items.push({ kind: room.kind, x1: ends[0].x, y1: ends[0].y, x2: ends[1].x, y2: ends[1].y, name: room.name || '' });
             } else if (room.kind === 'arc') {
@@ -20391,13 +20494,15 @@
             ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk'],
             ['arc', 'mapArc'], ['dim', 'mapDim'], ['text', 'mapText']
         ].forEach(function (pair) {
-            var on = state.mapTool === pair[0] && !state.mapStamp;
+            var on = state.mapTool === pair[0] && !state.mapStamp && !state.mapArmId;
             var tool = button('', 'asset-tree-tool' + (on ? ' is-on' : ''), function () {
                 state.mapTool = pair[0];
                 state.mapStamp = '';
+                state.mapArmId = 0;
                 state.mapAnchor = null;
                 state.mapArc = null;
                 state.mapClickAt = 0;
+                if (pair[0] !== 'select' && isRouteKind(state.mapLayer)) state.mapLayer = 'plan';
                 renderFrame();
             });
             pinStyle(tool, {
@@ -20495,6 +20600,7 @@
                 state.mapStamp = tpl.id;
                 state.mapTool = 'stamp';
                 state.mapAssetId = 0;
+                state.mapArmId = 0;
                 state.mapAnchor = null;
                 state.mapClickAt = 0;
             }
@@ -20679,12 +20785,20 @@
         rows.forEach(function (row) {
             var asset = row.asset;
             var typeLabel = typeFor(asset).label || '';
-            var buttonRow = button('', 'asset-tree-gear-row' + (state.mapAssetId === asset.id ? ' is-current' : ''), function () {
-                state.mapAssetId = asset.id;
-                state.mapTool = 'select';
-                state.mapStamp = '';
-                state.mapAnchor = null;
-                state.mapClickAt = 0;
+            var armed = state.mapArmId === asset.id;
+            var picked = state.mapAssetId === asset.id;
+            var buttonRow = button('', 'asset-tree-gear-row' + (armed ? ' is-armed' : '') + (picked ? ' is-current' : ''), function () {
+                if (state.mapArmId === asset.id) {
+                    state.mapArmId = 0;
+                } else {
+                    state.mapArmId = asset.id;
+                    state.mapAssetId = 0;
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    state.mapAnchor = null;
+                    state.mapArc = null;
+                    state.mapClickAt = 0;
+                }
                 renderFrame();
             });
             buttonRow.appendChild(el('strong', null, asset.name || asset.objectKey || ''));
@@ -20881,8 +20995,21 @@
         return kind === 'wall' || kind === 'partition';
     }
 
+    function isRouteKind(kind) {
+        return kind === 'power' || kind === 'scs' || kind === 'comm' || kind === 'vent' || kind === 'water';
+    }
+
+    function routeColor(kind) {
+        if (kind === 'power') return '#ff5630';
+        if (kind === 'scs') return '#0065ff';
+        if (kind === 'comm') return '#6554c0';
+        if (kind === 'vent') return '#36b37e';
+        if (kind === 'water') return '#00b8d9';
+        return '#172b4d';
+    }
+
     function isThinKind(kind) {
-        return kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'dim';
+        return kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'dim' || isRouteKind(kind);
     }
 
     function segmentLocalEnds(room) {
@@ -20910,14 +21037,16 @@
         return d;
     }
 
-    function nearestEnd(x, y, ignoreIndex, radius) {
+    function nearestEnd(x, y, ignoreIndex, radius, kindFilter) {
         var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
         var best = null;
         var limit = radius * radius;
         var i;
         for (i = 0; i < rooms.length; i++) {
             if (i === ignoreIndex) continue;
-            if (!isSegmentKind(rooms[i].kind)) continue;
+            if (kindFilter) {
+                if (rooms[i].kind !== kindFilter || !shapeShown(rooms[i])) continue;
+            } else if (!isSegmentKind(rooms[i].kind)) continue;
             var ends = segmentEnds(rooms[i]);
             var n;
             for (n = 0; n < ends.length; n++) {
@@ -20933,8 +21062,8 @@
         return best;
     }
 
-    function snapStart(x, y) {
-        var join = nearestEnd(x, y, -1, 16);
+    function snapStart(x, y, kindFilter) {
+        var join = nearestEnd(x, y, -1, 16, kindFilter);
         if (join) return { x: join.x, y: join.y };
         return { x: snapCoord(x), y: snapCoord(y) };
     }
@@ -20960,8 +21089,8 @@
         };
     }
 
-    function resolveEnd(origin, point, loose, ignoreIndex) {
-        var join = nearestEnd(point.x, point.y, ignoreIndex, 18);
+    function resolveEnd(origin, point, loose, ignoreIndex, kindFilter) {
+        var join = nearestEnd(point.x, point.y, ignoreIndex, 18, kindFilter);
         if (join) {
             var dx = join.x - origin.x;
             var dy = join.y - origin.y;
@@ -21181,6 +21310,10 @@
     function commitSegment(floor, tool, ax, ay, bx, by) {
         var thick = tool === 'partition' ? 6 : 18;
         return pushShape(floor, applySegment({ kind: tool, name: '', color: '', h: thick, w: thick }, ax, ay, bx, by));
+    }
+
+    function commitRoute(floor, kind, ax, ay, bx, by) {
+        return pushShape(floor, applySegment({ kind: kind, name: '', color: routeColor(kind), h: 6, w: 6 }, ax, ay, bx, by));
     }
 
     function placeOpeningAt(floor, kind, x, y) {
@@ -21459,7 +21592,7 @@
         var bodies = [];
         var indexes = [];
         (rooms || []).forEach(function (room, index) {
-            if (!isSegmentKind(room.kind)) return;
+            if (!isSegmentKind(room.kind) || !shapeShown(room)) return;
             bodies.push(wallBody(room));
             indexes.push(index);
         });
@@ -22016,7 +22149,7 @@
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
         var mode = 'is-pan';
-        if (editing && state.mapStamp) mode = 'is-stamp';
+        if (editing && (state.mapStamp || state.mapArmId)) mode = 'is-stamp';
         else if (editing && state.mapTool && state.mapTool !== 'select') mode = 'is-draw';
         svg.setAttribute('class', 'asset-tree-canvas ' + mode);
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
@@ -22045,10 +22178,13 @@
         var drawnRooms = [];
         var drawnWalls = [];
         var drawnRest = [];
+        var drawnRoutes = [];
         (floor.rooms || []).forEach(function (room, index) {
+            if (!shapeShown(room)) return;
             var kind = room.kind || 'room';
             if (kind === 'room') drawnRooms.push([room, index]);
             else if (isSegmentKind(kind)) drawnWalls.push([room, index]);
+            else if (isRouteKind(kind)) drawnRoutes.push([room, index]);
             else drawnRest.push([room, index]);
         });
         drawnRooms.forEach(function (pair) {
@@ -22062,28 +22198,23 @@
         drawnRest.forEach(function (pair) {
             svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
         });
-        (floor.pins || []).forEach(function (pin) {
+        if (mapLayerOn('plan')) (floor.pins || []).forEach(function (pin) {
             var mark = svgEl('g');
             mark.setAttribute('class', 'asset-tree-pin' + (state.mapAssetId === pin.assetId ? ' is-selected' : ''));
             mark.setAttribute('transform', 'translate(' + pin.x + ' ' + pin.y + ')');
-            var plate = svgEl('rect');
-            plate.setAttribute('x', '-12');
-            plate.setAttribute('y', '-12');
-            plate.setAttribute('width', '24');
-            plate.setAttribute('height', '24');
-            plate.setAttribute('rx', '4');
-            plate.setAttribute('class', 'asset-tree-pin-plate');
-            var glyph = svgEl('path');
-            glyph.setAttribute('d', 'M-6 -6h12v8h-12zM-4 2h8M-2 5h4');
-            glyph.setAttribute('class', 'asset-tree-pin-glyph');
-            mark.appendChild(plate);
-            mark.appendChild(glyph);
+            pinFace(mark);
             if (editing) {
                 mark.addEventListener('mousedown', function (event) {
                     if (event.button !== 0) return;
                     event.preventDefault();
                     event.stopPropagation();
+                    if (state.mapArmId) {
+                        if (placeArmedPin(floor, pin.x, pin.y)) renderFrame();
+                        return;
+                    }
                     state.mapAssetId = pin.assetId;
+                    state.mapSelection = null;
+                    state.mapGroup = [];
                     beginDrag(svg, { kind: 'pin' }, function (move) {
                         var next = svgPoint(svg, move);
                         pin.x = clampNum(snapCoord(next.x), 0, size.w);
@@ -22105,14 +22236,25 @@
             caption.textContent = pinLabel;
             svg.appendChild(caption);
         });
+        drawnRoutes.forEach(function (pair) {
+            svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
+        });
+        if (editing && state.mapArmId) {
+            var ghost = svgEl('g');
+            ghost.id = 'asset-tree-pin-ghost';
+            ghost.setAttribute('class', 'asset-tree-pin is-ghost');
+            ghost.setAttribute('visibility', 'hidden');
+            pinFace(ghost);
+            svg.appendChild(ghost);
+        }
         paper.addEventListener('mousedown', function (event) {
             if (event.button !== 0) return;
             if (!editing) {
                 startPan(svg, event);
                 return;
             }
-            if (state.mapTool === 'select') {
-                if (state.mapAssetId) {
+            if (state.mapTool === 'select' || state.mapArmId) {
+                if (state.mapArmId) {
                     event.preventDefault();
                     event.stopPropagation();
                     var point = svgPoint(svg, event);
@@ -22123,10 +22265,11 @@
                     startPan(svg, event);
                     return;
                 }
+                state.mapAssetId = 0;
                 startMarquee(svg, floor, event);
             }
         });
-        if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room')) {
+        if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room' || state.mapTool === 'route')) {
             var anchorDot = svgEl('circle');
             anchorDot.setAttribute('cx', String(state.mapAnchor.x));
             anchorDot.setAttribute('cy', String(state.mapAnchor.y));
@@ -22170,6 +22313,10 @@
                     return;
                 }
                 if (state.mapTool === 'select') return;
+                if (state.mapTool === 'route' && !isRouteKind(state.mapLayer)) {
+                    state.mapTool = 'select';
+                    return;
+                }
                 if (state.mapTool === 'text') {
                     event.preventDefault();
                     var written = svgPoint(svg, event);
@@ -22191,7 +22338,8 @@
                     placeArcPoint(floor, snapStart(aimed.x, aimed.y));
                     return;
                 }
-                var segmentTool = isSegmentKind(state.mapTool) || state.mapTool === 'room';
+                var routeKind = state.mapTool === 'route' && isRouteKind(state.mapLayer) ? state.mapLayer : '';
+                var segmentTool = isSegmentKind(state.mapTool) || state.mapTool === 'room' || !!routeKind;
                 var openingTool = state.mapTool === 'door' || state.mapTool === 'window';
                 if (segmentTool && state.mapChainDoneAt && (Date.now() - state.mapChainDoneAt) < 450) {
                     event.preventDefault();
@@ -22212,7 +22360,7 @@
                 event.preventDefault();
                 var point = svgPoint(svg, event);
                 beginDrag(svg, {
-                    kind: state.mapTool,
+                    kind: routeKind || state.mapTool,
                     downX: point.x,
                     downY: point.y,
                     x0: point.x,
@@ -22231,8 +22379,8 @@
                     if (cdx * cdx + cdy * cdy > 36) state.mapDrag.moved = true;
                     state.mapDrag.shift = !!move.shiftKey;
                     if (segmentTool || openingTool) {
-                        var origin = snapStart(state.mapDrag.downX, state.mapDrag.downY);
-                        var end = resolveEnd(origin, next, move.shiftKey, -1);
+                        var origin = snapStart(state.mapDrag.downX, state.mapDrag.downY, routeKind);
+                        var end = resolveEnd(origin, next, move.shiftKey, -1, routeKind);
                         state.mapDrag.x0 = origin.x;
                         state.mapDrag.y0 = origin.y;
                         state.mapDrag.x1 = end.x;
@@ -22246,28 +22394,32 @@
                 }, function (finished) {
                     if (!finished) return;
                     var tool = finished.kind === 'room' ? 'wall' : finished.kind;
-                    if (isSegmentKind(tool)) {
-                        var facesBefore = closedFaces(floor.rooms || []).length;
+                    if (isSegmentKind(tool) || isRouteKind(tool)) {
+                        var facesBefore = isSegmentKind(tool) ? closedFaces(floor.rooms || []).length : -1;
+                        var commitChain = function (ax, ay, bx, by) {
+                            if (isRouteKind(tool)) return commitRoute(floor, tool, ax, ay, bx, by);
+                            return commitSegment(floor, tool, ax, ay, bx, by);
+                        };
                         if (finished.moved) {
-                            if (commitSegment(floor, tool, finished.x0, finished.y0, finished.x1, finished.y1)) {
+                            if (commitChain(finished.x0, finished.y0, finished.x1, finished.y1)) {
                                 state.mapAnchor = { x: finished.x1, y: finished.y1 };
                             }
                             state.mapClickAt = 0;
                         } else if (state.mapAnchor) {
-                            var chained = resolveEnd(state.mapAnchor, { x: finished.downX, y: finished.downY }, finished.shift, -1);
-                            if (commitSegment(floor, tool, state.mapAnchor.x, state.mapAnchor.y, chained.x, chained.y)) {
+                            var chained = resolveEnd(state.mapAnchor, { x: finished.downX, y: finished.downY }, finished.shift, -1, isRouteKind(tool) ? tool : '');
+                            if (commitChain(state.mapAnchor.x, state.mapAnchor.y, chained.x, chained.y)) {
                                 state.mapAnchor = { x: chained.x, y: chained.y };
                             }
                             state.mapClickAt = Date.now();
                             state.mapClickX = finished.clientX;
                             state.mapClickY = finished.clientY;
                         } else {
-                            state.mapAnchor = snapStart(finished.downX, finished.downY);
+                            state.mapAnchor = snapStart(finished.downX, finished.downY, isRouteKind(tool) ? tool : '');
                             state.mapClickAt = Date.now();
                             state.mapClickX = finished.clientX;
                             state.mapClickY = finished.clientY;
                         }
-                        if (closedFaces(floor.rooms || []).length > facesBefore) {
+                        if (isSegmentKind(tool) && closedFaces(floor.rooms || []).length > facesBefore) {
                             state.mapAnchor = null;
                             state.mapClickAt = 0;
                         }
@@ -22286,10 +22438,17 @@
                 });
             });
             svg.addEventListener('mousemove', function (event) {
-                if (state.mapDrag || !state.mapAnchor || !(isSegmentKind(state.mapTool) || state.mapTool === 'room')) return;
+                var ghost = svg.querySelector('#asset-tree-pin-ghost');
+                if (ghost && state.mapArmId && !state.mapDrag) {
+                    var hover = svgPoint(svg, event);
+                    ghost.setAttribute('visibility', 'visible');
+                    ghost.setAttribute('transform', 'translate(' + snapCoord(hover.x) + ' ' + snapCoord(hover.y) + ')');
+                }
+                var hoverRoute = state.mapTool === 'route' && isRouteKind(state.mapLayer) ? state.mapLayer : '';
+                if (state.mapDrag || !state.mapAnchor || !(isSegmentKind(state.mapTool) || state.mapTool === 'room' || hoverRoute)) return;
                 var next = svgPoint(svg, event);
-                var end = resolveEnd(state.mapAnchor, next, event.shiftKey, -1);
-                var previewKind = state.mapTool === 'room' ? 'wall' : state.mapTool;
+                var end = resolveEnd(state.mapAnchor, next, event.shiftKey, -1, hoverRoute);
+                var previewKind = hoverRoute || (state.mapTool === 'room' ? 'wall' : state.mapTool);
                 paintPreviewBox(svg, shapeFromDrag(previewKind, state.mapAnchor.x, state.mapAnchor.y, end.x, end.y, true));
             });
         }
@@ -22343,11 +22502,12 @@
                 if (event.button !== 0 || state.mapTool !== 'select') return;
                 event.preventDefault();
                 event.stopPropagation();
-                if (state.mapAssetId) {
+                if (state.mapArmId) {
                     var point = svgPoint(options.svg, event);
                     if (placeArmedPin(options.floor, point.x, point.y)) renderFrame();
                     return;
                 }
+                state.mapAssetId = 0;
                 if (event.altKey) {
                     startPan(options.svg, event);
                     return;
@@ -22376,6 +22536,31 @@
             rect.setAttribute('fill', 'transparent');
         }
         group.appendChild(rect);
+        if (isRouteKind(kindName)) {
+            var routeEnds = segmentLocalEnds(room);
+            if (options && options.selected) {
+                var halo = svgEl('line');
+                halo.setAttribute('x1', String(routeEnds[0][0]));
+                halo.setAttribute('y1', String(routeEnds[0][1]));
+                halo.setAttribute('x2', String(routeEnds[1][0]));
+                halo.setAttribute('y2', String(routeEnds[1][1]));
+                halo.setAttribute('stroke', '#ffab00');
+                halo.setAttribute('stroke-width', '10');
+                halo.setAttribute('stroke-linecap', 'round');
+                halo.setAttribute('class', 'asset-tree-route-halo');
+                group.appendChild(halo);
+            }
+            var routeLine = svgEl('line');
+            routeLine.setAttribute('x1', String(routeEnds[0][0]));
+            routeLine.setAttribute('y1', String(routeEnds[0][1]));
+            routeLine.setAttribute('x2', String(routeEnds[1][0]));
+            routeLine.setAttribute('y2', String(routeEnds[1][1]));
+            routeLine.setAttribute('stroke', room.color || routeColor(kindName));
+            routeLine.setAttribute('stroke-width', '4');
+            routeLine.setAttribute('stroke-linecap', 'round');
+            routeLine.setAttribute('class', 'asset-tree-route');
+            group.appendChild(routeLine);
+        }
         decorateRoom(group, room);
         appendOpening(group, room);
         appendLabel(group, room);
@@ -22385,6 +22570,12 @@
                 if (state.mapTool !== 'select') return;
                 event.preventDefault();
                 event.stopPropagation();
+                if (state.mapArmId) {
+                    var armedAt = svgPoint(options.svg, event);
+                    if (placeArmedPin(options.floor, armedAt.x, armedAt.y)) renderFrame();
+                    return;
+                }
+                state.mapAssetId = 0;
                 var index = options.index;
                 if (event.shiftKey) {
                     var grouped = (state.mapGroup || []).slice();
@@ -22455,7 +22646,6 @@
                     }
                     state.mapDirty = true;
                 }, function (finished) {
-                    if (finished && !finished.moved && state.mapAssetId) placeArmedPin(options.floor, finished.x0, finished.y0);
                     if (finished && finished.moved) {
                         var furn = mates.filter(function (at) {
                             return options.floor.rooms[at] && isFurnKind(options.floor.rooms[at].kind);
@@ -22472,6 +22662,7 @@
 
     function decorateRoom(parent, room) {
         var kind = room.kind || 'room';
+        if (isRouteKind(kind)) return;
         var x = 0;
         var y = 0;
         var w = room.w;
@@ -22971,9 +23162,25 @@
         group.appendChild(knob);
     }
 
+    function pinFace(mark) {
+        var plate = svgEl('rect');
+        plate.setAttribute('x', '-12');
+        plate.setAttribute('y', '-12');
+        plate.setAttribute('width', '24');
+        plate.setAttribute('height', '24');
+        plate.setAttribute('rx', '4');
+        plate.setAttribute('class', 'asset-tree-pin-plate');
+        var glyph = svgEl('path');
+        glyph.setAttribute('d', 'M-6 -6h12v8h-12zM-4 2h8M-2 5h4');
+        glyph.setAttribute('class', 'asset-tree-pin-glyph');
+        mark.appendChild(plate);
+        mark.appendChild(glyph);
+    }
+
     function placeArmedPin(floor, x, y) {
-        var asset = byId()[state.mapAssetId];
+        var asset = byId()[state.mapArmId];
         if (!asset) return false;
+        rememberMap();
         var box = planSize(floor);
         var px = snapCoord(x);
         var py = snapCoord(y);
@@ -22993,6 +23200,8 @@
             });
             floor.pins = pins;
         }
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
         state.mapDirty = true;
         return true;
     }
@@ -23168,6 +23377,12 @@
             });
             block.appendChild(placePick);
         }
+        if (isRouteKind(room.kind)) {
+            var routeEnds = segmentEnds(room);
+            var routeDx = routeEnds[1].x - routeEnds[0].x;
+            var routeDy = routeEnds[1].y - routeEnds[0].y;
+            block.appendChild(el('span', 'asset-tree-plan-label', mapLayerLabel(room.kind) + ' · ' + Math.round(Math.sqrt(routeDx * routeDx + routeDy * routeDy)) + ' ' + t('mapCm')));
+        }
         if (isSegmentKind(room.kind)) {
             var ends = segmentEnds(room);
             var thick = room.w >= room.h ? room.h : room.w;
@@ -23289,7 +23504,7 @@
         sizes.appendChild(height);
         sizes.appendChild(el('span', 'asset-tree-plan-label', t('mapAngle')));
         sizes.appendChild(angle);
-        if (!isPolygonRoom(room) && !isSegmentKind(room.kind)) block.appendChild(sizes);
+        if (!isPolygonRoom(room) && !isSegmentKind(room.kind) && !isRouteKind(room.kind)) block.appendChild(sizes);
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('mapDuplicate'), 'asset-tree-btn', duplicateMapSelection));
         actions.appendChild(button(t('mapSaveTemplate'), 'asset-tree-btn', function () {
@@ -23340,6 +23555,7 @@
         if (kind === 'stove') return room.name || t('mapStove');
         if (kind === 'rug') return room.name || t('mapRug');
         if (kind === 'partition') return t('mapPartition');
+        if (isRouteKind(kind)) return mapLayerLabel(kind);
         if (kind === 'arc') return t('mapArc');
         if (kind === 'dim') return t('mapDim');
         if (kind === 'text') return room.name || t('mapText');
@@ -23362,6 +23578,36 @@
             svg.appendChild(node);
         }
         while (node.firstChild) node.removeChild(node.firstChild);
+        if (isRouteKind(shape.kind)) {
+            var routeEnds = segmentEnds(shape);
+            var routeLine = svgEl('line');
+            routeLine.setAttribute('x1', String(routeEnds[0].x));
+            routeLine.setAttribute('y1', String(routeEnds[0].y));
+            routeLine.setAttribute('x2', String(routeEnds[1].x));
+            routeLine.setAttribute('y2', String(routeEnds[1].y));
+            routeLine.setAttribute('stroke', routeColor(shape.kind));
+            routeLine.setAttribute('stroke-width', '4');
+            routeLine.setAttribute('stroke-linecap', 'round');
+            routeLine.setAttribute('stroke-dasharray', '8 6');
+            routeLine.setAttribute('class', 'asset-tree-route');
+            node.appendChild(routeLine);
+            var routeDot = svgEl('circle');
+            routeDot.setAttribute('cx', String(routeEnds[1].x));
+            routeDot.setAttribute('cy', String(routeEnds[1].y));
+            routeDot.setAttribute('r', '5');
+            routeDot.setAttribute('fill', routeColor(shape.kind));
+            node.appendChild(routeDot);
+            var routeLabel = svgEl('text');
+            var routeDx = routeEnds[1].x - routeEnds[0].x;
+            var routeDy = routeEnds[1].y - routeEnds[0].y;
+            var routeLen = Math.sqrt(routeDx * routeDx + routeDy * routeDy) || 1;
+            routeLabel.setAttribute('class', 'asset-tree-rubber-label');
+            routeLabel.setAttribute('x', String((routeEnds[0].x + routeEnds[1].x) / 2));
+            routeLabel.setAttribute('y', String((routeEnds[0].y + routeEnds[1].y) / 2 - 10));
+            routeLabel.textContent = Math.round(normalizeAngle(Math.atan2(routeDy, routeDx) * 180 / Math.PI)) + '\u00b0  ' + Math.round(routeLen) + ' ' + t('mapCm');
+            node.appendChild(routeLabel);
+            return;
+        }
         if (isThinKind(shape.kind)) {
             var ends = segmentEnds(shape);
             var dx = ends[1].x - ends[0].x;
@@ -23432,7 +23678,7 @@
             var length = Math.sqrt(dx * dx + dy * dy);
             var minThin = roomMin(tool);
             if (length < Math.max(minThin, 8)) return null;
-            var thick = tool === 'partition' ? 6 : (tool === 'wall' ? 18 : (tool === 'dim' ? 8 : 10));
+            var thick = isRouteKind(tool) ? 6 : (tool === 'partition' ? 6 : (tool === 'wall' ? 18 : (tool === 'dim' ? 8 : 10)));
             var w = Math.max(minThin, Math.round(length));
             var h = thick;
             var mx = (x0 + x1) / 2;
@@ -25366,7 +25612,7 @@
                     event.preventDefault();
                     var every = [];
                     (state.mapDraft.rooms || []).forEach(function (item, at) {
-                        if ((item.kind || 'room') !== 'room') every.push(at);
+                        if ((item.kind || 'room') !== 'room' && shapeShown(item)) every.push(at);
                     });
                     state.mapSelection = every.length ? every[0] : null;
                     state.mapGroup = every.slice(1);
@@ -25375,9 +25621,12 @@
                     renderFrame();
                     return;
                 }
-                if (event.key === 'Escape' && state.mapAnchor) {
+                if (event.key === 'Escape' && (state.mapAnchor || state.mapArmId || state.mapAssetId || state.mapArc)) {
                     event.preventDefault();
                     state.mapAnchor = null;
+                    state.mapArmId = 0;
+                    state.mapAssetId = 0;
+                    state.mapArc = null;
                     state.mapClickAt = 0;
                     state.mapChainDoneAt = 0;
                     renderFrame();

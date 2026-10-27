@@ -6692,6 +6692,11 @@ a.asset-tree-url {
     background: #deebff !important;
 }
 
+#asset-tree-app button.asset-tree-gear-row.is-armed {
+    background: #fff7d6 !important;
+    box-shadow: inset 0 0 0 1px #ffab00;
+}
+
 #asset-tree-app .asset-tree-map-tools {
     display: flex;
     flex-wrap: wrap;
@@ -7338,7 +7343,12 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-room.is-wall,
 #asset-tree-app .asset-tree-room.is-partition,
 #asset-tree-app .asset-tree-room.is-door,
-#asset-tree-app .asset-tree-room.is-window {
+#asset-tree-app .asset-tree-room.is-window,
+#asset-tree-app .asset-tree-room.is-power,
+#asset-tree-app .asset-tree-room.is-scs,
+#asset-tree-app .asset-tree-room.is-comm,
+#asset-tree-app .asset-tree-room.is-vent,
+#asset-tree-app .asset-tree-room.is-water {
     fill: transparent;
     stroke: none;
     pointer-events: all;
@@ -7396,8 +7406,71 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-room.is-wall.is-selected,
 #asset-tree-app .asset-tree-room.is-partition.is-selected,
 #asset-tree-app .asset-tree-room.is-door.is-selected,
-#asset-tree-app .asset-tree-room.is-window.is-selected {
-    stroke-width: 1;
+#asset-tree-app .asset-tree-room.is-window.is-selected,
+#asset-tree-app .asset-tree-room.is-power.is-selected,
+#asset-tree-app .asset-tree-room.is-scs.is-selected,
+#asset-tree-app .asset-tree-room.is-comm.is-selected,
+#asset-tree-app .asset-tree-room.is-vent.is-selected,
+#asset-tree-app .asset-tree-room.is-water.is-selected {
+    stroke: none;
+    stroke-width: 0;
+}
+
+#asset-tree-app .asset-tree-route,
+#asset-tree-app .asset-tree-route-halo {
+    fill: none;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-pin.is-ghost {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-map-layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-map-layer {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    width: auto !important;
+    min-height: 24px;
+    margin: 0;
+    padding: 2px 6px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fff !important;
+    color: #172b4d !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 16px !important;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-map-layer.is-on {
+    background: #deebff !important;
+    border-color: #4c9aff !important;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-map-layer.is-off {
+    color: #97a0af !important;
+}
+
+#asset-tree-app .asset-tree-map-eye,
+#asset-tree-app .asset-tree-map-swatch {
+    display: inline-block;
+    flex: 0 0 auto;
+    font-style: normal;
+}
+
+#asset-tree-app .asset-tree-map-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
 }
 
 #asset-tree-app #asset-tree-room-preview {

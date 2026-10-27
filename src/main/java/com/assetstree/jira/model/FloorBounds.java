@@ -35,6 +35,11 @@ public final class FloorBounds {
     public static final String ARC = "arc";
     public static final String DIM = "dim";
     public static final String TEXT = "text";
+    public static final String POWER = "power";
+    public static final String SCS = "scs";
+    public static final String COMM = "comm";
+    public static final String VENT = "vent";
+    public static final String WATER = "water";
 
     private FloorBounds() {
     }
@@ -65,7 +70,9 @@ public final class FloorBounds {
                 || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
                 || BED.equals(value) || PLANT.equals(value) || BATH.equals(value)
                 || TOILET.equals(value) || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)
-                || ARC.equals(value) || DIM.equals(value) || TEXT.equals(value)) {
+                || ARC.equals(value) || DIM.equals(value) || TEXT.equals(value)
+                || POWER.equals(value) || SCS.equals(value) || COMM.equals(value)
+                || VENT.equals(value) || WATER.equals(value)) {
             return value;
         }
         return ROOM;

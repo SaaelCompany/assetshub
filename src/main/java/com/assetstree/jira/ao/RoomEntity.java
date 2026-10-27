@@ -38,7 +38,7 @@ public interface RoomEntity extends Entity {
 
     void setAngle(int angle);
 
-    /** room, wall, door, window, column, stair, desk, or partition. Empty on rows drawn before kinds existed. */
+    /** room, wall, door, window, column, stair, desk, partition, or a route: power, scs, comm, vent, water. Empty on rows drawn before kinds existed. */
     @StringLength(16)
     String getKind();
 

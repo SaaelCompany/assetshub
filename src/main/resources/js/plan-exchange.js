@@ -100,13 +100,15 @@ var AssetTreePlan = (function () {
         var dy = y2 - y1;
         var length = Math.sqrt(dx * dx + dy * dy);
         if (length < 8) return null;
-        var thick = kind === 'partition' ? 6 : (kind === 'door' || kind === 'window' ? 10 : (kind === 'dim' ? 8 : 18));
+        var route = kind === 'power' || kind === 'scs' || kind === 'comm' || kind === 'vent' || kind === 'water';
+        var thick = route ? 6 : (kind === 'partition' ? 6 : (kind === 'door' || kind === 'window' ? 10 : (kind === 'dim' ? 8 : 18)));
         var angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
         if (angle < 0) angle += 360;
         var w = Math.max(8, Math.round(length));
         var h = thick;
+        var storedKind = kind === 'door' || kind === 'window' || kind === 'dim' || kind === 'partition' || route ? kind : 'wall';
         return {
-            kind: kind === 'door' || kind === 'window' || kind === 'dim' ? kind : (kind === 'partition' ? 'partition' : 'wall'),
+            kind: storedKind,
             name: '',
             color: '',
             angle: angle % 360,
@@ -161,6 +163,11 @@ var AssetTreePlan = (function () {
 
     function layerKind(name) {
         var text = String(name || '').toUpperCase();
+        if (text.indexOf('POWER') >= 0 || text.indexOf('ЭЛЕКТ') >= 0) return 'power';
+        if (text.indexOf('SCS') >= 0 || text.indexOf('СКС') >= 0) return 'scs';
+        if (text.indexOf('COMM') >= 0 || text.indexOf('СВЯЗ') >= 0) return 'comm';
+        if (text.indexOf('VENT') >= 0 || text.indexOf('ВЕНТ') >= 0) return 'vent';
+        if (text.indexOf('WATER') >= 0 || text.indexOf('ВОД') >= 0) return 'water';
         if (text.indexOf('PART') >= 0 || text.indexOf('ПЕРЕГ') >= 0) return 'partition';
         if (text.indexOf('DOOR') >= 0 || text.indexOf('ДВЕР') >= 0) return 'door';
         if (text.indexOf('WIND') >= 0 || text.indexOf('ОКН') >= 0) return 'window';
@@ -211,7 +218,17 @@ var AssetTreePlan = (function () {
             }
             if (item.x1 == null) return;
             out += dxfPair(0, 'LINE');
-            out += dxfPair(8, item.kind === 'partition' ? 'PARTITION' : (item.kind === 'dim' ? 'DIM' : (item.kind === 'door' ? 'DOOR' : (item.kind === 'window' ? 'WINDOW' : 'WALL'))));
+            var dxfLayer = 'WALL';
+            if (item.kind === 'partition') dxfLayer = 'PARTITION';
+            else if (item.kind === 'dim') dxfLayer = 'DIM';
+            else if (item.kind === 'door') dxfLayer = 'DOOR';
+            else if (item.kind === 'window') dxfLayer = 'WINDOW';
+            else if (item.kind === 'power') dxfLayer = 'POWER';
+            else if (item.kind === 'scs') dxfLayer = 'SCS';
+            else if (item.kind === 'comm') dxfLayer = 'COMM';
+            else if (item.kind === 'vent') dxfLayer = 'VENT';
+            else if (item.kind === 'water') dxfLayer = 'WATER';
+            out += dxfPair(8, dxfLayer);
             out += dxfPair(10, item.x1);
             out += dxfPair(20, height - item.y1);
             out += dxfPair(11, item.x2);

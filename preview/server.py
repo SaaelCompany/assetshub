@@ -1212,7 +1212,7 @@ def pack_furniture(raw):
             if len(bits) < 5:
                 continue
             kind = bits[0].strip().lower()
-            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text"):
+            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text", "power", "scs", "comm", "vent", "water"):
                 kind = "room"
             def coord(value, limit):
                 try:
@@ -2773,7 +2773,7 @@ def save_floor(project_key, floor_id, body, text):
     seq = 1
     for room in rooms:
         kind = (room.get("kind") or "room").strip().lower()
-        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text"):
+        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text", "power", "scs", "comm", "vent", "water"):
             kind = "room"
         label = (room.get("name") or "").strip()
         if not label and kind == "room" and not room_points(room.get("points")):
