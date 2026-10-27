@@ -2041,8 +2041,12 @@ public class AssetServiceImpl implements AssetService {
                     String parentKey = type.getParentTypeKey() == null ? "" : type.getParentTypeKey().trim();
                     catalog.add(new PickerLayout.Catalog(type.getTypeKey(), type.getLabel(), parentKey));
                 }
+                Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
+                Map<String, String[]> holders = new HashMap<String, String[]>();
+                Map<Integer, String> searchText = new HashMap<Integer, String>();
                 List<PickerLayout.Source> sources = new ArrayList<PickerLayout.Source>();
                 for (AssetEntity row : ordered) {
+                    searchText.put(Integer.valueOf(row.getID()), pickerSearch(row, attributes.get(row.getID()), holders));
                     AssetTypeDto type = types.get(row.getTypeKey());
                     String parentKey = type == null || type.getParentTypeKey() == null ? "" : type.getParentTypeKey().trim();
                     AssetTypeDto parentType = parentKey.isEmpty() ? null : types.get(parentKey);
@@ -2070,6 +2074,10 @@ public class AssetServiceImpl implements AssetService {
                     node.setStatus(laid.getStatus());
                     node.setTypeLabel(laid.getTypeLabel());
                     node.setGroup(laid.isGroup());
+                    if (!laid.isGroup()) {
+                        String extra = searchText.get(Integer.valueOf(laid.getId()));
+                        node.setSearch(extra == null ? "" : extra);
+                    }
                     nodes.add(node);
                 }
                 return nodes;
@@ -4694,6 +4702,53 @@ public class AssetServiceImpl implements AssetService {
             clause.append(')');
             ao().deleteWithSQL(type, clause.toString(), params);
         }
+    }
+
+    private String pickerSearch(AssetEntity asset, List<AssetAttributeEntity> attributes, Map<String, String[]> holders) {
+        StringBuilder text = new StringBuilder();
+        appendSearch(text, asset.getObjectKey());
+        appendSearch(text, asset.getDescription());
+        appendSearch(text, asset.getCustodianKey());
+        appendHolderSearch(text, asset.getCustodianKey(), holders);
+        appendSearch(text, asset.getIssuedKey());
+        appendHolderSearch(text, asset.getIssuedKey(), holders);
+        if (attributes != null) {
+            for (AssetAttributeEntity attribute : attributes) {
+                appendSearch(text, attribute.getAttrName());
+                appendSearch(text, attribute.getAttrValue());
+            }
+        }
+        return text.toString();
+    }
+
+    private void appendSearch(StringBuilder text, String value) {
+        if (value == null) {
+            return;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        if (text.length() > 0) {
+            text.append(' ');
+        }
+        text.append(trimmed);
+    }
+
+    private void appendHolderSearch(StringBuilder text, String userKey, Map<String, String[]> holders) {
+        if (userKey == null || userKey.isEmpty()) {
+            return;
+        }
+        String[] cached = holders.get(userKey);
+        if (cached == null) {
+            ApplicationUser person = userManager().getUserByKey(userKey);
+            String name = person == null || person.getDisplayName() == null ? "" : person.getDisplayName();
+            String email = person == null || person.getEmailAddress() == null ? "" : person.getEmailAddress();
+            cached = new String[] {name, email};
+            holders.put(userKey, cached);
+        }
+        appendSearch(text, cached[0]);
+        appendSearch(text, cached[1]);
     }
 
     private boolean matches(AssetEntity asset, List<AssetAttributeEntity> attributes, String needle, Map<String, String[]> holders) {

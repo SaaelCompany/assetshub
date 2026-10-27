@@ -941,12 +941,18 @@ def ensure_portal_demo():
     ensure_type("test-place", "Площадка", True, "building", 10)
     ensure_type("test-dept", "Отделение", True, "department", 11)
     ensure_type("test-device", "Оборудование", False, "device", 12)
+    STATE["types"]["test-device"]["fields"] = [
+        {"fieldKey": "serial", "label": "Серийный номер", "kind": "text", "required": False, "position": 0},
+        {"fieldKey": "inventory", "label": "Инвентарный номер", "kind": "text", "required": False, "position": 1},
+    ]
     place_a = add_asset("TEST", "test-place", "Площадка А", None, "in_use", None, {}, "TEST-1")
     place_b = add_asset("TEST", "test-place", "Площадка Б", None, "in_use", None, {}, "TEST-2")
     department = add_asset("TEST", "test-dept", "Отделение А", place_a, "in_use", None, {}, "TEST-3")
-    add_asset("TEST", "test-device", "Аппарат", department, "in_use", None, {}, "TEST-4")
-    add_asset("TEST", "test-device", "Управляющая компания", department, "in_use", None, {}, "TEST-5")
-    add_asset("TEST", "test-device", "Принтер Б", place_b, "in_use", None, {}, "TEST-6")
+    apparat = add_asset("TEST", "test-device", "Аппарат", department, "in_use", "smirnov", {"serial": "SN-APPARAT-77", "inventory": "INV-100"}, "TEST-4")
+    office = add_asset("TEST", "test-device", "Управляющая компания", department, "in_use", None, {"serial": "SN-OFFICE-88", "inventory": "INV-200"}, "TEST-5")
+    add_asset("TEST", "test-device", "Принтер Б", place_b, "in_use", None, {"serial": "SN-PRINTER-99", "inventory": "INV-300"}, "TEST-6")
+    STATE["assets"][apparat]["description"] = "Кабинет бухгалтерии"
+    STATE["assets"][office]["description"] = "Серверная стойка"
     STATE["portal_rules"] = [
         {"id": 1, "assetId": place_a, "position": 1, "conditions": [{"field": "Площадка", "option": "Пункт А"}]},
         {"id": 2, "assetId": place_b, "position": 2, "conditions": [{"field": "Площадка", "option": "Пункт Б"}]},
@@ -1644,6 +1650,7 @@ def picker_nodes(rows, text):
             "parentTypeLabel": parent_label,
             "location": location,
             "offeredLines": list(row.get("offeredTypes") or []) if location else [],
+            "search": asset_search_text(row, text),
         })
     return arrange_picker(sources)
 
@@ -1740,6 +1747,30 @@ def picker_root_label(root_key, items):
     return items[0]["typeLabel"] or root_key
 
 
+def asset_search_text(row, text):
+    parts = []
+
+    def add(value):
+        item = str(value or "").strip()
+        if item and item not in parts:
+            parts.append(item)
+
+    add(row.get("objectKey"))
+    add(row.get("description"))
+    for key_name in ("custodianKey", "issuedKey"):
+        user_key = row.get(key_name) or ""
+        add(user_key)
+        person = USERS.get(user_key) or {}
+        add(person.get("displayName"))
+        add(person.get("email"))
+    typed = type_row(row.get("typeKey")) or {}
+    values = row.get("values") or {}
+    for field in typed.get("fields") or []:
+        add(label_of(field.get("label"), text) if text else field.get("label"))
+        add(values.get(field.get("fieldKey")))
+    return " ".join(parts)
+
+
 def picker_asset(source, parent_id):
     return {
         "id": source["id"],
@@ -1749,6 +1780,7 @@ def picker_asset(source, parent_id):
         "status": source["status"],
         "typeLabel": source["typeLabel"],
         "group": False,
+        "search": source.get("search") or "",
     }
 
 
@@ -5897,7 +5929,12 @@ form.vp-request-form .select2-container .select2-chosen { position: relative; z-
             search.hidden = !showSearch;
             for (var i = 0; i < el.options.length; i++) {
                 var text = el.options[i].text || '';
-                if (needle && text.toLowerCase().indexOf(needle) === -1) continue;
+                var matched = true;
+                if (needle) {
+                    if (typeof options.matcher === 'function') matched = !!options.matcher(input.value, text, el.options[i]);
+                    else matched = text.toLowerCase().indexOf(needle) !== -1;
+                }
+                if (!matched) continue;
                 var item = document.createElement('li');
                 item.className = 'select2-result';
                 item.textContent = text;
