@@ -5911,8 +5911,14 @@ public class AssetServiceImpl implements AssetService {
                 if (row == null) {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
+                boolean marking = Boolean.TRUE.equals(draft.getDone());
                 fillPlan(row, asset, draft, false);
                 row.save();
+                if (marking) {
+                    recordActivity(asset.getID(), user.getKey(), "service_done",
+                            row.getName() == null ? "" : row.getName(), "",
+                            row.getCompletedOn() == null ? "" : row.getCompletedOn());
+                }
                 applyDueQuietly(asset.getProjectKey(), notices);
                 return planDto(row, businessToday());
             }

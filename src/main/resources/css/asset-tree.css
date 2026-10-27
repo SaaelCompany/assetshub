@@ -5339,6 +5339,36 @@ a.asset-tree-url {
     background: #fffae6;
 }
 
+#asset-tree-app form.asset-tree-plan.is-done,
+#asset-tree-app .asset-tree-plan.is-done {
+    border-color: #abf5d1;
+    background: #f3fcf7;
+}
+
+#asset-tree-app .asset-tree-plan-result {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    margin: 0;
+    padding: 6px 10px;
+    border: 1px solid #abf5d1;
+    border-radius: 3px;
+    background: #e3fcef;
+    color: #006644;
+    font-size: 13px;
+    line-height: 18px;
+}
+
+#asset-tree-app .asset-tree-plan.is-read .asset-tree-plan-result {
+    flex: 1 0 100%;
+}
+
+#asset-tree-app .asset-tree-plan-result strong {
+    font-weight: 600;
+}
+
 #asset-tree-app .asset-tree-plan.is-read {
     display: flex !important;
     flex-wrap: wrap;

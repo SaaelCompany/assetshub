@@ -4988,8 +4988,29 @@
         return t('serviceEvery') + ' ' + (plan.everyCount || 1) + ' ' + serviceUnitWord(plan.everyUnit);
     }
 
+    function serviceDoneText(plan) {
+        var marked = plan && plan.completedOn ? formatFieldDate(plan.completedOn) : '';
+        var text = t('serviceMarked') + (marked ? ' ' + marked : '');
+        if (plan && !plan.completed && plan.everyUnit && plan.everyUnit !== 'once' && plan.nextDue) {
+            text += '. ' + t('serviceNext') + ' ' + formatFieldDate(plan.nextDue);
+        }
+        return text;
+    }
+
+    function serviceResult(plan) {
+        if (!plan || !plan.completedOn) return null;
+        var line = el('div', 'asset-tree-plan-result');
+        line.appendChild(el('strong', null, t('serviceMarked') + ' ' + formatFieldDate(plan.completedOn)));
+        if (!plan.completed && plan.everyUnit && plan.everyUnit !== 'once' && plan.nextDue) {
+            line.appendChild(el('span', null, t('serviceNext') + ' ' + formatFieldDate(plan.nextDue)));
+        }
+        return line;
+    }
+
     function serviceRead(plan) {
-        var row = el('div', 'asset-tree-plan is-read' + (plan.due ? ' is-due' : ''));
+        var row = el('div', 'asset-tree-plan is-read' + (plan.completed && plan.completedOn ? ' is-done' : (plan.due ? ' is-due' : '')));
+        var doneLine = serviceResult(plan);
+        if (doneLine) row.appendChild(doneLine);
         var title = el('div', 'asset-tree-plan-title');
         title.appendChild(el('strong', null, plan.name));
         title.appendChild(el('span', null, kindName(plan.kind)));
@@ -5011,8 +5032,10 @@
 
     function serviceEditor(asset, plan, extras) {
         var creating = !plan;
-        var row = el('form', 'asset-tree-plan' + (plan && plan.due ? ' is-due' : ''));
+        var row = el('form', 'asset-tree-plan' + (plan && plan.completed && plan.completedOn ? ' is-done' : (plan && plan.due ? ' is-due' : '')));
         row.addEventListener('submit', function (event) { event.preventDefault(); });
+        var doneLine = serviceResult(plan);
+        if (doneLine) row.appendChild(doneLine);
         var name = input('', plan ? plan.name : '', false);
         name.placeholder = t('serviceName');
         name.setAttribute('aria-label', t('serviceName'));
@@ -5104,7 +5127,7 @@
                     var shown = last.value;
                     if (done && response && (response.nextDue || response.lastDone)) shown = response.nextDue || response.lastDone;
                     touchSchedule(shown);
-                    if (!done) notify(t('serviceSame'));
+                    notify(done ? serviceDoneText(response) : t('serviceSame'));
                     reloadCard(asset.id);
                 } else notify((response && response.message) || t('errorTitle'));
             });
@@ -5921,6 +5944,7 @@
         if (item.action === 'place_in') return t('actPlaceIn');
         if (item.action === 'place_out') return t('actPlaceOut');
         if (item.action === 'service_due') return t('actServiceDue');
+        if (item.action === 'service_done') return t('actServiceDone');
         if (item.action === 'peer_add') return t('actPeerAdd');
         if (item.action === 'peer_remove') return t('actPeerRemove');
         return t('actUpdated');
@@ -5966,8 +5990,9 @@
         if (field) change.appendChild(el('span', 'asset-tree-history-field', field));
         var oldText = historyValue(item, item.oldValue);
         var newText = historyValue(item, item.newValue);
-        if (item.action === 'service_due') {
-            change.appendChild(el('span', null, (item.field ? item.field + ' · ' : '') + formatFieldDate(item.newValue)));
+        if (item.action === 'service_due' || item.action === 'service_done') {
+            var when = formatFieldDate(item.newValue);
+            change.appendChild(el('span', null, item.action === 'service_done' ? when : ((item.field ? item.field + ' · ' : '') + when)));
         } else if (item.action === 'file' || item.action === 'file_delete' || item.action === 'comment' || item.action === 'comment_delete') {
             change.appendChild(el('span', null, newText || oldText));
         } else if (item.action === 'status') {
@@ -15740,6 +15765,7 @@
                     ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, body, function (status, payload) {
                         if (status >= 200 && status < 300) {
                             closeModal();
+                            notify(serviceDoneText(payload));
                             refreshSchedules();
                         } else notify((payload && payload.message) || t('errorTitle'));
                     });

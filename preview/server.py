@@ -6916,9 +6916,12 @@ setTimeout(function () {
         asset = STATE["assets"].get(asset_id)
         if not asset or not row or row["assetId"] != asset_id:
             return 404, {"message": text["asset-tree.error.notFound"]}
+        marking = (body or {}).get("done") is True
         error = fill_plan(row, body, False, asset["projectKey"], text)
         if error:
             return 400, {"message": error}
+        if marking:
+            record_activity(asset_id, "service_done", row.get("name") or "", "", row.get("completedOn") or "")
         apply_due(asset["projectKey"])
         return 200, plan_dto(row)
 
