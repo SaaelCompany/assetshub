@@ -8396,6 +8396,66 @@ a.asset-tree-url {
     cursor: default;
 }
 
+#asset-tree-app select.asset-tree-roster-pattern {
+    width: auto;
+    max-width: 64px;
+    height: 18px;
+    min-height: 0;
+    margin: 0 0 0 4px;
+    padding: 0 2px !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 8px;
+    background: #f7f8fa;
+    color: #172b4d;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
+}
+
+#asset-tree-app .asset-tree-roster-pattern-wrap {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+}
+
+#asset-tree-app .asset-tree-roster-pattern-custom {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2px;
+}
+
+#asset-tree-app .asset-tree-roster-pattern-num,
+#asset-tree-app .asset-tree-roster-hour-edit {
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 18px !important;
+    min-height: 0 !important;
+    margin: 0 1px;
+    padding: 0 !important;
+    border: 1px solid #e6e8ec !important;
+    border-radius: 6px !important;
+    background: #fff !important;
+    color: #172b4d;
+    font-size: 11px;
+    text-align: center;
+}
+
+#asset-tree-app td.asset-tree-roster-day.is-selected {
+    box-shadow: inset 0 0 0 2px #172b4d;
+}
+
+#asset-tree-app .asset-tree-staff-sheet-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app select.asset-tree-staff-branch-add {
+    max-width: 240px;
+}
+
 #asset-tree-app .asset-tree-roster-hours {
     width: 36px !important;
     min-width: 36px !important;

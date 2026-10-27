@@ -2429,6 +2429,19 @@ def staff_list(project_key):
     return rows
 
 
+def staff_shift_pattern(weekdays):
+    if weekdays < 128 or weekdays > 383:
+        return False
+    packed = weekdays - 128
+    work = packed // 16
+    rest = packed % 16
+    return 1 <= work <= 15 and 1 <= rest <= 15
+
+
+def staff_weekdays_allowed(weekdays):
+    return (1 <= weekdays <= 127) or staff_shift_pattern(weekdays)
+
+
 def parse_staff_day(raw):
     text_day = (raw or "").strip()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text_day):
@@ -2449,7 +2462,7 @@ def save_staff(project_key, body, text):
         hours = int(body.get("hours") or 0)
     except (TypeError, ValueError):
         return 400, {"message": text["asset-tree.error.staff"]}
-    if weekdays < 1 or weekdays > 127 or hours < 1 or hours > 24:
+    if not staff_weekdays_allowed(weekdays) or hours < 1 or hours > 24:
         return 400, {"message": text["asset-tree.error.staff"]}
     existing = None
     owned = [row for row in STATE["duties"].values() if row.get("projectKey") == project_key]
@@ -2470,7 +2483,7 @@ def save_staff(project_key, body, text):
     if "startOn" in body:
         parsed = parse_staff_day(body.get("startOn"))
         anchor = parsed.isoformat() if parsed else ""
-    if hours >= 12:
+    if staff_shift_pattern(weekdays) or hours >= 12:
         if not anchor:
             anchor = "2024-01-01"
     else:

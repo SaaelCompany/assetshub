@@ -6774,7 +6774,7 @@ public class AssetServiceImpl implements AssetService {
         final String person = staffUser(draft);
         final int weekdays = draft == null || draft.getWeekdays() == null ? 0 : draft.getWeekdays().intValue();
         final int hours = draft == null || draft.getHours() == null ? 0 : draft.getHours().intValue();
-        if (weekdays < 1 || weekdays > 127 || hours < 1 || hours > 24) {
+        if (!staffWeekdaysAllowed(weekdays) || hours < 1 || hours > 24) {
             throw new AssetException(400, "asset-tree.error.staff");
         }
         return ao().executeInTransaction(new TransactionCallback<StaffDutyDto>() {
@@ -6804,7 +6804,7 @@ public class AssetServiceImpl implements AssetService {
                     LocalDate parsed = staffDay(draft.getStartOn());
                     anchor = parsed == null ? "" : parsed.toString();
                 }
-                if (hours >= 12) {
+                if (staffShiftPattern(weekdays) || hours >= 12) {
                     if (anchor.isEmpty()) {
                         anchor = "2024-01-01";
                     }
@@ -6905,6 +6905,21 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
+    }
+
+    private boolean staffWeekdaysAllowed(int weekdays) {
+        return (weekdays >= 1 && weekdays <= 127) || staffShiftPattern(weekdays);
+    }
+
+    /** Work/rest cycle packed as 128 + work * 16 + rest. Work and rest are 1..15. */
+    private boolean staffShiftPattern(int weekdays) {
+        if (weekdays < 128 || weekdays > 383) {
+            return false;
+        }
+        int packed = weekdays - 128;
+        int work = packed / 16;
+        int rest = packed % 16;
+        return work >= 1 && work <= 15 && rest >= 1 && rest <= 15;
     }
 
     private String staffUser(StaffDutyDraft draft) {
