@@ -14828,6 +14828,124 @@
         if (state.view === 'schedules') renderFrame();
     }
 
+    function staffCellFromPoint(x, y) {
+        var node = document.elementFromPoint(x, y);
+        while (node && node !== document.body) {
+            if (node.getAttribute && node.getAttribute('data-staff-day') && node.getAttribute('data-staff-user')) return node;
+            node = node.parentNode;
+        }
+        return null;
+    }
+
+    function staffSelectionCells() {
+        var grid = staffVisibleGrid();
+        var cells = [];
+        grid.people.forEach(function (person) {
+            grid.days.forEach(function (iso) {
+                if (staffCellSelected(person.userKey, iso)) cells.push({ userKey: person.userKey, iso: iso });
+            });
+        });
+        return cells;
+    }
+
+    function staffEarliestSelected(userKey) {
+        var grid = staffVisibleGrid();
+        var start = '';
+        grid.days.forEach(function (iso) {
+            if (!staffCellSelected(userKey, iso)) return;
+            if (!start || iso < start) start = iso;
+        });
+        return start;
+    }
+
+    function staffColumnSelected(iso) {
+        var grid = staffVisibleGrid();
+        if (!grid.people.length) return false;
+        var index;
+        for (index = 0; index < grid.people.length; index++) {
+            if (!staffCellSelected(grid.people[index].userKey, iso)) return false;
+        }
+        return true;
+    }
+
+    function staffRowSelected(userKey) {
+        var grid = staffVisibleGrid();
+        if (!grid.days.length) return false;
+        var index;
+        for (index = 0; index < grid.days.length; index++) {
+            if (!staffCellSelected(userKey, grid.days[index])) return false;
+        }
+        return true;
+    }
+
+    function staffSelectColumn(iso) {
+        var grid = staffVisibleGrid();
+        var pairs = [];
+        grid.people.forEach(function (person) {
+            pairs.push({ userKey: person.userKey, iso: iso });
+        });
+        if (!pairs.length) return;
+        var last = pairs[pairs.length - 1];
+        staffSetSelection(pairs, staffCellKey(pairs[0].userKey, iso), staffCellKey(last.userKey, iso));
+        if (state.view === 'schedules') renderFrame();
+    }
+
+    function staffSelectPerson(userKey) {
+        var grid = staffVisibleGrid();
+        var pairs = [];
+        grid.days.forEach(function (iso) {
+            pairs.push({ userKey: userKey, iso: iso });
+        });
+        if (!pairs.length) return;
+        staffSetSelection(pairs, staffCellKey(userKey, grid.days[0]), staffCellKey(userKey, grid.days[grid.days.length - 1]));
+        if (state.view === 'schedules') renderFrame();
+    }
+
+    function staffMonthStart() {
+        var month = state.scheduleMonth < 10 ? '0' + state.scheduleMonth : String(state.scheduleMonth);
+        return state.scheduleYear + '-' + month + '-01';
+    }
+
+    function staffApplyPattern(person, startIso, weekdays) {
+        if (!person || !person.hours || !startIso) return;
+        var pattern = staffPatternOf(person);
+        var packed = weekdays || packStaffShift(pattern.work, pattern.rest);
+        var marks = parseDayMarks(person.hours.marks);
+        person.hours.weekdays = packed;
+        person.hours.startOn = startIso;
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var iso = isoDate(date);
+            if (iso < startIso) continue;
+            if (!marks[iso] || markCustom(marks, iso) != null) continue;
+            if (marks[iso] === 'work' || marks[iso] === 'off') {
+                delete marks[iso];
+                delete marks._hours[iso];
+            }
+        }
+        saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
+    }
+
+    function staffFillSelection() {
+        var grid = staffVisibleGrid();
+        var found = [];
+        grid.people.forEach(function (person) {
+            var start = staffEarliestSelected(person.userKey);
+            if (start) found.push({ person: person, start: start });
+        });
+        if (!found.length) {
+            notify(t('staffFillNeed'));
+            return;
+        }
+        found.forEach(function (item) {
+            staffApplyPattern(item.person, item.start);
+        });
+    }
+
     function staffPaintSelection(cells) {
         var pairs = [];
         (cells || []).forEach(function (cell) { pairs.push({ userKey: cell.userKey, iso: cell.iso }); });
@@ -14953,88 +15071,31 @@
         });
     }
 
-    function staffSameOnce(existing, iso, brush, per, spec, visible) {
-        if (visible !== brush) return false;
-        if (!spec || brush === 'off') return true;
-        var custom = markCustom(existing, iso);
-        if (spec.mode === 'abs') return custom === spec.value;
-        var expected = staffDayHours(brush, per) + spec.value;
-        if (expected < 0) expected = 0;
-        if (expected > 24) expected = 24;
-        expected = Math.round(expected * 100) / 100;
-        return custom != null && Math.abs(custom - expected) < 0.001;
-    }
-
     function beginStaffPaint(person, iso, event) {
-        if (!state.canEdit || !person.hours || event.button !== 0) return;
+        if (!person.hours || event.button !== 0) return;
         event.preventDefault();
-        if (event.shiftKey) {
-            var anchor = state.staffSelection && state.staffSelection.anchor;
-            function extend(ev) {
-                var node = ev.target;
-                while (node && node !== document.body) {
-                    if (node.getAttribute && node.getAttribute('data-staff-day') && node.getAttribute('data-staff-user')) {
-                        staffSelectRange(node.getAttribute('data-staff-user'), node.getAttribute('data-staff-day'), anchor);
-                        staffMarkSelectedCells();
-                        break;
-                    }
-                    node = node.parentNode;
-                }
-            }
-            function finish() {
-                document.removeEventListener('mousemove', extend);
-                document.removeEventListener('mouseup', finish);
-                renderFrame();
-            }
-            staffSelectRange(person.userKey, iso, anchor);
-            document.addEventListener('mousemove', extend);
-            document.addEventListener('mouseup', finish);
-            return;
-        }
         if (event.ctrlKey || event.metaKey) {
             staffToggleCell(person.userKey, iso);
             renderFrame();
             return;
         }
-        var brush = state.staffBrush || 'work';
-        var existing = parseDayMarks(person.hours.marks);
-        var start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-        var startDate = start ? new Date(Number(start[1]), Number(start[2]) - 1, Number(start[3])) : new Date();
-        var spec = staffOnceSpec();
-        var per = parseInt(person.hours.hours, 10) || 8;
-        var visible = staffVisible(person, iso, startDate, existing);
-        var erase = staffSameOnce(existing, iso, brush, per, spec, visible);
-        var seen = {};
-        var cells = [{ userKey: person.userKey, iso: iso }];
-        seen[staffCellKey(person.userKey, iso)] = true;
-        state.staffDrag = { cells: cells, erase: erase };
-        function move(ev) {
-            var node = ev.target;
-            while (node && node !== document.body) {
-                if (node.getAttribute && node.getAttribute('data-staff-day') && node.getAttribute('data-staff-user')) {
-                    var day = node.getAttribute('data-staff-day');
-                    var user = node.getAttribute('data-staff-user');
-                    var key = staffCellKey(user, day);
-                    if (state.staffDrag && !seen[key]) {
-                        seen[key] = true;
-                        state.staffDrag.cells.push({ userKey: user, iso: day });
-                    }
-                    node.classList.add('is-painting');
-                    break;
-                }
-                node = node.parentNode;
-            }
+        var anchor = (event.shiftKey && state.staffSelection && state.staffSelection.anchor)
+            ? state.staffSelection.anchor
+            : staffCellKey(person.userKey, iso);
+        function extend(ev) {
+            var node = staffCellFromPoint(ev.clientX, ev.clientY);
+            if (!node) return;
+            staffSelectRange(node.getAttribute('data-staff-user'), node.getAttribute('data-staff-day'), anchor);
+            staffMarkSelectedCells();
         }
-        function up() {
-            document.removeEventListener('mousemove', move);
-            document.removeEventListener('mouseup', up);
-            var painted = state.staffDrag ? state.staffDrag.cells.slice() : [];
-            var clear = state.staffDrag ? state.staffDrag.erase : false;
-            state.staffDrag = null;
-            if (painted.length) paintStaffCells(painted, clear);
+        function finish() {
+            document.removeEventListener('mousemove', extend);
+            document.removeEventListener('mouseup', finish);
+            renderFrame();
         }
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
+        staffSelectRange(person.userKey, iso, anchor);
+        document.addEventListener('mousemove', extend);
+        document.addEventListener('mouseup', finish);
     }
 
     function staffMarkSelectedCells() {
@@ -15234,8 +15295,8 @@
             var nextWork = parseInt(workInput.value, 10) || 0;
             var nextRest = parseInt(restInput.value, 10) || 0;
             if (nextWork < 1 || nextWork > 15 || nextRest < 1 || nextRest > 15) return;
-            var anchor = person.hours.startOn || '2024-01-01';
-            saveStaffHours(person.userKey, packStaffShift(nextWork, nextRest), person.hours.hours || 8, undefined, anchor);
+            var anchor = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
+            staffApplyPattern(person, anchor, packStaffShift(nextWork, nextRest));
         }
         workInput.addEventListener('change', commit);
         restInput.addEventListener('change', commit);
@@ -15275,24 +15336,36 @@
         select.addEventListener('mousedown', function (event) { event.stopPropagation(); });
         var nudge = button('+1', 'asset-tree-roster-pattern', function () {
             var currentPattern = staffPatternOf(person);
-            var anchor = parseIsoDate(person.hours.startOn) || parseIsoDate('2024-01-01');
+            var anchor = parseIsoDate(person.hours.startOn) || parseIsoDate(staffMonthStart());
             saveStaffHours(person.userKey, packStaffShift(currentPattern.work, currentPattern.rest), person.hours.hours || 8, undefined, isoDate(shiftDays(anchor, 1)));
         });
         nudge.title = t('staffShiftHint');
         nudge.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        var fill = button(t('staffFillRow'), 'asset-tree-roster-pattern', function () {
+            var start = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
+            staffApplyPattern(person, start);
+        });
+        fill.title = t('staffFillHint');
+        fill.addEventListener('mousedown', function (event) { event.stopPropagation(); });
         select.addEventListener('change', function () {
             if (select.value === 'custom') {
                 if (!wrap.querySelector('.asset-tree-roster-pattern-custom')) {
-                    wrap.insertBefore(staffPatternNumbers(person, pattern.work || 5, pattern.rest || 2), nudge);
+                    wrap.insertBefore(staffPatternNumbers(person, pattern.work || 5, pattern.rest || 2), fill);
                 }
                 return;
             }
             var bits = select.value.split('/');
-            var anchor = person.hours.startOn || '2024-01-01';
-            saveStaffHours(person.userKey, packStaffShift(bits[0], bits[1]), person.hours.hours || 8, undefined, anchor);
+            var anchor = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
+            staffApplyPattern(person, anchor, packStaffShift(bits[0], bits[1]));
         });
         wrap.appendChild(select);
         if (!known) wrap.appendChild(staffPatternNumbers(person, pattern.work, pattern.rest));
+        wrap.appendChild(fill);
+        if (person.hours.startOn) {
+            var from = el('span', 'asset-tree-roster-pattern-from', t('staffFillFrom', staffDayShort(person.hours.startOn)));
+            from.title = t('staffFillHint');
+            wrap.appendChild(from);
+        }
         wrap.appendChild(nudge);
         return wrap;
     }
@@ -15650,7 +15723,13 @@
         bar.appendChild(button(t('staffSelectAll'), 'asset-tree-btn slim', function () { staffSelectAll(); }));
         bar.appendChild(button(t('staffCopy'), 'asset-tree-btn slim', function () { staffCopySelection(); }));
         if (state.canEdit) bar.appendChild(button(t('staffPaste'), 'asset-tree-btn slim', function () { staffPasteSelection(); }));
+        if (state.canEdit) {
+            var fill = button(t('staffFill'), 'asset-tree-btn slim', function () { staffFillSelection(); });
+            fill.title = t('staffFillHint');
+            bar.appendChild(fill);
+        }
         bar.appendChild(button(t('staffExcel'), 'asset-tree-btn slim', function () { downloadStaffBook(); }));
+        bar.appendChild(el('p', 'asset-tree-staff-fill-hint', t('staffFillHint')));
         return bar;
     }
 
@@ -15673,7 +15752,14 @@
         }
         var who = el('span', 'asset-tree-roster-who', person.userName);
         who.title = person.phone ? person.userName + ' \u00B7 ' + person.phone : person.userName;
+        who.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            staffSelectPerson(person.userKey);
+        });
         identity.appendChild(who);
+        if (staffRowSelected(person.userKey)) name.className += ' is-selected';
         if (state.canEdit && person.hours) {
             identity.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
@@ -15801,13 +15887,20 @@
             var weekend = date.getDay() === 0 || date.getDay() === 6;
             var iso = isoDate(date);
             var label = el('span', 'asset-tree-roster-num' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''), String(day));
-            var cell = el('th', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : ''));
+            var cell = el('th', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (staffColumnSelected(iso) ? ' is-selected' : ''));
             if (weekend) {
                 var weekday = rosterWeekday(date);
                 cell.title = weekday;
                 label.title = weekday;
                 label.setAttribute('aria-label', day + ' ' + weekday);
             }
+            (function (columnIso) {
+                cell.addEventListener('mousedown', function (event) {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    staffSelectColumn(columnIso);
+                });
+            })(iso);
             cell.appendChild(label);
             row.appendChild(cell);
         }
@@ -16034,6 +16127,11 @@
         var offOn = state.staffBrush === 'off';
         var off = button(t('staffOff'), 'asset-tree-mark-pick' + (offOn ? ' is-on' : ''), function () {
             state.staffBrush = 'off';
+            var cells = staffSelectionCells();
+            if (cells.length) {
+                paintStaffCells(cells, false);
+                return;
+            }
             renderFrame();
         });
         off.setAttribute('aria-pressed', offOn ? 'true' : 'false');
@@ -16042,13 +16140,12 @@
             var chip = el('div', 'asset-tree-mark' + (state.staffBrush === row.id ? ' is-on' : ''));
             function choose() {
                 state.staffBrush = row.id;
-                var nodes = bar.children;
-                var index;
-                for (index = 0; index < nodes.length; index++) {
-                    if (nodes[index].classList) nodes[index].classList.remove('is-on');
+                var cells = staffSelectionCells();
+                if (cells.length) {
+                    paintStaffCells(cells, false);
+                    return;
                 }
-                chip.classList.add('is-on');
-                off.classList.remove('is-on');
+                renderFrame();
             }
             var swatch = document.createElement('label');
             swatch.className = 'asset-tree-mark-swatch';
