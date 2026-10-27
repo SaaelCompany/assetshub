@@ -1189,6 +1189,8 @@ public final class UiCatalog {
             "mapNextBuilding",
             "mapWorkstation",
             "mapMeeting",
+            "mapRound",
+            "mapKitchen",
             "mapReception",
             "mapWaiting",
             "mapTwinDesk",

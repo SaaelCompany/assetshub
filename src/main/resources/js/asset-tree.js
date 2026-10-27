@@ -17688,6 +17688,18 @@
                 bit('desk', 120, 0, 104, 56, 0),
                 bit('chair', 154, 64, 36, 36, 180)
             ]),
+            group('round', 'mapRound', [
+                bit('table', 34, 34, 92, 92, 0),
+                bit('chair', 62, 0, 36, 30, 0),
+                bit('chair', 62, 130, 36, 30, 180),
+                bit('chair', 0, 62, 30, 36, 270),
+                bit('chair', 130, 62, 30, 36, 90)
+            ]),
+            group('kitchen', 'mapKitchen', [
+                bit('cabinet', 0, 0, 220, 52, 0),
+                bit('sink', 18, 8, 64, 36, 0),
+                bit('stove', 148, 6, 52, 40, 0)
+            ]),
             group('meet', 'mapMeeting', [
                 bit('table', 40, 40, 128, 72, 0),
                 bit('chair', 88, 0, 36, 36, 0),
@@ -19401,23 +19413,39 @@
         rect.setAttribute('height', String(room.h));
     }
 
+    function dimensionPath(room) {
+        var long = room.w >= room.h ? room.w : room.h;
+        if (long < 40) return '';
+        if (room.w >= room.h) {
+            return 'M 0 -26 L 0 -16 M ' + room.w + ' -26 L ' + room.w + ' -16 M 0 -21 L ' + room.w + ' -21';
+        }
+        return 'M -26 0 L -16 0 M -26 ' + room.h + ' L -16 ' + room.h + ' M -21 0 L -21 ' + room.h;
+    }
+
     function placeDimension(node, room) {
         var long = room.w >= room.h ? room.w : room.h;
-        node.textContent = planMeters(long) + ' ' + t('mapMeter');
+        node.textContent = String(Math.round(long));
         node.setAttribute('text-anchor', 'middle');
+        node.setAttribute('dominant-baseline', 'middle');
         if (room.w >= room.h) {
             node.setAttribute('x', String(room.w / 2));
-            node.setAttribute('y', '-4');
+            node.setAttribute('y', '-21');
             node.removeAttribute('transform');
             return;
         }
-        node.setAttribute('x', '-4');
+        node.setAttribute('x', '-21');
         node.setAttribute('y', String(room.h / 2));
-        node.setAttribute('transform', 'rotate(-90 -4 ' + (room.h / 2) + ')');
+        node.setAttribute('transform', 'rotate(-90 -21 ' + (room.h / 2) + ')');
     }
 
     function appendDimension(parent, room) {
         if (!isSegmentKind(room.kind)) return;
+        var path = dimensionPath(room);
+        if (!path) return;
+        var line = svgEl('path');
+        line.setAttribute('class', 'asset-tree-dim-line');
+        line.setAttribute('d', path);
+        parent.appendChild(line);
         var node = svgEl('text');
         node.setAttribute('class', 'asset-tree-dim');
         placeDimension(node, room);
@@ -19845,12 +19873,14 @@
         pattern.setAttribute('width', String(step));
         pattern.setAttribute('height', String(step));
         pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-        var grid = svgEl('path');
-        grid.setAttribute('d', 'M ' + step + ' 0 L 0 0 0 ' + step);
-        grid.setAttribute('fill', 'none');
-        grid.setAttribute('stroke', '#eceef1');
-        grid.setAttribute('stroke-width', '1');
-        grid.setAttribute('vector-effect', 'non-scaling-stroke');
+        var gridStep = 20;
+        pattern.setAttribute('width', String(gridStep));
+        pattern.setAttribute('height', String(gridStep));
+        var grid = svgEl('circle');
+        grid.setAttribute('cx', String(gridStep / 2));
+        grid.setAttribute('cy', String(gridStep / 2));
+        grid.setAttribute('r', '2.15');
+        grid.setAttribute('fill', '#9aa3b2');
         pattern.appendChild(grid);
         defs.appendChild(pattern);
         svg.appendChild(defs);
@@ -19869,7 +19899,6 @@
         gridPaper.setAttribute('height', String(size.h));
         gridPaper.setAttribute('fill', 'url(#asset-tree-grid)');
         gridPaper.setAttribute('pointer-events', 'none');
-        svg.appendChild(gridPaper);
         var shapeOptions = function (room, index) {
             return {
                 editing: editing,
@@ -19886,6 +19915,7 @@
             if (isPolygonRoom(room)) svg.appendChild(shapeNode(room, shapeOptions(room, index)));
             else drawnLater.push([room, index]);
         });
+        svg.appendChild(gridPaper);
         drawnLater.forEach(function (pair) {
             svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
         });
@@ -20184,11 +20214,14 @@
             rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
         }
         if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
+        if (kindName === 'table' && Math.abs(room.w - room.h) <= Math.max(room.w, room.h) * 0.2) {
+            rect.setAttribute('fill', 'transparent');
+        }
         group.appendChild(rect);
         decorateRoom(group, room);
         appendOpening(group, room);
         appendLabel(group, room);
-        if (options && options.selected) appendDimension(group, room);
+        if (isSegmentKind(room.kind) || (options && options.selected)) appendDimension(group, room);
         if (options && options.editing) {
             rect.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
@@ -20290,6 +20323,19 @@
             parent.appendChild(measure);
             return;
         }
+        if (kind === 'wall' || kind === 'partition') {
+            var face = svgEl('path');
+            var outline;
+            if (w >= h) {
+                outline = 'M ' + (-h / 2) + ' 0 L ' + (w + h / 2) + ' 0 M ' + (-h / 2) + ' ' + h + ' L ' + (w + h / 2) + ' ' + h;
+            } else {
+                outline = 'M 0 ' + (-w / 2) + ' L 0 ' + (h + w / 2) + ' M ' + w + ' ' + (-w / 2) + ' L ' + w + ' ' + (h + w / 2);
+            }
+            face.setAttribute('d', outline);
+            face.setAttribute('class', 'asset-tree-plan-mark is-face' + (kind === 'partition' ? ' is-partition' : ''));
+            parent.appendChild(face);
+            return;
+        }
         if (kind === 'arc' && window.AssetTreePlan) {
             var samples = window.AssetTreePlan.arcPoints(roomPoints(room), 12);
             if (samples.length >= 2) {
@@ -20307,7 +20353,7 @@
             mark.setAttribute('cx', String(x + w / 2));
             mark.setAttribute('cy', String(y + h / 2));
             mark.setAttribute('r', String(Math.max(2, Math.min(w, h) / 2 - 2)));
-            mark.setAttribute('class', 'asset-tree-plan-mark is-solid');
+            mark.setAttribute('class', 'asset-tree-plan-mark is-fill');
             parent.appendChild(mark);
             return;
         }
@@ -20341,13 +20387,13 @@
             node.setAttribute('class', 'asset-tree-plan-mark' + (tone ? ' is-fill is-' + tone : ''));
             parent.appendChild(node);
         }
-        function markOval(cx, cy, rx, ry) {
+        function markOval(cx, cy, rx, ry, tone) {
             var node = svgEl('ellipse');
             node.setAttribute('cx', String(cx));
             node.setAttribute('cy', String(cy));
             node.setAttribute('rx', String(Math.max(1, rx)));
             node.setAttribute('ry', String(Math.max(1, ry)));
-            node.setAttribute('class', 'asset-tree-plan-mark');
+            node.setAttribute('class', 'asset-tree-plan-mark' + (tone ? ' is-fill is-' + tone : ''));
             parent.appendChild(node);
         }
         function markLine(d) {
@@ -20356,10 +20402,13 @@
             node.setAttribute('class', 'asset-tree-plan-mark');
             parent.appendChild(node);
         }
+        if (kind === 'table' && Math.abs(w - h) <= Math.max(w, h) * 0.2) {
+            markOval(x + w / 2, y + h / 2, Math.max(4, w / 2 - 1), Math.max(4, h / 2 - 1), 'wood');
+            return;
+        }
         if (kind === 'table' || kind === 'desk') {
-            markBox(x + 3, y + 3, w - 6, h - 6, 'wood');
-            markBox(x + 8, y + 8, w - 16, h - 16, 'wood');
-            if (kind === 'desk') markLine('M ' + (x + 8) + ' ' + (y + h * 0.72) + ' L ' + (x + w - 8) + ' ' + (y + h * 0.72));
+            markBox(x + 1, y + 1, w - 2, h - 2, 'wood');
+            if (kind === 'desk') markLine('M ' + (x + 6) + ' ' + (y + h * 0.62) + ' L ' + (x + w - 6) + ' ' + (y + h * 0.62));
             return;
         }
         if (kind === 'rug') {
@@ -20396,12 +20445,14 @@
             return;
         }
         if (kind === 'cabinet') {
+            markBox(x, y, w, h);
             markLine('M ' + (x + w / 2) + ' ' + y + ' L ' + (x + w / 2) + ' ' + (y + h));
             markBox(x + w / 2 - 7, y + h / 2 - 2, 4, 4);
             markBox(x + w / 2 + 3, y + h / 2 - 2, 4, 4);
             return;
         }
         if (kind === 'pedestal') {
+            markBox(x, y, w, h);
             markLine('M ' + x + ' ' + (y + h / 3) + ' L ' + (x + w) + ' ' + (y + h / 3) + ' M ' + x + ' ' + (y + h * 2 / 3) + ' L ' + (x + w) + ' ' + (y + h * 2 / 3));
             markBox(x + w / 2 - 2, y + h / 6 - 2, 4, 4);
             markBox(x + w / 2 - 2, y + h / 2 - 2, 4, 4);
@@ -20456,6 +20507,7 @@
             return;
         }
         if (kind === 'stove') {
+            markBox(x, y, w, h);
             markOval(x + w * 0.32, y + h * 0.32, w * 0.13, h * 0.13);
             markOval(x + w * 0.68, y + h * 0.32, w * 0.13, h * 0.13);
             markOval(x + w * 0.32, y + h * 0.68, w * 0.13, h * 0.13);
@@ -20527,6 +20579,8 @@
         }
         var dim = group.querySelector('.asset-tree-dim');
         if (dim) placeDimension(dim, room);
+        var dimLine = group.querySelector('.asset-tree-dim-line');
+        if (dimLine) dimLine.setAttribute('d', dimensionPath(room));
         var knob = group.querySelector('.asset-tree-rotate');
         if (knob) {
             knob.setAttribute('cx', String(room.w / 2));

@@ -7329,16 +7329,16 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-room {
-    fill: #e4e4e4;
+    fill: #e7ebf0;
     stroke: none;
     stroke-width: 0;
     cursor: pointer;
 }
 
-#asset-tree-app .asset-tree-room.is-wall {
-    fill: #1c1c1c;
-    stroke: #1c1c1c;
-    stroke-width: 0;
+#asset-tree-app .asset-tree-room.is-wall,
+#asset-tree-app .asset-tree-room.is-partition {
+    fill: #ffffff;
+    stroke: none;
 }
 
 #asset-tree-app .asset-tree-room.is-door,
@@ -7351,9 +7351,7 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-room.is-column {
     fill: #ffffff;
-    stroke: #1c1c1c;
-    stroke-width: 1.25;
-    vector-effect: non-scaling-stroke;
+    stroke: none;
 }
 
 #asset-tree-app .asset-tree-room.is-stair {
@@ -7365,15 +7363,12 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-room.is-desk {
     fill: #ffffff;
-    stroke: #1c1c1c;
-    stroke-width: 1.25;
-    vector-effect: non-scaling-stroke;
+    stroke: none;
 }
 
 #asset-tree-app .asset-tree-room.is-partition {
-    fill: #4a4a4a;
-    stroke: #4a4a4a;
-    stroke-width: 0;
+    fill: #ffffff;
+    stroke: none;
 }
 
 #asset-tree-app .asset-tree-room.is-table,
@@ -7389,9 +7384,7 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-room.is-stove,
 #asset-tree-app .asset-tree-room.is-rug {
     fill: #ffffff;
-    stroke: #1c1c1c;
-    stroke-width: 1.25;
-    vector-effect: non-scaling-stroke;
+    stroke: none;
 }
 
 #asset-tree-app .asset-tree-room.is-plant {
@@ -7680,27 +7673,38 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill,
-#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill {
-    fill: #e7d7c3;
-    stroke: #6b5438;
-}
-
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill,
 #asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-fabric,
-#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-fabric {
-    fill: #d9c6b6;
-    stroke: #6d5344;
-}
-
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-fabric,
 #asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-wood,
-#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-wood {
-    fill: #ead7b8;
-    stroke: #7a5b32;
-}
-
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-wood,
 #asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-ceramic,
 #asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-ceramic {
-    fill: #f4f7f8;
-    stroke: #5d6d82;
+    fill: #ffffff;
+    stroke: #1c1c1c;
+    stroke-width: 1.15;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-face,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-face {
+    fill: none;
+    stroke: #1c1c1c;
+    stroke-width: 1.6;
+    stroke-linecap: square;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-face.is-partition,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-face.is-partition {
+    stroke: #5e6c84;
+    stroke-width: 1.15;
+}
+
+#asset-tree-app .asset-tree-dim-line {
+    fill: none;
+    stroke: #6b778c;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
 }
 
 #asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-arc,
@@ -10261,9 +10265,12 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-dim {
-    fill: #42526e;
-    font-size: 11px;
+    fill: #172b4d;
+    font-size: 12px;
     font-weight: 600;
+    stroke: #ffffff;
+    stroke-width: 3px;
+    paint-order: stroke fill;
     pointer-events: none;
 }
 
