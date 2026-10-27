@@ -18152,16 +18152,24 @@
         return false;
     }
 
+    function shapeHitsWall(room, rooms) {
+        var u;
+        var v;
+        for (u = 0; u <= 4; u++) {
+            for (v = 0; v <= 4; v++) {
+                var point = localToWorld(room, room.w * u / 4, room.h * v / 4);
+                if (pointHitsWall(point.x, point.y, rooms)) return true;
+            }
+        }
+        return false;
+    }
+
     function groupHitsWall(rooms, indexes) {
         var i;
-        var c;
         for (i = 0; i < indexes.length; i++) {
             var room = rooms[indexes[i]];
             if (!room || !isFurnKind(room.kind)) continue;
-            var corners = shapeCorners(room);
-            for (c = 0; c < corners.length; c++) {
-                if (pointHitsWall(corners[c].x, corners[c].y, rooms)) return true;
-            }
+            if (shapeHitsWall(room, rooms)) return true;
         }
         return false;
     }
@@ -18198,6 +18206,33 @@
         });
     }
 
+    function firstWallHit(rooms, indexes) {
+        var i;
+        var u;
+        var v;
+        for (i = 0; i < indexes.length; i++) {
+            var room = rooms[indexes[i]];
+            if (!room || !isFurnKind(room.kind)) continue;
+            for (u = 0; u <= 4; u++) {
+                for (v = 0; v <= 4; v++) {
+                    var point = localToWorld(room, room.w * u / 4, room.h * v / 4);
+                    var w;
+                    for (w = 0; w < rooms.length; w++) {
+                        if (!isSegmentKind(rooms[w].kind)) continue;
+                        var ends = segmentEnds(rooms[w]);
+                        var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, point.x, point.y);
+                        if (!hit || hit.t < -0.02 || hit.t > 1.02) continue;
+                        var thick = rooms[w].w >= rooms[w].h ? rooms[w].h : rooms[w].w;
+                        if (hit.dist < thick / 2 - 0.5) {
+                            return { x: point.x, y: point.y, projX: hit.x, projY: hit.y };
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     function settleFurniture(floor, indexes) {
         var rooms = floor.rooms || [];
         var furn = false;
@@ -18206,24 +18241,26 @@
         });
         if (!furn) return;
         var guard = 0;
-        while (guard < 48 && groupHitsWall(rooms, indexes)) {
-            var center = groupCenter(rooms, indexes);
-            var near = nearestWall(center.x, center.y, 800);
-            if (!near) break;
-            var ends = segmentEnds(near.room);
-            var proj = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, center.x, center.y);
-            if (!proj) break;
-            var dx = center.x - proj.x;
-            var dy = center.y - proj.y;
-            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var hit = firstWallHit(rooms, indexes);
+        while (guard < 48 && hit) {
+            var dx = hit.x - hit.projX;
+            var dy = hit.y - hit.projY;
+            var len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 0.5) {
+                var center = groupCenter(rooms, indexes);
+                dx = center.x - hit.projX;
+                dy = center.y - hit.projY;
+                len = Math.sqrt(dx * dx + dy * dy) || 1;
+            }
             indexes.forEach(function (at) {
                 if (!rooms[at]) return;
                 rooms[at].x += dx / len * 4;
                 rooms[at].y += dy / len * 4;
             });
             guard += 1;
+            hit = firstWallHit(rooms, indexes);
         }
-        if (groupHitsWall(rooms, indexes)) centerGroupInRoom(floor, indexes);
+        if (hit) centerGroupInRoom(floor, indexes);
         indexes.forEach(function (at) {
             if (!rooms[at]) return;
             rooms[at].x = Math.round(rooms[at].x);
@@ -18289,8 +18326,8 @@
                     rotateMembers(floor.rooms, indexes, turn, anchorX, anchorY);
                     var inwardX = -bx;
                     var inwardY = -by;
-                    var wantX = proj.x + inwardX * (thick / 2 + backExtent);
-                    var wantY = proj.y + inwardY * (thick / 2 + backExtent);
+                    var wantX = proj.x + inwardX * (thick / 2 + backExtent + 2);
+                    var wantY = proj.y + inwardY * (thick / 2 + backExtent + 2);
                     indexes.forEach(function (at) {
                         floor.rooms[at].x += wantX - anchorX;
                         floor.rooms[at].y += wantY - anchorY;
