@@ -7663,7 +7663,8 @@ a.asset-tree-url {
     cursor: nwse-resize;
 }
 
-#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark {
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark {
     fill: none;
     stroke: #1c1c1c;
     stroke-width: 1.25;
@@ -7673,8 +7674,57 @@ a.asset-tree-url {
     pointer-events: none;
 }
 
-#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-solid {
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-solid,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-solid {
     fill: #1c1c1c;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill {
+    fill: #e7d7c3;
+    stroke: #6b5438;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-fabric,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-fabric {
+    fill: #d9c6b6;
+    stroke: #6d5344;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-wood,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-wood {
+    fill: #ead7b8;
+    stroke: #7a5b32;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-fill.is-ceramic,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-fill.is-ceramic {
+    fill: #f4f7f8;
+    stroke: #5d6d82;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-arc,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-arc {
+    stroke: #1c1c1c;
+    stroke-width: 2.4;
+}
+
+#asset-tree-app .asset-tree-room.is-arc,
+#asset-tree-app .asset-tree-room.is-dim,
+#asset-tree-app .asset-tree-room.is-text {
+    fill: transparent;
+    stroke: none;
+}
+
+#asset-tree-app .asset-tree-plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 8px 0 4px;
+}
+
+#asset-tree-app .asset-tree-plan-file {
+    display: none;
 }
 
 #asset-tree-app .asset-tree-editor-bar button.asset-tree-btn.slim.is-on {

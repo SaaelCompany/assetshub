@@ -1206,7 +1206,7 @@ def pack_furniture(raw):
             if len(bits) < 5:
                 continue
             kind = bits[0].strip().lower()
-            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug"):
+            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text"):
                 kind = "room"
             def coord(value, limit):
                 try:
@@ -2716,14 +2716,14 @@ def save_floor(project_key, floor_id, body, text):
     seq = 1
     for room in rooms:
         kind = (room.get("kind") or "room").strip().lower()
-        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug"):
+        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text"):
             kind = "room"
         label = (room.get("name") or "").strip()
         if not label and kind == "room" and not room_points(room.get("points")):
             label = "Комната"
         if kind in ("room", "stair"):
             minimum = 16
-        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug"):
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text"):
             minimum = 8
         else:
             minimum = 4
@@ -5619,6 +5619,7 @@ class Handler(BaseHTTPRequestHandler):
                 .replace("@@TITLE@@", text.get("asset-tree.ui.title", "Asset tree"))
                 .replace("@@CSS@@", "/download/resources/asset-tree/asset-tree.css")
                 .replace("@@QR@@", "/download/resources/asset-tree/qr-code.js")
+                .replace("@@PLAN@@", "/download/resources/asset-tree/plan-exchange.js")
                 .replace("@@JS@@", "/download/resources/asset-tree/asset-tree.js")
                 .replace("@@REST@@", "/rest/asset-tree/1.0")
                 .replace("@@PROJECT@@", project)

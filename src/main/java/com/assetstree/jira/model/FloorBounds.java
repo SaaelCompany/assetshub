@@ -32,6 +32,9 @@ public final class FloorBounds {
     public static final String SINK = "sink";
     public static final String STOVE = "stove";
     public static final String RUG = "rug";
+    public static final String ARC = "arc";
+    public static final String DIM = "dim";
+    public static final String TEXT = "text";
 
     private FloorBounds() {
     }
@@ -61,7 +64,8 @@ public final class FloorBounds {
                 || TABLE.equals(value) || CHAIR.equals(value) || CABINET.equals(value)
                 || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
                 || BED.equals(value) || PLANT.equals(value) || BATH.equals(value)
-                || TOILET.equals(value) || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)) {
+                || TOILET.equals(value) || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)
+                || ARC.equals(value) || DIM.equals(value) || TEXT.equals(value)) {
             return value;
         }
         return ROOM;
@@ -75,7 +79,7 @@ public final class FloorBounds {
         if (COLUMN.equals(value) || DESK.equals(value) || TABLE.equals(value) || CHAIR.equals(value)
                 || CABINET.equals(value) || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
                 || BED.equals(value) || PLANT.equals(value) || BATH.equals(value) || TOILET.equals(value)
-                || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)) {
+                || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value) || TEXT.equals(value)) {
             return 8;
         }
         return MIN_PART;
