@@ -12967,7 +12967,7 @@
     }
 
     function scheduleViewTitle() {
-        if (scheduleSpanName() === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
+        if (rosterOn() || scheduleSpanName() === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
         var days = scheduleViewDays();
         var first = days[0];
         var last = days[days.length - 1];
@@ -12989,7 +12989,7 @@
     }
 
     function shiftScheduleView(delta) {
-        if (scheduleSpanName() === 'month') {
+        if (rosterOn() || scheduleSpanName() === 'month') {
             shiftScheduleMonth(delta);
             return;
         }
