@@ -14369,7 +14369,10 @@
         var box = el('div', 'asset-tree-staff-find');
         var placeFilter = staffPlaceSelect();
         if (placeFilter) box.appendChild(placeFilter);
-        if (!state.canEdit) return box.childNodes.length ? box : null;
+        if (!state.canEdit) {
+            box.appendChild(button(t('staffExcel'), 'asset-tree-btn slim asset-tree-staff-excel', function () { downloadStaffBook(); }));
+            return box;
+        }
         var field = el('label', 'asset-tree-staff-find-field');
         field.appendChild(el('span', null, t('staffAdd')));
         var query = document.createElement('input');
@@ -14407,6 +14410,7 @@
         box.appendChild(hits);
         var adder = staffBranchAdder();
         if (adder) box.appendChild(adder);
+        box.appendChild(button(t('staffExcel'), 'asset-tree-btn slim asset-tree-staff-excel', function () { downloadStaffBook(); }));
         return box;
     }
 
@@ -14852,7 +14856,7 @@
             var target = event.target;
             if (!target || !target.closest) return;
             if (target.closest('.asset-tree-roster-menu, .asset-tree-roster-menu-back')) return;
-            if (target.closest('.asset-tree-staff-sheet-tools, .asset-tree-roster-pattern-wrap')) return;
+            if (target.closest('.asset-tree-staff-sheet-tools, .asset-tree-roster-pattern-wrap, .asset-tree-staff-excel')) return;
             if (target.closest('td[data-staff-day], th.asset-tree-roster-day, th.asset-tree-roster-name')) return;
             staffClearSelection();
         }, true);
@@ -15094,21 +15098,56 @@
         saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
     }
 
-    function staffFillSelection() {
-        var grid = staffVisibleGrid();
-        var found = [];
-        grid.people.forEach(function (person) {
-            if (!person || !person.hours) return;
-            var start = staffEarliestSelected(person.userKey) || person.hours.startOn || staffMonthStart();
-            if (start) found.push({ person: person, start: start });
-        });
-        if (!found.length) {
-            notify(t('staffFillNeed'));
-            return;
+    function staffFillForward(person, startIso) {
+        if (!person || !person.hours || !startIso) return;
+        var pattern = staffPatternOf(person);
+        var packed = pattern.kind === 'week' ? pattern.weekdays : staffEncodePattern(pattern.work, pattern.rest);
+        var asShift = staffShiftPacked(packed);
+        if (asShift && asShift.work === 5 && asShift.rest === 2) packed = 31;
+        var marks = parseDayMarks(person.hours.marks);
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var prior = {};
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var iso = isoDate(date);
+            prior[iso] = staffNatural(person, iso, date);
+            if (iso >= startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
+            if (marks[iso] && marks[iso] !== 'work' && marks[iso] !== 'off') continue;
+            if (!marks[iso] && prior[iso] && prior[iso] !== 'off' && prior[iso] !== 'leave') marks[iso] = prior[iso];
         }
-        found.forEach(function (item) {
-            staffApplyPattern(item.person, item.start);
-        });
+        person.hours.weekdays = packed;
+        person.hours.startOn = startIso;
+        for (day = 1; day <= count; day++) {
+            date = new Date(year, month - 1, day);
+            iso = isoDate(date);
+            if (iso < startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
+            if (marks[iso] !== 'work' && marks[iso] !== 'off') continue;
+            if (marks[iso] === prior[iso]) {
+                delete marks[iso];
+                delete marks._hours[iso];
+            }
+        }
+        staffStripMatchedMarks(person, marks);
+        saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
+    }
+
+    function staffFillFromMenu(person, iso) {
+        var targets = [];
+        if (person && staffCellSelected(person.userKey, iso)) {
+            staffVisibleGrid().people.forEach(function (item) {
+                if (!item || !item.hours) return;
+                var start = staffEarliestSelected(item.userKey);
+                if (!start) return;
+                var fresh = staffPersonBundle(item.userKey) || item;
+                if (fresh && fresh.hours) targets.push({ person: fresh, start: start });
+            });
+        } else if (person && person.hours) {
+            targets.push({ person: person, start: iso });
+        }
+        targets.forEach(function (item) { staffFillForward(item.person, item.start); });
     }
 
     function staffPaintSelection(cells) {
@@ -15359,6 +15398,10 @@
             if (state.view === 'schedules') renderFrame();
         });
         item(t('staffSelectAll'), true, false, function () { staffSelectAll(); });
+        item(t('staffFillRow'), !!state.canEdit && !!person.hours, false, function () {
+            var fresh = staffPersonBundle(person.userKey) || person;
+            staffFillFromMenu(fresh, iso);
+        });
         if (state.canEdit && person.hours) {
             var hoursRow = el('label', 'asset-tree-roster-menu-hours');
             hoursRow.appendChild(el('span', null, t('staffMenuHours')));
@@ -15642,17 +15685,10 @@
         });
         nudge.title = t('staffShiftHint');
         nudge.addEventListener('mousedown', function (event) { event.stopPropagation(); });
-        var fill = button(t('staffFillRow'), 'asset-tree-roster-pattern', function () {
-            var fresh = staffPersonBundle(person.userKey) || person;
-            var start = staffEarliestSelected(fresh.userKey) || (fresh.hours && fresh.hours.startOn) || staffMonthStart();
-            staffApplyPattern(fresh, start);
-        });
-        fill.title = t('staffFillHint');
-        fill.addEventListener('mousedown', function (event) { event.stopPropagation(); });
         select.addEventListener('change', function () {
             if (select.value === 'custom') {
                 if (!wrap.querySelector('.asset-tree-roster-pattern-custom')) {
-                    wrap.insertBefore(staffPatternNumbers(person, pattern.work || 5, pattern.rest || 2), fill);
+                    wrap.insertBefore(staffPatternNumbers(person, pattern.work || 5, pattern.rest || 2), nudge);
                 }
                 return;
             }
@@ -15664,7 +15700,6 @@
         });
         wrap.appendChild(select);
         if (!known) wrap.appendChild(staffPatternNumbers(person, pattern.work, pattern.rest));
-        wrap.appendChild(fill);
         if (person.hours.startOn) {
             var from = el('span', 'asset-tree-roster-pattern-from', t('staffFillFrom', staffDayShort(person.hours.startOn)));
             from.title = t('staffFillHint');
@@ -16022,16 +16057,45 @@
         document.body.removeChild(link);
     }
 
+    function staffTypingTarget(node) {
+        if (!node || !node.tagName) return false;
+        var tag = node.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+        return !!node.isContentEditable;
+    }
+
+    function staffHotkeys(event) {
+        if (state.view !== 'schedules' || !rosterOn() || staffTypingTarget(event.target)) return;
+        if (document.querySelector('.asset-tree-backdrop')) return;
+        var key = event.key || '';
+        var command = event.ctrlKey || event.metaKey;
+        if (command && !event.altKey && (key === 'c' || key === 'C')) {
+            if (!staffSelectionCells().length) return;
+            event.preventDefault();
+            staffCopySelection();
+            return;
+        }
+        if (command && !event.altKey && (key === 'v' || key === 'V')) {
+            if (!state.canEdit || !state.staffClip || !state.staffClip.length || !state.staffSelection) return;
+            event.preventDefault();
+            staffPasteSelection();
+            return;
+        }
+        if (command && !event.altKey && (key === 'x' || key === 'X')) {
+            if (!state.canEdit || !staffSelectionCells().length) return;
+            event.preventDefault();
+            if (staffCopySelection()) staffEraseSelection();
+            return;
+        }
+        if (!command && !event.altKey && !event.shiftKey && (key === 'Delete' || event.keyCode === 46)) {
+            if (!state.canEdit || !staffSelectionCells().length) return;
+            event.preventDefault();
+            staffEraseSelection();
+        }
+    }
+
     function staffSheetTools() {
         var bar = el('div', 'asset-tree-staff-sheet-tools');
-        bar.appendChild(button(t('staffCopy'), 'asset-tree-btn slim', function () { staffCopySelection(); }));
-        if (state.canEdit) bar.appendChild(button(t('staffPaste'), 'asset-tree-btn slim', function () { staffPasteSelection(); }));
-        if (state.canEdit) {
-            var fill = button(t('staffFill'), 'asset-tree-btn slim', function () { staffFillSelection(); });
-            fill.title = t('staffFillHint');
-            bar.appendChild(fill);
-        }
-        bar.appendChild(button(t('staffExcel'), 'asset-tree-btn slim', function () { downloadStaffBook(); }));
         bar.appendChild(el('p', 'asset-tree-staff-fill-hint', t('staffFillHint')));
         return bar;
     }
@@ -25261,6 +25325,7 @@
     }
 
     document.addEventListener('keydown', function (event) {
+        staffHotkeys(event);
         if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S')) {
             var form = document.getElementById('asset-detail-form');
             if (form && state.canEdit) {

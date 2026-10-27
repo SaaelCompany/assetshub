@@ -8505,6 +8505,10 @@ a.asset-tree-url {
     max-width: 240px;
 }
 
+#asset-tree-app .asset-tree-staff-excel {
+    height: 32px;
+}
+
 #asset-tree-app .asset-tree-roster-hours {
     width: 36px !important;
     min-width: 36px !important;
