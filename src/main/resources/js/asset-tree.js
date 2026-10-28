@@ -401,6 +401,7 @@
         searchScope: 'project',
         sortKey: 'tree',
         sortDir: 'asc',
+        listTops: {},
         treeSort: 'order',
         treeSortDir: 'asc',
         mineColumns: null,
@@ -1257,11 +1258,17 @@
     }
 
     function fieldRaw(asset, key) {
+        if (!asset) return '';
         if (key === 'name') return asset.name || '';
+        if (key === 'key') return asset.objectKey || '';
         if (key === 'type') return asset.typeLabel || typeOf(asset.typeKey).label || '';
         if (key === 'status') return statusLabel(asset.status);
         if (key === 'custodian') return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        if (key === 'location') return asset.location || '';
+        if (key === 'description') return asset.description || '';
+        if (key === 'created') return asset.created || '';
         if (key === 'updated') return asset.updated || '';
+        if (key === 'project') return asset.projectName || asset.projectKey || '';
         if (key.indexOf('attr:') === 0) return attrRaw(asset, key);
         return '';
     }
@@ -2318,16 +2325,20 @@
         }
     }
 
+    function scrollTargets() {
+        var root = document.getElementById('asset-tree-app');
+        if (!root) return [];
+        return root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog, .asset-tree-request-main, .asset-tree-request-aside, #asset-tree-scroll, #asset-tree-detail');
+    }
+
     function captureViewScroll() {
         var nodes = [];
-        var root = document.getElementById('asset-tree-app');
-        if (root) {
-            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog');
-            var index;
-            for (index = 0; index < found.length; index++) {
-                nodes.push({ top: found[index].scrollTop, left: found[index].scrollLeft });
-            }
+        var found = scrollTargets();
+        var index;
+        for (index = 0; index < found.length; index++) {
+            nodes.push({ id: found[index].id || '', top: found[index].scrollTop, left: found[index].scrollLeft });
         }
+        var root = document.getElementById('asset-tree-app');
         var clock = root ? root.querySelector('.asset-tree-clock') : null;
         var outlook = root ? root.querySelector('.asset-tree-outlook') : null;
         return {
@@ -2342,12 +2353,21 @@
     function restoreViewScroll(kept) {
         if (!kept) return;
         var root = document.getElementById('asset-tree-app');
-        if (root && kept.nodes && kept.nodes.length) {
-            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog');
+        if (kept.nodes && kept.nodes.length) {
+            var found = scrollTargets();
+            var anonymous = [];
             var index;
-            for (index = 0; index < found.length && index < kept.nodes.length; index++) {
-                found[index].scrollTop = kept.nodes[index].top;
-                found[index].scrollLeft = kept.nodes[index].left;
+            for (index = 0; index < found.length; index++) {
+                if (!found[index].id) anonymous.push(found[index]);
+            }
+            var anonIndex = 0;
+            for (index = 0; index < kept.nodes.length; index++) {
+                var saved = kept.nodes[index];
+                var node = saved.id ? document.getElementById(saved.id) : null;
+                if (!node && !saved.id && anonIndex < anonymous.length) node = anonymous[anonIndex++];
+                if (!node) continue;
+                node.scrollTop = saved.top;
+                node.scrollLeft = saved.left;
             }
         }
         if (kept.clock != null && root) {
@@ -2676,6 +2696,53 @@
         return nest;
     }
 
+    function listContext() {
+        var group = state.typeGroup;
+        var base = group
+            ? ('group:' + group.placeId + ':' + group.typeKey + ':' + (group.scope || ''))
+            : ('node:' + (state.selectedId || 'root'));
+        var query = textQuery();
+        if (query) base += ':q:' + query.toLowerCase();
+        if (state.searchScope === 'all' && query) base += ':all';
+        return base;
+    }
+
+    function noteListPosition() {
+        var detail = document.getElementById('asset-tree-detail');
+        if (!detail || detail.className.indexOf('is-queue') < 0) return;
+        var key = detail.getAttribute('data-list-key') || '';
+        if (!key) return;
+        if (!state.listTops) state.listTops = {};
+        state.listTops[key] = detail.scrollTop;
+    }
+
+    function restoreListedScroll(detail) {
+        if (!detail || detail.className.indexOf('is-queue') < 0 || !state.listTops) return;
+        var key = detail.getAttribute('data-list-key') || '';
+        if (!key || state.listTops[key] == null) return;
+        detail.scrollTop = state.listTops[key];
+    }
+
+    function readPaneScroll(section) {
+        if (!section) return null;
+        var main = section.querySelector('.asset-tree-request-main');
+        var aside = section.querySelector('.asset-tree-request-aside');
+        return {
+            main: main ? main.scrollTop : 0,
+            aside: aside ? aside.scrollTop : 0,
+            detail: section.scrollTop || 0
+        };
+    }
+
+    function writePaneScroll(section, saved) {
+        if (!section || !saved) return;
+        var main = section.querySelector('.asset-tree-request-main');
+        var aside = section.querySelector('.asset-tree-request-aside');
+        if (main && saved.main) main.scrollTop = saved.main;
+        if (aside && saved.aside) aside.scrollTop = saved.aside;
+        if (saved.detail) section.scrollTop = saved.detail;
+    }
+
     function replaceDetail() {
         var frame = document.getElementById('asset-tree-frame');
         var existing = document.getElementById('asset-tree-detail');
@@ -2683,7 +2750,10 @@
             renderFrame();
             return;
         }
-        frame.replaceChild(renderDetail(), existing);
+        noteListPosition();
+        var next = renderDetail();
+        frame.replaceChild(next, existing);
+        restoreListedScroll(next);
     }
 
     function appendLevel(container, parentId, visible, matches) {
@@ -3713,10 +3783,13 @@
 
     function renderDetail() {
         var asset = state.selectedId ? byId()[state.selectedId] : null;
-        if (state.pane === 'card' && asset && !isFolder(asset)) {
+        if (state.pane === 'card' && asset && !isFolder(asset) && !textQuery()) {
             var section = el('section', 'asset-tree-detail');
             section.id = 'asset-tree-detail';
             return section;
+        }
+        if (textQuery()) {
+            return renderChildList(null);
         }
         if (state.typeGroup && byId()[state.typeGroup.placeId]) {
             return renderTypeGroup();
@@ -3738,6 +3811,7 @@
         var type = typeOf(group ? group.typeKey : '');
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
+        section.setAttribute('data-list-key', listContext());
         var source = group.scope === 'under' ? equipmentUnder(group.placeId) : equipmentIn(group.placeId, group.typeKey);
         if (group.scope === 'under') {
             source = source.filter(function (asset) { return asset.typeKey === group.typeKey; });
@@ -3795,7 +3869,9 @@
                     selectAsset(child.id);
                 })
             ].concat(groupColumns.map(function (key) { return columnCell(child, key); }));
-        }), [t('name')].concat(columnHeaders(groupColumns)), {
+        }), [columnSortHeader(t('name'), 'name')].concat(groupColumns.map(function (key) {
+            return columnSortHeader(columnLabel(key), key);
+        })), {
             scope: 'group:' + group.placeId + ':' + group.typeKey,
             rows: kids.map(function (child) {
                 return { key: String(child.id), kind: 'object', label: child.name, projectKey: child.projectKey || state.projectKey, asset: child };
@@ -4269,6 +4345,7 @@
     function renderChildList(asset) {
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
+        section.setAttribute('data-list-key', listContext());
         var project = currentProject();
         var title = asset ? asset.name : (project ? project.name : state.projectKey);
         var parentId = asset ? asset.id : null;
@@ -4338,8 +4415,10 @@
         var columns = tableColumns([]);
         var showField = state.sortKey && state.sortKey.indexOf('attr:') === 0 && columns.indexOf(state.sortKey) < 0;
         if (showField) columns = columns.concat([state.sortKey]);
-        var headers = [t('name')].concat(columnHeaders(columns));
-        if (remote) headers.push(t('project'));
+        var headers = [columnSortHeader(t('name'), 'name')].concat(columns.map(function (key) {
+            return columnSortHeader(columnLabel(key), key);
+        }));
+        if (remote) headers.push(columnSortHeader(t('project'), 'project'));
         section.appendChild(selectableTable(kids.map(function (child) {
             var nested = childrenOf(child.id).length;
             var cells = [
@@ -4570,6 +4649,23 @@
             renderFrame();
         });
         if (active) buttonNode.appendChild(document.createTextNode(state.mineSortDir === 'desc' ? ' \u2193' : ' \u2191'));
+        buttonNode.title = t('sortBy') + ': ' + label;
+        buttonNode.setAttribute('aria-pressed', active ? 'true' : 'false');
+        return buttonNode;
+    }
+
+    function columnSortHeader(label, key) {
+        var active = state.sortKey === key;
+        var buttonNode = button(label, 'asset-tree-th-sort' + (active ? ' is-active' : ''), function () {
+            if (state.sortKey === key) {
+                state.sortDir = state.sortDir === 'desc' ? 'asc' : 'desc';
+            } else {
+                state.sortKey = key;
+                state.sortDir = 'asc';
+            }
+            replaceDetail();
+        });
+        if (active) buttonNode.appendChild(document.createTextNode(state.sortDir === 'desc' ? ' \u2193' : ' \u2191'));
         buttonNode.title = t('sortBy') + ': ' + label;
         buttonNode.setAttribute('aria-pressed', active ? 'true' : 'false');
         return buttonNode;
@@ -7576,8 +7672,12 @@
     }
 
     function showDetailView(asset, issuesLoading, section) {
+        var painted = section.getAttribute('data-asset-id');
+        var kept = painted === String(asset.id) ? readPaneScroll(section) : null;
+        if (section.className.indexOf('is-queue') >= 0) noteListPosition();
         section.className = 'asset-tree-detail is-issue is-view';
         section.innerHTML = '';
+        section.setAttribute('data-asset-id', String(asset.id));
         var form = el('div', 'asset-tree-request is-view');
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
@@ -7684,6 +7784,7 @@
         form.appendChild(main);
         attachAside(form, aside);
         section.appendChild(form);
+        writePaneScroll(section, kept);
     }
 
     function showDetail(asset, issuesLoading, section) {
@@ -7702,14 +7803,20 @@
         if (!state.editing || !mayEdit(asset)) {
             if (placePage) {
                 state.editing = false;
+                var placeKept = section.getAttribute('data-asset-id') === String(asset.id) ? readPaneScroll(section) : null;
                 replaceDetail();
+                writePaneScroll(document.getElementById('asset-tree-detail'), placeKept);
                 return;
             }
             showDetailView(asset, issuesLoading, section);
             return;
         }
+        var painted = section.getAttribute('data-asset-id');
+        var kept = painted === String(asset.id) ? readPaneScroll(section) : null;
+        if (section.className.indexOf('is-queue') >= 0) noteListPosition();
         section.className = 'asset-tree-detail is-issue';
         section.innerHTML = '';
+        section.setAttribute('data-asset-id', String(asset.id));
         var form = el('form', 'asset-tree-request');
         form.id = 'asset-detail-form';
         var main = el('div', 'asset-tree-request-main');
@@ -7862,6 +7969,7 @@
             state.dirty = true;
         });
         section.appendChild(form);
+        writePaneScroll(section, kept);
         var typeSelect = document.getElementById('asset-field-type');
         if (typeSelect) {
             typeSelect.addEventListener('change', function () {

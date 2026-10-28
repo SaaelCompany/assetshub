@@ -1204,7 +1204,6 @@
             var people = portalSection('Люди');
             people.appendChild(portalPerson('МОЛ', card.custodian));
             people.appendChild(portalPerson('Кому выдано', card.issued));
-            people.appendChild(portalPerson('Автор', card.author || (card.createdBy ? { displayName: card.createdBy } : null)));
             people.appendChild(portalShareBlock(card));
             body.appendChild(people);
             body.appendChild(portalFiles(card));
