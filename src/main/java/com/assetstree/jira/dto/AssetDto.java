@@ -30,6 +30,7 @@ public class AssetDto {
     private boolean cardImage;
     private UserProfileDto custodian;
     private UserProfileDto issued;
+    private UserProfileDto author;
     private String holderRole;
     private List<AttributeDto> attributes = new ArrayList<AttributeDto>();
     private List<IssueRefDto> issues;
@@ -216,6 +217,14 @@ public class AssetDto {
 
     public void setIssued(UserProfileDto issued) {
         this.issued = issued;
+    }
+
+    public UserProfileDto getAuthor() {
+        return author;
+    }
+
+    public void setAuthor(UserProfileDto author) {
+        this.author = author;
     }
 
     public String getHolderRole() {

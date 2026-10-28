@@ -1600,6 +1600,10 @@ def portal_date(raw):
 
 
 def ensure_profile_demo():
+    colors = {"ivanov": (0, 82, 204), "petrova": (0, 135, 90), "smirnov": (101, 84, 192)}
+    for key, user in USERS.items():
+        if not user.get("avatarUrl"):
+            user["avatarUrl"] = "data:image/png;base64," + base64.b64encode(tiny_png(colors.get(key, (93, 107, 130)))).decode("ascii")
     if STATE.get("profile_demo"):
         return
     STATE["profile_demo"] = True
@@ -1653,6 +1657,7 @@ def ensure_profile_demo():
         remember_file(laptop["id"], "lenovo.png", "image/png", tiny_png((54, 179, 126)))
         remember_file(laptop["id"], "паспорт.txt", "text/plain", "Паспорт оборудования\nНоутбук для выездов\nСерийный номер PF-12345".encode("utf-8"))
         remember_file(laptop["id"], "акт.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", tiny_docx("Акт приёма\nНоутбук Lenovo T14 передан в эксплуатацию."))
+        remember_file(laptop["id"], "Заказ ключей VipNet client.pdf".encode("utf-8").decode("latin-1"), "application/pdf", tiny_pdf())
     printer = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "TEST-6"), None)
     if printer and not any(row.get("assetId") == printer["id"] and row.get("userKey") == "ivanov" for row in STATE["shares"].values()):
         remember_share(printer["id"], "ivanov")
@@ -1826,6 +1831,7 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "custodian": USERS.get(asset.get("custodianKey") or ""),
         "issued": USERS.get(asset.get("issuedKey") or ""),
         "createdBy": USERS["ivanov"]["displayName"],
+        "author": USERS.get("ivanov"),
         "shares": share_dtos(asset_id),
         "comments": [comment_dto(row) for row in comments_of(asset_id)],
         "files": [file_dto(row) for row in files_of(asset_id)],
@@ -2124,7 +2130,7 @@ def asset_dto(asset, text, with_issues):
         "typeKey": asset["typeKey"], "typeLabel": typed["label"], "color": typed["color"], "icon": typed["icon"],
         "status": canonical(asset["status"]), "parentId": normalize_parent(asset["parentId"]),
         "sortOrder": asset["sortOrder"], "created": asset["created"], "updated": asset["updated"],
-        "createdBy": USERS["ivanov"]["displayName"], "updatedBy": USERS["ivanov"]["displayName"], "projectKey": asset["projectKey"],
+        "createdBy": USERS["ivanov"]["displayName"], "updatedBy": USERS["ivanov"]["displayName"], "author": USERS.get("ivanov"), "projectKey": asset["projectKey"],
         "projectName": next(item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]),
         "location": location_of(asset), "editable": True,
         "cardImage": asset["id"] in STATE["card_images"],
@@ -2181,6 +2187,41 @@ def remember_file(asset_id, name, content_type, data):
     }
     write_preview_file(file_id, data)
     return file_id
+
+
+def repair_filename(name):
+    if not name:
+        return name or ""
+    try:
+        raw = name.encode("latin-1")
+    except UnicodeEncodeError:
+        return name
+    try:
+        fixed = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return name
+    return fixed or name
+
+
+def tiny_pdf():
+    objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        "<< /Length 44 >>\nstream\nBT /F1 24 Tf 72 700 Td (VipNet) Tj ET\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += ("%d 0 obj\n%s\nendobj\n" % (index, body)).encode("ascii")
+    xref = len(out)
+    out += ("xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)).encode("ascii")
+    for offset in offsets:
+        out += ("%010d 00000 n \n" % offset).encode("ascii")
+    out += ("trailer<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF" % (len(objects) + 1, xref)).encode("ascii")
+    return bytes(out)
 
 
 def tiny_png(rgb):
@@ -4209,14 +4250,14 @@ def log_place(place_id, kind, child):
 def file_dto(row):
     author = USERS.get(row.get("authorKey") or "")
     return {
-        "id": row["id"], "fileName": row["fileName"], "contentType": row["contentType"],
+        "id": row["id"], "fileName": repair_filename(row["fileName"]), "contentType": row["contentType"],
         "size": row["size"], "created": row["created"],
         "authorName": author["displayName"] if author else "",
     }
 
 
 def safe_file_name(raw):
-    name = (raw or "").strip().replace("\\", "/").split("/")[-1]
+    name = repair_filename((raw or "").strip()).replace("\\", "/").split("/")[-1]
     if not name or name in (".", ".."):
         return None
     if len(name) > 180:
@@ -4296,7 +4337,7 @@ def multipart_filename(headers):
         named = lower.find("filename=")
         if named >= 0 and (starred < 0 or named < starred):
             plain = multipart_token(line[named + len("filename="):].strip())
-    chosen = multipart_decode_star(encoded) if encoded else multipart_unquote(plain)
+    chosen = multipart_decode_star(encoded) if encoded else repair_filename(multipart_unquote(plain) or "")
     if not chosen:
         return None
     return chosen.replace("\\", "/").split("/")[-1]
@@ -7945,8 +7986,8 @@ setTimeout(function () {
                 return
             with open(path, "rb") as handle:
                 data = handle.read()
-            name = (row["fileName"] or "file").replace('"', "").replace("\r", "").replace("\n", "")
-            ascii_name = name.encode("ascii", "replace").decode("ascii")
+            name = repair_filename(row["fileName"] or "file").replace('"', "").replace("\r", "").replace("\n", "")
+            ascii_name = name.encode("ascii", "replace").decode("ascii").replace("?", "_")
             if (query.get("preview") or [""])[0] == "text":
                 body = file_preview_text(name, data).encode("utf-8")
                 self.respond(200, body, "text/plain; charset=utf-8", {
@@ -7955,7 +7996,8 @@ setTimeout(function () {
                 })
                 return
             shown = inline_type(data) if (query.get("inline") or ["0"])[0] == "1" else None
-            disposition = 'inline; filename="%s"' % ascii_name if shown else 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (ascii_name, quote(name))
+            mode = "inline" if shown else "attachment"
+            disposition = '%s; filename="%s"; filename*=UTF-8\'\'%s' % (mode, ascii_name, quote(name))
             self.respond(200, data, shown or row["contentType"] or "application/octet-stream", {
                 "X-Content-Type-Options": "nosniff",
                 "Content-Disposition": disposition,

@@ -24,6 +24,7 @@ public class PortalCardDto {
     private UserProfileDto custodian;
     private UserProfileDto issued;
     private String createdBy = "";
+    private UserProfileDto author;
     private List<UserProfileDto> shares = new ArrayList<UserProfileDto>();
     private List<CommentDto> comments = new ArrayList<CommentDto>();
     private List<FileDto> files = new ArrayList<FileDto>();
@@ -147,6 +148,14 @@ public class PortalCardDto {
 
     public void setCreatedBy(String createdBy) {
         this.createdBy = createdBy == null ? "" : createdBy;
+    }
+
+    public UserProfileDto getAuthor() {
+        return author;
+    }
+
+    public void setAuthor(UserProfileDto author) {
+        this.author = author;
     }
 
     public List<UserProfileDto> getShares() {

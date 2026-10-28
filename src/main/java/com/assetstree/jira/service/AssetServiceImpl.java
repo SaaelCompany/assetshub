@@ -5,6 +5,9 @@ import com.atlassian.crowd.embedded.api.CrowdDirectoryService;
 import com.atlassian.crowd.embedded.api.CrowdService;
 import com.atlassian.crowd.embedded.api.Directory;
 import com.atlassian.crowd.embedded.api.UserWithAttributes;
+import com.atlassian.jira.avatar.Avatar;
+import com.atlassian.jira.avatar.AvatarService;
+import com.atlassian.jira.avatar.AvatarsDisabledException;
 import com.atlassian.jira.bc.user.search.UserSearchParams;
 import com.atlassian.jira.bc.user.search.UserSearchService;
 import com.atlassian.jira.component.ComponentAccessor;
@@ -743,7 +746,7 @@ public class AssetServiceImpl implements AssetService {
         } catch (IOException ex) {
             throw new AssetException(500, "asset-tree.error.unexpected");
         }
-        return new StoredFile(file.getFileName(), file.getContentType(), data);
+        return new StoredFile(FileNames.repair(file.getFileName()), file.getContentType(), data);
     }
 
     @Override
@@ -854,6 +857,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setCustodian(profile(asset.getCustodianKey()));
         dto.setIssued(profile(asset.getIssuedKey()));
         dto.setCreatedBy(displayName(asset.getCreatedBy()));
+        dto.setAuthor(profile(asset.getCreatedBy()));
         dto.setShares(shareDtos(id));
         dto.setComments(commentDtos(id));
         dto.setFiles(fileDtos(id));
@@ -5781,6 +5785,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setLocation(location(entity, index));
         dto.setCustodian(profile(entity.getCustodianKey()));
         dto.setIssued(profile(entity.getIssuedKey()));
+        dto.setAuthor(profile(entity.getCreatedBy()));
         AssetTypeDto type = types.get(entity.getTypeKey());
         if (type != null) {
             dto.setTypeLabel(type.getLabel());
@@ -5972,7 +5977,7 @@ public class AssetServiceImpl implements AssetService {
     private FileDto fileDto(AssetFileEntity row) {
         FileDto dto = new FileDto();
         dto.setId(row.getID());
-        dto.setFileName(row.getFileName());
+        dto.setFileName(FileNames.repair(row.getFileName()));
         dto.setContentType(row.getContentType());
         dto.setSize(row.getSizeBytes());
         dto.setCreated(format(row.getCreated()));
@@ -6018,7 +6023,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private String fileNameOf(String fileName) {
-        String name = fileName == null ? "" : fileName.trim();
+        String name = FileNames.repair(fileName == null ? "" : fileName.trim());
         int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
         if (slash >= 0) {
             name = name.substring(slash + 1);
@@ -6290,6 +6295,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setDisplayName(user.getDisplayName());
         dto.setEmail(user.getEmailAddress());
         dto.setActive(user.isActive());
+        dto.setAvatarUrl(avatarUrl(user));
         try {
             Directory directory = crowdDirectoryService().findDirectoryById(user.getDirectoryId());
             if (directory != null) {
@@ -6309,6 +6315,30 @@ public class AssetServiceImpl implements AssetService {
             log.debug("Directory attributes failed for {}", userKey, ex);
         }
         return dto;
+    }
+
+    private String avatarUrl(ApplicationUser user) {
+        if (user == null) {
+            return "";
+        }
+        try {
+            AvatarService avatars = ComponentAccessor.getComponent(AvatarService.class);
+            if (avatars == null) {
+                return "";
+            }
+            java.net.URI uri = avatars.getAvatarUrlNoPermCheck(user, Avatar.Size.SMALL);
+            if (uri == null) {
+                return "";
+            }
+            String text = uri.toString();
+            int at = text.indexOf("/secure/");
+            return at >= 0 ? text.substring(at) : text;
+        } catch (AvatarsDisabledException ex) {
+            return "";
+        } catch (RuntimeException ex) {
+            log.debug("Avatar lookup failed for {}", user.getKey(), ex);
+            return "";
+        }
     }
 
     private String firstValue(UserWithAttributes attributes, String... keys) {

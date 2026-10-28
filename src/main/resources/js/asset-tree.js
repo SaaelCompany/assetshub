@@ -5730,51 +5730,46 @@
     }
 
     function staticPeople(asset) {
-        var box = el('div', 'asset-tree-people');
+        var box = el('div');
         box.appendChild(personField(t('custodian'), asset.custodian));
-        box.appendChild(personField(t('author'), asset.createdBy ? { displayName: asset.createdBy } : null));
+        box.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         return box;
     }
 
-    function peopleRow(label) {
-        var row = el('div', 'asset-tree-people-row');
-        row.appendChild(el('div', 'asset-tree-people-label', label));
-        row.appendChild(el('div', 'asset-tree-people-faces'));
-        return row;
-    }
-
-    function peopleFaces(row) {
-        return row.querySelector('.asset-tree-people-faces');
-    }
-
-    function userTip(profile, extra) {
-        var tip = el('div', 'asset-tree-tip');
+    function avatarNode(profile, extraClass) {
         var who = profile && profile.displayName ? profile.displayName : '';
-        tip.appendChild(el('span', 'asset-tree-avatar is-large', who ? initials(who) : ''));
-        var text = el('div', 'asset-tree-tip-text');
-        text.appendChild(el('strong', null, who));
+        var url = profile && profile.avatarUrl ? profile.avatarUrl : '';
+        var cls = 'asset-tree-avatar' + (extraClass ? ' ' + extraClass : '');
+        if (url) {
+            var img = el('img', cls);
+            img.src = url;
+            img.alt = '';
+            img.addEventListener('error', function () {
+                var fallback = el('span', cls + (who ? '' : ' is-blank'), who ? initials(who) : '');
+                if (img.parentNode) img.parentNode.replaceChild(fallback, img);
+            });
+            return img;
+        }
+        return el('span', cls + (who ? '' : ' is-blank'), who ? initials(who) : '');
+    }
+
+    function personLine(profile, extra) {
+        var who = profile && profile.displayName ? profile.displayName : '';
+        var row = el('div', 'asset-tree-person');
+        row.appendChild(avatarNode(who ? profile : null));
+        var text = el('div', 'asset-tree-person-text');
+        text.appendChild(el('strong', null, who || t('custodianNone')));
         if (profile && profile.email) text.appendChild(el('span', null, profile.email));
-        if (profile && profile.title) text.appendChild(el('span', null, profile.title));
-        if (profile && profile.department) text.appendChild(el('span', null, profile.department));
-        if (profile && profile.phone) text.appendChild(el('span', null, profile.phone));
         if (extra) text.appendChild(extra);
-        tip.appendChild(text);
-        return tip;
-    }
-
-    function userFace(profile) {
-        var who = profile && profile.displayName ? profile.displayName : '';
-        var face = el('div', 'asset-tree-face' + (who ? '' : ' is-empty'));
-        face.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
-        face.appendChild(el('span', 'asset-tree-face-name', who || t('custodianNone')));
-        if (who) face.appendChild(userTip(profile));
-        return face;
+        row.appendChild(text);
+        return row;
     }
 
     function personField(label, profile) {
-        var row = peopleRow(label);
-        peopleFaces(row).appendChild(userFace(profile && profile.displayName ? profile : null));
-        return row;
+        var field = el('div', 'asset-tree-people-field');
+        field.appendChild(el('div', 'asset-tree-people-label', label));
+        field.appendChild(personLine(profile && profile.displayName ? profile : null));
+        return field;
     }
 
     function descriptionModule(asset, inline) {
@@ -5832,20 +5827,29 @@
 
     function personAssign(asset, options) {
         var profile = options.profile;
+        var field = el('div', 'asset-tree-people-field');
+        field.appendChild(el('div', 'asset-tree-people-label', options.label));
         var who = profile && profile.displayName ? profile.displayName : '';
-        var row = peopleRow(options.label);
-        row.id = options.boxId;
-        var faces = peopleFaces(row);
-        var face = userFace(who ? profile : null);
+        var extra = null;
         if (state.canEdit && state.userKey && (!profile || profile.userKey !== state.userKey)) {
-            var mine = button(t('assignMe'), 'asset-tree-linkish', function () {
+            extra = button(t('assignMe'), 'asset-tree-linkish', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
                 options.onPick(state.userKey);
             });
-            var tip = face.querySelector('.asset-tree-tip-text');
-            if (tip) tip.appendChild(mine);
         }
-        faces.appendChild(face);
-        if (!state.canEdit) return row;
+        var person = personLine(who ? profile : null, extra);
+        var box = el('div', 'asset-tree-assign');
+        box.id = options.boxId;
+        if (!state.canEdit) {
+            field.appendChild(person);
+            return field;
+        }
+        var toggle = button('', 'asset-tree-assign-btn', function () {
+            search.hidden = !search.hidden;
+            if (!search.hidden) input.focus();
+        });
+        toggle.appendChild(person);
+        box.appendChild(toggle);
         var search = el('div', 'asset-tree-assign-search');
         search.hidden = true;
         var input = el('input');
@@ -5880,12 +5884,9 @@
                 options.onPick('');
             }));
         }
-        faces.appendChild(button(t('peopleChange'), 'asset-tree-linkish asset-tree-assign-btn', function () {
-            search.hidden = !search.hidden;
-            if (!search.hidden) input.focus();
-        }));
-        faces.appendChild(search);
-        return row;
+        box.appendChild(search);
+        field.appendChild(box);
+        return field;
     }
 
     function openAssign() {
@@ -5911,7 +5912,7 @@
         var row = el('div', 'asset-tree-activity-comment');
         var head = el('div', 'asset-tree-action-head');
         var author = comment.author && comment.author.displayName ? comment.author.displayName : '';
-        head.appendChild(el('span', 'asset-tree-avatar is-small', initials(author)));
+        head.appendChild(avatarNode(comment.author, 'is-small'));
         var details = el('div', 'asset-tree-action-details');
         var line = el('div', 'asset-tree-action-line');
         line.appendChild(el('span', 'asset-tree-comment-user', author));
@@ -5984,7 +5985,7 @@
         var row = el('div', 'asset-tree-history');
         var head = el('div', 'asset-tree-history-head');
         var author = item.author && item.author.displayName ? item.author.displayName : '';
-        head.appendChild(el('span', 'asset-tree-avatar', initials(author)));
+        head.appendChild(avatarNode(item.author));
         var text = el('div');
         var line = el('div');
         line.appendChild(el('strong', null, author));
@@ -6167,16 +6168,18 @@
         overlay.addEventListener('click', function (event) {
             if (event.target === overlay) closeFilePreview();
         });
-        var frame = el('div', 'asset-tree-preview-frame');
         var bar = el('div', 'asset-tree-preview-bar');
-        var title = el('strong', null, '');
+        var heading = el('div', 'asset-tree-preview-heading');
+        var title = el('div', 'asset-tree-preview-title', '');
+        var meta = el('div', 'asset-tree-preview-sub', '');
+        heading.appendChild(title);
+        heading.appendChild(meta);
         var actions = el('div', 'asset-tree-preview-actions');
         var stage = el('div', 'asset-tree-preview-stage');
-        bar.appendChild(title);
+        bar.appendChild(heading);
         bar.appendChild(actions);
-        frame.appendChild(bar);
-        frame.appendChild(stage);
-        overlay.appendChild(frame);
+        overlay.appendChild(bar);
+        overlay.appendChild(stage);
         function paint(at) {
             index = at;
             if (index < 0) index = list.length - 1;
@@ -6184,17 +6187,18 @@
             var current = list[index];
             var kind = previewKind(current);
             title.textContent = current.fileName || '';
+            meta.textContent = [fileSize(current.size), current.authorName || ''].filter(Boolean).join(' · ');
             actions.innerHTML = '';
             if (list.length > 1) {
-                actions.appendChild(button(t('filePrev'), 'asset-tree-btn subtle', function () { paint(index - 1); }));
-                actions.appendChild(button(t('fileNext'), 'asset-tree-btn subtle', function () { paint(index + 1); }));
+                actions.appendChild(previewIconButton(t('filePrev'), 'prev', function () { paint(index - 1); }));
+                actions.appendChild(previewIconButton(t('fileNext'), 'next', function () { paint(index + 1); }));
             }
-            var download = el('a', 'asset-tree-btn subtle', t('fileDownload'));
+            var download = previewIconButton(t('fileDownload'), 'download');
             download.href = fileUrl(current.id);
             download.setAttribute('download', current.fileName || 'file');
             actions.appendChild(download);
-            actions.appendChild(button(t('filePrint'), 'asset-tree-btn subtle', function () { printPreviewFile(current); }));
-            actions.appendChild(button(t('close'), 'asset-tree-btn subtle', closeFilePreview));
+            actions.appendChild(previewIconButton(t('filePrint'), 'print', function () { printPreviewFile(current); }));
+            actions.appendChild(previewIconButton(t('close'), 'close', closeFilePreview));
             stage.innerHTML = '';
             if (kind === 'image') {
                 var picture = el('img', 'asset-tree-preview-full');
@@ -6213,8 +6217,6 @@
             } else {
                 stage.appendChild(el('p', 'asset-tree-preview-missing', t('fileNoPreview')));
             }
-            var meta = el('p', 'asset-tree-preview-meta', [fileSize(current.size), current.authorName || ''].filter(Boolean).join(' · '));
-            stage.appendChild(meta);
         }
         function onKey(event) {
             if (event.key === 'Escape' || event.keyCode === 27) closeFilePreview();
@@ -6226,8 +6228,37 @@
         };
         document.addEventListener('keydown', onKey);
         paint(index);
-        var host = document.getElementById('asset-tree-app') || document.body;
-        host.appendChild(overlay);
+        document.body.appendChild(overlay);
+    }
+
+    function previewIconButton(label, glyph, onClick) {
+        var node = onClick ? button('', 'asset-tree-preview-icon', onClick) : el('a', 'asset-tree-preview-icon');
+        node.title = label;
+        node.setAttribute('aria-label', label);
+        node.appendChild(previewGlyph(glyph));
+        return node;
+    }
+
+    function previewGlyph(name) {
+        var paths = {
+            prev: 'M10 3L4 8l6 5',
+            next: 'M6 3l6 5-6 5',
+            download: 'M8 2v7M4.5 6.5L8 10l3.5-3.5M3 13h10',
+            print: 'M4 6V2h8v4M3 7h10a1 1 0 0 1 1 1v3h-2M3 11H2V8a1 1 0 0 1 1-1M4 9h8v5H4z',
+            close: 'M4 4l8 8M12 4L4 12'
+        };
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('aria-hidden', 'true');
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', paths[name] || '');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.6');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(path);
+        return svg;
     }
 
     function printPreviewFile(file) {
@@ -6282,25 +6313,33 @@
     }
 
     function shareField(asset) {
-        var row = peopleRow(t('shareTitle'));
-        row.classList.add('asset-tree-share');
-        var faces = peopleFaces(row);
+        var field = el('div', 'asset-tree-people-field asset-tree-share');
+        field.appendChild(el('div', 'asset-tree-people-label', t('shareTitle')));
         var people = asset.shares || [];
-        if (!people.length) faces.appendChild(userFace(null));
-        people.forEach(function (person) {
-            var face = userFace(person);
-            if (mayEdit(asset) && person && person.userKey) {
-                var tip = face.querySelector('.asset-tree-tip-text');
-                if (tip) {
-                    tip.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
-                        ajax('DELETE', '/assets/' + asset.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status, payload) {
-                            if (status >= 200 && status < 300) selectAsset(asset.id, true);
-                            else setFormError((payload && payload.message) || t('errorTitle'));
-                        });
-                    }));
-                }
+        function grant(userKey) {
+            ajax('POST', '/assets/' + asset.id + '/shares', { userKey: userKey }, function (code, body) {
+                if (code >= 200 && code < 300) selectAsset(asset.id, true);
+                else setFormError((body && body.message) || t('errorTitle'));
+            });
+        }
+        if (!people.length) {
+            var emptyExtra = null;
+            if (mayEdit(asset) && state.userKey) {
+                emptyExtra = button(t('shareMe'), 'asset-tree-linkish', function () { grant(state.userKey); });
             }
-            faces.appendChild(face);
+            field.appendChild(personLine(null, emptyExtra));
+        }
+        people.forEach(function (person) {
+            var remove = null;
+            if (mayEdit(asset) && person && person.userKey) {
+                remove = button(t('shareRemove'), 'asset-tree-linkish', function () {
+                    ajax('DELETE', '/assets/' + asset.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status, payload) {
+                        if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                        else setFormError((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+            }
+            field.appendChild(personLine(person, remove));
         });
         if (mayEdit(asset)) {
             var search = el('div', 'asset-tree-assign-search');
@@ -6326,10 +6365,7 @@
                             var taken = people.some(function (person) { return person && person.userKey === user.userKey; });
                             if (taken) return;
                             results.appendChild(button(user.displayName + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
-                                ajax('POST', '/assets/' + asset.id + '/shares', { userKey: user.userKey }, function (code, body) {
-                                    if (code >= 200 && code < 300) selectAsset(asset.id, true);
-                                    else setFormError((body && body.message) || t('errorTitle'));
-                                });
+                                grant(user.userKey);
                             }));
                         });
                     });
@@ -6337,22 +6373,19 @@
             });
             search.appendChild(input);
             search.appendChild(results);
+            var links = el('div', 'asset-tree-share-links');
             var mineTaken = people.some(function (person) { return person && person.userKey === state.userKey; });
-            if (state.userKey && !mineTaken) {
-                faces.appendChild(button(t('shareMe'), 'asset-tree-linkish', function () {
-                    ajax('POST', '/assets/' + asset.id + '/shares', { userKey: state.userKey }, function (code, body) {
-                        if (code >= 200 && code < 300) selectAsset(asset.id, true);
-                        else setFormError((body && body.message) || t('errorTitle'));
-                    });
-                }));
+            if (people.length && state.userKey && !mineTaken) {
+                links.appendChild(button(t('shareMe'), 'asset-tree-linkish', function () { grant(state.userKey); }));
             }
-            faces.appendChild(button(t('shareAdd'), 'asset-tree-linkish', function () {
+            links.appendChild(button(t('shareAdd'), 'asset-tree-linkish', function () {
                 search.hidden = !search.hidden;
                 if (!search.hidden) input.focus();
             }));
-            faces.appendChild(search);
+            field.appendChild(links);
+            field.appendChild(search);
         }
-        return row;
+        return field;
     }
 
     function fileBlock(asset) {
@@ -6369,8 +6402,9 @@
                 icon.title = t('filePreview');
                 icon.setAttribute('aria-label', t('filePreview'));
                 row.appendChild(icon);
-                var link = el('a', null, file.fileName || '');
-                link.href = fileUrl(file.id);
+                var link = button(file.fileName || '', 'asset-tree-file-name', function () {
+                    openFilePreview(file, list);
+                });
                 row.appendChild(link);
                 row.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
                 if (file.authorName) row.appendChild(el('span', 'asset-tree-file-meta', file.authorName));
@@ -7265,7 +7299,7 @@
         people.appendChild(custodianPicker(asset));
         people.appendChild(issuedPicker(asset));
         people.appendChild(shareField(asset));
-        people.appendChild(personField(t('author'), asset.createdBy ? { displayName: asset.createdBy } : null));
+        people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
         aside.appendChild(peerBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));

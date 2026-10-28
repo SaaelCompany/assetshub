@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
@@ -54,10 +55,10 @@ public class AssetFileServlet extends HttpServlet {
             response.setHeader("X-Content-Type-Options", "nosniff");
             if (inline != null) {
                 response.setContentType(inline);
-                response.setHeader("Content-Disposition", "inline; filename=\"" + name + "\"");
+                response.setHeader("Content-Disposition", disposition("inline", name));
             } else {
                 response.setContentType(stored.getContentType() == null ? "application/octet-stream" : stored.getContentType());
-                response.setHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+                response.setHeader("Content-Disposition", disposition("attachment", name));
             }
             response.setContentLength(stored.getData().length);
             response.getOutputStream().write(stored.getData());
@@ -101,6 +102,24 @@ public class AssetFileServlet extends HttpServlet {
         } catch (AssetException ex) {
             writeError(response, ex);
         }
+    }
+
+    private static String disposition(String mode, String name) {
+        StringBuilder ascii = new StringBuilder();
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            ascii.append(c >= 32 && c < 127 && c != '"' && c != '\\' ? c : '_');
+        }
+        if (ascii.length() == 0) {
+            ascii.append("file");
+        }
+        String encoded;
+        try {
+            encoded = URLEncoder.encode(name, "UTF-8").replace("+", "%20");
+        } catch (UnsupportedEncodingException ex) {
+            encoded = ascii.toString();
+        }
+        return mode + "; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
     }
 
     private static String queryValue(String query, String name) {
