@@ -489,7 +489,7 @@ STATE = {
     "seq": 1, "assets": {}, "types": {}, "links": [], "checks": {},
     "portal_rules": [], "portal_seq": 1, "portal_demo": False,
     "flows": {}, "flow_seq": 1, "flow_graphs": {},
-    "comment_seq": 1, "file_seq": 1, "comments": {}, "files": {},
+    "comment_seq": 1, "file_seq": 1, "comments": {}, "files": {}, "share_seq": 1, "shares": {},
     "activity_seq": 1, "activities": {}, "statuses": {}, "grants": {},
     "plan_seq": 1, "plans": {}, "mails": [],
     "duty_seq": 1, "duties": {},
@@ -1603,6 +1603,9 @@ def ensure_profile_demo():
     if STATE.get("profile_demo"):
         return
     STATE["profile_demo"] = True
+    STATE.setdefault("assetKeys", {})
+    STATE["assetKeys"].setdefault("STP", "ASIT")
+    STATE["assetKeys"].setdefault("TEST", "TEST")
     for project in ("STP", "TEST"):
         view = STATE.setdefault("views", {}).setdefault(project, {})
         modules = [item for item in (view.get("modules") or []) if item != "portal"]
@@ -1645,6 +1648,14 @@ def ensure_profile_demo():
         STATE["assets"][mindray]["issuedKey"] = "ivanov"
     STATE["views"]["STP"]["setup"]["portalColumns"] = "key,status,location,description,f:model,f:serial"
     STATE["views"]["TEST"]["setup"]["portalColumns"] = "key,status,type,location"
+    laptop = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "ASIT-1"), None)
+    if laptop and not files_of(laptop["id"]):
+        remember_file(laptop["id"], "lenovo.png", "image/png", tiny_png((54, 179, 126)))
+        remember_file(laptop["id"], "паспорт.txt", "text/plain", "Паспорт оборудования\nНоутбук для выездов\nСерийный номер PF-12345".encode("utf-8"))
+        remember_file(laptop["id"], "акт.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", tiny_docx("Акт приёма\nНоутбук Lenovo T14 передан в эксплуатацию."))
+    printer = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "TEST-6"), None)
+    if printer and not any(row.get("assetId") == printer["id"] and row.get("userKey") == "ivanov" for row in STATE["shares"].values()):
+        remember_share(printer["id"], "ivanov")
 
 
 def portal_role(asset, text, user_key):
@@ -1659,6 +1670,10 @@ def portal_role(asset, text, user_key):
             label = str(field.get("label") or "").strip()
             if label and label not in roles:
                 roles.append(label)
+    label = text.get("asset-tree.ui.shareTitle", "Shared access")
+    if label and any(row.get("assetId") == asset.get("id") and row.get("userKey") == user_key for row in STATE.get("shares", {}).values()):
+        if label not in roles:
+            roles.append(label)
     return " · ".join(roles)
 
 
@@ -2077,6 +2092,7 @@ def asset_dto(asset, text, with_issues):
         dto["issues"] = [dict(ISSUES_BY_ID[link["issueId"]]) for link in STATE["links"] if link["assetId"] == asset["id"] and link["issueId"] in ISSUES_BY_ID]
         dto["comments"] = [comment_dto(row) for row in comments_of(asset["id"])]
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
+        dto["shares"] = share_dtos(asset["id"])
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
         dto["peers"] = peers_for(asset["id"], text)
     return dto
@@ -2090,6 +2106,91 @@ def comments_of(asset_id):
     rows = [row for row in STATE["comments"].values() if row["assetId"] == asset_id]
     rows.sort(key=lambda item: (item["created"], item["id"]))
     return rows
+
+
+def share_dtos(asset_id):
+    people = []
+    for row in STATE.get("shares", {}).values():
+        if row.get("assetId") != asset_id:
+            continue
+        person = USERS.get(row.get("userKey") or "")
+        if person:
+            people.append(person)
+    people.sort(key=lambda item: item.get("displayName") or "")
+    return people
+
+
+def remember_share(asset_id, user_key):
+    share_id = STATE["share_seq"]
+    STATE["share_seq"] += 1
+    STATE["shares"][share_id] = {"id": share_id, "assetId": asset_id, "userKey": user_key}
+    return share_id
+
+
+def remember_file(asset_id, name, content_type, data):
+    file_id = STATE["file_seq"]
+    STATE["file_seq"] += 1
+    STATE["files"][file_id] = {
+        "id": file_id, "assetId": asset_id, "fileName": name,
+        "contentType": content_type, "size": len(data), "authorKey": "ivanov", "created": now_stamp(),
+    }
+    write_preview_file(file_id, data)
+    return file_id
+
+
+def tiny_png(rgb):
+    import struct
+    import zlib
+    width = height = 48
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+    def chunk(tag, payload):
+        return struct.pack(">I", len(payload)) + tag + payload + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def tiny_docx(text):
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>")
+        paragraphs = "".join("<w:p><w:r><w:t>%s</w:t></w:r></w:p>" % line for line in text.split("\n"))
+        archive.writestr("word/document.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>%s</w:body></w:document>" % paragraphs)
+    return buffer.getvalue()
+
+
+def inline_type(data):
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if len(data) >= 4 and data[:4] == b"%PDF":
+        return "application/pdf"
+    if len(data) >= 4 and data[:3] == b"GIF":
+        return "image/gif"
+    return None
+
+
+def file_preview_text(name, data):
+    lower = (name or "").lower()
+    if lower.endswith(".docx") and data[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(BytesIO(data)) as archive:
+                xml = archive.read("word/document.xml").decode("utf-8", "replace")
+        except (KeyError, zipfile.BadZipFile):
+            return ""
+        parts = []
+        for paragraph in xml.split("</w:p>"):
+            chunks = re.findall(r"<w:t[^>]*>(.*?)</w:t>", paragraph)
+            line = unescape_xml(" ".join(chunks)).strip()
+            if line:
+                parts.append(line)
+        return "\n".join(parts)[:8000]
+    if lower.endswith((".txt", ".csv", ".log", ".md", ".json", ".xml")):
+        return data[:32000].decode("utf-8", "replace").strip()[:8000]
+    return ""
+
+
+def unescape_xml(value):
+    return (value or "").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 
 
 def files_of(asset_id):
@@ -6812,6 +6913,12 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/files/(\d+)", path)
         if match and method == "DELETE":
             return self.delete_file(int(match.group(1)), int(match.group(2)), text)
+        match = re.fullmatch(r"/assets/(\d+)/shares", path)
+        if match and method == "POST":
+            return self.add_share(int(match.group(1)), (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/assets/(\d+)/shares/([A-Za-z0-9._@-]+)", path)
+        if match and method == "DELETE":
+            return self.remove_share(int(match.group(1)), match.group(2), text)
         match = re.fullmatch(r"/assets/(\d+)/move", path)
         if match and method == "POST":
             return self.move_asset(int(match.group(1)), self.read_json(), text)
@@ -7436,6 +7543,8 @@ setTimeout(function () {
             for plan_id in [row["id"] for row in plan_rows(current)]:
                 STATE["plans"].pop(plan_id, None)
             STATE.setdefault("lives", {}).pop(current, None)
+            for share_id in [row["id"] for row in STATE.get("shares", {}).values() if row.get("assetId") == current]:
+                STATE["shares"].pop(share_id, None)
             for floor in STATE.setdefault("floors", {}).values():
                 floor["pins"] = [pin for pin in floor.get("pins") or [] if pin.get("assetId") != current]
         return 204, None
@@ -7705,6 +7814,38 @@ setTimeout(function () {
         STATE["comments"].pop(comment_id, None)
         return 204, None
 
+    def add_share(self, asset_id, user_key, text):
+        asset = STATE["assets"].get(asset_id)
+        key = (user_key or "").strip()
+        person = USERS.get(key)
+        if not asset:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        if is_location_id(asset_id):
+            return 400, {"message": text.get("asset-tree.error.share.place", "Place")}
+        if not person:
+            return 400, {"message": text["asset-tree.error.user"]}
+        for row in STATE["shares"].values():
+            if row.get("assetId") == asset_id and row.get("userKey") == person["userKey"]:
+                return 201, person
+        remember_share(asset_id, person["userKey"])
+        log_activity(asset_id, "share", "", "", person["displayName"])
+        return 201, person
+
+    def remove_share(self, asset_id, user_key, text):
+        if asset_id not in STATE["assets"]:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        found = None
+        for row in STATE["shares"].values():
+            if row.get("assetId") == asset_id and row.get("userKey") == user_key:
+                found = row
+                break
+        if not found:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        STATE["shares"].pop(found["id"], None)
+        person = USERS.get(user_key) or {}
+        log_activity(asset_id, "share_remove", "", person.get("displayName") or user_key, "")
+        return 204, None
+
     def delete_file(self, asset_id, file_id, text):
         row = STATE["files"].get(file_id)
         if not row or row["assetId"] != asset_id or asset_id not in STATE["assets"]:
@@ -7731,8 +7872,16 @@ setTimeout(function () {
                 data = handle.read()
             name = (row["fileName"] or "file").replace('"', "").replace("\r", "").replace("\n", "")
             ascii_name = name.encode("ascii", "replace").decode("ascii")
-            disposition = 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (ascii_name, quote(name))
-            self.respond(200, data, row["contentType"] or "application/octet-stream", {
+            if (query.get("preview") or [""])[0] == "text":
+                body = file_preview_text(name, data).encode("utf-8")
+                self.respond(200, body, "text/plain; charset=utf-8", {
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Disposition": "inline",
+                })
+                return
+            shown = inline_type(data) if (query.get("inline") or ["0"])[0] == "1" else None
+            disposition = 'inline; filename="%s"' % ascii_name if shown else 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (ascii_name, quote(name))
+            self.respond(200, data, shown or row["contentType"] or "application/octet-stream", {
                 "X-Content-Type-Options": "nosniff",
                 "Content-Disposition": disposition,
             })

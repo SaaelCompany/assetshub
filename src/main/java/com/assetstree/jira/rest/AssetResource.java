@@ -12,6 +12,7 @@ import com.assetstree.jira.model.AssetDraft;
 import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkDraft;
 import com.assetstree.jira.model.CommentDraft;
+import com.assetstree.jira.model.ShareDraft;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.GrantDraft;
@@ -222,6 +223,30 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.deleteActivity(user(), id, activityId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/shares")
+    public Response share(@PathParam("id") final int id, final ShareDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String userKey = draft == null ? null : draft.getUserKey();
+                return Response.status(Response.Status.CREATED).entity(assetService.shareAsset(user(), id, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/shares/{userKey}")
+    public Response unshare(@PathParam("id") final int id, @PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.unshareAsset(user(), id, userKey);
                 return Response.noContent().build();
             }
         });

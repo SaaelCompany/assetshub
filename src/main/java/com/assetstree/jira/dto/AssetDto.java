@@ -36,6 +36,7 @@ public class AssetDto {
     private List<AssetPeerDto> peers;
     private List<CommentDto> comments;
     private List<FileDto> files;
+    private List<UserProfileDto> shares;
     private List<ActivityDto> activities;
     private List<ServicePlanDto> plans;
     private String serviceDue;
@@ -263,6 +264,14 @@ public class AssetDto {
 
     public void setFiles(List<FileDto> files) {
         this.files = files;
+    }
+
+    public List<UserProfileDto> getShares() {
+        return shares;
+    }
+
+    public void setShares(List<UserProfileDto> shares) {
+        this.shares = shares;
     }
 
     public List<ActivityDto> getActivities() {

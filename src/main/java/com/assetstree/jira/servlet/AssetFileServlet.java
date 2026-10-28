@@ -8,6 +8,7 @@ import com.assetstree.jira.dto.FileDto;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetFileStore;
+import com.assetstree.jira.service.FilePreview;
 import com.assetstree.jira.service.AssetService;
 import com.assetstree.jira.service.StoredFile;
 
@@ -19,6 +20,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 public class AssetFileServlet extends HttpServlet {
@@ -37,10 +39,26 @@ public class AssetFileServlet extends HttpServlet {
         try {
             StoredFile stored = service().openFile(user, id);
             String name = stored.getFileName() == null ? "file" : stored.getFileName().replace("\"", "").replace("\r", "").replace("\n", "");
+            if ("text".equals(request.getParameter("preview"))) {
+                byte[] text = FilePreview.textOf(stored.getFileName(), stored.getData()).getBytes(StandardCharsets.UTF_8);
+                response.setStatus(HttpServletResponse.SC_OK);
+                response.setContentType("text/plain; charset=UTF-8");
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                response.setHeader("Content-Disposition", "inline");
+                response.setContentLength(text.length);
+                response.getOutputStream().write(text);
+                return;
+            }
+            String inline = "1".equals(request.getParameter("inline")) ? FilePreview.inlineType(stored.getData()) : null;
             response.setStatus(HttpServletResponse.SC_OK);
-            response.setContentType(stored.getContentType() == null ? "application/octet-stream" : stored.getContentType());
             response.setHeader("X-Content-Type-Options", "nosniff");
-            response.setHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+            if (inline != null) {
+                response.setContentType(inline);
+                response.setHeader("Content-Disposition", "inline; filename=\"" + name + "\"");
+            } else {
+                response.setContentType(stored.getContentType() == null ? "application/octet-stream" : stored.getContentType());
+                response.setHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+            }
             response.setContentLength(stored.getData().length);
             response.getOutputStream().write(stored.getData());
         } catch (AssetException ex) {

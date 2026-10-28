@@ -83,6 +83,10 @@ public interface AssetService {
 
     void deleteFile(ApplicationUser user, int assetId, int fileId);
 
+    UserProfileDto shareAsset(ApplicationUser user, int assetId, String userKey);
+
+    void unshareAsset(ApplicationUser user, int assetId, String userKey);
+
     void storeCardImage(ApplicationUser user, int assetId, byte[] data);
 
     StoredFile openCardImage(ApplicationUser user, int assetId);

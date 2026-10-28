@@ -46,6 +46,7 @@ import com.assetstree.jira.ao.AssetFieldEntity;
 import com.assetstree.jira.ao.FlowGraphEntity;
 import com.assetstree.jira.ao.FlowRuleEntity;
 import com.assetstree.jira.ao.AssetFileEntity;
+import com.assetstree.jira.ao.AssetShareEntity;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetPeerEntity;
 import com.assetstree.jira.ao.InventoryMarkEntity;
@@ -735,6 +736,41 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public UserProfileDto shareAsset(ApplicationUser user, int assetId, String userKey) {
+        final String holder = normalizeCustodian(userKey);
+        AssetEntity asset = requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        if (isLocation(asset)) {
+            throw new AssetException(400, "asset-tree.error.share.place");
+        }
+        AssetShareEntity[] existing = ao().find(AssetShareEntity.class,
+                Query.select().where("ASSET_ID = ? AND USER_KEY = ?", Integer.valueOf(assetId), holder));
+        if (existing != null && existing.length > 0) {
+            return profile(holder);
+        }
+        ao().create(AssetShareEntity.class,
+                new DBParam("ASSET_ID", Integer.valueOf(assetId)),
+                new DBParam("USER_KEY", holder),
+                new DBParam("CREATED", new Date()));
+        logActivity(assetId, user.getKey(), "share", "", "", displayName(holder));
+        return profile(holder);
+    }
+
+    @Override
+    public void unshareAsset(ApplicationUser user, int assetId, String userKey) {
+        requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        String holder = userKey == null ? "" : userKey.trim();
+        AssetShareEntity[] existing = ao().find(AssetShareEntity.class,
+                Query.select().where("ASSET_ID = ? AND USER_KEY = ?", Integer.valueOf(assetId), holder));
+        if (existing == null || existing.length == 0) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        logActivity(assetId, user.getKey(), "share_remove", "", displayName(holder), "");
+        for (AssetShareEntity row : existing) {
+            ao().delete(row);
+        }
+    }
+
+    @Override
     public void storeCardImage(ApplicationUser user, int assetId, byte[] data) {
         if (data == null || data.length == 0) {
             throw new AssetException(400, "asset-tree.error.file.required");
@@ -871,6 +907,7 @@ public class AssetServiceImpl implements AssetService {
                 deleteRows(InventoryMarkEntity.class, "ASSET_ID", toDelete);
                 deleteRows(AssetCommentEntity.class, "ASSET_ID", toDelete);
                 deleteRows(AssetFileEntity.class, "ASSET_ID", toDelete);
+                deleteRows(AssetShareEntity.class, "ASSET_ID", toDelete);
                 deleteRows(AssetActivityEntity.class, "ASSET_ID", toDelete);
                 deleteRows(ServicePlanEntity.class, "ASSET_ID", toDelete);
                 deleteRows(LifecycleEntity.class, "ASSET_ID", toDelete);
@@ -3112,12 +3149,16 @@ public class AssetServiceImpl implements AssetService {
                     Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
                     Map<Integer, AssetEntity> index = indexAssets(rows);
                     Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
+                    Set<Integer> sharedIds = shareIds(holder);
                     for (AssetEntity row : rows) {
                         AssetTypeDto type = types.get(row.getTypeKey());
                         if (type != null && type.isLocation()) {
                             continue;
                         }
                         String role = holderRole(row, attributes.get(row.getID()), type, holder);
+                        if (role == null && sharedIds.contains(Integer.valueOf(row.getID()))) {
+                            role = i18n().getText("asset-tree.ui.shareTitle");
+                        }
                         if (role == null) {
                             continue;
                         }
@@ -3175,6 +3216,7 @@ public class AssetServiceImpl implements AssetService {
                     }
                 });
                 int total = 0;
+                final Set<Integer> sharedIds = shareIds(holder);
                 for (Project project : ordered) {
                     if (!moduleOn(project.getKey(), ProjectModules.PORTAL)) {
                         continue;
@@ -3195,7 +3237,8 @@ public class AssetServiceImpl implements AssetService {
                         if (type != null && type.isLocation()) {
                             continue;
                         }
-                        String role = portalRole(row, attributes.get(row.getID()), type, holder);
+                        String role = portalRole(row, attributes.get(row.getID()), type, holder,
+                                sharedIds.contains(Integer.valueOf(row.getID())));
                         if (role == null) {
                             continue;
                         }
@@ -4295,7 +4338,7 @@ public class AssetServiceImpl implements AssetService {
         return null;
     }
 
-    private String portalRole(AssetEntity asset, List<AssetAttributeEntity> attributes, AssetTypeDto type, String userKey) {
+    private String portalRole(AssetEntity asset, List<AssetAttributeEntity> attributes, AssetTypeDto type, String userKey, boolean shared) {
         List<String> roles = new ArrayList<String>();
         if (userKey.equals(asset.getCustodianKey())) {
             roles.add(i18n().getText("asset-tree.ui.custodian"));
@@ -4318,6 +4361,12 @@ public class AssetServiceImpl implements AssetService {
                         roles.add(label);
                     }
                 }
+            }
+        }
+        if (shared) {
+            String label = i18n().getText("asset-tree.ui.shareTitle");
+            if (label != null && !label.isEmpty() && !roles.contains(label)) {
+                roles.add(label);
             }
         }
         if (roles.isEmpty()) {
@@ -5623,6 +5672,7 @@ public class AssetServiceImpl implements AssetService {
             dto.setPeers(peersFor(entity.getID()));
             dto.setComments(commentDtos(entity.getID()));
             dto.setFiles(fileDtos(entity.getID()));
+            dto.setShares(shareDtos(entity.getID()));
             dto.setActivities(activityDtos(entity.getID()));
             dto.setPlans(planDtos(plans, businessToday()));
         }
@@ -5801,6 +5851,42 @@ public class AssetServiceImpl implements AssetService {
         UserProfileDto author = profile(row.getAuthorKey());
         dto.setAuthorName(author == null ? "" : author.getDisplayName());
         return dto;
+    }
+
+    private List<UserProfileDto> shareDtos(int assetId) {
+        AssetShareEntity[] rows = ao().find(AssetShareEntity.class, Query.select().where("ASSET_ID = ?", Integer.valueOf(assetId)));
+        List<UserProfileDto> result = new ArrayList<UserProfileDto>();
+        if (rows == null) {
+            return result;
+        }
+        java.util.Arrays.sort(rows, new Comparator<AssetShareEntity>() {
+            @Override
+            public int compare(AssetShareEntity left, AssetShareEntity right) {
+                return left.getID() - right.getID();
+            }
+        });
+        for (AssetShareEntity row : rows) {
+            UserProfileDto person = profile(row.getUserKey());
+            if (person != null) {
+                result.add(person);
+            }
+        }
+        return result;
+    }
+
+    private Set<Integer> shareIds(String userKey) {
+        Set<Integer> ids = new HashSet<Integer>();
+        if (userKey == null || userKey.isEmpty()) {
+            return ids;
+        }
+        AssetShareEntity[] rows = ao().find(AssetShareEntity.class, Query.select().where("USER_KEY = ?", userKey));
+        if (rows == null) {
+            return ids;
+        }
+        for (AssetShareEntity row : rows) {
+            ids.add(Integer.valueOf(row.getAssetId()));
+        }
+        return ids;
     }
 
     private String fileNameOf(String fileName) {

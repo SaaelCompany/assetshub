@@ -5945,6 +5945,8 @@
         if (item.action === 'comment_delete') return t('actCommentDelete');
         if (item.action === 'file') return t('actFile');
         if (item.action === 'file_delete') return t('actFileDelete');
+        if (item.action === 'share') return t('actShare');
+        if (item.action === 'share_remove') return t('actShareRemove');
         if (item.action === 'card_image') return t('actCardImage');
         if (item.action === 'card_image_delete') return t('actCardImageDelete');
         if (item.action === 'move') return t('actMove');
@@ -6002,7 +6004,7 @@
         if (item.action === 'service_due' || item.action === 'service_done') {
             var when = formatFieldDate(item.newValue);
             change.appendChild(el('span', null, item.action === 'service_done' ? when : ((item.field ? item.field + ' · ' : '') + when)));
-        } else if (item.action === 'file' || item.action === 'file_delete' || item.action === 'comment' || item.action === 'comment_delete') {
+        } else if (item.action === 'file' || item.action === 'file_delete' || item.action === 'comment' || item.action === 'comment_delete' || item.action === 'share' || item.action === 'share_remove') {
             change.appendChild(el('span', null, newText || oldText));
         } else if (item.action === 'status') {
             if (item.oldValue) change.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(item.oldValue), statusLabel(item.oldValue)));
@@ -6107,6 +6109,180 @@
         return moduleBlock(t('activityTitle'), body);
     }
 
+    function fileUrl(id, extra) {
+        return contextPath() + '/plugins/servlet/asset-tree-file?id=' + encodeURIComponent(id) + (extra || '');
+    }
+
+    function previewKind(file) {
+        var name = String(file && file.fileName || '').toLowerCase();
+        var ext = name.indexOf('.') < 0 ? '' : name.split('.').pop();
+        if (ext === 'svg') return '';
+        if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif' || ext === 'webp') return 'image';
+        if (ext === 'pdf') return 'pdf';
+        if (ext === 'txt' || ext === 'csv' || ext === 'log' || ext === 'md' || ext === 'json' || ext === 'xml'
+            || ext === 'html' || ext === 'htm' || ext === 'rtf' || ext === 'doc' || ext === 'docx'
+            || ext === 'xls' || ext === 'xlsx') return 'text';
+        var type = String(file && file.contentType || '').toLowerCase();
+        if (type.indexOf('image/') === 0 && type.indexOf('svg') < 0) return 'image';
+        if (type === 'application/pdf') return 'pdf';
+        if (type.indexOf('text/') === 0) return 'text';
+        return '';
+    }
+
+    function closeFilePreview() {
+        var open = document.querySelector('.asset-tree-preview-overlay');
+        if (!open) return;
+        if (open.onClose) open.onClose();
+        if (open.parentNode) open.parentNode.removeChild(open);
+    }
+
+    function openFilePreview(file) {
+        closeFilePreview();
+        var kind = previewKind(file);
+        if (!kind) return;
+        var overlay = el('div', 'asset-tree-preview-overlay');
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closeFilePreview();
+        });
+        var frame = el('div', 'asset-tree-preview-frame');
+        var bar = el('div', 'asset-tree-preview-bar');
+        bar.appendChild(el('strong', null, file.fileName || ''));
+        bar.appendChild(button(t('close'), 'asset-tree-btn subtle', closeFilePreview));
+        frame.appendChild(bar);
+        if (kind === 'image') {
+            var picture = el('img', 'asset-tree-preview-full');
+            picture.src = fileUrl(file.id, '&inline=1');
+            picture.alt = file.fileName || '';
+            frame.appendChild(picture);
+        } else if (kind === 'pdf') {
+            var sheet = el('iframe', 'asset-tree-preview-pdf');
+            sheet.src = fileUrl(file.id, '&inline=1');
+            sheet.title = file.fileName || '';
+            frame.appendChild(sheet);
+        } else {
+            var text = el('pre', 'asset-tree-preview-text', t('loading'));
+            frame.appendChild(text);
+            loadPreviewText(file, text);
+        }
+        overlay.appendChild(frame);
+        function onKey(event) {
+            if (event.key !== 'Escape' && event.keyCode !== 27) return;
+            closeFilePreview();
+        }
+        overlay.onClose = function () {
+            document.removeEventListener('keydown', onKey);
+        };
+        document.addEventListener('keydown', onKey);
+        var host = document.getElementById('asset-tree-app') || document.body;
+        host.appendChild(overlay);
+    }
+
+    function loadPreviewText(file, node) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', fileUrl(file.id, '&preview=text'), true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || !node.parentNode) return;
+            var text = xhr.status === 200 ? String(xhr.responseText || '').replace(/^\s+|\s+$/g, '') : '';
+            node.textContent = text || t('filePreviewEmpty');
+        };
+        xhr.send(null);
+    }
+
+    function filePreview(file) {
+        var kind = previewKind(file);
+        if (!kind) return null;
+        var box = el('div', 'asset-tree-file-preview');
+        if (kind === 'image') {
+            var picture = el('img', 'asset-tree-file-preview-image');
+            picture.src = fileUrl(file.id, '&inline=1');
+            picture.alt = file.fileName || '';
+            picture.addEventListener('click', function () { openFilePreview(file); });
+            box.appendChild(picture);
+            return box;
+        }
+        if (kind === 'pdf') {
+            var sheet = el('iframe', 'asset-tree-file-preview-pdf');
+            sheet.src = fileUrl(file.id, '&inline=1');
+            sheet.title = file.fileName || '';
+            box.appendChild(sheet);
+            return box;
+        }
+        var text = el('pre', 'asset-tree-file-preview-text', t('loading'));
+        box.appendChild(text);
+        loadPreviewText(file, text);
+        return box;
+    }
+
+    function shareField(asset) {
+        var field = el('div', 'asset-tree-people-field asset-tree-share');
+        field.appendChild(el('div', 'asset-tree-people-label', t('shareTitle')));
+        var people = asset.shares || [];
+        if (!people.length) {
+            field.appendChild(el('p', 'asset-tree-hint', t('shareEmpty')));
+        }
+        people.forEach(function (person) {
+            var who = person && person.displayName ? person.displayName : '';
+            var row = el('div', 'asset-tree-person');
+            row.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
+            var text = el('div', 'asset-tree-person-text');
+            text.appendChild(el('strong', null, who || t('custodianNone')));
+            if (person && person.email) text.appendChild(el('span', null, person.email));
+            if (mayEdit(asset) && person && person.userKey) {
+                text.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
+                    ajax('DELETE', '/assets/' + asset.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status, payload) {
+                        if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                        else setFormError((payload && payload.message) || t('errorTitle'));
+                    });
+                }));
+            }
+            row.appendChild(text);
+            field.appendChild(row);
+        });
+        if (mayEdit(asset)) {
+            var search = el('div', 'asset-tree-assign-search');
+            search.hidden = true;
+            var input = el('input');
+            input.type = 'search';
+            input.placeholder = t('custodianSearch');
+            var results = el('div', 'asset-tree-user-results');
+            var timer = null;
+            var searchSeq = 0;
+            input.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var query = input.value.trim();
+                    var seq = ++searchSeq;
+                    results.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (seq !== searchSeq || input.value.trim() !== query) return;
+                        results.innerHTML = '';
+                        if (status !== 200) return;
+                        (payload || []).forEach(function (user) {
+                            var taken = people.some(function (person) { return person && person.userKey === user.userKey; });
+                            if (taken) return;
+                            results.appendChild(button(user.displayName + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
+                                ajax('POST', '/assets/' + asset.id + '/shares', { userKey: user.userKey }, function (code, body) {
+                                    if (code >= 200 && code < 300) selectAsset(asset.id, true);
+                                    else setFormError((body && body.message) || t('errorTitle'));
+                                });
+                            }));
+                        });
+                    });
+                }, 220);
+            });
+            search.appendChild(input);
+            search.appendChild(results);
+            field.appendChild(button(t('shareAdd'), 'asset-tree-linkish', function () {
+                search.hidden = !search.hidden;
+                if (!search.hidden) input.focus();
+            }));
+            field.appendChild(search);
+        }
+        field.appendChild(el('p', 'asset-tree-hint', t('shareHint')));
+        return field;
+    }
+
     function fileBlock(asset) {
         var body = el('div');
         var list = asset.files;
@@ -6115,20 +6291,29 @@
         } else {
             list.forEach(function (file) {
                 var row = el('div', 'asset-tree-attachment');
-                row.appendChild(el('span', 'asset-tree-file-icon is-' + fileKind(file.fileName), fileGlyph(file.fileName)));
+                var head = el('div', 'asset-tree-attachment-head');
+                head.appendChild(el('span', 'asset-tree-file-icon is-' + fileKind(file.fileName), fileGlyph(file.fileName)));
                 var link = el('a', null, file.fileName || '');
-                link.href = contextPath() + '/plugins/servlet/asset-tree-file?id=' + file.id;
-                row.appendChild(link);
-                row.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
-                if (file.authorName) row.appendChild(el('span', 'asset-tree-file-meta', file.authorName));
+                link.href = fileUrl(file.id);
+                head.appendChild(link);
+                head.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
+                if (file.authorName) head.appendChild(el('span', 'asset-tree-file-meta', file.authorName));
+                if (previewKind(file)) {
+                    head.appendChild(button(t('filePreview'), 'asset-tree-linkish', function () {
+                        openFilePreview(file);
+                    }));
+                }
                 if (mayEdit(asset)) {
-                    row.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
+                    head.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
                         ajax('DELETE', '/assets/' + asset.id + '/files/' + file.id, null, function (status, payload) {
                             if (status >= 200 && status < 300) selectAsset(asset.id, true);
                             else setFormError((payload && payload.message) || t('errorTitle'));
                         });
                     }));
                 }
+                row.appendChild(head);
+                var preview = filePreview(file);
+                if (preview) row.appendChild(preview);
                 body.appendChild(row);
             });
         }
@@ -7011,6 +7196,7 @@
         var people = el('div');
         people.appendChild(custodianPicker(asset));
         people.appendChild(issuedPicker(asset));
+        people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.createdBy || '', null));
         aside.appendChild(moduleBlock(t('people'), people));
         aside.appendChild(peerBlock(asset));
