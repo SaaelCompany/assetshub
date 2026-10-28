@@ -6,6 +6,7 @@ import com.assetstree.jira.dto.AssetDto;
 import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
+import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.BulkResultDto;
 import com.assetstree.jira.dto.AssetListDto;
@@ -192,6 +193,9 @@ public interface AssetService {
     UserProfileDto userProfile(ApplicationUser user, String userKey);
 
     List<AssetDto> assetsForUser(ApplicationUser user, String userKey);
+
+    /** Equipment the signed-in customer is responsible for, for the portal profile. */
+    PortalMineDto portalMine(ApplicationUser user);
 
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 

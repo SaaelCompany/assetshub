@@ -1011,6 +1011,138 @@
         }
     }
 
+    var PORTAL_ICONS = {
+        laptop: 'M4 5h16a1 1 0 0 1 1 1v10H3V6a1 1 0 0 1 1-1zm1 2v7h14V7H5zM2 18h20v1.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V18z',
+        medical: 'M12 21s-8-5.3-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.7-8 11-8 11zm-1.25-13v2.25H8.5v2.5h2.25V15h2.5v-2.25h2.25v-2.5h-2.25V8h-2.5z',
+        device: 'M7 7h10v10H7V7zm2 2v6h6V9H9zm2-7h2v3h-2V2zm0 17h2v3h-2v-3zM2 11h3v2H2v-2zm17 0h3v2h-3v-2zM6 2h2v3H6V2zm10 0h2v3h-2V2zM6 19h2v3H6v-3zm10 0h2v3h-2v-3zM2 6h3v2H2V6zm17 0h3v2h-3V6zM2 16h3v2H2v-2zm17 0h3v2h-3v-2z',
+        desktop: 'M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h4v2H6v-2h4v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z',
+        box: 'M12 3l9 4v10l-9 4-9-4V7l9-4zm0 2.2L6.5 7.6 12 10l5.5-2.4L12 5.2zM5 9.1v6.9l6 2.7v-6.9L5 9.1zm14 0l-6 2.7v6.9l6-2.7V9.1z'
+    };
+    var mineState = { payload: null, loading: false };
+
+    function profilePage() {
+        return /\/user\/profile(?:\/|$|\?)/.test(location.pathname || '');
+    }
+
+    function profileHost() {
+        var selectors = ['.cv-profile', '.cv-user-profile', '.cp-profile', '.user-profile', '.asset-tree-profile-card', 'main', '#content'];
+        for (var i = 0; i < selectors.length; i++) {
+            var node = document.querySelector(selectors[i]);
+            if (node) return node;
+        }
+        return document.body;
+    }
+
+    function safeColor(value) {
+        return /^#[0-9a-fA-F]{3,8}$/.test(String(value || '')) ? String(value) : '#5D6B82';
+    }
+
+    function portalIcon(card) {
+        var wrap = el('span', 'asset-tree-portal-mine-icon');
+        wrap.style.background = safeColor(card.color);
+        var path = PORTAL_ICONS[card.icon];
+        if (path) {
+            var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.setAttribute('aria-hidden', 'true');
+            var shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            shape.setAttribute('d', path);
+            shape.setAttribute('fill', '#fff');
+            svg.appendChild(shape);
+            wrap.appendChild(svg);
+        } else {
+            wrap.textContent = String(card.name || '?').charAt(0).toUpperCase();
+        }
+        return wrap;
+    }
+
+    function mineSignature(data) {
+        var parts = [data.title || '', String(data.total || 0)];
+        (data.projects || []).forEach(function (group) {
+            parts.push(group.key, String(group.count || 0));
+            (group.assets || []).forEach(function (card) {
+                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.showKey ? '1' : '0', card.showStatus ? '1' : '0');
+                (card.lines || []).forEach(function (line) {
+                    parts.push(line.label, line.value);
+                });
+            });
+        });
+        return parts.join('\u0001');
+    }
+
+    function renderMine(data) {
+        var root = el('div', 'asset-tree-portal-mine-body');
+        var head = el('div', 'asset-tree-portal-mine-head');
+        head.appendChild(el('h2', null, data.title || 'My assets'));
+        head.appendChild(el('span', null, data.totalLabel || ''));
+        root.appendChild(head);
+        (data.projects || []).forEach(function (group) {
+            var block = el('section', 'asset-tree-portal-mine-group');
+            var title = el('h3', null);
+            title.appendChild(el('strong', null, group.key || ''));
+            title.appendChild(document.createTextNode(' ' + (group.countLabel || '')));
+            block.appendChild(title);
+            (group.assets || []).forEach(function (card) {
+                var item = el('article', 'asset-tree-portal-mine-card');
+                item.appendChild(portalIcon(card));
+                var body = el('div', 'asset-tree-portal-mine-copy');
+                var row = el('div', 'asset-tree-portal-mine-title');
+                row.appendChild(el('strong', null, card.name || ''));
+                if (card.showKey && card.objectKey) row.appendChild(el('span', 'asset-tree-portal-mine-key', card.objectKey));
+                if (card.showStatus && card.statusLabel) {
+                    var tone = card.statusCategory ? ('cat-' + card.statusCategory) : (card.status || '');
+                    row.appendChild(el('span', 'asset-tree-lozenge ' + tone, card.statusLabel));
+                }
+                body.appendChild(row);
+                if (card.role) body.appendChild(el('p', 'asset-tree-portal-mine-role', card.role));
+                (card.lines || []).forEach(function (line) {
+                    var field = el('p', 'asset-tree-portal-mine-line');
+                    field.appendChild(el('span', null, line.label || ''));
+                    field.appendChild(document.createTextNode(line.value || ''));
+                    body.appendChild(field);
+                });
+                item.appendChild(body);
+                block.appendChild(item);
+            });
+            root.appendChild(block);
+        });
+        return root;
+    }
+
+    function paintPortalMine() {
+        var existing = document.getElementById('asset-tree-portal-mine');
+        if (!profilePage()) {
+            if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+            return;
+        }
+        if (!mineState.payload) {
+            if (mineState.loading) return;
+            mineState.loading = true;
+            ajax('/portal/mine', function (status, payload) {
+                mineState.loading = false;
+                mineState.payload = status === 200 && payload ? payload : { total: 0, projects: [] };
+                paintPortalMine();
+            });
+            return;
+        }
+        var data = mineState.payload;
+        if (!data.total) {
+            if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+            return;
+        }
+        var host = profileHost();
+        if (!existing) {
+            existing = el('section', 'asset-tree-portal-mine');
+            existing.id = 'asset-tree-portal-mine';
+        }
+        if (existing.parentNode !== host) host.appendChild(existing);
+        var signature = mineSignature(data);
+        if (existing.getAttribute('data-sig') === signature) return;
+        existing.setAttribute('data-sig', signature);
+        while (existing.firstChild) existing.removeChild(existing.firstChild);
+        existing.appendChild(renderMine(data));
+    }
+
     function boot() {
         var pickers = document.querySelectorAll('.asset-tree-picker');
         for (var i = 0; i < pickers.length; i++) mount(pickers[i]);
@@ -1042,6 +1174,7 @@
                 try {
                     boot();
                     refresh();
+                    paintPortalMine();
                 } finally {
                     applying = false;
                 }
@@ -1065,6 +1198,7 @@
         }
         boot();
         refresh();
+        paintPortalMine();
     }
 
     function refresh() {

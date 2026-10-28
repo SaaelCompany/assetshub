@@ -938,6 +938,17 @@ public class AssetResource {
     }
 
     @GET
+    @Path("portal/mine")
+    public Response portalMine() {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.portalMine(user())).build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/portal-rules")
     public Response portalRules(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {

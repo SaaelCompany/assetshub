@@ -1185,6 +1185,8 @@ def module_setup(stored, migrate=True):
         "scheduleBoards": pack_boards(stored.get("scheduleBoards")),
         "scheduleOpen": pack_open(stored.get("scheduleOpen"), layer),
         "furniture": pack_furniture(stored.get("furniture")),
+        "portalMine": bool(stored.get("portalMine")),
+        "portalColumns": normalize_portal_columns(stored.get("portalColumns")),
         "scheduleKindVersion": 2,
     }
 
@@ -1475,6 +1477,8 @@ def seed():
     }
     add_asset("STP", "stp-place", "Усть-Лабинск", None, "in_use", None, {}, "STP-1")
     add_asset("STP", "stp-place", "Краснодар", None, "in_use", None, {}, "STP-2")
+    ensure_portal_demo()
+    ensure_profile_demo()
 
 
 def normalize_parent(parent_id):
@@ -1543,6 +1547,230 @@ def subtree_height(rows, asset_id):
         return 0 if not kids else 1 + max(height(child) for child in kids)
 
     return height(asset_id)
+
+
+PORTAL_FIELDS = ("key", "type", "status", "location", "description", "created", "updated")
+PORTAL_DEFAULT = ("key", "type", "status", "location")
+
+
+def normalize_portal_columns(raw):
+    if raw is None:
+        return "*"
+    text = str(raw).strip()
+    if text in ("", "*"):
+        return "*"
+    if text == "-":
+        return "-"
+    kept = []
+    for part in text.split(","):
+        token = part.strip().lower()
+        if token in PORTAL_FIELDS or re.fullmatch(r"f:[a-z][a-z0-9-]{0,39}", token):
+            if token not in kept:
+                kept.append(token)
+        if len(kept) >= 40:
+            break
+    return ",".join(kept) if kept else "-"
+
+
+def portal_column_list(raw):
+    stored = normalize_portal_columns(raw)
+    if stored == "*":
+        return list(PORTAL_DEFAULT)
+    if stored == "-":
+        return []
+    return stored.split(",")
+
+
+def portal_count(count, text):
+    n10 = abs(count) % 10
+    n100 = abs(count) % 100
+    key = "asset-tree.ui.portalMineMany"
+    if n10 == 1 and n100 != 11:
+        key = "asset-tree.ui.portalMineOne"
+    elif 2 <= n10 <= 4 and not (12 <= n100 <= 14):
+        key = "asset-tree.ui.portalMineFew"
+    return text.get(key, "{0}").replace("{0}", str(count))
+
+
+def portal_date(raw):
+    text = str(raw or "")
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return "%s.%s.%s" % (text[8:10], text[5:7], text[0:4])
+    return ""
+
+
+def ensure_profile_demo():
+    if STATE.get("profile_demo"):
+        return
+    STATE["profile_demo"] = True
+    for project in ("STP", "TEST"):
+        view = STATE.setdefault("views", {}).setdefault(project, {})
+        modules = [item for item in (view.get("modules") or []) if item != "portal"]
+        modules.append("portal")
+        view["modules"] = modules
+        setup = view.setdefault("setup", {})
+        setup["portalMine"] = False
+    if "stp-laptop" not in STATE["types"]:
+        STATE["types"]["stp-laptop"] = {
+            "typeKey": "stp-laptop", "projectKey": "STP", "baseKey": "laptop", "label": "Ноутбук",
+            "color": "#36B37E", "icon": "laptop", "systemType": False, "location": False,
+            "showInTree": True, "service": False, "sortOrder": 20,
+            "fields": [
+                {"fieldKey": "model", "label": "Модель", "kind": "text", "required": False, "position": 0},
+                {"fieldKey": "ram", "label": "Оперативная память", "kind": "text", "required": False, "position": 1},
+                {"fieldKey": "serial", "label": "Серийный номер", "kind": "text", "required": False, "position": 2},
+            ],
+        }
+    if "test-uzi" not in STATE["types"]:
+        STATE["types"]["test-uzi"] = {
+            "typeKey": "test-uzi", "projectKey": "TEST", "baseKey": "uzi", "label": "Аппарат УЗИ",
+            "color": "#DE350B", "icon": "medical", "systemType": False, "location": False,
+            "showInTree": True, "service": False, "sortOrder": 30,
+            "fields": [],
+        }
+    if "test-place" not in STATE["types"]:
+        STATE["types"]["test-place"] = {
+            "typeKey": "test-place", "projectKey": "TEST", "baseKey": "place", "label": "Площадка",
+            "color": "#0052CC", "icon": "building", "systemType": False, "location": True,
+            "showInTree": True, "service": False, "sortOrder": 10, "fields": [],
+        }
+    labinsk = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "STP-1"), None)
+    if labinsk and not any(asset.get("objectKey") == "ASIT-1" for asset in STATE["assets"].values()):
+        laptop = add_asset("STP", "stp-laptop", "Lenovo T14", labinsk["id"], "in_use", "ivanov",
+                           {"model": "ThinkPad T14", "serial": "PF-12345", "ram": "16 ГБ"}, "ASIT-1")
+        STATE["assets"][laptop]["description"] = "Рабочий ноутбук для выездов"
+    if not any(asset.get("objectKey") == "MED-2" for asset in STATE["assets"].values()):
+        surgery = add_asset("TEST", "test-place", "Хирургия, 3 этаж", None, "in_use", None, {}, "TEST-9")
+        mindray = add_asset("TEST", "test-uzi", "Mindray DC-70", surgery, "in_use", None, {}, "MED-2")
+        STATE["assets"][mindray]["issuedKey"] = "ivanov"
+    STATE["views"]["STP"]["setup"]["portalColumns"] = "key,status,location,description,f:model,f:serial"
+    STATE["views"]["TEST"]["setup"]["portalColumns"] = "key,status,type,location"
+
+
+def portal_role(asset, text, user_key):
+    roles = []
+    if asset.get("custodianKey") == user_key:
+        roles.append(text.get("asset-tree.ui.custodian", "Custodian"))
+    if asset.get("issuedKey") == user_key:
+        roles.append(text.get("asset-tree.ui.issuedTo", "Issued to"))
+    type_row = STATE["types"].get(asset.get("typeKey")) or {}
+    for field in type_row.get("fields") or []:
+        if field.get("kind") == "user" and (asset.get("values") or {}).get(field.get("fieldKey")) == user_key:
+            label = str(field.get("label") or "").strip()
+            if label and label not in roles:
+                roles.append(label)
+    return " · ".join(roles)
+
+
+def portal_line_value(asset, column):
+    type_row = STATE["types"].get(asset.get("typeKey")) or {}
+    if column == "type":
+        return type_row.get("label") or ""
+    if column == "location":
+        return location_of(asset)
+    if column == "description":
+        return asset.get("description") or ""
+    if column in ("created", "updated"):
+        return portal_date(asset.get(column))
+    if column.startswith("f:"):
+        wanted = column[2:]
+        for key, value in (asset.get("values") or {}).items():
+            if str(key).lower() == wanted and value:
+                return str(value)
+    return ""
+
+
+def portal_line_label(column, asset, text):
+    labels = {
+        "type": "asset-tree.ui.type",
+        "location": "asset-tree.ui.columnLocation",
+        "description": "asset-tree.ui.description",
+        "created": "asset-tree.ui.created",
+        "updated": "asset-tree.ui.updated",
+    }
+    if column in labels:
+        return text.get(labels[column], column)
+    if column.startswith("f:"):
+        wanted = column[2:]
+        type_row = STATE["types"].get(asset.get("typeKey")) or {}
+        for field in type_row.get("fields") or []:
+            if str(field.get("fieldKey") or "").lower() == wanted:
+                return field.get("label") or field.get("fieldKey") or ""
+    return ""
+
+
+def portal_mine(text, user_key="ivanov"):
+    groups = []
+    total = 0
+    projects = sorted(PROJECTS, key=lambda item: item["key"].lower())
+    for project in projects:
+        project_key = project["key"]
+        if not module_on(project_key, "portal"):
+            continue
+        setup = module_setup(((STATE.get("views") or {}).get(project_key) or {}).get("setup"), migrate=False)
+        if not setup.get("portalMine"):
+            continue
+        columns = portal_column_list(setup.get("portalColumns"))
+        cards = []
+        for asset in project_assets(project_key):
+            if is_location_id(asset["id"]):
+                continue
+            role = portal_role(asset, text, user_key)
+            if not role:
+                continue
+            status = canonical(asset.get("status"))
+            label, category = status, "todo"
+            for row in ensure_statuses(project_key, text):
+                if row["statusKey"] == status:
+                    label, category = row["label"], row["category"]
+                    break
+            type_row = STATE["types"].get(asset.get("typeKey")) or {}
+            lines = []
+            seen = set()
+            show_key = False
+            show_status = False
+            for column in columns:
+                if column == "key":
+                    show_key = True
+                    continue
+                if column == "status":
+                    show_status = True
+                    continue
+                line_label = portal_line_label(column, asset, text)
+                value = str(portal_line_value(asset, column) or "").strip()
+                if not line_label or not value or line_label in seen:
+                    continue
+                seen.add(line_label)
+                lines.append({"label": line_label, "value": value})
+            cards.append({
+                "name": asset.get("name") or "",
+                "objectKey": asset.get("objectKey") or "",
+                "showKey": show_key,
+                "showStatus": show_status,
+                "status": status,
+                "statusLabel": label,
+                "statusCategory": category,
+                "role": role,
+                "color": type_row.get("color") or "#5D6B82",
+                "icon": type_row.get("icon") or "box",
+                "lines": lines,
+            })
+        cards.sort(key=lambda item: (item.get("name") or "").lower())
+        if not cards:
+            continue
+        groups.append({
+            "key": project_key,
+            "count": len(cards),
+            "countLabel": portal_count(len(cards), text),
+            "assets": cards,
+        })
+        total += len(cards)
+    return {
+        "title": text.get("asset-tree.ui.portalMineHeading", "My assets"),
+        "total": total,
+        "totalLabel": portal_count(total, text),
+        "projects": groups,
+    }
 
 
 def location_of(asset):
@@ -5624,6 +5852,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_issue(query)
         if path == "/portal" or re.fullmatch(r"/servicedesk/customer/portal/\d+/create/\d+", path):
             return self.serve_portal(path)
+        if path in ("/servicedesk/customer/user/profile",) or re.fullmatch(r"/servicedesk/customer/portal/\d+/user/profile", path):
+            return self.serve_profile()
         if path.startswith("/rest/servicedeskapi/portals/") or path.startswith("/rest/servicedeskapi/servicedesk/"):
             body = b'{"id":"7","projectId":"10000","projectKey":"TEST","projectName":"Test"}'
             return self.respond(200, body, "application/json; charset=utf-8")
@@ -5774,6 +6004,40 @@ p { color: #5d6b82; }
 </aside></main>
 <script src="/download/resources/asset-tree/issue-panel.js"></script>
 </body></html>""" % (issue["issueKey"], issue["issueKey"], issue["issueId"], issue["issueKey"])
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_profile(self):
+        ensure_portal_demo()
+        ensure_profile_demo()
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Центр поддержки</title>
+<link rel="stylesheet" href="/download/resources/asset-tree/asset-field.css">
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+header a { color: #fff; text-decoration: none; }
+main { max-width: 560px; margin: 24px auto 48px; background: #fff; border: 1px solid #dfe1e6; border-radius: 3px; padding: 24px; }
+h1 { margin: 0 0 12px; font-size: 20px; }
+.muted { color: #6b778c; font-size: 12px; }
+dl { margin: 16px 0; }
+dt { margin-top: 12px; font-weight: 700; }
+dd { margin: 2px 0 0; }
+</style></head>
+<body>
+<header><a href="/portal">Центр поддержки</a><span>Запросы</span></header>
+<main class="cv-profile">
+<p class="muted">Центр поддержки</p>
+<h1>Иванов Сергей</h1>
+<p>ivanov</p>
+<dl>
+<dt>Мой профиль</dt>
+<dd>Иванов Сергей<br>ivanov@example.com</dd>
+<dt>Настройки</dt>
+<dd>русский (Россия)</dd>
+</dl>
+</main>
+<script src="/download/resources/asset-tree/asset-field.js"></script>
+</body></html>"""
         self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
     def serve_portal(self, path):
@@ -6092,6 +6356,10 @@ setTimeout(function () {
 
     def api(self, method, path, query):
         text = self.text()
+        if path == "/portal/mine" and method == "GET":
+            ensure_portal_demo()
+            ensure_profile_demo()
+            return 200, portal_mine(text)
         if path == "/meta" and method == "GET":
             i18n = {key[len("asset-tree.ui."):]: value for key, value in text.items() if key.startswith("asset-tree.ui.")}
             return 200, {

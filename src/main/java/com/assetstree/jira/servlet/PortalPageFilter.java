@@ -103,10 +103,16 @@ public class PortalPageFilter implements Filter {
         } catch (RuntimeException ex) {
             log.debug("Portal project was not resolved for {}", portalId, ex);
         }
-        if (!portalModuleOn(projectKey)) {
+        boolean profile = uriContainsProfile(request);
+        if (!profile && !portalModuleOn(projectKey)) {
             return new byte[0];
         }
         return PortalPageMarkup.snippet(base, portalId, projectKey, fieldIds);
+    }
+
+    private static boolean uriContainsProfile(HttpServletRequest request) {
+        String uri = request.getRequestURI() == null ? "" : request.getRequestURI();
+        return uri.contains("/user/profile");
     }
 
     private static boolean portalModuleOn(String projectKey) {
