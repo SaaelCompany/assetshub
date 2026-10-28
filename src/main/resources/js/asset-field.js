@@ -1102,11 +1102,293 @@
                     body.appendChild(field);
                 });
                 item.appendChild(body);
+                item.tabIndex = 0;
+                item.setAttribute('role', 'button');
+                item.addEventListener('click', function () { openPortalCard(card.id); });
+                item.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.keyCode === 13) openPortalCard(card.id);
+                });
                 block.appendChild(item);
             });
             root.appendChild(block);
         });
         return root;
+    }
+
+    function sendJson(method, path, body, callback) {
+        var xhr = new XMLHttpRequest();
+        xhr.open(method, contextPath() + '/rest/asset-tree/1.0' + path, true);
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var payload = null;
+            if (xhr.responseText) {
+                try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            }
+            callback(xhr.status, payload);
+        };
+        xhr.send(body ? JSON.stringify(body) : null);
+    }
+
+    function portalInitials(name) {
+        var parts = String(name || '').trim().split(/\s+/);
+        if (!parts[0]) return '';
+        return ((parts[0].charAt(0) || '') + (parts.length > 1 ? parts[1].charAt(0) : '')).toUpperCase();
+    }
+
+    function portalFileUrl(id, extra) {
+        return contextPath() + '/plugins/servlet/asset-tree-file?id=' + encodeURIComponent(id) + (extra || '');
+    }
+
+    function closePortalCard() {
+        var open = document.getElementById('asset-tree-portal-dialog');
+        if (open && open.parentNode) open.parentNode.removeChild(open);
+    }
+
+    function openPortalCard(id) {
+        if (!id) return;
+        closePortalCard();
+        var overlay = el('div', 'asset-tree-portal-dialog');
+        overlay.id = 'asset-tree-portal-dialog';
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closePortalCard();
+        });
+        var dialog = el('div', 'asset-tree-portal-dialog-card');
+        dialog.appendChild(el('p', null, '...'));
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        function paint(card) {
+            dialog.innerHTML = '';
+            var bar = el('div', 'asset-tree-portal-dialog-bar');
+            var heading = el('div');
+            heading.appendChild(el('strong', null, card.name || ''));
+            if (card.objectKey) heading.appendChild(el('span', null, ' ' + card.objectKey));
+            bar.appendChild(heading);
+            bar.appendChild(el('button', 'asset-tree-portal-textbtn', 'Закрыть'));
+            bar.lastChild.type = 'button';
+            bar.lastChild.addEventListener('click', closePortalCard);
+            dialog.appendChild(bar);
+            if (card.role) dialog.appendChild(el('p', 'asset-tree-portal-mine-role', card.role));
+            if (card.statusLabel) dialog.appendChild(el('p', null, card.statusLabel));
+            (card.lines || []).forEach(function (line) {
+                var field = el('p', 'asset-tree-portal-mine-line');
+                field.appendChild(el('span', null, line.label || ''));
+                field.appendChild(document.createTextNode(line.value || ''));
+                dialog.appendChild(field);
+            });
+            if (card.description) dialog.appendChild(el('p', null, card.description));
+            dialog.appendChild(el('h3', null, 'Люди'));
+            dialog.appendChild(portalPerson('МОЛ', card.custodian));
+            dialog.appendChild(portalPerson('Кому выдано', card.issued));
+            dialog.appendChild(portalPerson('Автор', card.createdBy ? { displayName: card.createdBy } : null));
+            var shareTitle = el('div', 'asset-tree-portal-share-title');
+            shareTitle.appendChild(el('span', null, 'Общий доступ'));
+            dialog.appendChild(shareTitle);
+            var shares = card.shares || [];
+            if (!shares.length) dialog.appendChild(el('p', 'asset-tree-portal-mine-role', 'Пока никого нет.'));
+            shares.forEach(function (person) {
+                var row = portalPerson('', person);
+                var remove = el('button', 'asset-tree-portal-textbtn', 'Убрать');
+                remove.type = 'button';
+                remove.addEventListener('click', function () {
+                    sendJson('DELETE', '/portal/assets/' + card.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status) {
+                        if (status >= 200 && status < 300) openPortalCard(card.id);
+                    });
+                });
+                row.appendChild(remove);
+                dialog.appendChild(row);
+            });
+            var shareTools = el('div', 'asset-tree-portal-share-tools');
+            var mine = !(card.shares || []).some(function (person) { return person && person.userKey === card.viewerKey; });
+            if (card.viewerKey && mine) {
+                var self = el('button', 'asset-tree-portal-textbtn', 'Добавить меня');
+                self.type = 'button';
+                self.addEventListener('click', function () {
+                    sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: card.viewerKey }, function (status) {
+                        if (status >= 200 && status < 300) openPortalCard(card.id);
+                    });
+                });
+                shareTools.appendChild(self);
+            }
+            var search = el('input');
+            search.type = 'search';
+            search.placeholder = 'Добавить человека';
+            var hits = el('div', 'asset-tree-portal-hits');
+            var timer = null;
+            search.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var query = search.value.replace(/^\s+|\s+$/g, '');
+                    hits.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('/users?q=' + encodeURIComponent(query), function (status, payload) {
+                        hits.innerHTML = '';
+                        if (status !== 200) return;
+                        (payload || []).forEach(function (user) {
+                            var taken = (card.shares || []).some(function (person) { return person && person.userKey === user.userKey; });
+                            if (taken) return;
+                            var hit = el('button', 'asset-tree-portal-hit', user.displayName || '');
+                            hit.type = 'button';
+                            hit.addEventListener('click', function () {
+                                sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: user.userKey }, function (code) {
+                                    if (code >= 200 && code < 300) openPortalCard(card.id);
+                                });
+                            });
+                            hits.appendChild(hit);
+                        });
+                    });
+                }, 220);
+            });
+            shareTools.appendChild(search);
+            dialog.appendChild(shareTools);
+            dialog.appendChild(hits);
+            dialog.appendChild(el('h3', null, 'Вложения'));
+            (card.files || []).forEach(function (file) {
+                var row = el('div', 'asset-tree-portal-file');
+                var icon = el('button', 'asset-tree-portal-file-icon', (file.fileName || 'FILE').split('.').pop().slice(0, 4).toUpperCase());
+                icon.type = 'button';
+                icon.addEventListener('click', function () { openPortalPreview(file, card.files); });
+                row.appendChild(icon);
+                var link = el('a', null, file.fileName || '');
+                link.href = portalFileUrl(file.id);
+                row.appendChild(link);
+                dialog.appendChild(row);
+            });
+            var upload = el('input');
+            upload.type = 'file';
+            upload.addEventListener('change', function () {
+                var chosen = upload.files && upload.files[0];
+                upload.value = '';
+                if (!chosen) return;
+                var data = new FormData();
+                data.append('file', chosen, chosen.name || 'file');
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + card.id + '&portal=1', true);
+                xhr.setRequestHeader('Accept', 'application/json');
+                xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState !== 4) return;
+                    if (xhr.status >= 200 && xhr.status < 300) openPortalCard(card.id);
+                };
+                xhr.send(data);
+            });
+            dialog.appendChild(upload);
+            dialog.appendChild(el('h3', null, 'Комментарии'));
+            (card.comments || []).forEach(function (comment) {
+                var note = el('div', 'asset-tree-portal-comment');
+                var author = comment.author && comment.author.displayName ? comment.author.displayName : '';
+                note.appendChild(el('strong', null, author));
+                note.appendChild(el('p', null, comment.body || ''));
+                dialog.appendChild(note);
+            });
+            var area = el('textarea');
+            area.placeholder = 'Написать комментарий';
+            var submit = el('button', 'asset-tree-portal-textbtn', 'Отправить');
+            submit.type = 'button';
+            submit.addEventListener('click', function () {
+                var text = area.value.replace(/^\s+|\s+$/g, '');
+                if (!text) return;
+                sendJson('POST', '/portal/assets/' + card.id + '/comments', { body: text }, function (status) {
+                    if (status >= 200 && status < 300) openPortalCard(card.id);
+                });
+            });
+            dialog.appendChild(area);
+            dialog.appendChild(submit);
+        }
+        ajax('/portal/assets/' + id, function (status, payload) {
+            if (status !== 200 || !payload) {
+                dialog.innerHTML = '';
+                dialog.appendChild(el('p', null, 'Карточка недоступна'));
+                return;
+            }
+            paint(payload);
+        });
+    }
+
+    function portalPerson(label, profile) {
+        var row = el('div', 'asset-tree-portal-person');
+        if (label) row.appendChild(el('span', 'asset-tree-portal-person-label', label));
+        var who = profile && profile.displayName ? profile.displayName : '';
+        var face = el('div', 'asset-tree-portal-face');
+        face.appendChild(el('span', 'asset-tree-portal-avatar', who ? portalInitials(who) : ''));
+        face.appendChild(el('span', null, who || 'Не назначен'));
+        if (who && (profile.email || profile.department || profile.title)) {
+            var tip = el('div', 'asset-tree-portal-tip');
+            tip.appendChild(el('strong', null, who));
+            if (profile.email) tip.appendChild(el('span', null, profile.email));
+            if (profile.title) tip.appendChild(el('span', null, profile.title));
+            if (profile.department) tip.appendChild(el('span', null, profile.department));
+            face.appendChild(tip);
+        }
+        row.appendChild(face);
+        return row;
+    }
+
+    function openPortalPreview(file, files) {
+        var list = files && files.length ? files : [file];
+        var index = 0;
+        var i;
+        for (i = 0; i < list.length; i++) if (list[i].id === file.id) index = i;
+        var overlay = el('div', 'asset-tree-portal-preview');
+        var frame = el('div', 'asset-tree-portal-preview-frame');
+        var bar = el('div', 'asset-tree-portal-dialog-bar');
+        var title = el('strong', null, '');
+        var stage = el('div', 'asset-tree-portal-preview-stage');
+        bar.appendChild(title);
+        var actions = el('div', 'asset-tree-portal-preview-actions');
+        bar.appendChild(actions);
+        frame.appendChild(bar);
+        frame.appendChild(stage);
+        overlay.appendChild(frame);
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        });
+        function paint(at) {
+            index = at;
+            if (index < 0) index = list.length - 1;
+            if (index >= list.length) index = 0;
+            var current = list[index];
+            title.textContent = current.fileName || '';
+            actions.innerHTML = '';
+            var download = el('a', 'asset-tree-portal-textbtn', 'Скачать');
+            download.href = portalFileUrl(current.id);
+            actions.appendChild(download);
+            var print = el('button', 'asset-tree-portal-textbtn', 'Печать');
+            print.type = 'button';
+            print.addEventListener('click', function () { window.open(portalFileUrl(current.id, '&inline=1'), '_blank'); });
+            actions.appendChild(print);
+            var close = el('button', 'asset-tree-portal-textbtn', 'Закрыть');
+            close.type = 'button';
+            close.addEventListener('click', function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); });
+            actions.appendChild(close);
+            stage.innerHTML = '';
+            var name = String(current.fileName || '').toLowerCase();
+            if (/\.(png|jpe?g|gif|webp)$/.test(name)) {
+                var picture = el('img');
+                picture.src = portalFileUrl(current.id, '&inline=1');
+                picture.alt = current.fileName || '';
+                stage.appendChild(picture);
+            } else if (/\.pdf$/.test(name)) {
+                var sheet = el('iframe');
+                sheet.src = portalFileUrl(current.id, '&inline=1');
+                stage.appendChild(sheet);
+            } else if (/\.(txt|csv|docx|md|json|xml)$/.test(name)) {
+                var pre = el('pre', null, '...');
+                stage.appendChild(pre);
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', portalFileUrl(current.id, '&preview=text'), true);
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState === 4) pre.textContent = xhr.responseText || '';
+                };
+                xhr.send(null);
+            } else {
+                stage.appendChild(el('p', null, 'Предпросмотр этого файла недоступен. Его можно скачать.'));
+            }
+        }
+        paint(index);
+        document.body.appendChild(overlay);
     }
 
     function paintPortalMine() {

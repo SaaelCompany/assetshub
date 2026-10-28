@@ -963,6 +963,65 @@ public class AssetResource {
     }
 
     @GET
+    @Path("portal/assets/{id}")
+    public Response portalAsset(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.portalAsset(user(), id)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/comments")
+    public Response portalComment(@PathParam("id") final int id, final CommentDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String body = draft == null ? null : draft.getBody();
+                return Response.status(Response.Status.CREATED).entity(assetService.portalComment(user(), id, body)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("portal/assets/{id}/files/{fileId}")
+    public Response portalDeleteFile(@PathParam("id") final int id, @PathParam("fileId") final int fileId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalDeleteFile(user(), id, fileId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/shares")
+    public Response portalShare(@PathParam("id") final int id, final ShareDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String userKey = draft == null ? null : draft.getUserKey();
+                return Response.status(Response.Status.CREATED).entity(assetService.portalShare(user(), id, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("portal/assets/{id}/shares/{userKey}")
+    public Response portalUnshare(@PathParam("id") final int id, @PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalUnshare(user(), id, userKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
     @Path("portal/mine")
     public Response portalMine() {
         return invoke(new Callable<Response>() {

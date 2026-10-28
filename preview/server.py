@@ -1758,6 +1758,7 @@ def portal_mine(text, user_key="ivanov"):
                 seen.add(line_label)
                 lines.append({"label": line_label, "value": value})
             cards.append({
+                "id": asset.get("id") or 0,
                 "name": asset.get("name") or "",
                 "objectKey": asset.get("objectKey") or "",
                 "showKey": show_key,
@@ -1785,6 +1786,50 @@ def portal_mine(text, user_key="ivanov"):
         "total": total,
         "totalLabel": portal_count(total, text),
         "projects": groups,
+    }
+
+
+def portal_detail(asset_id, text, user_key="ivanov"):
+    asset = STATE["assets"].get(asset_id)
+    if not asset or is_location_id(asset_id):
+        return None
+    project_key = asset["projectKey"]
+    if not module_on(project_key, "portal"):
+        return None
+    setup = module_setup(((STATE.get("views") or {}).get(project_key) or {}).get("setup"), migrate=False)
+    if not setup.get("portalMine"):
+        return None
+    role = portal_role(asset, text, user_key)
+    if not role:
+        return None
+    page = portal_mine(text, user_key)
+    summary = None
+    for group in page["projects"]:
+        for card in group["assets"]:
+            if card.get("id") == asset_id:
+                summary = card
+    if not summary:
+        return None
+    return {
+        "id": asset_id,
+        "name": summary["name"],
+        "objectKey": summary["objectKey"],
+        "description": asset.get("description") or "",
+        "location": location_of(asset),
+        "status": summary["status"],
+        "statusLabel": summary["statusLabel"],
+        "statusCategory": summary["statusCategory"],
+        "role": role,
+        "color": summary["color"],
+        "icon": summary["icon"],
+        "viewerKey": user_key,
+        "custodian": USERS.get(asset.get("custodianKey") or ""),
+        "issued": USERS.get(asset.get("issuedKey") or ""),
+        "createdBy": USERS["ivanov"]["displayName"],
+        "shares": share_dtos(asset_id),
+        "comments": [comment_dto(row) for row in comments_of(asset_id)],
+        "files": [file_dto(row) for row in files_of(asset_id)],
+        "lines": summary["lines"],
     }
 
 
@@ -6457,6 +6502,36 @@ setTimeout(function () {
 
     def api(self, method, path, query):
         text = self.text()
+        match = re.fullmatch(r"/portal/assets/(\d+)/comments", path)
+        if match and method == "POST":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.add_comment(asset_id, self.read_json(), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/files/(\d+)", path)
+        if match and method == "DELETE":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.delete_file(asset_id, int(match.group(2)), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/shares/([A-Za-z0-9._@-]+)", path)
+        if match and method == "DELETE":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.remove_share(asset_id, match.group(2), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/shares", path)
+        if match and method == "POST":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.add_share(asset_id, (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)", path)
+        if match and method == "GET":
+            detail = portal_detail(int(match.group(1)), text)
+            if not detail:
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return 200, detail
         if path == "/portal/mine" and method == "GET":
             ensure_portal_demo()
             ensure_profile_demo()

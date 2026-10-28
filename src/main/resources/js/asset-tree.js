@@ -4153,6 +4153,7 @@
         });
         main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
         main.appendChild(descriptionModule(full, true));
+        main.appendChild(fileBlock(full));
 
         if (departments.length) {
             var places = el('div');
@@ -5729,24 +5730,51 @@
     }
 
     function staticPeople(asset) {
-        var box = el('div');
-        box.appendChild(personField(t('custodian'), asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone'), null));
-        box.appendChild(personField(t('author'), asset.createdBy || '', null));
+        var box = el('div', 'asset-tree-people');
+        box.appendChild(personField(t('custodian'), asset.custodian));
+        box.appendChild(personField(t('author'), asset.createdBy ? { displayName: asset.createdBy } : null));
         return box;
     }
 
-    function personField(label, name, extra) {
-        var field = el('div', 'asset-tree-people-field');
-        field.appendChild(el('div', 'asset-tree-people-label', label));
-        var row = el('div', 'asset-tree-person');
-        var blank = !name || name === t('custodianNone');
-        row.appendChild(el('span', 'asset-tree-avatar' + (blank ? ' is-blank' : ''), blank ? '' : initials(name)));
-        var text = el('div', 'asset-tree-person-text');
-        text.appendChild(el('strong', null, name || t('custodianNone')));
+    function peopleRow(label) {
+        var row = el('div', 'asset-tree-people-row');
+        row.appendChild(el('div', 'asset-tree-people-label', label));
+        row.appendChild(el('div', 'asset-tree-people-faces'));
+        return row;
+    }
+
+    function peopleFaces(row) {
+        return row.querySelector('.asset-tree-people-faces');
+    }
+
+    function userTip(profile, extra) {
+        var tip = el('div', 'asset-tree-tip');
+        var who = profile && profile.displayName ? profile.displayName : '';
+        tip.appendChild(el('span', 'asset-tree-avatar is-large', who ? initials(who) : ''));
+        var text = el('div', 'asset-tree-tip-text');
+        text.appendChild(el('strong', null, who));
+        if (profile && profile.email) text.appendChild(el('span', null, profile.email));
+        if (profile && profile.title) text.appendChild(el('span', null, profile.title));
+        if (profile && profile.department) text.appendChild(el('span', null, profile.department));
+        if (profile && profile.phone) text.appendChild(el('span', null, profile.phone));
         if (extra) text.appendChild(extra);
-        row.appendChild(text);
-        field.appendChild(row);
-        return field;
+        tip.appendChild(text);
+        return tip;
+    }
+
+    function userFace(profile) {
+        var who = profile && profile.displayName ? profile.displayName : '';
+        var face = el('div', 'asset-tree-face' + (who ? '' : ' is-empty'));
+        face.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
+        face.appendChild(el('span', 'asset-tree-face-name', who || t('custodianNone')));
+        if (who) face.appendChild(userTip(profile));
+        return face;
+    }
+
+    function personField(label, profile) {
+        var row = peopleRow(label);
+        peopleFaces(row).appendChild(userFace(profile && profile.displayName ? profile : null));
+        return row;
     }
 
     function descriptionModule(asset, inline) {
@@ -5804,32 +5832,20 @@
 
     function personAssign(asset, options) {
         var profile = options.profile;
-        var field = el('div', 'asset-tree-people-field');
-        field.appendChild(el('div', 'asset-tree-people-label', options.label));
         var who = profile && profile.displayName ? profile.displayName : '';
-        var person = el('div', 'asset-tree-person');
-        person.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
-        var personText = el('div', 'asset-tree-person-text');
-        personText.appendChild(el('strong', null, who || t('custodianNone')));
-        if (profile && profile.email) personText.appendChild(el('span', null, profile.email));
+        var row = peopleRow(options.label);
+        row.id = options.boxId;
+        var faces = peopleFaces(row);
+        var face = userFace(who ? profile : null);
         if (state.canEdit && state.userKey && (!profile || profile.userKey !== state.userKey)) {
-            personText.appendChild(button(t('assignMe'), 'asset-tree-linkish', function () {
+            var mine = button(t('assignMe'), 'asset-tree-linkish', function () {
                 options.onPick(state.userKey);
-            }));
+            });
+            var tip = face.querySelector('.asset-tree-tip-text');
+            if (tip) tip.appendChild(mine);
         }
-        person.appendChild(personText);
-        var box = el('div', 'asset-tree-assign');
-        box.id = options.boxId;
-        if (!state.canEdit) {
-            field.appendChild(person);
-            return field;
-        }
-        var toggle = button('', 'asset-tree-assign-btn', function () {
-            search.hidden = !search.hidden;
-            if (!search.hidden) input.focus();
-        });
-        toggle.appendChild(person);
-        box.appendChild(toggle);
+        faces.appendChild(face);
+        if (!state.canEdit) return row;
         var search = el('div', 'asset-tree-assign-search');
         search.hidden = true;
         var input = el('input');
@@ -5864,9 +5880,12 @@
                 options.onPick('');
             }));
         }
-        box.appendChild(search);
-        field.appendChild(box);
-        return field;
+        faces.appendChild(button(t('peopleChange'), 'asset-tree-linkish asset-tree-assign-btn', function () {
+            search.hidden = !search.hidden;
+            if (!search.hidden) input.focus();
+        }));
+        faces.appendChild(search);
+        return row;
     }
 
     function openAssign() {
@@ -6136,45 +6155,119 @@
         if (open.parentNode) open.parentNode.removeChild(open);
     }
 
-    function openFilePreview(file) {
+    function openFilePreview(file, files) {
         closeFilePreview();
-        var kind = previewKind(file);
-        if (!kind) return;
+        var list = files && files.length ? files : [file];
+        var index = 0;
+        var i;
+        for (i = 0; i < list.length; i++) {
+            if (list[i] && list[i].id === file.id) index = i;
+        }
         var overlay = el('div', 'asset-tree-preview-overlay');
         overlay.addEventListener('click', function (event) {
             if (event.target === overlay) closeFilePreview();
         });
         var frame = el('div', 'asset-tree-preview-frame');
         var bar = el('div', 'asset-tree-preview-bar');
-        bar.appendChild(el('strong', null, file.fileName || ''));
-        bar.appendChild(button(t('close'), 'asset-tree-btn subtle', closeFilePreview));
+        var title = el('strong', null, '');
+        var actions = el('div', 'asset-tree-preview-actions');
+        var stage = el('div', 'asset-tree-preview-stage');
+        bar.appendChild(title);
+        bar.appendChild(actions);
         frame.appendChild(bar);
-        if (kind === 'image') {
-            var picture = el('img', 'asset-tree-preview-full');
-            picture.src = fileUrl(file.id, '&inline=1');
-            picture.alt = file.fileName || '';
-            frame.appendChild(picture);
-        } else if (kind === 'pdf') {
-            var sheet = el('iframe', 'asset-tree-preview-pdf');
-            sheet.src = fileUrl(file.id, '&inline=1');
-            sheet.title = file.fileName || '';
-            frame.appendChild(sheet);
-        } else {
-            var text = el('pre', 'asset-tree-preview-text', t('loading'));
-            frame.appendChild(text);
-            loadPreviewText(file, text);
-        }
+        frame.appendChild(stage);
         overlay.appendChild(frame);
+        function paint(at) {
+            index = at;
+            if (index < 0) index = list.length - 1;
+            if (index >= list.length) index = 0;
+            var current = list[index];
+            var kind = previewKind(current);
+            title.textContent = current.fileName || '';
+            actions.innerHTML = '';
+            if (list.length > 1) {
+                actions.appendChild(button(t('filePrev'), 'asset-tree-btn subtle', function () { paint(index - 1); }));
+                actions.appendChild(button(t('fileNext'), 'asset-tree-btn subtle', function () { paint(index + 1); }));
+            }
+            var download = el('a', 'asset-tree-btn subtle', t('fileDownload'));
+            download.href = fileUrl(current.id);
+            download.setAttribute('download', current.fileName || 'file');
+            actions.appendChild(download);
+            actions.appendChild(button(t('filePrint'), 'asset-tree-btn subtle', function () { printPreviewFile(current); }));
+            actions.appendChild(button(t('close'), 'asset-tree-btn subtle', closeFilePreview));
+            stage.innerHTML = '';
+            if (kind === 'image') {
+                var picture = el('img', 'asset-tree-preview-full');
+                picture.src = fileUrl(current.id, '&inline=1');
+                picture.alt = current.fileName || '';
+                stage.appendChild(picture);
+            } else if (kind === 'pdf') {
+                var sheet = el('iframe', 'asset-tree-preview-pdf');
+                sheet.src = fileUrl(current.id, '&inline=1');
+                sheet.title = current.fileName || '';
+                stage.appendChild(sheet);
+            } else if (kind === 'text') {
+                var text = el('pre', 'asset-tree-preview-text', t('loading'));
+                stage.appendChild(text);
+                loadPreviewText(current, text);
+            } else {
+                stage.appendChild(el('p', 'asset-tree-preview-missing', t('fileNoPreview')));
+            }
+            var meta = el('p', 'asset-tree-preview-meta', [fileSize(current.size), current.authorName || ''].filter(Boolean).join(' · '));
+            stage.appendChild(meta);
+        }
         function onKey(event) {
-            if (event.key !== 'Escape' && event.keyCode !== 27) return;
-            closeFilePreview();
+            if (event.key === 'Escape' || event.keyCode === 27) closeFilePreview();
+            else if (event.key === 'ArrowLeft' || event.keyCode === 37) paint(index - 1);
+            else if (event.key === 'ArrowRight' || event.keyCode === 39) paint(index + 1);
         }
         overlay.onClose = function () {
             document.removeEventListener('keydown', onKey);
         };
         document.addEventListener('keydown', onKey);
+        paint(index);
         var host = document.getElementById('asset-tree-app') || document.body;
         host.appendChild(overlay);
+    }
+
+    function printPreviewFile(file) {
+        var kind = previewKind(file);
+        var frame = document.createElement('iframe');
+        frame.className = 'asset-tree-print-frame';
+        frame.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(frame);
+        function finish() {
+            setTimeout(function () {
+                if (frame.parentNode) frame.parentNode.removeChild(frame);
+            }, 1200);
+        }
+        if (kind === 'text') {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', fileUrl(file.id, '&preview=text'), true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4) return;
+                var body = xhr.status === 200 ? xhr.responseText : '';
+                var doc = frame.contentWindow.document;
+                doc.open();
+                doc.write('<pre style="font:14px/1.45 sans-serif;white-space:pre-wrap">' + htmlEscape(body) + '</pre>');
+                doc.close();
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+                finish();
+            };
+            xhr.send(null);
+            return;
+        }
+        frame.onload = function () {
+            try {
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+            } catch (error) {
+                window.open(fileUrl(file.id, '&inline=1'), '_blank');
+            }
+            finish();
+        };
+        frame.src = fileUrl(file.id, '&inline=1');
     }
 
     function loadPreviewText(file, node) {
@@ -6188,55 +6281,26 @@
         xhr.send(null);
     }
 
-    function filePreview(file) {
-        var kind = previewKind(file);
-        if (!kind) return null;
-        var box = el('div', 'asset-tree-file-preview');
-        if (kind === 'image') {
-            var picture = el('img', 'asset-tree-file-preview-image');
-            picture.src = fileUrl(file.id, '&inline=1');
-            picture.alt = file.fileName || '';
-            picture.addEventListener('click', function () { openFilePreview(file); });
-            box.appendChild(picture);
-            return box;
-        }
-        if (kind === 'pdf') {
-            var sheet = el('iframe', 'asset-tree-file-preview-pdf');
-            sheet.src = fileUrl(file.id, '&inline=1');
-            sheet.title = file.fileName || '';
-            box.appendChild(sheet);
-            return box;
-        }
-        var text = el('pre', 'asset-tree-file-preview-text', t('loading'));
-        box.appendChild(text);
-        loadPreviewText(file, text);
-        return box;
-    }
-
     function shareField(asset) {
-        var field = el('div', 'asset-tree-people-field asset-tree-share');
-        field.appendChild(el('div', 'asset-tree-people-label', t('shareTitle')));
+        var row = peopleRow(t('shareTitle'));
+        row.classList.add('asset-tree-share');
+        var faces = peopleFaces(row);
         var people = asset.shares || [];
-        if (!people.length) {
-            field.appendChild(el('p', 'asset-tree-hint', t('shareEmpty')));
-        }
+        if (!people.length) faces.appendChild(userFace(null));
         people.forEach(function (person) {
-            var who = person && person.displayName ? person.displayName : '';
-            var row = el('div', 'asset-tree-person');
-            row.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
-            var text = el('div', 'asset-tree-person-text');
-            text.appendChild(el('strong', null, who || t('custodianNone')));
-            if (person && person.email) text.appendChild(el('span', null, person.email));
+            var face = userFace(person);
             if (mayEdit(asset) && person && person.userKey) {
-                text.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
-                    ajax('DELETE', '/assets/' + asset.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status, payload) {
-                        if (status >= 200 && status < 300) selectAsset(asset.id, true);
-                        else setFormError((payload && payload.message) || t('errorTitle'));
-                    });
-                }));
+                var tip = face.querySelector('.asset-tree-tip-text');
+                if (tip) {
+                    tip.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
+                        ajax('DELETE', '/assets/' + asset.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status, payload) {
+                            if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                            else setFormError((payload && payload.message) || t('errorTitle'));
+                        });
+                    }));
+                }
             }
-            row.appendChild(text);
-            field.appendChild(row);
+            faces.appendChild(face);
         });
         if (mayEdit(asset)) {
             var search = el('div', 'asset-tree-assign-search');
@@ -6273,14 +6337,22 @@
             });
             search.appendChild(input);
             search.appendChild(results);
-            field.appendChild(button(t('shareAdd'), 'asset-tree-linkish', function () {
+            var mineTaken = people.some(function (person) { return person && person.userKey === state.userKey; });
+            if (state.userKey && !mineTaken) {
+                faces.appendChild(button(t('shareMe'), 'asset-tree-linkish', function () {
+                    ajax('POST', '/assets/' + asset.id + '/shares', { userKey: state.userKey }, function (code, body) {
+                        if (code >= 200 && code < 300) selectAsset(asset.id, true);
+                        else setFormError((body && body.message) || t('errorTitle'));
+                    });
+                }));
+            }
+            faces.appendChild(button(t('shareAdd'), 'asset-tree-linkish', function () {
                 search.hidden = !search.hidden;
                 if (!search.hidden) input.focus();
             }));
-            field.appendChild(search);
+            faces.appendChild(search);
         }
-        field.appendChild(el('p', 'asset-tree-hint', t('shareHint')));
-        return field;
+        return row;
     }
 
     function fileBlock(asset) {
@@ -6291,29 +6363,25 @@
         } else {
             list.forEach(function (file) {
                 var row = el('div', 'asset-tree-attachment');
-                var head = el('div', 'asset-tree-attachment-head');
-                head.appendChild(el('span', 'asset-tree-file-icon is-' + fileKind(file.fileName), fileGlyph(file.fileName)));
+                var icon = button(fileGlyph(file.fileName), 'asset-tree-file-icon is-' + fileKind(file.fileName), function () {
+                    openFilePreview(file, list);
+                });
+                icon.title = t('filePreview');
+                icon.setAttribute('aria-label', t('filePreview'));
+                row.appendChild(icon);
                 var link = el('a', null, file.fileName || '');
                 link.href = fileUrl(file.id);
-                head.appendChild(link);
-                head.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
-                if (file.authorName) head.appendChild(el('span', 'asset-tree-file-meta', file.authorName));
-                if (previewKind(file)) {
-                    head.appendChild(button(t('filePreview'), 'asset-tree-linkish', function () {
-                        openFilePreview(file);
-                    }));
-                }
+                row.appendChild(link);
+                row.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
+                if (file.authorName) row.appendChild(el('span', 'asset-tree-file-meta', file.authorName));
                 if (mayEdit(asset)) {
-                    head.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
+                    row.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
                         ajax('DELETE', '/assets/' + asset.id + '/files/' + file.id, null, function (status, payload) {
                             if (status >= 200 && status < 300) selectAsset(asset.id, true);
                             else setFormError((payload && payload.message) || t('errorTitle'));
                         });
                     }));
                 }
-                row.appendChild(head);
-                var preview = filePreview(file);
-                if (preview) row.appendChild(preview);
                 body.appendChild(row);
             });
         }
@@ -7197,7 +7265,7 @@
         people.appendChild(custodianPicker(asset));
         people.appendChild(issuedPicker(asset));
         people.appendChild(shareField(asset));
-        people.appendChild(personField(t('author'), asset.createdBy || '', null));
+        people.appendChild(personField(t('author'), asset.createdBy ? { displayName: asset.createdBy } : null));
         aside.appendChild(moduleBlock(t('people'), people));
         aside.appendChild(peerBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
@@ -20219,10 +20287,30 @@
         return show[id] !== false;
     }
 
+    function shapeLayer(room) {
+        var kind = room && room.kind ? room.kind : '';
+        if (isRouteKind(kind)) return kind;
+        var dash = kind.indexOf('-');
+        if (dash > 0 && isRouteKind(kind.slice(0, dash))) return kind.slice(0, dash);
+        return 'plan';
+    }
+
     function shapeShown(room) {
         if (!room) return false;
-        if (isRouteKind(room.kind)) return mapLayerOn(room.kind);
-        return mapLayerOn('plan');
+        return mapLayerOn(shapeLayer(room));
+    }
+
+    function routeMarkKind(kind) {
+        var name = kind || '';
+        var dash = name.indexOf('-');
+        if (dash <= 0) return '';
+        if (!isRouteKind(name.slice(0, dash))) return '';
+        return name.slice(dash + 1);
+    }
+
+    function isRouteMarkTool(tool) {
+        return tool === 'outlet' || tool === 'rack' || tool === 'valve' || tool === 'socket'
+            || tool === 'board' || tool === 'grille' || tool === 'point' || tool === 'label';
     }
 
     function activateMapLayer(id) {
@@ -20679,13 +20767,26 @@
         return row;
     }
 
+    function routeToolPairs(layer) {
+        var line = layer === 'water' ? 'mapToolPipe' : (layer === 'vent' ? 'mapToolDuct' : (layer === 'comm' ? 'mapToolLine' : 'mapToolCable'));
+        var tools = [['select', 'mapSelect'], ['route', line]];
+        if (layer === 'scs') tools.push(['outlet', 'mapToolOutlet'], ['rack', 'mapToolRack']);
+        else if (layer === 'water') tools.push(['valve', 'mapToolValve']);
+        else if (layer === 'power') tools.push(['socket', 'mapToolSocket'], ['board', 'mapToolBoard']);
+        else if (layer === 'vent') tools.push(['grille', 'mapToolGrille']);
+        else tools.push(['point', 'mapToolPoint']);
+        tools.push(['label', 'mapText']);
+        return tools;
+    }
+
     function mapToolGrid() {
         var grid = el('div', 'asset-tree-tool-grid');
-        [
+        var tools = isRouteKind(state.mapLayer) ? routeToolPairs(state.mapLayer) : [
             ['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['partition', 'mapPartition'],
             ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk'],
             ['arc', 'mapArc'], ['dim', 'mapDim'], ['text', 'mapText']
-        ].forEach(function (pair) {
+        ];
+        tools.forEach(function (pair) {
             var on = state.mapTool === pair[0] && !state.mapStamp && !state.mapArmId;
             var tool = button('', 'asset-tree-tool' + (on ? ' is-on' : ''), function () {
                 state.mapTool = pair[0];
@@ -20694,7 +20795,8 @@
                 state.mapAnchor = null;
                 state.mapArc = null;
                 state.mapClickAt = 0;
-                if (pair[0] !== 'select' && isRouteKind(state.mapLayer)) state.mapLayer = 'plan';
+                var keepLayer = pair[0] === 'select' || pair[0] === 'route' || isRouteMarkTool(pair[0]);
+                if (!keepLayer && isRouteKind(state.mapLayer)) state.mapLayer = 'plan';
                 renderFrame();
             });
             pinStyle(tool, {
@@ -21506,6 +21608,21 @@
 
     function commitRoute(floor, kind, ax, ay, bx, by) {
         return pushShape(floor, applySegment({ kind: kind, name: '', color: routeColor(kind), h: 6, w: 6 }, ax, ay, bx, by));
+    }
+
+    function placeRouteMark(floor, layer, tool, x, y) {
+        var size = tool === 'rack' || tool === 'board' ? 40 : (tool === 'label' ? 96 : 24);
+        var height = tool === 'label' ? 28 : size;
+        return pushShape(floor, clampRoom({
+            kind: layer + '-' + tool,
+            name: tool === 'label' ? t('mapTextSample') : '',
+            color: routeColor(layer),
+            angle: 0,
+            x: snapCoord(x) - size / 2,
+            y: snapCoord(y) - height / 2,
+            w: size,
+            h: height
+        }));
     }
 
     function placeOpeningAt(floor, kind, x, y) {
@@ -22498,6 +22615,13 @@
                     return;
                 }
                 if (event.button !== 0) return;
+                if (isRouteMarkTool(state.mapTool) && isRouteKind(state.mapLayer)) {
+                    event.preventDefault();
+                    var marked = svgPoint(svg, event);
+                    placeRouteMark(floor, state.mapLayer, state.mapTool, marked.x, marked.y);
+                    renderFrame();
+                    return;
+                }
                 if (state.mapTool === 'stamp') {
                     event.preventDefault();
                     var stamped = svgPoint(svg, event);
@@ -22717,6 +22841,58 @@
         return group;
     }
 
+    function routeSymbol(room, mark) {
+        var color = room.color || routeColor(shapeLayer(room));
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-route-mark');
+        if (mark === 'label') {
+            var caption = svgEl('text');
+            caption.setAttribute('x', '2');
+            caption.setAttribute('y', '16');
+            caption.setAttribute('fill', color);
+            caption.setAttribute('class', 'asset-tree-room-label');
+            caption.textContent = room.name || t('mapTextSample');
+            group.appendChild(caption);
+            return group;
+        }
+        var shape = svgEl(mark === 'rack' || mark === 'board' || mark === 'grille' ? 'rect' : 'circle');
+        if (shape.tagName.toLowerCase() === 'circle' || shape.localName === 'circle') {
+            shape.setAttribute('cx', String(room.w / 2));
+            shape.setAttribute('cy', String(room.h / 2));
+            shape.setAttribute('r', String(Math.min(room.w, room.h) / 2 - 1));
+        } else {
+            shape.setAttribute('x', '1');
+            shape.setAttribute('y', '1');
+            shape.setAttribute('width', String(room.w - 2));
+            shape.setAttribute('height', String(room.h - 2));
+            shape.setAttribute('rx', mark === 'rack' || mark === 'board' ? '2' : '0');
+        }
+        shape.setAttribute('fill', mark === 'grille' ? 'none' : color);
+        shape.setAttribute('stroke', color);
+        shape.setAttribute('stroke-width', '2');
+        group.appendChild(shape);
+        if (mark === 'valve' || mark === 'socket' || mark === 'outlet' || mark === 'point') {
+            var bar = svgEl('path');
+            var mid = room.w / 2;
+            bar.setAttribute('d', 'M ' + (mid - 6) + ' ' + (room.h / 2) + ' H ' + (mid + 6) + ' M ' + mid + ' ' + (room.h / 2 - 6) + ' V ' + (room.h / 2 + 6));
+            bar.setAttribute('stroke', '#fff');
+            bar.setAttribute('stroke-width', '1.6');
+            bar.setAttribute('fill', 'none');
+            group.appendChild(bar);
+        }
+        if (room.name) {
+            var name = svgEl('text');
+            name.setAttribute('x', String(room.w / 2));
+            name.setAttribute('y', String(room.h + 12));
+            name.setAttribute('text-anchor', 'middle');
+            name.setAttribute('fill', color);
+            name.setAttribute('class', 'asset-tree-room-label');
+            name.textContent = room.name;
+            group.appendChild(name);
+        }
+        return group;
+    }
+
     function shapeNode(room, options) {
         if (isPolygonRoom(room)) return polygonNode(room, options);
         var group = svgEl('g');
@@ -22726,6 +22902,18 @@
         var rect = svgEl('rect');
         applyWallCap(rect, room);
         var kindName = room.kind || 'room';
+        var mark = routeMarkKind(kindName);
+        if (mark) {
+            rect.setAttribute('x', '0');
+            rect.setAttribute('y', '0');
+            rect.setAttribute('width', String(room.w));
+            rect.setAttribute('height', String(room.h));
+            rect.setAttribute('fill', 'transparent');
+            rect.setAttribute('stroke', options && options.selected ? '#ffab00' : 'transparent');
+            rect.setAttribute('class', 'asset-tree-room is-mark');
+            group.appendChild(rect);
+            group.appendChild(routeSymbol(room, mark));
+        } else {
         rect.setAttribute('class', 'asset-tree-room is-' + kindName + (options && options.selected ? ' is-selected' : ''));
         if (kindName === 'sofa' || kindName === 'seat' || kindName === 'chair' || kindName === 'bath' || kindName === 'toilet' || kindName === 'bed') {
             rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
@@ -22763,6 +22951,7 @@
         decorateRoom(group, room);
         appendOpening(group, room);
         appendLabel(group, room);
+        }
         if (options && options.editing) {
             rect.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
@@ -23438,7 +23627,12 @@
         else if (kind === 'stair') add('M5 19h5v-4h4V11h5V6');
         else if (kind === 'arc') add('M5 17c2-8 12-8 14 0');
         else if (kind === 'dim') add('M4 16h16M4 16v-3M20 16v-3M12 8v8');
-        else if (kind === 'text') add('M6 6h12M12 6v12');
+        else if (kind === 'text' || kind === 'label') add('M6 6h12M12 6v12');
+        else if (kind === 'route') add('M4 16c4-8 12-8 16 0');
+        else if (kind === 'outlet' || kind === 'socket' || kind === 'point') add('M12 5a7 7 0 1 0 0.01 0zM9 12h6M12 9v6');
+        else if (kind === 'valve') add('M12 5a7 7 0 1 0 0.01 0zM6 12h12');
+        else if (kind === 'rack' || kind === 'board') add('M6 5h12v14H6zM6 10h12M6 14h12');
+        else if (kind === 'grille') add('M5 6h14v12H5zM8 6v12M12 6v12M16 6v12');
         else add('M4 8h16v9H4zM7 11h10');
         return svg;
     }

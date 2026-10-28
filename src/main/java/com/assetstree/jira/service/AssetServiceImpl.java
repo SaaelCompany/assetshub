@@ -70,6 +70,7 @@ import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ModuleSetupDto;
+import com.assetstree.jira.dto.PortalCardDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.model.ProjectModules;
@@ -601,6 +602,16 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public CommentDto addComment(ApplicationUser user, int id, String body) {
         requireAssetCap(user, id, kindCap(requireAsset(id)));
+        return writeComment(user, id, body);
+    }
+
+    @Override
+    public CommentDto portalComment(ApplicationUser user, int id, String body) {
+        requirePortalAsset(user, id);
+        return writeComment(user, id, body);
+    }
+
+    private CommentDto writeComment(ApplicationUser user, int id, String body) {
         String text = body == null ? "" : body.trim();
         if (text.isEmpty()) {
             throw new AssetException(400, "asset-tree.error.comment.required");
@@ -660,6 +671,16 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data) {
         requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        return writeFile(user, assetId, fileName, contentType, data);
+    }
+
+    @Override
+    public FileDto portalStoreFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data) {
+        requirePortalAsset(user, assetId);
+        return writeFile(user, assetId, fileName, contentType, data);
+    }
+
+    private FileDto writeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data) {
         if (data == null || data.length == 0) {
             throw new AssetException(400, "asset-tree.error.file.required");
         }
@@ -697,7 +718,9 @@ public class AssetServiceImpl implements AssetService {
         if (file == null) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
-        requireReadable(user, file.getAssetId());
+        if (!portalParticipant(user, file.getAssetId())) {
+            requireReadable(user, file.getAssetId());
+        }
         java.io.File stored = AssetFileStore.file(file.getID());
         if (!stored.isFile()) {
             throw new AssetException(404, "asset-tree.error.notFound");
@@ -726,6 +749,16 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void deleteFile(ApplicationUser user, int assetId, int fileId) {
         requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        removeFile(user, assetId, fileId);
+    }
+
+    @Override
+    public void portalDeleteFile(ApplicationUser user, int assetId, int fileId) {
+        requirePortalAsset(user, assetId);
+        removeFile(user, assetId, fileId);
+    }
+
+    private void removeFile(ApplicationUser user, int assetId, int fileId) {
         AssetFileEntity file = ao().get(AssetFileEntity.class, fileId);
         if (file == null || file.getAssetId() != assetId) {
             throw new AssetException(404, "asset-tree.error.notFound");
@@ -737,8 +770,18 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public UserProfileDto shareAsset(ApplicationUser user, int assetId, String userKey) {
-        final String holder = normalizeCustodian(userKey);
         AssetEntity asset = requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        return grantShare(user, asset, userKey);
+    }
+
+    @Override
+    public UserProfileDto portalShare(ApplicationUser user, int assetId, String userKey) {
+        return grantShare(user, requirePortalAsset(user, assetId), userKey);
+    }
+
+    private UserProfileDto grantShare(ApplicationUser user, AssetEntity asset, String userKey) {
+        final String holder = normalizeCustodian(userKey);
+        final int assetId = asset.getID();
         if (isLocation(asset)) {
             throw new AssetException(400, "asset-tree.error.share.place");
         }
@@ -758,6 +801,16 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void unshareAsset(ApplicationUser user, int assetId, String userKey) {
         requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        dropShare(user, assetId, userKey);
+    }
+
+    @Override
+    public void portalUnshare(ApplicationUser user, int assetId, String userKey) {
+        requirePortalAsset(user, assetId);
+        dropShare(user, assetId, userKey);
+    }
+
+    private void dropShare(ApplicationUser user, int assetId, String userKey) {
         String holder = userKey == null ? "" : userKey.trim();
         AssetShareEntity[] existing = ao().find(AssetShareEntity.class,
                 Query.select().where("ASSET_ID = ? AND USER_KEY = ?", Integer.valueOf(assetId), holder));
@@ -767,6 +820,80 @@ public class AssetServiceImpl implements AssetService {
         logActivity(assetId, user.getKey(), "share_remove", "", displayName(holder), "");
         for (AssetShareEntity row : existing) {
             ao().delete(row);
+        }
+    }
+
+    @Override
+    public PortalCardDto portalAsset(ApplicationUser user, int id) {
+        AssetEntity asset = requirePortalAsset(user, id);
+        String projectKey = asset.getProjectKey();
+        AssetEntity[] rows = assetsIn(projectKey);
+        Map<String, AssetTypeDto> types = indexTypes(typeDtos(projectKey, rows));
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        List<AssetAttributeEntity> attributes = attributesFor(id);
+        AssetTypeDto type = types.get(asset.getTypeKey());
+        boolean shared = shareIds(user.getKey()).contains(Integer.valueOf(id));
+        String role = portalRole(asset, attributes, type, user.getKey(), shared);
+        ProjectViewEntity view = viewRow(projectKey);
+        ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+        PortalMineDto.Card summary = portalCard(asset, attributes, type, index,
+                ModuleSetup.portalColumnList(setup.getPortalColumns()), role, projectKey);
+        PortalCardDto dto = new PortalCardDto();
+        dto.setId(id);
+        dto.setName(summary.getName());
+        dto.setObjectKey(summary.getObjectKey());
+        dto.setStatus(summary.getStatus());
+        dto.setStatusLabel(summary.getStatusLabel());
+        dto.setStatusCategory(summary.getStatusCategory());
+        dto.setRole(role == null ? "" : role);
+        dto.setColor(summary.getColor());
+        dto.setIcon(summary.getIcon());
+        dto.setLines(summary.getLines());
+        dto.setDescription(asset.getDescription() == null ? "" : asset.getDescription());
+        dto.setLocation(location(asset, index));
+        dto.setCustodian(profile(asset.getCustodianKey()));
+        dto.setIssued(profile(asset.getIssuedKey()));
+        dto.setCreatedBy(displayName(asset.getCreatedBy()));
+        dto.setShares(shareDtos(id));
+        dto.setComments(commentDtos(id));
+        dto.setFiles(fileDtos(id));
+        dto.setViewerKey(user.getKey());
+        return dto;
+    }
+
+    private AssetEntity requirePortalAsset(ApplicationUser user, int assetId) {
+        requireUser(user);
+        AssetEntity asset = requireAsset(assetId);
+        if (isLocation(asset)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        String projectKey = asset.getProjectKey();
+        if (!moduleOn(projectKey, ProjectModules.PORTAL)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        ProjectViewEntity view = viewRow(projectKey);
+        ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+        if (!Boolean.TRUE.equals(setup.getPortalMine())) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        AssetEntity[] rows = assetsIn(projectKey);
+        Map<String, AssetTypeDto> types = indexTypes(typeDtos(projectKey, rows));
+        AssetTypeDto type = types.get(asset.getTypeKey());
+        boolean shared = shareIds(user.getKey()).contains(Integer.valueOf(assetId));
+        if (portalRole(asset, attributesFor(assetId), type, user.getKey(), shared) == null) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        return asset;
+    }
+
+    private boolean portalParticipant(ApplicationUser user, int assetId) {
+        try {
+            requirePortalAsset(user, assetId);
+            return true;
+        } catch (AssetException ex) {
+            return false;
+        } catch (RuntimeException ex) {
+            return false;
         }
     }
 
@@ -4385,6 +4512,7 @@ public class AssetServiceImpl implements AssetService {
     private PortalMineDto.Card portalCard(AssetEntity row, List<AssetAttributeEntity> attributes, AssetTypeDto type,
                                           Map<Integer, AssetEntity> index, List<String> columns, String role, String projectKey) {
         PortalMineDto.Card card = new PortalMineDto.Card();
+        card.setId(row.getID());
         card.setName(row.getName() == null ? "" : row.getName());
         card.setObjectKey(row.getObjectKey() == null ? "" : row.getObjectKey());
         card.setRole(role);

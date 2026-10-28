@@ -4775,18 +4775,17 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-attachment {
     display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-    padding: 8px 0;
-    border-bottom: 1px solid #ebecf0;
-}
-
-#asset-tree-app .asset-tree-attachment-head {
-    display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #ebecf0;
+}
+
+#asset-tree-app button.asset-tree-file-icon {
+    padding: 0;
+    border: 0;
+    cursor: pointer;
 }
 
 #asset-tree-app .asset-tree-file-preview {
@@ -4855,6 +4854,38 @@ a.asset-tree-url {
     gap: 12px;
     padding: 10px 12px;
     border-bottom: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-preview-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-preview-actions a {
+    text-decoration: none;
+}
+
+#asset-tree-app .asset-tree-preview-stage {
+    overflow: auto;
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-preview-missing,
+#asset-tree-app .asset-tree-preview-meta {
+    margin: 0;
+    padding: 16px;
+    color: #42526e;
+    text-align: center;
+}
+
+#asset-tree-app .asset-tree-print-frame {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    width: 0;
+    height: 0;
+    border: 0;
 }
 
 #asset-tree-app .asset-tree-preview-full {
@@ -5026,8 +5057,87 @@ a.asset-tree-url {
     text-decoration: line-through;
 }
 
-#asset-tree-app .asset-tree-people-field {
-    margin: 0 0 14px;
+#asset-tree-app .asset-tree-people-field,
+#asset-tree-app .asset-tree-people-row {
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-people-faces {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-people-faces .asset-tree-linkish {
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-face {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    min-height: 28px;
+}
+
+#asset-tree-app .asset-tree-face-name {
+    color: #172b4d;
+    font-size: 14px;
+    line-height: 1.3;
+}
+
+#asset-tree-app .asset-tree-face.is-empty .asset-tree-face-name {
+    color: #6b778c;
+}
+
+#asset-tree-app .asset-tree-tip {
+    display: none;
+    position: absolute;
+    z-index: 30;
+    top: 100%;
+    left: 0;
+    width: 260px;
+    margin-top: 4px;
+    padding: 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    box-shadow: 0 8px 16px rgba(9, 30, 66, 0.18);
+}
+
+#asset-tree-app .asset-tree-face:hover .asset-tree-tip,
+#asset-tree-app .asset-tree-face:focus-within .asset-tree-tip {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+#asset-tree-app .asset-tree-tip-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    color: #42526e;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-tip-text strong {
+    color: #172b4d;
+    font-size: 14px;
+}
+
+#asset-tree-app .asset-tree-avatar.is-large {
+    width: 40px;
+    height: 40px;
+    font-size: 14px;
+    flex: 0 0 40px;
 }
 
 #asset-tree-app .asset-tree-people-label {
