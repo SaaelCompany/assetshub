@@ -1833,8 +1833,8 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "createdBy": USERS["ivanov"]["displayName"],
         "author": USERS.get("ivanov"),
         "shares": share_dtos(asset_id),
-        "comments": [comment_dto(row) for row in comments_of(asset_id)],
-        "files": [file_dto(row) for row in files_of(asset_id)],
+        "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
+        "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
         "lines": summary["lines"],
     }
 
@@ -2178,12 +2178,13 @@ def remember_share(asset_id, user_key):
     return share_id
 
 
-def remember_file(asset_id, name, content_type, data):
+def remember_file(asset_id, name, content_type, data, internal=False):
     file_id = STATE["file_seq"]
     STATE["file_seq"] += 1
     STATE["files"][file_id] = {
         "id": file_id, "assetId": asset_id, "fileName": name,
         "contentType": content_type, "size": len(data), "authorKey": "ivanov", "created": now_stamp(),
+        "internal": bool(internal),
     }
     write_preview_file(file_id, data)
     return file_id
@@ -2289,7 +2290,7 @@ def comment_dto(row):
     author = USERS.get(row.get("authorKey") or "")
     if not author:
         author = {"userKey": row.get("authorKey") or "", "displayName": row.get("authorKey") or "", "active": False}
-    return {"id": row["id"], "body": row["body"], "created": row["created"], "author": author}
+    return {"id": row["id"], "body": row["body"], "created": row["created"], "author": author, "internal": bool(row.get("internal"))}
 
 
 def activities_of(asset_id):
@@ -4253,6 +4254,7 @@ def file_dto(row):
         "id": row["id"], "fileName": repair_filename(row["fileName"]), "contentType": row["contentType"],
         "size": row["size"], "created": row["created"],
         "authorName": author["displayName"] if author else "",
+        "internal": bool(row.get("internal")),
     }
 
 
@@ -7917,6 +7919,7 @@ setTimeout(function () {
         row = {
             "id": comment_id, "assetId": asset_id, "authorKey": "ivanov",
             "body": note, "created": now_stamp(),
+            "internal": bool((body or {}).get("internal")),
         }
         STATE["comments"][comment_id] = row
         log_activity(asset_id, "comment", "", "", note[:500])
@@ -8039,6 +8042,7 @@ setTimeout(function () {
                     "id": file_id, "assetId": asset_id, "fileName": safe,
                     "contentType": content_type or "application/octet-stream",
                     "size": len(data), "authorKey": "ivanov", "created": now_stamp(),
+                    "internal": (query.get("internal") or ["0"])[0] == "1" and (query.get("portal") or ["0"])[0] != "1",
                 }
         if missing:
             self.respond(404, json.dumps({"message": text["asset-tree.error.notFound"]}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")

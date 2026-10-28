@@ -72,13 +72,13 @@ public interface AssetService {
 
     AssetDto updateAsset(ApplicationUser user, int id, AssetDraft draft);
 
-    CommentDto addComment(ApplicationUser user, int id, String body);
+    CommentDto addComment(ApplicationUser user, int id, String body, boolean internal);
 
     void deleteComment(ApplicationUser user, int assetId, int commentId);
 
     void deleteActivity(ApplicationUser user, int assetId, int activityId);
 
-    FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data);
+    FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
 
     StoredFile openFile(ApplicationUser user, int fileId);
 
@@ -90,9 +90,9 @@ public interface AssetService {
 
     PortalCardDto portalAsset(ApplicationUser user, int id);
 
-    CommentDto portalComment(ApplicationUser user, int id, String body);
+    CommentDto portalComment(ApplicationUser user, int id, String body, boolean internal);
 
-    FileDto portalStoreFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data);
+    FileDto portalStoreFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
 
     void portalDeleteFile(ApplicationUser user, int assetId, int fileId);
 

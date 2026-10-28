@@ -603,26 +603,24 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public CommentDto addComment(ApplicationUser user, int id, String body) {
+    public CommentDto addComment(ApplicationUser user, int id, String body, boolean internal) {
         requireAssetCap(user, id, kindCap(requireAsset(id)));
-        return writeComment(user, id, body);
+        return writeComment(user, id, body, internal);
     }
 
     @Override
-    public CommentDto portalComment(ApplicationUser user, int id, String body) {
+    public CommentDto portalComment(ApplicationUser user, int id, String body, boolean internal) {
         requirePortalAsset(user, id);
-        return writeComment(user, id, body);
+        return writeComment(user, id, body, false);
     }
 
-    private CommentDto writeComment(ApplicationUser user, int id, String body) {
-        String text = body == null ? "" : body.trim();
+    private CommentDto writeComment(ApplicationUser user, int id, String body, boolean internal) {
+        String text = CommentHtml.clean(body);
         if (text.isEmpty()) {
             throw new AssetException(400, "asset-tree.error.comment.required");
         }
-        if (text.length() > AssetValidator.MAX_DESCRIPTION) {
-            throw new AssetException(400, "asset-tree.error.description.length");
-        }
         final String saved = text;
+        final boolean hidden = internal;
         AssetCommentEntity created = ao().executeInTransaction(new TransactionCallback<AssetCommentEntity>() {
             @Override
             public AssetCommentEntity doInTransaction() {
@@ -630,7 +628,8 @@ public class AssetServiceImpl implements AssetService {
                         new DBParam("ASSET_ID", id),
                         new DBParam("AUTHOR_KEY", user.getKey()),
                         new DBParam("BODY", saved),
-                        new DBParam("CREATED", new Date()));
+                        new DBParam("CREATED", new Date()),
+                        new DBParam("INTERNAL", Boolean.valueOf(hidden)));
             }
         });
         logActivity(id, user.getKey(), "comment", "", "", clip(saved));
@@ -672,18 +671,18 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data) {
+    public FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal) {
         requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
-        return writeFile(user, assetId, fileName, contentType, data);
+        return writeFile(user, assetId, fileName, contentType, data, internal);
     }
 
     @Override
-    public FileDto portalStoreFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data) {
+    public FileDto portalStoreFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal) {
         requirePortalAsset(user, assetId);
-        return writeFile(user, assetId, fileName, contentType, data);
+        return writeFile(user, assetId, fileName, contentType, data, false);
     }
 
-    private FileDto writeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data) {
+    private FileDto writeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal) {
         if (data == null || data.length == 0) {
             throw new AssetException(400, "asset-tree.error.file.required");
         }
@@ -693,6 +692,7 @@ public class AssetServiceImpl implements AssetService {
         final String safeName = fileNameOf(fileName);
         final String safeType = contentType == null || contentType.trim().isEmpty() ? "application/octet-stream" : contentType.trim();
         final byte[] bytes = data;
+        final boolean hidden = internal;
         AssetFileEntity created = ao().executeInTransaction(new TransactionCallback<AssetFileEntity>() {
             @Override
             public AssetFileEntity doInTransaction() {
@@ -702,7 +702,8 @@ public class AssetServiceImpl implements AssetService {
                         new DBParam("CONTENT_TYPE", safeType),
                         new DBParam("SIZE_BYTES", Long.valueOf(bytes.length)),
                         new DBParam("AUTHOR_KEY", user.getKey()),
-                        new DBParam("CREATED", new Date()));
+                        new DBParam("CREATED", new Date()),
+                        new DBParam("INTERNAL", Boolean.valueOf(hidden)));
             }
         });
         try {
@@ -721,7 +722,7 @@ public class AssetServiceImpl implements AssetService {
         if (file == null) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
-        if (!portalParticipant(user, file.getAssetId())) {
+        if (file.isInternal() || !portalParticipant(user, file.getAssetId())) {
             requireReadable(user, file.getAssetId());
         }
         java.io.File stored = AssetFileStore.file(file.getID());
@@ -859,8 +860,8 @@ public class AssetServiceImpl implements AssetService {
         dto.setCreatedBy(displayName(asset.getCreatedBy()));
         dto.setAuthor(profile(asset.getCreatedBy()));
         dto.setShares(shareDtos(id));
-        dto.setComments(commentDtos(id));
-        dto.setFiles(fileDtos(id));
+        dto.setComments(commentDtos(id, false));
+        dto.setFiles(fileDtos(id, false));
         dto.setViewerKey(user.getKey());
         return dto;
     }
@@ -5926,6 +5927,10 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private List<CommentDto> commentDtos(int assetId) {
+        return commentDtos(assetId, true);
+    }
+
+    private List<CommentDto> commentDtos(int assetId, boolean includeInternal) {
         AssetCommentEntity[] rows = ao().find(AssetCommentEntity.class, Query.select().where("ASSET_ID = ?", assetId));
         List<CommentDto> result = new ArrayList<CommentDto>();
         if (rows == null) {
@@ -5948,6 +5953,9 @@ public class AssetServiceImpl implements AssetService {
             }
         });
         for (AssetCommentEntity row : ordered) {
+            if (!includeInternal && row.isInternal()) {
+                continue;
+            }
             result.add(commentDto(row));
         }
         return result;
@@ -5959,16 +5967,24 @@ public class AssetServiceImpl implements AssetService {
         dto.setBody(row.getBody() == null ? "" : row.getBody());
         dto.setCreated(format(row.getCreated()));
         dto.setAuthor(profile(row.getAuthorKey()));
+        dto.setInternal(row.isInternal());
         return dto;
     }
 
     private List<FileDto> fileDtos(int assetId) {
+        return fileDtos(assetId, true);
+    }
+
+    private List<FileDto> fileDtos(int assetId, boolean includeInternal) {
         AssetFileEntity[] rows = ao().find(AssetFileEntity.class, Query.select().where("ASSET_ID = ?", assetId));
         List<FileDto> result = new ArrayList<FileDto>();
         if (rows == null) {
             return result;
         }
         for (AssetFileEntity row : rows) {
+            if (!includeInternal && row.isInternal()) {
+                continue;
+            }
             result.add(fileDto(row));
         }
         return result;
@@ -5983,6 +5999,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setCreated(format(row.getCreated()));
         UserProfileDto author = profile(row.getAuthorKey());
         dto.setAuthorName(author == null ? "" : author.getDisplayName());
+        dto.setInternal(row.isInternal());
         return dto;
     }
 

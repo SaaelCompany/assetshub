@@ -464,6 +464,7 @@
         mapPlaceId: 0,
         mapStep: 8,
         mapTool: 'select',
+        mapWire: '',
         mapAssetId: 0,
         mapArmId: 0,
         mapLayer: 'plan',
@@ -3836,6 +3837,7 @@
             more: 'M6 10a2 2 0 1 0 .01 4A2 2 0 0 0 6 10zm6 0a2 2 0 1 0 .01 4A2 2 0 0 0 12 10zm6 0a2 2 0 1 0 .01 4A2 2 0 0 0 18 10z',
             print: 'M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z',
             copy: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z',
+            link: 'M3.9 12a5 5 0 0 1 5-5h4v2h-4a3 3 0 0 0 0 6h4v2h-4a5 5 0 0 1-5-5zm6.1-1h4v2h-4v-2zm5.1-4h4a5 5 0 0 1 0 10h-4v-2h4a3 3 0 0 0 0-6h-4V7z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
             trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 7h12l-1 14H7L6 7z',
             cloud: 'M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 8.6 3.5 3.5 0 0 0 7 18z',
@@ -5897,14 +5899,255 @@
         if (input) input.focus();
     }
 
+    function commentPlain(node) {
+        var text = '';
+        function walk(current) {
+            var child = current.firstChild;
+            while (child) {
+                if (child.nodeType === 3) text += child.nodeValue;
+                else if (child.nodeType === 1) {
+                    var name = child.tagName.toLowerCase();
+                    if ((name === 'br' || name === 'p' || name === 'div' || name === 'li' || name === 'h2' || name === 'h3') && text && text.charAt(text.length - 1) !== '\n') text += '\n';
+                    walk(child);
+                }
+                child = child.nextSibling;
+            }
+        }
+        walk(node);
+        return text.replace(/^\s+|\s+$/g, '');
+    }
+
+    function commentSerialize(node) {
+        var html = '';
+        var child = node.firstChild;
+        while (child) {
+            if (child.nodeType === 3) html += htmlEscape(child.nodeValue);
+            else if (child.nodeType === 1) {
+                var name = child.tagName.toLowerCase();
+                var inner = commentSerialize(child);
+                if (name === 'br') html += '<br>';
+                else if (name === 'b' || name === 'strong') html += '<strong>' + inner + '</strong>';
+                else if (name === 'i' || name === 'em') html += '<em>' + inner + '</em>';
+                else if (name === 'u') html += '<u>' + inner + '</u>';
+                else if (name === 'ul') html += '<ul>' + inner + '</ul>';
+                else if (name === 'ol') html += '<ol>' + inner + '</ol>';
+                else if (name === 'li') html += '<li>' + inner + '</li>';
+                else if (name === 'h2' || name === 'h3' || name === 'p') html += '<' + name + '>' + inner + '</' + name + '>';
+                else if (name === 'div') html += '<p>' + inner + '</p>';
+                else if (name === 'a') {
+                    var href = child.getAttribute('href') || '';
+                    if (/^(https?:|mailto:)/i.test(href)) html += '<a href="' + htmlEscape(href) + '">' + inner + '</a>';
+                    else html += inner;
+                } else if (name === 'font' || name === 'span') {
+                    var color = name === 'font' ? (child.getAttribute('color') || '') : '';
+                    if (!color) {
+                        var found = /color\s*:\s*(#[0-9a-f]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))/i.exec(child.getAttribute('style') || '');
+                        if (found) color = found[1].replace(/\s+/g, '');
+                    }
+                    if (/^#[0-9a-f]{3,8}$/i.test(color) || /^rgb\(\d{1,3},\d{1,3},\d{1,3}\)$/i.test(color)) html += '<span style="color:' + color + '">' + inner + '</span>';
+                    else html += inner;
+                } else html += inner;
+            }
+            child = child.nextSibling;
+        }
+        return html;
+    }
+
+    function appendSafeHtml(parent, html) {
+        var raw = String(html || '');
+        if (raw.indexOf('<') < 0) {
+            raw.split('\n').forEach(function (line, index) {
+                if (index) parent.appendChild(document.createElement('br'));
+                parent.appendChild(document.createTextNode(line));
+            });
+            return;
+        }
+        var parsed = new DOMParser().parseFromString('<div>' + raw + '</div>', 'text/html');
+        var source = parsed.body && parsed.body.firstChild;
+        function copy(from, to) {
+            var node = from.firstChild;
+            while (node) {
+                if (node.nodeType === 3) to.appendChild(document.createTextNode(node.nodeValue || ''));
+                else if (node.nodeType === 1) {
+                    var name = node.tagName.toLowerCase();
+                    var next = null;
+                    if (name === 'br') next = document.createElement('br');
+                    else if (name === 'strong' || name === 'b' || name === 'em' || name === 'i' || name === 'u' || name === 'ul' || name === 'ol' || name === 'li' || name === 'p' || name === 'h2' || name === 'h3') next = document.createElement(name === 'b' ? 'strong' : (name === 'i' ? 'em' : name));
+                    else if (name === 'a') {
+                        var href = node.getAttribute('href') || '';
+                        if (/^(https?:|mailto:)/i.test(href)) {
+                            next = document.createElement('a');
+                            next.setAttribute('href', href);
+                            next.setAttribute('rel', 'nofollow');
+                        }
+                    } else if (name === 'span') {
+                        var style = node.getAttribute('style') || '';
+                        var color = /color\s*:\s*(#[0-9a-f]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))/i.exec(style);
+                        if (color) {
+                            next = document.createElement('span');
+                            next.style.color = color[1].replace(/\s+/g, '');
+                        }
+                    }
+                    if (next) {
+                        if (name !== 'br') copy(node, next);
+                        to.appendChild(next);
+                    } else copy(node, to);
+                }
+                node = node.nextSibling;
+            }
+        }
+        if (source) copy(source, parent);
+    }
+
+    function jiraComposer(options) {
+        var box = el('div', 'asset-tree-jira-editor');
+        var bar = el('div', 'asset-tree-jira-bar');
+        var visual = el('div', 'asset-tree-jira-visual');
+        visual.contentEditable = 'true';
+        visual.setAttribute('role', 'textbox');
+        visual.setAttribute('aria-multiline', 'true');
+        visual.setAttribute('data-placeholder', options.placeholder || t('commentPlaceholder'));
+        var source = el('textarea', 'asset-tree-jira-source');
+        source.placeholder = options.placeholder || t('commentPlaceholder');
+        source.hidden = true;
+        var textMode = false;
+        function markEmpty() {
+            var empty = !commentPlain(visual);
+            if (empty) visual.classList.add('is-empty');
+            else visual.classList.remove('is-empty');
+        }
+        function command(name, value) {
+            if (textMode) return;
+            visual.focus();
+            try { document.execCommand(name, false, value || null); } catch (ignore) {}
+            markEmpty();
+        }
+        function tool(label, title, action) {
+            var node = button(label, 'asset-tree-jira-tool', function (event) {
+                event.preventDefault();
+                action();
+            });
+            node.title = title;
+            node.setAttribute('aria-label', title);
+            node.addEventListener('mousedown', function (event) { event.preventDefault(); });
+            bar.appendChild(node);
+            return node;
+        }
+        var style = document.createElement('select');
+        style.className = 'asset-tree-jira-style';
+        style.title = t('commentStyle');
+        [['p', t('commentStyle')], ['h2', 'H2'], ['h3', 'H3']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = pair[1];
+            style.appendChild(option);
+        });
+        style.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        style.addEventListener('change', function () {
+            command('formatBlock', style.value === 'p' ? 'p' : style.value);
+            style.value = 'p';
+        });
+        bar.appendChild(style);
+        tool('B', 'Bold', function () { command('bold'); });
+        tool('I', 'Italic', function () { command('italic'); });
+        tool('U', 'Underline', function () { command('underline'); });
+        var color = document.createElement('input');
+        color.type = 'color';
+        color.className = 'asset-tree-jira-color';
+        color.value = '#172b4d';
+        color.title = t('commentColor');
+        color.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        color.addEventListener('change', function () { command('foreColor', color.value); });
+        bar.appendChild(color);
+        var linkTool = tool('', t('commentLink'), function () {
+            var href = window.prompt(t('commentLink'), 'https://');
+            if (!href) return;
+            if (!/^(https?:|mailto:)/i.test(href)) return;
+            command('createLink', href);
+        });
+        linkTool.appendChild(toolIcon('link'));
+        tool('•', t('commentList'), function () { command('insertUnorderedList'); });
+        tool('1.', t('commentOrdered'), function () { command('insertOrderedList'); });
+        box.appendChild(bar);
+        box.appendChild(visual);
+        box.appendChild(source);
+        visual.addEventListener('input', markEmpty);
+        visual.addEventListener('keyup', markEmpty);
+        markEmpty();
+        var foot = el('div', 'asset-tree-jira-foot');
+        var tabs = el('div', 'asset-tree-jira-tabs');
+        var visualTab = button(t('commentVisual'), 'asset-tree-jira-tab is-on', function () {
+            if (!textMode) return;
+            textMode = false;
+            visual.innerHTML = '';
+            String(source.value || '').split('\n').forEach(function (line, index) {
+                if (index) visual.appendChild(document.createElement('br'));
+                visual.appendChild(document.createTextNode(line));
+            });
+            source.hidden = true;
+            visual.hidden = false;
+            visualTab.classList.add('is-on');
+            textTab.classList.remove('is-on');
+            markEmpty();
+            visual.focus();
+        });
+        var textTab = button(t('commentText'), 'asset-tree-jira-tab', function () {
+            if (textMode) return;
+            textMode = true;
+            source.value = commentPlain(visual);
+            visual.hidden = true;
+            source.hidden = false;
+            textTab.classList.add('is-on');
+            visualTab.classList.remove('is-on');
+            source.focus();
+        });
+        tabs.appendChild(visualTab);
+        tabs.appendChild(textTab);
+        var actions = el('div', 'asset-tree-jira-actions');
+        function currentText() {
+            if (textMode) return String(source.value || '').replace(/^\s+|\s+$/g, '');
+            if (!commentPlain(visual)) return '';
+            return commentSerialize(visual).replace(/^\s+|\s+$/g, '');
+        }
+        if (options.onPublic) actions.appendChild(button(options.publicLabel || t('commentPublic'), 'asset-tree-btn primary', function () { options.onPublic(currentText()); }));
+        if (options.onInternal) actions.appendChild(button(options.internalLabel || t('commentInternal'), 'asset-tree-jira-quiet', function () { options.onInternal(currentText()); }));
+        if (options.onCancel) actions.appendChild(button(t('cancel'), 'asset-tree-jira-quiet', options.onCancel));
+        foot.appendChild(tabs);
+        foot.appendChild(actions);
+        box.appendChild(foot);
+        return {
+            root: box,
+            foot: foot,
+            read: currentText,
+            focus: function () { visual.focus(); },
+            clear: function () {
+                visual.innerHTML = '';
+                source.value = '';
+                markEmpty();
+            }
+        };
+    }
+
+    function sendAssetComment(asset, text, internal, composer) {
+        if (!text) {
+            setFormError(t('commentPlaceholder'));
+            return;
+        }
+        ajax('POST', '/assets/' + asset.id + '/comments', { body: text, internal: !!internal }, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                if (composer) composer.clear();
+                selectAsset(asset.id, true);
+            } else setFormError((payload && payload.message) || t('errorTitle'));
+        });
+    }
+
     function openComment() {
         var editor = document.getElementById('asset-tree-comment-editor');
         if (!editor) return;
         editor.hidden = false;
         var trigger = document.getElementById('asset-tree-comment-trigger');
         if (trigger) trigger.hidden = true;
-        var area = editor.querySelector('textarea');
-        if (area) area.focus();
+        if (editor.focusComposer) editor.focusComposer();
         editor.scrollIntoView({ block: 'nearest' });
     }
 
@@ -5916,10 +6159,13 @@
         var details = el('div', 'asset-tree-action-details');
         var line = el('div', 'asset-tree-action-line');
         line.appendChild(el('span', 'asset-tree-comment-user', author));
+        if (comment.internal) line.appendChild(el('span', 'asset-tree-comment-internal', t('commentInternalTag')));
         line.appendChild(document.createTextNode(' ' + t('actComment') + ' \u2014 '));
         line.appendChild(el('span', 'asset-tree-comment-time', stamp(comment.created)));
         details.appendChild(line);
-        details.appendChild(el('div', 'asset-tree-action-body', comment.body || ''));
+        var bodyNode = el('div', 'asset-tree-action-body');
+        appendSafeHtml(bodyNode, comment.body || '');
+        details.appendChild(bodyNode);
         var own = !!(comment.author && comment.author.userKey && comment.author.userKey === state.userKey);
         if (state.canArrange || (own && mayEdit(asset))) {
             var links = el('div', 'asset-tree-action-links');
@@ -6099,28 +6345,19 @@
             var editor = el('div', 'asset-tree-comment-editor');
             editor.id = 'asset-tree-comment-editor';
             editor.hidden = true;
-            var area = el('textarea', 'asset-tree-comment-box');
-            area.placeholder = t('commentPlaceholder');
-            var actions = el('div', 'asset-tree-comment-actions');
-            actions.appendChild(button(t('commentSubmit'), 'asset-tree-btn primary', function () {
-                var text = area.value.trim();
-                if (!text) {
-                    setFormError(t('commentPlaceholder'));
-                    return;
+            var composer = jiraComposer({
+                placeholder: t('commentPlaceholder'),
+                onPublic: function (text) { sendAssetComment(asset, text, false, composer); },
+                onInternal: function (text) { sendAssetComment(asset, text, true, composer); },
+                onCancel: function () {
+                    editor.hidden = true;
+                    composer.clear();
+                    var trigger = document.getElementById('asset-tree-comment-trigger');
+                    if (trigger) trigger.hidden = false;
                 }
-                ajax('POST', '/assets/' + asset.id + '/comments', { body: text }, function (status, payload) {
-                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
-                    else setFormError((payload && payload.message) || t('errorTitle'));
-                });
-            }));
-            actions.appendChild(button(t('cancel'), 'asset-tree-linkish', function () {
-                editor.hidden = true;
-                area.value = '';
-                var trigger = document.getElementById('asset-tree-comment-trigger');
-                if (trigger) trigger.hidden = false;
-            }));
-            editor.appendChild(area);
-            editor.appendChild(actions);
+            });
+            editor.focusComposer = composer.focus;
+            editor.appendChild(composer.root);
             body.appendChild(editor);
             var trigger = toolButton(t('addComment'), 'comment', openComment);
             trigger.id = 'asset-tree-comment-trigger';
@@ -6408,6 +6645,7 @@
                 row.appendChild(link);
                 row.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
                 if (file.authorName) row.appendChild(el('span', 'asset-tree-file-meta', file.authorName));
+                if (file.internal) row.appendChild(el('span', 'asset-tree-file-internal', t('commentInternalTag')));
                 if (mayEdit(asset)) {
                     row.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
                         ajax('DELETE', '/assets/' + asset.id + '/files/' + file.id, null, function (status, payload) {
@@ -6424,15 +6662,7 @@
         fileError.hidden = true;
         body.appendChild(fileError);
         if (mayEdit(asset)) {
-            var drop = el('label', 'asset-tree-drop');
-            var input = el('input', 'asset-tree-file');
-            input.type = 'file';
-            input.addEventListener('change', function () {
-                var chosen = input.files && input.files[0];
-                input.value = '';
-                if (chosen) uploadFile(asset, chosen);
-            });
-            drop.appendChild(input);
+            var drop = button('', 'asset-tree-drop', function () { openAttachDialog(asset, []); });
             drop.appendChild(toolIcon('cloud'));
             var caption = el('div', 'asset-tree-drop-caption');
             caption.appendChild(document.createTextNode(t('attachDrop') + ' '));
@@ -6446,9 +6676,11 @@
             drop.addEventListener('drop', function (event) {
                 event.preventDefault();
                 drop.classList.remove('is-over');
-                if (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) {
-                    uploadFile(asset, event.dataTransfer.files[0]);
-                }
+                var incoming = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files : [];
+                var files = [];
+                var index;
+                for (index = 0; index < incoming.length; index++) files.push(incoming[index]);
+                openAttachDialog(asset, files);
             });
             body.appendChild(drop);
         } else if (list && !list.length) {
@@ -6587,27 +6819,166 @@
         xhr.send();
     }
 
-    function uploadFile(asset, file) {
-        if (!file) return;
+    function uploadFile(asset, file, internal, done) {
+        if (!file) {
+            if (done) done(true);
+            return;
+        }
         showFileError('');
         var xhr = new XMLHttpRequest();
         var data = new FormData();
         data.append('file', file, file.name || 'file');
-        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id, true);
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id + (internal ? '&internal=1' : ''), true);
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) return;
             if (xhr.status >= 200 && xhr.status < 300) {
-                notify(t('saved'));
-                selectAsset(asset.id, true);
+                if (done) done(true);
                 return;
             }
             var payload = null;
             try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
             showFileError((payload && payload.message) || t('errorTitle'));
+            if (done) done(false);
         };
         xhr.send(data);
+    }
+
+    function uploadFiles(asset, files, internal, done) {
+        var index = 0;
+        function next() {
+            if (index >= files.length) {
+                done(true);
+                return;
+            }
+            uploadFile(asset, files[index], internal, function (ok) {
+                if (!ok) {
+                    done(false);
+                    return;
+                }
+                index += 1;
+                next();
+            });
+        }
+        next();
+    }
+
+    function closeAttachDialog() {
+        var open = document.querySelector('.asset-tree-attach-overlay');
+        if (open && open.parentNode) open.parentNode.removeChild(open);
+    }
+
+    function openAttachDialog(asset, initial) {
+        closeAttachDialog();
+        var queued = [];
+        var seed = initial || [];
+        var seedAt;
+        for (seedAt = 0; seedAt < seed.length; seedAt++) if (seed[seedAt]) queued.push(seed[seedAt]);
+        var overlay = el('div', 'asset-tree-attach-overlay');
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closeAttachDialog();
+        });
+        var dialog = el('div', 'asset-tree-attach-dialog');
+        dialog.appendChild(el('h2', null, t('attachTitle')));
+        var list = el('div', 'asset-tree-attach-list');
+        function paintQueue() {
+            list.innerHTML = '';
+            queued.forEach(function (file, index) {
+                var card = el('div', 'asset-tree-attach-card');
+                if (file.type && file.type.indexOf('image/') === 0) {
+                    var img = el('img', 'asset-tree-attach-thumb');
+                    img.alt = file.name || '';
+                    img.src = URL.createObjectURL(file);
+                    card.appendChild(img);
+                } else {
+                    card.appendChild(el('span', 'asset-tree-attach-glyph', fileGlyph(file.name)));
+                }
+                card.appendChild(button('\u00d7', 'asset-tree-attach-remove', function () {
+                    queued.splice(index, 1);
+                    paintQueue();
+                }));
+                card.appendChild(el('div', 'asset-tree-attach-name', file.name || ''));
+                list.appendChild(card);
+            });
+            list.appendChild(el('p', 'asset-tree-attach-hint', t('attachDropHint')));
+        }
+        function take(files) {
+            var index;
+            for (index = 0; index < files.length; index++) queued.push(files[index]);
+            paintQueue();
+        }
+        var composer = jiraComposer({
+            placeholder: t('commentPlaceholder'),
+            onPublic: function (text) { finish(false, text); },
+            onInternal: function (text) { finish(true, text); },
+            onCancel: closeAttachDialog,
+            publicLabel: t('attachCustomer'),
+            internalLabel: t('attachRequest')
+        });
+        var drop = el('label', 'asset-tree-attach-drop');
+        var input = el('input', 'asset-tree-file');
+        input.type = 'file';
+        input.multiple = true;
+        input.addEventListener('change', function () {
+            take(input.files || []);
+            input.value = '';
+        });
+        drop.appendChild(input);
+        drop.appendChild(list);
+        drop.addEventListener('dragover', function (event) {
+            event.preventDefault();
+            drop.classList.add('is-over');
+        });
+        drop.addEventListener('dragleave', function () { drop.classList.remove('is-over'); });
+        drop.addEventListener('drop', function (event) {
+            event.preventDefault();
+            drop.classList.remove('is-over');
+            if (event.dataTransfer && event.dataTransfer.files) take(event.dataTransfer.files);
+        });
+        dialog.addEventListener('paste', function (event) {
+            var items = event.clipboardData && event.clipboardData.items;
+            if (!items) return;
+            var files = [];
+            var index;
+            for (index = 0; index < items.length; index++) {
+                if (items[index].kind === 'file') {
+                    var file = items[index].getAsFile();
+                    if (file) files.push(file);
+                }
+            }
+            if (files.length) {
+                event.preventDefault();
+                take(files);
+            }
+        });
+        function finish(internal, text) {
+            if (!queued.length && !text) {
+                setFormError(t('attachDropHint'));
+                return;
+            }
+            uploadFiles(asset, queued.slice(), internal, function (ok) {
+                if (!ok) return;
+                if (!text) {
+                    closeAttachDialog();
+                    notify(t('saved'));
+                    selectAsset(asset.id, true);
+                    return;
+                }
+                ajax('POST', '/assets/' + asset.id + '/comments', { body: text, internal: !!internal }, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        closeAttachDialog();
+                        selectAsset(asset.id, true);
+                    } else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+        }
+        dialog.appendChild(composer.root);
+        composer.root.insertBefore(drop, composer.foot);
+        paintQueue();
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        composer.focus();
     }
 
     function htmlEscape(value) {
@@ -14385,8 +14756,6 @@
         var packed = staffShiftPacked(row ? row.weekdays : 0);
         if (packed && packed.work === 5 && packed.rest === 2) return { kind: 'week', weekdays: 31, work: 5, rest: 2 };
         if (packed) return { kind: 'shift', work: packed.work, rest: packed.rest };
-        var hours = row ? parseInt(row.hours, 10) || 0 : 0;
-        if (hours >= 12) return { kind: 'shift', work: 2, rest: 2 };
         var weekdays = row && row.weekdays ? parseInt(row.weekdays, 10) || 31 : 31;
         if (weekdays < 1 || weekdays > 127) weekdays = 31;
         return { kind: 'week', weekdays: weekdays, work: 5, rest: 2 };
@@ -14505,7 +14874,6 @@
     function staffNatural(person, iso, date) {
         if (staffLeaveOn(person, iso)) return 'leave';
         var startOn = person.hours && person.hours.startOn ? String(person.hours.startOn) : '';
-        if (startOn && iso < startOn) return 'off';
         var pattern = staffPatternOf(person);
         if (pattern.kind === 'shift') {
             var anchor = parseIsoDate(startOn);
@@ -14515,7 +14883,7 @@
             var phase = ((delta % span) + span) % span;
             return phase < pattern.work ? 'work' : 'off';
         }
-        if (!startOn) return 'off';
+        if (!startOn || iso < startOn) return 'off';
         var bit = (date.getDay() + 6) % 7;
         var weekdays = pattern.weekdays || 31;
         return (weekdays & (1 << bit)) ? 'work' : 'off';
@@ -15379,6 +15747,22 @@
         return state.scheduleYear + '-' + month + '-01';
     }
 
+    function staffClearPlainMarks(marks, fromIso) {
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var iso = isoDate(date);
+            if (fromIso && iso < fromIso) continue;
+            if (markCustom(marks, iso) != null) continue;
+            if (marks[iso] !== 'work' && marks[iso] !== 'off') continue;
+            delete marks[iso];
+            delete marks._hours[iso];
+        }
+    }
+
     function staffApplyPattern(person, startIso, weekdays) {
         if (!person || !person.hours || !startIso) return;
         var pattern = staffPatternOf(person);
@@ -15388,6 +15772,7 @@
         var marks = parseDayMarks(person.hours.marks);
         person.hours.weekdays = packed;
         person.hours.startOn = startIso;
+        if (staffShiftPacked(packed)) staffClearPlainMarks(marks, '');
         staffStripMatchedMarks(person, marks);
         saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
     }
@@ -15404,26 +15789,19 @@
         var count = new Date(year, month, 0).getDate();
         var prior = {};
         var day;
+        var shift = pattern.kind === 'shift';
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
             var iso = isoDate(date);
             prior[iso] = staffNatural(person, iso, date);
-            if (iso >= startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
+            if (shift || iso >= startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
             if (marks[iso] && marks[iso] !== 'work' && marks[iso] !== 'off') continue;
             if (!marks[iso] && prior[iso] && prior[iso] !== 'off' && prior[iso] !== 'leave') marks[iso] = prior[iso];
         }
         person.hours.weekdays = packed;
         person.hours.startOn = startIso;
-        for (day = 1; day <= count; day++) {
-            date = new Date(year, month - 1, day);
-            iso = isoDate(date);
-            if (iso < startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
-            if (marks[iso] !== 'work' && marks[iso] !== 'off') continue;
-            if (marks[iso] === prior[iso]) {
-                delete marks[iso];
-                delete marks._hours[iso];
-            }
-        }
+        if (shift) staffClearPlainMarks(marks, '');
+        else staffClearPlainMarks(marks, startIso);
         staffStripMatchedMarks(person, marks);
         saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
     }
@@ -15930,9 +16308,7 @@
             var nextRest = parseInt(restInput.value, 10) || 0;
             if (nextWork < 1 || nextWork > 15 || nextRest < 1 || nextRest > 15) return;
             var packed = staffEncodePattern(nextWork, nextRest);
-            var anchor = person.hours.startOn || '';
-            if (anchor) staffApplyPattern(person, anchor, packed);
-            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
+            staffApplyPattern(person, person.hours.startOn || staffMonthStart(), packed);
         }
         workInput.addEventListener('change', commit);
         restInput.addEventListener('change', commit);
@@ -15988,9 +16364,7 @@
             }
             var bits = select.value.split('/');
             var packed = staffEncodePattern(bits[0], bits[1]);
-            var anchor = person.hours.startOn || '';
-            if (anchor) staffApplyPattern(person, anchor, packed);
-            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
+            staffApplyPattern(person, person.hours.startOn || staffMonthStart(), packed);
         });
         wrap.appendChild(select);
         if (!known) wrap.appendChild(staffPatternNumbers(person, pattern.work, pattern.rest));
@@ -20304,7 +20678,7 @@
     }
 
     function mapLayerIds() {
-        return ['plan', 'power', 'scs', 'comm', 'vent', 'water'];
+        return ['plan', 'power', 'scs', 'comm', 'vent', 'water', 'heat', 'fire', 'guard'];
     }
 
     function mapLayerLabel(id) {
@@ -20313,6 +20687,9 @@
         if (id === 'comm') return t('mapLayerComm');
         if (id === 'vent') return t('mapLayerVent');
         if (id === 'water') return t('mapLayerWater');
+        if (id === 'heat') return t('mapLayerHeat');
+        if (id === 'fire') return t('mapLayerFire');
+        if (id === 'guard') return t('mapLayerGuard');
         return t('mapLayerPlan');
     }
 
@@ -20342,9 +20719,35 @@
         return name.slice(dash + 1);
     }
 
+    function routeMarkGlyph(tool) {
+        var glyphs = {
+            outlet: '\u0421\u041a', rack: '\u0428\u041a', valve: '\u041a\u041b', socket: '220', board: '\u0429',
+            grille: '\u0420\u0428', point: '\u0422', switch: '\u0412\u041a', lamp: '\u0421\u0412', ups: '\u0418\u0411',
+            meter: '\u0421\u0427', wmeter: '\u0412\u0421', net: 'LAN', patch: '\u041f\u041f', wifi: 'Wi',
+            phone: '\u0422\u041b', camera: '\u041a\u041c', speaker: '\u0413\u0420', ac: '\u041a\u0414', airlock: '\u0428\u041b',
+            fan: '\u0412\u041d', damper: '\u0417\u0421', crane: '\u041a\u0420', pump: '\u041d\u0421', hydrant: '\u0413\u0414',
+            radiator: '\u0420\u0414', boiler: '\u041a\u0422', manifold: '\u041a\u041e', thermo: '\u0422\u0420', alarm: '\u0421\u0413',
+            smoke: '\u041f\u0414', heatdet: '\u0422\u0414', sprinkler: '\u0421\u041f', panel: '\u041f\u0420', extinguisher: '\u041e\u0413',
+            sensor: '\u0414\u041e', motion: '\u0414\u0414', reader: 'ID', siren: '\u0421\u0420'
+        };
+        return glyphs[tool] || '';
+    }
+
     function isRouteMarkTool(tool) {
-        return tool === 'outlet' || tool === 'rack' || tool === 'valve' || tool === 'socket'
-            || tool === 'board' || tool === 'grille' || tool === 'point' || tool === 'label';
+        return tool === 'label' || !!routeMarkGlyph(tool);
+    }
+
+    function routeWireLabel(id) {
+        var names = { vvg: '\u0412\u0412\u0413', pvs: '\u041f\u0412\u0421', ground: 'PE', bus: '\u0428', utp: 'UTP', fiber: '\u041e\u0412', coax: 'KX', phone: '\u0422\u041b' };
+        return names[id] || id || '';
+    }
+
+    function routeDash(id) {
+        if (id === 'fiber' || id === 'phone') return '2 3';
+        if (id === 'ground') return '1 2';
+        if (id === 'coax' || id === 'bus') return '8 3 2 3';
+        if (id === 'vvg' || id === 'pvs' || id === 'utp') return '6 3';
+        return '';
     }
 
     function activateMapLayer(id) {
@@ -20357,6 +20760,7 @@
         state.mapClickAt = 0;
         state.mapArmId = 0;
         state.mapStamp = '';
+        state.mapWire = '';
         if (isRouteKind(id)) state.mapTool = 'route';
         else if (state.mapTool === 'route') state.mapTool = 'select';
         renderFrame();
@@ -20802,13 +21206,25 @@
     }
 
     function routeToolPairs(layer) {
-        var line = layer === 'water' ? 'mapToolPipe' : (layer === 'vent' ? 'mapToolDuct' : (layer === 'comm' ? 'mapToolLine' : 'mapToolCable'));
+        var line = layer === 'water' || layer === 'heat' ? 'mapToolPipe' : (layer === 'vent' ? 'mapToolDuct' : (layer === 'power' || layer === 'scs' ? 'mapToolCable' : 'mapToolLine'));
         var tools = [['select', 'mapSelect'], ['route', line]];
-        if (layer === 'scs') tools.push(['outlet', 'mapToolOutlet'], ['rack', 'mapToolRack']);
-        else if (layer === 'water') tools.push(['valve', 'mapToolValve']);
-        else if (layer === 'power') tools.push(['socket', 'mapToolSocket'], ['board', 'mapToolBoard']);
-        else if (layer === 'vent') tools.push(['grille', 'mapToolGrille']);
-        else tools.push(['point', 'mapToolPoint']);
+        var wires = {
+            power: [['wire-vvg', 'mapToolVvg'], ['wire-pvs', 'mapToolPvs'], ['wire-ground', 'mapToolGround'], ['wire-bus', 'mapToolBus']],
+            scs: [['wire-utp', 'mapToolUtp'], ['wire-fiber', 'mapToolFiber']],
+            comm: [['wire-coax', 'mapToolCoax'], ['wire-phone', 'mapToolPhoneLine']]
+        };
+        var marks = {
+            power: [['socket', 'mapToolSocket220'], ['switch', 'mapToolSwitch'], ['lamp', 'mapToolLamp'], ['board', 'mapToolBoard'], ['ups', 'mapToolUps'], ['meter', 'mapToolMeter']],
+            scs: [['outlet', 'mapToolOutlet'], ['net', 'mapToolNet'], ['rack', 'mapToolRack'], ['patch', 'mapToolPatch'], ['wifi', 'mapToolWifi']],
+            comm: [['point', 'mapToolPoint'], ['phone', 'mapToolPhone'], ['camera', 'mapToolCamera'], ['speaker', 'mapToolSpeaker']],
+            vent: [['grille', 'mapToolGrille'], ['ac', 'mapToolAc'], ['airlock', 'mapToolAirlock'], ['fan', 'mapToolFan'], ['damper', 'mapToolDamper']],
+            water: [['valve', 'mapToolValve'], ['crane', 'mapToolCrane'], ['pump', 'mapToolPump'], ['wmeter', 'mapToolMeter'], ['hydrant', 'mapToolHydrant']],
+            heat: [['radiator', 'mapToolRadiator'], ['boiler', 'mapToolBoiler'], ['manifold', 'mapToolManifold'], ['thermo', 'mapToolThermo']],
+            fire: [['alarm', 'mapToolAlarm'], ['smoke', 'mapToolSmoke'], ['heatdet', 'mapToolHeatDet'], ['sprinkler', 'mapToolSprinkler'], ['panel', 'mapToolPanel'], ['extinguisher', 'mapToolExtinguisher']],
+            guard: [['alarm', 'mapToolAlarm'], ['sensor', 'mapToolSensor'], ['motion', 'mapToolMotion'], ['camera', 'mapToolCamera'], ['reader', 'mapToolReader'], ['siren', 'mapToolSiren'], ['panel', 'mapToolPanel']]
+        };
+        (wires[layer] || []).forEach(function (pair) { tools.push(pair); });
+        (marks[layer] || []).forEach(function (pair) { tools.push(pair); });
         tools.push(['label', 'mapText']);
         return tools;
     }
@@ -20821,21 +21237,25 @@
             ['arc', 'mapArc'], ['dim', 'mapDim'], ['text', 'mapText']
         ];
         tools.forEach(function (pair) {
-            var on = state.mapTool === pair[0] && !state.mapStamp && !state.mapArmId;
+            var wire = pair[0].indexOf('wire-') === 0 ? pair[0].slice(5) : '';
+            var on = !state.mapStamp && !state.mapArmId && (wire
+                ? state.mapTool === 'route' && state.mapWire === wire
+                : state.mapTool === pair[0] && (pair[0] !== 'route' || !state.mapWire));
             var tool = button('', 'asset-tree-tool' + (on ? ' is-on' : ''), function () {
-                state.mapTool = pair[0];
+                state.mapTool = wire ? 'route' : pair[0];
+                state.mapWire = wire;
                 state.mapStamp = '';
                 state.mapArmId = 0;
                 state.mapAnchor = null;
                 state.mapArc = null;
                 state.mapClickAt = 0;
-                var keepLayer = pair[0] === 'select' || pair[0] === 'route' || isRouteMarkTool(pair[0]);
+                var keepLayer = state.mapTool === 'select' || state.mapTool === 'route' || isRouteMarkTool(state.mapTool);
                 if (!keepLayer && isRouteKind(state.mapLayer)) state.mapLayer = 'plan';
                 renderFrame();
             });
             pinStyle(tool, {
                 display: 'grid',
-                'grid-template-rows': '22px 16px',
+                'grid-template-rows': '20px 26px',
                 'grid-template-columns': 'minmax(0, 1fr)',
                 'align-items': 'center',
                 'justify-items': 'center',
@@ -20845,19 +21265,19 @@
                 'flex-wrap': 'nowrap',
                 gap: '2px',
                 width: '100%',
-                height: '46px',
-                'min-height': '46px',
-                'max-height': '46px',
+                height: '54px',
+                'min-height': '54px',
+                'max-height': '54px',
                 margin: '0',
-                padding: '4px 2px',
+                padding: '3px 2px',
                 'box-sizing': 'border-box',
                 'text-align': 'center',
-                'line-height': '0',
-                'white-space': 'nowrap',
+                'line-height': '13px',
+                'white-space': 'normal',
                 float: 'none',
                 overflow: 'hidden',
                 'vertical-align': 'top',
-                'font-size': '12px',
+                'font-size': '11px',
                 'font-weight': '400'
             });
             var glyph = el('span', 'asset-tree-tool-glyph');
@@ -20879,22 +21299,20 @@
             tool.appendChild(glyph);
             var label = el('span', 'asset-tree-tool-label', t(pair[1]));
             pinStyle(label, {
-                display: 'flex',
-                'align-items': 'center',
-                'justify-content': 'center',
+                display: 'block',
                 width: '100%',
-                height: '16px',
+                height: '26px',
                 margin: '0',
                 padding: '0',
                 overflow: 'hidden',
+                'overflow-wrap': 'anywhere',
                 'font-size': '11px',
                 'font-weight': '400',
-                'line-height': '16px',
+                'line-height': '13px',
                 'letter-spacing': '0',
                 'text-align': 'center',
                 'text-indent': '0',
-                'white-space': 'nowrap',
-                'text-overflow': 'ellipsis',
+                'white-space': 'normal',
                 float: 'none',
                 'grid-row': '2',
                 'grid-column': '1',
@@ -21324,7 +21742,8 @@
     }
 
     function isRouteKind(kind) {
-        return kind === 'power' || kind === 'scs' || kind === 'comm' || kind === 'vent' || kind === 'water';
+        return kind === 'power' || kind === 'scs' || kind === 'comm' || kind === 'vent' || kind === 'water'
+            || kind === 'heat' || kind === 'fire' || kind === 'guard';
     }
 
     function routeColor(kind) {
@@ -21333,6 +21752,9 @@
         if (kind === 'comm') return '#6554c0';
         if (kind === 'vent') return '#36b37e';
         if (kind === 'water') return '#00b8d9';
+        if (kind === 'heat') return '#ff8b00';
+        if (kind === 'fire') return '#de350b';
+        if (kind === 'guard') return '#253858';
         return '#172b4d';
     }
 
@@ -21641,11 +22063,12 @@
     }
 
     function commitRoute(floor, kind, ax, ay, bx, by) {
-        return pushShape(floor, applySegment({ kind: kind, name: '', color: routeColor(kind), h: 6, w: 6 }, ax, ay, bx, by));
+        var wire = state.mapWire || '';
+        return pushShape(floor, applySegment({ kind: kind, name: wire ? ('wire:' + wire) : '', color: routeColor(kind), h: 6, w: 6 }, ax, ay, bx, by));
     }
 
     function placeRouteMark(floor, layer, tool, x, y) {
-        var size = tool === 'rack' || tool === 'board' ? 40 : (tool === 'label' ? 96 : 24);
+        var size = tool === 'rack' || tool === 'board' || tool === 'panel' || tool === 'patch' ? 40 : (tool === 'label' ? 96 : 28);
         var height = tool === 'label' ? 28 : size;
         return pushShape(floor, clampRoom({
             kind: layer + '-' + tool,
@@ -22889,7 +23312,8 @@
             group.appendChild(caption);
             return group;
         }
-        var shape = svgEl(mark === 'rack' || mark === 'board' || mark === 'grille' ? 'rect' : 'circle');
+        var boxed = mark === 'rack' || mark === 'board' || mark === 'grille' || mark === 'panel' || mark === 'patch' || mark === 'radiator';
+        var shape = svgEl(boxed ? 'rect' : 'circle');
         if (shape.tagName.toLowerCase() === 'circle' || shape.localName === 'circle') {
             shape.setAttribute('cx', String(room.w / 2));
             shape.setAttribute('cy', String(room.h / 2));
@@ -22899,20 +23323,23 @@
             shape.setAttribute('y', '1');
             shape.setAttribute('width', String(room.w - 2));
             shape.setAttribute('height', String(room.h - 2));
-            shape.setAttribute('rx', mark === 'rack' || mark === 'board' ? '2' : '0');
+            shape.setAttribute('rx', mark === 'grille' ? '0' : '2');
         }
         shape.setAttribute('fill', mark === 'grille' ? 'none' : color);
         shape.setAttribute('stroke', color);
         shape.setAttribute('stroke-width', '2');
         group.appendChild(shape);
-        if (mark === 'valve' || mark === 'socket' || mark === 'outlet' || mark === 'point') {
-            var bar = svgEl('path');
-            var mid = room.w / 2;
-            bar.setAttribute('d', 'M ' + (mid - 6) + ' ' + (room.h / 2) + ' H ' + (mid + 6) + ' M ' + mid + ' ' + (room.h / 2 - 6) + ' V ' + (room.h / 2 + 6));
-            bar.setAttribute('stroke', '#fff');
-            bar.setAttribute('stroke-width', '1.6');
-            bar.setAttribute('fill', 'none');
-            group.appendChild(bar);
+        var glyph = routeMarkGlyph(mark);
+        if (glyph) {
+            var letter = svgEl('text');
+            letter.setAttribute('x', String(room.w / 2));
+            letter.setAttribute('y', String(room.h / 2 + 3));
+            letter.setAttribute('text-anchor', 'middle');
+            letter.setAttribute('fill', mark === 'grille' ? color : '#fff');
+            letter.setAttribute('font-size', glyph.length > 2 ? '7' : '8');
+            letter.setAttribute('font-weight', '700');
+            letter.textContent = glyph;
+            group.appendChild(letter);
         }
         if (room.name) {
             var name = svgEl('text');
@@ -22980,7 +23407,22 @@
             routeLine.setAttribute('stroke-width', '4');
             routeLine.setAttribute('stroke-linecap', 'round');
             routeLine.setAttribute('class', 'asset-tree-route');
+            var wireName = String(room.name || '');
+            if (wireName.indexOf('wire:') === 0) {
+                var dash = routeDash(wireName.slice(5));
+                if (dash) routeLine.setAttribute('stroke-dasharray', dash);
+            }
             group.appendChild(routeLine);
+            if (wireName.indexOf('wire:') === 0) {
+                var wireTag = svgEl('text');
+                wireTag.setAttribute('x', String((routeEnds[0][0] + routeEnds[1][0]) / 2));
+                wireTag.setAttribute('y', String((routeEnds[0][1] + routeEnds[1][1]) / 2 - 4));
+                wireTag.setAttribute('text-anchor', 'middle');
+                wireTag.setAttribute('fill', room.color || routeColor(kindName));
+                wireTag.setAttribute('font-size', '9');
+                wireTag.textContent = routeWireLabel(wireName.slice(5));
+                group.appendChild(wireTag);
+            }
         }
         decorateRoom(group, room);
         appendOpening(group, room);
@@ -23650,6 +24092,22 @@
             path.setAttribute('stroke-linejoin', 'round');
             path.setAttribute('stroke-linecap', 'round');
             svg.appendChild(path);
+        }
+        var glyph = routeMarkGlyph(kind);
+        var wireId = kind.indexOf('wire-') === 0 ? kind.slice(5) : '';
+        if (glyph || wireId) {
+            add('M12 4.5a7.5 7.5 0 1 0 0.01 0z');
+            var text = svgEl('text');
+            var shown = wireId ? routeWireLabel(wireId) : glyph;
+            text.textContent = shown;
+            text.setAttribute('x', '12');
+            text.setAttribute('y', '15');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('font-size', shown.length > 2 ? '6' : '7');
+            text.setAttribute('font-weight', '700');
+            text.setAttribute('fill', 'currentColor');
+            svg.appendChild(text);
+            return svg;
         }
         if (kind === 'select') add('M8 4.5l.2 12.2 2.6-2.8 2.4 4.6 2.2-1.2-2.4-4.6H17z', 'currentColor');
         else if (kind === 'room') add('M5 5h14v14H5z');

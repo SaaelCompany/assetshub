@@ -199,7 +199,8 @@ public class AssetResource {
             @Override
             public Response call() {
                 String body = draft == null ? null : draft.getBody();
-                return Response.status(Response.Status.CREATED).entity(assetService.addComment(user(), id, body)).build();
+                boolean internal = draft != null && draft.isInternal();
+                return Response.status(Response.Status.CREATED).entity(assetService.addComment(user(), id, body, internal)).build();
             }
         });
     }
@@ -980,7 +981,7 @@ public class AssetResource {
             @Override
             public Response call() {
                 String body = draft == null ? null : draft.getBody();
-                return Response.status(Response.Status.CREATED).entity(assetService.portalComment(user(), id, body)).build();
+                return Response.status(Response.Status.CREATED).entity(assetService.portalComment(user(), id, body, false)).build();
             }
         });
     }

@@ -92,9 +92,10 @@ public class AssetFileServlet extends HttpServlet {
             if (upload.getData().length > AssetFileStore.MAX_BYTES) {
                 throw new AssetException(400, "asset-tree.error.file.size");
             }
+            boolean internal = "1".equals(request.getParameter("internal"));
             FileDto saved = "1".equals(request.getParameter("portal"))
-                    ? service().portalStoreFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData())
-                    : service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData());
+                    ? service().portalStoreFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), false)
+                    : service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), internal);
             response.setStatus(HttpServletResponse.SC_CREATED);
             response.setContentType("application/json; charset=UTF-8");
             response.setCharacterEncoding("UTF-8");

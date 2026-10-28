@@ -1353,6 +1353,107 @@
         return field;
     }
 
+    function portalPlain(node) {
+        var text = '';
+        function walk(current) {
+            var child = current.firstChild;
+            while (child) {
+                if (child.nodeType === 3) text += child.nodeValue;
+                else if (child.nodeType === 1) {
+                    var name = child.tagName.toLowerCase();
+                    if ((name === 'br' || name === 'p' || name === 'div') && text && text.charAt(text.length - 1) !== '\n') text += '\n';
+                    walk(child);
+                }
+                child = child.nextSibling;
+            }
+        }
+        walk(node);
+        return text.replace(/^\s+|\s+$/g, '');
+    }
+
+    function portalComposer(placeholder) {
+        var box = el('div', 'asset-tree-jira-editor');
+        var bar = el('div', 'asset-tree-jira-bar');
+        var visual = el('div', 'asset-tree-jira-visual is-empty');
+        visual.contentEditable = 'true';
+        visual.setAttribute('data-placeholder', placeholder);
+        var source = el('textarea', 'asset-tree-jira-source');
+        source.hidden = true;
+        var textMode = false;
+        function command(name, value) {
+            if (textMode) return;
+            visual.focus();
+            try { document.execCommand(name, false, value || null); } catch (ignore) {}
+            if (portalPlain(visual)) visual.classList.remove('is-empty');
+            else visual.classList.add('is-empty');
+        }
+        function tool(label, action) {
+            var node = el('button', 'asset-tree-jira-tool', label);
+            node.type = 'button';
+            node.addEventListener('mousedown', function (event) { event.preventDefault(); });
+            node.addEventListener('click', function (event) {
+                event.preventDefault();
+                action();
+            });
+            bar.appendChild(node);
+        }
+        var style = el('select', 'asset-tree-jira-style');
+        style.appendChild(el('option', null, 'Стиль'));
+        tool('B', function () { command('bold'); });
+        tool('I', function () { command('italic'); });
+        tool('U', function () { command('underline'); });
+        tool('•', function () { command('insertUnorderedList'); });
+        tool('1.', function () { command('insertOrderedList'); });
+        bar.insertBefore(style, bar.firstChild);
+        box.appendChild(bar);
+        box.appendChild(visual);
+        box.appendChild(source);
+        var foot = el('div', 'asset-tree-jira-foot');
+        var tabs = el('div', 'asset-tree-jira-tabs');
+        var visualTab = el('button', 'asset-tree-jira-tab is-on', 'Визуальный');
+        var textTab = el('button', 'asset-tree-jira-tab', 'Текст');
+        visualTab.type = 'button';
+        textTab.type = 'button';
+        visualTab.addEventListener('click', function () {
+            if (!textMode) return;
+            textMode = false;
+            visual.innerHTML = '';
+            String(source.value || '').split('\n').forEach(function (line, index) {
+                if (index) visual.appendChild(document.createElement('br'));
+                visual.appendChild(document.createTextNode(line));
+            });
+            source.hidden = true;
+            visual.hidden = false;
+            visualTab.classList.add('is-on');
+            textTab.classList.remove('is-on');
+        });
+        textTab.addEventListener('click', function () {
+            if (textMode) return;
+            textMode = true;
+            source.value = portalPlain(visual);
+            visual.hidden = true;
+            source.hidden = false;
+            textTab.classList.add('is-on');
+            visualTab.classList.remove('is-on');
+        });
+        tabs.appendChild(visualTab);
+        tabs.appendChild(textTab);
+        var actions = el('div', 'asset-tree-jira-actions');
+        foot.appendChild(tabs);
+        foot.appendChild(actions);
+        box.appendChild(foot);
+        return {
+            root: box,
+            foot: foot,
+            actions: actions,
+            read: function () {
+                if (textMode) return String(source.value || '').replace(/^\s+|\s+$/g, '');
+                return portalPlain(visual);
+            },
+            focus: function () { visual.focus(); }
+        };
+    }
+
     function portalFiles(card) {
         var section = portalSection('Вложения');
         (card.files || []).forEach(function (file) {
@@ -1369,30 +1470,110 @@
             if (file.size) row.appendChild(el('span', 'asset-tree-portal-file-meta', portalSize(file.size)));
             section.appendChild(row);
         });
-        var drop = el('label', 'asset-tree-portal-drop');
-        var upload = el('input');
-        upload.type = 'file';
-        upload.addEventListener('change', function () {
-            var chosen = upload.files && upload.files[0];
-            upload.value = '';
-            if (!chosen) return;
+        var drop = el('button', 'asset-tree-portal-drop', 'Добавить вложения');
+        drop.type = 'button';
+        drop.addEventListener('click', function () { openPortalAttach(card); });
+        section.appendChild(drop);
+        return section;
+    }
+
+    function openPortalAttach(card) {
+        var queued = [];
+        var overlay = el('div', 'asset-tree-attach-overlay');
+        var dialog = el('div', 'asset-tree-attach-dialog');
+        dialog.appendChild(el('h2', null, 'Добавить вложения'));
+        var composer = portalComposer('Вставьте здесь комментарий...');
+        var list = el('div', 'asset-tree-attach-list');
+        function paint() {
+            list.innerHTML = '';
+            queued.forEach(function (file, index) {
+                var cardNode = el('div', 'asset-tree-attach-card');
+                cardNode.appendChild(el('span', 'asset-tree-attach-glyph', (file.name || 'file').slice(0, 4)));
+                var remove = el('button', 'asset-tree-attach-remove', '\u00d7');
+                remove.type = 'button';
+                remove.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    queued.splice(index, 1);
+                    paint();
+                });
+                cardNode.appendChild(remove);
+                cardNode.appendChild(el('div', 'asset-tree-attach-name', file.name || ''));
+                list.appendChild(cardNode);
+            });
+            list.appendChild(el('p', 'asset-tree-attach-hint', 'Перетащите файлы или вставьте снимки экрана, чтобы приложить их'));
+        }
+        var zone = el('label', 'asset-tree-attach-drop');
+        var input = el('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.addEventListener('change', function () {
+            var index;
+            for (index = 0; index < input.files.length; index++) queued.push(input.files[index]);
+            input.value = '';
+            paint();
+        });
+        zone.appendChild(input);
+        zone.appendChild(list);
+        zone.addEventListener('dragover', function (event) { event.preventDefault(); });
+        zone.addEventListener('drop', function (event) {
+            event.preventDefault();
+            var files = event.dataTransfer && event.dataTransfer.files;
+            var index;
+            if (!files) return;
+            for (index = 0; index < files.length; index++) queued.push(files[index]);
+            paint();
+        });
+        function close() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        function uploadAt(index, done) {
+            if (index >= queued.length) {
+                done(true);
+                return;
+            }
             var data = new FormData();
-            data.append('file', chosen, chosen.name || 'file');
+            data.append('file', queued[index], queued[index].name || 'file');
             var xhr = new XMLHttpRequest();
             xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + card.id + '&portal=1', true);
             xhr.setRequestHeader('Accept', 'application/json');
             xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
             xhr.onreadystatechange = function () {
                 if (xhr.readyState !== 4) return;
-                if (xhr.status >= 200 && xhr.status < 300) openPortalCard(card.id);
+                if (xhr.status >= 200 && xhr.status < 300) uploadAt(index + 1, done);
             };
             xhr.send(data);
+        }
+        var send = el('button', 'asset-tree-btn primary', 'Сделать доступным клиенту');
+        send.type = 'button';
+        send.addEventListener('click', function () {
+            var text = composer.read();
+            uploadAt(0, function () {
+                if (!text) {
+                    close();
+                    openPortalCard(card.id);
+                    return;
+                }
+                sendJson('POST', '/portal/assets/' + card.id + '/comments', { body: text }, function (status) {
+                    if (status >= 200 && status < 300) {
+                        close();
+                        openPortalCard(card.id);
+                    }
+                });
+            });
         });
-        drop.appendChild(upload);
-        drop.appendChild(document.createTextNode('Перенесите файлы, чтобы прикрепить, или '));
-        drop.appendChild(el('span', null, 'обзор'));
-        section.appendChild(drop);
-        return section;
+        var cancel = el('button', 'asset-tree-jira-quiet', 'Отмена');
+        cancel.type = 'button';
+        cancel.addEventListener('click', close);
+        composer.actions.appendChild(send);
+        composer.actions.appendChild(cancel);
+        dialog.appendChild(composer.root);
+        composer.root.insertBefore(zone, composer.foot);
+        paint();
+        overlay.appendChild(dialog);
+        overlay.addEventListener('click', function (event) { if (event.target === overlay) close(); });
+        document.body.appendChild(overlay);
+        composer.focus();
     }
 
     function portalSize(bytes) {
@@ -1414,19 +1595,21 @@
             note.appendChild(text);
             section.appendChild(note);
         });
-        var area = el('textarea');
-        area.placeholder = 'Написать комментарий';
-        var submit = el('button', 'asset-tree-portal-send', 'Отправить');
+        var composer = portalComposer('Вставьте здесь комментарий...');
+        var submit = el('button', 'asset-tree-btn primary', 'Публичный комментарий');
         submit.type = 'button';
         submit.addEventListener('click', function () {
-            var text = area.value.replace(/^\s+|\s+$/g, '');
+            var text = composer.read();
             if (!text) return;
             sendJson('POST', '/portal/assets/' + card.id + '/comments', { body: text }, function (status) {
                 if (status >= 200 && status < 300) openPortalCard(card.id);
             });
         });
-        section.appendChild(area);
-        section.appendChild(submit);
+        var cancel = el('button', 'asset-tree-jira-quiet', 'Отмена');
+        cancel.type = 'button';
+        composer.actions.appendChild(submit);
+        composer.actions.appendChild(cancel);
+        section.appendChild(composer.root);
         return section;
     }
 

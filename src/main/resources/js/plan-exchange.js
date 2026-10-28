@@ -168,6 +168,9 @@ var AssetTreePlan = (function () {
         if (text.indexOf('COMM') >= 0 || text.indexOf('СВЯЗ') >= 0) return 'comm';
         if (text.indexOf('VENT') >= 0 || text.indexOf('ВЕНТ') >= 0) return 'vent';
         if (text.indexOf('WATER') >= 0 || text.indexOf('ВОД') >= 0) return 'water';
+        if (text.indexOf('HEAT') >= 0 || text.indexOf('ОТОП') >= 0) return 'heat';
+        if (text.indexOf('FIRE') >= 0 || text.indexOf('ПОЖ') >= 0) return 'fire';
+        if (text.indexOf('GUARD') >= 0 || text.indexOf('ОХР') >= 0) return 'guard';
         if (text.indexOf('PART') >= 0 || text.indexOf('ПЕРЕГ') >= 0) return 'partition';
         if (text.indexOf('DOOR') >= 0 || text.indexOf('ДВЕР') >= 0) return 'door';
         if (text.indexOf('WIND') >= 0 || text.indexOf('ОКН') >= 0) return 'window';
@@ -228,6 +231,9 @@ var AssetTreePlan = (function () {
             else if (item.kind === 'comm') dxfLayer = 'COMM';
             else if (item.kind === 'vent') dxfLayer = 'VENT';
             else if (item.kind === 'water') dxfLayer = 'WATER';
+            else if (item.kind === 'heat') dxfLayer = 'HEAT';
+            else if (item.kind === 'fire') dxfLayer = 'FIRE';
+            else if (item.kind === 'guard') dxfLayer = 'GUARD';
             out += dxfPair(8, dxfLayer);
             out += dxfPair(10, item.x1);
             out += dxfPair(20, height - item.y1);
