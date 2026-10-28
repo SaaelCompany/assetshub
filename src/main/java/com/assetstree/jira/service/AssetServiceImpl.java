@@ -3631,6 +3631,7 @@ public class AssetServiceImpl implements AssetService {
         common.add(labels.getText("asset-tree.ui.status"));
         common.add(labels.getText("asset-tree.ui.exchangePlace"));
         common.add(labels.getText("asset-tree.ui.custodian"));
+        common.add(labels.getText("asset-tree.ui.issuedTo"));
         common.add(labels.getText("asset-tree.ui.description"));
         Map<String, List<AssetEntity>> byType = new LinkedHashMap<String, List<AssetEntity>>();
         for (AssetTypeDto type : types) {
@@ -3689,6 +3690,7 @@ public class AssetServiceImpl implements AssetService {
                 line.add(statusLabels.containsKey(status) ? statusLabels.get(status) : status);
                 line.add(location(row, index));
                 line.add(displayName(row.getCustodianKey()));
+                line.add(displayName(row.getIssuedKey()));
                 line.add(row.getDescription() == null ? "" : row.getDescription());
                 for (FieldDto field : columns) {
                     String value = values.containsKey(field.getFieldKey()) ? values.get(field.getFieldKey()) : "";
@@ -3762,6 +3764,7 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("status", labels.getText("asset-tree.ui.status"));
         headerLabels.put("place", labels.getText("asset-tree.ui.exchangePlace"));
         headerLabels.put("custodian", labels.getText("asset-tree.ui.custodian"));
+        headerLabels.put("issued", labels.getText("asset-tree.ui.issuedTo"));
         headerLabels.put("description", labels.getText("asset-tree.ui.description"));
         return new PreparedImport(types, statuses, nodes, headerLabels);
     }
@@ -4139,6 +4142,7 @@ public class AssetServiceImpl implements AssetService {
                 new DBParam("PROJECT_KEY", projectKey));
         entity.setParentId(parentId);
         entity.setCustodianKey(change.getCustodianKey());
+        entity.setIssuedKey(change.getIssuedKey());
         entity.save();
         replaceAttributes(entity, drafts(change));
         logActivity(entity.getID(), user.getKey(), "created", "", "", entity.getName());
@@ -4155,6 +4159,7 @@ public class AssetServiceImpl implements AssetService {
         String oldType = entity.getTypeKey() == null ? "" : entity.getTypeKey();
         String oldStatus = Statuses.canonical(entity.getStatus());
         String oldCustodian = entity.getCustodianKey() == null ? "" : entity.getCustodianKey();
+        String oldIssued = entity.getIssuedKey() == null ? "" : entity.getIssuedKey();
         Integer oldParent = TreeLogic.normalizeParent(entity.getParentId());
         Integer fromPlace = memory.place(oldParent);
         Integer toPlace = memory.place(Integer.valueOf(change.getParentId()));
@@ -4163,11 +4168,15 @@ public class AssetServiceImpl implements AssetService {
         String newCustodian = change.isCustodianPresent()
                 ? (change.getCustodianKey() == null ? "" : change.getCustodianKey())
                 : oldCustodian;
+        String newIssued = change.isIssuedPresent()
+                ? (change.getIssuedKey() == null ? "" : change.getIssuedKey())
+                : oldIssued;
         entity.setName(change.getName());
         entity.setDescription(newDescription);
         entity.setTypeKey(change.getTypeKey());
         entity.setStatus(change.getStatusKey());
         entity.setCustodianKey(newCustodian.isEmpty() ? null : newCustodian);
+        entity.setIssuedKey(newIssued.isEmpty() ? null : newIssued);
         entity.setParentId(Integer.valueOf(change.getParentId()));
         entity.setUpdated(new Date());
         entity.setUpdatedBy(user.getKey());
@@ -4181,6 +4190,7 @@ public class AssetServiceImpl implements AssetService {
         // userLabel reads the cached Jira user. displayName also asks the
         // directory for phone and department, which is wasted on an import row.
         logActivity(id, user.getKey(), "custodian", "", userLabel(oldCustodian), userLabel(newCustodian));
+        logActivity(id, user.getKey(), "issued", "", userLabel(oldIssued), userLabel(newIssued));
         if (oldParent == null || oldParent.intValue() != change.getParentId()) {
             logActivity(id, user.getKey(), "move", "", memory.name(oldParent), memory.name(Integer.valueOf(change.getParentId())));
         }

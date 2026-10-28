@@ -8797,8 +8797,9 @@
             form.appendChild(field(t('type'), typeControl, true));
 
             var equipment = el('div');
-            equipment.appendChild(field(t('status'), selectBox('create-status', statusChoices(), 'in_use', false), true));
-            equipment.appendChild(custodianField('create-custodian', null));
+        equipment.appendChild(field(t('status'), selectBox('create-status', statusChoices(), 'in_use', false), true));
+        equipment.appendChild(custodianField('create-custodian', null));
+        equipment.appendChild(issuedField('create-issued', null));
             form.appendChild(equipment);
 
             var schema = el('div');
@@ -9085,6 +9086,7 @@
 
             function postAsset(typeKey, attributes, place, createdType) {
                 var custodian = document.getElementById('create-custodian');
+                var issued = document.getElementById('create-issued');
                 var statusBox = document.getElementById('create-status');
                 var chosenParent = parentId || null;
                 if (kind === 'object' && !(typeKey && parentId)) {
@@ -9098,6 +9100,7 @@
                     status: place ? 'in_stock' : (statusBox ? statusBox.value : 'in_use'),
                     description: '',
                     custodianKey: place ? '' : (custodian ? custodian.value : ''),
+                    issuedKey: place ? '' : (issued ? issued.value : ''),
                     parentId: chosenParent,
                     attributes: attributes
                 }, function (status, payload) {

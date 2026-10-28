@@ -4431,6 +4431,7 @@ def equipment_headers(text):
         text.get("asset-tree.ui.status", "Status"),
         text.get("asset-tree.ui.exchangePlace", "Place"),
         text.get("asset-tree.ui.custodian", "Custodian"),
+        text.get("asset-tree.ui.issuedTo", "Issued to"),
         text.get("asset-tree.ui.description", "Description"),
     ]
 
@@ -4469,6 +4470,7 @@ def equipment_table(project_key, text, day_first):
     for asset in assets:
         kind = types.get(asset["typeKey"]) or {}
         person = USERS.get(asset.get("custodianKey") or "")
+        holder = USERS.get(asset.get("issuedKey") or "")
         line = [
             asset["objectKey"],
             asset["name"],
@@ -4476,6 +4478,7 @@ def equipment_table(project_key, text, day_first):
             statuses.get(canonical(asset.get("status")), asset.get("status") or ""),
             location_of(asset),
             person["displayName"] if person else "",
+            holder["displayName"] if holder else "",
             asset.get("description") or "",
         ]
         values = asset.get("values") or {}
@@ -4601,6 +4604,7 @@ def equipment_pages(project_key, text, day_first):
         lines = []
         for asset in assets:
             person = USERS.get(asset.get("custodianKey") or "")
+            holder = USERS.get(asset.get("issuedKey") or "")
             line = [
                 asset["objectKey"],
                 asset["name"],
@@ -4608,6 +4612,7 @@ def equipment_pages(project_key, text, day_first):
                 statuses.get(canonical(asset.get("status")), asset.get("status") or ""),
                 location_of(asset),
                 person["displayName"] if person else "",
+                holder["displayName"] if holder else "",
                 asset.get("description") or "",
             ]
             values = asset.get("values") or {}
@@ -5133,6 +5138,7 @@ def sheet_role(header):
         "status": "status", "статус": "status",
         "place": "place", "площадка": "place", "место": "place",
         "custodian": "custodian", "ответственный": "custodian", "мол": "custodian",
+        "issued": "issued", "issued to": "issued", "кому выдано": "issued", "выдано": "issued",
         "description": "description", "описание": "description",
     }
     return roles.get(name)
@@ -5338,8 +5344,10 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         status_name = cell(cells, "status")
         place = cell(cells, "place")
         custodian_name = cell(cells, "custodian")
+        issued_name = cell(cells, "issued")
         description = cell(cells, "description")
         has_custodian = "custodian" in roles
+        has_issued = "issued" in roles
         has_description = "description" in roles
         if not name:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.name", "Name")})
@@ -5387,6 +5395,14 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
             if not custodian:
                 errors.append({"row": row_number, "message": text.get("asset-tree.error.import.user", "User").replace("{0}", custodian_name)})
                 continue
+        issued = None
+        if issued_name:
+            if issued_name not in known_users:
+                known_users[issued_name] = find_preview_user(issued_name)
+            issued = known_users[issued_name]
+            if not issued:
+                errors.append({"row": row_number, "message": text.get("asset-tree.error.import.user", "User").replace("{0}", issued_name)})
+                continue
         if existing:
             old_parent = normalize_parent(existing.get("parentId"))
             existing["name"] = name
@@ -5398,6 +5414,8 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
                 existing["description"] = description
             if has_custodian:
                 existing["custodianKey"] = custodian
+            if has_issued:
+                existing["issuedKey"] = issued
             if old_parent != parent:
                 from_place = place_container(old_parent)
                 to_place = place_container(parent)
@@ -5418,6 +5436,8 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
                 errors.append({"row": row_number, "message": text.get("asset-tree.error.assetKey.required", "Key")})
                 continue
             STATE["assets"][asset_id]["description"] = description
+            if has_issued:
+                STATE["assets"][asset_id]["issuedKey"] = issued
             by_key[STATE["assets"][asset_id]["objectKey"].lower()] = STATE["assets"][asset_id]
             log_activity(asset_id, "created", "", "", name)
             log_place(place_container(parent), "place_add", STATE["assets"][asset_id])
