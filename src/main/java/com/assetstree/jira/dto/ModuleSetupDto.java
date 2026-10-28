@@ -32,6 +32,8 @@ public class ModuleSetupDto {
     private String scheduleBoards;
     private String scheduleOpen;
     private String furniture;
+    private Boolean portalMine;
+    private String portalColumns;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -85,4 +87,8 @@ public class ModuleSetupDto {
     public void setScheduleOpen(String scheduleOpen) { this.scheduleOpen = scheduleOpen; }
     public String getFurniture() { return furniture; }
     public void setFurniture(String furniture) { this.furniture = furniture; }
+    public Boolean getPortalMine() { return portalMine; }
+    public void setPortalMine(Boolean portalMine) { this.portalMine = portalMine; }
+    public String getPortalColumns() { return portalColumns; }
+    public void setPortalColumns(String portalColumns) { this.portalColumns = portalColumns; }
 }

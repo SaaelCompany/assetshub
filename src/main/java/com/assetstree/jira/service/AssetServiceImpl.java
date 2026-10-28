@@ -69,6 +69,7 @@ import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ModuleSetupDto;
+import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.model.ProjectModules;
 import com.assetstree.jira.model.ViewColumns;
@@ -3146,6 +3147,86 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public PortalMineDto portalMine(ApplicationUser user) {
+        requireUser(user);
+        final String holder = user.getKey() == null ? "" : user.getKey().trim();
+        if (holder.isEmpty()) {
+            throw new AssetException(401, "asset-tree.error.auth");
+        }
+        return ao().executeInTransaction(new TransactionCallback<PortalMineDto>() {
+            @Override
+            public PortalMineDto doInTransaction() {
+                PortalMineDto page = new PortalMineDto();
+                page.setTitle(i18n().getText("asset-tree.ui.portalMineHeading"));
+                List<PortalMineDto.Group> groups = new ArrayList<PortalMineDto.Group>();
+                List<Project> ordered = new ArrayList<Project>();
+                Collection<Project> known = projectManager().getProjects();
+                if (known != null) {
+                    for (Project project : known) {
+                        if (project != null && project.getKey() != null && !project.getKey().trim().isEmpty()) {
+                            ordered.add(project);
+                        }
+                    }
+                }
+                Collections.sort(ordered, new Comparator<Project>() {
+                    @Override
+                    public int compare(Project left, Project right) {
+                        return left.getKey().compareToIgnoreCase(right.getKey());
+                    }
+                });
+                int total = 0;
+                for (Project project : ordered) {
+                    if (!moduleOn(project.getKey(), ProjectModules.PORTAL)) {
+                        continue;
+                    }
+                    ProjectViewEntity view = viewRow(project.getKey());
+                    ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+                    if (!Boolean.TRUE.equals(setup.getPortalMine())) {
+                        continue;
+                    }
+                    List<String> columns = ModuleSetup.portalColumnList(setup.getPortalColumns());
+                    AssetEntity[] rows = assetsIn(project.getKey());
+                    Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
+                    Map<Integer, AssetEntity> index = indexAssets(rows);
+                    Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
+                    List<PortalMineDto.Card> cards = new ArrayList<PortalMineDto.Card>();
+                    for (AssetEntity row : rows) {
+                        AssetTypeDto type = types.get(row.getTypeKey());
+                        if (type != null && type.isLocation()) {
+                            continue;
+                        }
+                        String role = portalRole(row, attributes.get(row.getID()), type, holder);
+                        if (role == null) {
+                            continue;
+                        }
+                        cards.add(portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey()));
+                    }
+                    Collections.sort(cards, new Comparator<PortalMineDto.Card>() {
+                        @Override
+                        public int compare(PortalMineDto.Card left, PortalMineDto.Card right) {
+                            return left.getName().compareToIgnoreCase(right.getName());
+                        }
+                    });
+                    if (cards.isEmpty()) {
+                        continue;
+                    }
+                    PortalMineDto.Group group = new PortalMineDto.Group();
+                    group.setKey(project.getKey());
+                    group.setCount(cards.size());
+                    group.setCountLabel(portalCount(cards.size()));
+                    group.setAssets(cards);
+                    groups.add(group);
+                    total += cards.size();
+                }
+                page.setProjects(groups);
+                page.setTotal(total);
+                page.setTotalLabel(portalCount(total));
+                return page;
+            }
+        });
+    }
+
+    @Override
     public void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId) {
         if (user == null || issue == null || issue.getProjectObject() == null || !canBrowse(user, issue)) {
             return;
@@ -4212,6 +4293,178 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         return null;
+    }
+
+    private String portalRole(AssetEntity asset, List<AssetAttributeEntity> attributes, AssetTypeDto type, String userKey) {
+        List<String> roles = new ArrayList<String>();
+        if (userKey.equals(asset.getCustodianKey())) {
+            roles.add(i18n().getText("asset-tree.ui.custodian"));
+        }
+        if (userKey.equals(asset.getIssuedKey())) {
+            roles.add(i18n().getText("asset-tree.ui.issuedTo"));
+        }
+        if (attributes != null && type != null && type.getFields() != null) {
+            Map<String, FieldDto> fields = new HashMap<String, FieldDto>();
+            for (FieldDto field : type.getFields()) {
+                if (field.getFieldKey() != null) {
+                    fields.put(field.getFieldKey(), field);
+                }
+            }
+            for (AssetAttributeEntity attribute : attributes) {
+                FieldDto field = fields.get(attribute.getAttrName());
+                if (field != null && FieldKinds.USER.equals(field.getKind()) && userKey.equals(attribute.getAttrValue())) {
+                    String label = field.getLabel() == null ? "" : field.getLabel().trim();
+                    if (!label.isEmpty() && !roles.contains(label)) {
+                        roles.add(label);
+                    }
+                }
+            }
+        }
+        if (roles.isEmpty()) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder();
+        for (String role : roles) {
+            if (text.length() > 0) {
+                text.append(" · ");
+            }
+            text.append(role);
+        }
+        return text.toString();
+    }
+
+    private PortalMineDto.Card portalCard(AssetEntity row, List<AssetAttributeEntity> attributes, AssetTypeDto type,
+                                          Map<Integer, AssetEntity> index, List<String> columns, String role, String projectKey) {
+        PortalMineDto.Card card = new PortalMineDto.Card();
+        card.setName(row.getName() == null ? "" : row.getName());
+        card.setObjectKey(row.getObjectKey() == null ? "" : row.getObjectKey());
+        card.setRole(role);
+        String status = Statuses.canonical(row.getStatus());
+        card.setStatus(status);
+        ProjectStatusEntity statusRow = findStatus(projectKey, status);
+        if (statusRow != null && statusRow.getLabel() != null && !statusRow.getLabel().trim().isEmpty()) {
+            card.setStatusLabel(statusRow.getLabel().trim());
+            card.setStatusCategory(statusRow.getCategory() == null ? "" : statusRow.getCategory());
+        } else {
+            card.setStatusLabel(statusText(status));
+        }
+        if (card.getStatusCategory() == null || card.getStatusCategory().isEmpty()) {
+            card.setStatusCategory(portalCategory(status));
+        }
+        if (type != null) {
+            card.setColor(type.getColor() == null ? "#5D6B82" : type.getColor());
+            card.setIcon(type.getIcon() == null ? "box" : type.getIcon());
+        } else {
+            card.setColor("#5D6B82");
+            card.setIcon("box");
+        }
+        Map<String, String> values = portalValues(row, attributes, type, index);
+        List<PortalMineDto.Line> lines = new ArrayList<PortalMineDto.Line>();
+        Set<String> seen = new HashSet<String>();
+        for (String column : columns) {
+            if ("key".equals(column)) {
+                card.setShowKey(true);
+                continue;
+            }
+            if ("status".equals(column)) {
+                card.setShowStatus(true);
+                continue;
+            }
+            String label = portalColumnLabel(column, type);
+            String value = values.get(column);
+            if (label.isEmpty() || value == null || value.trim().isEmpty() || !seen.add(label)) {
+                continue;
+            }
+            PortalMineDto.Line line = new PortalMineDto.Line();
+            line.setLabel(label);
+            line.setValue(value.trim());
+            lines.add(line);
+        }
+        card.setLines(lines);
+        return card;
+    }
+
+    private Map<String, String> portalValues(AssetEntity row, List<AssetAttributeEntity> attributes, AssetTypeDto type,
+                                             Map<Integer, AssetEntity> index) {
+        Map<String, String> values = new HashMap<String, String>();
+        values.put("type", type == null || type.getLabel() == null ? "" : type.getLabel());
+        values.put("location", location(row, index));
+        values.put("description", row.getDescription() == null ? "" : row.getDescription());
+        values.put("created", portalDate(row.getCreated()));
+        values.put("updated", portalDate(row.getUpdated()));
+        if (attributes != null && type != null && type.getFields() != null) {
+            Map<String, FieldDto> fields = new HashMap<String, FieldDto>();
+            for (FieldDto field : type.getFields()) {
+                if (field.getFieldKey() != null) {
+                    fields.put(field.getFieldKey(), field);
+                }
+            }
+            for (AssetAttributeEntity attribute : attributes) {
+                FieldDto field = fields.get(attribute.getAttrName());
+                if (field == null || field.getFieldKey() == null) {
+                    continue;
+                }
+                String shown = FieldKinds.USER.equals(field.getKind()) ? userLabel(attribute.getAttrValue()) : attribute.getAttrValue();
+                values.put("f:" + field.getFieldKey().toLowerCase(Locale.ROOT), shown == null ? "" : shown);
+            }
+        }
+        return values;
+    }
+
+    private String portalColumnLabel(String column, AssetTypeDto type) {
+        if ("type".equals(column)) {
+            return i18n().getText("asset-tree.ui.type");
+        }
+        if ("location".equals(column)) {
+            return i18n().getText("asset-tree.ui.columnLocation");
+        }
+        if ("description".equals(column)) {
+            return i18n().getText("asset-tree.ui.description");
+        }
+        if ("created".equals(column)) {
+            return i18n().getText("asset-tree.ui.created");
+        }
+        if ("updated".equals(column)) {
+            return i18n().getText("asset-tree.ui.updated");
+        }
+        if (column != null && column.startsWith("f:") && type != null && type.getFields() != null) {
+            String key = column.substring(2);
+            for (FieldDto field : type.getFields()) {
+                if (field.getFieldKey() != null && field.getFieldKey().equalsIgnoreCase(key)) {
+                    return field.getLabel() == null || field.getLabel().trim().isEmpty() ? field.getFieldKey() : field.getLabel().trim();
+                }
+            }
+        }
+        return "";
+    }
+
+    private String portalCategory(String status) {
+        if (Statuses.IN_USE.equals(status) || Statuses.REPAIR.equals(status) || Statuses.MAINTENANCE.equals(status)) {
+            return "progress";
+        }
+        if (Statuses.WRITTEN_OFF.equals(status)) {
+            return "done";
+        }
+        return "todo";
+    }
+
+    private String portalDate(Date date) {
+        if (date == null) {
+            return "";
+        }
+        return DateTimeFormatter.ofPattern("dd.MM.yyyy").withZone(businessZone()).format(date.toInstant());
+    }
+
+    private String portalCount(int count) {
+        int n10 = Math.abs(count) % 10;
+        int n100 = Math.abs(count) % 100;
+        String key = "asset-tree.ui.portalMineMany";
+        if (n10 == 1 && n100 != 11) {
+            key = "asset-tree.ui.portalMineOne";
+        } else if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) {
+            key = "asset-tree.ui.portalMineFew";
+        }
+        return i18n().getText(key, Integer.valueOf(count));
     }
 
     private AssetEntity requireReadable(ApplicationUser user, int id) {

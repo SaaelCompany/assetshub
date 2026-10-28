@@ -51,6 +51,8 @@ public final class ModuleSetup {
         setup.setScheduleBoards(boards(values.get("boards")));
         setup.setScheduleOpen(openBoard(values.get("open"), values.get("layer")));
         setup.setFurniture(furniture(values.get("furn")));
+        setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
+        setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
         return setup;
     }
 
@@ -86,7 +88,75 @@ public final class ModuleSetup {
         append(stored, "boards", boards(value.getScheduleBoards()));
         append(stored, "open", openBoard(value.getScheduleOpen(), value.getScheduleLayer()));
         append(stored, "furn", furniture(value.getFurniture()));
+        append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
+        append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
         return stored.toString();
+    }
+
+    private static final List<String> PORTAL_FIELDS = Arrays.asList(
+            "key", "type", "status", "location", "description", "created", "updated");
+    private static final List<String> PORTAL_DEFAULT = Arrays.asList("key", "type", "status", "location");
+
+    /** Stored form: {@code *} keeps the default columns, {@code -} keeps none. */
+    public static String normalizePortalColumns(String raw) {
+        if (raw == null) {
+            return "*";
+        }
+        String text = raw.trim();
+        if (text.isEmpty() || "*".equals(text)) {
+            return "*";
+        }
+        if ("-".equals(text)) {
+            return "-";
+        }
+        StringBuilder kept = new StringBuilder();
+        int count = 0;
+        for (String part : text.split(",")) {
+            String token = part == null ? "" : part.trim().toLowerCase(Locale.ROOT);
+            if (!portalToken(token) || containsToken(kept, token)) {
+                continue;
+            }
+            if (kept.length() > 0) {
+                kept.append(',');
+            }
+            kept.append(token);
+            count++;
+            if (count >= 40) {
+                break;
+            }
+        }
+        return kept.length() == 0 ? "-" : kept.toString();
+    }
+
+    public static List<String> portalColumnList(String raw) {
+        String stored = normalizePortalColumns(raw);
+        if ("*".equals(stored)) {
+            return new ArrayList<String>(PORTAL_DEFAULT);
+        }
+        if ("-".equals(stored)) {
+            return new ArrayList<String>();
+        }
+        return new ArrayList<String>(Arrays.asList(stored.split(",")));
+    }
+
+    private static boolean portalToken(String token) {
+        if (PORTAL_FIELDS.contains(token)) {
+            return true;
+        }
+        return token.length() > 2 && token.startsWith("f:") && token.substring(2).matches("[a-z][a-z0-9-]{0,39}");
+    }
+
+    private static boolean containsToken(StringBuilder kept, String token) {
+        String text = kept.toString();
+        if (text.isEmpty()) {
+            return false;
+        }
+        for (String part : text.split(",")) {
+            if (part.equals(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void append(StringBuilder stored, String key, String value) {

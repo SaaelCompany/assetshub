@@ -5069,6 +5069,21 @@ a.asset-tree-url {
     min-height: 0;
 }
 
+#asset-tree-app .asset-tree-portal-mine-settings {
+    margin-bottom: 0;
+}
+
+#asset-tree-app .asset-tree-portal-mine-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-portal-mine-fields .asset-tree-check {
+    margin: 0;
+}
+
 #asset-tree-app .asset-tree-jira-field {
     display: flex;
     flex-direction: column;

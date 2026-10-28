@@ -18543,7 +18543,13 @@
                 var layer = String(setup.scheduleLayer || '').toLowerCase();
                 return layer === 'roster' || layer === 'staff' ? 'roster' : 'calendar';
             })(),
-            furniture: setup.furniture || ''
+            furniture: setup.furniture || '',
+            portalMine: !!setup.portalMine,
+            portalColumns: (function () {
+                var raw = setup.portalColumns;
+                if (raw == null || raw === '' || raw === '*') return 'key,type,status,location';
+                return String(raw);
+            })()
         };
     }
 
@@ -24725,8 +24731,123 @@
         return { id: null, assetId: '', conditions: [{ field: '', option: '' }] };
     }
 
+    function portalMineChoices() {
+        var standard = [
+            ['key', t('keyLabel')],
+            ['type', t('type')],
+            ['status', t('status')],
+            ['location', t('columnLocation')],
+            ['description', t('description')],
+            ['created', t('created')],
+            ['updated', t('updated')]
+        ];
+        var byLabel = {};
+        var custom = [];
+        (state.types || []).forEach(function (type) {
+            if (!type || type.location) return;
+            (type.fields || []).forEach(function (field) {
+                if (!field || !field.fieldKey) return;
+                var label = String(field.label || field.fieldKey).replace(/^\s+|\s+$/g, '');
+                if (!label) return;
+                var token = 'f:' + String(field.fieldKey).toLowerCase();
+                var bucket = byLabel[label.toLowerCase()];
+                if (!bucket) {
+                    bucket = { label: label, keys: [] };
+                    byLabel[label.toLowerCase()] = bucket;
+                    custom.push(bucket);
+                }
+                if (bucket.keys.indexOf(token) < 0) bucket.keys.push(token);
+            });
+        });
+        custom.sort(function (left, right) {
+            return left.label.localeCompare(right.label);
+        });
+        return { standard: standard, custom: custom };
+    }
+
+    function portalMineSelected() {
+        var raw = moduleSetup().portalColumns;
+        if (raw === '-') return [];
+        return String(raw || '').split(',').filter(function (key) { return key; });
+    }
+
+    function portalMineSettings() {
+        var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
+        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('portalMineHint')));
+        var show = el('label', 'asset-tree-check');
+        var toggle = el('input');
+        toggle.type = 'checkbox';
+        toggle.checked = !!moduleSetup().portalMine;
+        toggle.setAttribute('aria-label', t('portalMineShow'));
+        show.appendChild(toggle);
+        show.appendChild(el('span', null, t('portalMineShow')));
+        box.appendChild(show);
+        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineFields')));
+        box.appendChild(el('p', 'asset-tree-hint', t('portalMineFieldsHint')));
+        var grid = el('div', 'asset-tree-portal-mine-fields');
+        var choices = portalMineChoices();
+        var selected = portalMineSelected();
+
+        function checked(keys) {
+            for (var i = 0; i < keys.length; i++) {
+                if (selected.indexOf(keys[i]) >= 0) return true;
+            }
+            return false;
+        }
+
+        function paint(keys, label) {
+            var row = el('label', 'asset-tree-check');
+            var input = el('input');
+            input.type = 'checkbox';
+            input.checked = checked(keys);
+            input.setAttribute('aria-label', label);
+            input.addEventListener('change', function () {
+                keys.forEach(function (key) {
+                    var at = selected.indexOf(key);
+                    if (input.checked && at < 0) selected.push(key);
+                    if (!input.checked && at >= 0) selected.splice(at, 1);
+                });
+                savePortalMine(toggle.checked, selected);
+            });
+            row.appendChild(input);
+            row.appendChild(el('span', null, label));
+            grid.appendChild(row);
+        }
+
+        choices.standard.forEach(function (pair) { paint([pair[0]], pair[1]); });
+        choices.custom.forEach(function (item) { paint(item.keys, item.label); });
+        toggle.addEventListener('change', function () {
+            savePortalMine(toggle.checked, selected);
+        });
+        box.appendChild(grid);
+        return box;
+    }
+
+    function savePortalMine(show, selected) {
+        var choices = portalMineChoices();
+        var on = {};
+        (selected || []).forEach(function (key) { on[key] = true; });
+        var columns = [];
+        choices.standard.forEach(function (pair) {
+            if (on[pair[0]]) columns.push(pair[0]);
+        });
+        choices.custom.forEach(function (item) {
+            item.keys.forEach(function (key) {
+                if (on[key]) columns.push(key);
+            });
+        });
+        var next = moduleSetup();
+        next.portalMine = !!show;
+        next.portalColumns = columns.length ? columns.join(',') : '-';
+        var project = currentProject();
+        if (project) project.setup = next;
+        saveProjectView({ setup: next }, null, true);
+    }
+
     function renderPortalSettings(panel) {
         panel.appendChild(el('p', 'asset-tree-hint', t('portalSectionHint')));
+        panel.appendChild(portalMineSettings());
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
         var fields = el('div', 'asset-tree-portal-fields');
         fields.appendChild(el('h3', 'asset-tree-settings-title', t('portalFieldsTitle')));
