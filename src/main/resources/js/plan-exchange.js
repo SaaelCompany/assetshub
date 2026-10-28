@@ -120,7 +120,7 @@ var AssetTreePlan = (function () {
         };
     }
 
-    function fitRooms(rooms) {
+    function fitRooms(rooms, insunits) {
         if (!rooms.length) return rooms;
         var minX = Infinity;
         var minY = Infinity;
@@ -138,8 +138,13 @@ var AssetTreePlan = (function () {
             (room.points || []).forEach(function (point) { touch(point.x, point.y); });
         });
         var span = Math.max(maxX - minX, maxY - minY, 1);
+        var units = parseInt(insunits, 10) || 0;
         var scale = 1;
-        if (span > 20000) scale = 0.1;
+        if (units === 4) scale = 0.1;
+        else if (units === 6) scale = 100;
+        else if (units === 1) scale = 2.54;
+        else if (units === 5) scale = 1;
+        else if (span > 20000) scale = 0.1;
         else if (span < 80) scale = 100;
         var dx = 40 - minX * scale;
         var dy = 40 - minY * scale;
@@ -259,14 +264,26 @@ var AssetTreePlan = (function () {
         var current = null;
         var inEntities = false;
         var section = '';
+        var insunits = 0;
+        var headerKey = '';
         pairs.forEach(function (pair) {
             if (pair.code === 0 && pair.value === 'SECTION') {
                 section = '';
+                headerKey = '';
                 return;
             }
             if (pair.code === 2 && section === '') {
                 section = pair.value;
                 inEntities = pair.value === 'ENTITIES';
+                return;
+            }
+            if (section === 'HEADER' && pair.code === 9) {
+                headerKey = pair.value;
+                return;
+            }
+            if (section === 'HEADER' && headerKey === '$INSUNITS' && pair.code === 70) {
+                insunits = parseInt(pair.value, 10) || 0;
+                headerKey = '';
                 return;
             }
             if (pair.code === 0 && pair.value === 'ENDSEC') {
@@ -357,7 +374,7 @@ var AssetTreePlan = (function () {
                 });
             }
         });
-        return { rooms: fitRooms(rooms) };
+        return { rooms: fitRooms(rooms, insunits) };
     }
 
     function pdfEscape(text) {

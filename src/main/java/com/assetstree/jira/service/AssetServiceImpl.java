@@ -7902,11 +7902,11 @@ public class AssetServiceImpl implements AssetService {
                         } else {
                             x = FloorBounds.origin(room.getX());
                             y = FloorBounds.origin(room.getY());
-                            if (w > 4800) {
-                                w = 4800;
+                            if (w > FloorBounds.span()) {
+                                w = FloorBounds.span();
                             }
-                            if (h > 4800) {
-                                h = 4800;
+                            if (h > FloorBounds.span()) {
+                                h = FloorBounds.span();
                             }
                         }
                         RoomEntity stored = ao().create(RoomEntity.class, new DBParam("FLOOR_ID", row.getID()));

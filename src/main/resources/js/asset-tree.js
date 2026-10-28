@@ -9,6 +9,12 @@
     var PALETTE = ['#0052CC', '#00875A', '#6554C0', '#FF991F', '#DE350B', '#00A3BF', '#172B4D', '#36B37E'];
     var DEFAULT_PLACE_ICON = 'building';
     var DEFAULT_OBJECT_ICON = 'device';
+    /* Plan units are centimeters. The sheet can cover a 400 m by 300 m floor. */
+    var PLAN_MIN_W = 640;
+    var PLAN_MIN_H = 480;
+    var PLAN_MAX_W = 40000;
+    var PLAN_MAX_H = 30000;
+    var PLAN_CLOSE = 160;
     var ICON_GROUPS = ['places', 'it', 'medical', 'facility', 'marketing', 'service', 'office'];
     var TYPE_ICONS = [
         { key: 'building', g: 'places', d: 'M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v4h4a1 1 0 0 1 1 1v11H4zM7 8h2V6H7v2zm4 0h2V6h-2v2zm-4 4h2v-2H7v2zm4 0h2v-2h-2v2zm6 0h2v-2h-2v2zM7 16h2v-2H7v2zm10 0h2v-2h-2v2zm-7 5h4v-4h-4v4z' },
@@ -12468,13 +12474,13 @@
         if (moduleKey === 'map') {
             var width = document.createElement('input');
             width.type = 'number';
-            width.min = '640';
-            width.max = '2400';
+            width.min = String(PLAN_MIN_W);
+            width.max = String(PLAN_MAX_W);
             width.value = String(setup.mapWidth);
             var height = document.createElement('input');
             height.type = 'number';
-            height.min = '480';
-            height.max = '1600';
+            height.min = String(PLAN_MIN_H);
+            height.max = String(PLAN_MAX_H);
             height.value = String(setup.mapHeight);
             var gridSize = document.createElement('select');
             [8, 12, 16, 24, 32].forEach(function (step) {
@@ -12496,8 +12502,8 @@
             panel.appendChild(snap);
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
-                next.mapWidth = clampNum(width.value, 640, 2400);
-                next.mapHeight = clampNum(height.value, 480, 1600);
+                next.mapWidth = clampNum(width.value, PLAN_MIN_W, PLAN_MAX_W);
+                next.mapHeight = clampNum(height.value, PLAN_MIN_H, PLAN_MAX_H);
                 next.mapGrid = Number(gridSize.value);
                 next.mapSnap = snapBox.checked;
                 saveSetup(next);
@@ -19167,8 +19173,8 @@
             })(),
             scheduleUnit: setup.scheduleUnit || 'month',
             scheduleNotify: !!setup.scheduleNotify,
-            mapWidth: clampNum(setup.mapWidth || 1200, 640, 2400),
-            mapHeight: clampNum(setup.mapHeight || 760, 480, 1600),
+            mapWidth: clampNum(setup.mapWidth || 1200, PLAN_MIN_W, PLAN_MAX_W),
+            mapHeight: clampNum(setup.mapHeight || 760, PLAN_MIN_H, PLAN_MAX_H),
             mapGrid: [8, 12, 16, 24, 32].indexOf(Number(setup.mapGrid)) >= 0 ? Number(setup.mapGrid) : 24,
             mapSnap: setup.mapSnap !== false,
             reportHidden: setup.reportHidden || '',
@@ -19338,7 +19344,7 @@
         var source = floor || {};
         var width = Number(source.planW) || setup.mapWidth || 1200;
         var height = Number(source.planH) || setup.mapHeight || 760;
-        return { w: clampNum(width, 640, 2400), h: clampNum(height, 480, 1600) };
+        return { w: clampNum(width, PLAN_MIN_W, PLAN_MAX_W), h: clampNum(height, PLAN_MIN_H, PLAN_MAX_H) };
     }
 
     function snapCoord(value) {
@@ -19376,10 +19382,10 @@
             if (x + w > box.w) w = Math.max(min, box.w - x);
             if (y + h > box.h) h = Math.max(min, box.h - y);
         } else {
-            x = clampNum(x, -2400, 4800);
-            y = clampNum(y, -2400, 4800);
-            if (w > 4800) w = 4800;
-            if (h > 4800) h = 4800;
+            x = clampNum(x, -PLAN_MAX_W, PLAN_MAX_W * 2);
+            y = clampNum(y, -PLAN_MAX_W, PLAN_MAX_W * 2);
+            if (w > PLAN_MAX_W * 2) w = PLAN_MAX_W * 2;
+            if (h > PLAN_MAX_W * 2) h = PLAN_MAX_W * 2;
         }
         var groupId = parseInt(room.groupId, 10) || 0;
         if (groupId < 0) groupId = 0;
@@ -19481,6 +19487,10 @@
         svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
         var label = document.querySelector('.asset-tree-zoom-readout');
         if (label) label.textContent = zoomPercent() + '%';
+        var dots = svg.querySelector('.asset-tree-grid-dots');
+        if (dots && dots.parentNode) {
+            dots.parentNode.replaceChild(gridDotPath(planSize(state.mapDraft || currentFloor())), dots);
+        }
     }
 
     function zoomAt(svg, event, factor) {
@@ -19488,7 +19498,7 @@
         var metrics = viewMetrics(svg);
         var before = svgPoint(svg, event);
         var aspect = (metrics.rect.width || 1) / (metrics.rect.height || 1);
-        var w = clampNum(metrics.vw / factor, size.w / 8, Math.max(size.w, size.h) * 2.4);
+        var w = clampNum(metrics.vw / factor, PLAN_CLOSE, Math.max(size.w, size.h) * 2.4);
         var h = w / aspect;
         var rx = (event.clientX - metrics.rect.left) / (metrics.rect.width || 1);
         var ry = (event.clientY - metrics.rect.top) / (metrics.rect.height || 1);
@@ -21046,7 +21056,22 @@
             return;
         }
         rememberMap();
+        var maxX = 0;
+        var maxY = 0;
+        parsed.rooms.forEach(function (room) {
+            maxX = Math.max(maxX, (Number(room.x) || 0) + (Number(room.w) || 0));
+            maxY = Math.max(maxY, (Number(room.y) || 0) + (Number(room.h) || 0));
+            (room.points || []).forEach(function (point) {
+                maxX = Math.max(maxX, Number(point.x) || 0);
+                maxY = Math.max(maxY, Number(point.y) || 0);
+            });
+        });
         var box = planSize(state.mapDraft);
+        var needW = clampNum(Math.ceil(maxX + 80), PLAN_MIN_W, PLAN_MAX_W);
+        var needH = clampNum(Math.ceil(maxY + 80), PLAN_MIN_H, PLAN_MAX_H);
+        if (needW > box.w) state.mapDraft.planW = needW;
+        if (needH > box.h) state.mapDraft.planH = needH;
+        box = planSize(state.mapDraft);
         parsed.rooms.forEach(function (room) {
             pushShape(state.mapDraft, clampRoom(room, box));
         });
@@ -21594,22 +21619,22 @@
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapPlanSize')));
         var width = document.createElement('input');
         width.type = 'number';
-        width.min = '640';
-        width.max = '2400';
+        width.min = String(PLAN_MIN_W);
+        width.max = String(PLAN_MAX_W);
         width.value = String(size.w);
         width.className = 'asset-tree-plan-size';
         width.setAttribute('aria-label', t('setupPlanW'));
         var height = document.createElement('input');
         height.type = 'number';
-        height.min = '480';
-        height.max = '1600';
+        height.min = String(PLAN_MIN_H);
+        height.max = String(PLAN_MAX_H);
         height.value = String(size.h);
         height.className = 'asset-tree-plan-size';
         height.setAttribute('aria-label', t('setupPlanH'));
         function resizePlan() {
             rememberMap();
-            state.mapDraft.planW = clampNum(width.value, 640, 2400);
-            state.mapDraft.planH = clampNum(height.value, 480, 1600);
+            state.mapDraft.planW = clampNum(width.value, PLAN_MIN_W, PLAN_MAX_W);
+            state.mapDraft.planH = clampNum(height.value, PLAN_MIN_H, PLAN_MAX_H);
             var next = planSize(state.mapDraft);
             state.mapDraft.rooms = (state.mapDraft.rooms || []).map(function (room) { return clampRoom(room, next); });
             state.mapDraft.pins = (state.mapDraft.pins || []).map(function (pin) {
@@ -22893,13 +22918,29 @@
 
     function gridDotPath(size) {
         var path = svgEl('path');
+        var cam = activeCamera(size);
+        var margin = Math.max(cam.w, cam.h);
+        var left = Math.max(0, cam.x - margin);
+        var top = Math.max(0, cam.y - margin);
+        var right = Math.min(size.w, cam.x + cam.w + margin);
+        var bottom = Math.min(size.h, cam.y + cam.h + margin);
+        var viewW = Math.max(20, right - left);
+        var viewH = Math.max(20, bottom - top);
         var step = 20;
+        var rough = Math.sqrt((viewW * viewH) / 4500);
+        while (step < rough) step *= 2;
+        var radius = Math.max(1.2, Math.round(step * 0.045 * 10) / 10);
         var parts = [];
         var x;
         var y;
-        for (x = step; x < size.w; x += step) {
-            for (y = step; y < size.h; y += step) {
-                parts.push('M' + x + ' ' + y + 'm-1.2 0a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0');
+        var x0 = Math.ceil(left / step) * step;
+        var y0 = Math.ceil(top / step) * step;
+        if (x0 < step) x0 = step;
+        if (y0 < step) y0 = step;
+        for (x = x0; x < right; x += step) {
+            for (y = y0; y < bottom; y += step) {
+                parts.push('M' + x + ' ' + y + 'm-' + radius + ' 0a' + radius + ' ' + radius
+                    + ' 0 1 0 ' + (radius * 2) + ' 0a' + radius + ' ' + radius + ' 0 1 0 -' + (radius * 2) + ' 0');
             }
         }
         path.setAttribute('d', parts.join(''));
@@ -24333,14 +24374,14 @@
         var width = document.createElement('input');
         width.type = 'number';
         width.min = String(roomMin(room.kind || 'room'));
-        width.max = '2400';
+        width.max = String(PLAN_MAX_W);
         width.value = String(room.w);
         width.className = 'asset-tree-plan-size';
         width.setAttribute('aria-label', t('setupPlanW'));
         var height = document.createElement('input');
         height.type = 'number';
         height.min = String(roomMin(room.kind || 'room'));
-        height.max = '1600';
+        height.max = String(PLAN_MAX_H);
         height.value = String(room.h);
         height.className = 'asset-tree-plan-size';
         height.setAttribute('aria-label', t('setupPlanH'));

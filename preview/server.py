@@ -1163,8 +1163,8 @@ def module_setup(stored, migrate=True):
         "scheduleLayer": layer,
         "scheduleUnit": unit,
         "scheduleNotify": bool(stored.get("scheduleNotify")),
-        "mapWidth": plan_limit(stored.get("mapWidth"), 1200, 640, 2400),
-        "mapHeight": plan_limit(stored.get("mapHeight"), 760, 480, 1600),
+        "mapWidth": plan_limit(stored.get("mapWidth"), 1200, PLAN_MIN_W, PLAN_MAX_W),
+        "mapHeight": plan_limit(stored.get("mapHeight"), 760, PLAN_MIN_H, PLAN_MAX_H),
         "mapGrid": grid,
         "mapSnap": stored.get("mapSnap") is not False,
         "reportHidden": ",".join(hidden),
@@ -1373,6 +1373,14 @@ def clean_day_marks(raw):
             continue
         marks[day] = ident if ident == "off" else ident + suffix
     return ",".join(f"{day}:{marks[day]}" for day in sorted(marks))
+
+
+PLAN_MIN_W = 640
+PLAN_MAX_W = 40000
+PLAN_MIN_H = 480
+PLAN_MAX_H = 30000
+PLAN_ORIGIN_LOW = -PLAN_MAX_W
+PLAN_ORIGIN_HIGH = PLAN_MAX_W * 2
 
 
 def plan_limit(raw, default, low, high):
@@ -3128,8 +3136,8 @@ def floor_dto(row):
     return {
         "id": row["id"], "name": row.get("name") or "", "level": row.get("level") or 1,
         "placeId": row.get("placeId") or 0, "placeName": (place or {}).get("name") or "",
-        "planW": plan_limit(row.get("planW"), 1200, 640, 2400),
-        "planH": plan_limit(row.get("planH"), 760, 480, 1600),
+        "planW": plan_limit(row.get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W),
+        "planH": plan_limit(row.get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H),
         "rooms": rooms, "pins": pins,
     }
 
@@ -3158,8 +3166,8 @@ def create_floor(project_key, body, text):
     STATE["floors"][floor_id] = {
         "id": floor_id, "projectKey": project_key, "name": name, "level": level,
         "placeId": place_id, "rooms": [], "pins": [], "room_seq": 1, "pin_seq": 1,
-        "planW": plan_limit((body or {}).get("planW"), 1200, 640, 2400),
-        "planH": plan_limit((body or {}).get("planH"), 760, 480, 1600),
+        "planW": plan_limit((body or {}).get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W),
+        "planH": plan_limit((body or {}).get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H),
     }
     return 201, floor_dto(STATE["floors"][floor_id])
 
@@ -3176,8 +3184,8 @@ def save_floor(project_key, floor_id, body, text):
     level = 0 if raw_level is None or raw_level == "" else int(raw_level)
     if not name or len(name) > 80 or level < -20 or level > 200:
         return 400, {"message": text.get("asset-tree.error.floor", "Floor")}
-    plan_w = plan_limit(body.get("planW"), 1200, 640, 2400)
-    plan_h = plan_limit(body.get("planH"), 760, 480, 1600)
+    plan_w = plan_limit(body.get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W)
+    plan_h = plan_limit(body.get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H)
     rooms = body.get("rooms") or []
     pins = body.get("pins") or []
     if len(rooms) > 400 or len(pins) > 200:
@@ -3211,10 +3219,10 @@ def save_floor(project_key, floor_id, body, text):
             if y + h > plan_h:
                 h = max(minimum, plan_h - y)
         else:
-            x = max(-2400, min(4800, int(room.get("x") or 0)))
-            y = max(-2400, min(4800, int(room.get("y") or 0)))
-            w = min(w, 4800)
-            h = min(h, 4800)
+            x = max(PLAN_ORIGIN_LOW, min(PLAN_ORIGIN_HIGH, int(room.get("x") or 0)))
+            y = max(PLAN_ORIGIN_LOW, min(PLAN_ORIGIN_HIGH, int(room.get("y") or 0)))
+            w = min(w, PLAN_ORIGIN_HIGH)
+            h = min(h, PLAN_ORIGIN_HIGH)
         stored_rooms.append({
             "id": seq, "name": label[:80], "kind": kind, "color": room_color(room.get("color")),
             "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
