@@ -1033,7 +1033,7 @@ def next_object_key(project):
     return "%s-%s" % (prefix, highest + 1)
 
 
-VIEW_BASE = ("key", "type", "status", "custodian", "location", "description", "created", "updated")
+VIEW_BASE = ("key", "type", "status", "custodian", "issued", "location", "description", "created", "updated")
 KNOWN_MODULES = ("service", "map", "reports", "life", "portal", "card")
 
 
@@ -3267,7 +3267,7 @@ def delete_floor(project_key, floor_id, text):
     return 204, None
 
 
-REPORT_STANDARD = ("status", "type", "place", "holder", "receipts", "cost", "warranty", "age", "writeoff", "work")
+REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work")
 
 
 def parse_money(raw):
@@ -3433,7 +3433,7 @@ def stored_report_chart(project_key, report_key, fallback):
 
 
 def report_group(key):
-    if key in ("status", "type", "place", "holder"):
+    if key in ("status", "type", "place", "holder", "issued"):
         return key
     return {"cost": "type", "receipts": "month", "age": "age", "warranty": "warranty", "writeoff": "writeoff", "work": "kind"}.get(key, "")
 
@@ -3444,6 +3444,7 @@ def report_catalog(project_key, text):
         "type": text.get("asset-tree.ui.reportTypeTitle", "Type"),
         "place": text.get("asset-tree.ui.reportPlaceTitle", "Place"),
         "holder": text.get("asset-tree.ui.reportHolderTitle", "Custodians"),
+        "issued": text.get("asset-tree.ui.issuedTo", "Issued to"),
         "receipts": text.get("asset-tree.ui.reportReceipts", "Receipts"),
         "warranty": text.get("asset-tree.ui.reportWarrantyTitle", "Warranty"),
         "cost": text.get("asset-tree.ui.reportCostTitle", "Cost"),
@@ -3467,7 +3468,7 @@ def create_saved_report(project_key, body, text):
     group = (body.get("groupBy") or "").strip().lower()
     filt = (body.get("filterField") or "").strip().lower()
     value = (body.get("filterValue") or "").strip()
-    if group not in ("status", "type", "place", "holder", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
+    if group not in ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if filt and filt not in ("status", "type", "holder", "mix"):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
@@ -3906,6 +3907,10 @@ def report_view(project_key, report_key, text, query=None):
             bucket = asset.get("custodianKey") or ""
             person = USERS.get(bucket) or {}
             label = text.get("asset-tree.ui.reportUnassigned", "None") if not bucket else (person.get("displayName") or bucket)
+        elif group == "issued":
+            bucket = asset.get("issuedKey") or ""
+            person = USERS.get(bucket) or {}
+            label = text.get("asset-tree.ui.custodianNone", "None") if not bucket else (person.get("displayName") or bucket)
         elif group == "place":
             place_id = place_root(asset["id"])
             place = STATE["assets"].get(place_id) if place_id else None
@@ -4198,7 +4203,7 @@ def sort_report_rows(report_key, group, rows, place_sort):
 
         rows.sort(key=status_key)
         return
-    if group in ("type", "holder") or report_key == "cost":
+    if group in ("type", "holder", "issued") or report_key == "cost":
         rows.sort(key=lambda row: ((row.get("label") or "").lower(), (row.get("key") or "").lower()))
         return
     if group == "place":
@@ -4940,6 +4945,7 @@ def group_word(group, text):
         "type": "asset-tree.ui.groupWordType",
         "place": "asset-tree.ui.groupWordPlace",
         "holder": "asset-tree.ui.groupWordHolder",
+        "issued": "asset-tree.ui.issuedTo",
         "month": "asset-tree.ui.groupWordMonth",
         "age": "asset-tree.ui.groupWordAge",
         "warranty": "asset-tree.ui.groupWordWarranty",

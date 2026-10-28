@@ -11,6 +11,7 @@ public final class ReportCatalog {
     public static final String TYPE = "type";
     public static final String PLACE = "place";
     public static final String HOLDER = "holder";
+    public static final String ISSUED = "issued";
     public static final String SERVICE = "service";
     public static final String WARRANTY = "warranty";
     public static final String COST = "cost";
@@ -20,9 +21,9 @@ public final class ReportCatalog {
     public static final String WORK = "work";
 
     private static final List<String> STANDARD = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
+            STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, "month", "age", WARRANTY, WRITEOFF, "kind"));
+            STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind"));
 
     private ReportCatalog() {
     }

@@ -1013,6 +1013,7 @@ public final class UiCatalog {
             "reportGroupType",
             "reportGroupPlace",
             "reportGroupHolder",
+            "reportGroupIssued",
             "reportFilter",
             "reportFilterNone",
             "reportDelete",

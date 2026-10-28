@@ -8424,7 +8424,8 @@ public class AssetServiceImpl implements AssetService {
 
     private String standardGroup(String key) {
         if (ReportCatalog.STATUS.equals(key) || ReportCatalog.TYPE.equals(key)
-                || ReportCatalog.PLACE.equals(key) || ReportCatalog.HOLDER.equals(key)) {
+                || ReportCatalog.PLACE.equals(key) || ReportCatalog.HOLDER.equals(key)
+                || ReportCatalog.ISSUED.equals(key)) {
             return key;
         }
         if (ReportCatalog.COST.equals(key)) {
@@ -8468,6 +8469,9 @@ public class AssetServiceImpl implements AssetService {
         }
         if (ReportCatalog.HOLDER.equals(key)) {
             return i18n().getText("asset-tree.ui.reportHolderTitle");
+        }
+        if (ReportCatalog.ISSUED.equals(key)) {
+            return i18n().getText("asset-tree.ui.issuedTo");
         }
         if (ReportCatalog.SERVICE.equals(key)) {
             return i18n().getText("asset-tree.ui.reportService");
@@ -9452,6 +9456,9 @@ public class AssetServiceImpl implements AssetService {
         if (ReportCatalog.HOLDER.equals(group)) {
             return asset.getCustodianKey() == null ? "" : asset.getCustodianKey();
         }
+        if (ReportCatalog.ISSUED.equals(group)) {
+            return asset.getIssuedKey() == null ? "" : asset.getIssuedKey();
+        }
         return Statuses.canonical(asset.getStatus());
     }
 
@@ -9498,6 +9505,9 @@ public class AssetServiceImpl implements AssetService {
         }
         if (ReportCatalog.HOLDER.equals(group)) {
             return bucketKey.isEmpty() ? i18n().getText("asset-tree.ui.reportUnassigned") : displayName(bucketKey);
+        }
+        if (ReportCatalog.ISSUED.equals(group)) {
+            return bucketKey.isEmpty() ? i18n().getText("asset-tree.ui.custodianNone") : displayName(bucketKey);
         }
         return statusName(bucketKey, statusNames);
     }
@@ -9618,7 +9628,8 @@ public class AssetServiceImpl implements AssetService {
             });
             return;
         }
-        if (ReportCatalog.TYPE.equals(group) || ReportCatalog.COST.equals(key) || ReportCatalog.HOLDER.equals(group)) {
+        if (ReportCatalog.TYPE.equals(group) || ReportCatalog.COST.equals(key) || ReportCatalog.HOLDER.equals(group)
+                || ReportCatalog.ISSUED.equals(group)) {
             Collections.sort(rows, new Comparator<ReportBucketDto>() {
                 @Override
                 public int compare(ReportBucketDto left, ReportBucketDto right) {
@@ -9951,6 +9962,9 @@ public class AssetServiceImpl implements AssetService {
         }
         if (ReportCatalog.HOLDER.equals(group)) {
             return i18n().getText("asset-tree.ui.groupWordHolder");
+        }
+        if (ReportCatalog.ISSUED.equals(group)) {
+            return i18n().getText("asset-tree.ui.issuedTo");
         }
         if ("month".equals(group)) {
             return i18n().getText("asset-tree.ui.groupWordMonth");

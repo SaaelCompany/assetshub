@@ -1120,6 +1120,9 @@
         if (asset.custodian) {
             parts.push(asset.custodian.displayName || '', asset.custodian.email || '', asset.custodian.department || '');
         }
+        if (asset.issued) {
+            parts.push(asset.issued.displayName || '', asset.issued.email || '', asset.issued.department || '');
+        }
         (asset.attributes || []).forEach(function (attribute) {
             parts.push(attribute.name || '', attribute.value || '', attribute.displayValue || '');
             if (attribute.kind === 'date' && attribute.value) parts.push(formatFieldDate(attribute.value));
@@ -1182,6 +1185,7 @@
             { key: 'type', label: t('type'), kind: 'type' },
             { key: 'status', label: t('status'), kind: 'status' },
             { key: 'custodian', label: t('custodian'), kind: 'text' },
+            { key: 'issued', label: t('issuedTo'), kind: 'text' },
             { key: 'updated', label: t('updated'), kind: 'text' }
         ];
         var seen = {};
@@ -1264,6 +1268,7 @@
         if (key === 'type') return asset.typeLabel || typeOf(asset.typeKey).label || '';
         if (key === 'status') return statusLabel(asset.status);
         if (key === 'custodian') return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        if (key === 'issued') return asset.issued && asset.issued.displayName ? asset.issued.displayName : '';
         if (key === 'location') return asset.location || '';
         if (key === 'description') return asset.description || '';
         if (key === 'created') return asset.created || '';
@@ -1314,6 +1319,10 @@
         return asset && asset.custodian && asset.custodian.userKey ? asset.custodian.userKey : '';
     }
 
+    function issuedPersonKey(asset) {
+        return asset && asset.issued && asset.issued.userKey ? asset.issued.userKey : '';
+    }
+
     function rulePasses(asset, rule) {
         if (rule && rule.ids) {
             return !!(rule.ids[asset.id] || rule.ids[String(asset.id)]);
@@ -1324,8 +1333,8 @@
         if (rule && rule.field === 'place') {
             return placeRulePasses(asset, rule);
         }
-        if (rule && rule.field === 'custodian' && (rule.userKey || (rule.userKeys && rule.userKeys.length))) {
-            var person = holderKey(asset);
+        if (rule && (rule.field === 'custodian' || rule.field === 'issued') && (rule.userKey || (rule.userKeys && rule.userKeys.length))) {
+            var person = rule.field === 'issued' ? issuedPersonKey(asset) : holderKey(asset);
             if (rule.userKeys && rule.userKeys.length) {
                 for (var holder = 0; holder < rule.userKeys.length; holder++) {
                     if (rule.userKeys[holder] === person) return true;
@@ -4452,10 +4461,10 @@
         return section;
     }
 
-    var DEFAULT_COLUMNS = ['key', 'type', 'status', 'custodian'];
-    var BASE_COLUMNS = ['key', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated'];
-    var MINE_DEFAULT_COLUMNS = ['key', 'project', 'status', 'location'];
-    var MINE_BASE_COLUMNS = ['key', 'project', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated', 'role'];
+    var DEFAULT_COLUMNS = ['key', 'type', 'status', 'custodian', 'issued'];
+    var BASE_COLUMNS = ['key', 'type', 'status', 'custodian', 'issued', 'location', 'description', 'created', 'updated'];
+    var MINE_DEFAULT_COLUMNS = ['key', 'project', 'status', 'issued', 'location'];
+    var MINE_BASE_COLUMNS = ['key', 'project', 'type', 'status', 'custodian', 'issued', 'location', 'description', 'created', 'updated', 'role'];
 
     function typeFieldColumn(key) {
         var parts = key.split(':');
@@ -4473,6 +4482,7 @@
 
     function columnLabel(key) {
         if (key === 'key') return t('keyLabel');
+        if (key === 'issued') return t('issuedTo');
         if (key === 'location') return t('columnLocation');
         if (key.indexOf('attr:') === 0) return fieldSpec(key).label;
         return t(key);
@@ -4587,6 +4597,7 @@
         if (key === 'type') return asset.typeLabel || typeOf(asset.typeKey).label || '';
         if (key === 'status') return statusLabel(asset.status);
         if (key === 'custodian') return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        if (key === 'issued') return asset.issued && asset.issued.displayName ? asset.issued.displayName : '';
         if (key === 'description') return asset.description || '';
         if (key === 'created' || key === 'updated') return asset[key] || '';
         if (key.indexOf('mineattr:') === 0) {
@@ -4610,6 +4621,9 @@
         if (key === 'location') return asset.location || t('root');
         if (key === 'custodian') {
             return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone');
+        }
+        if (key === 'issued') {
+            return asset.issued && asset.issued.displayName ? asset.issued.displayName : t('custodianNone');
         }
         if (key === 'description') {
             var text = asset.description || '';
@@ -4713,6 +4727,9 @@
         if (key === 'status') return lozenge(asset.status);
         if (key === 'custodian') {
             return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone');
+        }
+        if (key === 'issued') {
+            return asset.issued && asset.issued.displayName ? asset.issued.displayName : t('custodianNone');
         }
         if (key === 'location') {
             var parent = asset.parentId ? byId()[asset.parentId] : null;
@@ -18616,7 +18633,7 @@
 
     function groupWord(group) {
         var map = {
-            status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder',
+            status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
             month: 'groupWordMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind'
         };
         return t(map[group] || 'groupWordStatus');
@@ -18624,7 +18641,7 @@
 
     function groupPhrase(group) {
         var map = {
-            status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder',
+            status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder', issued: 'reportGroupIssued',
             month: 'reportGroupMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind'
         };
         return t(map[group] || 'reportGroupStatus');
@@ -18812,6 +18829,17 @@
         return name || key;
     }
 
+    function reportIssuedName(key) {
+        if (!key) return t('custodianNone');
+        var name = '';
+        (state.assets || []).some(function (asset) {
+            if (issuedPersonKey(asset) !== key) return false;
+            name = (asset.issued && asset.issued.displayName) || key;
+            return true;
+        });
+        return name || key;
+    }
+
     function reportPlaceName(id) {
         if (!id) return t('root');
         var node = byId()[id] || byId()[parseInt(id, 10)];
@@ -18897,6 +18925,10 @@
             if (!key) return { field: 'custodian', op: 'empty', value: '', caption: t('custodian') + ' ' + t('opEmpty') };
             return { field: 'custodian', op: 'eq', userKey: key, caption: t('custodian') + ': ' + (label || reportHolderName(key)) };
         }
+        if (group === 'issued') {
+            if (!key) return { field: 'issued', op: 'empty', value: '', caption: t('issuedTo') + ' ' + t('opEmpty') };
+            return { field: 'issued', op: 'eq', userKey: key, caption: t('issuedTo') + ': ' + (label || reportIssuedName(key)) };
+        }
         return { field: 'status', op: 'eq', value: key, caption: t('status') + ': ' + (label || statusLabel(key)) };
     }
 
@@ -18907,6 +18939,7 @@
             if (group === 'status' && rule.field === 'status') return false;
             if (group === 'type' && rule.field === 'type') return false;
             if (group === 'holder' && rule.field === 'custodian') return false;
+            if (group === 'issued' && rule.field === 'issued') return false;
             return true;
         });
         rules.push(bucket);
@@ -19087,7 +19120,7 @@
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
             var group = document.createElement('select');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
+            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
