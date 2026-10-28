@@ -13,6 +13,7 @@ public class UserProfileDto {
     private String department;
     private String title;
     private String directory;
+    private String avatarUrl = "";
     private boolean active = true;
 
     public String getUserKey() {
@@ -77,6 +78,14 @@ public class UserProfileDto {
 
     public void setDirectory(String directory) {
         this.directory = directory;
+    }
+
+    public String getAvatarUrl() {
+        return avatarUrl;
+    }
+
+    public void setAvatarUrl(String avatarUrl) {
+        this.avatarUrl = avatarUrl == null ? "" : avatarUrl;
     }
 
     public boolean isActive() {

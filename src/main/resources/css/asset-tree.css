@@ -4400,6 +4400,7 @@ a.asset-tree-url {
     font-size: 12px;
     font-weight: 700;
     flex: 0 0 auto;
+    object-fit: cover;
 }
 
 #asset-tree-app .asset-tree-person-text {
@@ -4527,6 +4528,11 @@ a.asset-tree-url {
     padding: 0 0 8px;
     border-bottom: 1px solid #ebecf0;
     gap: 2px;
+}
+
+#asset-tree-app button.asset-tree-tool[hidden],
+#asset-tree-app .asset-tree-comment-editor[hidden] {
+    display: none !important;
 }
 
 #asset-tree-app button.asset-tree-tool {
@@ -4712,18 +4718,24 @@ a.asset-tree-url {
     margin-top: 8px;
 }
 
-#asset-tree-app .asset-tree-drop {
+#asset-tree-app .asset-tree-drop,
+#asset-tree-app button.asset-tree-drop {
     position: relative;
-    display: flex;
+    display: flex !important;
     flex-direction: column;
     align-items: center;
     gap: 8px;
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
     margin-top: 8px;
-    padding: 28px 16px;
-    border: 2px dashed #dfe1e6;
+    padding: 28px 16px !important;
+    border: 2px dashed #dfe1e6 !important;
     border-radius: 3px;
-    background: #fafbfc;
-    color: #6b778c;
+    background: #fafbfc !important;
+    color: #6b778c !important;
+    font-weight: 400 !important;
+    line-height: 1.4 !important;
     text-align: center;
     cursor: pointer;
 }
@@ -4780,6 +4792,209 @@ a.asset-tree-url {
     gap: 8px 12px;
     padding: 6px 0;
     border-bottom: 1px solid #ebecf0;
+}
+
+#asset-tree-app button.asset-tree-file-icon {
+    padding: 0;
+    border: 0;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-file-name {
+    display: inline !important;
+    width: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #0052cc !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    line-height: 1.3 !important;
+    text-align: left;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-file-name:hover {
+    text-decoration: underline;
+}
+
+#asset-tree-app .asset-tree-file-preview {
+    margin-left: 44px;
+    max-width: 520px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fafbfc;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-file-preview-image {
+    display: block;
+    max-width: 100%;
+    max-height: 180px;
+    cursor: zoom-in;
+}
+
+#asset-tree-app .asset-tree-file-preview-pdf {
+    display: block;
+    width: 100%;
+    height: 240px;
+    border: 0;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-file-preview-text,
+#asset-tree-app .asset-tree-preview-text {
+    margin: 0;
+    padding: 10px 12px;
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: #172b4d;
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.asset-tree-preview-overlay {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 4000;
+    display: flex;
+    flex-direction: column;
+    background: #091e42;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.asset-tree-preview-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: 0 0 56px;
+    height: 56px;
+    padding: 0 12px 0 20px;
+    background: #091e42;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.asset-tree-preview-heading {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.asset-tree-preview-title {
+    overflow: hidden;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.asset-tree-preview-sub {
+    color: #b3bac5;
+    font-size: 12px;
+    line-height: 1.3;
+}
+
+.asset-tree-preview-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+button.asset-tree-preview-icon,
+a.asset-tree-preview-icon {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px !important;
+    height: 32px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 3px !important;
+    background: transparent !important;
+    color: #ebecf0 !important;
+    box-shadow: none !important;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+button.asset-tree-preview-icon:hover,
+a.asset-tree-preview-icon:hover,
+button.asset-tree-preview-icon:focus,
+a.asset-tree-preview-icon:focus {
+    background: rgba(255, 255, 255, 0.16) !important;
+    color: #fff !important;
+}
+
+.asset-tree-preview-icon svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.asset-tree-preview-stage {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1b2638;
+    overflow: auto;
+}
+
+.asset-tree-preview-missing {
+    margin: 0;
+    padding: 24px;
+    color: #dfe1e6;
+    font-size: 16px;
+    text-align: center;
+}
+
+.asset-tree-print-frame {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    width: 0;
+    height: 0;
+    border: 0;
+}
+
+.asset-tree-preview-full {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.asset-tree-preview-pdf {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #525659;
+}
+
+.asset-tree-preview-stage .asset-tree-preview-text {
+    box-sizing: border-box;
+    width: min(880px, 100%);
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    padding: 24px 28px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-share .asset-tree-person {
+    margin-bottom: 8px;
 }
 
 #asset-tree-app .asset-tree-attachment a {
@@ -4931,6 +5146,17 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-people-field {
     margin: 0 0 14px;
+}
+
+#asset-tree-app .asset-tree-share .asset-tree-person + .asset-tree-person {
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-share-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 6px;
 }
 
 #asset-tree-app .asset-tree-people-label {
@@ -7721,7 +7947,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app input.asset-tree-plan-size {
-    width: 76px;
+    width: 92px;
 }
 
 #asset-tree-app .asset-tree-opening {
@@ -10035,7 +10261,7 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-floorplan-body {
     display: grid;
-    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-columns: 300px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     flex: 1 1 auto;
     min-height: 0;
@@ -10118,11 +10344,13 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-tool-grid {
     grid-template-columns: 1fr 1fr 1fr;
+    max-height: 460px;
+    overflow: auto;
 }
 
 #asset-tree-app .asset-tree-floorplan button.asset-tree-tool {
     display: grid !important;
-    grid-template-rows: 22px 16px !important;
+    grid-template-rows: 20px 26px !important;
     grid-template-columns: minmax(0, 1fr) !important;
     align-items: center !important;
     justify-items: center !important;
@@ -10133,9 +10361,9 @@ a.asset-tree-url {
     gap: 2px !important;
     box-sizing: border-box !important;
     width: 100% !important;
-    height: 46px !important;
-    min-height: 46px !important;
-    max-height: 46px !important;
+    height: 54px !important;
+    min-height: 54px !important;
+    max-height: 54px !important;
     margin: 0 !important;
     padding: 4px 2px !important;
     border: 1px solid #dfe1e6 !important;
@@ -10144,10 +10372,10 @@ a.asset-tree-url {
     color: #172b4d !important;
     font-size: 12px !important;
     font-weight: 400 !important;
-    line-height: 0 !important;
+    line-height: 13px !important;
     text-align: center !important;
     text-indent: 0 !important;
-    white-space: nowrap !important;
+    white-space: normal !important;
     cursor: pointer;
     float: none !important;
     overflow: hidden !important;
@@ -10190,14 +10418,14 @@ a.asset-tree-url {
     overflow: hidden;
     color: inherit !important;
     font-family: inherit !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
     font-weight: 400 !important;
-    line-height: 16px !important;
+    line-height: 13px !important;
     letter-spacing: 0 !important;
     text-align: center !important;
     text-indent: 0 !important;
-    white-space: nowrap !important;
-    text-overflow: ellipsis;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
     float: none !important;
 }
 
@@ -10708,4 +10936,271 @@ a.asset-tree-url {
     #asset-tree-app .asset-tree-floorplan-body {
         grid-template-columns: 196px minmax(0, 1fr);
     }
+}
+
+.asset-tree-jira-editor {
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+}
+
+.asset-tree-jira-bar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 40px;
+    padding: 4px 8px;
+    border-bottom: 1px solid #dfe1e6;
+    background: #fafbfc;
+}
+
+.asset-tree-jira-style,
+.asset-tree-jira-color,
+button.asset-tree-jira-tool {
+    height: 28px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 6px !important;
+    border: 0 !important;
+    border-radius: 3px !important;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    line-height: 28px !important;
+    cursor: pointer;
+}
+
+.asset-tree-jira-style {
+    width: 92px;
+    font-weight: 400 !important;
+}
+
+.asset-tree-jira-color {
+    width: 28px;
+    padding: 2px !important;
+}
+
+button.asset-tree-jira-tool svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+}
+
+button.asset-tree-jira-tool:hover,
+.asset-tree-jira-style:hover {
+    background: #ebecf0 !important;
+}
+
+.asset-tree-jira-visual,
+.asset-tree-jira-source {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 96px;
+    margin: 0;
+    padding: 8px 12px;
+    border: 0;
+    background: #fff;
+    color: #172b4d;
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    outline: none;
+    white-space: pre-wrap;
+    resize: vertical;
+}
+
+.asset-tree-jira-visual.is-empty:before {
+    content: attr(data-placeholder);
+    color: #97a0af;
+    pointer-events: none;
+}
+
+.asset-tree-jira-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px;
+    border-top: 1px solid #dfe1e6;
+}
+
+.asset-tree-jira-tabs,
+.asset-tree-jira-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+button.asset-tree-jira-tab {
+    height: 28px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 10px !important;
+    border: 0 !important;
+    border-radius: 3px !important;
+    background: transparent !important;
+    color: #42526e !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+}
+
+button.asset-tree-jira-tab.is-on {
+    background: #505f79 !important;
+    color: #fff !important;
+}
+
+button.asset-tree-jira-quiet {
+    height: 32px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 10px !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #42526e !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    cursor: pointer;
+}
+
+button.asset-tree-jira-quiet:hover {
+    background: #ebecf0 !important;
+}
+
+.asset-tree-jira-editor .asset-tree-btn.primary,
+.asset-tree-attach-dialog .asset-tree-btn.primary {
+    height: 32px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 12px !important;
+    border: 0 !important;
+    border-radius: 3px !important;
+    background: #0052cc !important;
+    color: #fff !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+}
+
+.asset-tree-comment-internal,
+.asset-tree-file-internal {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 3px;
+    background: #fff0b3;
+    color: #172b4d;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
+}
+
+.asset-tree-action-body p,
+.asset-tree-action-body ul,
+.asset-tree-action-body ol {
+    margin: 0 0 6px;
+}
+
+.asset-tree-attach-overlay {
+    position: fixed;
+    z-index: 4200;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 48px 16px;
+    background: rgba(9, 30, 66, 0.54);
+    overflow: auto;
+}
+
+.asset-tree-attach-dialog {
+    width: min(720px, 100%);
+    padding: 16px 16px 12px;
+    border-radius: 3px;
+    background: #fff;
+    box-shadow: 0 8px 16px rgba(9, 30, 66, 0.25);
+    color: #172b4d;
+}
+
+.asset-tree-attach-dialog h2 {
+    margin: 0 0 12px;
+    color: #172b4d;
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+
+.asset-tree-attach-drop {
+    display: block;
+    margin: 0;
+    padding: 8px 12px 12px;
+    cursor: pointer;
+}
+
+.asset-tree-attach-drop input {
+    display: none;
+}
+
+.asset-tree-attach-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    min-height: 88px;
+}
+
+.asset-tree-attach-hint {
+    flex: 1 1 180px;
+    margin: 8px 0;
+    color: #6b778c;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.asset-tree-attach-card {
+    position: relative;
+    width: 96px;
+}
+
+.asset-tree-attach-thumb,
+.asset-tree-attach-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #f4f5f7;
+    object-fit: cover;
+    color: #42526e;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+button.asset-tree-attach-remove {
+    position: absolute;
+    top: -6px;
+    left: 60px;
+    width: 18px !important;
+    height: 18px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: #172b4d !important;
+    color: #fff !important;
+    font-size: 12px !important;
+    line-height: 18px !important;
+}
+
+.asset-tree-attach-name {
+    margin-top: 4px;
+    overflow: hidden;
+    color: #6b778c;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

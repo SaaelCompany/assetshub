@@ -1102,11 +1102,595 @@
                     body.appendChild(field);
                 });
                 item.appendChild(body);
+                item.tabIndex = 0;
+                item.setAttribute('role', 'button');
+                item.addEventListener('click', function () { openPortalCard(card.id); });
+                item.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.keyCode === 13) openPortalCard(card.id);
+                });
                 block.appendChild(item);
             });
             root.appendChild(block);
         });
         return root;
+    }
+
+    function sendJson(method, path, body, callback) {
+        var xhr = new XMLHttpRequest();
+        xhr.open(method, contextPath() + '/rest/asset-tree/1.0' + path, true);
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var payload = null;
+            if (xhr.responseText) {
+                try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            }
+            callback(xhr.status, payload);
+        };
+        xhr.send(body ? JSON.stringify(body) : null);
+    }
+
+    function portalInitials(name) {
+        var parts = String(name || '').trim().split(/\s+/);
+        if (!parts[0]) return '';
+        return ((parts[0].charAt(0) || '') + (parts.length > 1 ? parts[1].charAt(0) : '')).toUpperCase();
+    }
+
+    function portalFileUrl(id, extra) {
+        return contextPath() + '/plugins/servlet/asset-tree-file?id=' + encodeURIComponent(id) + (extra || '');
+    }
+
+    function closePortalCard() {
+        var open = document.getElementById('asset-tree-portal-dialog');
+        if (!open) return;
+        if (open._onKey) document.removeEventListener('keydown', open._onKey);
+        if (open.parentNode) open.parentNode.removeChild(open);
+    }
+
+    function openPortalCard(id) {
+        if (!id) return;
+        closePortalCard();
+        var overlay = el('div', 'asset-tree-portal-dialog');
+        overlay.id = 'asset-tree-portal-dialog';
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closePortalCard();
+        });
+        var dialog = el('div', 'asset-tree-portal-sheet');
+        dialog.appendChild(el('p', 'asset-tree-portal-loading', '...'));
+        overlay.appendChild(dialog);
+        function onKey(event) {
+            if ((event.key === 'Escape' || event.keyCode === 27) && !document.querySelector('.asset-tree-preview-overlay')) closePortalCard();
+        }
+        overlay._onKey = onKey;
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+        function paint(card) {
+            dialog.innerHTML = '';
+            dialog.className = 'asset-tree-portal-sheet';
+            var head = el('div', 'asset-tree-portal-sheet-head');
+            head.appendChild(portalIcon(card));
+            var titles = el('div', 'asset-tree-portal-sheet-titles');
+            titles.appendChild(el('h2', null, card.name || ''));
+            var meta = el('div', 'asset-tree-portal-sheet-meta');
+            if (card.objectKey) meta.appendChild(el('span', null, card.objectKey));
+            if (card.role) meta.appendChild(el('span', null, card.role));
+            if (card.statusLabel) {
+                var tone = card.statusCategory ? ('cat-' + card.statusCategory) : (card.status || '');
+                meta.appendChild(el('span', 'asset-tree-lozenge ' + tone, card.statusLabel));
+            }
+            titles.appendChild(meta);
+            head.appendChild(titles);
+            var closer = el('button', 'asset-tree-portal-close', '');
+            closer.type = 'button';
+            closer.setAttribute('aria-label', 'Закрыть');
+            closer.appendChild(portalGlyph('M6 6l12 12M18 6L6 18'));
+            closer.addEventListener('click', closePortalCard);
+            head.appendChild(closer);
+            dialog.appendChild(head);
+            var body = el('div', 'asset-tree-portal-sheet-body');
+            var details = portalSection('Детали');
+            var grid = el('div', 'asset-tree-portal-fields');
+            var described = false;
+            (card.lines || []).forEach(function (line) {
+                grid.appendChild(portalFact(line.label || '', line.value || ''));
+                if (card.description && line.value === card.description) described = true;
+            });
+            if (!grid.childNodes.length && card.location) grid.appendChild(portalFact('Расположение', card.location));
+            if (grid.childNodes.length) details.appendChild(grid);
+            if (card.description && !described) details.appendChild(el('p', 'asset-tree-portal-prose', card.description));
+            if (details.childNodes.length > 1) body.appendChild(details);
+            var people = portalSection('Люди');
+            people.appendChild(portalPerson('МОЛ', card.custodian));
+            people.appendChild(portalPerson('Кому выдано', card.issued));
+            people.appendChild(portalShareBlock(card));
+            body.appendChild(people);
+            body.appendChild(portalFiles(card));
+            body.appendChild(portalComments(card));
+            dialog.appendChild(body);
+        }
+        ajax('/portal/assets/' + id, function (status, payload) {
+            if (status !== 200 || !payload) {
+                dialog.innerHTML = '';
+                dialog.appendChild(el('p', null, 'Карточка недоступна'));
+                return;
+            }
+            paint(payload);
+        });
+    }
+
+    function portalSection(title) {
+        var section = el('section', 'asset-tree-portal-section');
+        section.appendChild(el('h3', null, title));
+        return section;
+    }
+
+    function portalFact(label, value) {
+        var fact = el('div', 'asset-tree-portal-fact');
+        fact.appendChild(el('span', null, label));
+        fact.appendChild(el('strong', null, value));
+        return fact;
+    }
+
+    function portalGlyph(d) {
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.8');
+        path.setAttribute('stroke-linecap', 'round');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function portalAvatar(profile) {
+        var who = profile && profile.displayName ? profile.displayName : '';
+        var url = profile && profile.avatarUrl ? profile.avatarUrl : '';
+        if (url) {
+            var img = el('img', 'asset-tree-portal-avatar');
+            img.src = url;
+            img.alt = '';
+            img.addEventListener('error', function () {
+                var fallback = el('span', 'asset-tree-portal-avatar' + (who ? '' : ' is-blank'), who ? portalInitials(who) : '');
+                if (img.parentNode) img.parentNode.replaceChild(fallback, img);
+            });
+            return img;
+        }
+        return el('span', 'asset-tree-portal-avatar' + (who ? '' : ' is-blank'), who ? portalInitials(who) : '');
+    }
+
+    function portalPerson(label, profile, extra) {
+        var field = el('div', 'asset-tree-portal-person');
+        if (label) field.appendChild(el('div', 'asset-tree-portal-person-label', label));
+        var who = profile && profile.displayName ? profile.displayName : '';
+        var row = el('div', 'asset-tree-portal-face');
+        row.appendChild(portalAvatar(who ? profile : null));
+        var text = el('div', 'asset-tree-portal-person-text');
+        text.appendChild(el('strong', null, who || 'Не назначен'));
+        if (profile && profile.email) text.appendChild(el('span', null, profile.email));
+        if (extra) text.appendChild(extra);
+        row.appendChild(text);
+        field.appendChild(row);
+        return field;
+    }
+
+    function portalShareBlock(card) {
+        var field = el('div', 'asset-tree-portal-person');
+        field.appendChild(el('div', 'asset-tree-portal-person-label', 'Общий доступ'));
+        var shares = card.shares || [];
+        var mine = !shares.some(function (person) { return person && person.userKey === card.viewerKey; });
+        if (!shares.length) {
+            var self = null;
+            if (card.viewerKey && mine) {
+                self = el('button', 'asset-tree-portal-textbtn', 'Добавить меня');
+                self.type = 'button';
+                self.addEventListener('click', function () {
+                    sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: card.viewerKey }, function (status) {
+                        if (status >= 200 && status < 300) openPortalCard(card.id);
+                    });
+                });
+            }
+            field.appendChild(portalPerson('', null, self).querySelector('.asset-tree-portal-face'));
+        }
+        shares.forEach(function (person) {
+            var remove = el('button', 'asset-tree-portal-textbtn', 'Убрать');
+            remove.type = 'button';
+            remove.addEventListener('click', function () {
+                sendJson('DELETE', '/portal/assets/' + card.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status) {
+                    if (status >= 200 && status < 300) openPortalCard(card.id);
+                });
+            });
+            field.appendChild(portalPerson('', person, remove).querySelector('.asset-tree-portal-face'));
+        });
+        var tools = el('div', 'asset-tree-portal-share-tools');
+        if (shares.length && card.viewerKey && mine) {
+            var addMe = el('button', 'asset-tree-portal-textbtn', 'Добавить меня');
+            addMe.type = 'button';
+            addMe.addEventListener('click', function () {
+                sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: card.viewerKey }, function (status) {
+                    if (status >= 200 && status < 300) openPortalCard(card.id);
+                });
+            });
+            tools.appendChild(addMe);
+        }
+        var search = el('input');
+        search.type = 'search';
+        search.placeholder = 'Добавить человека';
+        var hits = el('div', 'asset-tree-portal-hits');
+        var timer = null;
+        search.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var query = search.value.replace(/^\s+|\s+$/g, '');
+                hits.innerHTML = '';
+                if (query.length < 2) return;
+                ajax('/users?q=' + encodeURIComponent(query), function (status, payload) {
+                    hits.innerHTML = '';
+                    if (status !== 200) return;
+                    (payload || []).forEach(function (user) {
+                        var taken = (card.shares || []).some(function (person) { return person && person.userKey === user.userKey; });
+                        if (taken) return;
+                        var hit = el('button', 'asset-tree-portal-hit', user.displayName || '');
+                        hit.type = 'button';
+                        hit.addEventListener('click', function () {
+                            sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: user.userKey }, function (code) {
+                                if (code >= 200 && code < 300) openPortalCard(card.id);
+                            });
+                        });
+                        hits.appendChild(hit);
+                    });
+                });
+            }, 220);
+        });
+        tools.appendChild(search);
+        tools.appendChild(hits);
+        field.appendChild(tools);
+        return field;
+    }
+
+    function portalPlain(node) {
+        var text = '';
+        function walk(current) {
+            var child = current.firstChild;
+            while (child) {
+                if (child.nodeType === 3) text += child.nodeValue;
+                else if (child.nodeType === 1) {
+                    var name = child.tagName.toLowerCase();
+                    if ((name === 'br' || name === 'p' || name === 'div') && text && text.charAt(text.length - 1) !== '\n') text += '\n';
+                    walk(child);
+                }
+                child = child.nextSibling;
+            }
+        }
+        walk(node);
+        return text.replace(/^\s+|\s+$/g, '');
+    }
+
+    function portalComposer(placeholder) {
+        var box = el('div', 'asset-tree-jira-editor');
+        var bar = el('div', 'asset-tree-jira-bar');
+        var visual = el('div', 'asset-tree-jira-visual is-empty');
+        visual.contentEditable = 'true';
+        visual.setAttribute('data-placeholder', placeholder);
+        var source = el('textarea', 'asset-tree-jira-source');
+        source.hidden = true;
+        var textMode = false;
+        function command(name, value) {
+            if (textMode) return;
+            visual.focus();
+            try { document.execCommand(name, false, value || null); } catch (ignore) {}
+            if (portalPlain(visual)) visual.classList.remove('is-empty');
+            else visual.classList.add('is-empty');
+        }
+        function tool(label, action) {
+            var node = el('button', 'asset-tree-jira-tool', label);
+            node.type = 'button';
+            node.addEventListener('mousedown', function (event) { event.preventDefault(); });
+            node.addEventListener('click', function (event) {
+                event.preventDefault();
+                action();
+            });
+            bar.appendChild(node);
+        }
+        var style = el('select', 'asset-tree-jira-style');
+        style.appendChild(el('option', null, 'Стиль'));
+        tool('B', function () { command('bold'); });
+        tool('I', function () { command('italic'); });
+        tool('U', function () { command('underline'); });
+        tool('•', function () { command('insertUnorderedList'); });
+        tool('1.', function () { command('insertOrderedList'); });
+        bar.insertBefore(style, bar.firstChild);
+        box.appendChild(bar);
+        box.appendChild(visual);
+        box.appendChild(source);
+        var foot = el('div', 'asset-tree-jira-foot');
+        var tabs = el('div', 'asset-tree-jira-tabs');
+        var visualTab = el('button', 'asset-tree-jira-tab is-on', 'Визуальный');
+        var textTab = el('button', 'asset-tree-jira-tab', 'Текст');
+        visualTab.type = 'button';
+        textTab.type = 'button';
+        visualTab.addEventListener('click', function () {
+            if (!textMode) return;
+            textMode = false;
+            visual.innerHTML = '';
+            String(source.value || '').split('\n').forEach(function (line, index) {
+                if (index) visual.appendChild(document.createElement('br'));
+                visual.appendChild(document.createTextNode(line));
+            });
+            source.hidden = true;
+            visual.hidden = false;
+            visualTab.classList.add('is-on');
+            textTab.classList.remove('is-on');
+        });
+        textTab.addEventListener('click', function () {
+            if (textMode) return;
+            textMode = true;
+            source.value = portalPlain(visual);
+            visual.hidden = true;
+            source.hidden = false;
+            textTab.classList.add('is-on');
+            visualTab.classList.remove('is-on');
+        });
+        tabs.appendChild(visualTab);
+        tabs.appendChild(textTab);
+        var actions = el('div', 'asset-tree-jira-actions');
+        foot.appendChild(tabs);
+        foot.appendChild(actions);
+        box.appendChild(foot);
+        return {
+            root: box,
+            foot: foot,
+            actions: actions,
+            read: function () {
+                if (textMode) return String(source.value || '').replace(/^\s+|\s+$/g, '');
+                return portalPlain(visual);
+            },
+            focus: function () { visual.focus(); }
+        };
+    }
+
+    function portalFiles(card) {
+        var section = portalSection('Вложения');
+        (card.files || []).forEach(function (file) {
+            var row = el('div', 'asset-tree-portal-file');
+            var kind = String(file.fileName || '').split('.').pop().toLowerCase();
+            var icon = el('button', 'asset-tree-portal-file-icon is-' + kind, (kind || 'file').slice(0, 4).toUpperCase());
+            icon.type = 'button';
+            icon.addEventListener('click', function () { openPortalPreview(file, card.files); });
+            row.appendChild(icon);
+            var name = el('button', 'asset-tree-portal-file-name', file.fileName || '');
+            name.type = 'button';
+            name.addEventListener('click', function () { openPortalPreview(file, card.files); });
+            row.appendChild(name);
+            if (file.size) row.appendChild(el('span', 'asset-tree-portal-file-meta', portalSize(file.size)));
+            section.appendChild(row);
+        });
+        var drop = el('button', 'asset-tree-portal-drop', 'Добавить вложения');
+        drop.type = 'button';
+        drop.addEventListener('click', function () { openPortalAttach(card); });
+        section.appendChild(drop);
+        return section;
+    }
+
+    function openPortalAttach(card) {
+        var queued = [];
+        var overlay = el('div', 'asset-tree-attach-overlay');
+        var dialog = el('div', 'asset-tree-attach-dialog');
+        dialog.appendChild(el('h2', null, 'Добавить вложения'));
+        var composer = portalComposer('Вставьте здесь комментарий...');
+        var list = el('div', 'asset-tree-attach-list');
+        function paint() {
+            list.innerHTML = '';
+            queued.forEach(function (file, index) {
+                var cardNode = el('div', 'asset-tree-attach-card');
+                cardNode.appendChild(el('span', 'asset-tree-attach-glyph', (file.name || 'file').slice(0, 4)));
+                var remove = el('button', 'asset-tree-attach-remove', '\u00d7');
+                remove.type = 'button';
+                remove.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    queued.splice(index, 1);
+                    paint();
+                });
+                cardNode.appendChild(remove);
+                cardNode.appendChild(el('div', 'asset-tree-attach-name', file.name || ''));
+                list.appendChild(cardNode);
+            });
+            list.appendChild(el('p', 'asset-tree-attach-hint', 'Перетащите файлы или вставьте снимки экрана, чтобы приложить их'));
+        }
+        var zone = el('label', 'asset-tree-attach-drop');
+        var input = el('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.addEventListener('change', function () {
+            var index;
+            for (index = 0; index < input.files.length; index++) queued.push(input.files[index]);
+            input.value = '';
+            paint();
+        });
+        zone.appendChild(input);
+        zone.appendChild(list);
+        zone.addEventListener('dragover', function (event) { event.preventDefault(); });
+        zone.addEventListener('drop', function (event) {
+            event.preventDefault();
+            var files = event.dataTransfer && event.dataTransfer.files;
+            var index;
+            if (!files) return;
+            for (index = 0; index < files.length; index++) queued.push(files[index]);
+            paint();
+        });
+        function close() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        function uploadAt(index, done) {
+            if (index >= queued.length) {
+                done(true);
+                return;
+            }
+            var data = new FormData();
+            data.append('file', queued[index], queued[index].name || 'file');
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + card.id + '&portal=1', true);
+            xhr.setRequestHeader('Accept', 'application/json');
+            xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4) return;
+                if (xhr.status >= 200 && xhr.status < 300) uploadAt(index + 1, done);
+            };
+            xhr.send(data);
+        }
+        var send = el('button', 'asset-tree-btn primary', 'Сделать доступным клиенту');
+        send.type = 'button';
+        send.addEventListener('click', function () {
+            var text = composer.read();
+            uploadAt(0, function () {
+                if (!text) {
+                    close();
+                    openPortalCard(card.id);
+                    return;
+                }
+                sendJson('POST', '/portal/assets/' + card.id + '/comments', { body: text }, function (status) {
+                    if (status >= 200 && status < 300) {
+                        close();
+                        openPortalCard(card.id);
+                    }
+                });
+            });
+        });
+        var cancel = el('button', 'asset-tree-jira-quiet', 'Отмена');
+        cancel.type = 'button';
+        cancel.addEventListener('click', close);
+        composer.actions.appendChild(send);
+        composer.actions.appendChild(cancel);
+        dialog.appendChild(composer.root);
+        composer.root.insertBefore(zone, composer.foot);
+        paint();
+        overlay.appendChild(dialog);
+        overlay.addEventListener('click', function (event) { if (event.target === overlay) close(); });
+        document.body.appendChild(overlay);
+        composer.focus();
+    }
+
+    function portalSize(bytes) {
+        var size = Number(bytes) || 0;
+        if (size < 1024) return size + ' B';
+        if (size < 1048576) return Math.round(size / 1024) + ' KB';
+        return (size / 1048576).toFixed(1) + ' MB';
+    }
+
+    function portalComments(card) {
+        var section = portalSection('Комментарии');
+        (card.comments || []).forEach(function (comment) {
+            var note = el('div', 'asset-tree-portal-comment');
+            note.appendChild(portalAvatar(comment.author));
+            var text = el('div');
+            var author = comment.author && comment.author.displayName ? comment.author.displayName : '';
+            text.appendChild(el('strong', null, author));
+            text.appendChild(el('p', null, comment.body || ''));
+            note.appendChild(text);
+            section.appendChild(note);
+        });
+        var composer = portalComposer('Вставьте здесь комментарий...');
+        var submit = el('button', 'asset-tree-btn primary', 'Публичный комментарий');
+        submit.type = 'button';
+        submit.addEventListener('click', function () {
+            var text = composer.read();
+            if (!text) return;
+            sendJson('POST', '/portal/assets/' + card.id + '/comments', { body: text }, function (status) {
+                if (status >= 200 && status < 300) openPortalCard(card.id);
+            });
+        });
+        var cancel = el('button', 'asset-tree-jira-quiet', 'Отмена');
+        cancel.type = 'button';
+        composer.actions.appendChild(submit);
+        composer.actions.appendChild(cancel);
+        section.appendChild(composer.root);
+        return section;
+    }
+
+    function openPortalPreview(file, files) {
+        var list = files && files.length ? files : [file];
+        var index = 0;
+        var i;
+        for (i = 0; i < list.length; i++) if (list[i].id === file.id) index = i;
+        var overlay = el('div', 'asset-tree-preview-overlay');
+        var bar = el('div', 'asset-tree-preview-bar');
+        var heading = el('div', 'asset-tree-preview-heading');
+        var title = el('div', 'asset-tree-preview-title', '');
+        heading.appendChild(title);
+        var actions = el('div', 'asset-tree-preview-actions');
+        var stage = el('div', 'asset-tree-preview-stage');
+        bar.appendChild(heading);
+        bar.appendChild(actions);
+        overlay.appendChild(bar);
+        overlay.appendChild(stage);
+        function close() {
+            document.removeEventListener('keydown', onKey);
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        function paint(at) {
+            index = at;
+            if (index < 0) index = list.length - 1;
+            if (index >= list.length) index = 0;
+            var current = list[index];
+            title.textContent = current.fileName || '';
+            actions.innerHTML = '';
+            var download = el('a', 'asset-tree-preview-icon');
+            download.href = portalFileUrl(current.id);
+            download.title = 'Скачать';
+            download.setAttribute('aria-label', 'Скачать');
+            download.appendChild(portalGlyph('M12 4v10M8 10l4 4 4-4M6 20h12'));
+            actions.appendChild(download);
+            var print = el('button', 'asset-tree-preview-icon');
+            print.type = 'button';
+            print.title = 'Печать';
+            print.setAttribute('aria-label', 'Печать');
+            print.appendChild(portalGlyph('M7 8V4h10v4M6 10h12a1 1 0 0 1 1 1v4h-3M6 15H5v-4a1 1 0 0 1 1-1M8 13h8v7H8z'));
+            print.addEventListener('click', function () { window.open(portalFileUrl(current.id, '&inline=1'), '_blank'); });
+            actions.appendChild(print);
+            var closeBtn = el('button', 'asset-tree-preview-icon');
+            closeBtn.type = 'button';
+            closeBtn.title = 'Закрыть';
+            closeBtn.setAttribute('aria-label', 'Закрыть');
+            closeBtn.appendChild(portalGlyph('M6 6l12 12M18 6L6 18'));
+            closeBtn.addEventListener('click', close);
+            actions.appendChild(closeBtn);
+            stage.innerHTML = '';
+            var name = String(current.fileName || '').toLowerCase();
+            if (/\.(png|jpe?g|gif|webp)$/.test(name)) {
+                var picture = el('img', 'asset-tree-preview-full');
+                picture.src = portalFileUrl(current.id, '&inline=1');
+                picture.alt = current.fileName || '';
+                stage.appendChild(picture);
+            } else if (/\.pdf$/.test(name)) {
+                var sheet = el('iframe', 'asset-tree-preview-pdf');
+                sheet.src = portalFileUrl(current.id, '&inline=1');
+                stage.appendChild(sheet);
+            } else if (/\.(txt|csv|docx|md|json|xml|rtf|html?)$/.test(name)) {
+                var pre = el('pre', 'asset-tree-preview-text', '...');
+                stage.appendChild(pre);
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', portalFileUrl(current.id, '&preview=text'), true);
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState === 4) pre.textContent = xhr.responseText || '';
+                };
+                xhr.send(null);
+            } else {
+                stage.appendChild(el('p', 'asset-tree-preview-missing', 'Предпросмотр этого файла недоступен. Его можно скачать.'));
+            }
+        }
+        function onKey(event) {
+            if (event.key === 'Escape' || event.keyCode === 27) close();
+            else if (event.key === 'ArrowLeft' || event.keyCode === 37) paint(index - 1);
+            else if (event.key === 'ArrowRight' || event.keyCode === 39) paint(index + 1);
+        }
+        document.addEventListener('keydown', onKey);
+        paint(index);
+        document.body.appendChild(overlay);
     }
 
     function paintPortalMine() {

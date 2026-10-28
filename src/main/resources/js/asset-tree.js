@@ -9,6 +9,12 @@
     var PALETTE = ['#0052CC', '#00875A', '#6554C0', '#FF991F', '#DE350B', '#00A3BF', '#172B4D', '#36B37E'];
     var DEFAULT_PLACE_ICON = 'building';
     var DEFAULT_OBJECT_ICON = 'device';
+    /* Plan units are centimeters. The sheet can cover a 400 m by 300 m floor. */
+    var PLAN_MIN_W = 640;
+    var PLAN_MIN_H = 480;
+    var PLAN_MAX_W = 40000;
+    var PLAN_MAX_H = 30000;
+    var PLAN_CLOSE = 160;
     var ICON_GROUPS = ['places', 'it', 'medical', 'facility', 'marketing', 'service', 'office'];
     var TYPE_ICONS = [
         { key: 'building', g: 'places', d: 'M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v4h4a1 1 0 0 1 1 1v11H4zM7 8h2V6H7v2zm4 0h2V6h-2v2zm-4 4h2v-2H7v2zm4 0h2v-2h-2v2zm6 0h2v-2h-2v2zM7 16h2v-2H7v2zm10 0h2v-2h-2v2zm-7 5h4v-4h-4v4z' },
@@ -395,6 +401,7 @@
         searchScope: 'project',
         sortKey: 'tree',
         sortDir: 'asc',
+        listTops: {},
         treeSort: 'order',
         treeSortDir: 'asc',
         mineColumns: null,
@@ -464,6 +471,7 @@
         mapPlaceId: 0,
         mapStep: 8,
         mapTool: 'select',
+        mapWire: '',
         mapAssetId: 0,
         mapArmId: 0,
         mapLayer: 'plan',
@@ -1112,6 +1120,9 @@
         if (asset.custodian) {
             parts.push(asset.custodian.displayName || '', asset.custodian.email || '', asset.custodian.department || '');
         }
+        if (asset.issued) {
+            parts.push(asset.issued.displayName || '', asset.issued.email || '', asset.issued.department || '');
+        }
         (asset.attributes || []).forEach(function (attribute) {
             parts.push(attribute.name || '', attribute.value || '', attribute.displayValue || '');
             if (attribute.kind === 'date' && attribute.value) parts.push(formatFieldDate(attribute.value));
@@ -1174,6 +1185,7 @@
             { key: 'type', label: t('type'), kind: 'type' },
             { key: 'status', label: t('status'), kind: 'status' },
             { key: 'custodian', label: t('custodian'), kind: 'text' },
+            { key: 'issued', label: t('issuedTo'), kind: 'text' },
             { key: 'updated', label: t('updated'), kind: 'text' }
         ];
         var seen = {};
@@ -1250,11 +1262,18 @@
     }
 
     function fieldRaw(asset, key) {
+        if (!asset) return '';
         if (key === 'name') return asset.name || '';
+        if (key === 'key') return asset.objectKey || '';
         if (key === 'type') return asset.typeLabel || typeOf(asset.typeKey).label || '';
         if (key === 'status') return statusLabel(asset.status);
         if (key === 'custodian') return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        if (key === 'issued') return asset.issued && asset.issued.displayName ? asset.issued.displayName : '';
+        if (key === 'location') return asset.location || '';
+        if (key === 'description') return asset.description || '';
+        if (key === 'created') return asset.created || '';
         if (key === 'updated') return asset.updated || '';
+        if (key === 'project') return asset.projectName || asset.projectKey || '';
         if (key.indexOf('attr:') === 0) return attrRaw(asset, key);
         return '';
     }
@@ -1300,6 +1319,10 @@
         return asset && asset.custodian && asset.custodian.userKey ? asset.custodian.userKey : '';
     }
 
+    function issuedPersonKey(asset) {
+        return asset && asset.issued && asset.issued.userKey ? asset.issued.userKey : '';
+    }
+
     function rulePasses(asset, rule) {
         if (rule && rule.ids) {
             return !!(rule.ids[asset.id] || rule.ids[String(asset.id)]);
@@ -1310,8 +1333,8 @@
         if (rule && rule.field === 'place') {
             return placeRulePasses(asset, rule);
         }
-        if (rule && rule.field === 'custodian' && (rule.userKey || (rule.userKeys && rule.userKeys.length))) {
-            var person = holderKey(asset);
+        if (rule && (rule.field === 'custodian' || rule.field === 'issued') && (rule.userKey || (rule.userKeys && rule.userKeys.length))) {
+            var person = rule.field === 'issued' ? issuedPersonKey(asset) : holderKey(asset);
             if (rule.userKeys && rule.userKeys.length) {
                 for (var holder = 0; holder < rule.userKeys.length; holder++) {
                     if (rule.userKeys[holder] === person) return true;
@@ -2311,16 +2334,20 @@
         }
     }
 
+    function scrollTargets() {
+        var root = document.getElementById('asset-tree-app');
+        if (!root) return [];
+        return root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog, .asset-tree-request-main, .asset-tree-request-aside, #asset-tree-scroll, #asset-tree-detail');
+    }
+
     function captureViewScroll() {
         var nodes = [];
-        var root = document.getElementById('asset-tree-app');
-        if (root) {
-            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog');
-            var index;
-            for (index = 0; index < found.length; index++) {
-                nodes.push({ top: found[index].scrollTop, left: found[index].scrollLeft });
-            }
+        var found = scrollTargets();
+        var index;
+        for (index = 0; index < found.length; index++) {
+            nodes.push({ id: found[index].id || '', top: found[index].scrollTop, left: found[index].scrollLeft });
         }
+        var root = document.getElementById('asset-tree-app');
         var clock = root ? root.querySelector('.asset-tree-clock') : null;
         var outlook = root ? root.querySelector('.asset-tree-outlook') : null;
         return {
@@ -2335,12 +2362,21 @@
     function restoreViewScroll(kept) {
         if (!kept) return;
         var root = document.getElementById('asset-tree-app');
-        if (root && kept.nodes && kept.nodes.length) {
-            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog');
+        if (kept.nodes && kept.nodes.length) {
+            var found = scrollTargets();
+            var anonymous = [];
             var index;
-            for (index = 0; index < found.length && index < kept.nodes.length; index++) {
-                found[index].scrollTop = kept.nodes[index].top;
-                found[index].scrollLeft = kept.nodes[index].left;
+            for (index = 0; index < found.length; index++) {
+                if (!found[index].id) anonymous.push(found[index]);
+            }
+            var anonIndex = 0;
+            for (index = 0; index < kept.nodes.length; index++) {
+                var saved = kept.nodes[index];
+                var node = saved.id ? document.getElementById(saved.id) : null;
+                if (!node && !saved.id && anonIndex < anonymous.length) node = anonymous[anonIndex++];
+                if (!node) continue;
+                node.scrollTop = saved.top;
+                node.scrollLeft = saved.left;
             }
         }
         if (kept.clock != null && root) {
@@ -2669,6 +2705,53 @@
         return nest;
     }
 
+    function listContext() {
+        var group = state.typeGroup;
+        var base = group
+            ? ('group:' + group.placeId + ':' + group.typeKey + ':' + (group.scope || ''))
+            : ('node:' + (state.selectedId || 'root'));
+        var query = textQuery();
+        if (query) base += ':q:' + query.toLowerCase();
+        if (state.searchScope === 'all' && query) base += ':all';
+        return base;
+    }
+
+    function noteListPosition() {
+        var detail = document.getElementById('asset-tree-detail');
+        if (!detail || detail.className.indexOf('is-queue') < 0) return;
+        var key = detail.getAttribute('data-list-key') || '';
+        if (!key) return;
+        if (!state.listTops) state.listTops = {};
+        state.listTops[key] = detail.scrollTop;
+    }
+
+    function restoreListedScroll(detail) {
+        if (!detail || detail.className.indexOf('is-queue') < 0 || !state.listTops) return;
+        var key = detail.getAttribute('data-list-key') || '';
+        if (!key || state.listTops[key] == null) return;
+        detail.scrollTop = state.listTops[key];
+    }
+
+    function readPaneScroll(section) {
+        if (!section) return null;
+        var main = section.querySelector('.asset-tree-request-main');
+        var aside = section.querySelector('.asset-tree-request-aside');
+        return {
+            main: main ? main.scrollTop : 0,
+            aside: aside ? aside.scrollTop : 0,
+            detail: section.scrollTop || 0
+        };
+    }
+
+    function writePaneScroll(section, saved) {
+        if (!section || !saved) return;
+        var main = section.querySelector('.asset-tree-request-main');
+        var aside = section.querySelector('.asset-tree-request-aside');
+        if (main && saved.main) main.scrollTop = saved.main;
+        if (aside && saved.aside) aside.scrollTop = saved.aside;
+        if (saved.detail) section.scrollTop = saved.detail;
+    }
+
     function replaceDetail() {
         var frame = document.getElementById('asset-tree-frame');
         var existing = document.getElementById('asset-tree-detail');
@@ -2676,7 +2759,10 @@
             renderFrame();
             return;
         }
-        frame.replaceChild(renderDetail(), existing);
+        noteListPosition();
+        var next = renderDetail();
+        frame.replaceChild(next, existing);
+        restoreListedScroll(next);
     }
 
     function appendLevel(container, parentId, visible, matches) {
@@ -3706,10 +3792,13 @@
 
     function renderDetail() {
         var asset = state.selectedId ? byId()[state.selectedId] : null;
-        if (state.pane === 'card' && asset && !isFolder(asset)) {
+        if (state.pane === 'card' && asset && !isFolder(asset) && !textQuery()) {
             var section = el('section', 'asset-tree-detail');
             section.id = 'asset-tree-detail';
             return section;
+        }
+        if (textQuery()) {
+            return renderChildList(null);
         }
         if (state.typeGroup && byId()[state.typeGroup.placeId]) {
             return renderTypeGroup();
@@ -3731,6 +3820,7 @@
         var type = typeOf(group ? group.typeKey : '');
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
+        section.setAttribute('data-list-key', listContext());
         var source = group.scope === 'under' ? equipmentUnder(group.placeId) : equipmentIn(group.placeId, group.typeKey);
         if (group.scope === 'under') {
             source = source.filter(function (asset) { return asset.typeKey === group.typeKey; });
@@ -3788,7 +3878,9 @@
                     selectAsset(child.id);
                 })
             ].concat(groupColumns.map(function (key) { return columnCell(child, key); }));
-        }), [t('name')].concat(columnHeaders(groupColumns)), {
+        }), [columnSortHeader(t('name'), 'name')].concat(groupColumns.map(function (key) {
+            return columnSortHeader(columnLabel(key), key);
+        })), {
             scope: 'group:' + group.placeId + ':' + group.typeKey,
             rows: kids.map(function (child) {
                 return { key: String(child.id), kind: 'object', label: child.name, projectKey: child.projectKey || state.projectKey, asset: child };
@@ -3836,6 +3928,7 @@
             more: 'M6 10a2 2 0 1 0 .01 4A2 2 0 0 0 6 10zm6 0a2 2 0 1 0 .01 4A2 2 0 0 0 12 10zm6 0a2 2 0 1 0 .01 4A2 2 0 0 0 18 10z',
             print: 'M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z',
             copy: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z',
+            link: 'M3.9 12a5 5 0 0 1 5-5h4v2h-4a3 3 0 0 0 0 6h4v2h-4a5 5 0 0 1-5-5zm6.1-1h4v2h-4v-2zm5.1-4h4a5 5 0 0 1 0 10h-4v-2h4a3 3 0 0 0 0-6h-4V7z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
             trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 7h12l-1 14H7L6 7z',
             cloud: 'M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 8.6 3.5 3.5 0 0 0 7 18z',
@@ -4153,6 +4246,7 @@
         });
         main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
         main.appendChild(descriptionModule(full, true));
+        main.appendChild(fileBlock(full));
 
         if (departments.length) {
             var places = el('div');
@@ -4260,6 +4354,7 @@
     function renderChildList(asset) {
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
+        section.setAttribute('data-list-key', listContext());
         var project = currentProject();
         var title = asset ? asset.name : (project ? project.name : state.projectKey);
         var parentId = asset ? asset.id : null;
@@ -4329,8 +4424,10 @@
         var columns = tableColumns([]);
         var showField = state.sortKey && state.sortKey.indexOf('attr:') === 0 && columns.indexOf(state.sortKey) < 0;
         if (showField) columns = columns.concat([state.sortKey]);
-        var headers = [t('name')].concat(columnHeaders(columns));
-        if (remote) headers.push(t('project'));
+        var headers = [columnSortHeader(t('name'), 'name')].concat(columns.map(function (key) {
+            return columnSortHeader(columnLabel(key), key);
+        }));
+        if (remote) headers.push(columnSortHeader(t('project'), 'project'));
         section.appendChild(selectableTable(kids.map(function (child) {
             var nested = childrenOf(child.id).length;
             var cells = [
@@ -4364,10 +4461,10 @@
         return section;
     }
 
-    var DEFAULT_COLUMNS = ['key', 'type', 'status', 'custodian'];
-    var BASE_COLUMNS = ['key', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated'];
-    var MINE_DEFAULT_COLUMNS = ['key', 'project', 'status', 'location'];
-    var MINE_BASE_COLUMNS = ['key', 'project', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated', 'role'];
+    var DEFAULT_COLUMNS = ['key', 'type', 'status', 'custodian', 'issued'];
+    var BASE_COLUMNS = ['key', 'type', 'status', 'custodian', 'issued', 'location', 'description', 'created', 'updated'];
+    var MINE_DEFAULT_COLUMNS = ['key', 'project', 'status', 'issued', 'location'];
+    var MINE_BASE_COLUMNS = ['key', 'project', 'type', 'status', 'custodian', 'issued', 'location', 'description', 'created', 'updated', 'role'];
 
     function typeFieldColumn(key) {
         var parts = key.split(':');
@@ -4385,6 +4482,7 @@
 
     function columnLabel(key) {
         if (key === 'key') return t('keyLabel');
+        if (key === 'issued') return t('issuedTo');
         if (key === 'location') return t('columnLocation');
         if (key.indexOf('attr:') === 0) return fieldSpec(key).label;
         return t(key);
@@ -4499,6 +4597,7 @@
         if (key === 'type') return asset.typeLabel || typeOf(asset.typeKey).label || '';
         if (key === 'status') return statusLabel(asset.status);
         if (key === 'custodian') return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        if (key === 'issued') return asset.issued && asset.issued.displayName ? asset.issued.displayName : '';
         if (key === 'description') return asset.description || '';
         if (key === 'created' || key === 'updated') return asset[key] || '';
         if (key.indexOf('mineattr:') === 0) {
@@ -4522,6 +4621,9 @@
         if (key === 'location') return asset.location || t('root');
         if (key === 'custodian') {
             return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone');
+        }
+        if (key === 'issued') {
+            return asset.issued && asset.issued.displayName ? asset.issued.displayName : t('custodianNone');
         }
         if (key === 'description') {
             var text = asset.description || '';
@@ -4561,6 +4663,23 @@
             renderFrame();
         });
         if (active) buttonNode.appendChild(document.createTextNode(state.mineSortDir === 'desc' ? ' \u2193' : ' \u2191'));
+        buttonNode.title = t('sortBy') + ': ' + label;
+        buttonNode.setAttribute('aria-pressed', active ? 'true' : 'false');
+        return buttonNode;
+    }
+
+    function columnSortHeader(label, key) {
+        var active = state.sortKey === key;
+        var buttonNode = button(label, 'asset-tree-th-sort' + (active ? ' is-active' : ''), function () {
+            if (state.sortKey === key) {
+                state.sortDir = state.sortDir === 'desc' ? 'asc' : 'desc';
+            } else {
+                state.sortKey = key;
+                state.sortDir = 'asc';
+            }
+            replaceDetail();
+        });
+        if (active) buttonNode.appendChild(document.createTextNode(state.sortDir === 'desc' ? ' \u2193' : ' \u2191'));
         buttonNode.title = t('sortBy') + ': ' + label;
         buttonNode.setAttribute('aria-pressed', active ? 'true' : 'false');
         return buttonNode;
@@ -4608,6 +4727,9 @@
         if (key === 'status') return lozenge(asset.status);
         if (key === 'custodian') {
             return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone');
+        }
+        if (key === 'issued') {
+            return asset.issued && asset.issued.displayName ? asset.issued.displayName : t('custodianNone');
         }
         if (key === 'location') {
             var parent = asset.parentId ? byId()[asset.parentId] : null;
@@ -5730,22 +5852,44 @@
 
     function staticPeople(asset) {
         var box = el('div');
-        box.appendChild(personField(t('custodian'), asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone'), null));
-        box.appendChild(personField(t('author'), asset.createdBy || '', null));
+        box.appendChild(personField(t('custodian'), asset.custodian));
+        box.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         return box;
     }
 
-    function personField(label, name, extra) {
-        var field = el('div', 'asset-tree-people-field');
-        field.appendChild(el('div', 'asset-tree-people-label', label));
+    function avatarNode(profile, extraClass) {
+        var who = profile && profile.displayName ? profile.displayName : '';
+        var url = profile && profile.avatarUrl ? profile.avatarUrl : '';
+        var cls = 'asset-tree-avatar' + (extraClass ? ' ' + extraClass : '');
+        if (url) {
+            var img = el('img', cls);
+            img.src = url;
+            img.alt = '';
+            img.addEventListener('error', function () {
+                var fallback = el('span', cls + (who ? '' : ' is-blank'), who ? initials(who) : '');
+                if (img.parentNode) img.parentNode.replaceChild(fallback, img);
+            });
+            return img;
+        }
+        return el('span', cls + (who ? '' : ' is-blank'), who ? initials(who) : '');
+    }
+
+    function personLine(profile, extra) {
+        var who = profile && profile.displayName ? profile.displayName : '';
         var row = el('div', 'asset-tree-person');
-        var blank = !name || name === t('custodianNone');
-        row.appendChild(el('span', 'asset-tree-avatar' + (blank ? ' is-blank' : ''), blank ? '' : initials(name)));
+        row.appendChild(avatarNode(who ? profile : null));
         var text = el('div', 'asset-tree-person-text');
-        text.appendChild(el('strong', null, name || t('custodianNone')));
+        text.appendChild(el('strong', null, who || t('custodianNone')));
+        if (profile && profile.email) text.appendChild(el('span', null, profile.email));
         if (extra) text.appendChild(extra);
         row.appendChild(text);
-        field.appendChild(row);
+        return row;
+    }
+
+    function personField(label, profile) {
+        var field = el('div', 'asset-tree-people-field');
+        field.appendChild(el('div', 'asset-tree-people-label', label));
+        field.appendChild(personLine(profile && profile.displayName ? profile : null));
         return field;
     }
 
@@ -5807,17 +5951,14 @@
         var field = el('div', 'asset-tree-people-field');
         field.appendChild(el('div', 'asset-tree-people-label', options.label));
         var who = profile && profile.displayName ? profile.displayName : '';
-        var person = el('div', 'asset-tree-person');
-        person.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
-        var personText = el('div', 'asset-tree-person-text');
-        personText.appendChild(el('strong', null, who || t('custodianNone')));
-        if (profile && profile.email) personText.appendChild(el('span', null, profile.email));
+        var extra = null;
         if (state.canEdit && state.userKey && (!profile || profile.userKey !== state.userKey)) {
-            personText.appendChild(button(t('assignMe'), 'asset-tree-linkish', function () {
+            extra = button(t('assignMe'), 'asset-tree-linkish', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
                 options.onPick(state.userKey);
-            }));
+            });
         }
-        person.appendChild(personText);
+        var person = personLine(who ? profile : null, extra);
         var box = el('div', 'asset-tree-assign');
         box.id = options.boxId;
         if (!state.canEdit) {
@@ -5877,14 +6018,255 @@
         if (input) input.focus();
     }
 
+    function commentPlain(node) {
+        var text = '';
+        function walk(current) {
+            var child = current.firstChild;
+            while (child) {
+                if (child.nodeType === 3) text += child.nodeValue;
+                else if (child.nodeType === 1) {
+                    var name = child.tagName.toLowerCase();
+                    if ((name === 'br' || name === 'p' || name === 'div' || name === 'li' || name === 'h2' || name === 'h3') && text && text.charAt(text.length - 1) !== '\n') text += '\n';
+                    walk(child);
+                }
+                child = child.nextSibling;
+            }
+        }
+        walk(node);
+        return text.replace(/^\s+|\s+$/g, '');
+    }
+
+    function commentSerialize(node) {
+        var html = '';
+        var child = node.firstChild;
+        while (child) {
+            if (child.nodeType === 3) html += htmlEscape(child.nodeValue);
+            else if (child.nodeType === 1) {
+                var name = child.tagName.toLowerCase();
+                var inner = commentSerialize(child);
+                if (name === 'br') html += '<br>';
+                else if (name === 'b' || name === 'strong') html += '<strong>' + inner + '</strong>';
+                else if (name === 'i' || name === 'em') html += '<em>' + inner + '</em>';
+                else if (name === 'u') html += '<u>' + inner + '</u>';
+                else if (name === 'ul') html += '<ul>' + inner + '</ul>';
+                else if (name === 'ol') html += '<ol>' + inner + '</ol>';
+                else if (name === 'li') html += '<li>' + inner + '</li>';
+                else if (name === 'h2' || name === 'h3' || name === 'p') html += '<' + name + '>' + inner + '</' + name + '>';
+                else if (name === 'div') html += '<p>' + inner + '</p>';
+                else if (name === 'a') {
+                    var href = child.getAttribute('href') || '';
+                    if (/^(https?:|mailto:)/i.test(href)) html += '<a href="' + htmlEscape(href) + '">' + inner + '</a>';
+                    else html += inner;
+                } else if (name === 'font' || name === 'span') {
+                    var color = name === 'font' ? (child.getAttribute('color') || '') : '';
+                    if (!color) {
+                        var found = /color\s*:\s*(#[0-9a-f]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))/i.exec(child.getAttribute('style') || '');
+                        if (found) color = found[1].replace(/\s+/g, '');
+                    }
+                    if (/^#[0-9a-f]{3,8}$/i.test(color) || /^rgb\(\d{1,3},\d{1,3},\d{1,3}\)$/i.test(color)) html += '<span style="color:' + color + '">' + inner + '</span>';
+                    else html += inner;
+                } else html += inner;
+            }
+            child = child.nextSibling;
+        }
+        return html;
+    }
+
+    function appendSafeHtml(parent, html) {
+        var raw = String(html || '');
+        if (raw.indexOf('<') < 0) {
+            raw.split('\n').forEach(function (line, index) {
+                if (index) parent.appendChild(document.createElement('br'));
+                parent.appendChild(document.createTextNode(line));
+            });
+            return;
+        }
+        var parsed = new DOMParser().parseFromString('<div>' + raw + '</div>', 'text/html');
+        var source = parsed.body && parsed.body.firstChild;
+        function copy(from, to) {
+            var node = from.firstChild;
+            while (node) {
+                if (node.nodeType === 3) to.appendChild(document.createTextNode(node.nodeValue || ''));
+                else if (node.nodeType === 1) {
+                    var name = node.tagName.toLowerCase();
+                    var next = null;
+                    if (name === 'br') next = document.createElement('br');
+                    else if (name === 'strong' || name === 'b' || name === 'em' || name === 'i' || name === 'u' || name === 'ul' || name === 'ol' || name === 'li' || name === 'p' || name === 'h2' || name === 'h3') next = document.createElement(name === 'b' ? 'strong' : (name === 'i' ? 'em' : name));
+                    else if (name === 'a') {
+                        var href = node.getAttribute('href') || '';
+                        if (/^(https?:|mailto:)/i.test(href)) {
+                            next = document.createElement('a');
+                            next.setAttribute('href', href);
+                            next.setAttribute('rel', 'nofollow');
+                        }
+                    } else if (name === 'span') {
+                        var style = node.getAttribute('style') || '';
+                        var color = /color\s*:\s*(#[0-9a-f]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))/i.exec(style);
+                        if (color) {
+                            next = document.createElement('span');
+                            next.style.color = color[1].replace(/\s+/g, '');
+                        }
+                    }
+                    if (next) {
+                        if (name !== 'br') copy(node, next);
+                        to.appendChild(next);
+                    } else copy(node, to);
+                }
+                node = node.nextSibling;
+            }
+        }
+        if (source) copy(source, parent);
+    }
+
+    function jiraComposer(options) {
+        var box = el('div', 'asset-tree-jira-editor');
+        var bar = el('div', 'asset-tree-jira-bar');
+        var visual = el('div', 'asset-tree-jira-visual');
+        visual.contentEditable = 'true';
+        visual.setAttribute('role', 'textbox');
+        visual.setAttribute('aria-multiline', 'true');
+        visual.setAttribute('data-placeholder', options.placeholder || t('commentPlaceholder'));
+        var source = el('textarea', 'asset-tree-jira-source');
+        source.placeholder = options.placeholder || t('commentPlaceholder');
+        source.hidden = true;
+        var textMode = false;
+        function markEmpty() {
+            var empty = !commentPlain(visual);
+            if (empty) visual.classList.add('is-empty');
+            else visual.classList.remove('is-empty');
+        }
+        function command(name, value) {
+            if (textMode) return;
+            visual.focus();
+            try { document.execCommand(name, false, value || null); } catch (ignore) {}
+            markEmpty();
+        }
+        function tool(label, title, action) {
+            var node = button(label, 'asset-tree-jira-tool', function (event) {
+                event.preventDefault();
+                action();
+            });
+            node.title = title;
+            node.setAttribute('aria-label', title);
+            node.addEventListener('mousedown', function (event) { event.preventDefault(); });
+            bar.appendChild(node);
+            return node;
+        }
+        var style = document.createElement('select');
+        style.className = 'asset-tree-jira-style';
+        style.title = t('commentStyle');
+        [['p', t('commentStyle')], ['h2', 'H2'], ['h3', 'H3']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = pair[1];
+            style.appendChild(option);
+        });
+        style.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        style.addEventListener('change', function () {
+            command('formatBlock', style.value === 'p' ? 'p' : style.value);
+            style.value = 'p';
+        });
+        bar.appendChild(style);
+        tool('B', 'Bold', function () { command('bold'); });
+        tool('I', 'Italic', function () { command('italic'); });
+        tool('U', 'Underline', function () { command('underline'); });
+        var color = document.createElement('input');
+        color.type = 'color';
+        color.className = 'asset-tree-jira-color';
+        color.value = '#172b4d';
+        color.title = t('commentColor');
+        color.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        color.addEventListener('change', function () { command('foreColor', color.value); });
+        bar.appendChild(color);
+        var linkTool = tool('', t('commentLink'), function () {
+            var href = window.prompt(t('commentLink'), 'https://');
+            if (!href) return;
+            if (!/^(https?:|mailto:)/i.test(href)) return;
+            command('createLink', href);
+        });
+        linkTool.appendChild(toolIcon('link'));
+        tool('•', t('commentList'), function () { command('insertUnorderedList'); });
+        tool('1.', t('commentOrdered'), function () { command('insertOrderedList'); });
+        box.appendChild(bar);
+        box.appendChild(visual);
+        box.appendChild(source);
+        visual.addEventListener('input', markEmpty);
+        visual.addEventListener('keyup', markEmpty);
+        markEmpty();
+        var foot = el('div', 'asset-tree-jira-foot');
+        var tabs = el('div', 'asset-tree-jira-tabs');
+        var visualTab = button(t('commentVisual'), 'asset-tree-jira-tab is-on', function () {
+            if (!textMode) return;
+            textMode = false;
+            visual.innerHTML = '';
+            String(source.value || '').split('\n').forEach(function (line, index) {
+                if (index) visual.appendChild(document.createElement('br'));
+                visual.appendChild(document.createTextNode(line));
+            });
+            source.hidden = true;
+            visual.hidden = false;
+            visualTab.classList.add('is-on');
+            textTab.classList.remove('is-on');
+            markEmpty();
+            visual.focus();
+        });
+        var textTab = button(t('commentText'), 'asset-tree-jira-tab', function () {
+            if (textMode) return;
+            textMode = true;
+            source.value = commentPlain(visual);
+            visual.hidden = true;
+            source.hidden = false;
+            textTab.classList.add('is-on');
+            visualTab.classList.remove('is-on');
+            source.focus();
+        });
+        tabs.appendChild(visualTab);
+        tabs.appendChild(textTab);
+        var actions = el('div', 'asset-tree-jira-actions');
+        function currentText() {
+            if (textMode) return String(source.value || '').replace(/^\s+|\s+$/g, '');
+            if (!commentPlain(visual)) return '';
+            return commentSerialize(visual).replace(/^\s+|\s+$/g, '');
+        }
+        if (options.onPublic) actions.appendChild(button(options.publicLabel || t('commentPublic'), 'asset-tree-btn primary', function () { options.onPublic(currentText()); }));
+        if (options.onInternal) actions.appendChild(button(options.internalLabel || t('commentInternal'), 'asset-tree-jira-quiet', function () { options.onInternal(currentText()); }));
+        if (options.onCancel) actions.appendChild(button(t('cancel'), 'asset-tree-jira-quiet', options.onCancel));
+        foot.appendChild(tabs);
+        foot.appendChild(actions);
+        box.appendChild(foot);
+        return {
+            root: box,
+            foot: foot,
+            read: currentText,
+            focus: function () { visual.focus(); },
+            clear: function () {
+                visual.innerHTML = '';
+                source.value = '';
+                markEmpty();
+            }
+        };
+    }
+
+    function sendAssetComment(asset, text, internal, composer) {
+        if (!text) {
+            setFormError(t('commentPlaceholder'));
+            return;
+        }
+        ajax('POST', '/assets/' + asset.id + '/comments', { body: text, internal: !!internal }, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                if (composer) composer.clear();
+                selectAsset(asset.id, true);
+            } else setFormError((payload && payload.message) || t('errorTitle'));
+        });
+    }
+
     function openComment() {
         var editor = document.getElementById('asset-tree-comment-editor');
         if (!editor) return;
         editor.hidden = false;
         var trigger = document.getElementById('asset-tree-comment-trigger');
         if (trigger) trigger.hidden = true;
-        var area = editor.querySelector('textarea');
-        if (area) area.focus();
+        if (editor.focusComposer) editor.focusComposer();
         editor.scrollIntoView({ block: 'nearest' });
     }
 
@@ -5892,14 +6274,17 @@
         var row = el('div', 'asset-tree-activity-comment');
         var head = el('div', 'asset-tree-action-head');
         var author = comment.author && comment.author.displayName ? comment.author.displayName : '';
-        head.appendChild(el('span', 'asset-tree-avatar is-small', initials(author)));
+        head.appendChild(avatarNode(comment.author, 'is-small'));
         var details = el('div', 'asset-tree-action-details');
         var line = el('div', 'asset-tree-action-line');
         line.appendChild(el('span', 'asset-tree-comment-user', author));
+        if (comment.internal) line.appendChild(el('span', 'asset-tree-comment-internal', t('commentInternalTag')));
         line.appendChild(document.createTextNode(' ' + t('actComment') + ' \u2014 '));
         line.appendChild(el('span', 'asset-tree-comment-time', stamp(comment.created)));
         details.appendChild(line);
-        details.appendChild(el('div', 'asset-tree-action-body', comment.body || ''));
+        var bodyNode = el('div', 'asset-tree-action-body');
+        appendSafeHtml(bodyNode, comment.body || '');
+        details.appendChild(bodyNode);
         var own = !!(comment.author && comment.author.userKey && comment.author.userKey === state.userKey);
         if (state.canArrange || (own && mayEdit(asset))) {
             var links = el('div', 'asset-tree-action-links');
@@ -5945,6 +6330,8 @@
         if (item.action === 'comment_delete') return t('actCommentDelete');
         if (item.action === 'file') return t('actFile');
         if (item.action === 'file_delete') return t('actFileDelete');
+        if (item.action === 'share') return t('actShare');
+        if (item.action === 'share_remove') return t('actShareRemove');
         if (item.action === 'card_image') return t('actCardImage');
         if (item.action === 'card_image_delete') return t('actCardImageDelete');
         if (item.action === 'move') return t('actMove');
@@ -5963,7 +6350,7 @@
         var row = el('div', 'asset-tree-history');
         var head = el('div', 'asset-tree-history-head');
         var author = item.author && item.author.displayName ? item.author.displayName : '';
-        head.appendChild(el('span', 'asset-tree-avatar', initials(author)));
+        head.appendChild(avatarNode(item.author));
         var text = el('div');
         var line = el('div');
         line.appendChild(el('strong', null, author));
@@ -6002,7 +6389,7 @@
         if (item.action === 'service_due' || item.action === 'service_done') {
             var when = formatFieldDate(item.newValue);
             change.appendChild(el('span', null, item.action === 'service_done' ? when : ((item.field ? item.field + ' · ' : '') + when)));
-        } else if (item.action === 'file' || item.action === 'file_delete' || item.action === 'comment' || item.action === 'comment_delete') {
+        } else if (item.action === 'file' || item.action === 'file_delete' || item.action === 'comment' || item.action === 'comment_delete' || item.action === 'share' || item.action === 'share_remove') {
             change.appendChild(el('span', null, newText || oldText));
         } else if (item.action === 'status') {
             if (item.oldValue) change.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(item.oldValue), statusLabel(item.oldValue)));
@@ -6077,34 +6464,284 @@
             var editor = el('div', 'asset-tree-comment-editor');
             editor.id = 'asset-tree-comment-editor';
             editor.hidden = true;
-            var area = el('textarea', 'asset-tree-comment-box');
-            area.placeholder = t('commentPlaceholder');
-            var actions = el('div', 'asset-tree-comment-actions');
-            actions.appendChild(button(t('commentSubmit'), 'asset-tree-btn primary', function () {
-                var text = area.value.trim();
-                if (!text) {
-                    setFormError(t('commentPlaceholder'));
-                    return;
+            var composer = jiraComposer({
+                placeholder: t('commentPlaceholder'),
+                onPublic: function (text) { sendAssetComment(asset, text, false, composer); },
+                onInternal: function (text) { sendAssetComment(asset, text, true, composer); },
+                onCancel: function () {
+                    editor.hidden = true;
+                    composer.clear();
+                    var trigger = document.getElementById('asset-tree-comment-trigger');
+                    if (trigger) trigger.hidden = false;
                 }
-                ajax('POST', '/assets/' + asset.id + '/comments', { body: text }, function (status, payload) {
-                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
-                    else setFormError((payload && payload.message) || t('errorTitle'));
-                });
-            }));
-            actions.appendChild(button(t('cancel'), 'asset-tree-linkish', function () {
-                editor.hidden = true;
-                area.value = '';
-                var trigger = document.getElementById('asset-tree-comment-trigger');
-                if (trigger) trigger.hidden = false;
-            }));
-            editor.appendChild(area);
-            editor.appendChild(actions);
+            });
+            editor.focusComposer = composer.focus;
+            editor.appendChild(composer.root);
             body.appendChild(editor);
             var trigger = toolButton(t('addComment'), 'comment', openComment);
             trigger.id = 'asset-tree-comment-trigger';
             body.appendChild(trigger);
         }
         return moduleBlock(t('activityTitle'), body);
+    }
+
+    function fileUrl(id, extra) {
+        return contextPath() + '/plugins/servlet/asset-tree-file?id=' + encodeURIComponent(id) + (extra || '');
+    }
+
+    function previewKind(file) {
+        var name = String(file && file.fileName || '').toLowerCase();
+        var ext = name.indexOf('.') < 0 ? '' : name.split('.').pop();
+        if (ext === 'svg') return '';
+        if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif' || ext === 'webp') return 'image';
+        if (ext === 'pdf') return 'pdf';
+        if (ext === 'txt' || ext === 'csv' || ext === 'log' || ext === 'md' || ext === 'json' || ext === 'xml'
+            || ext === 'html' || ext === 'htm' || ext === 'rtf' || ext === 'doc' || ext === 'docx'
+            || ext === 'xls' || ext === 'xlsx') return 'text';
+        var type = String(file && file.contentType || '').toLowerCase();
+        if (type.indexOf('image/') === 0 && type.indexOf('svg') < 0) return 'image';
+        if (type === 'application/pdf') return 'pdf';
+        if (type.indexOf('text/') === 0) return 'text';
+        return '';
+    }
+
+    function closeFilePreview() {
+        var open = document.querySelector('.asset-tree-preview-overlay');
+        if (!open) return;
+        if (open.onClose) open.onClose();
+        if (open.parentNode) open.parentNode.removeChild(open);
+    }
+
+    function openFilePreview(file, files) {
+        closeFilePreview();
+        var list = files && files.length ? files : [file];
+        var index = 0;
+        var i;
+        for (i = 0; i < list.length; i++) {
+            if (list[i] && list[i].id === file.id) index = i;
+        }
+        var overlay = el('div', 'asset-tree-preview-overlay');
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closeFilePreview();
+        });
+        var bar = el('div', 'asset-tree-preview-bar');
+        var heading = el('div', 'asset-tree-preview-heading');
+        var title = el('div', 'asset-tree-preview-title', '');
+        var meta = el('div', 'asset-tree-preview-sub', '');
+        heading.appendChild(title);
+        heading.appendChild(meta);
+        var actions = el('div', 'asset-tree-preview-actions');
+        var stage = el('div', 'asset-tree-preview-stage');
+        bar.appendChild(heading);
+        bar.appendChild(actions);
+        overlay.appendChild(bar);
+        overlay.appendChild(stage);
+        function paint(at) {
+            index = at;
+            if (index < 0) index = list.length - 1;
+            if (index >= list.length) index = 0;
+            var current = list[index];
+            var kind = previewKind(current);
+            title.textContent = current.fileName || '';
+            meta.textContent = [fileSize(current.size), current.authorName || ''].filter(Boolean).join(' · ');
+            actions.innerHTML = '';
+            if (list.length > 1) {
+                actions.appendChild(previewIconButton(t('filePrev'), 'prev', function () { paint(index - 1); }));
+                actions.appendChild(previewIconButton(t('fileNext'), 'next', function () { paint(index + 1); }));
+            }
+            var download = previewIconButton(t('fileDownload'), 'download');
+            download.href = fileUrl(current.id);
+            download.setAttribute('download', current.fileName || 'file');
+            actions.appendChild(download);
+            actions.appendChild(previewIconButton(t('filePrint'), 'print', function () { printPreviewFile(current); }));
+            actions.appendChild(previewIconButton(t('close'), 'close', closeFilePreview));
+            stage.innerHTML = '';
+            if (kind === 'image') {
+                var picture = el('img', 'asset-tree-preview-full');
+                picture.src = fileUrl(current.id, '&inline=1');
+                picture.alt = current.fileName || '';
+                stage.appendChild(picture);
+            } else if (kind === 'pdf') {
+                var sheet = el('iframe', 'asset-tree-preview-pdf');
+                sheet.src = fileUrl(current.id, '&inline=1');
+                sheet.title = current.fileName || '';
+                stage.appendChild(sheet);
+            } else if (kind === 'text') {
+                var text = el('pre', 'asset-tree-preview-text', t('loading'));
+                stage.appendChild(text);
+                loadPreviewText(current, text);
+            } else {
+                stage.appendChild(el('p', 'asset-tree-preview-missing', t('fileNoPreview')));
+            }
+        }
+        function onKey(event) {
+            if (event.key === 'Escape' || event.keyCode === 27) closeFilePreview();
+            else if (event.key === 'ArrowLeft' || event.keyCode === 37) paint(index - 1);
+            else if (event.key === 'ArrowRight' || event.keyCode === 39) paint(index + 1);
+        }
+        overlay.onClose = function () {
+            document.removeEventListener('keydown', onKey);
+        };
+        document.addEventListener('keydown', onKey);
+        paint(index);
+        document.body.appendChild(overlay);
+    }
+
+    function previewIconButton(label, glyph, onClick) {
+        var node = onClick ? button('', 'asset-tree-preview-icon', onClick) : el('a', 'asset-tree-preview-icon');
+        node.title = label;
+        node.setAttribute('aria-label', label);
+        node.appendChild(previewGlyph(glyph));
+        return node;
+    }
+
+    function previewGlyph(name) {
+        var paths = {
+            prev: 'M10 3L4 8l6 5',
+            next: 'M6 3l6 5-6 5',
+            download: 'M8 2v7M4.5 6.5L8 10l3.5-3.5M3 13h10',
+            print: 'M4 6V2h8v4M3 7h10a1 1 0 0 1 1 1v3h-2M3 11H2V8a1 1 0 0 1 1-1M4 9h8v5H4z',
+            close: 'M4 4l8 8M12 4L4 12'
+        };
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('aria-hidden', 'true');
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', paths[name] || '');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.6');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function printPreviewFile(file) {
+        var kind = previewKind(file);
+        var frame = document.createElement('iframe');
+        frame.className = 'asset-tree-print-frame';
+        frame.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(frame);
+        function finish() {
+            setTimeout(function () {
+                if (frame.parentNode) frame.parentNode.removeChild(frame);
+            }, 1200);
+        }
+        if (kind === 'text') {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', fileUrl(file.id, '&preview=text'), true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4) return;
+                var body = xhr.status === 200 ? xhr.responseText : '';
+                var doc = frame.contentWindow.document;
+                doc.open();
+                doc.write('<pre style="font:14px/1.45 sans-serif;white-space:pre-wrap">' + htmlEscape(body) + '</pre>');
+                doc.close();
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+                finish();
+            };
+            xhr.send(null);
+            return;
+        }
+        frame.onload = function () {
+            try {
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+            } catch (error) {
+                window.open(fileUrl(file.id, '&inline=1'), '_blank');
+            }
+            finish();
+        };
+        frame.src = fileUrl(file.id, '&inline=1');
+    }
+
+    function loadPreviewText(file, node) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', fileUrl(file.id, '&preview=text'), true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || !node.parentNode) return;
+            var text = xhr.status === 200 ? String(xhr.responseText || '').replace(/^\s+|\s+$/g, '') : '';
+            node.textContent = text || t('filePreviewEmpty');
+        };
+        xhr.send(null);
+    }
+
+    function shareField(asset) {
+        var field = el('div', 'asset-tree-people-field asset-tree-share');
+        field.appendChild(el('div', 'asset-tree-people-label', t('shareTitle')));
+        var people = asset.shares || [];
+        function grant(userKey) {
+            ajax('POST', '/assets/' + asset.id + '/shares', { userKey: userKey }, function (code, body) {
+                if (code >= 200 && code < 300) selectAsset(asset.id, true);
+                else setFormError((body && body.message) || t('errorTitle'));
+            });
+        }
+        if (!people.length) {
+            var emptyExtra = null;
+            if (mayEdit(asset) && state.userKey) {
+                emptyExtra = button(t('shareMe'), 'asset-tree-linkish', function () { grant(state.userKey); });
+            }
+            field.appendChild(personLine(null, emptyExtra));
+        }
+        people.forEach(function (person) {
+            var remove = null;
+            if (mayEdit(asset) && person && person.userKey) {
+                remove = button(t('shareRemove'), 'asset-tree-linkish', function () {
+                    ajax('DELETE', '/assets/' + asset.id + '/shares/' + encodeURIComponent(person.userKey), null, function (status, payload) {
+                        if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                        else setFormError((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+            }
+            field.appendChild(personLine(person, remove));
+        });
+        if (mayEdit(asset)) {
+            var search = el('div', 'asset-tree-assign-search');
+            search.hidden = true;
+            var input = el('input');
+            input.type = 'search';
+            input.placeholder = t('custodianSearch');
+            var results = el('div', 'asset-tree-user-results');
+            var timer = null;
+            var searchSeq = 0;
+            input.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var query = input.value.trim();
+                    var seq = ++searchSeq;
+                    results.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (seq !== searchSeq || input.value.trim() !== query) return;
+                        results.innerHTML = '';
+                        if (status !== 200) return;
+                        (payload || []).forEach(function (user) {
+                            var taken = people.some(function (person) { return person && person.userKey === user.userKey; });
+                            if (taken) return;
+                            results.appendChild(button(user.displayName + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
+                                grant(user.userKey);
+                            }));
+                        });
+                    });
+                }, 220);
+            });
+            search.appendChild(input);
+            search.appendChild(results);
+            var links = el('div', 'asset-tree-share-links');
+            var mineTaken = people.some(function (person) { return person && person.userKey === state.userKey; });
+            if (people.length && state.userKey && !mineTaken) {
+                links.appendChild(button(t('shareMe'), 'asset-tree-linkish', function () { grant(state.userKey); }));
+            }
+            links.appendChild(button(t('shareAdd'), 'asset-tree-linkish', function () {
+                search.hidden = !search.hidden;
+                if (!search.hidden) input.focus();
+            }));
+            field.appendChild(links);
+            field.appendChild(search);
+        }
+        return field;
     }
 
     function fileBlock(asset) {
@@ -6115,12 +6752,19 @@
         } else {
             list.forEach(function (file) {
                 var row = el('div', 'asset-tree-attachment');
-                row.appendChild(el('span', 'asset-tree-file-icon is-' + fileKind(file.fileName), fileGlyph(file.fileName)));
-                var link = el('a', null, file.fileName || '');
-                link.href = contextPath() + '/plugins/servlet/asset-tree-file?id=' + file.id;
+                var icon = button(fileGlyph(file.fileName), 'asset-tree-file-icon is-' + fileKind(file.fileName), function () {
+                    openFilePreview(file, list);
+                });
+                icon.title = t('filePreview');
+                icon.setAttribute('aria-label', t('filePreview'));
+                row.appendChild(icon);
+                var link = button(file.fileName || '', 'asset-tree-file-name', function () {
+                    openFilePreview(file, list);
+                });
                 row.appendChild(link);
                 row.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
                 if (file.authorName) row.appendChild(el('span', 'asset-tree-file-meta', file.authorName));
+                if (file.internal) row.appendChild(el('span', 'asset-tree-file-internal', t('commentInternalTag')));
                 if (mayEdit(asset)) {
                     row.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
                         ajax('DELETE', '/assets/' + asset.id + '/files/' + file.id, null, function (status, payload) {
@@ -6137,15 +6781,7 @@
         fileError.hidden = true;
         body.appendChild(fileError);
         if (mayEdit(asset)) {
-            var drop = el('label', 'asset-tree-drop');
-            var input = el('input', 'asset-tree-file');
-            input.type = 'file';
-            input.addEventListener('change', function () {
-                var chosen = input.files && input.files[0];
-                input.value = '';
-                if (chosen) uploadFile(asset, chosen);
-            });
-            drop.appendChild(input);
+            var drop = button('', 'asset-tree-drop', function () { openAttachDialog(asset, []); });
             drop.appendChild(toolIcon('cloud'));
             var caption = el('div', 'asset-tree-drop-caption');
             caption.appendChild(document.createTextNode(t('attachDrop') + ' '));
@@ -6159,9 +6795,11 @@
             drop.addEventListener('drop', function (event) {
                 event.preventDefault();
                 drop.classList.remove('is-over');
-                if (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) {
-                    uploadFile(asset, event.dataTransfer.files[0]);
-                }
+                var incoming = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files : [];
+                var files = [];
+                var index;
+                for (index = 0; index < incoming.length; index++) files.push(incoming[index]);
+                openAttachDialog(asset, files);
             });
             body.appendChild(drop);
         } else if (list && !list.length) {
@@ -6300,27 +6938,166 @@
         xhr.send();
     }
 
-    function uploadFile(asset, file) {
-        if (!file) return;
+    function uploadFile(asset, file, internal, done) {
+        if (!file) {
+            if (done) done(true);
+            return;
+        }
         showFileError('');
         var xhr = new XMLHttpRequest();
         var data = new FormData();
         data.append('file', file, file.name || 'file');
-        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id, true);
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id + (internal ? '&internal=1' : ''), true);
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) return;
             if (xhr.status >= 200 && xhr.status < 300) {
-                notify(t('saved'));
-                selectAsset(asset.id, true);
+                if (done) done(true);
                 return;
             }
             var payload = null;
             try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
             showFileError((payload && payload.message) || t('errorTitle'));
+            if (done) done(false);
         };
         xhr.send(data);
+    }
+
+    function uploadFiles(asset, files, internal, done) {
+        var index = 0;
+        function next() {
+            if (index >= files.length) {
+                done(true);
+                return;
+            }
+            uploadFile(asset, files[index], internal, function (ok) {
+                if (!ok) {
+                    done(false);
+                    return;
+                }
+                index += 1;
+                next();
+            });
+        }
+        next();
+    }
+
+    function closeAttachDialog() {
+        var open = document.querySelector('.asset-tree-attach-overlay');
+        if (open && open.parentNode) open.parentNode.removeChild(open);
+    }
+
+    function openAttachDialog(asset, initial) {
+        closeAttachDialog();
+        var queued = [];
+        var seed = initial || [];
+        var seedAt;
+        for (seedAt = 0; seedAt < seed.length; seedAt++) if (seed[seedAt]) queued.push(seed[seedAt]);
+        var overlay = el('div', 'asset-tree-attach-overlay');
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closeAttachDialog();
+        });
+        var dialog = el('div', 'asset-tree-attach-dialog');
+        dialog.appendChild(el('h2', null, t('attachTitle')));
+        var list = el('div', 'asset-tree-attach-list');
+        function paintQueue() {
+            list.innerHTML = '';
+            queued.forEach(function (file, index) {
+                var card = el('div', 'asset-tree-attach-card');
+                if (file.type && file.type.indexOf('image/') === 0) {
+                    var img = el('img', 'asset-tree-attach-thumb');
+                    img.alt = file.name || '';
+                    img.src = URL.createObjectURL(file);
+                    card.appendChild(img);
+                } else {
+                    card.appendChild(el('span', 'asset-tree-attach-glyph', fileGlyph(file.name)));
+                }
+                card.appendChild(button('\u00d7', 'asset-tree-attach-remove', function () {
+                    queued.splice(index, 1);
+                    paintQueue();
+                }));
+                card.appendChild(el('div', 'asset-tree-attach-name', file.name || ''));
+                list.appendChild(card);
+            });
+            list.appendChild(el('p', 'asset-tree-attach-hint', t('attachDropHint')));
+        }
+        function take(files) {
+            var index;
+            for (index = 0; index < files.length; index++) queued.push(files[index]);
+            paintQueue();
+        }
+        var composer = jiraComposer({
+            placeholder: t('commentPlaceholder'),
+            onPublic: function (text) { finish(false, text); },
+            onInternal: function (text) { finish(true, text); },
+            onCancel: closeAttachDialog,
+            publicLabel: t('attachCustomer'),
+            internalLabel: t('attachRequest')
+        });
+        var drop = el('label', 'asset-tree-attach-drop');
+        var input = el('input', 'asset-tree-file');
+        input.type = 'file';
+        input.multiple = true;
+        input.addEventListener('change', function () {
+            take(input.files || []);
+            input.value = '';
+        });
+        drop.appendChild(input);
+        drop.appendChild(list);
+        drop.addEventListener('dragover', function (event) {
+            event.preventDefault();
+            drop.classList.add('is-over');
+        });
+        drop.addEventListener('dragleave', function () { drop.classList.remove('is-over'); });
+        drop.addEventListener('drop', function (event) {
+            event.preventDefault();
+            drop.classList.remove('is-over');
+            if (event.dataTransfer && event.dataTransfer.files) take(event.dataTransfer.files);
+        });
+        dialog.addEventListener('paste', function (event) {
+            var items = event.clipboardData && event.clipboardData.items;
+            if (!items) return;
+            var files = [];
+            var index;
+            for (index = 0; index < items.length; index++) {
+                if (items[index].kind === 'file') {
+                    var file = items[index].getAsFile();
+                    if (file) files.push(file);
+                }
+            }
+            if (files.length) {
+                event.preventDefault();
+                take(files);
+            }
+        });
+        function finish(internal, text) {
+            if (!queued.length && !text) {
+                setFormError(t('attachDropHint'));
+                return;
+            }
+            uploadFiles(asset, queued.slice(), internal, function (ok) {
+                if (!ok) return;
+                if (!text) {
+                    closeAttachDialog();
+                    notify(t('saved'));
+                    selectAsset(asset.id, true);
+                    return;
+                }
+                ajax('POST', '/assets/' + asset.id + '/comments', { body: text, internal: !!internal }, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        closeAttachDialog();
+                        selectAsset(asset.id, true);
+                    } else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+        }
+        dialog.appendChild(composer.root);
+        composer.root.insertBefore(drop, composer.foot);
+        paintQueue();
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        composer.focus();
     }
 
     function htmlEscape(value) {
@@ -6912,8 +7689,12 @@
     }
 
     function showDetailView(asset, issuesLoading, section) {
+        var painted = section.getAttribute('data-asset-id');
+        var kept = painted === String(asset.id) ? readPaneScroll(section) : null;
+        if (section.className.indexOf('is-queue') >= 0) noteListPosition();
         section.className = 'asset-tree-detail is-issue is-view';
         section.innerHTML = '';
+        section.setAttribute('data-asset-id', String(asset.id));
         var form = el('div', 'asset-tree-request is-view');
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
@@ -7011,7 +7792,8 @@
         var people = el('div');
         people.appendChild(custodianPicker(asset));
         people.appendChild(issuedPicker(asset));
-        people.appendChild(personField(t('author'), asset.createdBy || '', null));
+        people.appendChild(shareField(asset));
+        people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
         aside.appendChild(peerBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
@@ -7019,6 +7801,7 @@
         form.appendChild(main);
         attachAside(form, aside);
         section.appendChild(form);
+        writePaneScroll(section, kept);
     }
 
     function showDetail(asset, issuesLoading, section) {
@@ -7037,14 +7820,20 @@
         if (!state.editing || !mayEdit(asset)) {
             if (placePage) {
                 state.editing = false;
+                var placeKept = section.getAttribute('data-asset-id') === String(asset.id) ? readPaneScroll(section) : null;
                 replaceDetail();
+                writePaneScroll(document.getElementById('asset-tree-detail'), placeKept);
                 return;
             }
             showDetailView(asset, issuesLoading, section);
             return;
         }
+        var painted = section.getAttribute('data-asset-id');
+        var kept = painted === String(asset.id) ? readPaneScroll(section) : null;
+        if (section.className.indexOf('is-queue') >= 0) noteListPosition();
         section.className = 'asset-tree-detail is-issue';
         section.innerHTML = '';
+        section.setAttribute('data-asset-id', String(asset.id));
         var form = el('form', 'asset-tree-request');
         form.id = 'asset-detail-form';
         var main = el('div', 'asset-tree-request-main');
@@ -7197,6 +7986,7 @@
             state.dirty = true;
         });
         section.appendChild(form);
+        writePaneScroll(section, kept);
         var typeSelect = document.getElementById('asset-field-type');
         if (typeSelect) {
             typeSelect.addEventListener('change', function () {
@@ -8024,8 +8814,9 @@
             form.appendChild(field(t('type'), typeControl, true));
 
             var equipment = el('div');
-            equipment.appendChild(field(t('status'), selectBox('create-status', statusChoices(), 'in_use', false), true));
-            equipment.appendChild(custodianField('create-custodian', null));
+        equipment.appendChild(field(t('status'), selectBox('create-status', statusChoices(), 'in_use', false), true));
+        equipment.appendChild(custodianField('create-custodian', null));
+        equipment.appendChild(issuedField('create-issued', null));
             form.appendChild(equipment);
 
             var schema = el('div');
@@ -8312,6 +9103,7 @@
 
             function postAsset(typeKey, attributes, place, createdType) {
                 var custodian = document.getElementById('create-custodian');
+                var issued = document.getElementById('create-issued');
                 var statusBox = document.getElementById('create-status');
                 var chosenParent = parentId || null;
                 if (kind === 'object' && !(typeKey && parentId)) {
@@ -8325,6 +9117,7 @@
                     status: place ? 'in_stock' : (statusBox ? statusBox.value : 'in_use'),
                     description: '',
                     custodianKey: place ? '' : (custodian ? custodian.value : ''),
+                    issuedKey: place ? '' : (issued ? issued.value : ''),
                     parentId: chosenParent,
                     attributes: attributes
                 }, function (status, payload) {
@@ -11809,13 +12602,13 @@
         if (moduleKey === 'map') {
             var width = document.createElement('input');
             width.type = 'number';
-            width.min = '640';
-            width.max = '2400';
+            width.min = String(PLAN_MIN_W);
+            width.max = String(PLAN_MAX_W);
             width.value = String(setup.mapWidth);
             var height = document.createElement('input');
             height.type = 'number';
-            height.min = '480';
-            height.max = '1600';
+            height.min = String(PLAN_MIN_H);
+            height.max = String(PLAN_MAX_H);
             height.value = String(setup.mapHeight);
             var gridSize = document.createElement('select');
             [8, 12, 16, 24, 32].forEach(function (step) {
@@ -11837,8 +12630,8 @@
             panel.appendChild(snap);
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
-                next.mapWidth = clampNum(width.value, 640, 2400);
-                next.mapHeight = clampNum(height.value, 480, 1600);
+                next.mapWidth = clampNum(width.value, PLAN_MIN_W, PLAN_MAX_W);
+                next.mapHeight = clampNum(height.value, PLAN_MIN_H, PLAN_MAX_H);
                 next.mapGrid = Number(gridSize.value);
                 next.mapSnap = snapBox.checked;
                 saveSetup(next);
@@ -14097,8 +14890,6 @@
         var packed = staffShiftPacked(row ? row.weekdays : 0);
         if (packed && packed.work === 5 && packed.rest === 2) return { kind: 'week', weekdays: 31, work: 5, rest: 2 };
         if (packed) return { kind: 'shift', work: packed.work, rest: packed.rest };
-        var hours = row ? parseInt(row.hours, 10) || 0 : 0;
-        if (hours >= 12) return { kind: 'shift', work: 2, rest: 2 };
         var weekdays = row && row.weekdays ? parseInt(row.weekdays, 10) || 31 : 31;
         if (weekdays < 1 || weekdays > 127) weekdays = 31;
         return { kind: 'week', weekdays: weekdays, work: 5, rest: 2 };
@@ -14217,7 +15008,6 @@
     function staffNatural(person, iso, date) {
         if (staffLeaveOn(person, iso)) return 'leave';
         var startOn = person.hours && person.hours.startOn ? String(person.hours.startOn) : '';
-        if (startOn && iso < startOn) return 'off';
         var pattern = staffPatternOf(person);
         if (pattern.kind === 'shift') {
             var anchor = parseIsoDate(startOn);
@@ -14227,7 +15017,7 @@
             var phase = ((delta % span) + span) % span;
             return phase < pattern.work ? 'work' : 'off';
         }
-        if (!startOn) return 'off';
+        if (!startOn || iso < startOn) return 'off';
         var bit = (date.getDay() + 6) % 7;
         var weekdays = pattern.weekdays || 31;
         return (weekdays & (1 << bit)) ? 'work' : 'off';
@@ -15091,6 +15881,22 @@
         return state.scheduleYear + '-' + month + '-01';
     }
 
+    function staffClearPlainMarks(marks, fromIso) {
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var iso = isoDate(date);
+            if (fromIso && iso < fromIso) continue;
+            if (markCustom(marks, iso) != null) continue;
+            if (marks[iso] !== 'work' && marks[iso] !== 'off') continue;
+            delete marks[iso];
+            delete marks._hours[iso];
+        }
+    }
+
     function staffApplyPattern(person, startIso, weekdays) {
         if (!person || !person.hours || !startIso) return;
         var pattern = staffPatternOf(person);
@@ -15100,6 +15906,7 @@
         var marks = parseDayMarks(person.hours.marks);
         person.hours.weekdays = packed;
         person.hours.startOn = startIso;
+        if (staffShiftPacked(packed)) staffClearPlainMarks(marks, '');
         staffStripMatchedMarks(person, marks);
         saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
     }
@@ -15116,26 +15923,19 @@
         var count = new Date(year, month, 0).getDate();
         var prior = {};
         var day;
+        var shift = pattern.kind === 'shift';
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
             var iso = isoDate(date);
             prior[iso] = staffNatural(person, iso, date);
-            if (iso >= startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
+            if (shift || iso >= startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
             if (marks[iso] && marks[iso] !== 'work' && marks[iso] !== 'off') continue;
             if (!marks[iso] && prior[iso] && prior[iso] !== 'off' && prior[iso] !== 'leave') marks[iso] = prior[iso];
         }
         person.hours.weekdays = packed;
         person.hours.startOn = startIso;
-        for (day = 1; day <= count; day++) {
-            date = new Date(year, month - 1, day);
-            iso = isoDate(date);
-            if (iso < startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
-            if (marks[iso] !== 'work' && marks[iso] !== 'off') continue;
-            if (marks[iso] === prior[iso]) {
-                delete marks[iso];
-                delete marks._hours[iso];
-            }
-        }
+        if (shift) staffClearPlainMarks(marks, '');
+        else staffClearPlainMarks(marks, startIso);
         staffStripMatchedMarks(person, marks);
         saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
     }
@@ -15642,9 +16442,7 @@
             var nextRest = parseInt(restInput.value, 10) || 0;
             if (nextWork < 1 || nextWork > 15 || nextRest < 1 || nextRest > 15) return;
             var packed = staffEncodePattern(nextWork, nextRest);
-            var anchor = person.hours.startOn || '';
-            if (anchor) staffApplyPattern(person, anchor, packed);
-            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
+            staffApplyPattern(person, person.hours.startOn || staffMonthStart(), packed);
         }
         workInput.addEventListener('change', commit);
         restInput.addEventListener('change', commit);
@@ -15700,9 +16498,7 @@
             }
             var bits = select.value.split('/');
             var packed = staffEncodePattern(bits[0], bits[1]);
-            var anchor = person.hours.startOn || '';
-            if (anchor) staffApplyPattern(person, anchor, packed);
-            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
+            staffApplyPattern(person, person.hours.startOn || staffMonthStart(), packed);
         });
         wrap.appendChild(select);
         if (!known) wrap.appendChild(staffPatternNumbers(person, pattern.work, pattern.rest));
@@ -17837,7 +18633,7 @@
 
     function groupWord(group) {
         var map = {
-            status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder',
+            status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
             month: 'groupWordMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind'
         };
         return t(map[group] || 'groupWordStatus');
@@ -17845,7 +18641,7 @@
 
     function groupPhrase(group) {
         var map = {
-            status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder',
+            status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder', issued: 'reportGroupIssued',
             month: 'reportGroupMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind'
         };
         return t(map[group] || 'reportGroupStatus');
@@ -18033,6 +18829,17 @@
         return name || key;
     }
 
+    function reportIssuedName(key) {
+        if (!key) return t('custodianNone');
+        var name = '';
+        (state.assets || []).some(function (asset) {
+            if (issuedPersonKey(asset) !== key) return false;
+            name = (asset.issued && asset.issued.displayName) || key;
+            return true;
+        });
+        return name || key;
+    }
+
     function reportPlaceName(id) {
         if (!id) return t('root');
         var node = byId()[id] || byId()[parseInt(id, 10)];
@@ -18118,6 +18925,10 @@
             if (!key) return { field: 'custodian', op: 'empty', value: '', caption: t('custodian') + ' ' + t('opEmpty') };
             return { field: 'custodian', op: 'eq', userKey: key, caption: t('custodian') + ': ' + (label || reportHolderName(key)) };
         }
+        if (group === 'issued') {
+            if (!key) return { field: 'issued', op: 'empty', value: '', caption: t('issuedTo') + ' ' + t('opEmpty') };
+            return { field: 'issued', op: 'eq', userKey: key, caption: t('issuedTo') + ': ' + (label || reportIssuedName(key)) };
+        }
         return { field: 'status', op: 'eq', value: key, caption: t('status') + ': ' + (label || statusLabel(key)) };
     }
 
@@ -18128,6 +18939,7 @@
             if (group === 'status' && rule.field === 'status') return false;
             if (group === 'type' && rule.field === 'type') return false;
             if (group === 'holder' && rule.field === 'custodian') return false;
+            if (group === 'issued' && rule.field === 'issued') return false;
             return true;
         });
         rules.push(bucket);
@@ -18308,7 +19120,7 @@
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
             var group = document.createElement('select');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
+            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
@@ -18505,8 +19317,8 @@
             })(),
             scheduleUnit: setup.scheduleUnit || 'month',
             scheduleNotify: !!setup.scheduleNotify,
-            mapWidth: clampNum(setup.mapWidth || 1200, 640, 2400),
-            mapHeight: clampNum(setup.mapHeight || 760, 480, 1600),
+            mapWidth: clampNum(setup.mapWidth || 1200, PLAN_MIN_W, PLAN_MAX_W),
+            mapHeight: clampNum(setup.mapHeight || 760, PLAN_MIN_H, PLAN_MAX_H),
             mapGrid: [8, 12, 16, 24, 32].indexOf(Number(setup.mapGrid)) >= 0 ? Number(setup.mapGrid) : 24,
             mapSnap: setup.mapSnap !== false,
             reportHidden: setup.reportHidden || '',
@@ -18676,7 +19488,7 @@
         var source = floor || {};
         var width = Number(source.planW) || setup.mapWidth || 1200;
         var height = Number(source.planH) || setup.mapHeight || 760;
-        return { w: clampNum(width, 640, 2400), h: clampNum(height, 480, 1600) };
+        return { w: clampNum(width, PLAN_MIN_W, PLAN_MAX_W), h: clampNum(height, PLAN_MIN_H, PLAN_MAX_H) };
     }
 
     function snapCoord(value) {
@@ -18714,10 +19526,10 @@
             if (x + w > box.w) w = Math.max(min, box.w - x);
             if (y + h > box.h) h = Math.max(min, box.h - y);
         } else {
-            x = clampNum(x, -2400, 4800);
-            y = clampNum(y, -2400, 4800);
-            if (w > 4800) w = 4800;
-            if (h > 4800) h = 4800;
+            x = clampNum(x, -PLAN_MAX_W, PLAN_MAX_W * 2);
+            y = clampNum(y, -PLAN_MAX_W, PLAN_MAX_W * 2);
+            if (w > PLAN_MAX_W * 2) w = PLAN_MAX_W * 2;
+            if (h > PLAN_MAX_W * 2) h = PLAN_MAX_W * 2;
         }
         var groupId = parseInt(room.groupId, 10) || 0;
         if (groupId < 0) groupId = 0;
@@ -18819,6 +19631,10 @@
         svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
         var label = document.querySelector('.asset-tree-zoom-readout');
         if (label) label.textContent = zoomPercent() + '%';
+        var dots = svg.querySelector('.asset-tree-grid-dots');
+        if (dots && dots.parentNode) {
+            dots.parentNode.replaceChild(gridDotPath(planSize(state.mapDraft || currentFloor())), dots);
+        }
     }
 
     function zoomAt(svg, event, factor) {
@@ -18826,7 +19642,7 @@
         var metrics = viewMetrics(svg);
         var before = svgPoint(svg, event);
         var aspect = (metrics.rect.width || 1) / (metrics.rect.height || 1);
-        var w = clampNum(metrics.vw / factor, size.w / 8, Math.max(size.w, size.h) * 2.4);
+        var w = clampNum(metrics.vw / factor, PLAN_CLOSE, Math.max(size.w, size.h) * 2.4);
         var h = w / aspect;
         var rx = (event.clientX - metrics.rect.left) / (metrics.rect.width || 1);
         var ry = (event.clientY - metrics.rect.top) / (metrics.rect.height || 1);
@@ -20016,7 +20832,7 @@
     }
 
     function mapLayerIds() {
-        return ['plan', 'power', 'scs', 'comm', 'vent', 'water'];
+        return ['plan', 'power', 'scs', 'comm', 'vent', 'water', 'heat', 'fire', 'guard'];
     }
 
     function mapLayerLabel(id) {
@@ -20025,6 +20841,9 @@
         if (id === 'comm') return t('mapLayerComm');
         if (id === 'vent') return t('mapLayerVent');
         if (id === 'water') return t('mapLayerWater');
+        if (id === 'heat') return t('mapLayerHeat');
+        if (id === 'fire') return t('mapLayerFire');
+        if (id === 'guard') return t('mapLayerGuard');
         return t('mapLayerPlan');
     }
 
@@ -20033,10 +20852,56 @@
         return show[id] !== false;
     }
 
+    function shapeLayer(room) {
+        var kind = room && room.kind ? room.kind : '';
+        if (isRouteKind(kind)) return kind;
+        var dash = kind.indexOf('-');
+        if (dash > 0 && isRouteKind(kind.slice(0, dash))) return kind.slice(0, dash);
+        return 'plan';
+    }
+
     function shapeShown(room) {
         if (!room) return false;
-        if (isRouteKind(room.kind)) return mapLayerOn(room.kind);
-        return mapLayerOn('plan');
+        return mapLayerOn(shapeLayer(room));
+    }
+
+    function routeMarkKind(kind) {
+        var name = kind || '';
+        var dash = name.indexOf('-');
+        if (dash <= 0) return '';
+        if (!isRouteKind(name.slice(0, dash))) return '';
+        return name.slice(dash + 1);
+    }
+
+    function routeMarkGlyph(tool) {
+        var glyphs = {
+            outlet: '\u0421\u041a', rack: '\u0428\u041a', valve: '\u041a\u041b', socket: '220', board: '\u0429',
+            grille: '\u0420\u0428', point: '\u0422', switch: '\u0412\u041a', lamp: '\u0421\u0412', ups: '\u0418\u0411',
+            meter: '\u0421\u0427', wmeter: '\u0412\u0421', net: 'LAN', patch: '\u041f\u041f', wifi: 'Wi',
+            phone: '\u0422\u041b', camera: '\u041a\u041c', speaker: '\u0413\u0420', ac: '\u041a\u0414', airlock: '\u0428\u041b',
+            fan: '\u0412\u041d', damper: '\u0417\u0421', crane: '\u041a\u0420', pump: '\u041d\u0421', hydrant: '\u0413\u0414',
+            radiator: '\u0420\u0414', boiler: '\u041a\u0422', manifold: '\u041a\u041e', thermo: '\u0422\u0420', alarm: '\u0421\u0413',
+            smoke: '\u041f\u0414', heatdet: '\u0422\u0414', sprinkler: '\u0421\u041f', panel: '\u041f\u0420', extinguisher: '\u041e\u0413',
+            sensor: '\u0414\u041e', motion: '\u0414\u0414', reader: 'ID', siren: '\u0421\u0420'
+        };
+        return glyphs[tool] || '';
+    }
+
+    function isRouteMarkTool(tool) {
+        return tool === 'label' || !!routeMarkGlyph(tool);
+    }
+
+    function routeWireLabel(id) {
+        var names = { vvg: '\u0412\u0412\u0413', pvs: '\u041f\u0412\u0421', ground: 'PE', bus: '\u0428', utp: 'UTP', fiber: '\u041e\u0412', coax: 'KX', phone: '\u0422\u041b' };
+        return names[id] || id || '';
+    }
+
+    function routeDash(id) {
+        if (id === 'fiber' || id === 'phone') return '2 3';
+        if (id === 'ground') return '1 2';
+        if (id === 'coax' || id === 'bus') return '8 3 2 3';
+        if (id === 'vvg' || id === 'pvs' || id === 'utp') return '6 3';
+        return '';
     }
 
     function activateMapLayer(id) {
@@ -20049,6 +20914,7 @@
         state.mapClickAt = 0;
         state.mapArmId = 0;
         state.mapStamp = '';
+        state.mapWire = '';
         if (isRouteKind(id)) state.mapTool = 'route';
         else if (state.mapTool === 'route') state.mapTool = 'select';
         renderFrame();
@@ -20334,7 +21200,22 @@
             return;
         }
         rememberMap();
+        var maxX = 0;
+        var maxY = 0;
+        parsed.rooms.forEach(function (room) {
+            maxX = Math.max(maxX, (Number(room.x) || 0) + (Number(room.w) || 0));
+            maxY = Math.max(maxY, (Number(room.y) || 0) + (Number(room.h) || 0));
+            (room.points || []).forEach(function (point) {
+                maxX = Math.max(maxX, Number(point.x) || 0);
+                maxY = Math.max(maxY, Number(point.y) || 0);
+            });
+        });
         var box = planSize(state.mapDraft);
+        var needW = clampNum(Math.ceil(maxX + 80), PLAN_MIN_W, PLAN_MAX_W);
+        var needH = clampNum(Math.ceil(maxY + 80), PLAN_MIN_H, PLAN_MAX_H);
+        if (needW > box.w) state.mapDraft.planW = needW;
+        if (needH > box.h) state.mapDraft.planH = needH;
+        box = planSize(state.mapDraft);
         parsed.rooms.forEach(function (room) {
             pushShape(state.mapDraft, clampRoom(room, box));
         });
@@ -20493,27 +21374,57 @@
         return row;
     }
 
+    function routeToolPairs(layer) {
+        var line = layer === 'water' || layer === 'heat' ? 'mapToolPipe' : (layer === 'vent' ? 'mapToolDuct' : (layer === 'power' || layer === 'scs' ? 'mapToolCable' : 'mapToolLine'));
+        var tools = [['select', 'mapSelect'], ['route', line]];
+        var wires = {
+            power: [['wire-vvg', 'mapToolVvg'], ['wire-pvs', 'mapToolPvs'], ['wire-ground', 'mapToolGround'], ['wire-bus', 'mapToolBus']],
+            scs: [['wire-utp', 'mapToolUtp'], ['wire-fiber', 'mapToolFiber']],
+            comm: [['wire-coax', 'mapToolCoax'], ['wire-phone', 'mapToolPhoneLine']]
+        };
+        var marks = {
+            power: [['socket', 'mapToolSocket220'], ['switch', 'mapToolSwitch'], ['lamp', 'mapToolLamp'], ['board', 'mapToolBoard'], ['ups', 'mapToolUps'], ['meter', 'mapToolMeter']],
+            scs: [['outlet', 'mapToolOutlet'], ['net', 'mapToolNet'], ['rack', 'mapToolRack'], ['patch', 'mapToolPatch'], ['wifi', 'mapToolWifi']],
+            comm: [['point', 'mapToolPoint'], ['phone', 'mapToolPhone'], ['camera', 'mapToolCamera'], ['speaker', 'mapToolSpeaker']],
+            vent: [['grille', 'mapToolGrille'], ['ac', 'mapToolAc'], ['airlock', 'mapToolAirlock'], ['fan', 'mapToolFan'], ['damper', 'mapToolDamper']],
+            water: [['valve', 'mapToolValve'], ['crane', 'mapToolCrane'], ['pump', 'mapToolPump'], ['wmeter', 'mapToolMeter'], ['hydrant', 'mapToolHydrant']],
+            heat: [['radiator', 'mapToolRadiator'], ['boiler', 'mapToolBoiler'], ['manifold', 'mapToolManifold'], ['thermo', 'mapToolThermo']],
+            fire: [['alarm', 'mapToolAlarm'], ['smoke', 'mapToolSmoke'], ['heatdet', 'mapToolHeatDet'], ['sprinkler', 'mapToolSprinkler'], ['panel', 'mapToolPanel'], ['extinguisher', 'mapToolExtinguisher']],
+            guard: [['alarm', 'mapToolAlarm'], ['sensor', 'mapToolSensor'], ['motion', 'mapToolMotion'], ['camera', 'mapToolCamera'], ['reader', 'mapToolReader'], ['siren', 'mapToolSiren'], ['panel', 'mapToolPanel']]
+        };
+        (wires[layer] || []).forEach(function (pair) { tools.push(pair); });
+        (marks[layer] || []).forEach(function (pair) { tools.push(pair); });
+        tools.push(['label', 'mapText']);
+        return tools;
+    }
+
     function mapToolGrid() {
         var grid = el('div', 'asset-tree-tool-grid');
-        [
+        var tools = isRouteKind(state.mapLayer) ? routeToolPairs(state.mapLayer) : [
             ['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['partition', 'mapPartition'],
             ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk'],
             ['arc', 'mapArc'], ['dim', 'mapDim'], ['text', 'mapText']
-        ].forEach(function (pair) {
-            var on = state.mapTool === pair[0] && !state.mapStamp && !state.mapArmId;
+        ];
+        tools.forEach(function (pair) {
+            var wire = pair[0].indexOf('wire-') === 0 ? pair[0].slice(5) : '';
+            var on = !state.mapStamp && !state.mapArmId && (wire
+                ? state.mapTool === 'route' && state.mapWire === wire
+                : state.mapTool === pair[0] && (pair[0] !== 'route' || !state.mapWire));
             var tool = button('', 'asset-tree-tool' + (on ? ' is-on' : ''), function () {
-                state.mapTool = pair[0];
+                state.mapTool = wire ? 'route' : pair[0];
+                state.mapWire = wire;
                 state.mapStamp = '';
                 state.mapArmId = 0;
                 state.mapAnchor = null;
                 state.mapArc = null;
                 state.mapClickAt = 0;
-                if (pair[0] !== 'select' && isRouteKind(state.mapLayer)) state.mapLayer = 'plan';
+                var keepLayer = state.mapTool === 'select' || state.mapTool === 'route' || isRouteMarkTool(state.mapTool);
+                if (!keepLayer && isRouteKind(state.mapLayer)) state.mapLayer = 'plan';
                 renderFrame();
             });
             pinStyle(tool, {
                 display: 'grid',
-                'grid-template-rows': '22px 16px',
+                'grid-template-rows': '20px 26px',
                 'grid-template-columns': 'minmax(0, 1fr)',
                 'align-items': 'center',
                 'justify-items': 'center',
@@ -20523,19 +21434,19 @@
                 'flex-wrap': 'nowrap',
                 gap: '2px',
                 width: '100%',
-                height: '46px',
-                'min-height': '46px',
-                'max-height': '46px',
+                height: '54px',
+                'min-height': '54px',
+                'max-height': '54px',
                 margin: '0',
-                padding: '4px 2px',
+                padding: '3px 2px',
                 'box-sizing': 'border-box',
                 'text-align': 'center',
-                'line-height': '0',
-                'white-space': 'nowrap',
+                'line-height': '13px',
+                'white-space': 'normal',
                 float: 'none',
                 overflow: 'hidden',
                 'vertical-align': 'top',
-                'font-size': '12px',
+                'font-size': '11px',
                 'font-weight': '400'
             });
             var glyph = el('span', 'asset-tree-tool-glyph');
@@ -20557,22 +21468,20 @@
             tool.appendChild(glyph);
             var label = el('span', 'asset-tree-tool-label', t(pair[1]));
             pinStyle(label, {
-                display: 'flex',
-                'align-items': 'center',
-                'justify-content': 'center',
+                display: 'block',
                 width: '100%',
-                height: '16px',
+                height: '26px',
                 margin: '0',
                 padding: '0',
                 overflow: 'hidden',
+                'overflow-wrap': 'anywhere',
                 'font-size': '11px',
                 'font-weight': '400',
-                'line-height': '16px',
+                'line-height': '13px',
                 'letter-spacing': '0',
                 'text-align': 'center',
                 'text-indent': '0',
-                'white-space': 'nowrap',
-                'text-overflow': 'ellipsis',
+                'white-space': 'normal',
                 float: 'none',
                 'grid-row': '2',
                 'grid-column': '1',
@@ -20854,22 +21763,22 @@
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapPlanSize')));
         var width = document.createElement('input');
         width.type = 'number';
-        width.min = '640';
-        width.max = '2400';
+        width.min = String(PLAN_MIN_W);
+        width.max = String(PLAN_MAX_W);
         width.value = String(size.w);
         width.className = 'asset-tree-plan-size';
         width.setAttribute('aria-label', t('setupPlanW'));
         var height = document.createElement('input');
         height.type = 'number';
-        height.min = '480';
-        height.max = '1600';
+        height.min = String(PLAN_MIN_H);
+        height.max = String(PLAN_MAX_H);
         height.value = String(size.h);
         height.className = 'asset-tree-plan-size';
         height.setAttribute('aria-label', t('setupPlanH'));
         function resizePlan() {
             rememberMap();
-            state.mapDraft.planW = clampNum(width.value, 640, 2400);
-            state.mapDraft.planH = clampNum(height.value, 480, 1600);
+            state.mapDraft.planW = clampNum(width.value, PLAN_MIN_W, PLAN_MAX_W);
+            state.mapDraft.planH = clampNum(height.value, PLAN_MIN_H, PLAN_MAX_H);
             var next = planSize(state.mapDraft);
             state.mapDraft.rooms = (state.mapDraft.rooms || []).map(function (room) { return clampRoom(room, next); });
             state.mapDraft.pins = (state.mapDraft.pins || []).map(function (pin) {
@@ -21002,7 +21911,8 @@
     }
 
     function isRouteKind(kind) {
-        return kind === 'power' || kind === 'scs' || kind === 'comm' || kind === 'vent' || kind === 'water';
+        return kind === 'power' || kind === 'scs' || kind === 'comm' || kind === 'vent' || kind === 'water'
+            || kind === 'heat' || kind === 'fire' || kind === 'guard';
     }
 
     function routeColor(kind) {
@@ -21011,6 +21921,9 @@
         if (kind === 'comm') return '#6554c0';
         if (kind === 'vent') return '#36b37e';
         if (kind === 'water') return '#00b8d9';
+        if (kind === 'heat') return '#ff8b00';
+        if (kind === 'fire') return '#de350b';
+        if (kind === 'guard') return '#253858';
         return '#172b4d';
     }
 
@@ -21319,7 +22232,23 @@
     }
 
     function commitRoute(floor, kind, ax, ay, bx, by) {
-        return pushShape(floor, applySegment({ kind: kind, name: '', color: routeColor(kind), h: 6, w: 6 }, ax, ay, bx, by));
+        var wire = state.mapWire || '';
+        return pushShape(floor, applySegment({ kind: kind, name: wire ? ('wire:' + wire) : '', color: routeColor(kind), h: 6, w: 6 }, ax, ay, bx, by));
+    }
+
+    function placeRouteMark(floor, layer, tool, x, y) {
+        var size = tool === 'rack' || tool === 'board' || tool === 'panel' || tool === 'patch' ? 40 : (tool === 'label' ? 96 : 28);
+        var height = tool === 'label' ? 28 : size;
+        return pushShape(floor, clampRoom({
+            kind: layer + '-' + tool,
+            name: tool === 'label' ? t('mapTextSample') : '',
+            color: routeColor(layer),
+            angle: 0,
+            x: snapCoord(x) - size / 2,
+            y: snapCoord(y) - height / 2,
+            w: size,
+            h: height
+        }));
     }
 
     function placeOpeningAt(floor, kind, x, y) {
@@ -22133,13 +23062,29 @@
 
     function gridDotPath(size) {
         var path = svgEl('path');
+        var cam = activeCamera(size);
+        var margin = Math.max(cam.w, cam.h);
+        var left = Math.max(0, cam.x - margin);
+        var top = Math.max(0, cam.y - margin);
+        var right = Math.min(size.w, cam.x + cam.w + margin);
+        var bottom = Math.min(size.h, cam.y + cam.h + margin);
+        var viewW = Math.max(20, right - left);
+        var viewH = Math.max(20, bottom - top);
         var step = 20;
+        var rough = Math.sqrt((viewW * viewH) / 4500);
+        while (step < rough) step *= 2;
+        var radius = Math.max(1.2, Math.round(step * 0.045 * 10) / 10);
         var parts = [];
         var x;
         var y;
-        for (x = step; x < size.w; x += step) {
-            for (y = step; y < size.h; y += step) {
-                parts.push('M' + x + ' ' + y + 'm-1.2 0a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0');
+        var x0 = Math.ceil(left / step) * step;
+        var y0 = Math.ceil(top / step) * step;
+        if (x0 < step) x0 = step;
+        if (y0 < step) y0 = step;
+        for (x = x0; x < right; x += step) {
+            for (y = y0; y < bottom; y += step) {
+                parts.push('M' + x + ' ' + y + 'm-' + radius + ' 0a' + radius + ' ' + radius
+                    + ' 0 1 0 ' + (radius * 2) + ' 0a' + radius + ' ' + radius + ' 0 1 0 -' + (radius * 2) + ' 0');
             }
         }
         path.setAttribute('d', parts.join(''));
@@ -22312,6 +23257,13 @@
                     return;
                 }
                 if (event.button !== 0) return;
+                if (isRouteMarkTool(state.mapTool) && isRouteKind(state.mapLayer)) {
+                    event.preventDefault();
+                    var marked = svgPoint(svg, event);
+                    placeRouteMark(floor, state.mapLayer, state.mapTool, marked.x, marked.y);
+                    renderFrame();
+                    return;
+                }
                 if (state.mapTool === 'stamp') {
                     event.preventDefault();
                     var stamped = svgPoint(svg, event);
@@ -22531,6 +23483,62 @@
         return group;
     }
 
+    function routeSymbol(room, mark) {
+        var color = room.color || routeColor(shapeLayer(room));
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-route-mark');
+        if (mark === 'label') {
+            var caption = svgEl('text');
+            caption.setAttribute('x', '2');
+            caption.setAttribute('y', '16');
+            caption.setAttribute('fill', color);
+            caption.setAttribute('class', 'asset-tree-room-label');
+            caption.textContent = room.name || t('mapTextSample');
+            group.appendChild(caption);
+            return group;
+        }
+        var boxed = mark === 'rack' || mark === 'board' || mark === 'grille' || mark === 'panel' || mark === 'patch' || mark === 'radiator';
+        var shape = svgEl(boxed ? 'rect' : 'circle');
+        if (shape.tagName.toLowerCase() === 'circle' || shape.localName === 'circle') {
+            shape.setAttribute('cx', String(room.w / 2));
+            shape.setAttribute('cy', String(room.h / 2));
+            shape.setAttribute('r', String(Math.min(room.w, room.h) / 2 - 1));
+        } else {
+            shape.setAttribute('x', '1');
+            shape.setAttribute('y', '1');
+            shape.setAttribute('width', String(room.w - 2));
+            shape.setAttribute('height', String(room.h - 2));
+            shape.setAttribute('rx', mark === 'grille' ? '0' : '2');
+        }
+        shape.setAttribute('fill', mark === 'grille' ? 'none' : color);
+        shape.setAttribute('stroke', color);
+        shape.setAttribute('stroke-width', '2');
+        group.appendChild(shape);
+        var glyph = routeMarkGlyph(mark);
+        if (glyph) {
+            var letter = svgEl('text');
+            letter.setAttribute('x', String(room.w / 2));
+            letter.setAttribute('y', String(room.h / 2 + 3));
+            letter.setAttribute('text-anchor', 'middle');
+            letter.setAttribute('fill', mark === 'grille' ? color : '#fff');
+            letter.setAttribute('font-size', glyph.length > 2 ? '7' : '8');
+            letter.setAttribute('font-weight', '700');
+            letter.textContent = glyph;
+            group.appendChild(letter);
+        }
+        if (room.name) {
+            var name = svgEl('text');
+            name.setAttribute('x', String(room.w / 2));
+            name.setAttribute('y', String(room.h + 12));
+            name.setAttribute('text-anchor', 'middle');
+            name.setAttribute('fill', color);
+            name.setAttribute('class', 'asset-tree-room-label');
+            name.textContent = room.name;
+            group.appendChild(name);
+        }
+        return group;
+    }
+
     function shapeNode(room, options) {
         if (isPolygonRoom(room)) return polygonNode(room, options);
         var group = svgEl('g');
@@ -22540,6 +23548,18 @@
         var rect = svgEl('rect');
         applyWallCap(rect, room);
         var kindName = room.kind || 'room';
+        var mark = routeMarkKind(kindName);
+        if (mark) {
+            rect.setAttribute('x', '0');
+            rect.setAttribute('y', '0');
+            rect.setAttribute('width', String(room.w));
+            rect.setAttribute('height', String(room.h));
+            rect.setAttribute('fill', 'transparent');
+            rect.setAttribute('stroke', options && options.selected ? '#ffab00' : 'transparent');
+            rect.setAttribute('class', 'asset-tree-room is-mark');
+            group.appendChild(rect);
+            group.appendChild(routeSymbol(room, mark));
+        } else {
         rect.setAttribute('class', 'asset-tree-room is-' + kindName + (options && options.selected ? ' is-selected' : ''));
         if (kindName === 'sofa' || kindName === 'seat' || kindName === 'chair' || kindName === 'bath' || kindName === 'toilet' || kindName === 'bed') {
             rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
@@ -22572,11 +23592,27 @@
             routeLine.setAttribute('stroke-width', '4');
             routeLine.setAttribute('stroke-linecap', 'round');
             routeLine.setAttribute('class', 'asset-tree-route');
+            var wireName = String(room.name || '');
+            if (wireName.indexOf('wire:') === 0) {
+                var dash = routeDash(wireName.slice(5));
+                if (dash) routeLine.setAttribute('stroke-dasharray', dash);
+            }
             group.appendChild(routeLine);
+            if (wireName.indexOf('wire:') === 0) {
+                var wireTag = svgEl('text');
+                wireTag.setAttribute('x', String((routeEnds[0][0] + routeEnds[1][0]) / 2));
+                wireTag.setAttribute('y', String((routeEnds[0][1] + routeEnds[1][1]) / 2 - 4));
+                wireTag.setAttribute('text-anchor', 'middle');
+                wireTag.setAttribute('fill', room.color || routeColor(kindName));
+                wireTag.setAttribute('font-size', '9');
+                wireTag.textContent = routeWireLabel(wireName.slice(5));
+                group.appendChild(wireTag);
+            }
         }
         decorateRoom(group, room);
         appendOpening(group, room);
         appendLabel(group, room);
+        }
         if (options && options.editing) {
             rect.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
@@ -23242,6 +24278,22 @@
             path.setAttribute('stroke-linecap', 'round');
             svg.appendChild(path);
         }
+        var glyph = routeMarkGlyph(kind);
+        var wireId = kind.indexOf('wire-') === 0 ? kind.slice(5) : '';
+        if (glyph || wireId) {
+            add('M12 4.5a7.5 7.5 0 1 0 0.01 0z');
+            var text = svgEl('text');
+            var shown = wireId ? routeWireLabel(wireId) : glyph;
+            text.textContent = shown;
+            text.setAttribute('x', '12');
+            text.setAttribute('y', '15');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('font-size', shown.length > 2 ? '6' : '7');
+            text.setAttribute('font-weight', '700');
+            text.setAttribute('fill', 'currentColor');
+            svg.appendChild(text);
+            return svg;
+        }
         if (kind === 'select') add('M8 4.5l.2 12.2 2.6-2.8 2.4 4.6 2.2-1.2-2.4-4.6H17z', 'currentColor');
         else if (kind === 'room') add('M5 5h14v14H5z');
         else if (kind === 'wall') add('M4 9h16v6H4z', 'currentColor');
@@ -23252,7 +24304,12 @@
         else if (kind === 'stair') add('M5 19h5v-4h4V11h5V6');
         else if (kind === 'arc') add('M5 17c2-8 12-8 14 0');
         else if (kind === 'dim') add('M4 16h16M4 16v-3M20 16v-3M12 8v8');
-        else if (kind === 'text') add('M6 6h12M12 6v12');
+        else if (kind === 'text' || kind === 'label') add('M6 6h12M12 6v12');
+        else if (kind === 'route') add('M4 16c4-8 12-8 16 0');
+        else if (kind === 'outlet' || kind === 'socket' || kind === 'point') add('M12 5a7 7 0 1 0 0.01 0zM9 12h6M12 9v6');
+        else if (kind === 'valve') add('M12 5a7 7 0 1 0 0.01 0zM6 12h12');
+        else if (kind === 'rack' || kind === 'board') add('M6 5h12v14H6zM6 10h12M6 14h12');
+        else if (kind === 'grille') add('M5 6h14v12H5zM8 6v12M12 6v12M16 6v12');
         else add('M4 8h16v9H4zM7 11h10');
         return svg;
     }
@@ -23461,14 +24518,14 @@
         var width = document.createElement('input');
         width.type = 'number';
         width.min = String(roomMin(room.kind || 'room'));
-        width.max = '2400';
+        width.max = String(PLAN_MAX_W);
         width.value = String(room.w);
         width.className = 'asset-tree-plan-size';
         width.setAttribute('aria-label', t('setupPlanW'));
         var height = document.createElement('input');
         height.type = 'number';
         height.min = String(roomMin(room.kind || 'room'));
-        height.max = '1600';
+        height.max = String(PLAN_MAX_H);
         height.value = String(room.h);
         height.className = 'asset-tree-plan-size';
         height.setAttribute('aria-label', t('setupPlanH'));

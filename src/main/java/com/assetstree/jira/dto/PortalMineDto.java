@@ -88,6 +88,7 @@ public class PortalMineDto {
 
     @XmlAccessorType(XmlAccessType.PROPERTY)
     public static class Card {
+        private int id;
         private String name = "";
         private String objectKey = "";
         private boolean showKey;
@@ -99,6 +100,14 @@ public class PortalMineDto {
         private String color = "";
         private String icon = "";
         private List<Line> lines = new ArrayList<Line>();
+
+        public int getId() {
+            return id;
+        }
+
+        public void setId(int id) {
+            this.id = id;
+        }
 
         public String getName() {
             return name;

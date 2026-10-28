@@ -489,7 +489,7 @@ STATE = {
     "seq": 1, "assets": {}, "types": {}, "links": [], "checks": {},
     "portal_rules": [], "portal_seq": 1, "portal_demo": False,
     "flows": {}, "flow_seq": 1, "flow_graphs": {},
-    "comment_seq": 1, "file_seq": 1, "comments": {}, "files": {},
+    "comment_seq": 1, "file_seq": 1, "comments": {}, "files": {}, "share_seq": 1, "shares": {},
     "activity_seq": 1, "activities": {}, "statuses": {}, "grants": {},
     "plan_seq": 1, "plans": {}, "mails": [],
     "duty_seq": 1, "duties": {},
@@ -1033,7 +1033,7 @@ def next_object_key(project):
     return "%s-%s" % (prefix, highest + 1)
 
 
-VIEW_BASE = ("key", "type", "status", "custodian", "location", "description", "created", "updated")
+VIEW_BASE = ("key", "type", "status", "custodian", "issued", "location", "description", "created", "updated")
 KNOWN_MODULES = ("service", "map", "reports", "life", "portal", "card")
 
 
@@ -1163,8 +1163,8 @@ def module_setup(stored, migrate=True):
         "scheduleLayer": layer,
         "scheduleUnit": unit,
         "scheduleNotify": bool(stored.get("scheduleNotify")),
-        "mapWidth": plan_limit(stored.get("mapWidth"), 1200, 640, 2400),
-        "mapHeight": plan_limit(stored.get("mapHeight"), 760, 480, 1600),
+        "mapWidth": plan_limit(stored.get("mapWidth"), 1200, PLAN_MIN_W, PLAN_MAX_W),
+        "mapHeight": plan_limit(stored.get("mapHeight"), 760, PLAN_MIN_H, PLAN_MAX_H),
         "mapGrid": grid,
         "mapSnap": stored.get("mapSnap") is not False,
         "reportHidden": ",".join(hidden),
@@ -1373,6 +1373,14 @@ def clean_day_marks(raw):
             continue
         marks[day] = ident if ident == "off" else ident + suffix
     return ",".join(f"{day}:{marks[day]}" for day in sorted(marks))
+
+
+PLAN_MIN_W = 640
+PLAN_MAX_W = 40000
+PLAN_MIN_H = 480
+PLAN_MAX_H = 30000
+PLAN_ORIGIN_LOW = -PLAN_MAX_W
+PLAN_ORIGIN_HIGH = PLAN_MAX_W * 2
 
 
 def plan_limit(raw, default, low, high):
@@ -1600,9 +1608,16 @@ def portal_date(raw):
 
 
 def ensure_profile_demo():
+    colors = {"ivanov": (0, 82, 204), "petrova": (0, 135, 90), "smirnov": (101, 84, 192)}
+    for key, user in USERS.items():
+        if not user.get("avatarUrl"):
+            user["avatarUrl"] = "data:image/png;base64," + base64.b64encode(tiny_png(colors.get(key, (93, 107, 130)))).decode("ascii")
     if STATE.get("profile_demo"):
         return
     STATE["profile_demo"] = True
+    STATE.setdefault("assetKeys", {})
+    STATE["assetKeys"].setdefault("STP", "ASIT")
+    STATE["assetKeys"].setdefault("TEST", "TEST")
     for project in ("STP", "TEST"):
         view = STATE.setdefault("views", {}).setdefault(project, {})
         modules = [item for item in (view.get("modules") or []) if item != "portal"]
@@ -1645,6 +1660,15 @@ def ensure_profile_demo():
         STATE["assets"][mindray]["issuedKey"] = "ivanov"
     STATE["views"]["STP"]["setup"]["portalColumns"] = "key,status,location,description,f:model,f:serial"
     STATE["views"]["TEST"]["setup"]["portalColumns"] = "key,status,type,location"
+    laptop = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "ASIT-1"), None)
+    if laptop and not files_of(laptop["id"]):
+        remember_file(laptop["id"], "lenovo.png", "image/png", tiny_png((54, 179, 126)))
+        remember_file(laptop["id"], "паспорт.txt", "text/plain", "Паспорт оборудования\nНоутбук для выездов\nСерийный номер PF-12345".encode("utf-8"))
+        remember_file(laptop["id"], "акт.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", tiny_docx("Акт приёма\nНоутбук Lenovo T14 передан в эксплуатацию."))
+        remember_file(laptop["id"], "Заказ ключей VipNet client.pdf".encode("utf-8").decode("latin-1"), "application/pdf", tiny_pdf())
+    printer = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "TEST-6"), None)
+    if printer and not any(row.get("assetId") == printer["id"] and row.get("userKey") == "ivanov" for row in STATE["shares"].values()):
+        remember_share(printer["id"], "ivanov")
 
 
 def portal_role(asset, text, user_key):
@@ -1659,6 +1683,10 @@ def portal_role(asset, text, user_key):
             label = str(field.get("label") or "").strip()
             if label and label not in roles:
                 roles.append(label)
+    label = text.get("asset-tree.ui.shareTitle", "Shared access")
+    if label and any(row.get("assetId") == asset.get("id") and row.get("userKey") == user_key for row in STATE.get("shares", {}).values()):
+        if label not in roles:
+            roles.append(label)
     return " · ".join(roles)
 
 
@@ -1743,6 +1771,7 @@ def portal_mine(text, user_key="ivanov"):
                 seen.add(line_label)
                 lines.append({"label": line_label, "value": value})
             cards.append({
+                "id": asset.get("id") or 0,
                 "name": asset.get("name") or "",
                 "objectKey": asset.get("objectKey") or "",
                 "showKey": show_key,
@@ -1770,6 +1799,51 @@ def portal_mine(text, user_key="ivanov"):
         "total": total,
         "totalLabel": portal_count(total, text),
         "projects": groups,
+    }
+
+
+def portal_detail(asset_id, text, user_key="ivanov"):
+    asset = STATE["assets"].get(asset_id)
+    if not asset or is_location_id(asset_id):
+        return None
+    project_key = asset["projectKey"]
+    if not module_on(project_key, "portal"):
+        return None
+    setup = module_setup(((STATE.get("views") or {}).get(project_key) or {}).get("setup"), migrate=False)
+    if not setup.get("portalMine"):
+        return None
+    role = portal_role(asset, text, user_key)
+    if not role:
+        return None
+    page = portal_mine(text, user_key)
+    summary = None
+    for group in page["projects"]:
+        for card in group["assets"]:
+            if card.get("id") == asset_id:
+                summary = card
+    if not summary:
+        return None
+    return {
+        "id": asset_id,
+        "name": summary["name"],
+        "objectKey": summary["objectKey"],
+        "description": asset.get("description") or "",
+        "location": location_of(asset),
+        "status": summary["status"],
+        "statusLabel": summary["statusLabel"],
+        "statusCategory": summary["statusCategory"],
+        "role": role,
+        "color": summary["color"],
+        "icon": summary["icon"],
+        "viewerKey": user_key,
+        "custodian": USERS.get(asset.get("custodianKey") or ""),
+        "issued": USERS.get(asset.get("issuedKey") or ""),
+        "createdBy": USERS["ivanov"]["displayName"],
+        "author": USERS.get("ivanov"),
+        "shares": share_dtos(asset_id),
+        "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
+        "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
+        "lines": summary["lines"],
     }
 
 
@@ -2064,7 +2138,7 @@ def asset_dto(asset, text, with_issues):
         "typeKey": asset["typeKey"], "typeLabel": typed["label"], "color": typed["color"], "icon": typed["icon"],
         "status": canonical(asset["status"]), "parentId": normalize_parent(asset["parentId"]),
         "sortOrder": asset["sortOrder"], "created": asset["created"], "updated": asset["updated"],
-        "createdBy": USERS["ivanov"]["displayName"], "updatedBy": USERS["ivanov"]["displayName"], "projectKey": asset["projectKey"],
+        "createdBy": USERS["ivanov"]["displayName"], "updatedBy": USERS["ivanov"]["displayName"], "author": USERS.get("ivanov"), "projectKey": asset["projectKey"],
         "projectName": next(item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]),
         "location": location_of(asset), "editable": True,
         "cardImage": asset["id"] in STATE["card_images"],
@@ -2077,6 +2151,7 @@ def asset_dto(asset, text, with_issues):
         dto["issues"] = [dict(ISSUES_BY_ID[link["issueId"]]) for link in STATE["links"] if link["assetId"] == asset["id"] and link["issueId"] in ISSUES_BY_ID]
         dto["comments"] = [comment_dto(row) for row in comments_of(asset["id"])]
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
+        dto["shares"] = share_dtos(asset["id"])
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
         dto["peers"] = peers_for(asset["id"], text)
     return dto
@@ -2092,6 +2167,127 @@ def comments_of(asset_id):
     return rows
 
 
+def share_dtos(asset_id):
+    people = []
+    for row in STATE.get("shares", {}).values():
+        if row.get("assetId") != asset_id:
+            continue
+        person = USERS.get(row.get("userKey") or "")
+        if person:
+            people.append(person)
+    people.sort(key=lambda item: item.get("displayName") or "")
+    return people
+
+
+def remember_share(asset_id, user_key):
+    share_id = STATE["share_seq"]
+    STATE["share_seq"] += 1
+    STATE["shares"][share_id] = {"id": share_id, "assetId": asset_id, "userKey": user_key}
+    return share_id
+
+
+def remember_file(asset_id, name, content_type, data, internal=False):
+    file_id = STATE["file_seq"]
+    STATE["file_seq"] += 1
+    STATE["files"][file_id] = {
+        "id": file_id, "assetId": asset_id, "fileName": name,
+        "contentType": content_type, "size": len(data), "authorKey": "ivanov", "created": now_stamp(),
+        "internal": bool(internal),
+    }
+    write_preview_file(file_id, data)
+    return file_id
+
+
+def repair_filename(name):
+    if not name:
+        return name or ""
+    try:
+        raw = name.encode("latin-1")
+    except UnicodeEncodeError:
+        return name
+    try:
+        fixed = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return name
+    return fixed or name
+
+
+def tiny_pdf():
+    objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        "<< /Length 44 >>\nstream\nBT /F1 24 Tf 72 700 Td (VipNet) Tj ET\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += ("%d 0 obj\n%s\nendobj\n" % (index, body)).encode("ascii")
+    xref = len(out)
+    out += ("xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)).encode("ascii")
+    for offset in offsets:
+        out += ("%010d 00000 n \n" % offset).encode("ascii")
+    out += ("trailer<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF" % (len(objects) + 1, xref)).encode("ascii")
+    return bytes(out)
+
+
+def tiny_png(rgb):
+    import struct
+    import zlib
+    width = height = 48
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+    def chunk(tag, payload):
+        return struct.pack(">I", len(payload)) + tag + payload + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def tiny_docx(text):
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>")
+        paragraphs = "".join("<w:p><w:r><w:t>%s</w:t></w:r></w:p>" % line for line in text.split("\n"))
+        archive.writestr("word/document.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>%s</w:body></w:document>" % paragraphs)
+    return buffer.getvalue()
+
+
+def inline_type(data):
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if len(data) >= 4 and data[:4] == b"%PDF":
+        return "application/pdf"
+    if len(data) >= 4 and data[:3] == b"GIF":
+        return "image/gif"
+    return None
+
+
+def file_preview_text(name, data):
+    lower = (name or "").lower()
+    if lower.endswith(".docx") and data[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(BytesIO(data)) as archive:
+                xml = archive.read("word/document.xml").decode("utf-8", "replace")
+        except (KeyError, zipfile.BadZipFile):
+            return ""
+        parts = []
+        for paragraph in xml.split("</w:p>"):
+            chunks = re.findall(r"<w:t[^>]*>(.*?)</w:t>", paragraph)
+            line = unescape_xml(" ".join(chunks)).strip()
+            if line:
+                parts.append(line)
+        return "\n".join(parts)[:8000]
+    if lower.endswith((".txt", ".csv", ".log", ".md", ".json", ".xml")):
+        return data[:32000].decode("utf-8", "replace").strip()[:8000]
+    return ""
+
+
+def unescape_xml(value):
+    return (value or "").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+
+
 def files_of(asset_id):
     rows = [row for row in STATE["files"].values() if row["assetId"] == asset_id]
     rows.sort(key=lambda item: (item["created"], item["id"]))
@@ -2102,7 +2298,7 @@ def comment_dto(row):
     author = USERS.get(row.get("authorKey") or "")
     if not author:
         author = {"userKey": row.get("authorKey") or "", "displayName": row.get("authorKey") or "", "active": False}
-    return {"id": row["id"], "body": row["body"], "created": row["created"], "author": author}
+    return {"id": row["id"], "body": row["body"], "created": row["created"], "author": author, "internal": bool(row.get("internal"))}
 
 
 def activities_of(asset_id):
@@ -2940,8 +3136,8 @@ def floor_dto(row):
     return {
         "id": row["id"], "name": row.get("name") or "", "level": row.get("level") or 1,
         "placeId": row.get("placeId") or 0, "placeName": (place or {}).get("name") or "",
-        "planW": plan_limit(row.get("planW"), 1200, 640, 2400),
-        "planH": plan_limit(row.get("planH"), 760, 480, 1600),
+        "planW": plan_limit(row.get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W),
+        "planH": plan_limit(row.get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H),
         "rooms": rooms, "pins": pins,
     }
 
@@ -2970,8 +3166,8 @@ def create_floor(project_key, body, text):
     STATE["floors"][floor_id] = {
         "id": floor_id, "projectKey": project_key, "name": name, "level": level,
         "placeId": place_id, "rooms": [], "pins": [], "room_seq": 1, "pin_seq": 1,
-        "planW": plan_limit((body or {}).get("planW"), 1200, 640, 2400),
-        "planH": plan_limit((body or {}).get("planH"), 760, 480, 1600),
+        "planW": plan_limit((body or {}).get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W),
+        "planH": plan_limit((body or {}).get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H),
     }
     return 201, floor_dto(STATE["floors"][floor_id])
 
@@ -2988,8 +3184,8 @@ def save_floor(project_key, floor_id, body, text):
     level = 0 if raw_level is None or raw_level == "" else int(raw_level)
     if not name or len(name) > 80 or level < -20 or level > 200:
         return 400, {"message": text.get("asset-tree.error.floor", "Floor")}
-    plan_w = plan_limit(body.get("planW"), 1200, 640, 2400)
-    plan_h = plan_limit(body.get("planH"), 760, 480, 1600)
+    plan_w = plan_limit(body.get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W)
+    plan_h = plan_limit(body.get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H)
     rooms = body.get("rooms") or []
     pins = body.get("pins") or []
     if len(rooms) > 400 or len(pins) > 200:
@@ -3023,10 +3219,10 @@ def save_floor(project_key, floor_id, body, text):
             if y + h > plan_h:
                 h = max(minimum, plan_h - y)
         else:
-            x = max(-2400, min(4800, int(room.get("x") or 0)))
-            y = max(-2400, min(4800, int(room.get("y") or 0)))
-            w = min(w, 4800)
-            h = min(h, 4800)
+            x = max(PLAN_ORIGIN_LOW, min(PLAN_ORIGIN_HIGH, int(room.get("x") or 0)))
+            y = max(PLAN_ORIGIN_LOW, min(PLAN_ORIGIN_HIGH, int(room.get("y") or 0)))
+            w = min(w, PLAN_ORIGIN_HIGH)
+            h = min(h, PLAN_ORIGIN_HIGH)
         stored_rooms.append({
             "id": seq, "name": label[:80], "kind": kind, "color": room_color(room.get("color")),
             "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
@@ -3071,7 +3267,7 @@ def delete_floor(project_key, floor_id, text):
     return 204, None
 
 
-REPORT_STANDARD = ("status", "type", "place", "holder", "receipts", "cost", "warranty", "age", "writeoff", "work")
+REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work")
 
 
 def parse_money(raw):
@@ -3237,7 +3433,7 @@ def stored_report_chart(project_key, report_key, fallback):
 
 
 def report_group(key):
-    if key in ("status", "type", "place", "holder"):
+    if key in ("status", "type", "place", "holder", "issued"):
         return key
     return {"cost": "type", "receipts": "month", "age": "age", "warranty": "warranty", "writeoff": "writeoff", "work": "kind"}.get(key, "")
 
@@ -3248,6 +3444,7 @@ def report_catalog(project_key, text):
         "type": text.get("asset-tree.ui.reportTypeTitle", "Type"),
         "place": text.get("asset-tree.ui.reportPlaceTitle", "Place"),
         "holder": text.get("asset-tree.ui.reportHolderTitle", "Custodians"),
+        "issued": text.get("asset-tree.ui.issuedTo", "Issued to"),
         "receipts": text.get("asset-tree.ui.reportReceipts", "Receipts"),
         "warranty": text.get("asset-tree.ui.reportWarrantyTitle", "Warranty"),
         "cost": text.get("asset-tree.ui.reportCostTitle", "Cost"),
@@ -3271,7 +3468,7 @@ def create_saved_report(project_key, body, text):
     group = (body.get("groupBy") or "").strip().lower()
     filt = (body.get("filterField") or "").strip().lower()
     value = (body.get("filterValue") or "").strip()
-    if group not in ("status", "type", "place", "holder", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
+    if group not in ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if filt and filt not in ("status", "type", "holder", "mix"):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
@@ -3710,6 +3907,10 @@ def report_view(project_key, report_key, text, query=None):
             bucket = asset.get("custodianKey") or ""
             person = USERS.get(bucket) or {}
             label = text.get("asset-tree.ui.reportUnassigned", "None") if not bucket else (person.get("displayName") or bucket)
+        elif group == "issued":
+            bucket = asset.get("issuedKey") or ""
+            person = USERS.get(bucket) or {}
+            label = text.get("asset-tree.ui.custodianNone", "None") if not bucket else (person.get("displayName") or bucket)
         elif group == "place":
             place_id = place_root(asset["id"])
             place = STATE["assets"].get(place_id) if place_id else None
@@ -4002,7 +4203,7 @@ def sort_report_rows(report_key, group, rows, place_sort):
 
         rows.sort(key=status_key)
         return
-    if group in ("type", "holder") or report_key == "cost":
+    if group in ("type", "holder", "issued") or report_key == "cost":
         rows.sort(key=lambda row: ((row.get("label") or "").lower(), (row.get("key") or "").lower()))
         return
     if group == "place":
@@ -4063,14 +4264,15 @@ def log_place(place_id, kind, child):
 def file_dto(row):
     author = USERS.get(row.get("authorKey") or "")
     return {
-        "id": row["id"], "fileName": row["fileName"], "contentType": row["contentType"],
+        "id": row["id"], "fileName": repair_filename(row["fileName"]), "contentType": row["contentType"],
         "size": row["size"], "created": row["created"],
         "authorName": author["displayName"] if author else "",
+        "internal": bool(row.get("internal")),
     }
 
 
 def safe_file_name(raw):
-    name = (raw or "").strip().replace("\\", "/").split("/")[-1]
+    name = repair_filename((raw or "").strip()).replace("\\", "/").split("/")[-1]
     if not name or name in (".", ".."):
         return None
     if len(name) > 180:
@@ -4150,7 +4352,7 @@ def multipart_filename(headers):
         named = lower.find("filename=")
         if named >= 0 and (starred < 0 or named < starred):
             plain = multipart_token(line[named + len("filename="):].strip())
-    chosen = multipart_decode_star(encoded) if encoded else multipart_unquote(plain)
+    chosen = multipart_decode_star(encoded) if encoded else repair_filename(multipart_unquote(plain) or "")
     if not chosen:
         return None
     return chosen.replace("\\", "/").split("/")[-1]
@@ -4234,6 +4436,7 @@ def equipment_headers(text):
         text.get("asset-tree.ui.status", "Status"),
         text.get("asset-tree.ui.exchangePlace", "Place"),
         text.get("asset-tree.ui.custodian", "Custodian"),
+        text.get("asset-tree.ui.issuedTo", "Issued to"),
         text.get("asset-tree.ui.description", "Description"),
     ]
 
@@ -4272,6 +4475,7 @@ def equipment_table(project_key, text, day_first):
     for asset in assets:
         kind = types.get(asset["typeKey"]) or {}
         person = USERS.get(asset.get("custodianKey") or "")
+        holder = USERS.get(asset.get("issuedKey") or "")
         line = [
             asset["objectKey"],
             asset["name"],
@@ -4279,6 +4483,7 @@ def equipment_table(project_key, text, day_first):
             statuses.get(canonical(asset.get("status")), asset.get("status") or ""),
             location_of(asset),
             person["displayName"] if person else "",
+            holder["displayName"] if holder else "",
             asset.get("description") or "",
         ]
         values = asset.get("values") or {}
@@ -4404,6 +4609,7 @@ def equipment_pages(project_key, text, day_first):
         lines = []
         for asset in assets:
             person = USERS.get(asset.get("custodianKey") or "")
+            holder = USERS.get(asset.get("issuedKey") or "")
             line = [
                 asset["objectKey"],
                 asset["name"],
@@ -4411,6 +4617,7 @@ def equipment_pages(project_key, text, day_first):
                 statuses.get(canonical(asset.get("status")), asset.get("status") or ""),
                 location_of(asset),
                 person["displayName"] if person else "",
+                holder["displayName"] if holder else "",
                 asset.get("description") or "",
             ]
             values = asset.get("values") or {}
@@ -4738,6 +4945,7 @@ def group_word(group, text):
         "type": "asset-tree.ui.groupWordType",
         "place": "asset-tree.ui.groupWordPlace",
         "holder": "asset-tree.ui.groupWordHolder",
+        "issued": "asset-tree.ui.issuedTo",
         "month": "asset-tree.ui.groupWordMonth",
         "age": "asset-tree.ui.groupWordAge",
         "warranty": "asset-tree.ui.groupWordWarranty",
@@ -4936,6 +5144,7 @@ def sheet_role(header):
         "status": "status", "статус": "status",
         "place": "place", "площадка": "place", "место": "place",
         "custodian": "custodian", "ответственный": "custodian", "мол": "custodian",
+        "issued": "issued", "issued to": "issued", "кому выдано": "issued", "выдано": "issued",
         "description": "description", "описание": "description",
     }
     return roles.get(name)
@@ -5141,8 +5350,10 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         status_name = cell(cells, "status")
         place = cell(cells, "place")
         custodian_name = cell(cells, "custodian")
+        issued_name = cell(cells, "issued")
         description = cell(cells, "description")
         has_custodian = "custodian" in roles
+        has_issued = "issued" in roles
         has_description = "description" in roles
         if not name:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.name", "Name")})
@@ -5190,6 +5401,14 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
             if not custodian:
                 errors.append({"row": row_number, "message": text.get("asset-tree.error.import.user", "User").replace("{0}", custodian_name)})
                 continue
+        issued = None
+        if issued_name:
+            if issued_name not in known_users:
+                known_users[issued_name] = find_preview_user(issued_name)
+            issued = known_users[issued_name]
+            if not issued:
+                errors.append({"row": row_number, "message": text.get("asset-tree.error.import.user", "User").replace("{0}", issued_name)})
+                continue
         if existing:
             old_parent = normalize_parent(existing.get("parentId"))
             existing["name"] = name
@@ -5201,6 +5420,8 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
                 existing["description"] = description
             if has_custodian:
                 existing["custodianKey"] = custodian
+            if has_issued:
+                existing["issuedKey"] = issued
             if old_parent != parent:
                 from_place = place_container(old_parent)
                 to_place = place_container(parent)
@@ -5221,6 +5442,8 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
                 errors.append({"row": row_number, "message": text.get("asset-tree.error.assetKey.required", "Key")})
                 continue
             STATE["assets"][asset_id]["description"] = description
+            if has_issued:
+                STATE["assets"][asset_id]["issuedKey"] = issued
             by_key[STATE["assets"][asset_id]["objectKey"].lower()] = STATE["assets"][asset_id]
             log_activity(asset_id, "created", "", "", name)
             log_place(place_container(parent), "place_add", STATE["assets"][asset_id])
@@ -6356,6 +6579,36 @@ setTimeout(function () {
 
     def api(self, method, path, query):
         text = self.text()
+        match = re.fullmatch(r"/portal/assets/(\d+)/comments", path)
+        if match and method == "POST":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.add_comment(asset_id, self.read_json(), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/files/(\d+)", path)
+        if match and method == "DELETE":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.delete_file(asset_id, int(match.group(2)), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/shares/([A-Za-z0-9._@-]+)", path)
+        if match and method == "DELETE":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.remove_share(asset_id, match.group(2), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/shares", path)
+        if match and method == "POST":
+            asset_id = int(match.group(1))
+            if not portal_detail(asset_id, text):
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return self.add_share(asset_id, (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)", path)
+        if match and method == "GET":
+            detail = portal_detail(int(match.group(1)), text)
+            if not detail:
+                return 403, {"message": text["asset-tree.error.forbidden"]}
+            return 200, detail
         if path == "/portal/mine" and method == "GET":
             ensure_portal_demo()
             ensure_profile_demo()
@@ -6812,6 +7065,12 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/files/(\d+)", path)
         if match and method == "DELETE":
             return self.delete_file(int(match.group(1)), int(match.group(2)), text)
+        match = re.fullmatch(r"/assets/(\d+)/shares", path)
+        if match and method == "POST":
+            return self.add_share(int(match.group(1)), (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/assets/(\d+)/shares/([A-Za-z0-9._@-]+)", path)
+        if match and method == "DELETE":
+            return self.remove_share(int(match.group(1)), match.group(2), text)
         match = re.fullmatch(r"/assets/(\d+)/move", path)
         if match and method == "POST":
             return self.move_asset(int(match.group(1)), self.read_json(), text)
@@ -7436,6 +7695,8 @@ setTimeout(function () {
             for plan_id in [row["id"] for row in plan_rows(current)]:
                 STATE["plans"].pop(plan_id, None)
             STATE.setdefault("lives", {}).pop(current, None)
+            for share_id in [row["id"] for row in STATE.get("shares", {}).values() if row.get("assetId") == current]:
+                STATE["shares"].pop(share_id, None)
             for floor in STATE.setdefault("floors", {}).values():
                 floor["pins"] = [pin for pin in floor.get("pins") or [] if pin.get("assetId") != current]
         return 204, None
@@ -7692,6 +7953,7 @@ setTimeout(function () {
         row = {
             "id": comment_id, "assetId": asset_id, "authorKey": "ivanov",
             "body": note, "created": now_stamp(),
+            "internal": bool((body or {}).get("internal")),
         }
         STATE["comments"][comment_id] = row
         log_activity(asset_id, "comment", "", "", note[:500])
@@ -7703,6 +7965,38 @@ setTimeout(function () {
             return 404, {"message": text["asset-tree.error.notFound"]}
         log_activity(asset_id, "comment_delete", "", row.get("body") or "", "")
         STATE["comments"].pop(comment_id, None)
+        return 204, None
+
+    def add_share(self, asset_id, user_key, text):
+        asset = STATE["assets"].get(asset_id)
+        key = (user_key or "").strip()
+        person = USERS.get(key)
+        if not asset:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        if is_location_id(asset_id):
+            return 400, {"message": text.get("asset-tree.error.share.place", "Place")}
+        if not person:
+            return 400, {"message": text["asset-tree.error.user"]}
+        for row in STATE["shares"].values():
+            if row.get("assetId") == asset_id and row.get("userKey") == person["userKey"]:
+                return 201, person
+        remember_share(asset_id, person["userKey"])
+        log_activity(asset_id, "share", "", "", person["displayName"])
+        return 201, person
+
+    def remove_share(self, asset_id, user_key, text):
+        if asset_id not in STATE["assets"]:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        found = None
+        for row in STATE["shares"].values():
+            if row.get("assetId") == asset_id and row.get("userKey") == user_key:
+                found = row
+                break
+        if not found:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        STATE["shares"].pop(found["id"], None)
+        person = USERS.get(user_key) or {}
+        log_activity(asset_id, "share_remove", "", person.get("displayName") or user_key, "")
         return 204, None
 
     def delete_file(self, asset_id, file_id, text):
@@ -7729,10 +8023,19 @@ setTimeout(function () {
                 return
             with open(path, "rb") as handle:
                 data = handle.read()
-            name = (row["fileName"] or "file").replace('"', "").replace("\r", "").replace("\n", "")
-            ascii_name = name.encode("ascii", "replace").decode("ascii")
-            disposition = 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (ascii_name, quote(name))
-            self.respond(200, data, row["contentType"] or "application/octet-stream", {
+            name = repair_filename(row["fileName"] or "file").replace('"', "").replace("\r", "").replace("\n", "")
+            ascii_name = name.encode("ascii", "replace").decode("ascii").replace("?", "_")
+            if (query.get("preview") or [""])[0] == "text":
+                body = file_preview_text(name, data).encode("utf-8")
+                self.respond(200, body, "text/plain; charset=utf-8", {
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Disposition": "inline",
+                })
+                return
+            shown = inline_type(data) if (query.get("inline") or ["0"])[0] == "1" else None
+            mode = "inline" if shown else "attachment"
+            disposition = '%s; filename="%s"; filename*=UTF-8\'\'%s' % (mode, ascii_name, quote(name))
+            self.respond(200, data, shown or row["contentType"] or "application/octet-stream", {
                 "X-Content-Type-Options": "nosniff",
                 "Content-Disposition": disposition,
             })
@@ -7773,6 +8076,7 @@ setTimeout(function () {
                     "id": file_id, "assetId": asset_id, "fileName": safe,
                     "contentType": content_type or "application/octet-stream",
                     "size": len(data), "authorKey": "ivanov", "created": now_stamp(),
+                    "internal": (query.get("internal") or ["0"])[0] == "1" and (query.get("portal") or ["0"])[0] != "1",
                 }
         if missing:
             self.respond(404, json.dumps({"message": text["asset-tree.error.notFound"]}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")

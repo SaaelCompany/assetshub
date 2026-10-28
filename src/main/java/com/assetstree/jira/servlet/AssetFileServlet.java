@@ -8,6 +8,7 @@ import com.assetstree.jira.dto.FileDto;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetFileStore;
+import com.assetstree.jira.service.FilePreview;
 import com.assetstree.jira.service.AssetService;
 import com.assetstree.jira.service.StoredFile;
 
@@ -19,6 +20,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 public class AssetFileServlet extends HttpServlet {
@@ -37,10 +40,26 @@ public class AssetFileServlet extends HttpServlet {
         try {
             StoredFile stored = service().openFile(user, id);
             String name = stored.getFileName() == null ? "file" : stored.getFileName().replace("\"", "").replace("\r", "").replace("\n", "");
+            if ("text".equals(request.getParameter("preview"))) {
+                byte[] text = FilePreview.textOf(stored.getFileName(), stored.getData()).getBytes(StandardCharsets.UTF_8);
+                response.setStatus(HttpServletResponse.SC_OK);
+                response.setContentType("text/plain; charset=UTF-8");
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                response.setHeader("Content-Disposition", "inline");
+                response.setContentLength(text.length);
+                response.getOutputStream().write(text);
+                return;
+            }
+            String inline = "1".equals(request.getParameter("inline")) ? FilePreview.inlineType(stored.getData()) : null;
             response.setStatus(HttpServletResponse.SC_OK);
-            response.setContentType(stored.getContentType() == null ? "application/octet-stream" : stored.getContentType());
             response.setHeader("X-Content-Type-Options", "nosniff");
-            response.setHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+            if (inline != null) {
+                response.setContentType(inline);
+                response.setHeader("Content-Disposition", disposition("inline", name));
+            } else {
+                response.setContentType(stored.getContentType() == null ? "application/octet-stream" : stored.getContentType());
+                response.setHeader("Content-Disposition", disposition("attachment", name));
+            }
             response.setContentLength(stored.getData().length);
             response.getOutputStream().write(stored.getData());
         } catch (AssetException ex) {
@@ -73,7 +92,10 @@ public class AssetFileServlet extends HttpServlet {
             if (upload.getData().length > AssetFileStore.MAX_BYTES) {
                 throw new AssetException(400, "asset-tree.error.file.size");
             }
-            FileDto saved = service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData());
+            boolean internal = "1".equals(request.getParameter("internal"));
+            FileDto saved = "1".equals(request.getParameter("portal"))
+                    ? service().portalStoreFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), false)
+                    : service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), internal);
             response.setStatus(HttpServletResponse.SC_CREATED);
             response.setContentType("application/json; charset=UTF-8");
             response.setCharacterEncoding("UTF-8");
@@ -81,6 +103,24 @@ public class AssetFileServlet extends HttpServlet {
         } catch (AssetException ex) {
             writeError(response, ex);
         }
+    }
+
+    private static String disposition(String mode, String name) {
+        StringBuilder ascii = new StringBuilder();
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            ascii.append(c >= 32 && c < 127 && c != '"' && c != '\\' ? c : '_');
+        }
+        if (ascii.length() == 0) {
+            ascii.append("file");
+        }
+        String encoded;
+        try {
+            encoded = URLEncoder.encode(name, "UTF-8").replace("+", "%20");
+        } catch (UnsupportedEncodingException ex) {
+            encoded = ascii.toString();
+        }
+        return mode + "; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
     }
 
     private static String queryValue(String query, String name) {

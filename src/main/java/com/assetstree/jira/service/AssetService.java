@@ -6,6 +6,7 @@ import com.assetstree.jira.dto.AssetDto;
 import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
+import com.assetstree.jira.dto.PortalCardDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.BulkResultDto;
@@ -71,17 +72,33 @@ public interface AssetService {
 
     AssetDto updateAsset(ApplicationUser user, int id, AssetDraft draft);
 
-    CommentDto addComment(ApplicationUser user, int id, String body);
+    CommentDto addComment(ApplicationUser user, int id, String body, boolean internal);
 
     void deleteComment(ApplicationUser user, int assetId, int commentId);
 
     void deleteActivity(ApplicationUser user, int assetId, int activityId);
 
-    FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data);
+    FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
 
     StoredFile openFile(ApplicationUser user, int fileId);
 
     void deleteFile(ApplicationUser user, int assetId, int fileId);
+
+    UserProfileDto shareAsset(ApplicationUser user, int assetId, String userKey);
+
+    void unshareAsset(ApplicationUser user, int assetId, String userKey);
+
+    PortalCardDto portalAsset(ApplicationUser user, int id);
+
+    CommentDto portalComment(ApplicationUser user, int id, String body, boolean internal);
+
+    FileDto portalStoreFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
+
+    void portalDeleteFile(ApplicationUser user, int assetId, int fileId);
+
+    UserProfileDto portalShare(ApplicationUser user, int assetId, String userKey);
+
+    void portalUnshare(ApplicationUser user, int assetId, String userKey);
 
     void storeCardImage(ApplicationUser user, int assetId, byte[] data);
 
