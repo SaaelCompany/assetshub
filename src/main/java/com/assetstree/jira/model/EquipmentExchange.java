@@ -17,7 +17,7 @@ public final class EquipmentExchange {
     public static final int MAX_ROWS = 2000;
 
     private static final Pattern NUMBER = Pattern.compile("^-?\\d{1,12}(\\.\\d{1,4})?$");
-    private static final String[] ROLES = {"key", "name", "type", "status", "place", "custodian", "description"};
+    private static final String[] ROLES = {"key", "name", "type", "status", "place", "custodian", "issued", "description"};
 
     private EquipmentExchange() {
     }
@@ -220,10 +220,13 @@ public final class EquipmentExchange {
         private final int parentId;
         private final boolean custodianPresent;
         private final String custodianKey;
+        private final boolean issuedPresent;
+        private final String issuedKey;
         private final List<Value> attributes;
 
         Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
-               int parentId, boolean custodianPresent, String custodianKey, List<Value> attributes) {
+               int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
+               List<Value> attributes) {
             this.row = row;
             this.existingId = existingId;
             this.name = name;
@@ -233,6 +236,8 @@ public final class EquipmentExchange {
             this.parentId = parentId;
             this.custodianPresent = custodianPresent;
             this.custodianKey = custodianKey;
+            this.issuedPresent = issuedPresent;
+            this.issuedKey = issuedKey;
             this.attributes = attributes;
         }
 
@@ -270,6 +275,14 @@ public final class EquipmentExchange {
 
         public String getCustodianKey() {
             return custodianKey;
+        }
+
+        public boolean isIssuedPresent() {
+            return issuedPresent;
+        }
+
+        public String getIssuedKey() {
+            return issuedKey;
         }
 
         public List<Value> getAttributes() {
@@ -462,7 +475,9 @@ public final class EquipmentExchange {
         String place = text(record, roleColumn[4]);
         boolean custodianPresent = roleColumn[5] >= 0;
         String custodian = text(record, roleColumn[5]);
-        String description = roleColumn[6] < 0 ? null : record.cell(roleColumn[6]);
+        boolean issuedPresent = roleColumn[6] >= 0;
+        String issued = text(record, roleColumn[6]);
+        String description = roleColumn[7] < 0 ? null : record.cell(roleColumn[7]);
         if (name.isEmpty() && key.isEmpty() && typeName.isEmpty() && place.isEmpty()) {
             return null;
         }
@@ -526,18 +541,13 @@ public final class EquipmentExchange {
             issues.add(new Issue(row, "asset-tree.error.import.depth", place));
             return null;
         }
-        String custodianKey = null;
-        if (!custodian.isEmpty()) {
-            Person person = people == null ? Person.missing() : people.find(custodian);
-            if (person == null || person.isMissing() || person.isBlank()) {
-                issues.add(new Issue(row, "asset-tree.error.import.user", custodian));
-                return null;
-            }
-            if (person.isAmbiguous()) {
-                issues.add(new Issue(row, "asset-tree.error.import.user.ambiguous", custodian));
-                return null;
-            }
-            custodianKey = person.getKey();
+        String custodianKey = resolvePerson(custodian, people, row, issues);
+        if (!custodian.isEmpty() && custodianKey == null) {
+            return null;
+        }
+        String issuedKey = resolvePerson(issued, people, row, issues);
+        if (!issued.isEmpty() && issuedKey == null) {
+            return null;
         }
         List<Value> attributes = new ArrayList<Value>();
         Map<String, String> filled = new LinkedHashMap<String, String>();
@@ -610,7 +620,8 @@ public final class EquipmentExchange {
             attributes.add(new Value(field.getKey(), value));
         }
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
-                description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey, attributes);
+                description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
+                issuedPresent, issuedKey, attributes);
     }
 
     private static Map<String, List<Node>> indexPlaces(List<Node> nodes) {
@@ -820,6 +831,22 @@ public final class EquipmentExchange {
         return map;
     }
 
+    private static String resolvePerson(String raw, Directory people, int row, List<Issue> issues) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        Person person = people == null ? Person.missing() : people.find(raw);
+        if (person == null || person.isMissing() || person.isBlank()) {
+            issues.add(new Issue(row, "asset-tree.error.import.user", raw));
+            return null;
+        }
+        if (person.isAmbiguous()) {
+            issues.add(new Issue(row, "asset-tree.error.import.user.ambiguous", raw));
+            return null;
+        }
+        return person.getKey();
+    }
+
     private static String text(EquipmentSheet.Record record, int column) {
         if (column < 0) {
             return "";
@@ -845,6 +872,7 @@ public final class EquipmentExchange {
         alias(roles, "status", "status", "статус");
         alias(roles, "place", "place", "площадка", "место", "расположение");
         alias(roles, "custodian", "custodian", "ответственный", "мол");
+        alias(roles, "issued", "issued", "issued to", "кому выдано", "выдано");
         alias(roles, "description", "description", "описание");
         if (labels != null) {
             for (Map.Entry<String, String> entry : labels.entrySet()) {

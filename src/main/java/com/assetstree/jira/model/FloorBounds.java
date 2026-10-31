@@ -1,11 +1,18 @@
 package com.assetstree.jira.model;
 
 import java.util.Locale;
+import java.util.regex.Pattern;
 
-/** Pixel limits for a drawn floor: rooms, walls and equipment pins share one canvas. */
+/** Centimeter limits for a drawn floor: rooms, walls and equipment pins share one canvas. */
 public final class FloorBounds {
     public static final int CANVAS = 1200;
     public static final int CANVAS_HEIGHT = 760;
+    /** 6.4 m. A new floor starts larger than this. */
+    public static final int MIN_WIDTH = 640;
+    public static final int MIN_HEIGHT = 480;
+    /** 400 m by 300 m. One unit is one centimeter. */
+    public static final int MAX_WIDTH = 40000;
+    public static final int MAX_HEIGHT = 30000;
     public static final int MIN_ROOM = 16;
     public static final int MIN_PART = 4;
     public static final int MAX_FLOORS = 40;
@@ -40,6 +47,11 @@ public final class FloorBounds {
     public static final String COMM = "comm";
     public static final String VENT = "vent";
     public static final String WATER = "water";
+    public static final String HEAT = "heat";
+    public static final String FIRE = "fire";
+    public static final String GUARD = "guard";
+    public static final String PNG = "png";
+    private static final Pattern MARK = Pattern.compile("^(power|scs|comm|vent|water|heat|fire|guard)-[a-z]{1,12}$");
 
     private FloorBounds() {
     }
@@ -53,10 +65,15 @@ public final class FloorBounds {
 
     /** Origin of a rotated shape. Its unrotated box may hang off the sheet. */
     public static int origin(int value) {
-        if (value < -2400) {
-            return -2400;
+        if (value < -MAX_WIDTH) {
+            return -MAX_WIDTH;
         }
-        return value > 4800 ? 4800 : value;
+        return value > span() ? span() : value;
+    }
+
+    /** Longest stored side of a rotated shape. */
+    public static int span() {
+        return MAX_WIDTH * 2;
     }
 
     public static String kind(String raw) {
@@ -72,7 +89,11 @@ public final class FloorBounds {
                 || TOILET.equals(value) || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)
                 || ARC.equals(value) || DIM.equals(value) || TEXT.equals(value)
                 || POWER.equals(value) || SCS.equals(value) || COMM.equals(value)
-                || VENT.equals(value) || WATER.equals(value)) {
+                || VENT.equals(value) || WATER.equals(value)
+                || HEAT.equals(value) || FIRE.equals(value) || GUARD.equals(value) || PNG.equals(value)) {
+            return value;
+        }
+        if (value.length() <= 16 && MARK.matcher(value).matches()) {
             return value;
         }
         return ROOM;
@@ -86,7 +107,8 @@ public final class FloorBounds {
         if (COLUMN.equals(value) || DESK.equals(value) || TABLE.equals(value) || CHAIR.equals(value)
                 || CABINET.equals(value) || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
                 || BED.equals(value) || PLANT.equals(value) || BATH.equals(value) || TOILET.equals(value)
-                || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value) || TEXT.equals(value)) {
+                || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value) || TEXT.equals(value)
+                || PNG.equals(value)) {
             return 8;
         }
         return MIN_PART;
@@ -96,20 +118,20 @@ public final class FloorBounds {
         if (raw <= 0) {
             return CANVAS;
         }
-        if (raw < 640) {
-            return 640;
+        if (raw < MIN_WIDTH) {
+            return MIN_WIDTH;
         }
-        return raw > 2400 ? 2400 : raw;
+        return raw > MAX_WIDTH ? MAX_WIDTH : raw;
     }
 
     public static int height(int raw) {
         if (raw <= 0) {
             return CANVAS_HEIGHT;
         }
-        if (raw < 480) {
-            return 480;
+        if (raw < MIN_HEIGHT) {
+            return MIN_HEIGHT;
         }
-        return raw > 1600 ? 1600 : raw;
+        return raw > MAX_HEIGHT ? MAX_HEIGHT : raw;
     }
 
     /** Degrees clockwise, matching the plan canvas. */

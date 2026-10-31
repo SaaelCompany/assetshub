@@ -32,4 +32,9 @@ public interface AssetFileEntity extends Entity {
     Date getCreated();
 
     void setCreated(Date created);
+
+    /** Hidden from the customer portal. */
+    boolean isInternal();
+
+    void setInternal(boolean internal);
 }

@@ -585,6 +585,7 @@ public final class ModuleSetup {
         StringBuilder stored = new StringBuilder();
         String[] templates = raw.split("\\|");
         int count = 0;
+        int pictures = 0;
         for (String template : templates) {
             if (count >= 24) {
                 break;
@@ -593,11 +594,18 @@ public final class ModuleSetup {
             if (head.length < 3) {
                 continue;
             }
+            boolean picture = head[2].startsWith("png:");
+            if (picture && pictures >= 8) {
+                continue;
+            }
             String id = furnId(head[0]);
             String name = furnLabel(head[1]);
-            String shapes = furnShapes(head[2]);
+            String shapes = picture ? furnPng(head[2]) : furnShapes(head[2]);
             if (id.isEmpty() || name.isEmpty() || shapes.isEmpty()) {
                 continue;
+            }
+            if (picture) {
+                pictures++;
             }
             if (stored.length() > 0) {
                 stored.append('|');
@@ -615,6 +623,30 @@ public final class ModuleSetup {
 
     private static String furnLabel(String raw) {
         return clipLabel(raw).replace('^', ' ').replace('!', ' ').trim();
+    }
+
+    /** png:width:height:base64 . The picture has no semicolon, so it survives the setup row. */
+    private static String furnPng(String raw) {
+        String[] bits = raw.split(":", 4);
+        if (bits.length < 4) {
+            return "";
+        }
+        int width = furnCoord(bits[1], 400);
+        int height = furnCoord(bits[2], 400);
+        if (width < 8) {
+            width = 8;
+        }
+        if (height < 8) {
+            height = 8;
+        }
+        String data = bits[3] == null ? "" : bits[3].trim();
+        if (data.length() < 20 || data.length() > 60000 || !data.matches("[A-Za-z0-9+/=]+")) {
+            return "";
+        }
+        if (!data.startsWith("iVBORw0KGgo") && !data.startsWith("/9j/")) {
+            return "";
+        }
+        return "png:" + width + ":" + height + ":" + data;
     }
 
     private static String furnShapes(String raw) {

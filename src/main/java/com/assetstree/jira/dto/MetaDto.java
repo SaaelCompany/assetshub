@@ -18,6 +18,10 @@ public class MetaDto {
     private String displayName;
     private String userKey;
     private String baseUrl;
+    private boolean mineSaved;
+    private List<String> mineColumns;
+    private String mineSortKey;
+    private String mineSortDir;
     private Map<String, String> i18n = new LinkedHashMap<String, String>();
     private List<ProjectDto> projects = new ArrayList<ProjectDto>();
 
@@ -99,5 +103,37 @@ public class MetaDto {
 
     public void setProjects(List<ProjectDto> projects) {
         this.projects = projects;
+    }
+
+    public boolean isMineSaved() {
+        return mineSaved;
+    }
+
+    public void setMineSaved(boolean mineSaved) {
+        this.mineSaved = mineSaved;
+    }
+
+    public List<String> getMineColumns() {
+        return mineColumns;
+    }
+
+    public void setMineColumns(List<String> mineColumns) {
+        this.mineColumns = mineColumns;
+    }
+
+    public String getMineSortKey() {
+        return mineSortKey;
+    }
+
+    public void setMineSortKey(String mineSortKey) {
+        this.mineSortKey = mineSortKey;
+    }
+
+    public String getMineSortDir() {
+        return mineSortDir;
+    }
+
+    public void setMineSortDir(String mineSortDir) {
+        this.mineSortDir = mineSortDir;
     }
 }

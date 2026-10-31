@@ -8,10 +8,12 @@ import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.MessageDto;
+import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.model.AssetDraft;
 import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkDraft;
 import com.assetstree.jira.model.CommentDraft;
+import com.assetstree.jira.model.ShareDraft;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.GrantDraft;
@@ -73,6 +75,17 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.meta(user())).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("me/columns")
+    public Response saveMine(final MineViewDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveMineView(user(), draft)).build();
             }
         });
     }
@@ -198,7 +211,8 @@ public class AssetResource {
             @Override
             public Response call() {
                 String body = draft == null ? null : draft.getBody();
-                return Response.status(Response.Status.CREATED).entity(assetService.addComment(user(), id, body)).build();
+                boolean internal = draft != null && draft.isInternal();
+                return Response.status(Response.Status.CREATED).entity(assetService.addComment(user(), id, body, internal)).build();
             }
         });
     }
@@ -222,6 +236,30 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.deleteActivity(user(), id, activityId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/shares")
+    public Response share(@PathParam("id") final int id, final ShareDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String userKey = draft == null ? null : draft.getUserKey();
+                return Response.status(Response.Status.CREATED).entity(assetService.shareAsset(user(), id, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/shares/{userKey}")
+    public Response unshare(@PathParam("id") final int id, @PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.unshareAsset(user(), id, userKey);
                 return Response.noContent().build();
             }
         });
@@ -933,6 +971,65 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.picker(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("portal/assets/{id}")
+    public Response portalAsset(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.portalAsset(user(), id)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/comments")
+    public Response portalComment(@PathParam("id") final int id, final CommentDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String body = draft == null ? null : draft.getBody();
+                return Response.status(Response.Status.CREATED).entity(assetService.portalComment(user(), id, body, false)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("portal/assets/{id}/files/{fileId}")
+    public Response portalDeleteFile(@PathParam("id") final int id, @PathParam("fileId") final int fileId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalDeleteFile(user(), id, fileId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/shares")
+    public Response portalShare(@PathParam("id") final int id, final ShareDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String userKey = draft == null ? null : draft.getUserKey();
+                return Response.status(Response.Status.CREATED).entity(assetService.portalShare(user(), id, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("portal/assets/{id}/shares/{userKey}")
+    public Response portalUnshare(@PathParam("id") final int id, @PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalUnshare(user(), id, userKey);
+                return Response.noContent().build();
             }
         });
     }

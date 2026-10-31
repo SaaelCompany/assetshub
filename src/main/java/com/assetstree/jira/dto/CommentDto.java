@@ -8,6 +8,7 @@ public class CommentDto {
     private int id;
     private String body;
     private String created;
+    private boolean internal;
     private UserProfileDto author;
 
     public int getId() {
@@ -32,6 +33,14 @@ public class CommentDto {
 
     public void setCreated(String created) {
         this.created = created;
+    }
+
+    public boolean isInternal() {
+        return internal;
+    }
+
+    public void setInternal(boolean internal) {
+        this.internal = internal;
     }
 
     public UserProfileDto getAuthor() {

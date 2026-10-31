@@ -24,6 +24,7 @@
         <entity>com.assetstree.jira.ao.InventoryMarkEntity</entity>
         <entity>com.assetstree.jira.ao.AssetCommentEntity</entity>
         <entity>com.assetstree.jira.ao.AssetFileEntity</entity>
+        <entity>com.assetstree.jira.ao.AssetShareEntity</entity>
         <entity>com.assetstree.jira.ao.AssetActivityEntity</entity>
         <entity>com.assetstree.jira.ao.ProjectStatusEntity</entity>
         <entity>com.assetstree.jira.ao.ProjectGrantEntity</entity>

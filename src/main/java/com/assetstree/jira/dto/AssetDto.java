@@ -30,12 +30,14 @@ public class AssetDto {
     private boolean cardImage;
     private UserProfileDto custodian;
     private UserProfileDto issued;
+    private UserProfileDto author;
     private String holderRole;
     private List<AttributeDto> attributes = new ArrayList<AttributeDto>();
     private List<IssueRefDto> issues;
     private List<AssetPeerDto> peers;
     private List<CommentDto> comments;
     private List<FileDto> files;
+    private List<UserProfileDto> shares;
     private List<ActivityDto> activities;
     private List<ServicePlanDto> plans;
     private String serviceDue;
@@ -217,6 +219,14 @@ public class AssetDto {
         this.issued = issued;
     }
 
+    public UserProfileDto getAuthor() {
+        return author;
+    }
+
+    public void setAuthor(UserProfileDto author) {
+        this.author = author;
+    }
+
     public String getHolderRole() {
         return holderRole;
     }
@@ -263,6 +273,14 @@ public class AssetDto {
 
     public void setFiles(List<FileDto> files) {
         this.files = files;
+    }
+
+    public List<UserProfileDto> getShares() {
+        return shares;
+    }
+
+    public void setShares(List<UserProfileDto> shares) {
+        this.shares = shares;
     }
 
     public List<ActivityDto> getActivities() {
