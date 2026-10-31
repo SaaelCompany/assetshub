@@ -1,6 +1,7 @@
 package com.assetstree.jira.model;
 
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** Centimeter limits for a drawn floor: rooms, walls and equipment pins share one canvas. */
 public final class FloorBounds {
@@ -46,6 +47,11 @@ public final class FloorBounds {
     public static final String COMM = "comm";
     public static final String VENT = "vent";
     public static final String WATER = "water";
+    public static final String HEAT = "heat";
+    public static final String FIRE = "fire";
+    public static final String GUARD = "guard";
+    public static final String PNG = "png";
+    private static final Pattern MARK = Pattern.compile("^(power|scs|comm|vent|water|heat|fire|guard)-[a-z]{1,12}$");
 
     private FloorBounds() {
     }
@@ -83,7 +89,11 @@ public final class FloorBounds {
                 || TOILET.equals(value) || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)
                 || ARC.equals(value) || DIM.equals(value) || TEXT.equals(value)
                 || POWER.equals(value) || SCS.equals(value) || COMM.equals(value)
-                || VENT.equals(value) || WATER.equals(value)) {
+                || VENT.equals(value) || WATER.equals(value)
+                || HEAT.equals(value) || FIRE.equals(value) || GUARD.equals(value) || PNG.equals(value)) {
+            return value;
+        }
+        if (value.length() <= 16 && MARK.matcher(value).matches()) {
             return value;
         }
         return ROOM;
@@ -97,7 +107,8 @@ public final class FloorBounds {
         if (COLUMN.equals(value) || DESK.equals(value) || TABLE.equals(value) || CHAIR.equals(value)
                 || CABINET.equals(value) || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
                 || BED.equals(value) || PLANT.equals(value) || BATH.equals(value) || TOILET.equals(value)
-                || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value) || TEXT.equals(value)) {
+                || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value) || TEXT.equals(value)
+                || PNG.equals(value)) {
             return 8;
         }
         return MIN_PART;

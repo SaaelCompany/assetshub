@@ -23,6 +23,7 @@ import com.assetstree.jira.dto.InventoryRowDto;
 import com.assetstree.jira.dto.IssueContextDto;
 import com.assetstree.jira.dto.IssueRefDto;
 import com.assetstree.jira.dto.MetaDto;
+import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.dto.LifecycleDto;
@@ -61,6 +62,8 @@ import java.util.List;
 
 public interface AssetService {
     MetaDto meta(ApplicationUser user);
+
+    MineViewDto saveMineView(ApplicationUser user, MineViewDto draft);
 
     AssetListDto listAssets(ApplicationUser user, String projectKey, String query);
 

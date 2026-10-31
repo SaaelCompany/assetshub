@@ -30,6 +30,7 @@ import com.atlassian.jira.security.PermissionManager;
 import com.atlassian.jira.security.groups.GroupManager;
 import com.atlassian.jira.security.plugin.ProjectPermissionKey;
 import com.atlassian.jira.user.ApplicationUser;
+import com.atlassian.jira.user.UserPropertyManager;
 import com.atlassian.jira.user.util.UserManager;
 import com.atlassian.jira.util.I18nHelper;
 import com.atlassian.mail.Email;
@@ -100,6 +101,7 @@ import com.assetstree.jira.dto.InventoryRowDto;
 import com.assetstree.jira.dto.IssueContextDto;
 import com.assetstree.jira.dto.IssueRefDto;
 import com.assetstree.jira.dto.MetaDto;
+import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.PortalRuleDto;
 import com.assetstree.jira.dto.ProjectDto;
@@ -119,6 +121,7 @@ import com.assetstree.jira.dto.StaffDutyDto;
 import com.assetstree.jira.dto.ServicePlanDto;
 import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.UserProfileDto;
+import com.assetstree.jira.model.MineColumns;
 import com.assetstree.jira.model.AssetDraft;
 import com.assetstree.jira.model.CopyNames;
 import com.assetstree.jira.model.BulkDraft;
@@ -204,6 +207,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import com.opensymphony.module.propertyset.PropertySet;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
@@ -223,6 +228,7 @@ public class AssetServiceImpl implements AssetService {
     private volatile GlobalPermissionManager globalPermissionManagerRef;
     private volatile PermissionManager permissionManagerRef;
     private volatile UserManager userManagerRef;
+    private volatile UserPropertyManager userPropertyManagerRef;
     private volatile ProjectManager projectManagerRef;
     private volatile UserSearchService userSearchServiceRef;
     private volatile CrowdService crowdServiceRef;
@@ -376,8 +382,65 @@ public class AssetServiceImpl implements AssetService {
         attachCards(projects);
         attachAssetKeys(projects);
         attachViews(projects);
+        attachMine(meta, user);
         meta.setProjects(projects);
         return meta;
+    }
+
+    @Override
+    public MineViewDto saveMineView(ApplicationUser user, MineViewDto draft) {
+        requireUser(user);
+        MineViewDto clean = draft == null ? new MineViewDto() : draft;
+        String encoded = MineColumns.encode(clean.getColumns(), clean.getSortKey(), clean.getSortDir());
+        MineViewDto stored = MineColumns.decode(encoded);
+        try {
+            PropertySet set = userProperties().getPropertySet(user);
+            set.setText(MineColumns.KEY, encoded);
+        } catch (RuntimeException ex) {
+            log.warn("Could not store personal columns for {}", user.getKey(), ex);
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+        return stored == null ? new MineViewDto() : stored;
+    }
+
+    private void attachMine(MetaDto meta, ApplicationUser user) {
+        MineViewDto view = readMineView(user);
+        if (view == null) {
+            return;
+        }
+        meta.setMineSaved(true);
+        meta.setMineColumns(view.getColumns());
+        meta.setMineSortKey(view.getSortKey());
+        meta.setMineSortDir(view.getSortDir());
+    }
+
+    private MineViewDto readMineView(ApplicationUser user) {
+        try {
+            PropertySet set = userProperties().getPropertySet(user);
+            if (set == null || !set.exists(MineColumns.KEY)) {
+                return null;
+            }
+            String raw;
+            try {
+                raw = set.getText(MineColumns.KEY);
+            } catch (RuntimeException ex) {
+                raw = set.getString(MineColumns.KEY);
+            }
+            MineViewDto view = MineColumns.decode(raw == null ? "" : raw);
+            return view == null ? new MineViewDto() : view;
+        } catch (RuntimeException ex) {
+            log.warn("Could not read personal columns for {}", user.getKey(), ex);
+            return null;
+        }
+    }
+
+    private UserPropertyManager userProperties() {
+        UserPropertyManager current = userPropertyManagerRef;
+        if (current == null) {
+            current = ComponentAccessor.getComponent(UserPropertyManager.class);
+            userPropertyManagerRef = current;
+        }
+        return current;
     }
 
     @Override

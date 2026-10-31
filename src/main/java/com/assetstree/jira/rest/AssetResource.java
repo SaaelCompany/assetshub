@@ -8,6 +8,7 @@ import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.MessageDto;
+import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.model.AssetDraft;
 import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkDraft;
@@ -74,6 +75,17 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.meta(user())).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("me/columns")
+    public Response saveMine(final MineViewDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveMineView(user(), draft)).build();
             }
         });
     }

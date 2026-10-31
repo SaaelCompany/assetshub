@@ -1191,6 +1191,44 @@ def module_setup(stored, migrate=True):
     }
 
 
+def plan_kind(kind):
+    value = str(kind or "room").strip().lower()
+    allowed = {
+        "room", "wall", "door", "window", "column", "stair", "desk", "partition",
+        "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant",
+        "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text",
+        "power", "scs", "comm", "vent", "water", "heat", "fire", "guard", "png",
+    }
+    if value in allowed:
+        return value
+    if len(value) <= 16 and re.fullmatch(r"(power|scs|comm|vent|water|heat|fire|guard)-[a-z]{1,12}", value):
+        return value
+    return "room"
+
+
+def save_mine_view(user_key, body):
+    body = body or {}
+    columns = body.get("columns") if isinstance(body.get("columns"), list) else []
+    clean = []
+    for item in columns:
+        key = str(item or "").strip()
+        if not key or len(key) > 80 or key in clean or len(clean) >= 40:
+            continue
+        if any(ord(ch) < 32 for ch in key):
+            continue
+        clean.append(key)
+    sort_key = str(body.get("sortKey") or "").strip()[:80]
+    if any(ord(ch) < 32 for ch in sort_key):
+        sort_key = ""
+    stored = {
+        "columns": clean,
+        "sortKey": sort_key,
+        "sortDir": "desc" if body.get("sortDir") == "desc" else "asc",
+    }
+    STATE.setdefault("mine_views", {})[user_key] = stored
+    return stored
+
+
 def pack_furniture(raw):
     text = str(raw or "").strip()
     if not text:
@@ -1206,6 +1244,19 @@ def pack_furniture(raw):
         if not re.fullmatch(r"[a-z][a-z0-9]{0,7}", ident):
             continue
         name = re.sub(r"\s+", " ", re.sub(r"[,;|^!=]", " ", head[1])).strip()[:40]
+        if head[2].startswith("png:"):
+            bits = head[2].split(":", 3)
+            if name and len(bits) == 4 and re.fullmatch(r"[A-Za-z0-9+/=]{20,60000}", bits[3] or "") and bits[3].startswith(("iVBORw0KGgo", "/9j/")):
+                try:
+                    width = max(8, min(400, int(bits[1])))
+                    height = max(8, min(400, int(bits[2])))
+                except (TypeError, ValueError):
+                    width = 0
+                else:
+                    pictures = sum(1 for item in kept if "^png:" in item)
+                    if pictures < 8 and ident not in {item.split("^", 1)[0] for item in kept}:
+                        kept.append("%s^%s^png:%s:%s:%s" % (ident, name, width, height, bits[3]))
+            continue
         shapes = []
         for part in head[2].split("!"):
             if len(shapes) >= 16:
@@ -1213,9 +1264,7 @@ def pack_furniture(raw):
             bits = part.split(",")
             if len(bits) < 5:
                 continue
-            kind = bits[0].strip().lower()
-            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text", "power", "scs", "comm", "vent", "water"):
-                kind = "room"
+            kind = plan_kind(bits[0])
             def coord(value, limit):
                 try:
                     number = int(value)
@@ -3196,15 +3245,13 @@ def save_floor(project_key, floor_id, body, text):
     stored_rooms = []
     seq = 1
     for room in rooms:
-        kind = (room.get("kind") or "room").strip().lower()
-        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text", "power", "scs", "comm", "vent", "water"):
-            kind = "room"
+        kind = plan_kind(room.get("kind"))
         label = (room.get("name") or "").strip()
         if not label and kind == "room" and not room_points(room.get("points")):
             label = "Комната"
         if kind in ("room", "stair"):
             minimum = 16
-        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text"):
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text", "png"):
             minimum = 8
         else:
             minimum = 4
@@ -6621,8 +6668,14 @@ setTimeout(function () {
                 "locale": "ru-RU" if self.lang() == "ru" else "en-US",
                 "displayName": USERS["ivanov"]["displayName"],
                 "userKey": "ivanov", "i18n": i18n,
+                "mineSaved": (STATE.get("mine_views") or {}).get("ivanov") is not None,
+                "mineColumns": ((STATE.get("mine_views") or {}).get("ivanov") or {}).get("columns"),
+                "mineSortKey": ((STATE.get("mine_views") or {}).get("ivanov") or {}).get("sortKey") or "",
+                "mineSortDir": ((STATE.get("mine_views") or {}).get("ivanov") or {}).get("sortDir") or "asc",
                 "projects": [dict(project_rights(), key=item["key"], name=item["name"], card=card_for(item["key"]), assetKey=asset_prefix(item["key"]), **project_view(item["key"])) for item in PROJECTS],
             }
+        if path == "/me/columns" and method == "PUT":
+            return 200, save_mine_view("ivanov", self.read_json() or {})
         if path == "/assets" and method == "GET":
             project_key = (query.get("projectKey") or [""])[0]
             if project_key not in {item["key"] for item in PROJECTS}:

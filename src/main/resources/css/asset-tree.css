@@ -2508,6 +2508,7 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-detail {
     overflow-x: hidden;
+    padding-bottom: 88px;
 }
 
 #asset-tree-app .asset-tree-issue {
@@ -3763,10 +3764,19 @@ a.asset-tree-url {
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin: 8px 0;
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    z-index: 30;
+    width: max-content;
+    max-width: min(920px, calc(100% - 32px));
+    margin: 0;
     padding: 8px 10px;
     background: #deebff;
+    border: 1px solid #4c9aff;
     border-radius: 3px;
+    box-shadow: 0 8px 24px rgba(9, 30, 66, 0.18);
 }
 
 .asset-tree-bulk-count {
@@ -10153,6 +10163,82 @@ a.asset-tree-preview-icon:focus {
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     user-select: none;
+}
+
+#asset-tree-app .asset-tree-plan-modes {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0;
+    overflow-x: auto;
+    border-bottom: 1px solid #dfe1e6;
+    margin: 0 -12px -8px;
+    padding: 0 8px;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-plan-mode {
+    display: inline-flex !important;
+    align-items: center;
+    width: auto !important;
+    min-height: 32px;
+    margin: 0;
+    padding: 6px 12px !important;
+    border: 0 !important;
+    border-bottom: 2px solid transparent !important;
+    border-radius: 0;
+    background: transparent !important;
+    color: #42526e !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-plan-mode.is-on {
+    color: #0052cc !important;
+    border-bottom-color: #ff8b00 !important;
+    background: transparent !important;
+}
+
+#asset-tree-app .asset-tree-furn-cats {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 8px 0;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-furn-cat {
+    display: block !important;
+    width: 100% !important;
+    margin: 0;
+    padding: 6px 8px !important;
+    border: 0 !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #172b4d !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    text-align: left;
+}
+
+#asset-tree-app .asset-tree-floorplan button.asset-tree-furn-cat.is-on {
+    background: #deebff !important;
+    color: #0747a6 !important;
+}
+
+#asset-tree-app .asset-tree-thumb-grid img.asset-tree-thumb {
+    width: 100%;
+    height: 72px;
+    object-fit: contain;
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-canvas .asset-tree-plan-mark.is-face.is-demo,
+#asset-tree-app .asset-tree-thumb .asset-tree-plan-mark.is-face.is-demo {
+    stroke: #de350b;
+    stroke-dasharray: 8 4;
+}
+
+#asset-tree-app .asset-tree-wall-fill.is-demo {
+    fill: rgba(222, 53, 11, 0.18);
 }
 
 #asset-tree-app .asset-tree-plan-top {
