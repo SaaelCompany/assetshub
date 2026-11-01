@@ -341,6 +341,7 @@
         var nodesReady = false;
         var appliedRoot = undefined;
         var appliedLock = undefined;
+        var searchByValue = {};
 
         ajax('/projects/' + encodeURIComponent(projectKey) + '/picker', function (status, payload) {
             nodesReady = true;
@@ -413,6 +414,16 @@
             });
             names.push(node.name || '');
             return names.join(' / ');
+        }
+
+        function searchBlob(node) {
+            return ((node && node.search) || '') + ' ' + ((node && node.objectKey) || '');
+        }
+
+        function nodeMatches(node, term) {
+            if (!term) return true;
+            var hay = (optionText(node) + ' ' + searchBlob(node)).toLowerCase();
+            return hay.indexOf(term) !== -1;
         }
 
         function anchorId(id) {
@@ -492,6 +503,16 @@
                 var width = neighbour.box.getBoundingClientRect().width;
                 if (width >= 8) opts.width = Math.round(width) + 'px';
             }
+            opts.matcher = function (term, text, option) {
+                var extra = '';
+                var source = option;
+                if (source && source.jquery) source = source[0];
+                if (source && source.getAttribute) extra = source.getAttribute('data-search') || '';
+                if (!extra && source && source.value && searchByValue[source.value]) extra = searchByValue[source.value];
+                var hay = (text || '') + ' ' + extra;
+                if (!term) return true;
+                return hay.toUpperCase().indexOf(String(term).toUpperCase()) >= 0;
+            };
             var $select = AJS.$(select);
             try {
                 $select.auiSelect2(opts);
@@ -664,6 +685,10 @@
 
         function drawList(rootId, waiting) {
             levels.innerHTML = '';
+            if (picker.portalFind && picker.portalFind.parentNode) {
+                picker.portalFind.parentNode.removeChild(picker.portalFind);
+            }
+            picker.portalFind = null;
             if (waiting) {
                 var waitingSelect = el('select');
                 dressSelect(waitingSelect);
@@ -682,19 +707,52 @@
             var empty = el('option', null, blankLabel(chooseText));
             empty.value = '';
             select.appendChild(empty);
-            options.forEach(function (node) {
-                var option = el('option', null, optionText(node));
-                option.value = String(node.id);
-                if (hidden.value === option.value) option.selected = true;
-                select.appendChild(option);
-            });
+            var query = '';
+            function paintOptions() {
+                while (select.options.length > 1) select.remove(1);
+                options.forEach(function (node) {
+                    var blob = searchBlob(node).replace(/^\s+|\s+$/g, '');
+                    searchByValue[String(node.id)] = blob;
+                    var chosen = hidden.value === String(node.id);
+                    if (query && !chosen && !nodeMatches(node, query)) return;
+                    var option = el('option', null, optionText(node));
+                    option.value = String(node.id);
+                    if (blob) option.setAttribute('data-search', blob);
+                    if (chosen) option.selected = true;
+                    select.appendChild(option);
+                });
+            }
+            paintOptions();
             select.addEventListener('change', function () {
                 hidden.value = select.value;
                 show(hidden.value ? parseInt(hidden.value, 10) : null);
             });
             attachSelect(select);
+            if (!select2Ready(select)) mountFind(select, paintOptions, function (value) { query = value; });
             if (!options.length) levels.appendChild(el('p', 'asset-tree-picker-wait', emptyText));
             show(hidden.value ? parseInt(hidden.value, 10) : null);
+        }
+
+        function select2Ready(select) {
+            return !!(window.AJS && AJS.$ && AJS.$(select).data && AJS.$(select).data('select2'));
+        }
+
+        function mountFind(select, paintOptions, remember) {
+            if (!select.parentNode) return;
+            var find = el('input', 'asset-tree-picker-find');
+            find.type = 'search';
+            find.setAttribute('autocomplete', 'off');
+            find.placeholder = phrase('find');
+            var width = select.style.getPropertyValue('width');
+            if (width) find.style.setProperty('width', width);
+            find.addEventListener('input', function () {
+                var chosen = select.value;
+                remember(find.value.replace(/^\s+|\s+$/g, '').toLowerCase());
+                paintOptions();
+                if (chosen) select.value = chosen;
+            });
+            select.parentNode.insertBefore(find, select);
+            picker.portalFind = find;
         }
 
         function draw(value, rootId) {
@@ -769,6 +827,7 @@
         var ru = lang.indexOf('ru') === 0;
         if (kind === 'choose') return ru ? 'Выберите актив' : 'Choose an asset';
         if (kind === 'empty') return ru ? 'В этом месте нет активов' : 'No assets in this place';
+        if (kind === 'find') return ru ? 'Имя, ключ или поле' : 'Name, key, or field';
         return ru
             ? 'Заполните поля выше. Список активов откроется на подходящей площадке.'
             : 'Fill in the fields above. The asset list will open at the matching place.';

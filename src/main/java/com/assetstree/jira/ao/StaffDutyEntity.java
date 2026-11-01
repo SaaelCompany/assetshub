@@ -47,4 +47,21 @@ public interface StaffDutyEntity extends Entity {
     String getEndOn();
 
     void setEndOn(String endOn);
+
+    /** Day overrides on an hours row: yyyy-MM-dd:situation, with optional @hours. */
+    @StringLength(StringLength.UNLIMITED)
+    String getMarks();
+
+    void setMarks(String marks);
+
+    /** Location asset this person works at. Zero means none. */
+    int getPlaceId();
+
+    void setPlaceId(int placeId);
+
+    /** Free note shown on the timesheet, on the same row as this person. */
+    @StringLength(255)
+    String getNote();
+
+    void setNote(String note);
 }

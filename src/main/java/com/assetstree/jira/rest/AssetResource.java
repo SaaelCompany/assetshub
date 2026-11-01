@@ -320,6 +320,46 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("assets/{id}/peers")
+    public Response linkPeer(@PathParam("id") final int id, final IssueLinkDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                Integer otherId = draft == null ? null : draft.getAssetId();
+                if (otherId == null) {
+                    throw new AssetException(400, "asset-tree.error.peer.notFound");
+                }
+                return Response.status(Response.Status.CREATED)
+                        .entity(assetService.linkPeer(user(), id, otherId.intValue()))
+                        .build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/peers/{otherId}")
+    public Response unlinkPeer(@PathParam("id") final int id, @PathParam("otherId") final int otherId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.unlinkPeer(user(), id, otherId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("assets/{id}/peers/search")
+    public Response searchPeers(@PathParam("id") final int id, @QueryParam("q") final String query) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.searchPeers(user(), id, query)).build();
+            }
+        });
+    }
+
     @GET
     @Path("issues/{issueId}/assets")
     public Response assetsForIssue(@PathParam("issueId") final long issueId) {
@@ -551,12 +591,60 @@ public class AssetResource {
     }
 
     @GET
-    @Path("projects/{projectKey}/reports/{reportKey}")
-    public Response reportView(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey) {
+    @Path("projects/{projectKey}/reports.xlsx")
+    @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public Response exportReports(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.reportView(user(), projectKey, reportKey)).build();
+                byte[] book = assetService.exportReports(user(), projectKey);
+                String file = "reports-" + projectKey + ".xlsx";
+                return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
+                        .build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/reports/mail")
+    public Response sendReportMail(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.sendReportMail(user(), projectKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/reports/{reportKey}")
+    public Response updateReportChart(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey, final SavedReportDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                boolean editing = draft != null && ((draft.getName() != null && !draft.getName().trim().isEmpty())
+                        || (draft.getGroupBy() != null && !draft.getGroupBy().trim().isEmpty()));
+                if (editing) {
+                    return Response.ok(assetService.updateSavedReport(user(), projectKey, reportKey, draft)).build();
+                }
+                String chart = draft == null ? "" : draft.getChart();
+                return Response.ok(assetService.updateReportChart(user(), projectKey, reportKey, chart)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/reports/{reportKey}")
+    public Response reportView(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
+            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines, @QueryParam("bucket") final String bucket) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                int lineFrom = from == null ? 0 : from.intValue();
+                boolean allLines = lines != null && "all".equalsIgnoreCase(lines.trim());
+                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines, bucket)).build();
             }
         });
     }
@@ -731,11 +819,17 @@ public class AssetResource {
 
     @DELETE
     @Path("projects/{projectKey}/grants")
-    public Response deleteGrant(@PathParam("projectKey") final String projectKey, @QueryParam("group") final String group) {
+    public Response deleteGrant(@PathParam("projectKey") final String projectKey,
+                                @QueryParam("group") final String group,
+                                @QueryParam("user") final String userKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                assetService.deleteGrant(user(), projectKey, group);
+                if (userKey != null && !userKey.trim().isEmpty()) {
+                    assetService.deleteUserGrant(user(), projectKey, userKey);
+                } else {
+                    assetService.deleteGrant(user(), projectKey, group);
+                }
                 return Response.noContent().build();
             }
         });
@@ -978,6 +1072,17 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.searchUsers(user(), query)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("users/{userKey}")
+    public Response userProfile(@PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.userProfile(user(), userKey)).build();
             }
         });
     }

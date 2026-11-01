@@ -82,6 +82,13 @@ public interface AssetEntity extends Entity {
 
     void setCustodianKey(String custodianKey);
 
+    /** Person the equipment was handed to. Empty on a place. */
+    @Indexed
+    @StringLength(255)
+    String getIssuedKey();
+
+    void setIssuedKey(String issuedKey);
+
     /** Equipment types pinned to this place. Newline-separated type keys. Empty until someone adds a type here. */
     @StringLength(StringLength.UNLIMITED)
     String getOfferedTypes();

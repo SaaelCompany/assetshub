@@ -12,8 +12,12 @@ public class ServicePlanDraft {
     private String statusKey;
     /** Absent on a rename of the other fields so a partial save can leave the letter alone. */
     private Boolean notify;
-    /** True records the service as done today and starts the next interval. */
+    /** True records the service as done and starts the next interval. */
     private Boolean done;
+    /** Occurrence day closed by the calendar. Empty means today, which the asset card still uses. */
+    private String doneOn;
+    /** Moved or skipped days. Null leaves the stored list alone. */
+    private String moves;
     private String kind;
     private String assigneeKey;
     private String note;
@@ -98,4 +102,8 @@ public class ServicePlanDraft {
     public void setStartTime(String startTime) { this.startTime = startTime; }
     public String getEndTime() { return endTime; }
     public void setEndTime(String endTime) { this.endTime = endTime; }
+    public String getDoneOn() { return doneOn; }
+    public void setDoneOn(String doneOn) { this.doneOn = doneOn; }
+    public String getMoves() { return moves; }
+    public void setMoves(String moves) { this.moves = moves; }
 }

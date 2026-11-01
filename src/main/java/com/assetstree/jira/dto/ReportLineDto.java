@@ -9,6 +9,7 @@ public class ReportLineDto {
     private String objectKey;
     private String name;
     private String detail;
+    private String bucket;
 
     public ReportLineDto() {
     }
@@ -28,4 +29,6 @@ public class ReportLineDto {
     public void setName(String name) { this.name = name; }
     public String getDetail() { return detail; }
     public void setDetail(String detail) { this.detail = detail; }
+    public String getBucket() { return bucket; }
+    public void setBucket(String bucket) { this.bucket = bucket; }
 }

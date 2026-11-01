@@ -22,7 +22,7 @@ public final class ReportCatalog {
     private static final List<String> STANDARD = Collections.unmodifiableList(Arrays.asList(
             STATUS, TYPE, PLACE, HOLDER, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER));
+            STATUS, TYPE, PLACE, HOLDER, "month", "age", WARRANTY, WRITEOFF, "kind"));
 
     private ReportCatalog() {
     }
@@ -58,13 +58,13 @@ public final class ReportCatalog {
         }
     }
 
-    /** Donut for a status split, columns for everything else, unless a saved report chose otherwise. */
+    /** Ring, pie, columns (bar) or horizontal bars. Anything else is rejected. */
     public static String chart(String raw) {
         if (raw == null) {
             return "";
         }
         String value = raw.trim().toLowerCase(Locale.ROOT);
-        if ("donut".equals(value) || "bar".equals(value)) {
+        if ("donut".equals(value) || "pie".equals(value) || "bar".equals(value) || "bars".equals(value)) {
             return value;
         }
         return "";

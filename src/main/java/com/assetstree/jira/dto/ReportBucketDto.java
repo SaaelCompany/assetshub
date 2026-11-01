@@ -10,6 +10,8 @@ public class ReportBucketDto {
     private String color;
     private String icon;
     private int count;
+    private long amount;
+    private String amountText;
 
     public ReportBucketDto() {
     }
@@ -59,5 +61,21 @@ public class ReportBucketDto {
 
     public void setCount(int count) {
         this.count = count;
+    }
+
+    public long getAmount() {
+        return amount;
+    }
+
+    public void setAmount(long amount) {
+        this.amount = amount;
+    }
+
+    public String getAmountText() {
+        return amountText;
+    }
+
+    public void setAmountText(String amountText) {
+        this.amountText = amountText;
     }
 }

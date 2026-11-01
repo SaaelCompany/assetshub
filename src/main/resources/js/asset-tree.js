@@ -395,7 +395,14 @@
         searchScope: 'project',
         sortKey: 'tree',
         sortDir: 'asc',
+        treeSort: 'order',
+        treeSortDir: 'asc',
+        mineColumns: null,
+        mineSortKey: '',
+        mineSortDir: 'asc',
+        columnScope: '',
         rules: [],
+        objectsOnly: false,
         savedFilters: [],
         activeFilterId: '',
         focusSearch: String(app.getAttribute('data-view') || '').toLowerCase() === 'search',
@@ -429,6 +436,8 @@
         cardSelected: '',
         scheduleYear: 0,
         scheduleMonth: 0,
+        scheduleSpan: 'month',
+        scheduleAnchor: '',
         scheduleRows: null,
         scheduleOpen: false,
         scheduleLoading: false,
@@ -436,26 +445,60 @@
         scheduleError: '',
         scheduleMode: 'calendar',
         scheduleKindFilter: '',
+        scheduleLayerSet: false,
         schedulePersonFilter: '',
         scheduleFocusAsset: 0,
+        staffPlaceFilter: '',
+        staffHiddenPlaces: {},
+        staffHiddenProject: '',
         staffRows: null,
         staffLoading: false,
         staffToken: 0,
         staffError: '',
+        staffSelection: null,
+        staffSelectAdd: false,
+        staffClickTimer: null,
+        staffClip: null,
         floors: null,
         floorId: 0,
+        mapPlaceId: 0,
+        mapStep: 8,
         mapTool: 'select',
         mapAssetId: 0,
+        mapArmId: 0,
+        mapLayer: 'plan',
+        mapLayerShow: {},
         mapDraft: null,
         mapLoading: false,
         mapToken: 0,
         mapSelection: null,
+        mapGroup: [],
+        mapStamp: '',
+        mapNaming: false,
         mapEditing: false,
         mapDirty: false,
         mapZoom: 1,
+        mapCam: null,
+        mapAnchor: null,
+        mapArc: null,
+        mapOrtho: false,
+        mapClickAt: 0,
+        mapClickX: 0,
+        mapClickY: 0,
+        mapChainDoneAt: 0,
+        mapSuppressClick: false,
+        mapUndo: [],
+        mapRedo: [],
+        mapClipboard: null,
         reportCatalog: null,
         reportKey: 'status',
         reportView: null,
+        reportChart: '',
+        reportChartFor: '',
+        reportChartBusy: false,
+        reportChartPending: null,
+        reportChartEpoch: 0,
+        reportEmptyNav: false,
         reportOpen: false,
         galleryToken: 0,
         galleryLoading: false,
@@ -577,6 +620,42 @@
             return left.sortOrder - right.sortOrder;
         }
         return left.id - right.id;
+    }
+
+    function compareNames(left, right) {
+        var a = String(left || '').toLowerCase();
+        var b = String(right || '').toLowerCase();
+        var aParts = a.match(/(\d+|\D+)/g) || [];
+        var bParts = b.match(/(\d+|\D+)/g) || [];
+        var count = aParts.length > bParts.length ? aParts.length : bParts.length;
+        for (var i = 0; i < count; i++) {
+            var ap = aParts[i] || '';
+            var bp = bParts[i] || '';
+            if (/^\d+$/.test(ap) && /^\d+$/.test(bp)) {
+                var an = parseInt(ap, 10);
+                var bn = parseInt(bp, 10);
+                if (an !== bn) return an < bn ? -1 : 1;
+                if (ap.length !== bp.length) return ap.length < bp.length ? -1 : 1;
+            } else {
+                var cmp = ap.localeCompare(bp);
+                if (cmp) return cmp;
+            }
+        }
+        return 0;
+    }
+
+    function hierarchySorted(list) {
+        return list;
+    }
+
+    function loadTreeSort() {
+        state.treeSort = 'order';
+        state.treeSortDir = 'asc';
+        try {
+            localStorage.removeItem('asset-tree.treeSort');
+        } catch (error) {
+            /* local storage can be unavailable */
+        }
     }
 
     function childrenOf(parentId) {
@@ -918,22 +997,37 @@
         return visible.join(',');
     }
 
+    function grantIdentity(item) {
+        if (item && item.userKey) return 'user:' + item.userKey;
+        return 'group:' + ((item && item.groupName) || '');
+    }
+
+    function grantLabel(grant) {
+        if (!grant) return '';
+        if (grant.userKey) return grant.displayName || grant.username || grant.userKey;
+        return grant.groupName || '';
+    }
+
+    function grantBody(grant) {
+        if (grant && grant.userKey) return { userKey: grant.userKey };
+        return { groupName: grant ? grant.groupName : '' };
+    }
+
     function rememberGrant(payload) {
         var next = (state.grants || []).filter(function (item) {
-            return item.groupName !== payload.groupName;
+            return grantIdentity(item) !== grantIdentity(payload);
         });
         next.push(payload);
         next.sort(function (left, right) {
-            return String(left.groupName || '').localeCompare(String(right.groupName || ''));
+            return grantLabel(left).localeCompare(grantLabel(right));
         });
         state.grants = next;
     }
 
-    function postGrant(groupName, caps, errorNode) {
-        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', {
-            groupName: groupName,
-            caps: caps
-        }, function (status, payload) {
+    function postGrant(principal, caps, errorNode) {
+        var body = grantBody(principal);
+        body.caps = caps;
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', body, function (status, payload) {
             if (status >= 200 && status < 300) {
                 rememberGrant(payload);
                 renderFrame();
@@ -1171,9 +1265,60 @@
         return fieldRaw(asset, rule.field);
     }
 
+    function nearestPlaceId(asset) {
+        var parent = asset && asset.parentId;
+        var guard = 0;
+        while (parent && guard < 40) {
+            var node = byId()[parent];
+            if (!node) break;
+            if (isFolder(node)) return String(node.id);
+            parent = node.parentId;
+            guard++;
+        }
+        return '';
+    }
+
+    function placeRulePasses(asset, rule) {
+        if (rule.op === 'in') {
+            var wanted = {};
+            (rule.values || []).forEach(function (id) { wanted[String(id)] = true; });
+            var parent = asset && asset.parentId;
+            var guard = 0;
+            while (parent && guard < 40) {
+                var node = byId()[parent];
+                if (!node) break;
+                if (isFolder(node) && wanted[String(node.id)]) return true;
+                parent = node.parentId;
+                guard++;
+            }
+            return false;
+        }
+        return nearestPlaceId(asset) === String(rule.value || '');
+    }
+
+    function holderKey(asset) {
+        return asset && asset.custodian && asset.custodian.userKey ? asset.custodian.userKey : '';
+    }
+
     function rulePasses(asset, rule) {
+        if (rule && rule.ids) {
+            return !!(rule.ids[asset.id] || rule.ids[String(asset.id)]);
+        }
         if (rule && rule.keys && rule.keys.length) {
             return attrGroupPasses(asset, rule);
+        }
+        if (rule && rule.field === 'place') {
+            return placeRulePasses(asset, rule);
+        }
+        if (rule && rule.field === 'custodian' && (rule.userKey || (rule.userKeys && rule.userKeys.length))) {
+            var person = holderKey(asset);
+            if (rule.userKeys && rule.userKeys.length) {
+                for (var holder = 0; holder < rule.userKeys.length; holder++) {
+                    if (rule.userKeys[holder] === person) return true;
+                }
+                return false;
+            }
+            return person === rule.userKey;
         }
         var value = String(ruleStored(asset, rule) || '').trim();
         var expected = String(rule.value || '').trim();
@@ -1198,6 +1343,13 @@
         if (op === 'eq') {
             if (rule.field === 'type' || rule.field === 'status') return value === expected;
             return value.toLowerCase() === expected.toLowerCase();
+        }
+        if (op === 'in' && (rule.field === 'type' || rule.field === 'status')) {
+            var accepted = rule.values || [];
+            for (var index = 0; index < accepted.length; index++) {
+                if (value === String(accepted[index])) return true;
+            }
+            return false;
         }
         return value.toLowerCase().indexOf(expected.toLowerCase()) >= 0;
     }
@@ -1245,6 +1397,7 @@
             var query = textQuery().toLowerCase();
             if (query && haystack(asset).indexOf(query) < 0) return false;
         }
+        if (state.objectsOnly && isFolder(asset)) return false;
         var rules = state.rules || [];
         for (var i = 0; i < rules.length; i++) {
             if (!rulePasses(asset, rules[i])) return false;
@@ -1959,6 +2112,12 @@
     }
 
     function showView(view) {
+        var nextScope = view === 'mine' ? 'mine' : 'project';
+        if (state.columnScope && state.columnScope !== nextScope) {
+            state.columnDraft = null;
+            state.columnPicker = null;
+            state.columnScope = '';
+        }
         if (view === 'mine') {
             var entering = state.view !== 'mine';
             state.view = 'mine';
@@ -1974,7 +2133,9 @@
             loadMine();
             return;
         }
+        if (view === 'reports') forgetReports();
         if (state.view === view) {
+            if (view === 'reports') mount();
             return;
         }
         state.view = view;
@@ -2002,6 +2163,11 @@
         reloadTree(done);
     }
 
+    function stageMark(stage) {
+        if (stage === 'alpha') return el('span', 'asset-tree-alpha', t('modulesAlpha'));
+        return el('span', 'asset-tree-beta', t('modulesBeta'));
+    }
+
     function mount() {
         closeAllModals();
         app.innerHTML = '';
@@ -2009,13 +2175,15 @@
         top.appendChild(viewTabs());
         var row = el('div', 'asset-tree-top-row');
         var titles = el('div', 'asset-tree-heading');
-        if (state.view !== 'schedules') {
-            titles.appendChild(el('h1', null, viewTitle(state.view)));
-        }
+        var heading = el('h1', null, viewTitle(state.view));
+        if (state.view === 'schedules' || state.view === 'reports') heading.appendChild(stageMark('beta'));
+        if (state.view === 'map') heading.appendChild(stageMark('beta'));
+        titles.appendChild(heading);
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
         }
         var actions = el('div', 'asset-tree-actions');
+        if (state.view === 'reports') actions.appendChild(reportToolButtons());
         var projectLabel = el('label', 'asset-tree-project-label', t('project'));
         projectLabel.setAttribute('for', 'asset-tree-project');
         var projectPicker = el('select', 'asset-tree-project');
@@ -2134,8 +2302,63 @@
     }
 
     function renderFrame() {
+        var keptScroll = captureViewScroll();
+        try {
+            renderFrameContents();
+        } finally {
+            restoreViewScroll(keptScroll);
+            alignStaffNotes();
+        }
+    }
+
+    function captureViewScroll() {
+        var nodes = [];
+        var root = document.getElementById('asset-tree-app');
+        if (root) {
+            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog');
+            var index;
+            for (index = 0; index < found.length; index++) {
+                nodes.push({ top: found[index].scrollTop, left: found[index].scrollLeft });
+            }
+        }
+        var clock = root ? root.querySelector('.asset-tree-clock') : null;
+        var outlook = root ? root.querySelector('.asset-tree-outlook') : null;
+        return {
+            x: window.pageXOffset || document.documentElement.scrollLeft || 0,
+            y: window.pageYOffset || document.documentElement.scrollTop || 0,
+            nodes: nodes,
+            clock: clock ? clock.scrollTop : null,
+            outlook: outlook ? outlook.scrollTop : null
+        };
+    }
+
+    function restoreViewScroll(kept) {
+        if (!kept) return;
+        var root = document.getElementById('asset-tree-app');
+        if (root && kept.nodes && kept.nodes.length) {
+            var found = root.querySelectorAll('.asset-tree-roster-scroll, .asset-tree-main, .asset-tree-side, .asset-tree-catalog');
+            var index;
+            for (index = 0; index < found.length && index < kept.nodes.length; index++) {
+                found[index].scrollTop = kept.nodes[index].top;
+                found[index].scrollLeft = kept.nodes[index].left;
+            }
+        }
+        if (kept.clock != null && root) {
+            var clock = root.querySelector('.asset-tree-clock');
+            if (clock) clock.scrollTop = kept.clock;
+        }
+        if (kept.outlook != null && root) {
+            var outlook = root.querySelector('.asset-tree-outlook');
+            if (outlook) outlook.scrollTop = kept.outlook;
+        }
+        if (kept.x || kept.y) window.scrollTo(kept.x, kept.y);
+    }
+
+    function renderFrameContents() {
         closeStatusMenu();
         closeColorMenu();
+        closeStaffBranchAdd();
+        closeMapMenu();
         var frame = document.getElementById('asset-tree-frame');
         if (!frame) {
             return;
@@ -2318,7 +2541,7 @@
         tools.appendChild(count);
         bar.appendChild(tools);
         var dragHint = el('p', 'asset-tree-draghint', t('dragHint'));
-        dragHint.hidden = !state.canPlaces;
+        dragHint.hidden = !(state.canPlaces || state.canObjects);
         bar.appendChild(dragHint);
         side.appendChild(bar);
         var scroll = el('div', 'asset-tree-scroll');
@@ -2457,7 +2680,7 @@
     }
 
     function appendLevel(container, parentId, visible, matches) {
-        treeChildren(parentId, visible).forEach(function (asset) {
+        hierarchySorted(treeChildren(parentId, visible), 'asset').forEach(function (asset) {
             var groups = isFolder(asset) ? typeGroupsFor(asset.id) : [];
             var kids = treeChildren(asset.id, visible);
             var expandable = !!(kids.length || groups.length);
@@ -2504,7 +2727,7 @@
             container.appendChild(branch);
         });
         if (parentId && byId()[parentId] && isFolder(byId()[parentId])) {
-            typeGroupsFor(parentId).forEach(function (type) {
+            hierarchySorted(typeGroupsFor(parentId), 'type').forEach(function (type) {
                 container.appendChild(typeGroupRow(parentId, type));
             });
         }
@@ -2700,10 +2923,10 @@
         branch.appendChild(row);
         if (open) {
             var nested = el('div', 'asset-tree-children');
-            kids.forEach(function (child) {
+            hierarchySorted(kids, 'type').forEach(function (child) {
                 nested.appendChild(typeGroupRow(placeId, child));
             });
-            objects.forEach(function (asset) {
+            hierarchySorted(objects, 'asset').forEach(function (asset) {
                 nested.appendChild(objectTreeRow(asset));
             });
             branch.appendChild(nested);
@@ -2721,6 +2944,10 @@
         row.setAttribute('role', 'treeitem');
         row.setAttribute('data-asset-id', String(asset.id));
         if (state.selectedId === asset.id) row.classList.add('is-selected');
+        if (mayEdit(asset)) {
+            row.classList.add('is-movable');
+            bindObjectDrag(row, asset);
+        }
         var spacer = el('span', 'asset-tree-chevron');
         spacer.setAttribute('aria-hidden', 'true');
         row.appendChild(spacer);
@@ -2967,27 +3194,41 @@
 
     var pointerDrag = null;
 
+    function beginAssetDrag(asset, event) {
+        if (event.button !== 0 || !mayEdit(asset) || pointerDrag) return;
+        event.preventDefault();
+        pointerDrag = {
+            id: asset.id,
+            object: !isFolder(asset),
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            active: false,
+            plan: null
+        };
+        document.addEventListener('pointermove', onGripMove, true);
+        document.addEventListener('pointerup', onGripUp, true);
+        document.addEventListener('pointercancel', onGripUp, true);
+    }
+
+    function bindObjectDrag(row, asset) {
+        row.addEventListener('selectstart', function (event) {
+            event.preventDefault();
+        });
+        row.addEventListener('pointerdown', function (event) {
+            if (event.target && event.target.closest && event.target.closest('button')) return;
+            beginAssetDrag(asset, event);
+        });
+    }
+
     function dragGrip(asset) {
         var grip = el('span', 'asset-tree-grip');
         grip.title = t('dragHint');
         grip.setAttribute('aria-label', t('dragHint'));
         grip.appendChild(gripIcon());
         grip.addEventListener('pointerdown', function (event) {
-            if (event.button !== 0 || !mayEdit(asset)) return;
-            event.preventDefault();
             event.stopPropagation();
-            if (grip.setPointerCapture) grip.setPointerCapture(event.pointerId);
-            pointerDrag = {
-                id: asset.id,
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startY: event.clientY,
-                active: false,
-                plan: null
-            };
-            document.addEventListener('pointermove', onGripMove, true);
-            document.addEventListener('pointerup', onGripUp, true);
-            document.addEventListener('pointercancel', onGripUp, true);
+            beginAssetDrag(asset, event);
         });
         grip.addEventListener('click', function (event) {
             event.preventDefault();
@@ -3005,10 +3246,13 @@
             pointerDrag.active = true;
             state.draggingId = pointerDrag.id;
             app.classList.add('is-dragging');
+            if (pointerDrag.object) app.classList.add('is-object-drag');
             document.documentElement.classList.add('asset-tree-dragging');
             clearTextSelection();
             var moving = byId()[pointerDrag.id];
-            var ghost = el('div', 'asset-tree-drag-ghost', moving ? moving.name : '');
+            var ghostLabel = '';
+            if (moving) ghostLabel = moving.objectKey && !isFolder(moving) ? moving.objectKey + '  ' + (moving.name || '') : (moving.name || '');
+            var ghost = el('div', 'asset-tree-drag-ghost', ghostLabel);
             ghost.id = 'asset-tree-drag-ghost';
             document.body.appendChild(ghost);
         }
@@ -3035,14 +3279,28 @@
         var commit = event.type !== 'pointercancel' && pointerDrag.active;
         var plan = commit ? (pointerDrag.plan || planDrop(event.clientX, event.clientY, pointerDrag.id)) : null;
         var movingId = pointerDrag.id;
+        var objectDrag = !!pointerDrag.object;
+        if (pointerDrag.active) suppressNextClick();
         endPointerDrag();
-        if (plan) moveAsset(movingId, plan.parentId, plan.index);
+        if (!plan) return;
+        if (objectDrag) relocateObject(movingId, plan);
+        else moveAsset(movingId, plan.parentId, plan.index);
+    }
+
+    function suppressNextClick() {
+        function eat(event) {
+            document.removeEventListener('click', eat, true);
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        document.addEventListener('click', eat, true);
     }
 
     function endPointerDrag() {
         pointerDrag = null;
         state.draggingId = null;
         app.classList.remove('is-dragging');
+        app.classList.remove('is-object-drag');
         document.documentElement.classList.remove('asset-tree-dragging');
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
@@ -3052,6 +3310,8 @@
     }
 
     function planDrop(x, y, movingId) {
+        var moving = byId()[movingId];
+        if (moving && !isFolder(moving)) return planObjectDrop(x, y, moving);
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
         if (root) root.classList.remove('is-over');
@@ -3096,6 +3356,191 @@
         var target = byId()[targetId];
         var parentId = target && target.parentId ? target.parentId : null;
         return { parentId: parentId, index: destinationIndex(parentId, targetId, mode, movingId) };
+    }
+
+    function planObjectDrop(x, y, moving) {
+        clearDropClasses();
+        var root = document.getElementById('asset-tree-rootdrop');
+        if (root) root.classList.remove('is-over');
+        var stack = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)];
+        var row = null;
+        for (var i = 0; i < stack.length; i++) {
+            var node = stack[i];
+            if (!node || !node.closest) continue;
+            if (node.id === 'asset-tree-drag-ghost' || node.closest('#asset-tree-drag-ghost')) continue;
+            if (node.classList && node.classList.contains('asset-tree-draghint')) continue;
+            var hitRow = node.closest('.asset-tree-row');
+            if (hitRow && app.contains(hitRow)) {
+                row = hitRow;
+                break;
+            }
+        }
+        if (!row || !moving) return null;
+        var assetId = row.getAttribute('data-asset-id');
+        if (assetId) {
+            var targetId = parseInt(assetId, 10);
+            if (targetId === moving.id) return null;
+            var target = byId()[targetId];
+            if (!target || isFolder(target)) return null;
+            var rect = row.getBoundingClientRect();
+            var mode = (y - rect.top) < rect.height / 2 ? 'before' : 'after';
+            row.classList.add(mode === 'before' ? 'is-drop-before' : 'is-drop-after');
+            var parentId = target.parentId ? target.parentId : null;
+            return {
+                parentId: parentId,
+                index: destinationIndex(parentId, targetId, mode, moving.id),
+                typeKey: target.typeKey
+            };
+        }
+        var typeKey = row.getAttribute('data-type-key');
+        var typePlace = row.getAttribute('data-place-id');
+        if (typeKey && typePlace) {
+            var placeId = parseInt(typePlace, 10);
+            if (!placeId) return null;
+            var typeRect = row.getBoundingClientRect();
+            var ratio = typeRect.height ? (y - typeRect.top) / typeRect.height : 1;
+            var slot = ratio < 0.28 ? 'before' : 'after';
+            row.classList.add(slot === 'before' ? 'is-drop-before' : (ratio > 0.72 ? 'is-drop-after' : 'is-drop-inside'));
+            return {
+                parentId: placeId,
+                index: typeSlotIndex(placeId, typeKey, slot, moving.id),
+                typeKey: typeKey
+            };
+        }
+        var placeKey = row.getAttribute('data-id');
+        if (!placeKey) return null;
+        var into = parseInt(placeKey, 10);
+        var place = byId()[into];
+        if (!place || !isFolder(place)) return null;
+        row.classList.add('is-drop-inside');
+        return {
+            parentId: into,
+            index: typeSlotIndex(into, moving.typeKey, 'after', moving.id),
+            typeKey: moving.typeKey
+        };
+    }
+
+    function typeSlotIndex(parentId, typeKey, mode, movingId) {
+        var siblings = childrenOf(parentId).filter(function (asset) {
+            return asset.id !== movingId;
+        });
+        var first = -1;
+        var last = -1;
+        for (var i = 0; i < siblings.length; i++) {
+            if (!isFolder(siblings[i]) && siblings[i].typeKey === typeKey) {
+                if (first < 0) first = i;
+                last = i;
+            }
+        }
+        if (first < 0) return siblings.length;
+        return mode === 'before' ? first : last + 1;
+    }
+
+    function objectAlreadyThere(moving, plan) {
+        if (!plan || (plan.typeKey || moving.typeKey) !== moving.typeKey) return false;
+        var parentId = plan.parentId || null;
+        if ((moving.parentId || null) !== parentId) return false;
+        var siblings = childrenOf(parentId);
+        for (var i = 0; i < siblings.length; i++) {
+            if (siblings[i].id === moving.id) return plan.index === i;
+        }
+        return false;
+    }
+
+    function expandObjectBranch(parentId, typeKey) {
+        if (!parentId || !typeKey) return;
+        state.expanded[parentId] = true;
+        state.expanded[typeExpandKey(parentId, typeKey)] = true;
+        var local = localParent(parentId, typeKey);
+        if (local) state.expanded[typeExpandKey(parentId, local)] = true;
+        var schema = parentKeyOf(typeOf(typeKey));
+        if (schema) state.expanded[typeExpandKey(parentId, schema)] = true;
+        rememberExpanded();
+    }
+
+    function assetWriteBody(source, typeKey) {
+        var attributes = (source.attributes || []).map(function (attribute) {
+            return { fieldKey: attribute.fieldKey, value: attribute.value || '' };
+        });
+        return {
+            name: source.name,
+            projectKey: source.projectKey || state.projectKey,
+            typeKey: typeKey,
+            status: source.status,
+            description: source.description || '',
+            custodianKey: source.custodian && source.custodian.userKey ? source.custodian.userKey : '',
+            issuedKey: source.issued && source.issued.userKey ? source.issued.userKey : '',
+            attributes: attributes
+        };
+    }
+
+    function changeObjectType(asset, typeKey, done) {
+        function send(source) {
+            ajax('PUT', '/assets/' + asset.id, assetWriteBody(source, typeKey), function (code, payload) {
+                done(code, payload);
+            });
+        }
+        if (asset.attributes) {
+            send(asset);
+            return;
+        }
+        ajax('GET', '/assets/' + asset.id, null, function (code, payload) {
+            if (code < 200 || code >= 300 || !payload) {
+                done(code, payload);
+                return;
+            }
+            send(payload);
+        });
+    }
+
+    function relocateObject(movingId, plan) {
+        var moving = byId()[movingId];
+        if (!moving || isFolder(moving) || !mayEdit(moving) || !plan) return;
+        if (objectAlreadyThere(moving, plan)) return;
+        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        var nextType = plan.typeKey || moving.typeKey;
+        var typeChanges = nextType !== moving.typeKey;
+        if (typeChanges) {
+            var label = typeOf(nextType).label || nextType;
+            var name = moving.objectKey || moving.name || '';
+            if (!window.confirm(t('confirmTypeMove', name).split('{1}').join(label))) return;
+        }
+        if (wouldCycle(movingId, plan.parentId)) {
+            notify(t('errorTitle'));
+            return;
+        }
+        state.dirty = false;
+        function finishMove() {
+            ajax('POST', '/assets/' + movingId + '/move', { parentId: plan.parentId, index: plan.index }, function (status, payload) {
+                if (status < 200 || status >= 300) {
+                    setBusy(false);
+                    notify((payload && payload.message) || t('errorTitle'));
+                    if (typeChanges) reloadTree(function () { selectAsset(movingId, true); });
+                    return;
+                }
+                assetsChanged();
+                reloadTree(function () {
+                    setBusy(false);
+                    var placed = byId()[movingId];
+                    if (placed) expandObjectBranch(placed.parentId, placed.typeKey);
+                    selectAsset(movingId, true);
+                    notify(t('moved'));
+                });
+            });
+        }
+        setBusy(true);
+        if (!typeChanges) {
+            finishMove();
+            return;
+        }
+        changeObjectType(moving, nextType, function (code, payload) {
+            if (code < 200 || code >= 300) {
+                setBusy(false);
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            finishMove();
+        });
     }
 
     function gripIcon() {
@@ -3921,6 +4366,8 @@
 
     var DEFAULT_COLUMNS = ['key', 'type', 'status', 'custodian'];
     var BASE_COLUMNS = ['key', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated'];
+    var MINE_DEFAULT_COLUMNS = ['key', 'project', 'status', 'location'];
+    var MINE_BASE_COLUMNS = ['key', 'project', 'type', 'status', 'custodian', 'location', 'description', 'created', 'updated', 'role'];
 
     function typeFieldColumn(key) {
         var parts = key.split(':');
@@ -3941,6 +4388,182 @@
         if (key === 'location') return t('columnLocation');
         if (key.indexOf('attr:') === 0) return fieldSpec(key).label;
         return t(key);
+    }
+
+    function mineAttrKey(name) {
+        return 'mineattr:' + String(name || '').trim().toLowerCase();
+    }
+
+    function mineAttrLabels() {
+        var labels = {};
+        function keep(name) {
+            var text = String(name || '').trim();
+            if (!text) return;
+            var key = mineAttrKey(text);
+            if (!labels[key]) labels[key] = text;
+        }
+        (state.mineAssets || []).forEach(function (asset) {
+            (asset.attributes || []).forEach(function (attribute) { keep(attribute.name); });
+        });
+        if (state.types && state.types.length) {
+            state.types.forEach(function (type) {
+                (type.fields || []).forEach(function (field) { keep(field.label); });
+            });
+        }
+        (state.mineColumns || []).forEach(function (key) {
+            if (key.indexOf('mineattr:') === 0 && !labels[key]) labels[key] = key.slice('mineattr:'.length);
+        });
+        if (state.columnScope === 'mine' && state.columnDraft) {
+            state.columnDraft.forEach(function (key) {
+                if (key.indexOf('mineattr:') === 0 && !labels[key]) labels[key] = key.slice('mineattr:'.length);
+            });
+        }
+        return labels;
+    }
+
+    function mineColumnLabel(key) {
+        if (key === 'location') return t('parent');
+        if (key === 'project') return t('project');
+        if (key === 'role') return t('mineRole');
+        if (key.indexOf('mineattr:') === 0) return mineAttrLabels()[key] || key.slice('mineattr:'.length);
+        return columnLabel(key);
+    }
+
+    function mineColumnChoices() {
+        var labels = mineAttrLabels();
+        var extra = Object.keys(labels).map(function (key) {
+            return { key: key, label: labels[key] };
+        });
+        extra.sort(function (left, right) { return compareNames(left.label, right.label); });
+        return MINE_BASE_COLUMNS.map(function (key) {
+            return { key: key, label: mineColumnLabel(key) };
+        }).concat(extra);
+    }
+
+    function minePrefsKey() {
+        return 'asset-tree.mineColumns:' + (state.userKey || '');
+    }
+
+    function loadMinePrefs() {
+        state.mineColumns = null;
+        state.mineSortKey = '';
+        state.mineSortDir = 'asc';
+        try {
+            var raw = localStorage.getItem(minePrefsKey());
+            var parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && parsed.columns && parsed.columns.concat) state.mineColumns = parsed.columns;
+            if (parsed && typeof parsed.sortKey === 'string') state.mineSortKey = parsed.sortKey;
+            if (parsed && parsed.sortDir === 'desc') state.mineSortDir = 'desc';
+        } catch (error) {
+            state.mineColumns = null;
+        }
+    }
+
+    function rememberMinePrefs() {
+        try {
+            var payload = {
+                sortKey: state.mineSortKey || '',
+                sortDir: state.mineSortDir === 'desc' ? 'desc' : 'asc'
+            };
+            if (state.mineColumns) payload.columns = state.mineColumns;
+            localStorage.setItem(minePrefsKey(), JSON.stringify(payload));
+        } catch (error) {
+            /* local storage can be unavailable */
+        }
+    }
+
+    function activeColumnLabel(key) {
+        if (state.columnScope === 'mine') return mineColumnLabel(key);
+        return columnLabel(key);
+    }
+
+    function shownMineColumns() {
+        var saved = state.columnScope === 'mine' && state.columnDraft ? state.columnDraft : state.mineColumns;
+        if (!saved) saved = MINE_DEFAULT_COLUMNS;
+        var known = {};
+        mineColumnChoices().forEach(function (choice) { known[choice.key] = true; });
+        var result = [];
+        saved.forEach(function (key) {
+            if (known[key] && result.indexOf(key) < 0) result.push(key);
+        });
+        return result;
+    }
+
+    function mineFieldText(asset, key) {
+        if (!asset) return '';
+        if (key === 'name') return asset.name || '';
+        if (key === 'key') return asset.objectKey || '';
+        if (key === 'project') return asset.projectName || asset.projectKey || '';
+        if (key === 'role') return asset.holderRole || '';
+        if (key === 'location') return asset.location || '';
+        if (key === 'type') return asset.typeLabel || typeOf(asset.typeKey).label || '';
+        if (key === 'status') return statusLabel(asset.status);
+        if (key === 'custodian') return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        if (key === 'description') return asset.description || '';
+        if (key === 'created' || key === 'updated') return asset[key] || '';
+        if (key.indexOf('mineattr:') === 0) {
+            var wanted = key.slice('mineattr:'.length);
+            var attrs = asset.attributes || [];
+            var blank = '';
+            for (var i = 0; i < attrs.length; i++) {
+                if (String(attrs[i].name || '').trim().toLowerCase() !== wanted) continue;
+                var text = attrs[i].displayValue || attrs[i].value || '';
+                if (text) return text;
+                blank = text;
+            }
+            return blank;
+        }
+        return '';
+    }
+
+    function mineCell(asset, key) {
+        if (key === 'status') return lozenge(asset.status);
+        if (key === 'type') return typeBadge(typeFor(asset), asset.typeLabel || typeOf(asset.typeKey).label);
+        if (key === 'location') return asset.location || t('root');
+        if (key === 'custodian') {
+            return asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : t('custodianNone');
+        }
+        if (key === 'description') {
+            var text = asset.description || '';
+            return text.length > 120 ? text.slice(0, 117) + '...' : text;
+        }
+        if (key === 'created' || key === 'updated') return asset[key] ? stamp(asset[key]) : '';
+        return mineFieldText(asset, key);
+    }
+
+    function mineSorted(rows) {
+        var key = state.mineSortKey;
+        if (!key) return rows.slice();
+        var dir = state.mineSortDir === 'desc' ? -1 : 1;
+        return rows.slice().sort(function (left, right) {
+            var a = String(mineFieldText(left, key) || '').trim();
+            var b = String(mineFieldText(right, key) || '').trim();
+            if (!a || !b) {
+                if (!a && !b) return (left.id || 0) - (right.id || 0);
+                return a ? -1 : 1;
+            }
+            var cmp = compareNames(a, b);
+            if (!cmp) return (left.id || 0) - (right.id || 0);
+            return cmp * dir;
+        });
+    }
+
+    function mineSortHeader(label, key) {
+        var active = state.mineSortKey === key;
+        var buttonNode = button(label, 'asset-tree-th-sort' + (active ? ' is-active' : ''), function () {
+            if (state.mineSortKey === key) {
+                state.mineSortDir = state.mineSortDir === 'desc' ? 'asc' : 'desc';
+            } else {
+                state.mineSortKey = key;
+                state.mineSortDir = 'asc';
+            }
+            rememberMinePrefs();
+            renderFrame();
+        });
+        if (active) buttonNode.appendChild(document.createTextNode(state.mineSortDir === 'desc' ? ' \u2193' : ' \u2191'));
+        buttonNode.title = t('sortBy') + ': ' + label;
+        buttonNode.setAttribute('aria-pressed', active ? 'true' : 'false');
+        return buttonNode;
     }
 
     function columnHeaders(columns) {
@@ -4000,22 +4623,26 @@
     }
 
     function columnsButton() {
-        var node = button(t('columns'), 'asset-tree-btn' + (state.columnDraft ? ' is-active' : ''), function () {
-            if (state.columnDraft) {
+        var mine = state.view === 'mine';
+        var openHere = state.columnDraft && state.columnScope === (mine ? 'mine' : 'project');
+        var node = button(t('columns'), 'asset-tree-btn' + (openHere ? ' is-active' : ''), function () {
+            if (openHere) {
                 closeColumnsEditor();
                 return;
             }
-            state.columnDraft = tableColumns([]);
+            state.columnScope = mine ? 'mine' : 'project';
+            state.columnDraft = mine ? shownMineColumns().slice() : tableColumns([]);
             state.columnPicker = { open: false, query: '' };
             replaceDetail();
         });
-        node.setAttribute('aria-pressed', state.columnDraft ? 'true' : 'false');
+        node.setAttribute('aria-pressed', openHere ? 'true' : 'false');
         return node;
     }
 
     function closeColumnsEditor() {
         state.columnDraft = null;
         state.columnPicker = null;
+        state.columnScope = '';
         replaceDetail();
     }
 
@@ -4055,7 +4682,7 @@
             chip.setAttribute('data-column', key);
             chip.setAttribute('tabindex', '0');
             chip.draggable = true;
-            var label = columnLabel(key);
+            var label = activeColumnLabel(key);
             var types = key.indexOf('attr:') === 0 ? columnTypesText(key) : '';
             chip.title = types ? label + ' \u2014 ' + types : label;
             chip.setAttribute('aria-label', label + '. ' + t('columnsDragHint'));
@@ -4131,17 +4758,27 @@
         top.appendChild(chips);
         bar.appendChild(top);
         var foot = el('div', 'asset-tree-coledit-row asset-tree-coledit-foot');
-        foot.appendChild(el('span', 'asset-tree-hint', t('columnsHint')));
+        foot.appendChild(el('span', 'asset-tree-hint', t(state.columnScope === 'mine' ? 'mineColumnsHint' : 'columnsHint')));
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+            if (state.columnScope === 'mine') {
+                state.mineColumns = state.columnDraft.slice();
+                state.columnDraft = null;
+                state.columnPicker = null;
+                state.columnScope = '';
+                rememberMinePrefs();
+                renderFrame();
+                return;
+            }
             saveProjectView({ columns: state.columnDraft.slice() }, function () {
                 state.columnDraft = null;
                 state.columnPicker = null;
+                state.columnScope = '';
                 renderFrame();
             });
         }));
         actions.appendChild(button(t('columnsReset'), 'asset-tree-btn', function () {
-            state.columnDraft = DEFAULT_COLUMNS.slice();
+            state.columnDraft = (state.columnScope === 'mine' ? MINE_DEFAULT_COLUMNS : DEFAULT_COLUMNS).slice();
             replaceDetail();
         }));
         actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeColumnsEditor));
@@ -4165,7 +4802,10 @@
         var empty = el('p', 'asset-tree-hint', t('schemaNoMatch'));
         pop.appendChild(empty);
         var rows = [];
-        columnChoices().forEach(function (key) {
+        var choices = state.columnScope === 'mine'
+            ? mineColumnChoices().map(function (item) { return item.key; })
+            : columnChoices();
+        choices.forEach(function (key) {
             var item = el('li');
             var label = el('label', 'asset-tree-check');
             var box = el('input');
@@ -4180,7 +4820,7 @@
                 refocusColumns('.asset-tree-coledit-list input[data-column="' + key + '"]');
             });
             label.appendChild(box);
-            var name = columnLabel(key);
+            var name = activeColumnLabel(key);
             label.appendChild(el('span', null, name));
             var types = key.indexOf('attr:') === 0 ? columnTypesText(key) : '';
             if (types) label.appendChild(el('span', 'asset-tree-coledit-types', types));
@@ -4281,11 +4921,16 @@
 
     function openPlansOnSchedule(asset) {
         var soon = '';
+        var soonKind = '';
         (asset.plans || []).forEach(function (plan) {
             var day = plan.nextDue || plan.lastDone || '';
-            if (day && (!soon || day < soon)) soon = day;
+            if (day && (!soon || day < soon)) {
+                soon = day;
+                soonKind = plan.kind || '';
+            }
         });
-        state.scheduleKindFilter = '';
+        state.scheduleKindFilter = soonKind;
+        state.scheduleLayerSet = true;
         state.schedulePersonFilter = '';
         state.scheduleFocusAsset = asset && asset.id ? asset.id : 0;
         touchSchedule(soon);
@@ -4352,8 +4997,29 @@
         return t('serviceEvery') + ' ' + (plan.everyCount || 1) + ' ' + serviceUnitWord(plan.everyUnit);
     }
 
+    function serviceDoneText(plan) {
+        var marked = plan && plan.completedOn ? formatFieldDate(plan.completedOn) : '';
+        var text = t('serviceMarked') + (marked ? ' ' + marked : '');
+        if (plan && !plan.completed && plan.everyUnit && plan.everyUnit !== 'once' && plan.nextDue) {
+            text += '. ' + t('serviceNext') + ' ' + formatFieldDate(plan.nextDue);
+        }
+        return text;
+    }
+
+    function serviceResult(plan) {
+        if (!plan || !plan.completedOn) return null;
+        var line = el('div', 'asset-tree-plan-result');
+        line.appendChild(el('strong', null, t('serviceMarked') + ' ' + formatFieldDate(plan.completedOn)));
+        if (!plan.completed && plan.everyUnit && plan.everyUnit !== 'once' && plan.nextDue) {
+            line.appendChild(el('span', null, t('serviceNext') + ' ' + formatFieldDate(plan.nextDue)));
+        }
+        return line;
+    }
+
     function serviceRead(plan) {
-        var row = el('div', 'asset-tree-plan is-read' + (plan.due ? ' is-due' : ''));
+        var row = el('div', 'asset-tree-plan is-read' + (plan.completed && plan.completedOn ? ' is-done' : (plan.due ? ' is-due' : '')));
+        var doneLine = serviceResult(plan);
+        if (doneLine) row.appendChild(doneLine);
         var title = el('div', 'asset-tree-plan-title');
         title.appendChild(el('strong', null, plan.name));
         title.appendChild(el('span', null, kindName(plan.kind)));
@@ -4375,8 +5041,10 @@
 
     function serviceEditor(asset, plan, extras) {
         var creating = !plan;
-        var row = el('form', 'asset-tree-plan' + (plan && plan.due ? ' is-due' : ''));
+        var row = el('form', 'asset-tree-plan' + (plan && plan.completed && plan.completedOn ? ' is-done' : (plan && plan.due ? ' is-due' : '')));
         row.addEventListener('submit', function (event) { event.preventDefault(); });
+        var doneLine = serviceResult(plan);
+        if (doneLine) row.appendChild(doneLine);
         var name = input('', plan ? plan.name : '', false);
         name.placeholder = t('serviceName');
         name.setAttribute('aria-label', t('serviceName'));
@@ -4410,15 +5078,8 @@
         syncEvery();
         var kind = document.createElement('select');
         kind.setAttribute('aria-label', t('schedulesKind'));
-        enabledKinds().forEach(function (key) {
-            var labels = { to: 'kindTo', kts: 'kindKts', verify: 'kindVerify' };
-            var option = document.createElement('option');
-            option.value = key;
-            option.textContent = t(labels[key]);
-            kind.appendChild(option);
-        });
-        if (plan && plan.kind) kind.value = plan.kind;
-        if (!kind.value) kind.value = enabledKinds()[0] || 'to';
+        fillKindSelect(kind, plan && plan.kind, false);
+        kind.value = (plan && plan.kind) || enabledKinds()[0] || 'to';
         var everyWrap = el('div', 'asset-tree-plan-every');
         everyWrap.appendChild(every);
         everyWrap.appendChild(unit);
@@ -4451,7 +5112,16 @@
                 statusKey: status.value,
                 notify: box.checked
             };
-            if (done) body.done = true;
+            if (done) {
+                body.done = true;
+                if (plan && plan.everyUnit && plan.everyUnit !== 'once') {
+                    var source = nextPendingSource(plan);
+                    if (source) {
+                        body.doneOn = source;
+                        body.moves = dropMovesUntil(plan, source);
+                    }
+                }
+            }
             return body;
         }
         function send(done) {
@@ -4459,13 +5129,14 @@
             ajax(creating ? 'POST' : 'PUT', path, payload(done), function (statusCode, response) {
                 if (statusCode >= 200 && statusCode < 300) {
                     if (creating) state.serviceOpen = null;
-                    state.scheduleKindFilter = '';
+                    state.scheduleKindFilter = kind.value || '';
+                    state.scheduleLayerSet = true;
                     state.schedulePersonFilter = '';
                     state.scheduleFocusAsset = asset.id;
                     var shown = last.value;
                     if (done && response && (response.nextDue || response.lastDone)) shown = response.nextDue || response.lastDone;
                     touchSchedule(shown);
-                    if (!done) notify(t('serviceSame'));
+                    notify(done ? serviceDoneText(response) : t('serviceSame'));
                     reloadCard(asset.id);
                 } else notify((response && response.message) || t('errorTitle'));
             });
@@ -4807,7 +5478,8 @@
         var head = el('thead');
         var hr = el('tr');
         headers.forEach(function (label) {
-            var th = el('th', label && label.nodeType ? 'asset-tree-pick' : null);
+            var pickHead = label && label.nodeType && label.classList && label.classList.contains('asset-tree-pick-box');
+            var th = el('th', pickHead ? 'asset-tree-pick' : null);
             if (label && label.nodeType) th.appendChild(label);
             else th.textContent = label == null ? '' : String(label);
             hr.appendChild(th);
@@ -5024,6 +5696,10 @@
         if (changes && Object.prototype.hasOwnProperty.call(changes, 'custodianKey')) {
             custodianKey = changes.custodianKey || '';
         }
+        var issuedKey = source.issued && source.issued.userKey ? source.issued.userKey : '';
+        if (changes && Object.prototype.hasOwnProperty.call(changes, 'issuedKey')) {
+            issuedKey = changes.issuedKey || '';
+        }
         var nextType = changes && changes.typeKey ? changes.typeKey : (source.typeKey || asset.typeKey);
         var typeMoved = nextType !== (source.typeKey || asset.typeKey);
         setBusy(true);
@@ -5034,6 +5710,7 @@
             status: changes && changes.status ? changes.status : source.status,
             description: changes && Object.prototype.hasOwnProperty.call(changes, 'description') ? changes.description : (source.description || ''),
             custodianKey: custodianKey,
+            issuedKey: issuedKey,
             attributes: attributes
         }, function (code, payload) {
             setBusy(false);
@@ -5103,23 +5780,46 @@
         return moduleBlock(t('description'), host);
     }
 
+    function changeIssued(asset, userKey) {
+        persistAsset(asset, { issuedKey: userKey || '' });
+    }
+
     function custodianPicker(asset) {
+        return personAssign(asset, {
+            profile: asset.custodian,
+            label: t('custodian'),
+            boxId: 'asset-tree-assign',
+            onPick: function (userKey) { changeCustodian(asset, userKey); }
+        });
+    }
+
+    function issuedPicker(asset) {
+        return personAssign(asset, {
+            profile: asset.issued,
+            label: t('issuedTo'),
+            boxId: 'asset-tree-issued',
+            onPick: function (userKey) { changeIssued(asset, userKey); }
+        });
+    }
+
+    function personAssign(asset, options) {
+        var profile = options.profile;
         var field = el('div', 'asset-tree-people-field');
-        field.appendChild(el('div', 'asset-tree-people-label', t('custodian')));
-        var who = asset.custodian && asset.custodian.displayName ? asset.custodian.displayName : '';
+        field.appendChild(el('div', 'asset-tree-people-label', options.label));
+        var who = profile && profile.displayName ? profile.displayName : '';
         var person = el('div', 'asset-tree-person');
         person.appendChild(el('span', 'asset-tree-avatar' + (who ? '' : ' is-blank'), who ? initials(who) : ''));
         var personText = el('div', 'asset-tree-person-text');
         personText.appendChild(el('strong', null, who || t('custodianNone')));
-        if (asset.custodian && asset.custodian.email) personText.appendChild(el('span', null, asset.custodian.email));
-        if (state.canEdit && state.userKey && (!asset.custodian || asset.custodian.userKey !== state.userKey)) {
+        if (profile && profile.email) personText.appendChild(el('span', null, profile.email));
+        if (state.canEdit && state.userKey && (!profile || profile.userKey !== state.userKey)) {
             personText.appendChild(button(t('assignMe'), 'asset-tree-linkish', function () {
-                changeCustodian(asset, state.userKey);
+                options.onPick(state.userKey);
             }));
         }
         person.appendChild(personText);
         var box = el('div', 'asset-tree-assign');
-        box.id = 'asset-tree-assign';
+        box.id = options.boxId;
         if (!state.canEdit) {
             field.appendChild(person);
             return field;
@@ -5151,7 +5851,7 @@
                     if (status !== 200) return;
                     (payload || []).forEach(function (user) {
                         results.appendChild(button(user.displayName + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
-                            changeCustodian(asset, user.userKey);
+                            options.onPick(user.userKey);
                         }));
                     });
                 });
@@ -5161,7 +5861,7 @@
         search.appendChild(results);
         if (who) {
             search.appendChild(button(t('unassign'), 'asset-tree-linkish', function () {
-                changeCustodian(asset, '');
+                options.onPick('');
             }));
         }
         box.appendChild(search);
@@ -5227,6 +5927,7 @@
         if (item.field) return item.field;
         if (item.action === 'status') return t('status');
         if (item.action === 'custodian') return t('custodian');
+        if (item.action === 'issued') return t('issuedTo');
         if (item.action === 'name') return t('name');
         if (item.action === 'description') return t('description');
         if (item.action === 'type') return t('type');
@@ -5252,6 +5953,9 @@
         if (item.action === 'place_in') return t('actPlaceIn');
         if (item.action === 'place_out') return t('actPlaceOut');
         if (item.action === 'service_due') return t('actServiceDue');
+        if (item.action === 'service_done') return t('actServiceDone');
+        if (item.action === 'peer_add') return t('actPeerAdd');
+        if (item.action === 'peer_remove') return t('actPeerRemove');
         return t('actUpdated');
     }
 
@@ -5282,7 +5986,7 @@
         }
         row.appendChild(head);
         if (item.action === 'created' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
-        if (placeKind(item.action)) {
+        if (placeKind(item.action) || item.action === 'peer_add' || item.action === 'peer_remove') {
             var placeChange = el('div', 'asset-tree-history-change');
             var placeLabel = item.newValue || item.oldValue || '';
             var placeKey = item.field || '';
@@ -5295,16 +5999,17 @@
         if (field) change.appendChild(el('span', 'asset-tree-history-field', field));
         var oldText = historyValue(item, item.oldValue);
         var newText = historyValue(item, item.newValue);
-        if (item.action === 'service_due') {
-            change.appendChild(el('span', null, (item.field ? item.field + ' · ' : '') + formatFieldDate(item.newValue)));
+        if (item.action === 'service_due' || item.action === 'service_done') {
+            var when = formatFieldDate(item.newValue);
+            change.appendChild(el('span', null, item.action === 'service_done' ? when : ((item.field ? item.field + ' · ' : '') + when)));
         } else if (item.action === 'file' || item.action === 'file_delete' || item.action === 'comment' || item.action === 'comment_delete') {
             change.appendChild(el('span', null, newText || oldText));
         } else if (item.action === 'status') {
             if (item.oldValue) change.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(item.oldValue), statusLabel(item.oldValue)));
             change.appendChild(el('span', 'asset-tree-history-arrow', '\u2192'));
             if (item.newValue) change.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(item.newValue), statusLabel(item.newValue)));
-        } else if (oldText || newText || item.action === 'custodian') {
-            var missing = item.action === 'custodian' ? t('custodianNone') : t('emptyValue');
+        } else if (oldText || newText || item.action === 'custodian' || item.action === 'issued') {
+            var missing = item.action === 'custodian' || item.action === 'issued' ? t('custodianNone') : t('emptyValue');
             change.appendChild(el('span', 'is-old', oldText || missing));
             change.appendChild(el('span', 'asset-tree-history-arrow', '\u2192'));
             change.appendChild(el('span', 'is-new', newText || missing));
@@ -6305,8 +7010,10 @@
 
         var people = el('div');
         people.appendChild(custodianPicker(asset));
+        people.appendChild(issuedPicker(asset));
         people.appendChild(personField(t('author'), asset.createdBy || '', null));
         aside.appendChild(moduleBlock(t('people'), people));
+        aside.appendChild(peerBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
         form.appendChild(main);
@@ -6452,6 +7159,8 @@
 
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
+        if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
+        if (!placePage) aside.appendChild(peerBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
             ? state.types.map(function (type) { return { value: type.typeKey, label: type.label }; })
@@ -6592,6 +7301,131 @@
         }
     }
 
+    function peerSummary(peer) {
+        var parts = [];
+        if (peer.projectName || peer.projectKey) parts.push(peer.projectName || peer.projectKey);
+        if (peer.objectKey) parts.push(peer.objectKey);
+        if (peer.typeLabel) parts.push(peer.typeLabel);
+        if (peer.location) parts.push(peer.location);
+        return parts.join(' \u00b7 ');
+    }
+
+    function peerCaption(peer) {
+        var caption = ((peer.objectKey || '') + '  ' + (peer.name || '')).replace(/^\s+|\s+$/g, '');
+        if (peer.location) caption += ' \u00b7 ' + peer.location;
+        return caption;
+    }
+
+    function peerCardRow(label, value) {
+        var row = el('div', 'asset-tree-peer-card-row');
+        row.appendChild(el('span', null, label));
+        row.appendChild(el('span', null, value || ''));
+        return row;
+    }
+
+    function peerCard(peer) {
+        var card = el('div', 'asset-tree-peer-card');
+        card.appendChild(el('strong', null, peer.name || ''));
+        (peer.attributes || []).forEach(function (attr) {
+            if (!attr || !attr.name || attr.showOnIssue === false) return;
+            card.appendChild(peerCardRow(attr.name, attr.displayValue || attr.value || ''));
+        });
+        var holder = peer.custodian && peer.custodian.displayName ? peer.custodian.displayName : '';
+        if (holder) card.appendChild(peerCardRow(t('custodian'), holder));
+        var issued = peer.issued && peer.issued.displayName ? peer.issued.displayName : '';
+        if (issued) card.appendChild(peerCardRow(t('issuedTo'), issued));
+        return card;
+    }
+
+    function peerRow(asset, peer) {
+        var block = el('div', 'asset-tree-peer' + (peer.open ? '' : ' is-locked'));
+        var line = el('div', 'asset-tree-peer-line');
+        var caption = peerCaption(peer);
+        if (peer.open) {
+            line.appendChild(button(caption, 'asset-tree-linkish', function () {
+                goToAsset(peer.projectKey, peer.id);
+            }));
+        } else {
+            line.appendChild(el('span', 'asset-tree-peer-name', caption));
+        }
+        if (mayEdit(asset)) {
+            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                ajax('DELETE', '/assets/' + asset.id + '/peers/' + peer.id, null, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            remove.setAttribute('aria-label', t('unlink'));
+            line.appendChild(remove);
+        }
+        block.appendChild(line);
+        block.appendChild(peerCard(peer));
+        return block;
+    }
+
+    function peerBlock(asset) {
+        var body = el('div');
+        body.appendChild(el('p', 'asset-tree-hint', t('peersHint')));
+        if (mayEdit(asset)) {
+            var linker = el('div', 'asset-tree-linkrow');
+            var input = el('input');
+            input.type = 'search';
+            input.placeholder = t('peerSearch');
+            linker.appendChild(input);
+            body.appendChild(linker);
+            var results = el('div', 'asset-tree-user-results');
+            body.appendChild(results);
+            var timer = null;
+            var seq = 0;
+            input.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var query = input.value.trim();
+                    var token = ++seq;
+                    results.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (token !== seq || input.value.trim() !== query) return;
+                        results.innerHTML = '';
+                        if (status !== 200) {
+                            results.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
+                            return;
+                        }
+                        if (!payload || !payload.length) {
+                            results.appendChild(el('p', 'asset-tree-hint', t('noResults')));
+                            return;
+                        }
+                        payload.forEach(function (peer) {
+                            var caption = peer.name || peer.objectKey || '';
+                            var extra = peerSummary(peer);
+                            results.appendChild(button(extra ? caption + ' \u00b7 ' + extra : caption, 'asset-tree-user-hit', function () {
+                                ajax('POST', '/assets/' + asset.id + '/peers', { assetId: peer.id }, function (st, answer) {
+                                    if (st >= 200 && st < 300) {
+                                        notify(t('peerAdded'));
+                                        selectAsset(asset.id, true);
+                                    } else {
+                                        setFormError((answer && answer.message) || t('errorTitle'));
+                                    }
+                                });
+                            }));
+                        });
+                    });
+                }, 220);
+            });
+        }
+        if (asset.peers == null) {
+            body.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        } else if (!asset.peers.length) {
+            body.appendChild(el('p', 'asset-tree-hint', t('peerEmpty')));
+        } else {
+            asset.peers.forEach(function (peer) {
+                body.appendChild(peerRow(asset, peer));
+            });
+        }
+        return moduleBlock(t('peers'), body);
+    }
+
     function issueRow(assetId, issue) {
         var row = el('div', 'asset-tree-issue');
         row.appendChild(issueMark('#0052cc'));
@@ -6671,6 +7505,11 @@
             status: statusBox ? statusBox.value : ((current && current.status) || 'in_stock'),
             description: document.getElementById('asset-field-description').value,
             custodianKey: document.getElementById('asset-field-custodian').value,
+            issuedKey: (function () {
+                var issuedBox = document.getElementById('asset-field-issued');
+                if (issuedBox) return issuedBox.value || '';
+                return current && current.issued && current.issued.userKey ? current.issued.userKey : '';
+            }()),
             attributes: collectAttributes(document.getElementById('asset-detail-form'))
         }, function (status, payload) {
             if (status < 200 || status >= 300) {
@@ -8341,22 +9180,26 @@
         var dialog = el('div', 'asset-tree-dialog');
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
-        builder(dialog);
         backdrop.appendChild(dialog);
+        builder(dialog);
         backdrop.addEventListener('click', function (event) {
-            if (event.target === backdrop) closeModal();
+            if (event.target === backdrop) closeModal(backdrop);
         });
         (root || document.body).appendChild(backdrop);
         var first = dialog.querySelector('input:not([type="hidden"]), select, button');
         if (first) first.focus();
+        return backdrop;
     }
 
-    function closeModal() {
-        var nodes = document.querySelectorAll('.asset-tree-backdrop');
-        if (!nodes.length) return;
-        var last = nodes[nodes.length - 1];
-        if (last.querySelector('#asset-tree-module-dialog')) state.moduleDialog = '';
-        last.parentNode.removeChild(last);
+    function closeModal(node) {
+        var target = node && node.parentNode && String(node.className || '').indexOf('asset-tree-backdrop') !== -1 ? node : null;
+        if (!target) {
+            var nodes = document.querySelectorAll('.asset-tree-backdrop');
+            if (!nodes.length) return;
+            target = nodes[nodes.length - 1];
+        }
+        if (target.querySelector('#asset-tree-module-dialog')) state.moduleDialog = '';
+        if (target.parentNode) target.parentNode.removeChild(target);
     }
 
     function closeAllModals() {
@@ -8474,6 +9317,7 @@
         state.selectedId = selectedId || null;
         state.query = '';
         state.rules = [];
+        state.objectsOnly = false;
         state.activeFilterId = '';
         state.searchHits = null;
         state.searching = false;
@@ -8486,19 +9330,38 @@
         state.scheduleLoading = false;
         state.scheduleToken++;
         state.scheduleError = '';
+        state.scheduleKindFilter = '';
+        state.scheduleLayerSet = false;
+        state.scheduleMode = 'calendar';
         state.staffRows = null;
         state.staffLoading = false;
         state.staffToken++;
         state.staffError = '';
         state.floors = null;
         state.floorId = 0;
+        state.mapPlaceId = 0;
         state.mapDraft = null;
+        state.mapGroup = [];
+        state.mapStamp = '';
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
+        state.mapLayer = 'plan';
+        state.mapNaming = false;
         state.mapLoading = false;
         state.mapToken++;
         state.mapSelection = null;
+        state.mapCam = null;
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
         state.reportCatalog = null;
         state.reportKey = 'status';
         state.reportView = null;
+        state.reportChart = '';
+        state.reportChartFor = '';
+        state.reportChartBusy = false;
+        state.reportChartPending = null;
+        state.reportChartEpoch += 1;
+        state.reportEmptyNav = false;
         state.reportOpen = false;
         state.galleryToken++;
         state.galleryLoading = false;
@@ -8642,11 +9505,19 @@
     }
 
     function custodianField(id, profile) {
+        return personFieldBox(id, t('custodian'), profile);
+    }
+
+    function issuedField(id, profile) {
+        return personFieldBox(id, t('issuedTo'), profile);
+    }
+
+    function personFieldBox(id, label, profile) {
         var box = userBox(profile ? profile.userKey : '', !state.canEdit, profile ? (profile.displayName || '') : '');
         box.querySelector('.asset-tree-field-value').id = id;
         var text = box.querySelector('input[type="search"]');
         if (profile && text && !text.value) text.value = profile.displayName || '';
-        var wrap = field(t('custodian'), box, true);
+        var wrap = field(label, box, true);
         if (profile) wrap.appendChild(profileCard(profile));
         return wrap;
     }
@@ -8773,7 +9644,12 @@
     }
 
     function focusMatches(rule) {
-        state.rules = [rule];
+        showAssetRules(rule ? [rule] : [], false);
+    }
+
+    function showAssetRules(rules, objectsOnly) {
+        state.rules = rules || [];
+        state.objectsOnly = !!objectsOnly;
         state.activeFilterId = '';
         state.query = '';
         state.searchHits = null;
@@ -8794,6 +9670,7 @@
 
     function showAllAssets() {
         state.rules = [];
+        state.objectsOnly = false;
         state.activeFilterId = '';
         state.query = '';
         state.searchHits = null;
@@ -9452,6 +10329,7 @@
         rows.forEach(function (place) {
             var line = button(place.name, 'asset-tree-dash-link', function () {
                 state.rules = [];
+                state.objectsOnly = false;
                 state.activeFilterId = '';
                 state.query = '';
                 state.searchHits = null;
@@ -9468,8 +10346,19 @@
     function holderList(rows) {
         var list = el('div', 'asset-tree-dash-list');
         rows.forEach(function (holder) {
-            var name = holder.user && holder.user.displayName ? holder.user.displayName : '';
-            var line = button(name, 'asset-tree-dash-link', function () {
+            var user = holder.user || {};
+            var name = user.displayName || '';
+            var line = button(name || user.userKey || '', 'asset-tree-dash-link', function () {
+                if (user.userKey) {
+                    focusMatches({
+                        field: 'custodian',
+                        op: 'eq',
+                        userKey: user.userKey,
+                        value: name,
+                        caption: t('custodian') + ': ' + (name || user.userKey)
+                    });
+                    return;
+                }
                 focusMatches({ field: 'custodian', op: 'eq', value: name });
             });
             line.appendChild(el('strong', null, String(holder.count)));
@@ -9536,8 +10425,15 @@
     function renderMine() {
         var panel = el('section', 'asset-tree-report');
         var title = state.displayName ? t('menuMine') + ' · ' + state.displayName : t('menuMine');
-        panel.appendChild(el('h2', null, title));
+        var head = el('div', 'asset-tree-mine-head');
+        head.appendChild(el('h2', null, title));
+        if (state.mineAssets !== null) head.appendChild(columnsButton());
+        panel.appendChild(head);
         panel.appendChild(el('p', 'asset-tree-hint', t('mineHint')));
+        if (state.columnScope === 'mine') {
+            var editor = columnsEditor();
+            if (editor) panel.appendChild(editor);
+        }
         if (state.mineAssets === null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             return panel;
@@ -9546,20 +10442,19 @@
             panel.appendChild(el('p', 'asset-tree-hint', t('mineEmpty')));
             return panel;
         }
-        var rows = mineVisible(state.mineAssets);
+        var rows = mineSorted(mineVisible(state.mineAssets));
         if (!rows.length) {
             panel.appendChild(el('p', 'asset-tree-hint', t('noResults')));
             return panel;
         }
+        var columns = shownMineColumns();
         panel.appendChild(selectableTable(rows.map(function (asset) {
-            return [
-                nameCell(asset, function () { goToAsset(asset.projectKey, asset.id); }),
-                asset.objectKey || '',
-                asset.projectName || asset.projectKey || '',
-                lozenge(asset.status),
-                asset.location || t('root')
-            ];
-        }), [t('name'), t('keyLabel'), t('project'), t('status'), t('parent')], {
+            return [nameCell(asset, function () { goToAsset(asset.projectKey, asset.id); })].concat(columns.map(function (key) {
+                return mineCell(asset, key);
+            }));
+        }), [mineSortHeader(t('name'), 'name')].concat(columns.map(function (key) {
+            return mineSortHeader(mineColumnLabel(key), key);
+        })), {
             scope: 'mine',
             rows: rows.map(function (asset) {
                 return {
@@ -9585,7 +10480,18 @@
         if (rule.kind) copy.kind = rule.kind;
         if (rule.label) copy.label = rule.label;
         if (rule.caption) copy.caption = rule.caption;
+        if (rule.userKey) copy.userKey = rule.userKey;
+        if (rule.userKeys && rule.userKeys.length) copy.userKeys = rule.userKeys.slice();
+        if (rule.ids) copy.ids = rule.ids;
         return copy;
+    }
+
+    function ruleLocked(rule) {
+        if (!rule) return false;
+        if (rule.ids || rule.userKey || (rule.userKeys && rule.userKeys.length)) return true;
+        if (rule.field === 'place') return true;
+        if (rule.keys && rule.keys.length) return true;
+        return rule.op === 'in' && rule.values && rule.values.length;
     }
 
     function filterBar() {
@@ -9620,6 +10526,7 @@
                 if (filter.id === picker.value) chosen = filter;
             });
             state.rules = chosen ? chosen.rules.map(copyRule) : [];
+            state.objectsOnly = false;
             refreshBrowse();
         });
         bar.appendChild(picker);
@@ -9627,6 +10534,7 @@
         if ((state.rules && state.rules.length) || state.activeFilterId) {
             bar.appendChild(button(t('clearFilters'), 'asset-tree-btn', function () {
                 state.rules = [];
+                state.objectsOnly = false;
                 state.activeFilterId = '';
                 refreshBrowse();
             }));
@@ -9721,7 +10629,7 @@
                 if (!draft.rules.length) draft.rules.push({ field: 'name', op: 'contains', value: '' });
                 list.innerHTML = '';
                 draft.rules.forEach(function (rule, index) {
-                    if (rule.keys && rule.keys.length) {
+                    if (ruleLocked(rule)) {
                         var locked = el('div', 'asset-tree-rule');
                         locked.setAttribute('data-rule', String(index));
                         locked._kept = copyRule(rule);
@@ -9818,7 +10726,7 @@
             form.appendChild(error);
             function applyRules(save) {
                 var rules = readRules().filter(function (rule) {
-                    if (rule.keys && rule.keys.length) return true;
+                    if (ruleLocked(rule)) return true;
                     if (rule.op === 'empty' || rule.op === 'notEmpty') return true;
                     if (rule.op === 'in' && rule.values && rule.values.length) return true;
                     return String(rule.value || '').trim().length > 0;
@@ -9833,6 +10741,7 @@
                     return;
                 }
                 state.rules = rules;
+                state.objectsOnly = false;
                 if (save) {
                     var id = draft.id || ('f' + Date.now());
                     var next = (state.savedFilters || []).filter(function (filter) { return filter.id !== id; });
@@ -9855,6 +10764,7 @@
                     if (state.activeFilterId === draft.id) {
                         state.activeFilterId = '';
                         state.rules = [];
+                        state.objectsOnly = false;
                     }
                     closeModal();
                     refreshBrowse();
@@ -10710,7 +11620,19 @@
         return true;
     }
 
+    function refreshPortalSettings() {
+        if (state.view === 'settings' && state.schemaTab === 'portal') renderFrame();
+    }
+
     function openModuleSetup(moduleKey) {
+        if (moduleKey === 'portal') {
+            closeAllModals();
+            state.view = 'settings';
+            state.schemaTab = 'portal';
+            rememberView('settings');
+            renderFrame();
+            return;
+        }
         closeAllModals();
         state.moduleDialog = moduleKey;
         var root = document.getElementById('asset-tree-app') || document.body;
@@ -10728,26 +11650,131 @@
     function moduleSetupPanel(moduleKey) {
         var setup = moduleSetup();
         var panel = el('div', 'asset-tree-module-setup');
-        function saveSetup(next) {
+            function saveSetup(next) {
             saveProjectView({ setup: next }, function (ok) {
-                if (ok) closeModal();
+                if (ok) {
+                    if (moduleKey === 'service') state.scheduleLayerSet = false;
+                    closeModal();
+                }
             });
         }
         if (moduleKey === 'service') {
-            var kinds = el('div', 'asset-tree-check-list');
-            ['to', 'kts', 'verify'].forEach(function (key) {
-                var labels = { to: 'kindToLong', kts: 'kindKtsLong', verify: 'kindVerifyLong' };
-                var label = el('label', 'asset-tree-check');
-                var box = document.createElement('input');
-                box.type = 'checkbox';
-                box.checked = setup.scheduleKinds.split(',').indexOf(key) >= 0;
-                box.setAttribute('data-kind', key);
-                label.appendChild(box);
-                label.appendChild(document.createTextNode(t(labels[key])));
-                kinds.appendChild(label);
-            });
+            var rows = parseKindList(setup.scheduleKinds);
+            var list = el('div', 'asset-tree-kind-list');
+            function paintKinds() {
+                list.innerHTML = '';
+                rows.forEach(function (row, index) {
+                    var line = el('div', 'asset-tree-kind-row');
+                    var name = document.createElement('input');
+                    name.type = 'text';
+                    name.maxLength = 40;
+                    name.value = row.label || builtinKind(row.id, true);
+                    name.setAttribute('aria-label', t('setupKinds'));
+                    name.addEventListener('input', function () {
+                        var next = cleanKindLabel(name.value);
+                        if (next) row.label = next;
+                        paintLayerOptions();
+                    });
+                    name.addEventListener('blur', function () {
+                        if (!cleanKindLabel(name.value)) name.value = row.label || builtinKind(row.id, true);
+                    });
+                    line.appendChild(name);
+                    var remove = button(t('setupKindRemove'), 'asset-tree-btn', function () {
+                        if (rows.length < 2) return;
+                        rows.splice(index, 1);
+                        paintKinds();
+                    });
+                    remove.disabled = rows.length < 2;
+                    line.appendChild(remove);
+                    list.appendChild(line);
+                });
+                paintLayerOptions();
+            }
+            var layer = document.createElement('select');
+            layer.setAttribute('aria-label', t('setupLayer'));
+            function paintLayerOptions() {
+                var current = layer.value || setup.scheduleLayer || '';
+                layer.innerHTML = '';
+                var all = document.createElement('option');
+                all.value = '';
+                all.textContent = t('schedulesAllLayers');
+                layer.appendChild(all);
+                rows.forEach(function (row) {
+                    var option = document.createElement('option');
+                    option.value = row.id;
+                    option.textContent = row.label || builtinKind(row.id, true);
+                    layer.appendChild(option);
+                });
+                if (current === 'staff' || current === 'roster') current = '';
+                layer.value = rows.some(function (row) { return row.id === current; }) ? current : '';
+            }
+            paintKinds();
+            var adder = document.createElement('input');
+            adder.type = 'text';
+            adder.maxLength = 40;
+            adder.placeholder = t('setupKindAdd');
+            adder.setAttribute('aria-label', t('setupKindAdd'));
+            var addRow = el('div', 'asset-tree-kind-row');
+            addRow.appendChild(adder);
+            addRow.appendChild(button(t('setupKindAdd'), 'asset-tree-btn', function () {
+                var label = cleanKindLabel(adder.value);
+                if (!label || rows.length >= 24) return;
+                rows.push({ id: nextKindId(rows), label: label });
+                adder.value = '';
+                paintKinds();
+            }));
             panel.appendChild(el('span', 'asset-tree-nav-label', t('setupKinds')));
-            panel.appendChild(kinds);
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupKindsHint')));
+            panel.appendChild(list);
+            panel.appendChild(addRow);
+            panel.appendChild(planField(t('setupLayer'), layer));
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupLayerHint')));
+            var boardsNow = scheduleBoards();
+            var calendarBox = document.createElement('input');
+            calendarBox.type = 'checkbox';
+            calendarBox.checked = boardsNow.calendar;
+            var rosterBox = document.createElement('input');
+            rosterBox.type = 'checkbox';
+            rosterBox.checked = boardsNow.roster;
+            var openOn = document.createElement('select');
+            openOn.setAttribute('aria-label', t('setupOpen'));
+            function paintOpenOptions() {
+                if (!calendarBox.checked && !rosterBox.checked) {
+                    calendarBox.checked = true;
+                }
+                var current = openOn.value || setup.scheduleOpen || (setup.scheduleLayer === 'roster' ? 'roster' : 'calendar');
+                openOn.innerHTML = '';
+                if (calendarBox.checked) {
+                    var calendarOption = document.createElement('option');
+                    calendarOption.value = 'calendar';
+                    calendarOption.textContent = t('setupBoardCalendar');
+                    openOn.appendChild(calendarOption);
+                }
+                if (rosterBox.checked) {
+                    var rosterOption = document.createElement('option');
+                    rosterOption.value = 'roster';
+                    rosterOption.textContent = t('setupBoardRoster');
+                    openOn.appendChild(rosterOption);
+                }
+                openOn.value = openOn.querySelector('option[value="' + current + '"]') ? current : openOn.options[0].value;
+            }
+            calendarBox.addEventListener('change', paintOpenOptions);
+            rosterBox.addEventListener('change', paintOpenOptions);
+            var boardRow = el('div', 'asset-tree-check-list');
+            var calendarLabel = el('label', 'asset-tree-check');
+            calendarLabel.appendChild(calendarBox);
+            calendarLabel.appendChild(document.createTextNode(t('setupBoardCalendar')));
+            var rosterLabel = el('label', 'asset-tree-check');
+            rosterLabel.appendChild(rosterBox);
+            rosterLabel.appendChild(document.createTextNode(t('setupBoardRoster')));
+            boardRow.appendChild(calendarLabel);
+            boardRow.appendChild(rosterLabel);
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('setupBoards')));
+            panel.appendChild(boardRow);
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupBoardsHint')));
+            paintOpenOptions();
+            panel.appendChild(planField(t('setupOpen'), openOn));
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupOpenHint')));
             var unit = document.createElement('select');
             [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -10765,13 +11792,17 @@
             notify.appendChild(document.createTextNode(t('setupNotify')));
             panel.appendChild(notify);
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
-                var picked = [];
-                var boxes = kinds.querySelectorAll('input');
-                for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) picked.push(boxes[i].getAttribute('data-kind'));
                 var next = moduleSetup();
-                next.scheduleKinds = picked.join(',');
+                next.scheduleKinds = packKinds(rows);
+                next.scheduleLayer = layer.value;
                 next.scheduleUnit = unit.value;
                 next.scheduleNotify = notifyBox.checked;
+                var pickedBoards = [];
+                if (calendarBox.checked) pickedBoards.push('calendar');
+                if (rosterBox.checked) pickedBoards.push('roster');
+                if (!pickedBoards.length) pickedBoards.push('calendar');
+                next.scheduleBoards = pickedBoards.join(',');
+                next.scheduleOpen = pickedBoards.indexOf(openOn.value) >= 0 ? openOn.value : pickedBoards[0];
                 saveSetup(next);
             }));
         }
@@ -10827,14 +11858,145 @@
             });
             panel.appendChild(el('span', 'asset-tree-nav-label', t('setupShow')));
             panel.appendChild(reports);
-            panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
+            var mailOn = el('label', 'asset-tree-check');
+            var mailBox = document.createElement('input');
+            mailBox.type = 'checkbox';
+            mailBox.checked = setup.reportMail;
+            mailOn.appendChild(mailBox);
+            mailOn.appendChild(document.createTextNode(t('reportMail')));
+            var every = document.createElement('select');
+            [['week', 'reportMailWeek'], ['month', 'reportMailMonth']].forEach(function (pair) {
+                var option = document.createElement('option');
+                option.value = pair[0];
+                option.textContent = t(pair[1]);
+                every.appendChild(option);
+            });
+            every.value = setup.reportMailEvery === 'month' ? 'month' : 'week';
+            var day = document.createElement('select');
+            var dayField = planField(t('reportMailWeekDay'), day);
+            var dayLabel = dayField.querySelector('span');
+            function paintMailDay() {
+                var month = every.value === 'month';
+                if (dayLabel) dayLabel.textContent = t(month ? 'reportMailMonthDay' : 'reportMailWeekDay');
+                var previous = day.value || String(setup.reportMailDay || 1);
+                day.innerHTML = '';
+                var names = ['reportMailMon', 'reportMailTue', 'reportMailWed', 'reportMailThu', 'reportMailFri', 'reportMailSat', 'reportMailSun'];
+                var count = month ? 31 : 7;
+                for (var i = 1; i <= count; i++) {
+                    var option = document.createElement('option');
+                    option.value = String(i);
+                    option.textContent = month ? String(i) : t(names[i - 1]);
+                    day.appendChild(option);
+                }
+                day.value = String(Math.min(count, Math.max(1, Number(previous) || 1)));
+            }
+            every.addEventListener('change', paintMailDay);
+            paintMailDay();
+            var mailTo = (setup.reportMailTo || '').split(',').filter(function (key) { return key; });
+            var mailNames = {};
+            var MAIL_LIMIT = 20;
+            var chips = el('div', 'asset-tree-check-list');
+            var finder = document.createElement('input');
+            finder.type = 'search';
+            finder.placeholder = t('schedulesFindUser');
+            finder.setAttribute('aria-label', t('reportMailTo'));
+            var hits = el('div', 'asset-tree-user-results');
+            var mailTimer = null;
+            var mailSeq = 0;
+            function paintMailTo() {
+                chips.innerHTML = '';
+                mailTo.forEach(function (key) {
+                    var line = el('label', 'asset-tree-check');
+                    line.appendChild(document.createTextNode(mailNames[key] || key));
+                    line.appendChild(button('\u00D7', 'asset-tree-btn', function () {
+                        mailTo = mailTo.filter(function (item) { return item !== key; });
+                        paintMailTo();
+                    }));
+                    chips.appendChild(line);
+                });
+            }
+            paintMailTo();
+            mailTo.forEach(function (key) {
+                ajax('GET', '/users/' + encodeURIComponent(key), null, function (status, payload) {
+                    if (status === 200 && payload && payload.displayName) {
+                        mailNames[key] = payload.displayName;
+                        paintMailTo();
+                    }
+                });
+            });
+            finder.addEventListener('input', function () {
+                clearTimeout(mailTimer);
+                mailTimer = setTimeout(function () {
+                    var query = finder.value.trim();
+                    var mark = ++mailSeq;
+                    hits.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mark !== mailSeq) return;
+                        hits.innerHTML = '';
+                        (payload || []).forEach(function (user) {
+                            if (!user || !user.userKey) return;
+                            var label = user.displayName || user.userKey;
+                            if (user.email) label += ' \u00B7 ' + user.email;
+                            hits.appendChild(button(label, 'asset-tree-user-hit', function () {
+                                if (mailTo.indexOf(user.userKey) >= 0) return;
+                                if (mailTo.length >= MAIL_LIMIT) {
+                                    notify(t('reportMailFull'));
+                                    return;
+                                }
+                                mailNames[user.userKey] = user.displayName || user.userKey;
+                                mailTo.push(user.userKey);
+                                finder.value = '';
+                                hits.innerHTML = '';
+                                paintMailTo();
+                            }));
+                        });
+                    });
+                }, 200);
+            });
+            panel.appendChild(mailOn);
+            panel.appendChild(planField(t('reportMailEvery'), every));
+            panel.appendChild(dayField);
+            var who = planField(t('reportMailTo'), finder);
+            who.appendChild(chips);
+            who.appendChild(hits);
+            panel.appendChild(who);
+            var mailActions = el('div', 'asset-tree-inline-actions');
+            mailActions.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var hidden = [];
                 var boxes = reports.querySelectorAll('input');
                 for (var i = 0; i < boxes.length; i++) if (!boxes[i].checked) hidden.push(boxes[i].getAttribute('data-report'));
                 var next = moduleSetup();
                 next.reportHidden = hidden.join(',');
+                next.reportMail = mailBox.checked;
+                next.reportMailEvery = every.value;
+                next.reportMailDay = Number(day.value) || 1;
+                next.reportMailTo = mailTo.join(',');
                 saveSetup(next);
             }));
+            mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
+                if (!mailTo.length) {
+                    notify(t('reportMailNeed'));
+                    return;
+                }
+                var hidden = [];
+                var boxes = reports.querySelectorAll('input');
+                for (var i = 0; i < boxes.length; i++) if (!boxes[i].checked) hidden.push(boxes[i].getAttribute('data-report'));
+                var next = moduleSetup();
+                next.reportHidden = hidden.join(',');
+                next.reportMail = mailBox.checked;
+                next.reportMailEvery = every.value;
+                next.reportMailDay = Number(day.value) || 1;
+                next.reportMailTo = mailTo.join(',');
+                saveProjectView({ setup: next }, function (ok) {
+                    if (!ok) return;
+                    ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
+                        if (status >= 200 && status < 300) notify(t('reportMailQueued'));
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }, true);
+            }));
+            panel.appendChild(mailActions);
         }
         if (moduleKey === 'life') {
             var approval = el('label', 'asset-tree-check');
@@ -10843,14 +12005,78 @@
             approvalBox.checked = setup.lifeApproval;
             approval.appendChild(approvalBox);
             approval.appendChild(document.createTextNode(t('setupApproval')));
-            var approver = document.createElement('input');
-            approver.value = setup.lifeApprover || '';
-            approver.setAttribute('aria-label', t('setupApprover'));
+            var approverKey = setup.lifeApprover || '';
+            var approverName = approverKey && approverKey === state.userKey ? (state.displayName || '') : '';
+            var chosen = el('div', 'asset-tree-userpick-name', approverName || t('lifeApproverEmpty'));
+            var finder = document.createElement('input');
+            finder.type = 'search';
+            finder.placeholder = t('schedulesFindUser');
+            finder.setAttribute('aria-label', t('setupApprover'));
+            finder.value = approverName;
+            var hits = el('div', 'asset-tree-user-results');
+            var timer = null;
+            var seq = 0;
+            function showApprover(name) {
+                approverName = name || '';
+                finder.value = approverName;
+                chosen.textContent = approverName || t('lifeApproverEmpty');
+            }
+            function pickApprover(user) {
+                approverKey = user && user.userKey ? user.userKey : '';
+                showApprover(user && (user.displayName || user.userKey));
+                hits.innerHTML = '';
+            }
+            finder.addEventListener('input', function () {
+                var typed = finder.value.trim();
+                if (!typed) {
+                    approverKey = '';
+                    approverName = '';
+                    chosen.textContent = t('lifeApproverEmpty');
+                } else if (typed !== approverName) {
+                    approverKey = '';
+                    chosen.textContent = '';
+                }
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var query = finder.value.trim();
+                    var mark = ++seq;
+                    hits.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mark !== seq) return;
+                        hits.innerHTML = '';
+                        (payload || []).forEach(function (user) {
+                            var label = user.displayName || user.userKey;
+                            if (user.email) label += ' · ' + user.email;
+                            else if (user.department) label += ' · ' + user.department;
+                            hits.appendChild(button(label, 'asset-tree-user-hit', function () {
+                                pickApprover(user);
+                            }));
+                        });
+                    });
+                }, 200);
+            });
+            if (approverKey && !approverName) {
+                ajax('GET', '/users/' + encodeURIComponent(approverKey), null, function (status, user) {
+                    if (status === 200 && user && user.displayName) showApprover(user.displayName);
+                    else chosen.textContent = approverKey;
+                });
+            }
+            var head = el('div', 'asset-tree-life-setup-head');
+            head.appendChild(approval);
+            head.appendChild(button(t('schedulesMe'), 'asset-tree-linkish', function () {
+                pickApprover({ userKey: state.userKey || '', displayName: state.displayName || '' });
+            }));
+            panel.appendChild(head);
+            var who = planField(t('setupApprover'), finder);
+            who.appendChild(chosen);
+            who.appendChild(hits);
+            panel.appendChild(who);
             var currency = document.createElement('select');
             ['RUB', 'USD', 'EUR'].forEach(function (code) {
                 var option = document.createElement('option');
                 option.value = code;
-                option.textContent = code;
+                option.textContent = currencyMark(code);
                 currency.appendChild(option);
             });
             currency.value = setup.lifeCurrency || 'RUB';
@@ -10858,18 +12084,13 @@
             months.type = 'number';
             months.min = '0';
             months.max = '600';
-            months.value = String(setup.lifeMonths || 0);
-            panel.appendChild(approval);
-            panel.appendChild(button(t('schedulesMe'), 'asset-tree-btn slim', function () {
-                approver.value = state.userKey || '';
-            }));
-            panel.appendChild(planField(t('setupApprover'), approver));
+            months.value = String(setup.lifeMonths > 0 ? setup.lifeMonths : 60);
             panel.appendChild(planField(t('setupCurrency'), currency));
             panel.appendChild(planField(t('setupMonths'), months));
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
                 next.lifeApproval = approvalBox.checked;
-                next.lifeApprover = approver.value.trim();
+                next.lifeApprover = approverKey;
                 next.lifeCurrency = currency.value;
                 next.lifeMonths = clampNum(months.value, 0, 600);
                 saveSetup(next);
@@ -10878,7 +12099,7 @@
         return panel;
     }
 
-    function saveProjectView(patch, done) {
+    function saveProjectView(patch, done, quiet) {
         setBusy(true);
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', patch, function (status, payload) {
             if (status < 200 || status >= 300) {
@@ -10896,7 +12117,7 @@
             }
             setBusy(false);
             if (done) done(true);
-            notify(t('viewSaved'));
+            if (!quiet) notify(t('viewSaved'));
         });
     }
 
@@ -10920,6 +12141,7 @@
         if (state.canConfigure) {
             sections.push(['statuses', t('statusSection'), (state.statuses || []).length]);
             sections.push(['types', t('typesSection'), state.types.length]);
+            if (moduleOn('portal')) sections.push(['portal', t('portalSection'), null]);
         }
         if (state.canGrant) {
             sections.push(['access', t('accessSection'), state.grants ? state.grants.length : null]);
@@ -10962,6 +12184,10 @@
             renderAccessSettings(panel);
         } else if (state.schemaTab === 'project') {
             renderProjectSettings(panel);
+        } else if (state.schemaTab === 'portal') {
+            panel.classList.add('is-portal');
+            renderPortalSettings(panel);
+            fitPortalPanel(panel);
         } else {
             renderStatusSettings(panel);
         }
@@ -11039,17 +12265,16 @@
 
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
-        head.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
         modules.appendChild(head);
         modules.appendChild(el('p', 'asset-tree-hint', t('modulesHint')));
         var grid = el('div', 'asset-tree-module-grid');
         [
-            ['service', 'moduleService', 'moduleServiceHint', 'schedules'],
-            ['map', 'moduleMap', 'moduleMapHint', 'map'],
-            ['reports', 'moduleReports', 'moduleReportsHint', 'reports'],
-            ['life', 'moduleLife', 'moduleLifeHint', ''],
-            ['portal', 'modulePortal', 'modulePortalHint', ''],
-            ['card', 'moduleCard', 'moduleCardHint', '']
+            ['service', 'moduleService', 'moduleServiceHint', 'schedules', 'beta'],
+            ['map', 'moduleMap', 'moduleMapHint', 'map', 'beta'],
+            ['reports', 'moduleReports', 'moduleReportsHint', 'reports', 'beta'],
+            ['life', 'moduleLife', 'moduleLifeHint', '', 'beta'],
+            ['portal', 'modulePortal', 'modulePortalHint', '', 'beta'],
+            ['card', 'moduleCard', 'moduleCardHint', '', 'beta']
         ].forEach(function (item) {
             var option = el('div', 'asset-tree-module-option');
             var label = el('label');
@@ -11080,7 +12305,10 @@
                 });
             });
             var text = el('span');
-            text.appendChild(el('strong', null, t(item[1])));
+            var title = el('strong');
+            title.appendChild(document.createTextNode(t(item[1])));
+            title.appendChild(stageMark(item[4]));
+            text.appendChild(title);
             text.appendChild(el('span', 'asset-tree-hint', t(item[2])));
             label.appendChild(box);
             label.appendChild(text);
@@ -11214,25 +12442,221 @@
             cursor = planNextDate(isoDate(cursor), count, unit);
             seen++;
         }
+        return movedDates(plan, found, year, month);
+    }
+
+    function planMoveMap(plan) {
+        var map = {};
+        String(plan && plan.moves || '').split(',').forEach(function (part) {
+            var at = part.indexOf('>');
+            if (at < 1) return;
+            var source = part.slice(0, at);
+            var target = part.slice(at + 1);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(source)) return;
+            var day = target.indexOf('@') < 0 ? target : target.slice(0, target.indexOf('@'));
+            if (day !== '-' && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+            if (day === source && target.indexOf('@') < 0) return;
+            if (target.indexOf('@') >= 0) {
+                var spanText = target.slice(target.indexOf('@') + 1);
+                var span = spanText.split('-');
+                if (spanText !== '-' && !/^\d{2}:\d{2}$/.test(span[0] || '')) return;
+                if (spanText !== '-' && span[1] && !/^\d{2}:\d{2}$/.test(span[1])) return;
+            }
+            map[source] = target;
+        });
+        return map;
+    }
+
+    function moveDay(value) {
+        if (!value) return '';
+        var at = value.indexOf('@');
+        return at < 0 ? value : value.slice(0, at);
+    }
+
+    function packPlanMoves(map) {
+        var parts = [];
+        Object.keys(map).sort().forEach(function (source) {
+            if (parts.length >= 80) return;
+            var target = map[source];
+            if (!target || target === source) return;
+            parts.push(source + '>' + target);
+        });
+        return parts.join(',');
+    }
+
+    function seriesSource(plan, displayIso) {
+        var map = planMoveMap(plan);
+        var source;
+        for (source in map) {
+            if (Object.prototype.hasOwnProperty.call(map, source) && moveDay(map[source]) === displayIso) return source;
+        }
+        return displayIso || '';
+    }
+
+    function nextPendingSource(plan) {
+        var count = parseInt(plan.everyCount, 10) || 0;
+        var unit = plan.everyUnit || '';
+        var cursor = planNextDate(plan.lastDone, count, unit);
+        var map = planMoveMap(plan);
+        var guard = 0;
+        while (cursor && guard < 80) {
+            var iso = isoDate(cursor);
+            if (map[iso] !== '-') return iso;
+            cursor = planNextDate(iso, count, unit);
+            guard++;
+        }
+        return '';
+    }
+
+    function dropMovesUntil(plan, iso) {
+        var map = planMoveMap(plan);
+        var limit = parseIsoDate(iso);
+        if (!limit) return packPlanMoves(map);
+        Object.keys(map).forEach(function (source) {
+            var day = parseIsoDate(source);
+            if (day && dayNumber(day) <= dayNumber(limit)) delete map[source];
+        });
+        return packPlanMoves(map);
+    }
+
+    function movedDates(plan, dates, year, month) {
+        var map = planMoveMap(plan);
+        var anchor = parseIsoDate(plan.lastDone || '');
+        function inside(iso) {
+            var day = parseIsoDate(iso);
+            return !!(day && day.getFullYear() === year && day.getMonth() + 1 === month);
+        }
+        function stillAhead(source) {
+            var origin = parseIsoDate(source);
+            return !(anchor && origin && dayNumber(origin) <= dayNumber(anchor));
+        }
+        var seen = {};
+        var found = [];
+        function add(display, source) {
+            if (!display || display === '-' || seen[display] || !inside(display) || !stillAhead(source)) return;
+            seen[display] = source;
+            found.push(display);
+        }
+        dates.forEach(function (iso) {
+            var moved = Object.prototype.hasOwnProperty.call(map, iso) ? moveDay(map[iso]) : iso;
+            add(moved, iso);
+        });
+        Object.keys(map).forEach(function (source) {
+            if (dates.indexOf(source) >= 0) return;
+            add(moveDay(map[source]), source);
+        });
+        found.sort();
         return found;
     }
 
+    var KIND_TEXT = {
+        to: ['kindTo', 'kindToLong'],
+        kts: ['kindKts', 'kindKtsLong'],
+        verify: ['kindVerify', 'kindVerifyLong'],
+        staff: ['kindStaff', 'kindStaffLong'],
+        event: ['kindEvent', 'kindEventLong'],
+        update: ['kindUpdate', 'kindUpdateLong']
+    };
+    var DEFAULT_KINDS = 'to,kts,verify,staff,event,update';
+
+    function cleanKindLabel(value) {
+        return String(value || '').replace(/[,;|=]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+
+    function parseKindList(raw) {
+        var source = String(raw || '').trim() || DEFAULT_KINDS;
+        var rows = [];
+        var seen = {};
+        source.split(',').forEach(function (part) {
+            part = part.trim();
+            if (!part || rows.length >= 24) return;
+            var bar = part.indexOf('|');
+            var id = (bar < 0 ? part : part.slice(0, bar)).trim().toLowerCase();
+            var label = bar < 0 ? '' : cleanKindLabel(part.slice(bar + 1));
+            if (!/^[a-z][a-z0-9]{0,15}$/.test(id) || seen[id]) return;
+            seen[id] = true;
+            rows.push({ id: id, label: label });
+        });
+        if (!rows.length) {
+            DEFAULT_KINDS.split(',').forEach(function (id) { rows.push({ id: id, label: '' }); });
+        }
+        return rows;
+    }
+
+    function packKinds(items) {
+        return items.map(function (row) {
+            var label = cleanKindLabel(row.label);
+            if (!label || label === builtinKind(row.id, true) || label === builtinKind(row.id, false)) return row.id;
+            return row.id + '|' + label;
+        }).join(',');
+    }
+
+    function nextKindId(items) {
+        var taken = {};
+        items.forEach(function (row) { taken[row.id] = true; });
+        var n = 1;
+        var id = 'w1';
+        while (taken[id] && n < 200) {
+            n += 1;
+            id = 'w' + n;
+        }
+        return id;
+    }
+
+    function builtinKind(kind, longForm) {
+        var pair = KIND_TEXT[kind];
+        if (!pair) return kind || '';
+        return t(longForm ? pair[1] : pair[0]);
+    }
+
+    function kindRow(kind) {
+        var rows = parseKindList(moduleSetup().scheduleKinds);
+        for (var i = 0; i < rows.length; i++) if (rows[i].id === kind) return rows[i];
+        return null;
+    }
+
     function kindName(kind) {
-        if (kind === 'kts') return t('kindKts');
-        if (kind === 'verify') return t('kindVerify');
-        return t('kindTo');
+        var row = kindRow(kind);
+        if (row && row.label) return row.label;
+        return builtinKind(kind, false);
     }
 
     function kindLong(kind) {
-        if (kind === 'kts') return t('kindKtsLong');
-        if (kind === 'verify') return t('kindVerifyLong');
-        return t('kindToLong');
+        var row = kindRow(kind);
+        if (row && row.label) return row.label;
+        return builtinKind(kind, true);
     }
 
     function kindColor(kind) {
         if (kind === 'kts') return '#FF8B00';
         if (kind === 'verify') return '#6554C0';
-        return '#0052CC';
+        if (kind === 'staff') return '#00875A';
+        if (kind === 'event') return '#00B8D9';
+        if (kind === 'update') return '#FF5630';
+        if (kind === 'to') return '#0052CC';
+        var palette = ['#006644', '#403294', '#FF7452', '#2684FF', '#57D9A3', '#8777D9'];
+        var n = 0;
+        var text = String(kind || '');
+        for (var i = 0; i < text.length; i++) n = (n + text.charCodeAt(i)) % palette.length;
+        return palette[n];
+    }
+
+    function fillKindSelect(select, current, longForm) {
+        var rows = parseKindList(moduleSetup().scheduleKinds);
+        var seen = false;
+        rows.forEach(function (row) {
+            var option = document.createElement('option');
+            option.value = row.id;
+            option.textContent = longForm ? kindLong(row.id) : kindName(row.id);
+            select.appendChild(option);
+            if (current && row.id === current) seen = true;
+        });
+        if (current && !seen) {
+            var extra = document.createElement('option');
+            extra.value = current;
+            extra.textContent = kindName(current);
+            select.appendChild(extra);
+        }
     }
 
     function monthTitle(year, month) {
@@ -11274,7 +12698,7 @@
     function sheetHead(titleKey, hintKey) {
         var head = el('div', 'asset-tree-sheet-head');
         var title = el('h2', null, t(titleKey));
-        title.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
+        title.appendChild(stageMark('beta'));
         head.appendChild(title);
         return head;
     }
@@ -11301,7 +12725,42 @@
         if (state.scheduleKindFilter && plan.kind !== state.scheduleKindFilter) return false;
         if (state.schedulePersonFilter === '__none__') return !plan.assigneeKey;
         if (state.schedulePersonFilter && plan.assigneeKey !== state.schedulePersonFilter) return false;
+        if (!planMatchesPlace(plan)) return false;
         return true;
+    }
+
+    function planMatchesPlace(plan) {
+        var filter = state.staffPlaceFilter || '';
+        if (!filter) return true;
+        var asset = plan.assetId ? byId()[plan.assetId] : null;
+        if (filter === '__none__') return !asset || !assetPlaceId(asset);
+        var placeId = parseInt(filter, 10) || 0;
+        return !!(asset && placeId && assetUnderPlace(asset, placeId));
+    }
+
+    function assetPlaceId(asset) {
+        var guard = 0;
+        var current = asset;
+        while (current && current.parentId && guard < 24) {
+            var parent = byId()[current.parentId];
+            if (!parent) return 0;
+            if (isFolder(parent)) return parent.id;
+            current = parent;
+            guard++;
+        }
+        return 0;
+    }
+
+    function assetUnderPlace(asset, placeId) {
+        var guard = 0;
+        var current = asset;
+        while (current && guard < 24) {
+            if (current.id === placeId) return true;
+            if (!current.parentId) return false;
+            current = byId()[current.parentId];
+            guard++;
+        }
+        return false;
     }
 
     function datesInRange(plan, start, end) {
@@ -11337,48 +12796,112 @@
         return { overdue: overdue, monthCount: monthCount, weekCount: weekCount, done: done };
     }
 
+    function scheduleBoards() {
+        var raw = String(moduleSetup().scheduleBoards || '').toLowerCase().split(',');
+        var calendar = raw.indexOf('calendar') >= 0;
+        var roster = raw.indexOf('roster') >= 0;
+        if (!calendar && !roster) return { calendar: true, roster: true };
+        return { calendar: calendar, roster: roster };
+    }
+
+    function scheduleOpenBoard() {
+        var boards = scheduleBoards();
+        var open = moduleSetup().scheduleOpen;
+        if (open !== 'calendar' && open !== 'roster') {
+            open = moduleSetup().scheduleLayer === 'roster' ? 'roster' : 'calendar';
+        }
+        if (open === 'roster' && !boards.roster) return 'calendar';
+        if (open === 'calendar' && !boards.calendar) return 'roster';
+        return open;
+    }
+
+    function ensureScheduleLayer() {
+        if (state.scheduleLayerSet) return;
+        state.scheduleLayerSet = true;
+        var layer = moduleSetup().scheduleLayer;
+        state.scheduleBoard = scheduleOpenBoard();
+        if (state.scheduleBoard === 'roster') {
+            state.scheduleKindFilter = '';
+            return;
+        }
+        state.scheduleKindFilter = layer !== 'roster' && enabledKinds().indexOf(layer) >= 0 ? layer : '';
+    }
+
+    function rosterOn() {
+        return state.scheduleBoard === 'roster';
+    }
+
     function renderSchedules() {
         if (!state.scheduleYear) {
             var now = new Date();
             state.scheduleYear = now.getFullYear();
             state.scheduleMonth = now.getMonth() + 1;
         }
-        var panel = el('section', 'asset-tree-sheet');
-        var head = sheetHead('schedulesPageTitle');
-        if (state.canEdit) {
-            head.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', openScheduleDialog));
-        }
-        panel.appendChild(head);
-        panel.appendChild(el('p', 'asset-tree-hint', t(state.scheduleMode === 'staff' ? 'staffHint' : 'schedulesHint')));
+        if (state.scheduleMode === 'staff') state.scheduleMode = 'calendar';
+        ensureScheduleLayer();
+        var boards = scheduleBoards();
+        if (rosterOn() && !boards.roster) state.scheduleBoard = 'calendar';
+        if (!rosterOn() && !boards.calendar) state.scheduleBoard = 'roster';
+        var panel = el('section', 'asset-tree-sheet asset-tree-board');
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadSchedules();
             return panel;
         }
         if (state.scheduleError) panel.appendChild(el('p', 'asset-tree-hint', state.scheduleError));
-        var kpis = el('div', 'asset-tree-kpis');
-        if (state.scheduleMode === 'staff') {
-            var sum = staffMonthSum();
-            var daysCard = kpiCard(String(sum.days), t('staffDaysLabel'), '');
-            daysCard.appendChild(el('span', 'asset-tree-kpi-sub', monthTitle(state.scheduleYear, state.scheduleMonth)));
-            kpis.appendChild(daysCard);
-            kpis.appendChild(kpiCard(String(sum.hours), t('staffHoursLabel'), ''));
-            kpis.appendChild(kpiCard(String(sum.leave), t('staffLeaveLabel'), ''));
+        panel.appendChild(scheduleBoardHead());
+        if (rosterOn()) {
+            panel.appendChild(el('p', 'asset-tree-hint', t('staffHint')));
+            panel.appendChild(scheduleStaff());
         } else {
-            var stats = scheduleStats();
-            kpis.appendChild(kpiCard(String(stats.overdue), t('schedulesOverdue'), stats.overdue ? 'is-alert' : ''));
-            var week = kpiCard(String(stats.weekCount), t('schedulesWeek'), '');
-            week.appendChild(el('span', 'asset-tree-kpi-sub', stats.monthCount + ' ' + t('schedulesPlanned') + ' · ' + monthTitle(state.scheduleYear, state.scheduleMonth)));
-            kpis.appendChild(week);
-            kpis.appendChild(kpiCard(String(stats.done), t('schedulesDoneMonth'), ''));
+            panel.appendChild(scheduleLayers());
+            if (scheduleSpanName() === 'month') panel.appendChild(scheduleCalendar());
+            else panel.appendChild(scheduleOutlook());
         }
-        panel.appendChild(kpis);
-        panel.appendChild(scheduleToolbar());
-        if (state.scheduleMode === 'list') panel.appendChild(scheduleTable());
-        else if (state.scheduleMode === 'people') panel.appendChild(schedulePeople());
-        else if (state.scheduleMode === 'staff') panel.appendChild(scheduleStaff());
-        else panel.appendChild(scheduleCalendar());
         return panel;
+    }
+
+    function scheduleBoardHead() {
+        var head = el('div', 'asset-tree-board-head');
+        var nav = el('div', 'asset-tree-calendar-nav');
+        nav.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftScheduleView(-1); }));
+        nav.appendChild(el('strong', 'asset-tree-calendar-title', scheduleViewTitle()));
+        nav.appendChild(button('\u203A', 'asset-tree-month-btn', function () { shiftScheduleView(1); }));
+        nav.appendChild(button(t('schedulesToday'), 'asset-tree-btn slim', function () {
+            var now = new Date();
+            state.scheduleYear = now.getFullYear();
+            state.scheduleMonth = now.getMonth() + 1;
+            state.scheduleExpanded = '';
+            state.scheduleAnchor = isoDate(now);
+            state.scheduleClockDay = '';
+            renderFrame();
+        }));
+        head.appendChild(nav);
+        if (!rosterOn()) head.appendChild(scheduleSpanSwitch());
+        var boards = scheduleBoards();
+        if (boards.calendar && boards.roster) {
+            var seg = el('div', 'asset-tree-board-switch');
+            [['calendar', 'schedulesCalendar'], ['roster', 'schedulesRoster']].forEach(function (pair) {
+                var on = pair[0] === 'roster' ? rosterOn() : !rosterOn();
+                var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
+                    state.scheduleBoard = pair[0];
+                    state.scheduleLayerSet = true;
+                    renderFrame();
+                });
+                item.setAttribute('aria-pressed', on ? 'true' : 'false');
+                seg.appendChild(item);
+            });
+            head.appendChild(seg);
+        }
+        var filters = el('div', 'asset-tree-sheet-filters');
+        if (!rosterOn()) {
+            var placeFilter = staffPlaceSelect();
+            if (placeFilter) filters.appendChild(placeFilter);
+            filters.appendChild(schedulePersonSelect());
+        }
+        if (state.canEdit) filters.appendChild(button(t('schedulesNew'), 'asset-tree-btn primary', function () { openScheduleDialog(); }));
+        if (filters.childNodes.length) head.appendChild(filters);
+        return head;
     }
 
     function kpiCard(value, label, extra) {
@@ -11388,33 +12911,31 @@
         return card;
     }
 
-    function scheduleToolbar() {
-        var bar = el('div', 'asset-tree-sheet-bar');
-        var seg = el('div', 'asset-tree-seg');
-        [['calendar', 'schedulesCalendar'], ['list', 'schedulesList'], ['people', 'schedulesPeople'], ['staff', 'schedulesStaff']].forEach(function (pair) {
-            var item = button(t(pair[1]), 'asset-tree-seg-btn' + (state.scheduleMode === pair[0] ? ' is-on' : ''), function () {
-                state.scheduleMode = pair[0];
-                renderFrame();
-            });
-            seg.appendChild(item);
+    function scheduleLayers() {
+        var bar = el('div', 'asset-tree-layers');
+        bar.appendChild(layerButton('', t('schedulesAllLayers')));
+        parseKindList(moduleSetup().scheduleKinds).forEach(function (row) {
+            bar.appendChild(layerButton(row.id, kindName(row.id)));
         });
-        bar.appendChild(seg);
-        var nav = el('div', 'asset-tree-calendar-nav');
-        nav.appendChild(button('\u2039', 'asset-tree-btn slim', function () { shiftScheduleMonth(-1); }));
-        nav.appendChild(el('strong', 'asset-tree-calendar-title', monthTitle(state.scheduleYear, state.scheduleMonth)));
-        nav.appendChild(button(t('schedulesToday'), 'asset-tree-btn slim', function () {
-            var now = new Date();
-            state.scheduleYear = now.getFullYear();
-            state.scheduleMonth = now.getMonth() + 1;
-            renderFrame();
-        }));
-        nav.appendChild(button('\u203A', 'asset-tree-btn slim', function () { shiftScheduleMonth(1); }));
-        bar.appendChild(nav);
-        if (state.scheduleMode !== 'staff') {
-            bar.appendChild(scheduleKindSelect());
-            bar.appendChild(schedulePersonSelect());
-        }
         return bar;
+    }
+
+    function layerButton(id, label) {
+        var on = (state.scheduleKindFilter || '') === id;
+        var item = button('', 'asset-tree-layer' + (on ? ' is-on' : ''), function () {
+            state.scheduleBoard = 'calendar';
+            state.scheduleKindFilter = id;
+            state.scheduleLayerSet = true;
+            renderFrame();
+        });
+        item.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (id) {
+            var dot = el('i', 'asset-tree-layer-dot');
+            dot.style.background = kindColor(id);
+            item.appendChild(dot);
+        }
+        item.appendChild(document.createTextNode(label));
+        return item;
     }
 
     function shiftScheduleMonth(delta) {
@@ -11427,30 +12948,132 @@
             state.scheduleMonth = 1;
             state.scheduleYear += 1;
         }
+        var anchor = parseIsoDate(state.scheduleAnchor);
+        var day = anchor ? anchor.getDate() : 1;
+        var last = new Date(state.scheduleYear, state.scheduleMonth, 0).getDate();
+        if (day > last) day = last;
+        state.scheduleAnchor = isoDate(new Date(state.scheduleYear, state.scheduleMonth - 1, day));
+        state.scheduleExpanded = '';
+        state.scheduleClockDay = '';
         renderFrame();
     }
 
-    function scheduleKindSelect() {
-        var select = document.createElement('select');
-        select.className = 'asset-tree-filter';
-        select.setAttribute('aria-label', t('schedulesKind'));
-        var all = document.createElement('option');
-        all.value = '';
-        all.textContent = t('schedulesAllKinds');
-        select.appendChild(all);
-        enabledKinds().forEach(function (key) {
-            var labels = { to: 'kindTo', kts: 'kindKts', verify: 'kindVerify' };
-            var option = document.createElement('option');
-            option.value = key;
-            option.textContent = t(labels[key]);
-            select.appendChild(option);
+    function scheduleSpanName() {
+        var span = state.scheduleSpan;
+        if (span === 'week' || span === 'work' || span === 'day') return span;
+        return 'month';
+    }
+
+    function viewAnchorDate() {
+        var parsed = parseIsoDate(state.scheduleAnchor);
+        if (parsed) return parsed;
+        var now = new Date();
+        if (state.scheduleYear === now.getFullYear() && state.scheduleMonth === now.getMonth() + 1) {
+            state.scheduleAnchor = isoDate(now);
+            return now;
+        }
+        var first = new Date(state.scheduleYear || now.getFullYear(), (state.scheduleMonth || (now.getMonth() + 1)) - 1, 1);
+        state.scheduleAnchor = isoDate(first);
+        return first;
+    }
+
+    function mondayOf(date) {
+        return shiftDays(date, -((date.getDay() + 6) % 7));
+    }
+
+    function scheduleViewDays() {
+        var anchor = viewAnchorDate();
+        var span = scheduleSpanName();
+        if (span === 'day') return [anchor];
+        var start = mondayOf(anchor);
+        var count = span === 'work' ? 5 : 7;
+        var days = [];
+        var index;
+        for (index = 0; index < count; index++) days.push(shiftDays(start, index));
+        return days;
+    }
+
+    function scheduleDateText(date, withYear) {
+        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+        var options = { day: 'numeric', month: 'long' };
+        if (withYear) options.year = 'numeric';
+        try {
+            return date.toLocaleDateString(locale, options);
+        } catch (error) {
+            return isoDate(date);
+        }
+    }
+
+    function scheduleViewTitle() {
+        if (rosterOn() || scheduleSpanName() === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
+        var days = scheduleViewDays();
+        var first = days[0];
+        var last = days[days.length - 1];
+        if (days.length === 1) {
+            var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+            try {
+                return first.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            } catch (error) {
+                return isoDate(first);
+            }
+        }
+        if (first.getFullYear() === last.getFullYear() && first.getMonth() === last.getMonth()) {
+            return first.getDate() + '\u2013' + scheduleDateText(last, true);
+        }
+        if (first.getFullYear() === last.getFullYear()) {
+            return scheduleDateText(first, false) + ' \u2013 ' + scheduleDateText(last, true);
+        }
+        return scheduleDateText(first, true) + ' \u2013 ' + scheduleDateText(last, true);
+    }
+
+    function shiftScheduleView(delta) {
+        if (rosterOn() || scheduleSpanName() === 'month') {
+            shiftScheduleMonth(delta);
+            return;
+        }
+        var anchor = viewAnchorDate();
+        var step = scheduleSpanName() === 'day' ? delta : delta * 7;
+        var next = shiftDays(anchor, step);
+        state.scheduleAnchor = isoDate(next);
+        state.scheduleYear = next.getFullYear();
+        state.scheduleMonth = next.getMonth() + 1;
+        state.scheduleExpanded = '';
+        state.scheduleClockDay = '';
+        renderFrame();
+    }
+
+    function setScheduleSpan(span) {
+        state.scheduleSpan = span === 'week' || span === 'work' || span === 'day' ? span : 'month';
+        state.scheduleClockDay = '';
+        var anchor = viewAnchorDate();
+        state.scheduleYear = anchor.getFullYear();
+        state.scheduleMonth = anchor.getMonth() + 1;
+        renderFrame();
+    }
+
+    function scheduleSpanSwitch() {
+        var seg = el('div', 'asset-tree-board-switch asset-tree-span-switch');
+        [['month', 'schedulesSpanMonth'], ['week', 'schedulesSpanWeek'], ['work', 'schedulesSpanWork'], ['day', 'schedulesSpanDay']].forEach(function (pair) {
+            var on = scheduleSpanName() === pair[0];
+            var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
+                setScheduleSpan(pair[0]);
+            });
+            item.setAttribute('aria-pressed', on ? 'true' : 'false');
+            seg.appendChild(item);
         });
-        select.value = state.scheduleKindFilter || '';
-        select.addEventListener('change', function () {
-            state.scheduleKindFilter = select.value;
-            renderFrame();
+        return seg;
+    }
+
+    function plansOnIso(iso) {
+        var parsed = parseIsoDate(iso);
+        var plans = [];
+        if (!parsed) return plans;
+        var year = parsed.getFullYear();
+        var month = parsed.getMonth() + 1;
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            if (monthDates(plan, year, month).indexOf(iso) >= 0) plans.push(plan);
         });
-        return select;
+        return sortDayPlans(plans, iso);
     }
 
     function schedulePersonSelect() {
@@ -11482,6 +13105,154 @@
         return select;
     }
 
+    function occurrenceClock(plan, displayIso) {
+        var map = planMoveMap(plan);
+        var source = seriesSource(plan, displayIso);
+        var raw = map[source] || '';
+        var at = raw.indexOf('@');
+        if (at >= 0) {
+            var spanText = raw.slice(at + 1);
+            if (spanText === '-') return { start: '', end: '' };
+            var span = spanText.split('-');
+            return { start: span[0] || '', end: span[1] || '' };
+        }
+        return { start: plan.startTime || '', end: plan.endTime || '' };
+    }
+
+    function timeMinutes(hhmm) {
+        if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return 24 * 60 + 1;
+        return parseInt(hhmm.slice(0, 2), 10) * 60 + parseInt(hhmm.slice(3), 10);
+    }
+
+    function addMinutes(hhmm, minutes) {
+        var total = timeMinutes(hhmm) + minutes;
+        if (total < 0) total = 0;
+        if (total > 23 * 60 + 59) total = 23 * 60 + 59;
+        var hour = Math.floor(total / 60);
+        var minute = total % 60;
+        return (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+    }
+
+    function minutesClock(total) {
+        if (total < 0) total = 0;
+        if (total > 23 * 60 + 59) total = 23 * 60 + 59;
+        var hour = Math.floor(total / 60);
+        var minute = total % 60;
+        return (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+    }
+
+    function clockDuration(clock) {
+        if (!clock || !clock.start || !clock.end) return 60;
+        var span = timeMinutes(clock.end) - timeMinutes(clock.start);
+        if (span < 1) return 60;
+        return span;
+    }
+
+    function fitClock(start, duration) {
+        var max = 23 * 60 + 59;
+        var begin = timeMinutes(start);
+        if (begin > 24 * 60) begin = 0;
+        if (duration < 1) duration = 60;
+        if (begin + duration > max) begin = max - duration;
+        if (begin < 0) begin = 0;
+        var end = begin + duration;
+        if (end > max) end = max;
+        return { start: minutesClock(begin), end: minutesClock(end) };
+    }
+
+    function sortDayPlans(plans, iso) {
+        plans.sort(function (a, b) {
+            var diff = timeMinutes(occurrenceClock(a, iso).start) - timeMinutes(occurrenceClock(b, iso).start);
+            if (diff) return diff;
+            var an = String(a.name || '');
+            var bn = String(b.name || '');
+            if (an < bn) return -1;
+            if (an > bn) return 1;
+            return (a.id || 0) - (b.id || 0);
+        });
+        return plans;
+    }
+
+    function dayTitle(iso) {
+        var parsed = parseIsoDate(iso);
+        if (!parsed) return iso || '';
+        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+        try {
+            return parsed.toLocaleDateString(locale, { day: 'numeric', month: 'long' });
+        } catch (error) {
+            return iso;
+        }
+    }
+
+    function scheduleClock(iso) {
+        var board = el('section', 'asset-tree-clock');
+        var head = el('div', 'asset-tree-clock-head');
+        head.appendChild(el('strong', null, dayTitle(iso)));
+        head.appendChild(el('span', null, t('schedulesDragTime')));
+        head.appendChild(button(t('schedulesClockClose'), 'asset-tree-btn slim', function () {
+            state.scheduleClockDay = '';
+            renderFrame();
+        }));
+        board.appendChild(head);
+        var plans = [];
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            var parsed = parseIsoDate(iso);
+            if (!parsed) return;
+            if (monthDates(plan, parsed.getFullYear(), parsed.getMonth() + 1).indexOf(iso) >= 0) plans.push(plan);
+        });
+        sortDayPlans(plans, iso);
+        board.appendChild(clockLane(iso, '', t('schedulesAllDay'), plans));
+        var first = 8;
+        var last = 20;
+        plans.forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            if (!start) return;
+            var hour = parseInt(start.slice(0, 2), 10);
+            if (hour < first) first = hour;
+            if (hour > last) last = hour;
+        });
+        var endMinute = last * 60;
+        plans.forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            if (!start) return;
+            var bucket = timeMinutes(timeBucket(start));
+            if (bucket > endMinute) endMinute = bucket;
+        });
+        var cursor;
+        for (cursor = first * 60; cursor <= endMinute; cursor += 30) {
+            var hour = Math.floor(cursor / 60);
+            var minute = cursor % 60;
+            var label = (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+            board.appendChild(clockLane(iso, label, minute === 0 ? label : '', plans));
+        }
+        return board;
+    }
+
+    function clockLane(iso, time, label, plans) {
+        var lane = el('div', 'asset-tree-slot' + (time ? '' : ' is-all'));
+        lane.setAttribute('data-day', iso);
+        lane.setAttribute('data-time', time);
+        lane.appendChild(el('span', 'asset-tree-slot-label', label));
+        var list = el('div', 'asset-tree-slot-list');
+        plans.forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            var bucket = start ? timeBucket(start) : '';
+            if (bucket !== time) return;
+            list.appendChild(scheduleEventCard(plan, iso, true));
+        });
+        lane.appendChild(list);
+        return lane;
+    }
+
+    function timeBucket(hhmm) {
+        var minutes = timeMinutes(hhmm);
+        if (minutes > 24 * 60) return '';
+        var snapped = Math.floor(minutes / 30) * 30;
+        var hour = Math.floor(snapped / 60);
+        var minute = snapped % 60;
+        return (hour < 10 ? '0' : '') + hour + ':' + (minute < 10 ? '0' : '') + minute;
+    }
+
     function scheduleCalendar() {
         var byDay = {};
         (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
@@ -11491,8 +13262,8 @@
             });
         });
         var grid = el('div', 'asset-tree-calendar');
-        weekdayLabels().forEach(function (label) {
-            grid.appendChild(el('div', 'asset-tree-weekday', label));
+        weekdayLabels().forEach(function (label, index) {
+            grid.appendChild(el('div', 'asset-tree-weekday' + (index > 4 ? ' is-weekend' : ''), label));
         });
         var start = new Date(state.scheduleYear, state.scheduleMonth - 1, 1);
         var days = new Date(state.scheduleYear, state.scheduleMonth, 0).getDate();
@@ -11504,23 +13275,422 @@
             var date = shiftDays(start, index - lead);
             var iso = isoDate(date);
             var inMonth = date.getMonth() === start.getMonth();
-            var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (iso === today ? ' is-today' : ''));
-            cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
+            var weekend = date.getDay() === 0 || date.getDay() === 6;
+            var cell = el('div', 'asset-tree-day' + (inMonth ? '' : ' is-out') + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''));
+            cell.setAttribute('data-day', iso);
             if (inMonth) {
-                (byDay[iso] || []).forEach(function (plan) {
-                    var day = iso;
-                    var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
-                    var label = kindName(plan.kind);
-                    if (plan.name) label += ' · ' + plan.name;
-                    var chip = button(label, 'asset-tree-bar-event' + (focused ? ' is-focus' : ''), function () { openPlanEvent(plan, day); });
-                    chip.style.background = kindColor(plan.kind);
-                    chip.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
-                    cell.appendChild(chip);
+                cell.appendChild(dayNumberButton(iso, date.getDate()));
+            } else {
+                cell.appendChild(el('span', 'asset-tree-day-num', String(date.getDate())));
+            }
+            if (inMonth) {
+                var plans = sortDayPlans(byDay[iso] || [], iso);
+                var expanded = state.scheduleExpanded === iso;
+                var shown = !expanded && plans.length > 3 ? plans.slice(0, 2) : plans;
+                shown.forEach(function (plan) {
+                    cell.appendChild(scheduleEventCard(plan, iso));
                 });
+                if (!expanded && plans.length > shown.length) {
+                    cell.appendChild(dayMoreButton(iso, '+' + (plans.length - shown.length), true));
+                } else if (expanded && plans.length > 3) {
+                    cell.appendChild(dayMoreButton(iso, t('schedulesCollapse'), false));
+                }
+                if (state.canEdit) {
+                    (function (dayIso, dayCell) {
+                        dayCell.addEventListener('click', function (event) {
+                            if (state.scheduleSuppressClick) {
+                                state.scheduleSuppressClick = false;
+                                return;
+                            }
+                            var node = event.target;
+                            while (node && node !== dayCell) {
+                                if (node.tagName === 'BUTTON') return;
+                                node = node.parentNode;
+                            }
+                            openScheduleDialog(dayIso);
+                        });
+                    })(iso, cell);
+                }
             }
             grid.appendChild(cell);
         }
         return grid;
+    }
+
+    function dayNumberButton(iso, day) {
+        var num = button(String(day), 'asset-tree-day-num', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var parsed = parseIsoDate(iso);
+            state.scheduleSpan = 'day';
+            state.scheduleAnchor = iso;
+            state.scheduleClockDay = '';
+            if (parsed) {
+                state.scheduleYear = parsed.getFullYear();
+                state.scheduleMonth = parsed.getMonth() + 1;
+            }
+            renderFrame();
+        });
+        num.title = t('schedulesSpanDay');
+        return num;
+    }
+
+    function scheduleOutlook() {
+        var days = scheduleViewDays();
+        var byDay = {};
+        var firstMin = 8 * 60;
+        var lastMin = 20 * 60;
+        days.forEach(function (date) {
+            var iso = isoDate(date);
+            var plans = plansOnIso(iso);
+            byDay[iso] = plans;
+            plans.forEach(function (plan) {
+                var clock = occurrenceClock(plan, iso);
+                if (!clock.start) return;
+                var start = timeMinutes(timeBucket(clock.start));
+                if (start > 24 * 60) return;
+                var end = clock.end ? timeMinutes(clock.end) : start + 60;
+                var endBucket = Math.ceil(end / 30) * 30;
+                if (start < firstMin) firstMin = start;
+                if (endBucket > lastMin) lastMin = endBucket;
+            });
+        });
+        var today = isoDate(new Date());
+        var todayShown = false;
+        days.forEach(function (date) { if (isoDate(date) === today) todayShown = true; });
+        if (todayShown) {
+            var now = new Date();
+            var nowBucket = Math.floor((now.getHours() * 60 + now.getMinutes()) / 30) * 30;
+            if (nowBucket < firstMin) firstMin = nowBucket;
+            if (nowBucket + 30 > lastMin) lastMin = nowBucket + 30;
+        }
+        if (firstMin < 0) firstMin = 0;
+        if (lastMin > 24 * 60) lastMin = 24 * 60;
+        if (lastMin <= firstMin) lastMin = Math.min(24 * 60, firstMin + 30);
+        var labels = weekdayLabels();
+        var board = el('div', 'asset-tree-outlook');
+        board.style.gridTemplateColumns = '76px repeat(' + days.length + ', minmax(120px, 1fr))';
+        board.appendChild(el('div', 'asset-tree-outlook-corner'));
+        days.forEach(function (date) {
+            var iso = isoDate(date);
+            var weekend = date.getDay() === 0 || date.getDay() === 6;
+            var head = button('', 'asset-tree-outlook-head' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''), function () {
+                state.scheduleSpan = 'day';
+                state.scheduleAnchor = iso;
+                state.scheduleYear = date.getFullYear();
+                state.scheduleMonth = date.getMonth() + 1;
+                state.scheduleClockDay = '';
+                renderFrame();
+            });
+            head.appendChild(el('span', 'asset-tree-outlook-dow', labels[(date.getDay() + 6) % 7] || ''));
+            head.appendChild(el('span', 'asset-tree-outlook-date', String(date.getDate())));
+            board.appendChild(head);
+        });
+        board.appendChild(el('div', 'asset-tree-outlook-gutter is-all', t('schedulesAllDay')));
+        days.forEach(function (date) {
+            var iso = isoDate(date);
+            board.appendChild(outlookCell(iso, '', byDay[iso], date.getDay() === 0 || date.getDay() === 6, iso === today, false));
+        });
+        var cursor;
+        for (cursor = firstMin; cursor < lastMin; cursor += 30) {
+            var onHour = cursor % 60 === 0;
+            board.appendChild(el('div', 'asset-tree-outlook-gutter' + (onHour ? ' is-hour' : ''), onHour ? minutesClock(cursor) : ''));
+            days.forEach(function (date) {
+                var iso = isoDate(date);
+                board.appendChild(outlookCell(iso, minutesClock(cursor), byDay[iso], date.getDay() === 0 || date.getDay() === 6, iso === today, onHour));
+            });
+        }
+        return board;
+    }
+
+    function outlookCell(iso, time, plans, weekend, today, onHour) {
+        var cell = el('div', 'asset-tree-slot asset-tree-outlook-cell' + (time ? '' : ' is-all') + (onHour ? ' is-hour' : '') + (weekend ? ' is-weekend' : '') + (today ? ' is-today' : ''));
+        cell.setAttribute('data-day', iso);
+        cell.setAttribute('data-time', time);
+        var list = el('div', 'asset-tree-outlook-list');
+        (plans || []).forEach(function (plan) {
+            var start = occurrenceClock(plan, iso).start;
+            var bucket = start ? timeBucket(start) : '';
+            if (bucket !== time) return;
+            var card = scheduleEventCard(plan, iso, true);
+            card.className += ' is-outlook';
+            list.appendChild(card);
+        });
+        cell.appendChild(list);
+        if (time && today) {
+            var now = new Date();
+            var minutes = now.getHours() * 60 + now.getMinutes();
+            var startMin = timeMinutes(time);
+            if (minutes >= startMin && minutes < startMin + 30) {
+                var mark = el('i', 'asset-tree-outlook-now');
+                mark.style.top = ((minutes - startMin) / 30 * 100) + '%';
+                cell.appendChild(mark);
+            }
+        }
+        if (state.canEdit) {
+            cell.addEventListener('click', function (event) {
+                if (state.scheduleSuppressClick) {
+                    state.scheduleSuppressClick = false;
+                    return;
+                }
+                var node = event.target;
+                while (node && node !== cell) {
+                    if (node.tagName === 'BUTTON') return;
+                    node = node.parentNode;
+                }
+                openScheduleDialog(iso, time);
+            });
+        }
+        return cell;
+    }
+
+    function revealScheduleClock() {
+        var board = document.querySelector('.asset-tree-clock');
+        if (!board || !board.scrollIntoView) return;
+        try {
+            board.scrollIntoView({ block: 'start' });
+        } catch (ignore) {
+            board.scrollIntoView();
+        }
+    }
+
+    function dayMoreButton(iso, label, expand) {
+        var more = button(label, 'asset-tree-day-more', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            state.scheduleExpanded = expand ? iso : '';
+            renderFrame();
+        });
+        return more;
+    }
+
+    function occurrenceIsDue(plan, displayIso) {
+        if (!plan || plan.completed) return false;
+        var source = seriesSource(plan, displayIso);
+        if (!source || source !== (plan.nextDue || '')) return false;
+        var today = isoDate(new Date());
+        if (displayIso > today) return false;
+        if (displayIso < today) return true;
+        var start = occurrenceClock(plan, displayIso).start;
+        if (!start) return true;
+        var now = new Date();
+        return timeMinutes(start) <= now.getHours() * 60 + now.getMinutes();
+    }
+
+    function scheduleEventCard(plan, iso, onClock) {
+        var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
+        var source = seriesSource(plan, iso);
+        var done = !!plan.completed;
+        var due = occurrenceIsDue(plan, iso);
+        var card = button('', 'asset-tree-event' + (done ? ' is-done' : '') + (due ? ' is-due' : '') + (focused ? ' is-focus' : ''), function () {
+            if (state.scheduleSuppressClick) {
+                state.scheduleSuppressClick = false;
+                return;
+            }
+            openPlanEvent(plan, iso);
+        });
+        var mark = el('i', 'asset-tree-event-mark');
+        mark.style.background = kindColor(plan.kind);
+        var text = el('span', 'asset-tree-event-text');
+        text.appendChild(el('strong', null, plan.name || kindName(plan.kind)));
+        var meta = kindName(plan.kind);
+        var clock = occurrenceClock(plan, iso);
+        if (clock.start) meta = clock.start + (clock.end ? '–' + clock.end : '') + ' · ' + meta;
+        if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
+        if (plan.assetId) {
+            var placeName = assetPlaceName(byId()[plan.assetId]);
+            if (placeName) meta += ' · ' + placeName;
+        }
+        text.appendChild(el('em', null, meta));
+        card.appendChild(mark);
+        card.appendChild(text);
+        card.title = (plan.name || kindLong(plan.kind)) + (plan.assetName ? ' · ' + plan.assetName : '');
+        if (state.canEdit) {
+            card.title += ' · ' + t(onClock ? 'schedulesDragTime' : 'schedulesDragOne');
+            card.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                beginPlanDrag(plan, iso, card, event);
+            });
+        }
+        return card;
+    }
+
+    function dropTargetAt(x, y) {
+        var node = document.elementFromPoint(x, y);
+        var dayNode = null;
+        var slot = null;
+        while (node && node !== document.body) {
+            if (!slot && node.getAttribute && node.classList && node.classList.contains('asset-tree-slot')) slot = node;
+            if (!dayNode && node.getAttribute && node.classList && node.classList.contains('asset-tree-day')) dayNode = node;
+            node = node.parentNode;
+        }
+        var chosen = slot || dayNode;
+        if (!chosen) return null;
+        return {
+            node: chosen,
+            day: chosen.getAttribute('data-day') || '',
+            time: slot ? (slot.getAttribute('data-time') || '') : null
+        };
+    }
+
+    function planAnchorFor(plan, fromIso, toIso) {
+        if (!toIso || toIso === fromIso) return plan.lastDone || fromIso || '';
+        if (!plan.everyUnit || plan.everyUnit === 'once') return toIso;
+        var from = parseIsoDate(fromIso);
+        var to = parseIsoDate(toIso);
+        var anchor = parseIsoDate(plan.lastDone || fromIso);
+        if (!from || !to || !anchor) return toIso;
+        return isoDate(shiftDays(anchor, dayNumber(to) - dayNumber(from)));
+    }
+
+    function savePlan(plan, patch, done) {
+        var body = {
+            name: patch.name != null ? patch.name : (plan.name || kindName(plan.kind) || kindLong(plan.kind)),
+            lastDone: patch.lastDone || plan.lastDone || '',
+            everyCount: patch.everyCount || plan.everyCount || 1,
+            everyUnit: patch.everyUnit || plan.everyUnit || 'once',
+            kind: patch.kind || plan.kind || 'event',
+            assigneeKey: patch.assigneeKey != null ? patch.assigneeKey : (plan.assigneeKey || ''),
+            note: patch.note != null ? patch.note : (plan.note || ''),
+            startTime: patch.startTime != null ? patch.startTime : (plan.startTime || ''),
+            endTime: patch.endTime != null ? patch.endTime : (plan.endTime || ''),
+            notify: patch.notify != null ? patch.notify === true : plan.notify === true,
+            moves: patch.moves != null ? patch.moves : (plan.moves || '')
+        };
+        patchPlanLocal(plan, body);
+        if (state.view === 'schedules') renderFrame();
+        ajax('PUT', '/assets/' + (plan.assetId || 0) + '/plans/' + plan.id, body, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                refreshSchedules();
+                if (done) done(true);
+            } else {
+                notify((payload && payload.message) || t('errorTitle'));
+                refreshSchedules();
+                if (done) done(false);
+            }
+        });
+    }
+
+    function patchPlanLocal(plan, patch) {
+        var rows = state.scheduleRows || [];
+        var index;
+        for (index = 0; index < rows.length; index++) {
+            var row = rows[index];
+            if (!row || row.id !== plan.id || (row.assetId || 0) !== (plan.assetId || 0)) continue;
+            if (patch.name != null) row.name = patch.name;
+            if (patch.kind) row.kind = patch.kind;
+            if (patch.everyCount) row.everyCount = patch.everyCount;
+            if (patch.everyUnit) row.everyUnit = patch.everyUnit;
+            if (patch.moves != null) row.moves = patch.moves;
+            if (patch.lastDone) {
+                row.lastDone = patch.lastDone;
+                if (!row.everyUnit || row.everyUnit === 'once') row.nextDue = patch.lastDone;
+                else {
+                    var nxt = planNextDate(patch.lastDone, row.everyCount, row.everyUnit);
+                    if (nxt) row.nextDue = isoDate(nxt);
+                }
+            }
+            if (patch.assigneeKey != null) row.assigneeKey = patch.assigneeKey;
+            if (patch.note != null) row.note = patch.note;
+            if (patch.startTime != null) row.startTime = patch.startTime;
+            if (patch.endTime != null) row.endTime = patch.endTime;
+        }
+    }
+
+    function refreshSchedules() {
+        state.scheduleLoading = false;
+        state.scheduleToken++;
+        loadSchedules();
+    }
+
+    function occurrenceMoves(plan, source, day, start, end) {
+        var map = planMoveMap(plan);
+        if (!source || !day) return packPlanMoves(map);
+        var sameDay = day === source;
+        var sameClock = (start || '') === (plan.startTime || '') && (end || '') === (plan.endTime || '');
+        if (sameDay && sameClock) delete map[source];
+        else if (!start) map[source] = sameClock ? day : day + '@-';
+        else if (sameClock) map[source] = day;
+        else map[source] = day + '@' + start + (end ? '-' + end : '');
+        return packPlanMoves(map);
+    }
+
+    function dropPlanAt(plan, fromIso, day, time) {
+        var current = occurrenceClock(plan, fromIso);
+        var timed = time != null;
+        if (!timed && (!day || day === fromIso)) return;
+        var start = current.start || '';
+        var end = current.end || '';
+        if (timed) {
+            if (!time) {
+                start = '';
+                end = '';
+            } else {
+                var offset = current.start ? timeMinutes(current.start) % 30 : 0;
+                var fitted = fitClock(minutesClock(timeMinutes(time) + offset), clockDuration(current));
+                start = fitted.start;
+                end = fitted.end;
+            }
+        }
+        if (day === fromIso && start === (current.start || '') && end === (current.end || '')) return;
+        if (!plan.everyUnit || plan.everyUnit === 'once') {
+            var patch = {};
+            if (day && day !== fromIso) patch.lastDone = day;
+            if (timed) {
+                patch.startTime = start;
+                patch.endTime = end;
+            }
+            if (!patch.lastDone && patch.startTime == null) return;
+            savePlan(plan, patch);
+            return;
+        }
+        var source = seriesSource(plan, fromIso);
+        savePlan(plan, { moves: occurrenceMoves(plan, source, day, start, end) });
+    }
+
+    function beginPlanDrag(plan, iso, card, event) {
+        if (!state.canEdit || event.button !== 0) return;
+        var startX = event.clientX;
+        var startY = event.clientY;
+        var dragging = false;
+        var target = null;
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 5) return;
+            dragging = true;
+            card.classList.add('is-dragging');
+            var clockBoard = document.querySelector('.asset-tree-clock, .asset-tree-outlook');
+            if (clockBoard) {
+                var bounds = clockBoard.getBoundingClientRect();
+                if (ev.clientY < bounds.top + 36) clockBoard.scrollTop -= 18;
+                else if (ev.clientY > bounds.bottom - 36) clockBoard.scrollTop += 18;
+            }
+            var next = dropTargetAt(ev.clientX, ev.clientY);
+            var nextNode = next ? next.node : null;
+            if (target && target.node !== nextNode) target.node.classList.remove('is-drop');
+            target = next;
+            if (target) target.node.classList.add('is-drop');
+        }
+        function up(ev) {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            if (target) target.node.classList.remove('is-drop');
+            card.classList.remove('is-dragging');
+            if (!dragging) return;
+            state.scheduleSuppressClick = true;
+            function eatClick(clickEvent) {
+                clickEvent.preventDefault();
+                clickEvent.stopPropagation();
+                state.scheduleSuppressClick = false;
+                document.removeEventListener('click', eatClick, true);
+            }
+            document.addEventListener('click', eatClick, true);
+            setTimeout(function () { document.removeEventListener('click', eatClick, true); }, 0);
+            if (!target || !target.day) return;
+            dropPlanAt(plan, iso, target.day, target.time);
+        }
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
     }
 
     function scheduleTable() {
@@ -11591,15 +13761,54 @@
                 state.staffRows = [];
                 state.staffError = (payload && payload.message) || t('errorTitle');
             }
-            if (state.view === 'schedules' && state.scheduleMode === 'staff') renderFrame();
+            if (state.view === 'schedules' && rosterOn()) renderFrame();
         });
     }
 
     function reloadStaff() {
-        state.staffRows = null;
         state.staffLoading = false;
         state.staffToken++;
-        if (state.view === 'schedules') renderFrame();
+        loadStaff();
+    }
+
+    function staffHoursRow(userKey) {
+        var rows = state.staffRows || [];
+        var index;
+        for (index = 0; index < rows.length; index++) {
+            if (rows[index] && rows[index].userKey === userKey && rows[index].kind === 'hours') return rows[index];
+        }
+        return null;
+    }
+
+    function staffDtoSame(left, right) {
+        if (!left || !right) return false;
+        return left.id === right.id
+            && left.userKey === right.userKey
+            && (left.weekdays || 0) === (right.weekdays || 0)
+            && (parseInt(left.hours, 10) || 0) === (parseInt(right.hours, 10) || 0)
+            && (left.startOn || '') === (right.startOn || '')
+            && (left.marks || '') === (right.marks || '')
+            && (parseInt(left.placeId, 10) || 0) === (parseInt(right.placeId, 10) || 0)
+            && (left.userName || '') === (right.userName || '')
+            && (left.department || '') === (right.department || '')
+            && (left.note || '') === (right.note || '');
+    }
+
+    function rememberStaff(payload) {
+        if (!payload || !payload.userKey) return false;
+        var rows = state.staffRows ? state.staffRows.slice() : [];
+        var index;
+        for (index = 0; index < rows.length; index++) {
+            if (rows[index].kind === 'hours' && rows[index].userKey === payload.userKey) {
+                var changed = !staffDtoSame(rows[index], payload);
+                rows[index] = payload;
+                state.staffRows = rows;
+                return changed;
+            }
+        }
+        rows.push(payload);
+        state.staffRows = rows;
+        return true;
     }
 
     function staffHas(userKey) {
@@ -11617,79 +13826,561 @@
         (state.staffRows || []).forEach(function (row) {
             if (!row || !row.userKey || !people[row.userKey]) {
                 if (!row || !row.userKey) return;
-                people[row.userKey] = { userKey: row.userKey, userName: row.userName || row.userKey, hours: null, leaves: [] };
+                people[row.userKey] = { userKey: row.userKey, userName: row.userName || row.userKey, department: '', phone: '', hours: null, leaves: [] };
                 order.push(row.userKey);
             }
+            if (row.department && !people[row.userKey].department) people[row.userKey].department = row.department;
+            if (row.phone && !people[row.userKey].phone) people[row.userKey].phone = row.phone;
             if (row.kind === 'leave') people[row.userKey].leaves.push(row);
             else if (row.kind === 'hours') {
                 people[row.userKey].hours = row;
                 if (row.userName) people[row.userKey].userName = row.userName;
             }
         });
-        order = order.filter(function (key) { return !!people[key].hours; });
+        order = order.filter(function (key) { return !!people[key].hours && staffPlaceVisible(people[key]); });
+        var rank = {};
+        staffOrderKeys().forEach(function (key, index) { rank[key] = index; });
         order.sort(function (left, right) {
-            return String(people[left].userName).localeCompare(String(people[right].userName));
+            var leftRank = Object.prototype.hasOwnProperty.call(rank, left) ? rank[left] : 10000;
+            var rightRank = Object.prototype.hasOwnProperty.call(rank, right) ? rank[right] : 10000;
+            if (leftRank !== rightRank) return leftRank - rightRank;
+            return String(people[left].userName).localeCompare(String(people[right].userName), state.locale || 'ru');
         });
         return { people: people, order: order };
     }
 
-    function staffTally(weekdays, hours, leaves, year, month) {
+    function staffOrderKeys() {
+        var keys = [];
+        var seen = {};
+        String(moduleSetup().staffOrder || '').split(',').forEach(function (part) {
+            var key = part.trim();
+            if (!/^[A-Za-z0-9._@-]{1,80}$/.test(key) || seen[key]) return;
+            seen[key] = true;
+            keys.push(key);
+        });
+        return keys;
+    }
+
+    function saveStaffOrder(keys) {
+        var next = moduleSetup();
+        var clean = [];
+        var seen = {};
+        (keys || []).forEach(function (key) {
+            if (!/^[A-Za-z0-9._@-]{1,80}$/.test(key) || seen[key] || clean.length >= 60) return;
+            seen[key] = true;
+            clean.push(key);
+        });
+        next.staffOrder = clean.join(',');
+        var project = currentProject();
+        var previous = project && project.setup ? project.setup.staffOrder : '';
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.staffOrder = next.staffOrder;
+        }
+        if (state.view === 'schedules') renderFrame();
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                if (project && project.setup) project.setup.staffOrder = previous;
+                notify((payload && payload.message) || t('errorTitle'));
+                if (state.view === 'schedules') renderFrame();
+                return;
+            }
+            var incoming = payload && payload.setup ? payload.setup.staffOrder || '' : '';
+            if (project && payload && payload.setup) project.setup = payload.setup;
+            if (incoming !== next.staffOrder && state.view === 'schedules') renderFrame();
+        });
+    }
+
+    function staffPlaceOrderKeys() {
+        var keys = [];
+        var seen = {};
+        String(moduleSetup().staffPlaceOrder || '').split(',').forEach(function (part) {
+            var key = part.trim();
+            if (!/^\d{1,9}$/.test(key)) return;
+            key = String(parseInt(key, 10));
+            if (seen[key]) return;
+            seen[key] = true;
+            keys.push(key);
+        });
+        return keys;
+    }
+
+    function saveStaffPlaceOrder(visibleIds, keepOutside) {
+        var next = moduleSetup();
+        var clean = [];
+        var seen = {};
+        function push(key) {
+            key = String(key == null ? '' : key).trim();
+            if (!/^\d{1,9}$/.test(key) || clean.length >= 80) return;
+            key = String(parseInt(key, 10));
+            if (seen[key]) return;
+            seen[key] = true;
+            clean.push(key);
+        }
+        var visible = [];
+        var visibleSet = {};
+        (visibleIds || []).forEach(function (key) {
+            key = String(key == null ? '' : key).trim();
+            if (!/^\d{1,9}$/.test(key)) return;
+            key = String(parseInt(key, 10));
+            if (visibleSet[key]) return;
+            visibleSet[key] = true;
+            visible.push(key);
+        });
+        if (keepOutside === false) {
+            visible.forEach(push);
+        } else {
+            var previous = staffPlaceOrderKeys();
+            var placed = false;
+            previous.forEach(function (id) {
+                if (visibleSet[id]) {
+                    if (!placed) {
+                        visible.forEach(push);
+                        placed = true;
+                    }
+                    return;
+                }
+                push(id);
+            });
+            if (!placed) visible.forEach(push);
+        }
+        next.staffPlaceOrder = clean.join(',');
+        var project = currentProject();
+        var previousOrder = project && project.setup ? project.setup.staffPlaceOrder : '';
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.staffPlaceOrder = next.staffPlaceOrder;
+        }
+        if (state.view === 'schedules') renderFrame();
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                if (project && project.setup) project.setup.staffPlaceOrder = previousOrder;
+                notify((payload && payload.message) || t('errorTitle'));
+                if (state.view === 'schedules') renderFrame();
+                return;
+            }
+            var incoming = payload && payload.setup ? payload.setup.staffPlaceOrder || '' : '';
+            if (project && payload && payload.setup) project.setup = payload.setup;
+            if (incoming !== next.staffPlaceOrder && state.view === 'schedules') renderFrame();
+        });
+    }
+
+    function saveStaffHours(userKey, weekdays, hours, marks, startOn, placeId, note) {
+        var currentRow = staffHoursRow(userKey);
+        var anchor = '';
+        if (startOn !== undefined && startOn !== null) anchor = startOn || '';
+        else if (currentRow && currentRow.startOn) anchor = currentRow.startOn;
+        var body = {
+            userKey: userKey,
+            weekdays: weekdays || 31,
+            hours: hours,
+            startOn: anchor
+        };
+        if (marks !== undefined) body.marks = marks;
+        if (placeId !== undefined) body.placeId = placeId;
+        if (note !== undefined) body.note = cleanStaffNote(note);
+        var current = currentRow;
+        rememberStaff({
+            id: current ? current.id : 0,
+            userKey: userKey,
+            userName: current && current.userName ? current.userName : userKey,
+            department: current ? current.department || '' : '',
+            phone: current ? current.phone || '' : '',
+            kind: 'hours',
+            weekdays: body.weekdays,
+            hours: hours,
+            startOn: anchor,
+            endOn: '',
+            marks: marks !== undefined ? marks : (current && current.marks ? current.marks : ''),
+            placeId: placeId !== undefined ? placeId : (current ? parseInt(current.placeId, 10) || 0 : 0),
+            note: note !== undefined ? cleanStaffNote(note) : (current && current.note ? current.note : '')
+        });
+        if (state.view === 'schedules' && rosterOn()) renderFrame();
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/staff', body, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                if (rememberStaff(payload) && state.view === 'schedules' && rosterOn()) renderFrame();
+            } else {
+                notify((payload && payload.message) || t('errorTitle'));
+                reloadStaff();
+            }
+        });
+    }
+
+    var DEFAULT_STAFF_MARKS = 'work||172b4d|8|1,night||4338ca|8|2,trip||0f766e|8|1,leave||d97706|0|0,sick||e11d48|0|0,miss||b91c1c|0|0';
+    var STAFF_PATTERN_PRESETS = [[5, 2], [2, 2], [1, 2], [1, 3], [2, 3], [3, 3], [4, 2], [4, 4], [6, 1], [1, 1], [7, 7]];
+
+    function staffMarkName(row) {
+        if (row && row.label) return row.label;
+        var id = row && row.id;
+        if (id === 'work') return t('staffLegendWork');
+        if (id === 'night') return t('staffMarkNight');
+        if (id === 'trip') return t('staffMarkTrip');
+        if (id === 'leave') return t('staffLeave');
+        if (id === 'sick') return t('staffMarkSick');
+        if (id === 'miss') return t('staffMarkMiss');
+        return id || '';
+    }
+
+    function parseStaffMarks(raw) {
+        var source = String(raw || '').trim() || DEFAULT_STAFF_MARKS;
+        var rows = [];
+        var seen = {};
+        source.split(',').forEach(function (part) {
+            if (!part || rows.length >= 12) return;
+            var piece = part.split('|');
+            var id = String(piece[0] || '').trim().toLowerCase();
+            if (!/^[a-z][a-z0-9]{0,15}$/.test(id) || id === 'off' || id === 'hours' || seen[id]) return;
+            seen[id] = true;
+            var label = cleanKindLabel(String(piece[1] || '').replace(/#/g, ' '));
+            var color = String(piece[2] || '').replace('#', '').trim().toLowerCase();
+            if (!/^[0-9a-f]{6}$/.test(color)) color = '64748b';
+            var hours = parseInt(piece[3], 10);
+            if (isNaN(hours)) hours = 8;
+            if (hours < 0) hours = 0;
+            if (hours > 24) hours = 24;
+            var factor = parseInt(piece[4], 10);
+            if (piece.length < 5 || piece[4] === '' || (factor !== 0 && factor !== 1 && factor !== 2)) {
+                if (hours <= 0) factor = 0;
+                else if (id === 'night') factor = 2;
+                else factor = 1;
+            }
+            rows.push({ id: id, label: label, color: color, hours: hours, factor: factor });
+        });
+        if (!seen.work) rows.unshift({ id: 'work', label: '', color: '172b4d', hours: 8, factor: 1 });
+        return rows.slice(0, 12);
+    }
+
+    function packStaffMarks(rows) {
+        return rows.map(function (row) {
+            var factor = row.factor === 0 || row.factor === 2 ? row.factor : 1;
+            return row.id + '|' + (row.label || '') + '|' + row.color + '|' + row.hours + '|' + factor;
+        }).join(',');
+    }
+
+    function staffMarkList() {
+        var rows = parseStaffMarks(moduleSetup().staffMarks);
+        var hasMiss = false;
+        rows.forEach(function (row) { if (row.id === 'miss') hasMiss = true; });
+        if (!hasMiss && rows.length < 12) rows.push({ id: 'miss', label: '', color: 'b91c1c', hours: 0, factor: 0 });
+        return rows;
+    }
+
+    function staffShiftPacked(weekdays) {
+        weekdays = parseInt(weekdays, 10) || 0;
+        if (weekdays < 128 || weekdays > 383) return null;
+        var packed = weekdays - 128;
+        var work = Math.floor(packed / 16);
+        var rest = packed % 16;
+        if (work < 1 || work > 15 || rest < 1 || rest > 15) return null;
+        return { work: work, rest: rest };
+    }
+
+    function packStaffShift(work, rest) {
+        work = parseInt(work, 10) || 0;
+        rest = parseInt(rest, 10) || 0;
+        if (work < 1) work = 1;
+        if (work > 15) work = 15;
+        if (rest < 1) rest = 1;
+        if (rest > 15) rest = 15;
+        return 128 + work * 16 + rest;
+    }
+
+    function staffEncodePattern(work, rest) {
+        work = parseInt(work, 10) || 0;
+        rest = parseInt(rest, 10) || 0;
+        if (work === 5 && rest === 2) return 31;
+        return packStaffShift(work, rest);
+    }
+
+    function staffPatternOf(person) {
+        var row = person && person.hours ? person.hours : null;
+        var packed = staffShiftPacked(row ? row.weekdays : 0);
+        if (packed && packed.work === 5 && packed.rest === 2) return { kind: 'week', weekdays: 31, work: 5, rest: 2 };
+        if (packed) return { kind: 'shift', work: packed.work, rest: packed.rest };
+        var hours = row ? parseInt(row.hours, 10) || 0 : 0;
+        if (hours >= 12) return { kind: 'shift', work: 2, rest: 2 };
+        var weekdays = row && row.weekdays ? parseInt(row.weekdays, 10) || 31 : 31;
+        if (weekdays < 1 || weekdays > 127) weekdays = 31;
+        return { kind: 'week', weekdays: weekdays, work: 5, rest: 2 };
+    }
+
+    function staffMarkById(id) {
+        var rows = staffMarkList();
+        var index;
+        for (index = 0; index < rows.length; index++) {
+            if (rows[index].id === id) return rows[index];
+        }
+        return null;
+    }
+
+    function saveStaffPalette(rows) {
+        var next = moduleSetup();
+        next.staffMarks = packStaffMarks(rows);
+        var project = currentProject();
+        var previous = project && project.setup ? project.setup.staffMarks : '';
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.staffMarks = next.staffMarks;
+        }
+        if (state.view === 'schedules') renderFrame();
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                if (project && project.setup) project.setup.staffMarks = previous;
+                notify((payload && payload.message) || t('errorTitle'));
+                if (state.view === 'schedules') renderFrame();
+                return;
+            }
+            var incoming = payload && payload.setup ? payload.setup.staffMarks || '' : '';
+            if (project && payload && payload.setup) project.setup = payload.setup;
+            if (incoming !== next.staffMarks && state.view === 'schedules') renderFrame();
+        });
+    }
+
+    function parseDayMarks(raw) {
+        var map = { _hours: {} };
+        String(raw || '').split(',').forEach(function (part) {
+            var colon = part.indexOf(':');
+            if (colon <= 0) return;
+            var day = part.slice(0, colon).trim();
+            var token = part.slice(colon + 1).trim().toLowerCase();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+            var at = token.indexOf('@');
+            var id = at < 0 ? token : token.slice(0, at);
+            var custom = null;
+            if (at >= 0) {
+                var rest = token.slice(at + 1);
+                if (rest.charAt(0) !== '=' && /^\d{1,2}(\.\d{1,2})?$/.test(rest)) {
+                    var value = parseFloat(rest);
+                    if (value >= 0 && value <= 24) custom = Math.round(value * 100) / 100;
+                }
+            }
+            if (id !== 'off' && !/^[a-z][a-z0-9]{0,15}$/.test(id)) return;
+            map[day] = id;
+            if (custom != null && id !== 'off') map._hours[day] = custom;
+        });
+        return map;
+    }
+
+    function packDayMarks(map) {
+        var hours = map && map._hours ? map._hours : {};
+        return Object.keys(map || {}).filter(function (day) {
+            return /^\d{4}-\d{2}-\d{2}$/.test(day);
+        }).sort().map(function (day) {
+            var token = map[day];
+            if (hours[day] != null && token && token !== 'off') token += '@' + formatStaffHours(hours[day]);
+            return day + ':' + token;
+        }).join(',');
+    }
+
+    function markCustom(marks, iso) {
+        if (!marks || !marks._hours || !Object.prototype.hasOwnProperty.call(marks._hours, iso)) return null;
+        return marks._hours[iso];
+    }
+
+    function staffOnceSpec() {
+        if (state.staffOnce == null || state.staffOnce === '') return null;
+        var raw = String(state.staffOnce).trim();
+        if (/^[+-]\d{1,2}(\.\d{1,2})?$/.test(raw)) {
+            var delta = parseFloat(raw);
+            if (!delta || delta < -24 || delta > 24) return null;
+            return { mode: 'delta', value: delta, text: raw };
+        }
+        if (/^\d{1,2}(\.\d{1,2})?$/.test(raw)) {
+            var value = parseFloat(raw);
+            if (isNaN(value) || value < 0 || value > 24) return null;
+            return { mode: 'abs', value: Math.round(value * 100) / 100, text: raw };
+        }
+        return null;
+    }
+
+    function staffOnceHours() {
+        var spec = staffOnceSpec();
+        if (!spec || spec.mode !== 'abs') return null;
+        return spec.value;
+    }
+
+    function staffMarkColor(id) {
+        if (id === 'off') return '94a3b8';
+        var mark = staffMarkById(id);
+        return mark ? mark.color : '94a3b8';
+    }
+
+    function staffMarkTint(hex) {
+        var value = String(hex || '').replace('#', '');
+        if (!/^[0-9a-f]{6}$/i.test(value)) return 'rgba(148, 163, 184, 0.18)';
+        var red = parseInt(value.slice(0, 2), 16);
+        var green = parseInt(value.slice(2, 4), 16);
+        var blue = parseInt(value.slice(4, 6), 16);
+        return 'rgba(' + red + ', ' + green + ', ' + blue + ', 0.18)';
+    }
+
+    function staffNatural(person, iso, date) {
+        if (staffLeaveOn(person, iso)) return 'leave';
+        var startOn = person.hours && person.hours.startOn ? String(person.hours.startOn) : '';
+        if (startOn && iso < startOn) return 'off';
+        var pattern = staffPatternOf(person);
+        if (pattern.kind === 'shift') {
+            var anchor = parseIsoDate(startOn);
+            if (!anchor) return 'off';
+            var span = pattern.work + pattern.rest;
+            var delta = dayNumber(date) - dayNumber(anchor);
+            var phase = ((delta % span) + span) % span;
+            return phase < pattern.work ? 'work' : 'off';
+        }
+        if (!startOn) return 'off';
+        var bit = (date.getDay() + 6) % 7;
+        var weekdays = pattern.weekdays || 31;
+        return (weekdays & (1 << bit)) ? 'work' : 'off';
+    }
+
+    function staffVisible(person, iso, date, marks) {
+        if (marks && marks[iso]) return marks[iso];
+        return staffNatural(person, iso, date);
+    }
+
+    function staffMarkFactor(id) {
+        if (!id || id === 'off') return 0;
+        var mark = staffMarkById(id);
+        if (!mark) return 0;
+        if (mark.factor === 0 || mark.factor === 2) return mark.factor;
+        return 1;
+    }
+
+    function staffDayHours(id, personHours) {
+        var factor = staffMarkFactor(id);
+        if (!factor) return 0;
+        return personHours * factor;
+    }
+
+    function formatStaffHours(value) {
+        var rounded = Math.round(Number(value) * 100) / 100;
+        if (!isFinite(rounded)) return '0';
+        if (Math.abs(rounded - Math.round(rounded)) < 0.001) return String(Math.round(rounded));
+        return String(rounded);
+    }
+
+    function staffDayValue(person, iso, date, marks) {
+        var per = person && person.hours ? parseInt(person.hours.hours, 10) || 0 : 0;
+        if (per < 1) per = 1;
+        if (per > 24) per = 24;
+        var id = staffVisible(person, iso, date, marks);
+        var known = id === 'off' || id === 'work' || !!staffMarkById(id);
+        if (!known) return { value: 0, blank: true, id: id || '' };
+        var custom = markCustom(marks, iso);
+        if (custom != null) return { value: custom, blank: false, id: id };
+        if (!id || id === 'off') return { value: 0, blank: true, id: 'off' };
+        var hours = staffDayHours(id, per);
+        if (!(hours > 0)) return { value: 0, blank: false, id: id };
+        return { value: hours, blank: false, id: id };
+    }
+
+    function staffTally(person, year, month) {
         var count = new Date(year, month, 0).getDate();
-        var work = 0;
-        var away = 0;
+        var row = person.hours || { weekdays: 31, hours: 8, marks: '' };
+        var marks = parseDayMarks(row.marks);
+        var by = {};
+        var totalDays = 0;
+        var totalHours = 0;
         var day;
         for (day = 1; day <= count; day++) {
             var date = new Date(year, month - 1, day);
             var iso = isoDate(date);
-            var onLeave = false;
-            var index;
-            for (index = 0; index < leaves.length; index++) {
-                var start = leaves[index].startOn || '';
-                var end = leaves[index].endOn || '';
-                if (start && end && iso >= start && iso <= end) {
-                    onLeave = true;
-                    break;
-                }
-            }
-            if (onLeave) away++;
-            else if (weekdays & (1 << ((date.getDay() + 6) % 7))) work++;
+            var cell = staffDayValue(person, iso, date, marks);
+            var id = cell.id;
+            if (!id || id === 'off' || (id !== 'work' && !staffMarkById(id))) continue;
+            if (!by[id]) by[id] = { days: 0, hours: 0 };
+            by[id].days += 1;
+            by[id].hours += cell.value;
+            if (!(cell.value > 0)) continue;
+            totalDays += 1;
+            totalHours += cell.value;
         }
-        var per = parseInt(hours, 10) || 0;
-        if (per < 0) per = 0;
-        if (per > 24) per = 24;
-        return { days: work, hours: work * per, leave: away };
+        return { by: by, days: totalDays, hours: totalHours };
     }
 
-    function staffMonthSum() {
-        var grouped = staffGroups();
-        var days = 0;
-        var hours = 0;
-        var leave = 0;
-        grouped.order.forEach(function (key) {
-            var person = grouped.people[key];
-            if (!person.hours) return;
-            var tally = staffTally(person.hours.weekdays, person.hours.hours, person.leaves, state.scheduleYear, state.scheduleMonth);
-            days += tally.days;
-            hours += tally.hours;
-            leave += tally.leave;
-        });
-        return { days: days, hours: hours, leave: leave };
+    function staffPlaceVisible(person) {
+        var filter = state.staffPlaceFilter || '';
+        if (!filter) return true;
+        var placeId = person && person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
+        if (filter === '__none__') return !placeId;
+        return String(placeId) === String(filter);
     }
 
-    function saveStaffHours(userKey, weekdays, hours) {
-        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/staff', {
-            userKey: userKey,
-            weekdays: weekdays,
-            hours: hours
-        }, function (status, payload) {
-            if (status >= 200 && status < 300) reloadStaff();
-            else notify((payload && payload.message) || t('errorTitle'));
+    function sortedPlaces() {
+        return placeAssets().slice().sort(function (left, right) {
+            return placeLabel(left).localeCompare(placeLabel(right), state.locale || 'ru');
         });
+    }
+
+    function placeLabel(asset) {
+        var parent = asset && asset.parentId ? byId()[asset.parentId] : null;
+        var name = asset && asset.name ? asset.name : '';
+        if (parent && isFolder(parent) && parent.name) return parent.name + ' / ' + name;
+        return name;
+    }
+
+    function placeNameById(placeId) {
+        var asset = byId()[placeId];
+        return asset ? placeLabel(asset) : '';
+    }
+
+    function staffListedPlaces() {
+        var ids = {};
+        staffPlaceOrderKeys().forEach(function (id) { if (id !== '0') ids[id] = true; });
+        (state.staffRows || []).forEach(function (row) {
+            if (!row || row.kind !== 'hours') return;
+            var id = parseInt(row.placeId, 10) || 0;
+            if (id) ids[String(id)] = true;
+        });
+        var list = [];
+        Object.keys(ids).forEach(function (id) {
+            list.push({ id: id, name: placeNameById(id) || t('staffPlace') });
+        });
+        list.sort(function (left, right) {
+            return left.name.localeCompare(right.name, state.locale || 'ru');
+        });
+        return list;
+    }
+
+    function staffPlaceSelect() {
+        var places = staffListedPlaces();
+        if (!places.length) return null;
+        var select = document.createElement('select');
+        select.className = 'asset-tree-filter asset-tree-staff-place-filter';
+        select.setAttribute('aria-label', t('staffPlace'));
+        var all = document.createElement('option');
+        all.value = '';
+        all.textContent = t('staffAllPlaces');
+        select.appendChild(all);
+        var none = document.createElement('option');
+        none.value = '__none__';
+        none.textContent = t('staffNoPlace');
+        select.appendChild(none);
+        places.forEach(function (asset) {
+            var option = document.createElement('option');
+            option.value = String(asset.id);
+            option.textContent = asset.name;
+            select.appendChild(option);
+        });
+        var current = state.staffPlaceFilter || '';
+        select.value = select.querySelector('option[value="' + current + '"]') ? current : '';
+        select.addEventListener('change', function () {
+            state.staffPlaceFilter = select.value;
+            renderFrame();
+        });
+        return select;
     }
 
     function staffFinder() {
         var box = el('div', 'asset-tree-staff-find');
-        box.appendChild(el('span', null, t('staffAdd')));
+        var placeFilter = staffPlaceSelect();
+        if (placeFilter) box.appendChild(placeFilter);
+        if (!state.canEdit) {
+            box.appendChild(button(t('staffExcel'), 'asset-tree-btn slim asset-tree-staff-excel', function () { downloadStaffBook(); }));
+            return box;
+        }
+        var field = el('label', 'asset-tree-staff-find-field');
+        field.appendChild(el('span', null, t('staffAdd')));
         var query = document.createElement('input');
         query.type = 'search';
         query.placeholder = t('schedulesFindUser');
@@ -11707,7 +14398,12 @@
                     if (status !== 200) return;
                     (payload || []).forEach(function (user) {
                         hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
-                            if (!staffHas(user.userKey)) saveStaffHours(user.userKey, 31, 8);
+                            if (!staffHas(user.userKey)) {
+                                saveStaffHours(user.userKey, 31, 8);
+                                var keys = staffOrderKeys();
+                                if (keys.indexOf(user.userKey) < 0) keys.push(user.userKey);
+                                saveStaffOrder(keys);
+                            }
                             hits.innerHTML = '';
                             query.value = '';
                         }));
@@ -11715,107 +14411,2324 @@
                 });
             }, 200);
         });
-        box.appendChild(query);
+        field.appendChild(query);
+        box.appendChild(field);
         box.appendChild(hits);
+        var adder = staffBranchAdder();
+        if (adder) box.appendChild(adder);
+        box.appendChild(button(t('staffExcel'), 'asset-tree-btn slim asset-tree-staff-excel', function () { downloadStaffBook(); }));
         return box;
     }
 
-    function staffCard(person) {
-        var row = person.hours || { weekdays: 31, hours: 8, id: 0 };
-        var tally = staffTally(row.weekdays, row.hours, person.leaves, state.scheduleYear, state.scheduleMonth);
-        var card = el('section', 'asset-tree-staff-card');
-        var head = el('div', 'asset-tree-staff-head');
-        head.appendChild(el('strong', null, person.userName));
-        head.appendChild(el('span', 'asset-tree-staff-tally', t('staffDaysCount', tally.days) + ' · ' + t('staffHoursCount', tally.hours) + ' · ' + t('staffLeaveCount', tally.leave)));
-        if (state.canEdit && row.id) {
-            head.appendChild(button(t('staffRemove'), 'asset-tree-btn slim', function () {
-                if (!window.confirm(t('staffRemoveConfirm', person.userName))) return;
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + row.id, null, function (status, payload) {
-                    if (status >= 200 && status < 300) reloadStaff();
-                    else notify((payload && payload.message) || t('errorTitle'));
-                });
-            }));
+    function staffBranchAdder() {
+        if (!state.canEdit) return null;
+        var taken = {};
+        staffPlaceOrderKeys().forEach(function (id) { taken[id] = true; });
+        (state.staffRows || []).forEach(function (row) {
+            if (!row || row.kind !== 'hours') return;
+            var id = parseInt(row.placeId, 10) || 0;
+            if (id) taken[String(id)] = true;
+        });
+        var places = sortedPlaces().filter(function (asset) { return asset && !taken[String(asset.id)]; });
+        if (!places.length) return null;
+        var select = document.createElement('select');
+        select.className = 'asset-tree-filter asset-tree-staff-branch-add';
+        select.setAttribute('aria-label', t('staffBranchAdd'));
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = t('staffBranchAdd');
+        select.appendChild(empty);
+        places.forEach(function (asset) {
+            var option = document.createElement('option');
+            option.value = String(asset.id);
+            option.textContent = placeLabel(asset);
+            select.appendChild(option);
+        });
+        select.addEventListener('change', function () {
+            var id = parseInt(select.value, 10) || 0;
+            if (!id) return;
+            var keys = staffPlaceOrderKeys();
+            if (keys.indexOf(String(id)) < 0) keys.push(String(id));
+            saveStaffPlaceOrder(keys, false);
+        });
+        return select;
+    }
+
+    function staffDayShort(iso) {
+        var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+        if (!match) return '';
+        return match[3] + '.' + match[2];
+    }
+
+    function staffLeaveOn(person, iso) {
+        var leaves = person.leaves || [];
+        var index;
+        for (index = 0; index < leaves.length; index++) {
+            var start = leaves[index].startOn || '';
+            var end = leaves[index].endOn || '';
+            if (start && end && iso >= start && iso <= end) return leaves[index];
         }
-        card.appendChild(head);
-        var days = el('div', 'asset-tree-staff-days');
-        var labels = weekdayLabels();
-        var bit;
-        for (bit = 0; bit < 7; bit++) {
-            var on = !!(row.weekdays & (1 << bit));
-            (function (index, pressed) {
-                var toggle = button(labels[index] || String(index + 1), 'asset-tree-day-toggle' + (pressed ? ' is-on' : ''), function () {
-                    if (!state.canEdit || !person.hours) return;
-                    var next = person.hours.weekdays ^ (1 << index);
-                    if (next < 1 || next > 127) return;
-                    saveStaffHours(person.userKey, next, person.hours.hours || 8);
-                });
-                toggle.disabled = !state.canEdit;
-                toggle.setAttribute('aria-pressed', pressed ? 'true' : 'false');
-                days.appendChild(toggle);
-            })(bit, on);
+        return null;
+    }
+
+    function staffSections(grouped) {
+        var buckets = {};
+        var order = [];
+        function ensure(placeId, name) {
+            var id = String(placeId || 0);
+            if (!buckets[id]) {
+                buckets[id] = { placeId: parseInt(placeId, 10) || 0, name: name || '', people: [] };
+                order.push(id);
+            }
+            return buckets[id];
         }
-        card.appendChild(days);
-        var hoursField = el('label', 'asset-tree-staff-hours');
-        hoursField.appendChild(el('span', null, t('staffHours')));
-        var hours = document.createElement('input');
-        hours.type = 'number';
-        hours.min = '1';
-        hours.max = '24';
-        hours.value = String(row.hours || 8);
-        hours.disabled = !state.canEdit;
-        hours.setAttribute('aria-label', t('staffHours'));
-        hours.addEventListener('change', function () {
-            if (!person.hours) return;
-            var value = parseInt(hours.value, 10) || 0;
-            if (value < 1 || value > 24) {
-                hours.value = String(person.hours.hours || 8);
+        var filter = state.staffPlaceFilter || '';
+        if (filter === '__none__') {
+            ensure(0, t('staffNoPlace'));
+        } else if (filter) {
+            var chosen = parseInt(filter, 10) || 0;
+            ensure(chosen, placeNameById(chosen) || t('staffPlace'));
+        } else {
+            staffPlaceOrderKeys().forEach(function (id) {
+                ensure(id, placeNameById(id) || t('staffPlace'));
+            });
+        }
+        grouped.order.forEach(function (key) {
+            var person = grouped.people[key];
+            var placeId = person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
+            if (!buckets[String(placeId)]) {
+                ensure(placeId, placeId ? (placeNameById(placeId) || t('staffPlace')) : t('staffNoPlace'));
+            }
+            buckets[String(placeId)].people.push(person);
+        });
+        var placeRank = {};
+        staffPlaceOrderKeys().forEach(function (id, index) { placeRank[id] = index; });
+        order.sort(function (left, right) {
+            var leftRank = Object.prototype.hasOwnProperty.call(placeRank, left) ? placeRank[left] : 10000;
+            var rightRank = Object.prototype.hasOwnProperty.call(placeRank, right) ? placeRank[right] : 10000;
+            if (leftRank !== rightRank) return leftRank - rightRank;
+            if (left === '0') return 1;
+            if (right === '0') return -1;
+            return buckets[left].name.localeCompare(buckets[right].name, state.locale || 'ru');
+        });
+        return order.map(function (id) { return buckets[id]; });
+    }
+
+    function usersAtPlace(placeId) {
+        var seen = {};
+        var list = [];
+        function add(custodian) {
+            if (!custodian || !custodian.userKey || seen[custodian.userKey] || staffHas(custodian.userKey)) return;
+            seen[custodian.userKey] = true;
+            list.push({ userKey: custodian.userKey, displayName: custodian.displayName || custodian.userKey });
+        }
+        if (!placeId) return list;
+        var place = byId()[placeId];
+        if (place) add(place.custodian);
+        equipmentUnder(placeId).forEach(function (asset) { add(asset.custodian); });
+        (state.assets || []).forEach(function (asset) {
+            if (!asset || !isFolder(asset) || asset.id === placeId) return;
+            if (assetUnderPlace(asset, placeId)) add(asset.custodian);
+        });
+        list.sort(function (left, right) {
+            return String(left.displayName).localeCompare(String(right.displayName), state.locale || 'ru');
+        });
+        return list;
+    }
+
+    function addStaffToPlace(userKey, placeId, displayName) {
+        var assigned = placeId || 0;
+        var row = staffHoursRow(userKey);
+        if (row) {
+            if ((parseInt(row.placeId, 10) || 0) === assigned) return;
+            saveStaffHours(userKey, row.weekdays, row.hours, undefined, row.startOn, assigned);
+            return;
+        }
+        if (displayName) {
+            rememberStaff({
+                id: 0,
+                userKey: userKey,
+                userName: displayName,
+                department: '',
+                phone: '',
+                kind: 'hours',
+                weekdays: 31,
+                hours: 8,
+                startOn: '',
+                endOn: '',
+                marks: '',
+                placeId: assigned
+            });
+        }
+        saveStaffHours(userKey, 31, 8, undefined, undefined, assigned);
+        var keys = staffOrderKeys();
+        if (keys.indexOf(userKey) < 0) keys.push(userKey);
+        saveStaffOrder(keys);
+    }
+
+    function closeStaffBranchAdd() {
+        var node = document.getElementById('asset-tree-branch-add');
+        if (!node) return;
+        if (node._outside) document.removeEventListener('mousedown', node._outside);
+        if (node.parentNode) node.parentNode.removeChild(node);
+    }
+
+    function openStaffBranchAdd(placeId, anchor) {
+        var existing = document.getElementById('asset-tree-branch-add');
+        var assigned = placeId || 0;
+        if (existing) {
+            var same = existing.getAttribute('data-place') === String(assigned);
+            closeStaffBranchAdd();
+            if (same) return;
+        }
+        var pop = el('div', 'asset-tree-branch-add');
+        pop.id = 'asset-tree-branch-add';
+        pop.setAttribute('data-place', String(assigned));
+        var people = usersAtPlace(assigned);
+        if (people.length) {
+            pop.appendChild(el('div', 'asset-tree-branch-add-title', t('staffPlaceSuggest')));
+            people.forEach(function (user) {
+                pop.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
+                    addStaffToPlace(user.userKey, assigned, user.displayName);
+                    closeStaffBranchAdd();
+                }));
+            });
+        } else {
+            pop.appendChild(el('p', 'asset-tree-branch-add-empty', t('staffPlaceEmptyPeople')));
+        }
+        var query = document.createElement('input');
+        query.type = 'search';
+        query.placeholder = t('schedulesFindUser');
+        query.setAttribute('aria-label', t('schedulesFindUser'));
+        var hits = el('div', 'asset-tree-branch-add-hits');
+        var timer = null;
+        query.addEventListener('input', function () {
+            clearTimeout(timer);
+            var value = query.value;
+            timer = setTimeout(function () {
+                hits.innerHTML = '';
+                if (!value.trim()) return;
+                ajax('GET', '/users?q=' + encodeURIComponent(value.trim()), null, function (status, payload) {
+                    if (!document.getElementById('asset-tree-branch-add')) return;
+                    hits.innerHTML = '';
+                    if (status !== 200) return;
+                    (payload || []).forEach(function (user) {
+                        if (!user || !user.userKey) return;
+                        hits.appendChild(button(user.displayName || user.userKey, 'asset-tree-user-hit', function () {
+                            addStaffToPlace(user.userKey, assigned, user.displayName || user.userKey);
+                            closeStaffBranchAdd();
+                        }));
+                    });
+                });
+            }, 200);
+        });
+        pop.appendChild(query);
+        pop.appendChild(hits);
+        var root = document.getElementById('asset-tree-app') || document.body;
+        root.appendChild(pop);
+        var rect = anchor.getBoundingClientRect();
+        var width = pop.offsetWidth || 240;
+        var height = pop.offsetHeight || 120;
+        var left = rect.left;
+        if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+        if (left < 8) left = 8;
+        var top = rect.bottom + 4;
+        if (top + height > window.innerHeight - 8 && rect.top > height + 8) top = rect.top - height - 4;
+        pop.style.left = left + 'px';
+        pop.style.top = top + 'px';
+        setTimeout(function () {
+            if (!document.getElementById('asset-tree-branch-add')) return;
+            function onDoc(event) {
+                var node = document.getElementById('asset-tree-branch-add');
+                if (!node) {
+                    document.removeEventListener('mousedown', onDoc);
+                    return;
+                }
+                var target = event.target;
+                while (target && target !== document.body) {
+                    if (target === node || target === anchor) return;
+                    target = target.parentNode;
+                }
+                closeStaffBranchAdd();
+            }
+            pop._outside = onDoc;
+            document.addEventListener('mousedown', onDoc);
+            try {
+                query.focus({ preventScroll: true });
+            } catch (ignore) {
+                query.focus();
+            }
+        }, 0);
+    }
+
+    function staffHiddenKey() {
+        return 'asset-tree.rosterHidden.' + (state.projectKey || '');
+    }
+
+    function loadStaffHidden() {
+        if (state.staffHiddenProject === state.projectKey && state.staffHiddenPlaces) return;
+        var hidden = {};
+        try {
+            String(localStorage.getItem(staffHiddenKey()) || '').split(',').forEach(function (part) {
+                if (part) hidden[part] = true;
+            });
+        } catch (ignore) {}
+        state.staffHiddenPlaces = hidden;
+        state.staffHiddenProject = state.projectKey;
+    }
+
+    function staffPlaceHidden(placeId) {
+        loadStaffHidden();
+        return !!state.staffHiddenPlaces[String(placeId || 0)];
+    }
+
+    function toggleStaffPlace(placeId) {
+        loadStaffHidden();
+        var id = String(placeId || 0);
+        if (state.staffHiddenPlaces[id]) delete state.staffHiddenPlaces[id];
+        else state.staffHiddenPlaces[id] = true;
+        try {
+            localStorage.setItem(staffHiddenKey(), Object.keys(state.staffHiddenPlaces).join(','));
+        } catch (ignore) {}
+        renderFrame();
+    }
+
+    function staffPlaceHead(placeId, label, count) {
+        var box = el('div', 'asset-tree-roster-branch');
+        var hidden = staffPlaceHidden(placeId);
+        var movable = !!(state.canEdit && label);
+        if (movable) {
+            var grip = button('', 'asset-tree-roster-grip', function () {});
+            grip.title = t('staffDrag');
+            grip.setAttribute('aria-label', t('staffDrag'));
+            grip.appendChild(el('i'));
+            grip.addEventListener('mousedown', function (event) { beginBranchReorder(placeId, event); });
+            box.appendChild(grip);
+        }
+        var fold = button(hidden ? '\u25B8' : '\u25BE', 'asset-tree-roster-fold' + (hidden ? ' is-hidden' : ''), function (event) {
+            event.stopPropagation();
+            toggleStaffPlace(placeId);
+        });
+        fold.title = hidden ? t('staffPlaceShow') : t('staffPlaceHide');
+        fold.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+        fold.setAttribute('aria-label', hidden ? t('staffPlaceShow') : t('staffPlaceHide'));
+        fold.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        box.appendChild(fold);
+        var title = el('strong', movable ? 'is-drag' : null, label);
+        if (movable) {
+            title.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                beginBranchReorder(placeId, event);
+            });
+        }
+        box.appendChild(title);
+        if (hidden && count) {
+            var badge = el('span', 'asset-tree-roster-fold-count', String(count));
+            badge.title = t('staffPlaceHidden', count);
+            box.appendChild(badge);
+        }
+        if (state.canEdit) {
+            var plus = button('+', 'asset-tree-roster-branch-add', function (event) {
+                event.stopPropagation();
+                openStaffBranchAdd(placeId, plus);
+            });
+            plus.title = t('staffPlaceAdd');
+            plus.setAttribute('aria-label', t('staffPlaceAdd'));
+            plus.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            box.appendChild(plus);
+            if (placeId && !count && staffPlaceOrderKeys().indexOf(String(placeId)) >= 0) {
+                var drop = button('\u00D7', 'asset-tree-roster-remove', function (event) {
+                    event.stopPropagation();
+                    var id = String(parseInt(placeId, 10) || 0);
+                    saveStaffPlaceOrder(staffPlaceOrderKeys().filter(function (key) { return key !== id; }), false);
+                });
+                drop.title = t('staffBranchRemove');
+                drop.setAttribute('aria-label', t('staffBranchRemove'));
+                drop.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+                box.appendChild(drop);
+            }
+        }
+        return box;
+    }
+
+    function staffCellKey(userKey, iso) {
+        return userKey + '|' + iso;
+    }
+
+    function staffCellSelected(userKey, iso) {
+        var map = state.staffSelection && state.staffSelection.map;
+        return !!(map && map[staffCellKey(userKey, iso)]);
+    }
+
+    function staffSetSelection(pairs, anchorKey, activeKey) {
+        var map = {};
+        (pairs || []).forEach(function (pair) {
+            if (!pair || !pair.userKey || !pair.iso) return;
+            map[staffCellKey(pair.userKey, pair.iso)] = true;
+        });
+        var first = pairs && pairs.length ? staffCellKey(pairs[0].userKey, pairs[0].iso) : '';
+        var anchor = anchorKey || first;
+        state.staffSelection = { map: map, anchor: anchor, active: activeKey || anchor };
+    }
+
+    function staffVisibleGrid() {
+        var grouped = staffGroups();
+        var sections = staffSections(grouped);
+        var people = [];
+        var places = {};
+        sections.forEach(function (section) {
+            if (staffPlaceHidden(section.placeId)) return;
+            section.people.forEach(function (person) {
+                if (!person || !person.hours) return;
+                people.push(person);
+                places[person.userKey] = section.name || '';
+            });
+        });
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var days = [];
+        var day;
+        for (day = 1; day <= count; day++) days.push(isoDate(new Date(year, month - 1, day)));
+        return { people: people, days: days, places: places };
+    }
+
+    function staffIndexOf(list, value, read) {
+        var index;
+        for (index = 0; index < list.length; index++) {
+            if (read(list[index]) === value) return index;
+        }
+        return -1;
+    }
+
+    function staffRangePairs(userKey, iso, anchorKey) {
+        var grid = staffVisibleGrid();
+        var anchor = anchorKey || (state.staffSelection && state.staffSelection.anchor) || staffCellKey(userKey, iso);
+        var cut = anchor.indexOf('|');
+        var anchorUser = cut > 0 ? anchor.slice(0, cut) : userKey;
+        var anchorIso = cut > 0 ? anchor.slice(cut + 1) : iso;
+        var r1 = staffIndexOf(grid.people, anchorUser, function (person) { return person.userKey; });
+        var r2 = staffIndexOf(grid.people, userKey, function (person) { return person.userKey; });
+        var c1 = grid.days.indexOf(anchorIso);
+        var c2 = grid.days.indexOf(iso);
+        var active = staffCellKey(userKey, iso);
+        if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) {
+            return { pairs: [{ userKey: userKey, iso: iso }], anchor: active, active: active };
+        }
+        var pairs = [];
+        var row;
+        var col;
+        var fromR = Math.min(r1, r2);
+        var toR = Math.max(r1, r2);
+        var fromC = Math.min(c1, c2);
+        var toC = Math.max(c1, c2);
+        for (row = fromR; row <= toR; row++) {
+            for (col = fromC; col <= toC; col++) pairs.push({ userKey: grid.people[row].userKey, iso: grid.days[col] });
+        }
+        return { pairs: pairs, anchor: anchor, active: active };
+    }
+
+    function staffSelectRange(userKey, iso, anchorKey) {
+        var range = staffRangePairs(userKey, iso, anchorKey);
+        staffSetSelection(range.pairs, range.anchor, range.active);
+    }
+
+    function staffCommitPairs(pairs, anchorKey, activeKey, keep) {
+        if (!pairs || !pairs.length) return;
+        if (keep && state.staffSelection && state.staffSelection.map) {
+            var map = {};
+            Object.keys(state.staffSelection.map).forEach(function (key) { map[key] = true; });
+            pairs.forEach(function (pair) {
+                if (!pair || !pair.userKey || !pair.iso) return;
+                map[staffCellKey(pair.userKey, pair.iso)] = true;
+            });
+            var first = staffCellKey(pairs[0].userKey, pairs[0].iso);
+            state.staffSelection = { map: map, anchor: anchorKey || first, active: activeKey || first };
+            return;
+        }
+        staffSetSelection(pairs, anchorKey, activeKey);
+    }
+
+    function staffClearSelection() {
+        state.staffSelection = null;
+        state.staffSelectAdd = false;
+        if (state.view === 'schedules') renderFrame();
+    }
+
+    if (!state.staffOutsideBound) {
+        state.staffOutsideBound = true;
+        document.addEventListener('mousedown', function (event) {
+            if (!state.staffSelection || event.button !== 0) return;
+            var target = event.target;
+            if (!target || !target.closest) return;
+            if (target.closest('.asset-tree-roster-menu, .asset-tree-roster-menu-back')) return;
+            if (target.closest('.asset-tree-staff-sheet-tools, .asset-tree-roster-pattern-wrap, .asset-tree-staff-excel')) return;
+            if (target.closest('td[data-staff-day], th.asset-tree-roster-day, th.asset-tree-roster-name')) return;
+            staffClearSelection();
+        }, true);
+    }
+
+    function staffPersonBundle(userKey) {
+        var row = staffHoursRow(userKey);
+        if (!row) return null;
+        var person = { userKey: userKey, hours: row, leaves: [] };
+        (state.staffRows || []).forEach(function (item) {
+            if (item && item.userKey === userKey && item.kind === 'leave') person.leaves.push(item);
+        });
+        return person;
+    }
+
+    function staffDropDay(marks, person, iso) {
+        var date = parseIsoDate(iso);
+        var natural = date ? staffNatural(person, iso, date) : 'off';
+        delete marks._hours[iso];
+        if (natural && natural !== 'off') marks[iso] = 'off';
+        else delete marks[iso];
+    }
+
+    function staffEraseDays(pairs) {
+        var byUser = {};
+        var order = [];
+        (pairs || []).forEach(function (pair) {
+            if (!pair || !pair.userKey || !pair.iso) return;
+            if (!byUser[pair.userKey]) {
+                byUser[pair.userKey] = [];
+                order.push(pair.userKey);
+            }
+            if (byUser[pair.userKey].indexOf(pair.iso) < 0) byUser[pair.userKey].push(pair.iso);
+        });
+        if (!order.length) {
+            notify(t('staffEraseNeed'));
+            return;
+        }
+        order.forEach(function (userKey) {
+            var person = staffPersonBundle(userKey);
+            if (!person) return;
+            var marks = parseDayMarks(person.hours.marks);
+            byUser[userKey].forEach(function (iso) { staffDropDay(marks, person, iso); });
+            saveStaffHours(userKey, person.hours.weekdays, person.hours.hours || 8, packDayMarks(marks), person.hours.startOn || '');
+        });
+    }
+
+    function staffEraseSelection() {
+        staffEraseDays(staffSelectionCells());
+    }
+
+    function staffPlaceDay(person, iso) {
+        if (!person || !person.hours || staffLeaveOn(person, iso)) return;
+        var row = person.hours;
+        var marks = parseDayMarks(row.marks);
+        var date = parseIsoDate(iso);
+        if (!date) return;
+        var id = staffVisible(person, iso, date, marks);
+        if (id && id !== 'off') {
+            staffDropDay(marks, person, iso);
+            saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), row.startOn || '');
+            return;
+        }
+        var brush = state.staffBrush || 'work';
+        if (brush === 'off') return;
+        var spec = staffOnceSpec();
+        var per = parseInt(row.hours, 10) || 8;
+        if (per < 1) per = 1;
+        if (per > 24) per = 24;
+        var startOn = row.startOn || '';
+        var mark = staffMarkById(brush);
+        var startsPattern = brush === 'work' || (mark && mark.factor !== 0);
+        if (!startOn && startsPattern) {
+            startOn = iso;
+            row.startOn = startOn;
+        }
+        if (spec) {
+            staffApplyOnce(marks, iso, brush, per, spec);
+        } else {
+            var natural = staffNatural(person, iso, date);
+            if (brush === natural) {
+                delete marks[iso];
+                delete marks._hours[iso];
+            } else {
+                marks[iso] = brush;
+                delete marks._hours[iso];
+            }
+        }
+        saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), startOn);
+    }
+
+    function staffSetDayHours(person, iso, raw) {
+        if (!person || !person.hours) return;
+        var row = person.hours;
+        var marks = parseDayMarks(row.marks);
+        var date = parseIsoDate(iso) || new Date();
+        var startOn = row.startOn || '';
+        var text = String(raw || '').replace(/^\s+|\s+$/g, '');
+        if (!text) {
+            delete marks._hours[iso];
+            saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), startOn);
+            return;
+        }
+        var per = parseInt(row.hours, 10) || 8;
+        if (per < 1) per = 1;
+        if (per > 24) per = 24;
+        var id = staffVisible(person, iso, date, marks);
+        var brush = state.staffBrush && state.staffBrush !== 'off' ? state.staffBrush : 'work';
+        if (!id || id === 'off') {
+            id = brush;
+            var mark = staffMarkById(id);
+            if (!startOn && (id === 'work' || (mark && mark.factor !== 0))) {
+                startOn = iso;
+                row.startOn = startOn;
+            }
+        }
+        var next = null;
+        if (/^[+-]\d{1,2}(\.\d{1,2})?$/.test(text)) next = staffDayHours(id, per) + parseFloat(text);
+        else if (/^\d{1,2}(\.\d{1,2})?$/.test(text)) next = parseFloat(text);
+        if (next == null || !isFinite(next)) return;
+        if (next < 0) next = 0;
+        if (next > 24) next = 24;
+        marks[iso] = id;
+        marks._hours[iso] = Math.round(next * 100) / 100;
+        saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(marks), startOn);
+    }
+
+    function staffToggleCell(userKey, iso) {
+        var map = {};
+        var existing = state.staffSelection && state.staffSelection.map;
+        if (existing) Object.keys(existing).forEach(function (key) { map[key] = true; });
+        var key = staffCellKey(userKey, iso);
+        if (map[key]) delete map[key];
+        else map[key] = true;
+        state.staffSelection = { map: map, anchor: key, active: key };
+    }
+
+    function staffSelectAll() {
+        var grid = staffVisibleGrid();
+        var pairs = [];
+        grid.people.forEach(function (person) {
+            grid.days.forEach(function (iso) { pairs.push({ userKey: person.userKey, iso: iso }); });
+        });
+        if (!pairs.length) return;
+        staffSetSelection(pairs, staffCellKey(pairs[0].userKey, pairs[0].iso));
+        if (state.view === 'schedules') renderFrame();
+    }
+
+    function staffCellFromPoint(x, y) {
+        var node = document.elementFromPoint(x, y);
+        while (node && node !== document.body) {
+            if (node.getAttribute && node.getAttribute('data-staff-day') && node.getAttribute('data-staff-user')) return node;
+            node = node.parentNode;
+        }
+        return null;
+    }
+
+    function staffSelectionCells() {
+        var grid = staffVisibleGrid();
+        var cells = [];
+        grid.people.forEach(function (person) {
+            grid.days.forEach(function (iso) {
+                if (staffCellSelected(person.userKey, iso)) cells.push({ userKey: person.userKey, iso: iso });
+            });
+        });
+        return cells;
+    }
+
+    function staffEarliestSelected(userKey) {
+        var grid = staffVisibleGrid();
+        var start = '';
+        grid.days.forEach(function (iso) {
+            if (!staffCellSelected(userKey, iso)) return;
+            if (!start || iso < start) start = iso;
+        });
+        return start;
+    }
+
+    function staffColumnSelected(iso) {
+        var grid = staffVisibleGrid();
+        if (!grid.people.length) return false;
+        var index;
+        for (index = 0; index < grid.people.length; index++) {
+            if (!staffCellSelected(grid.people[index].userKey, iso)) return false;
+        }
+        return true;
+    }
+
+    function staffRowSelected(userKey) {
+        var grid = staffVisibleGrid();
+        if (!grid.days.length) return false;
+        var index;
+        for (index = 0; index < grid.days.length; index++) {
+            if (!staffCellSelected(userKey, grid.days[index])) return false;
+        }
+        return true;
+    }
+
+    function staffSelectColumn(iso) {
+        var grid = staffVisibleGrid();
+        var pairs = [];
+        grid.people.forEach(function (person) {
+            pairs.push({ userKey: person.userKey, iso: iso });
+        });
+        if (!pairs.length) return;
+        var last = pairs[pairs.length - 1];
+        staffCommitPairs(pairs, staffCellKey(pairs[0].userKey, iso), staffCellKey(last.userKey, iso), state.staffSelectAdd);
+        state.staffSelectAdd = false;
+        if (state.view === 'schedules') renderFrame();
+    }
+
+    function staffSelectPerson(userKey) {
+        var grid = staffVisibleGrid();
+        var pairs = [];
+        grid.days.forEach(function (iso) {
+            pairs.push({ userKey: userKey, iso: iso });
+        });
+        if (!pairs.length) return;
+        staffCommitPairs(pairs, staffCellKey(userKey, grid.days[0]), staffCellKey(userKey, grid.days[grid.days.length - 1]), state.staffSelectAdd);
+        state.staffSelectAdd = false;
+        if (state.view === 'schedules') renderFrame();
+    }
+
+    function staffMonthStart() {
+        var month = state.scheduleMonth < 10 ? '0' + state.scheduleMonth : String(state.scheduleMonth);
+        return state.scheduleYear + '-' + month + '-01';
+    }
+
+    function staffApplyPattern(person, startIso, weekdays) {
+        if (!person || !person.hours || !startIso) return;
+        var pattern = staffPatternOf(person);
+        var packed = weekdays || (pattern.kind === 'week' ? pattern.weekdays : staffEncodePattern(pattern.work, pattern.rest));
+        var asShift = staffShiftPacked(packed);
+        if (asShift && asShift.work === 5 && asShift.rest === 2) packed = 31;
+        var marks = parseDayMarks(person.hours.marks);
+        person.hours.weekdays = packed;
+        person.hours.startOn = startIso;
+        staffStripMatchedMarks(person, marks);
+        saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
+    }
+
+    function staffFillForward(person, startIso) {
+        if (!person || !person.hours || !startIso) return;
+        var pattern = staffPatternOf(person);
+        var packed = pattern.kind === 'week' ? pattern.weekdays : staffEncodePattern(pattern.work, pattern.rest);
+        var asShift = staffShiftPacked(packed);
+        if (asShift && asShift.work === 5 && asShift.rest === 2) packed = 31;
+        var marks = parseDayMarks(person.hours.marks);
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var prior = {};
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var iso = isoDate(date);
+            prior[iso] = staffNatural(person, iso, date);
+            if (iso >= startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
+            if (marks[iso] && marks[iso] !== 'work' && marks[iso] !== 'off') continue;
+            if (!marks[iso] && prior[iso] && prior[iso] !== 'off' && prior[iso] !== 'leave') marks[iso] = prior[iso];
+        }
+        person.hours.weekdays = packed;
+        person.hours.startOn = startIso;
+        for (day = 1; day <= count; day++) {
+            date = new Date(year, month - 1, day);
+            iso = isoDate(date);
+            if (iso < startIso || staffLeaveOn(person, iso) || markCustom(marks, iso) != null) continue;
+            if (marks[iso] !== 'work' && marks[iso] !== 'off') continue;
+            if (marks[iso] === prior[iso]) {
+                delete marks[iso];
+                delete marks._hours[iso];
+            }
+        }
+        staffStripMatchedMarks(person, marks);
+        saveStaffHours(person.userKey, packed, person.hours.hours || 8, packDayMarks(marks), startIso);
+    }
+
+    function staffFillFromMenu(person, iso) {
+        var targets = [];
+        if (person && staffCellSelected(person.userKey, iso)) {
+            staffVisibleGrid().people.forEach(function (item) {
+                if (!item || !item.hours) return;
+                var start = staffEarliestSelected(item.userKey);
+                if (!start) return;
+                var fresh = staffPersonBundle(item.userKey) || item;
+                if (fresh && fresh.hours) targets.push({ person: fresh, start: start });
+            });
+        } else if (person && person.hours) {
+            targets.push({ person: person, start: iso });
+        }
+        targets.forEach(function (item) { staffFillForward(item.person, item.start); });
+    }
+
+    function staffPaintSelection(cells) {
+        var pairs = [];
+        (cells || []).forEach(function (cell) { pairs.push({ userKey: cell.userKey, iso: cell.iso }); });
+        if (!pairs.length) return;
+        var last = pairs[pairs.length - 1];
+        staffSetSelection(pairs, staffCellKey(pairs[0].userKey, pairs[0].iso), staffCellKey(last.userKey, last.iso));
+    }
+
+    function staffAnchorFromPaint(person, days) {
+        var pattern = staffPatternOf(person);
+        var work = pattern.work || 5;
+        var rest = pattern.rest || 2;
+        var least = work < 2 ? 1 : 2;
+        if (!days || days.length < least || days.length > work) return null;
+        var sorted = days.slice().sort();
+        var first = parseIsoDate(sorted[0]);
+        if (!first) return null;
+        var index;
+        for (index = 1; index < sorted.length; index++) {
+            if (isoDate(shiftDays(first, index)) !== sorted[index]) return null;
+        }
+        return { weekdays: staffEncodePattern(work, rest), startOn: sorted[0] };
+    }
+
+    function staffStripMatchedMarks(person, marks) {
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var iso = isoDate(date);
+            if (!marks[iso] || markCustom(marks, iso) != null) continue;
+            if (marks[iso] !== 'work' && marks[iso] !== 'off') continue;
+            if (marks[iso] === staffNatural(person, iso, date)) {
+                delete marks[iso];
+                delete marks._hours[iso];
+            }
+        }
+    }
+
+    function staffApplyOnce(marks, iso, brush, per, spec) {
+        marks[iso] = brush;
+        var base = staffDayHours(brush, per);
+        var next = spec.mode === 'delta' ? base + spec.value : spec.value;
+        if (next < 0) next = 0;
+        if (next > 24) next = 24;
+        marks._hours[iso] = Math.round(next * 100) / 100;
+    }
+
+    function paintStaffDays(person, isos, erase) {
+        if (!person.hours) return;
+        var marks = parseDayMarks(person.hours.marks);
+        var brush = state.staffBrush || 'work';
+        var spec = staffOnceSpec();
+        var per = parseInt(person.hours.hours, 10) || 8;
+        if (per < 1) per = 1;
+        if (per > 24) per = 24;
+        var paintedWork = [];
+        isos.forEach(function (iso) {
+            var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+            if (!match) return;
+            var date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+            var natural = staffNatural(person, iso, date);
+            if (erase) {
+                delete marks[iso];
+                delete marks._hours[iso];
+                if (natural === brush) marks[iso] = 'off';
+            } else if (spec && brush !== 'off') {
+                staffApplyOnce(marks, iso, brush, per, spec);
+            } else if (brush === 'work') {
+                if (brush === natural) {
+                    delete marks[iso];
+                    delete marks._hours[iso];
+                } else {
+                    marks[iso] = brush;
+                    delete marks._hours[iso];
+                }
+                paintedWork.push(iso);
+            } else if (brush === natural) {
+                delete marks[iso];
+                delete marks._hours[iso];
+            } else {
+                marks[iso] = brush;
+                delete marks._hours[iso];
+            }
+        });
+        var weekdays = person.hours.weekdays;
+        var startOn = person.hours.startOn;
+        if (!erase && !spec && brush === 'work' && paintedWork.length && !startOn) {
+            var anchored = staffAnchorFromPaint(person, paintedWork);
+            if (!anchored) {
+                var sortedPaint = paintedWork.slice().sort();
+                var pattern = staffPatternOf(person);
+                anchored = { weekdays: staffEncodePattern(pattern.work, pattern.rest), startOn: sortedPaint[0] };
+            }
+            weekdays = anchored.weekdays;
+            startOn = anchored.startOn;
+            person.hours.weekdays = weekdays;
+            person.hours.startOn = startOn;
+            staffStripMatchedMarks(person, marks);
+        }
+        saveStaffHours(person.userKey, weekdays, person.hours.hours || 8, packDayMarks(marks), startOn);
+    }
+
+    function paintStaffCells(cells, erase) {
+        var byUser = {};
+        var order = [];
+        (cells || []).forEach(function (cell) {
+            if (!cell || !cell.userKey || !cell.iso) return;
+            if (!byUser[cell.userKey]) {
+                byUser[cell.userKey] = [];
+                order.push(cell.userKey);
+            }
+            if (byUser[cell.userKey].indexOf(cell.iso) < 0) byUser[cell.userKey].push(cell.iso);
+        });
+        staffPaintSelection(cells);
+        order.forEach(function (userKey) {
+            var row = staffHoursRow(userKey);
+            if (!row) return;
+            var person = { userKey: userKey, hours: row, leaves: [] };
+            (state.staffRows || []).forEach(function (item) {
+                if (item && item.userKey === userKey && item.kind === 'leave') person.leaves.push(item);
+            });
+            paintStaffDays(person, byUser[userKey], erase);
+        });
+    }
+
+    function staffClearClickTimer() {
+        if (state.staffClickTimer) {
+            clearTimeout(state.staffClickTimer);
+            state.staffClickTimer = null;
+        }
+    }
+
+    function beginStaffPaint(person, iso, event) {
+        if (!person.hours || event.button !== 0) return;
+        event.preventDefault();
+        if (event.detail > 1) {
+            staffClearClickTimer();
+            openStaffHourEditor(person, iso, event.currentTarget);
+            return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+            staffClearClickTimer();
+            staffToggleCell(person.userKey, iso);
+            renderFrame();
+            return;
+        }
+        var adding = !!state.staffSelectAdd;
+        if (!adding) {
+            state.staffSelection = null;
+            staffMarkSelectedCells();
+        }
+        var startKey = staffCellKey(person.userKey, iso);
+        var base = {};
+        if (adding && state.staffSelection && state.staffSelection.map) {
+            Object.keys(state.staffSelection.map).forEach(function (key) { base[key] = true; });
+        }
+        var moved = false;
+        function extend(ev) {
+            var node = staffCellFromPoint(ev.clientX, ev.clientY);
+            if (!node) return;
+            var user = node.getAttribute('data-staff-user');
+            var day = node.getAttribute('data-staff-day');
+            var key = staffCellKey(user, day);
+            if (key === startKey && !moved) return;
+            moved = true;
+            staffClearClickTimer();
+            base[startKey] = true;
+            base[key] = true;
+            state.staffSelection = { map: base, anchor: startKey, active: key };
+            staffMarkSelectedCells();
+        }
+        function finish() {
+            document.removeEventListener('mousemove', extend);
+            document.removeEventListener('mouseup', finish);
+            if (adding) state.staffSelectAdd = false;
+            if (moved) {
+                renderFrame();
                 return;
             }
-            if (value !== person.hours.hours) saveStaffHours(person.userKey, person.hours.weekdays, value);
-        });
-        hoursField.appendChild(hours);
-        card.appendChild(hoursField);
-        person.leaves.forEach(function (leave) {
-            var line = el('div', 'asset-tree-staff-leave');
-            line.appendChild(el('span', null, t('staffLeave') + ' ' + formatFieldDate(leave.startOn) + ' \u2013 ' + formatFieldDate(leave.endOn)));
-            if (state.canEdit) {
-                line.appendChild(button(t('delete'), 'asset-tree-btn slim', function () {
-                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + leave.id, null, function (status, payload) {
-                        if (status >= 200 && status < 300) reloadStaff();
-                        else notify((payload && payload.message) || t('errorTitle'));
-                    });
-                }));
+            state.staffClickTimer = setTimeout(function () {
+                state.staffClickTimer = null;
+                var fresh = staffPersonBundle(person.userKey);
+                if (fresh) staffPlaceDay(fresh, iso);
+            }, 240);
+        }
+        document.addEventListener('mousemove', extend);
+        document.addEventListener('mouseup', finish);
+    }
+
+    function closeStaffCellMenu() {
+        var menu = document.querySelector('.asset-tree-roster-menu');
+        var back = document.querySelector('.asset-tree-roster-menu-back');
+        if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+        if (back && back.parentNode) back.parentNode.removeChild(back);
+    }
+
+    function openStaffCellMenu(person, iso, x, y) {
+        closeStaffCellMenu();
+        staffClearClickTimer();
+        if (!state.staffMenuBound) {
+            state.staffMenuBound = true;
+            function dismiss(event) {
+                var menu = document.querySelector('.asset-tree-roster-menu');
+                if (!menu) return;
+                if (event && event.target && menu.contains(event.target)) return;
+                closeStaffCellMenu();
             }
-            card.appendChild(line);
+            document.addEventListener('mousedown', dismiss, true);
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' || event.keyCode === 27) closeStaffCellMenu();
+            }, true);
+            document.addEventListener('scroll', function () { closeStaffCellMenu(); }, true);
+            window.addEventListener('resize', closeStaffCellMenu);
+        }
+        var back = el('div', 'asset-tree-roster-menu-back');
+        back.addEventListener('contextmenu', function (event) {
+            event.preventDefault();
+            closeStaffCellMenu();
+        });
+        document.body.appendChild(back);
+        var menu = el('div', 'asset-tree-roster-menu');
+        function item(label, enabled, danger, action) {
+            var node = button(label, 'asset-tree-roster-menu-item' + (danger ? ' is-danger' : ''), function () {
+                closeStaffCellMenu();
+                if (enabled) action();
+            });
+            node.disabled = !enabled;
+            menu.appendChild(node);
+        }
+        var key = staffCellKey(person.userKey, iso);
+        item(t('staffSelectClear'), true, false, function () { staffClearSelection(); });
+        item(t('staffMenuSelect'), true, false, function () {
+            staffSetSelection([{ userKey: person.userKey, iso: iso }], key, key);
+            if (state.view === 'schedules') renderFrame();
+        });
+        item(t('staffMenuDelete'), !!state.canEdit, true, function () {
+            var cells = staffCellSelected(person.userKey, iso) ? staffSelectionCells() : [{ userKey: person.userKey, iso: iso }];
+            staffEraseDays(cells);
+        });
+        item(t('staffSelectAdd'), true, false, function () {
+            state.staffSelectAdd = true;
+            staffCommitPairs([{ userKey: person.userKey, iso: iso }], key, key, true);
+            if (state.view === 'schedules') renderFrame();
+        });
+        item(t('staffSelectAll'), true, false, function () { staffSelectAll(); });
+        item(t('staffFillRow'), !!state.canEdit && !!person.hours, false, function () {
+            var fresh = staffPersonBundle(person.userKey) || person;
+            staffFillFromMenu(fresh, iso);
         });
         if (state.canEdit && person.hours) {
-            var add = el('div', 'asset-tree-staff-leave');
-            var from = document.createElement('input');
-            from.type = 'date';
-            from.setAttribute('aria-label', t('staffLeaveFrom'));
-            var to = document.createElement('input');
-            to.type = 'date';
-            to.setAttribute('aria-label', t('staffLeaveTo'));
-            var start = isoDate(new Date(state.scheduleYear, state.scheduleMonth - 1, 1));
-            from.value = start;
-            to.value = start;
-            add.appendChild(el('span', null, t('staffLeave')));
-            add.appendChild(from);
-            add.appendChild(to);
-            add.appendChild(button(t('staffLeaveAdd'), 'asset-tree-btn slim', function () {
-                if (!from.value || !to.value) return;
-                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/leave', {
-                    userKey: person.userKey,
-                    startOn: from.value,
-                    endOn: to.value
-                }, function (status, payload) {
-                    if (status >= 200 && status < 300) reloadStaff();
-                    else notify((payload && payload.message) || t('errorTitle'));
-                });
-            }));
-            card.appendChild(add);
+            var hoursRow = el('label', 'asset-tree-roster-menu-hours');
+            hoursRow.appendChild(el('span', null, t('staffMenuHours')));
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.maxLength = 5;
+            input.placeholder = '8';
+            input.title = t('staffMenuHoursHint');
+            input.setAttribute('aria-label', t('staffMenuHoursHint'));
+            var marks = parseDayMarks(person.hours.marks);
+            var custom = markCustom(marks, iso);
+            var shown = staffDayValue(person, iso, parseIsoDate(iso), marks);
+            if (custom != null) input.value = formatStaffHours(custom);
+            else if (shown && !shown.blank && shown.value > 0) input.value = formatStaffHours(shown.value);
+            input.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            input.addEventListener('keydown', function (event) {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    var fresh = staffPersonBundle(person.userKey);
+                    closeStaffCellMenu();
+                    if (fresh) staffSetDayHours(fresh, iso, input.value);
+                }
+                if (event.key === 'Escape') closeStaffCellMenu();
+            });
+            hoursRow.appendChild(input);
+            menu.appendChild(hoursRow);
         }
-        return card;
+        document.body.appendChild(menu);
+        var rect = menu.getBoundingClientRect();
+        var left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+        var top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+    }
+
+    function staffMarkSelectedCells() {
+        var nodes = document.querySelectorAll('#asset-tree-app td[data-staff-day]');
+        var index;
+        for (index = 0; index < nodes.length; index++) {
+            var node = nodes[index];
+            var on = staffCellSelected(node.getAttribute('data-staff-user'), node.getAttribute('data-staff-day'));
+            if (on) node.classList.add('is-selected');
+            else node.classList.remove('is-selected');
+        }
+    }
+
+    function beginStaffReorder(userKey, event) {
+        if (!state.canEdit || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        var origin = event.currentTarget;
+        while (origin && origin.tagName !== 'TR') origin = origin.parentNode;
+        if (!origin) return;
+        var startY = event.clientY;
+        var dragging = false;
+        var target = null;
+        var placeAfter = false;
+        function clearMarks() {
+            var rows = document.querySelectorAll('.asset-tree-roster-person, tr.asset-tree-roster-head, tr.asset-tree-roster-branch-row');
+            var index;
+            for (index = 0; index < rows.length; index++) rows[index].classList.remove('is-drop-before', 'is-drop-after');
+        }
+        function rowAt(node) {
+            while (node && node !== document.body) {
+                if (node.tagName === 'TR' && node.classList && (
+                    node.classList.contains('asset-tree-roster-person') ||
+                    node.classList.contains('asset-tree-roster-head') ||
+                    node.classList.contains('asset-tree-roster-branch-row')
+                ) && node.getAttribute('data-place') != null) return node;
+                node = node.parentNode;
+            }
+            return null;
+        }
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
+            if (!dragging) closeStaffBranchAdd();
+            dragging = true;
+            origin.classList.add('is-dragging');
+            var row = rowAt(document.elementFromPoint(ev.clientX, ev.clientY));
+            clearMarks();
+            target = row && row !== origin ? row : null;
+            if (!target) return;
+            if (target.classList.contains('asset-tree-roster-person')) {
+                var box = target.getBoundingClientRect();
+                placeAfter = ev.clientY > box.top + box.height / 2;
+                target.classList.add(placeAfter ? 'is-drop-after' : 'is-drop-before');
+            } else {
+                placeAfter = false;
+                target.classList.add('is-drop-after');
+            }
+        }
+        function up() {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            clearMarks();
+            origin.classList.remove('is-dragging');
+            if (!dragging || !target) return;
+            var destPlace = target.getAttribute('data-place');
+            var originPlace = origin.getAttribute('data-place') || '0';
+            if (destPlace == null) return;
+            var keys = [];
+            var rows = document.querySelectorAll('.asset-tree-roster-person');
+            var index;
+            for (index = 0; index < rows.length; index++) {
+                var key = rows[index].getAttribute('data-staff-user');
+                if (key && key !== userKey) keys.push(key);
+            }
+            if (target.classList.contains('asset-tree-roster-person')) {
+                var dest = target.getAttribute('data-staff-user');
+                var at = keys.indexOf(dest);
+                if (at < 0) return;
+                keys.splice(placeAfter ? at + 1 : at, 0, userKey);
+            } else {
+                var spot = keys.length;
+                for (index = 0; index < rows.length; index++) {
+                    if (rows[index] === origin) continue;
+                    if (rows[index].getAttribute('data-place') !== destPlace) continue;
+                    var found = keys.indexOf(rows[index].getAttribute('data-staff-user'));
+                    if (found >= 0) spot = found;
+                    break;
+                }
+                keys.splice(spot, 0, userKey);
+            }
+            if (String(destPlace) !== String(originPlace)) {
+                var hoursRow = staffHoursRow(userKey);
+                if (hoursRow) saveStaffHours(userKey, hoursRow.weekdays, hoursRow.hours, undefined, hoursRow.startOn, parseInt(destPlace, 10) || 0);
+            }
+            saveStaffOrder(keys);
+        }
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    }
+
+    function beginBranchReorder(placeId, event) {
+        if (!state.canEdit || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        var origin = event.currentTarget;
+        while (origin && origin.tagName !== 'TR') origin = origin.parentNode;
+        if (!origin || origin.getAttribute('data-place') == null) return;
+        var dragged = String(placeId || 0);
+        var startY = event.clientY;
+        var dragging = false;
+        var target = null;
+        var placeAfter = false;
+        function branchRows() {
+            return document.querySelectorAll('tr.asset-tree-roster-head[data-place], tr.asset-tree-roster-branch-row[data-place]');
+        }
+        function clearMarks() {
+            var rows = branchRows();
+            var index;
+            for (index = 0; index < rows.length; index++) rows[index].classList.remove('is-drop-before', 'is-drop-after');
+        }
+        function headerFor(node) {
+            var row = null;
+            while (node && node !== document.body) {
+                if (node.tagName === 'TR') {
+                    row = node;
+                    break;
+                }
+                node = node.parentNode;
+            }
+            if (!row) return null;
+            if (row.getAttribute('data-place') != null && (row.classList.contains('asset-tree-roster-head') || row.classList.contains('asset-tree-roster-branch-row'))) {
+                return row;
+            }
+            if (!row.classList.contains('asset-tree-roster-person')) return null;
+            var cursor = row.previousElementSibling;
+            while (cursor) {
+                if (cursor.getAttribute && cursor.getAttribute('data-place') != null && cursor.classList && (cursor.classList.contains('asset-tree-roster-branch-row') || cursor.classList.contains('asset-tree-roster-head'))) {
+                    return cursor;
+                }
+                cursor = cursor.previousElementSibling;
+            }
+            return document.querySelector('tr.asset-tree-roster-head[data-place]');
+        }
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
+            if (!dragging) closeStaffBranchAdd();
+            dragging = true;
+            origin.classList.add('is-dragging');
+            var row = headerFor(document.elementFromPoint(ev.clientX, ev.clientY));
+            clearMarks();
+            target = row && row !== origin ? row : null;
+            if (!target) return;
+            var box = target.getBoundingClientRect();
+            placeAfter = ev.clientY > box.top + box.height / 2;
+            target.classList.add(placeAfter ? 'is-drop-after' : 'is-drop-before');
+        }
+        function up() {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            clearMarks();
+            origin.classList.remove('is-dragging');
+            if (!dragging || !target) return;
+            var ids = [];
+            var rows = branchRows();
+            var index;
+            for (index = 0; index < rows.length; index++) {
+                var id = rows[index].getAttribute('data-place');
+                if (id != null && id !== dragged) ids.push(id);
+            }
+            var dest = target.getAttribute('data-place');
+            var at = ids.indexOf(dest);
+            if (at < 0) return;
+            ids.splice(placeAfter ? at + 1 : at, 0, dragged);
+            saveStaffPlaceOrder(ids);
+        }
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    }
+
+    function staffPatternNumbers(person, work, rest) {
+        var box = el('span', 'asset-tree-roster-pattern-custom');
+        function field(value, label) {
+            var input = document.createElement('input');
+            input.type = 'number';
+            input.min = '1';
+            input.max = '15';
+            input.value = String(value);
+            input.className = 'asset-tree-roster-pattern-num';
+            input.title = label;
+            input.setAttribute('aria-label', label);
+            input.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            return input;
+        }
+        var workInput = field(work, t('staffPatternWork'));
+        var restInput = field(rest, t('staffPatternRest'));
+        function commit() {
+            var nextWork = parseInt(workInput.value, 10) || 0;
+            var nextRest = parseInt(restInput.value, 10) || 0;
+            if (nextWork < 1 || nextWork > 15 || nextRest < 1 || nextRest > 15) return;
+            var packed = staffEncodePattern(nextWork, nextRest);
+            var anchor = person.hours.startOn || '';
+            if (anchor) staffApplyPattern(person, anchor, packed);
+            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
+        }
+        workInput.addEventListener('change', commit);
+        restInput.addEventListener('change', commit);
+        box.appendChild(workInput);
+        box.appendChild(el('span', null, '/'));
+        box.appendChild(restInput);
+        return box;
+    }
+
+    function staffPatternControl(person) {
+        var pattern = staffPatternOf(person);
+        var known = false;
+        var current = pattern.work + '/' + pattern.rest;
+        STAFF_PATTERN_PRESETS.forEach(function (pair) {
+            if (pair[0] === pattern.work && pair[1] === pattern.rest) known = true;
+        });
+        if (pattern.kind === 'week') {
+            known = true;
+            current = '5/2';
+        }
+        var wrap = el('span', 'asset-tree-roster-pattern-wrap');
+        var select = document.createElement('select');
+        select.className = 'asset-tree-roster-pattern';
+        select.title = t('staffPatternHint');
+        select.setAttribute('aria-label', t('staffPatternHint'));
+        STAFF_PATTERN_PRESETS.forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0] + '/' + pair[1];
+            option.textContent = option.value;
+            select.appendChild(option);
+        });
+        var custom = document.createElement('option');
+        custom.value = 'custom';
+        custom.textContent = t('staffPatternCustom');
+        select.appendChild(custom);
+        select.value = known ? current : 'custom';
+        select.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        var nudge = button('+1', 'asset-tree-roster-pattern', function () {
+            if (!person.hours.startOn) return;
+            var currentPattern = staffPatternOf(person);
+            var anchor = parseIsoDate(person.hours.startOn);
+            if (!anchor) return;
+            saveStaffHours(person.userKey, staffEncodePattern(currentPattern.work, currentPattern.rest), person.hours.hours || 8, undefined, isoDate(shiftDays(anchor, 1)));
+        });
+        nudge.title = t('staffShiftHint');
+        nudge.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        select.addEventListener('change', function () {
+            if (select.value === 'custom') {
+                if (!wrap.querySelector('.asset-tree-roster-pattern-custom')) {
+                    wrap.insertBefore(staffPatternNumbers(person, pattern.work || 5, pattern.rest || 2), nudge);
+                }
+                return;
+            }
+            var bits = select.value.split('/');
+            var packed = staffEncodePattern(bits[0], bits[1]);
+            var anchor = person.hours.startOn || '';
+            if (anchor) staffApplyPattern(person, anchor, packed);
+            else saveStaffHours(person.userKey, packed, person.hours.hours || 8, undefined, '');
+        });
+        wrap.appendChild(select);
+        if (!known) wrap.appendChild(staffPatternNumbers(person, pattern.work, pattern.rest));
+        if (person.hours.startOn) {
+            var from = el('span', 'asset-tree-roster-pattern-from', t('staffFillFrom', staffDayShort(person.hours.startOn)));
+            from.title = t('staffFillHint');
+            wrap.appendChild(from);
+        }
+        wrap.appendChild(nudge);
+        return wrap;
+    }
+
+    function openStaffHourEditor(person, iso, hit) {
+        if (!person.hours) return;
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'asset-tree-roster-hour-edit';
+        input.maxLength = 5;
+        input.placeholder = '-2';
+        input.title = t('staffOnceHint');
+        input.setAttribute('aria-label', t('staffOnce'));
+        var marks = parseDayMarks(person.hours.marks);
+        var custom = markCustom(marks, iso);
+        if (custom != null) input.value = formatStaffHours(custom);
+        hit.parentNode.replaceChild(input, hit);
+        input.focus();
+        input.select();
+        var done = false;
+        function commit(save) {
+            if (done) return;
+            done = true;
+            if (!save) {
+                renderFrame();
+                return;
+            }
+            var raw = String(input.value || '').trim();
+            var row = staffHoursRow(person.userKey) || person.hours;
+            var map = parseDayMarks(row.marks);
+            var date = parseIsoDate(iso) || new Date();
+            if (!raw) {
+                delete map[iso];
+                delete map._hours[iso];
+            } else {
+                var per = parseInt(row.hours, 10) || 8;
+                var id = staffVisible(person, iso, date, map);
+                if (!id || id === 'off') id = state.staffBrush && state.staffBrush !== 'off' ? state.staffBrush : 'work';
+                var next = null;
+                if (/^[+-]\d{1,2}(\.\d{1,2})?$/.test(raw)) next = staffDayHours(id, per) + parseFloat(raw);
+                else if (/^\d{1,2}(\.\d{1,2})?$/.test(raw)) next = parseFloat(raw);
+                if (next == null || !isFinite(next)) {
+                    renderFrame();
+                    return;
+                }
+                if (next < 0) next = 0;
+                if (next > 24) next = 24;
+                map[iso] = id;
+                map._hours[iso] = Math.round(next * 100) / 100;
+            }
+            saveStaffHours(person.userKey, row.weekdays, row.hours || 8, packDayMarks(map), row.startOn);
+        }
+        input.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+        input.addEventListener('keydown', function (event) {
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                commit(true);
+            }
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                commit(false);
+            }
+        });
+        input.addEventListener('blur', function () {
+            if (!document.body.contains(input)) return;
+            commit(true);
+        });
+    }
+
+    function staffCopyText(text) {
+        var area = document.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', 'readonly');
+        area.style.position = 'fixed';
+        area.style.left = '-9999px';
+        document.body.appendChild(area);
+        area.select();
+        try { document.execCommand('copy'); } catch (ignore) {}
+        if (area.parentNode) area.parentNode.removeChild(area);
+    }
+
+    function staffCopySelection() {
+        var grid = staffVisibleGrid();
+        var chosen = [];
+        grid.people.forEach(function (person, row) {
+            var marks = parseDayMarks(person.hours.marks);
+            grid.days.forEach(function (iso, col) {
+                if (!staffCellSelected(person.userKey, iso)) return;
+                var date = parseIsoDate(iso);
+                var id = staffVisible(person, iso, date, marks);
+                chosen.push({ row: row, col: col, id: id || 'off', hours: markCustom(marks, iso) });
+            });
+        });
+        if (!chosen.length) {
+            notify(t('staffCopyEmpty'));
+            return false;
+        }
+        var minR = chosen[0].row;
+        var minC = chosen[0].col;
+        var maxR = minR;
+        var maxC = minC;
+        chosen.forEach(function (cell) {
+            if (cell.row < minR) minR = cell.row;
+            if (cell.col < minC) minC = cell.col;
+            if (cell.row > maxR) maxR = cell.row;
+            if (cell.col > maxC) maxC = cell.col;
+        });
+        state.staffClip = chosen.map(function (cell) {
+            return { dr: cell.row - minR, dc: cell.col - minC, id: cell.id, hours: cell.hours };
+        });
+        var lines = [];
+        var lineRow;
+        var lineCol;
+        for (lineRow = minR; lineRow <= maxR; lineRow++) {
+            var cols = [];
+            for (lineCol = minC; lineCol <= maxC; lineCol++) {
+                var found = null;
+                chosen.forEach(function (cell) {
+                    if (cell.row === lineRow && cell.col === lineCol) found = cell;
+                });
+                if (!found || !found.id || found.id === 'off') cols.push('');
+                else if (found.hours != null) cols.push(formatStaffHours(found.hours));
+                else cols.push(staffMarkName(staffMarkById(found.id) || { id: found.id }));
+            }
+            lines.push(cols.join('\t'));
+        }
+        staffCopyText(lines.join('\n'));
+        return true;
+    }
+
+    function staffPasteSelection() {
+        if (!state.canEdit || !state.staffClip || !state.staffClip.length) return;
+        var grid = staffVisibleGrid();
+        var anchor = state.staffSelection && (state.staffSelection.active || state.staffSelection.anchor);
+        if (!anchor) return;
+        var cut = anchor.indexOf('|');
+        if (cut < 1) return;
+        var anchorUser = anchor.slice(0, cut);
+        var anchorIso = anchor.slice(cut + 1);
+        var row0 = staffIndexOf(grid.people, anchorUser, function (person) { return person.userKey; });
+        var col0 = grid.days.indexOf(anchorIso);
+        if (row0 < 0 || col0 < 0) return;
+        var byUser = {};
+        state.staffClip.forEach(function (cell) {
+            var person = grid.people[row0 + cell.dr];
+            var iso = grid.days[col0 + cell.dc];
+            if (!person || !iso || !person.hours) return;
+            if (!byUser[person.userKey]) byUser[person.userKey] = { person: person, marks: parseDayMarks(person.hours.marks), cells: [] };
+            var bucket = byUser[person.userKey];
+            if (!cell.id || cell.id === 'off') {
+                bucket.marks[iso] = 'off';
+                delete bucket.marks._hours[iso];
+            } else {
+                bucket.marks[iso] = cell.id;
+                if (cell.hours != null) bucket.marks._hours[iso] = cell.hours;
+                else delete bucket.marks._hours[iso];
+            }
+            bucket.cells.push({ userKey: person.userKey, iso: iso });
+        });
+        var painted = [];
+        Object.keys(byUser).forEach(function (userKey) {
+            var bucket = byUser[userKey];
+            saveStaffHours(userKey, bucket.person.hours.weekdays, bucket.person.hours.hours || 8, packDayMarks(bucket.marks), bucket.person.hours.startOn);
+            painted = painted.concat(bucket.cells);
+        });
+        if (painted.length) {
+            var last = painted[painted.length - 1];
+            staffSetSelection(painted, staffCellKey(painted[0].userKey, painted[0].iso), staffCellKey(last.userKey, last.iso));
+            if (state.view === 'schedules') renderFrame();
+        }
+    }
+
+    function staffUtf8(text) {
+        var encoded = unescape(encodeURIComponent(String(text == null ? '' : text)));
+        var bytes = new Uint8Array(encoded.length);
+        var index;
+        for (index = 0; index < encoded.length; index++) bytes[index] = encoded.charCodeAt(index) & 255;
+        return bytes;
+    }
+
+    function staffCrc32(bytes) {
+        if (!staffCrc32.table) {
+            var table = [];
+            var n;
+            var bit;
+            for (n = 0; n < 256; n++) {
+                var crc = n;
+                for (bit = 0; bit < 8; bit++) crc = (crc & 1) ? (0xedb88320 ^ (crc >>> 1)) : (crc >>> 1);
+                table[n] = crc >>> 0;
+            }
+            staffCrc32.table = table;
+        }
+        var sum = 0xffffffff;
+        var index;
+        for (index = 0; index < bytes.length; index++) sum = staffCrc32.table[(sum ^ bytes[index]) & 255] ^ (sum >>> 8);
+        return (sum ^ 0xffffffff) >>> 0;
+    }
+
+    function staffZip(files) {
+        var local = [];
+        var central = [];
+        var offset = 0;
+        function push(target, bytes) {
+            var index;
+            for (index = 0; index < bytes.length; index++) target.push(bytes[index] & 255);
+        }
+        function u16(target, value) { target.push(value & 255, (value >> 8) & 255); }
+        function u32(target, value) { target.push(value & 255, (value >> 8) & 255, (value >> 16) & 255, (value >>> 24) & 255); }
+        files.forEach(function (file) {
+            var name = staffUtf8(file.name);
+            var data = file.data;
+            var crc = staffCrc32(data);
+            var head = [];
+            u32(head, 0x04034b50);
+            u16(head, 20);
+            u16(head, 0);
+            u16(head, 0);
+            u16(head, 0);
+            u16(head, 33);
+            u32(head, crc);
+            u32(head, data.length);
+            u32(head, data.length);
+            u16(head, name.length);
+            u16(head, 0);
+            push(local, head);
+            push(local, name);
+            push(local, data);
+            var cent = [];
+            u32(cent, 0x02014b50);
+            u16(cent, 20);
+            u16(cent, 20);
+            u16(cent, 0);
+            u16(cent, 0);
+            u16(cent, 0);
+            u16(cent, 33);
+            u32(cent, crc);
+            u32(cent, data.length);
+            u32(cent, data.length);
+            u16(cent, name.length);
+            u16(cent, 0);
+            u16(cent, 0);
+            u16(cent, 0);
+            u16(cent, 0);
+            u32(cent, 0);
+            u32(cent, offset);
+            push(central, cent);
+            push(central, name);
+            offset += head.length + name.length + data.length;
+        });
+        var end = [];
+        u32(end, 0x06054b50);
+        u16(end, 0);
+        u16(end, 0);
+        u16(end, files.length);
+        u16(end, files.length);
+        u32(end, central.length);
+        u32(end, offset);
+        u16(end, 0);
+        var out = new Uint8Array(local.length + central.length + end.length);
+        var cursor = 0;
+        function copy(bytes) {
+            var index;
+            for (index = 0; index < bytes.length; index++) out[cursor++] = bytes[index];
+        }
+        copy(local);
+        copy(central);
+        copy(end);
+        return out;
+    }
+
+    function staffXml(text) {
+        return String(text == null ? '' : text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function staffColumnName(index) {
+        var name = '';
+        var n = index + 1;
+        while (n > 0) {
+            var rem = (n - 1) % 26;
+            name = String.fromCharCode(65 + rem) + name;
+            n = Math.floor((n - 1) / 26);
+        }
+        return name;
+    }
+
+    function staffSheetXml(headers, rows) {
+        function rowXml(values, number) {
+            var cells = '';
+            var index;
+            for (index = 0; index < values.length; index++) {
+                var value = values[index];
+                var ref = staffColumnName(index) + number;
+                if (typeof value === 'number' && isFinite(value)) cells += '<c r="' + ref + '"><v>' + value + '</v></c>';
+                else cells += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + staffXml(value) + '</t></is></c>';
+            }
+            return '<row r="' + number + '">' + cells + '</row>';
+        }
+        var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+        xml += rowXml(headers, 1);
+        var index;
+        for (index = 0; index < rows.length; index++) xml += rowXml(rows[index], index + 2);
+        xml += '</sheetData></worksheet>';
+        return staffUtf8(xml);
+    }
+
+    function downloadStaffBook() {
+        var grid = staffVisibleGrid();
+        if (!grid.people.length) {
+            notify(t('staffEmpty'));
+            return;
+        }
+        var headers = [t('staffExcelPerson'), t('staffPlace')];
+        grid.days.forEach(function (iso) { headers.push(String(parseInt(iso.slice(8), 10))); });
+        headers.push(t('staffDaysCol'), t('staffHoursCol'), t('staffNotes'));
+        var rows = [];
+        grid.people.forEach(function (person) {
+            var marks = parseDayMarks(person.hours.marks);
+            var tally = staffTally(person, state.scheduleYear, state.scheduleMonth);
+            var line = [person.userName || person.userKey, grid.places[person.userKey] || ''];
+            grid.days.forEach(function (iso) {
+                var date = parseIsoDate(iso);
+                var cell = staffDayValue(person, iso, date, marks);
+                if (!cell.id || cell.id === 'off' || cell.blank) line.push('');
+                else if (cell.value > 0) line.push(cell.value);
+                else line.push(staffMarkName(staffMarkById(cell.id) || { id: cell.id }));
+            });
+            line.push(tally.days);
+            line.push(Math.round(tally.hours * 100) / 100);
+            line.push(cleanStaffNote(person.hours.note));
+            rows.push(line);
+        });
+        var title = monthTitle(state.scheduleYear, state.scheduleMonth).replace(/[\\/:*?\[\]]/g, ' ').slice(0, 31) || 'Timesheet';
+        var sheet = staffSheetXml(headers, rows);
+        var book = staffZip([
+            { name: '[Content_Types].xml', data: staffUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>') },
+            { name: '_rels/.rels', data: staffUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>') },
+            { name: 'xl/workbook.xml', data: staffUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="' + staffXml(title) + '" sheetId="1" r:id="rId1"/></sheets></workbook>') },
+            { name: 'xl/_rels/workbook.xml.rels', data: staffUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>') },
+            { name: 'xl/styles.xml', data: staffUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>') },
+            { name: 'xl/worksheets/sheet1.xml', data: sheet }
+        ]);
+        var link = document.createElement('a');
+        var month = state.scheduleMonth < 10 ? '0' + state.scheduleMonth : String(state.scheduleMonth);
+        link.href = URL.createObjectURL(new Blob([book], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        link.download = 'tabel-' + (state.projectKey || 'staff') + '-' + state.scheduleYear + '-' + month + '.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function staffTypingTarget(node) {
+        if (!node || !node.tagName) return false;
+        var tag = node.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+        return !!node.isContentEditable;
+    }
+
+    function staffHotkeys(event) {
+        if (state.view !== 'schedules' || !rosterOn() || staffTypingTarget(event.target)) return;
+        if (document.querySelector('.asset-tree-backdrop')) return;
+        var key = event.key || '';
+        var command = event.ctrlKey || event.metaKey;
+        if (command && !event.altKey && (key === 'c' || key === 'C')) {
+            if (!staffSelectionCells().length) return;
+            event.preventDefault();
+            staffCopySelection();
+            return;
+        }
+        if (command && !event.altKey && (key === 'v' || key === 'V')) {
+            if (!state.canEdit || !state.staffClip || !state.staffClip.length || !state.staffSelection) return;
+            event.preventDefault();
+            staffPasteSelection();
+            return;
+        }
+        if (command && !event.altKey && (key === 'x' || key === 'X')) {
+            if (!state.canEdit || !staffSelectionCells().length) return;
+            event.preventDefault();
+            if (staffCopySelection()) staffEraseSelection();
+            return;
+        }
+        if (!command && !event.altKey && !event.shiftKey && (key === 'Delete' || event.keyCode === 46)) {
+            if (!state.canEdit || !staffSelectionCells().length) return;
+            event.preventDefault();
+            staffEraseSelection();
+        }
+    }
+
+    function staffSheetTools() {
+        var bar = el('div', 'asset-tree-staff-sheet-tools');
+        bar.appendChild(el('p', 'asset-tree-staff-fill-hint', t('staffFillHint')));
+        return bar;
+    }
+
+    function staffRosterRow(person, year, month, count, today) {
+        var row = person.hours || { weekdays: 31, hours: 8, id: 0, marks: '' };
+        var marks = parseDayMarks(row.marks);
+        var tally = staffTally(person, year, month);
+        var line = el('tr', 'asset-tree-roster-person');
+        line.setAttribute('data-staff-user', person.userKey);
+        var name = el('th', 'asset-tree-roster-name');
+        name.scope = 'row';
+        var identity = el('span', 'asset-tree-roster-id');
+        if (state.canEdit && person.hours) {
+            var grip = button('', 'asset-tree-roster-grip', function () {});
+            grip.title = t('staffDrag');
+            grip.setAttribute('aria-label', t('staffDrag'));
+            grip.appendChild(el('i'));
+            grip.addEventListener('mousedown', function (event) { beginStaffReorder(person.userKey, event); });
+            identity.appendChild(grip);
+        }
+        var who = el('span', 'asset-tree-roster-who', person.userName);
+        who.title = person.phone ? person.userName + ' \u00B7 ' + person.phone : person.userName;
+        who.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            staffSelectPerson(person.userKey);
+        });
+        identity.appendChild(who);
+        if (staffRowSelected(person.userKey)) name.className += ' is-selected';
+        if (state.canEdit && person.hours) {
+            identity.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                var node = event.target;
+                while (node && node !== identity) {
+                    if (node.tagName === 'INPUT' || node.tagName === 'BUTTON') return;
+                    node = node.parentNode;
+                }
+                beginStaffReorder(person.userKey, event);
+            });
+        }
+        var meta = el('span', 'asset-tree-roster-meta');
+        meta.appendChild(identity);
+        if (state.canEdit && person.hours) {
+            var hours = document.createElement('input');
+            hours.type = 'number';
+            hours.className = 'asset-tree-roster-hours';
+            hours.min = '1';
+            hours.max = '24';
+            hours.value = String(row.hours || 8);
+            hours.title = t('staffHours');
+            hours.setAttribute('aria-label', t('staffHours'));
+            hours.addEventListener('change', function () {
+                var value = parseInt(hours.value, 10) || 0;
+                if (value < 1 || value > 24) {
+                    hours.value = String(person.hours.hours || 8);
+                    return;
+                }
+                if (value !== person.hours.hours) {
+                    var pattern = staffPatternOf(person);
+                    var weekdays = pattern.kind === 'shift' ? packStaffShift(pattern.work, pattern.rest) : person.hours.weekdays;
+                    saveStaffHours(person.userKey, weekdays, value, undefined, person.hours.startOn);
+                }
+            });
+            meta.appendChild(hours);
+            meta.appendChild(el('span', 'asset-tree-roster-unit', t('staffHoursCount', '').trim()));
+            meta.appendChild(staffPatternControl(person));
+            var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
+                if (!window.confirm(t('staffRemoveConfirm', person.userName))) return;
+                var removedKey = person.userKey;
+                state.staffRows = (state.staffRows || []).filter(function (item) { return !item || item.userKey !== removedKey; });
+                renderFrame();
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + row.id, null, function (status, payload) {
+                    if (status < 200 || status >= 300) {
+                        notify((payload && payload.message) || t('errorTitle'));
+                        reloadStaff();
+                    }
+                });
+            });
+            remove.title = t('staffRemove');
+            remove.setAttribute('aria-label', t('staffRemove'));
+            meta.appendChild(remove);
+        }
+        name.appendChild(meta);
+        line.appendChild(name);
+        var day;
+        for (day = 1; day <= count; day++) {
+            (function (dayNumber) {
+                var date = new Date(year, month - 1, dayNumber);
+                var iso = isoDate(date);
+                var weekend = date.getDay() === 0 || date.getDay() === 6;
+                var id = staffVisible(person, iso, date, marks);
+                var known = id === 'off' || id === 'work' || !!staffMarkById(id);
+                var custom = markCustom(marks, iso);
+                var cellValue = known ? staffDayValue(person, iso, date, marks) : { value: 0, blank: true, id: id };
+                var hoursValue = cellValue.value || 0;
+                var cell = el('td', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : '') + (id && id !== 'off' && known ? ' is-mark' : '') + (staffCellSelected(person.userKey, iso) ? ' is-selected' : ''));
+                cell.setAttribute('data-staff-day', iso);
+                cell.setAttribute('data-staff-user', person.userKey);
+                var mark = staffMarkById(id);
+                var caption = '';
+                if (id && id !== 'off' && known) caption = (custom != null || hoursValue > 0) ? formatStaffHours(hoursValue) : staffMarkName(mark || { id: id }).slice(0, 3);
+                var title = id === 'off' || !known ? t('staffOff') : staffMarkName(mark || { id: id });
+                if (custom != null || hoursValue > 0) title += ' · ' + t('staffHoursCount', hoursValue);
+                if (state.canEdit && person.hours) {
+                    var hit = button(caption, 'asset-tree-roster-hit', function () {});
+                    hit.title = title;
+                    hit.setAttribute('aria-label', String(dayNumber) + ' ' + title);
+                    if (id && id !== 'off' && known) {
+                        hit.style.background = staffMarkTint(staffMarkColor(id));
+                        hit.style.color = '#' + staffMarkColor(id);
+                    }
+                    hit.addEventListener('mousedown', function (event) {
+                        if (event.button !== 0) return;
+                        beginStaffPaint(person, iso, event);
+                    });
+                    cell.appendChild(hit);
+                } else if (caption) {
+                    cell.textContent = caption;
+                    cell.title = title;
+                    if (id && id !== 'off' && known) cell.style.color = '#' + staffMarkColor(id);
+                }
+                cell.addEventListener('contextmenu', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openStaffCellMenu(person, iso, event.clientX, event.clientY);
+                });
+                line.appendChild(cell);
+            })(day);
+        }
+        var daysCell = el('td', 'asset-tree-roster-total', formatStaffHours(tally.days));
+        var hoursCell = el('td', 'asset-tree-roster-total', formatStaffHours(tally.hours));
+        var breakdown = [];
+        staffMarkList().forEach(function (mark) {
+            var item = tally.by[mark.id];
+            if (!item) return;
+            breakdown.push(staffMarkName(mark) + ' ' + t('staffDaysCount', item.days) + ' · ' + t('staffHoursCount', item.hours));
+        });
+        hoursCell.title = breakdown.join('\n');
+        line.appendChild(daysCell);
+        line.appendChild(hoursCell);
+        return line;
+    }
+
+    function rosterWeekday(date) {
+        var labels = weekdayLabels();
+        var index = date.getDay();
+        return labels[index === 0 ? 6 : index - 1] || '';
+    }
+
+    function staffDateHead(row, year, month, count, today) {
+        var day;
+        for (day = 1; day <= count; day++) {
+            var date = new Date(year, month - 1, day);
+            var weekend = date.getDay() === 0 || date.getDay() === 6;
+            var iso = isoDate(date);
+            var label = el('span', 'asset-tree-roster-num' + (weekend ? ' is-weekend' : '') + (iso === today ? ' is-today' : ''), String(day));
+            var cell = el('th', 'asset-tree-roster-day' + (weekend ? ' is-weekend' : '') + (staffColumnSelected(iso) ? ' is-selected' : ''));
+            if (weekend) {
+                var weekday = rosterWeekday(date);
+                cell.title = weekday;
+                label.title = weekday;
+                label.setAttribute('aria-label', day + ' ' + weekday);
+            }
+            (function (columnIso) {
+                cell.addEventListener('mousedown', function (event) {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    staffSelectColumn(columnIso);
+                });
+            })(iso);
+            cell.appendChild(label);
+            row.appendChild(cell);
+        }
+        row.appendChild(el('th', 'asset-tree-roster-total', t('staffDaysCol')));
+        row.appendChild(el('th', 'asset-tree-roster-total', t('staffHoursCol')));
+    }
+
+    function staffSectionHead(section, year, month, count, today) {
+        var row = el('tr', 'asset-tree-roster-head');
+        var name = el('th', 'asset-tree-roster-name');
+        if (section.name) {
+            row.setAttribute('data-place', String(section.placeId || 0));
+            name.appendChild(staffPlaceHead(section.placeId, section.name, section.people.length));
+            if (staffPlaceHidden(section.placeId)) row.className += ' is-folded';
+        }
+        row.appendChild(name);
+        staffDateHead(row, year, month, count, today);
+        return row;
+    }
+
+    function staffRoster(grouped) {
+        var year = state.scheduleYear;
+        var month = state.scheduleMonth;
+        var count = new Date(year, month, 0).getDate();
+        var today = isoDate(new Date());
+        var sections = staffSections(grouped);
+        var scroll = el('div', 'asset-tree-roster-scroll');
+        var table = el('table', 'asset-tree-roster');
+        var thead = el('thead');
+        var first = sections.length ? sections[0] : { placeId: 0, name: '', people: [] };
+        thead.appendChild(staffSectionHead(first, year, month, count, today));
+        table.appendChild(thead);
+        var body = el('tbody');
+        sections.forEach(function (section, index) {
+            if (index > 0 && section.name) {
+                var banner = el('tr', 'asset-tree-roster-branch-row');
+                banner.setAttribute('data-place', String(section.placeId || 0));
+                var cell = el('th', 'asset-tree-roster-name');
+                cell.appendChild(staffPlaceHead(section.placeId, section.name, section.people.length));
+                if (staffPlaceHidden(section.placeId)) banner.className += ' is-folded';
+                banner.appendChild(cell);
+                var gap;
+                for (gap = 1; gap <= count; gap++) {
+                    var gapDate = new Date(year, month - 1, gap);
+                    var gapWeekend = gapDate.getDay() === 0 || gapDate.getDay() === 6;
+                    banner.appendChild(el('td', 'asset-tree-roster-day' + (gapWeekend ? ' is-weekend' : '')));
+                }
+                banner.appendChild(el('td', 'asset-tree-roster-total'));
+                banner.appendChild(el('td', 'asset-tree-roster-total'));
+                body.appendChild(banner);
+            }
+            if (staffPlaceHidden(section.placeId)) return;
+            section.people.forEach(function (person) {
+                var line = staffRosterRow(person, year, month, count, today);
+                line.setAttribute('data-place', String(section.placeId || 0));
+                body.appendChild(line);
+            });
+        });
+        table.appendChild(body);
+        scroll.appendChild(table);
+        return scroll;
+    }
+
+    function cleanStaffNote(raw) {
+        var text = String(raw == null ? '' : raw).replace(/[\r\n\t]/g, ' ');
+        var out = '';
+        var index;
+        for (index = 0; index < text.length; index++) {
+            if (text.charCodeAt(index) >= 32) out += text.charAt(index);
+        }
+        out = out.replace(/^\s+|\s+$/g, '');
+        if (out.length > 240) out = out.slice(0, 240).replace(/\s+$/g, '');
+        return out;
+    }
+
+    function saveStaffNote(person, note) {
+        var row = person && person.hours;
+        if (!row) return;
+        var clean = cleanStaffNote(note);
+        if (clean === cleanStaffNote(row.note)) return;
+        saveStaffHours(person.userKey, row.weekdays, row.hours, undefined, row.startOn, row.placeId, clean);
+    }
+
+    function staffNotesHead() {
+        var row = el('tr', 'asset-tree-roster-head');
+        var cell = el('th', 'asset-tree-notes-label');
+        cell.appendChild(el('span', 'asset-tree-notes-title', t('staffNotes')));
+        cell.title = t('staffNoteHint');
+        row.appendChild(cell);
+        return row;
+    }
+
+    function staffNotesRow(person) {
+        var line = el('tr', 'asset-tree-roster-person');
+        line.setAttribute('data-staff-user', person.userKey);
+        var cell = el('td', 'asset-tree-notes-cell');
+        var text = cleanStaffNote(person.hours ? person.hours.note : '');
+        if (state.canEdit && person.hours) {
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'asset-tree-notes-input';
+            input.maxLength = 240;
+            input.value = text;
+            input.placeholder = t('staffNoteHint');
+            input.title = text || t('staffNoteHint');
+            input.setAttribute('aria-label', person.userName + ' ' + t('staffNotes'));
+            input.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            input.addEventListener('keydown', function (event) {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    input.blur();
+                }
+            });
+            input.addEventListener('change', function () { saveStaffNote(person, input.value); });
+            cell.appendChild(input);
+        } else {
+            cell.textContent = text;
+            cell.title = text;
+        }
+        line.appendChild(cell);
+        return line;
+    }
+
+    function staffNotes(sections) {
+        var scroll = el('div', 'asset-tree-notes');
+        var table = el('table', 'asset-tree-roster asset-tree-notes-table');
+        var thead = el('thead');
+        thead.appendChild(staffNotesHead());
+        table.appendChild(thead);
+        var body = el('tbody');
+        sections.forEach(function (section, index) {
+            if (index > 0 && section.name) {
+                var banner = el('tr', 'asset-tree-roster-branch-row');
+                banner.setAttribute('data-place', String(section.placeId || 0));
+                banner.appendChild(el('td', 'asset-tree-notes-cell'));
+                body.appendChild(banner);
+            }
+            if (staffPlaceHidden(section.placeId)) return;
+            section.people.forEach(function (person) {
+                body.appendChild(staffNotesRow(person));
+            });
+        });
+        table.appendChild(body);
+        scroll.appendChild(table);
+        return scroll;
+    }
+
+    function alignStaffNotes() {
+        var pair = document.querySelector('#asset-tree-app .asset-tree-roster-pair');
+        if (!pair) return;
+        var left = pair.querySelectorAll('.asset-tree-roster-scroll tr');
+        var right = pair.querySelectorAll('.asset-tree-notes tr');
+        var count = left.length < right.length ? left.length : right.length;
+        var index;
+        var cell;
+        for (index = 0; index < count; index++) {
+            cell = 0;
+            while (cell < left[index].children.length) {
+                left[index].children[cell].style.height = '';
+                cell++;
+            }
+            cell = 0;
+            while (cell < right[index].children.length) {
+                right[index].children[cell].style.height = '';
+                cell++;
+            }
+        }
+        for (index = 0; index < count; index++) {
+            var height = left[index].offsetHeight > right[index].offsetHeight ? left[index].offsetHeight : right[index].offsetHeight;
+            if (height < 1) continue;
+            cell = 0;
+            while (cell < left[index].children.length) {
+                left[index].children[cell].style.height = height + 'px';
+                cell++;
+            }
+            cell = 0;
+            while (cell < right[index].children.length) {
+                right[index].children[cell].style.height = height + 'px';
+                cell++;
+            }
+        }
+    }
+
+    function staffSummary(grouped) {
+        var totals = {};
+        var days = 0;
+        var hours = 0;
+        grouped.order.forEach(function (key) {
+            var tally = staffTally(grouped.people[key], state.scheduleYear, state.scheduleMonth);
+            days += tally.days;
+            hours += tally.hours;
+            Object.keys(tally.by).forEach(function (id) {
+                if (!totals[id]) totals[id] = { days: 0, hours: 0 };
+                totals[id].days += tally.by[id].days;
+                totals[id].hours += tally.by[id].hours;
+            });
+        });
+        var bar = el('div', 'asset-tree-staff-summary');
+        staffMarkList().forEach(function (mark) {
+            var item = totals[mark.id];
+            if (!item) return;
+            var chip = el('div', 'asset-tree-staff-sum');
+            var dot = el('i', 'asset-tree-layer-dot');
+            dot.style.background = '#' + mark.color;
+            chip.appendChild(dot);
+            chip.appendChild(el('strong', null, staffMarkName(mark)));
+            chip.appendChild(el('span', null, t('staffDaysCount', item.days) + ' · ' + t('staffHoursCount', item.hours)));
+            bar.appendChild(chip);
+        });
+        var all = el('div', 'asset-tree-staff-sum is-total');
+        all.appendChild(el('strong', null, t('staffHoursCol')));
+        all.appendChild(el('span', null, t('staffDaysCount', days) + ' · ' + t('staffHoursCount', hours)));
+        bar.appendChild(all);
+        return bar;
+    }
+
+    function staffPalette() {
+        var rows = staffMarkList();
+        if (!state.staffBrush || state.staffBrush !== 'off' && !rows.some(function (row) { return row.id === state.staffBrush; })) {
+            state.staffBrush = 'work';
+        }
+        var bar = el('div', 'asset-tree-mark-bar');
+        var offOn = state.staffBrush === 'off';
+        var off = button(t('staffOff'), 'asset-tree-mark-pick' + (offOn ? ' is-on' : ''), function () {
+            state.staffBrush = 'off';
+            var cells = staffSelectionCells();
+            if (cells.length) {
+                paintStaffCells(cells, false);
+                return;
+            }
+            renderFrame();
+        });
+        off.setAttribute('aria-pressed', offOn ? 'true' : 'false');
+        bar.appendChild(off);
+        rows.forEach(function (row) {
+            var chip = el('div', 'asset-tree-mark' + (state.staffBrush === row.id ? ' is-on' : ''));
+            function choose() {
+                state.staffBrush = row.id;
+                var cells = staffSelectionCells();
+                if (cells.length) {
+                    paintStaffCells(cells, false);
+                    return;
+                }
+                renderFrame();
+            }
+            var swatch = document.createElement('label');
+            swatch.className = 'asset-tree-mark-swatch';
+            swatch.style.background = '#' + row.color;
+            swatch.title = staffMarkName(row);
+            if (state.canEdit) {
+                var color = document.createElement('input');
+                color.type = 'color';
+                color.className = 'asset-tree-mark-color';
+                color.value = '#' + row.color;
+                color.title = staffMarkName(row);
+                color.setAttribute('aria-label', staffMarkName(row));
+                color.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+                color.addEventListener('click', function (event) { event.stopPropagation(); });
+                color.addEventListener('change', function () {
+                    var next = color.value.replace('#', '').toLowerCase();
+                    if (!/^[0-9a-f]{6}$/.test(next) || next === row.color) return;
+                    var copy = staffMarkList();
+                    copy.forEach(function (item) { if (item.id === row.id) item.color = next; });
+                    saveStaffPalette(copy);
+                });
+                swatch.appendChild(color);
+            }
+            chip.appendChild(swatch);
+            var pick = button('', 'asset-tree-mark-pick', choose);
+            pick.appendChild(el('span', 'asset-tree-mark-label', staffMarkName(row)));
+            pick.title = staffMarkName(row);
+            chip.appendChild(pick);
+            if (state.canEdit) {
+                var factor = row.factor === 0 || row.factor === 2 ? row.factor : 1;
+                var factorButton = button(factor === 0 ? '0' : '\u00D7' + factor, 'asset-tree-mark-factor' + (factor === 0 ? ' is-off' : factor === 2 ? ' is-double' : ''), function () {
+                    var nextFactor = factor === 1 ? 2 : factor === 2 ? 0 : 1;
+                    var copy = staffMarkList();
+                    copy.forEach(function (item) {
+                        if (item.id === row.id) item.factor = nextFactor;
+                    });
+                    saveStaffPalette(copy);
+                });
+                factorButton.title = t('staffFactorHint');
+                factorButton.setAttribute('aria-label', staffMarkName(row) + ' ' + t('staffFactorHint'));
+                chip.appendChild(factorButton);
+                pick.addEventListener('dblclick', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var editor = document.createElement('input');
+                    editor.type = 'text';
+                    editor.className = 'asset-tree-mark-name';
+                    editor.maxLength = 40;
+                    editor.value = row.label || staffMarkName(row);
+                    editor.setAttribute('aria-label', staffMarkName(row));
+                    pick.replaceWith(editor);
+                    editor.focus();
+                    editor.select();
+                    function commit() {
+                        var next = cleanKindLabel(editor.value.replace(/#/g, ' '));
+                        var builtin = staffMarkName({ id: row.id, label: '' });
+                        if (!next) next = builtin;
+                        var stored = next === builtin ? '' : next;
+                        if (stored === (row.label || '')) {
+                            renderFrame();
+                            return;
+                        }
+                        var copy = staffMarkList();
+                        copy.forEach(function (item) { if (item.id === row.id) item.label = stored; });
+                        saveStaffPalette(copy);
+                    }
+                    editor.addEventListener('blur', commit);
+                    editor.addEventListener('keydown', function (keyEvent) {
+                        if (keyEvent.key === 'Enter') editor.blur();
+                        if (keyEvent.key === 'Escape') {
+                            editor.value = row.label || staffMarkName(row);
+                            editor.blur();
+                        }
+                    });
+                });
+                if (row.id !== 'work') {
+                    var remove = button('\u00D7', 'asset-tree-roster-remove', function () {
+                        var copy = staffMarkList().filter(function (item) { return item.id !== row.id; });
+                        if (state.staffBrush === row.id) state.staffBrush = 'work';
+                        saveStaffPalette(copy);
+                    });
+                    remove.title = t('delete');
+                    remove.setAttribute('aria-label', t('delete'));
+                    chip.appendChild(remove);
+                }
+            }
+            bar.appendChild(chip);
+        });
+        if (state.canEdit && rows.length < 12) {
+            bar.appendChild(button(t('staffMarkAdd'), 'asset-tree-btn slim', function () {
+                var copy = staffMarkList();
+                var taken = {};
+                copy.forEach(function (item) { taken[item.id] = true; });
+                var n = 1;
+                var id = 'm1';
+                while (taken[id] && n < 40) {
+                    n += 1;
+                    id = 'm' + n;
+                }
+                copy.push({ id: id, label: t('staffMarkNew'), color: '64748b', hours: 8, factor: 1 });
+                state.staffBrush = id;
+                saveStaffPalette(copy);
+            }));
+        }
+        if (state.canEdit) {
+            var onceBox = el('div', 'asset-tree-mark-once' + (staffOnceSpec() ? ' is-set' : ''));
+            var caption = el('span', 'asset-tree-mark-once-label', t('staffOnce'));
+            onceBox.appendChild(caption);
+            var once = document.createElement('input');
+            once.type = 'text';
+            once.inputMode = 'text';
+            once.maxLength = 5;
+            once.placeholder = '-2';
+            once.title = t('staffOnceHint');
+            once.setAttribute('aria-label', t('staffOnce'));
+            if (staffOnceSpec()) once.value = staffOnceSpec().text;
+            var clearOnce = button('\u00D7', 'asset-tree-mark-once-clear', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                applyOnce('');
+            });
+            clearOnce.title = t('staffOnceHint');
+            clearOnce.setAttribute('aria-label', t('staffOnceHint'));
+            function applyOnce(raw) {
+                raw = String(raw == null ? '' : raw).trim();
+                if (!raw) {
+                    state.staffOnce = null;
+                    once.value = '';
+                    onceBox.classList.remove('is-set');
+                    clearOnce.classList.add('is-hidden');
+                    return;
+                }
+                state.staffOnce = raw;
+                if (!staffOnceSpec()) {
+                    onceBox.classList.remove('is-set');
+                    clearOnce.classList.add('is-hidden');
+                    return;
+                }
+                onceBox.classList.add('is-set');
+                clearOnce.classList.remove('is-hidden');
+            }
+            caption.addEventListener('mousedown', function (event) {
+                if (!staffOnceSpec()) {
+                    once.focus();
+                    return;
+                }
+                event.preventDefault();
+                applyOnce('');
+            });
+            once.addEventListener('input', function () { applyOnce(once.value); });
+            once.addEventListener('keydown', function (event) {
+                event.stopPropagation();
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                applyOnce('');
+                once.blur();
+            });
+            if (!staffOnceSpec()) clearOnce.classList.add('is-hidden');
+            onceBox.appendChild(once);
+            onceBox.appendChild(clearOnce);
+            bar.appendChild(onceBox);
+        }
+        return bar;
+    }
+
+    function staffLeaves(grouped) {
+        var box = el('div', 'asset-tree-staff-leaves');
+        var any = false;
+        grouped.order.forEach(function (key) {
+            var person = grouped.people[key];
+            var placeId = person.hours ? parseInt(person.hours.placeId, 10) || 0 : 0;
+            if (staffPlaceHidden(placeId)) return;
+            person.leaves.forEach(function (leave) {
+                any = true;
+                var text = person.userName + ' · ' + t('staffLeave') + ' ' + staffDayShort(leave.startOn) + '–' + staffDayShort(leave.endOn);
+                if (!state.canEdit) {
+                    box.appendChild(el('span', 'asset-tree-roster-leave', text));
+                    return;
+                }
+                var remove = button(text, 'asset-tree-roster-leave', function () {
+                    var leaveId = leave.id;
+                    state.staffRows = (state.staffRows || []).filter(function (item) { return !item || item.id !== leaveId; });
+                    renderFrame();
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/staff/' + leave.id, null, function (status, payload) {
+                        if (status < 200 || status >= 300) {
+                            notify((payload && payload.message) || t('errorTitle'));
+                            reloadStaff();
+                        }
+                    });
+                });
+                remove.title = t('delete');
+                box.appendChild(remove);
+            });
+        });
+        return any ? box : null;
+    }
+
+    function staffDirectory(grouped) {
+        var phones = [];
+        grouped.order.forEach(function (key) {
+            var person = grouped.people[key];
+            if (person.phone) phones.push(person.userName + ' ' + person.phone);
+        });
+        if (!phones.length) return null;
+        var list = el('div', 'asset-tree-staff-phones');
+        list.appendChild(el('div', 'asset-tree-staff-phones-title', t('staffPhones')));
+        phones.forEach(function (line) {
+            list.appendChild(el('div', null, line));
+        });
+        return list;
     }
 
     function scheduleStaff() {
@@ -11826,34 +16739,316 @@
             return wrap;
         }
         if (state.staffError) wrap.appendChild(el('p', 'asset-tree-hint', state.staffError));
-        if (state.canEdit) wrap.appendChild(staffFinder());
-        var grouped = staffGroups();
-        if (!grouped.order.length) wrap.appendChild(el('p', 'asset-tree-hint', t('staffEmpty')));
-        grouped.order.forEach(function (key) {
-            wrap.appendChild(staffCard(grouped.people[key]));
+        wrap.appendChild(staffPalette());
+        var tools = staffFinder();
+        if (tools) wrap.appendChild(tools);
+        wrap.appendChild(staffSheetTools());
+        var anyone = false;
+        (state.staffRows || []).forEach(function (item) {
+            if (item && item.kind === 'hours') anyone = true;
         });
+        if (!anyone && !staffPlaceOrderKeys().length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', sortedPlaces().length ? t('staffBranchEmpty') : t('staffEmpty')));
+            return wrap;
+        }
+        var grouped = staffGroups();
+        var pair = el('div', 'asset-tree-roster-pair');
+        var sections = staffSections(grouped);
+        pair.appendChild(staffRoster(grouped));
+        pair.appendChild(staffNotes(sections));
+        wrap.appendChild(pair);
+        if (!grouped.order.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', t('staffPlaceEmpty')));
+            return wrap;
+        }
+        wrap.appendChild(staffSummary(grouped));
+        var leaves = staffLeaves(grouped);
+        if (leaves) wrap.appendChild(leaves);
+        var phones = staffDirectory(grouped);
+        if (phones) wrap.appendChild(phones);
         return wrap;
+    }
+
+    function clockParts(value) {
+        var text = String(value || '');
+        if (text.length > 5) text = text.slice(0, 5);
+        var match = /^(\d{2}):(\d{2})$/.exec(text);
+        if (!match) return { hour: '', minute: '' };
+        var hour = parseInt(match[1], 10);
+        var minute = parseInt(match[2], 10);
+        if (hour > 23 || minute > 59) return { hour: '', minute: '' };
+        return { hour: match[1], minute: match[2] };
+    }
+
+    function fillClockSelect(select, values, selected) {
+        select.innerHTML = '';
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '—';
+        select.appendChild(empty);
+        var seen = {};
+        var index;
+        for (index = 0; index < values.length; index++) seen[values[index]] = true;
+        if (selected && !seen[selected]) values = values.concat([selected]);
+        values.forEach(function (value) {
+            var option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            select.appendChild(option);
+        });
+        select.value = selected || '';
+    }
+
+    function clockPair(startValue, endValue) {
+        var hours = [];
+        var minutes = [];
+        var index;
+        for (index = 0; index < 24; index++) hours.push((index < 10 ? '0' : '') + index);
+        for (index = 0; index < 60; index += 5) minutes.push((index < 10 ? '0' : '') + index);
+        var start = clockParts(startValue);
+        var end = clockParts(endValue);
+        function part(list, selected) {
+            var select = document.createElement('select');
+            select.className = 'asset-tree-clock-part';
+            fillClockSelect(select, list.slice(), selected);
+            return select;
+        }
+        var startHour = part(hours, start.hour);
+        var startMinute = part(minutes, start.minute);
+        var endHour = part(hours, end.hour);
+        var endMinute = part(minutes, end.minute);
+        function read(hourSelect, minuteSelect) {
+            if (!hourSelect.value || !minuteSelect.value) return '';
+            return hourSelect.value + ':' + minuteSelect.value;
+        }
+        var node = el('span', 'asset-tree-clock-pair');
+        node.appendChild(startHour);
+        node.appendChild(el('span', 'asset-tree-clock-colon', ':'));
+        node.appendChild(startMinute);
+        node.appendChild(el('span', 'asset-tree-clock-dash', '–'));
+        node.appendChild(endHour);
+        node.appendChild(el('span', 'asset-tree-clock-colon', ':'));
+        node.appendChild(endMinute);
+        return {
+            node: node,
+            start: function () { return read(startHour, startMinute); },
+            end: function () { return read(endHour, endMinute); },
+            setDisabled: function (disabled) {
+                startHour.disabled = disabled;
+                startMinute.disabled = disabled;
+                endHour.disabled = disabled;
+                endMinute.disabled = disabled;
+            },
+            setRange: function (startText, endText) {
+                var from = clockParts(startText);
+                var to = clockParts(endText);
+                fillClockSelect(startHour, hours.slice(), from.hour);
+                fillClockSelect(startMinute, minutes.slice(), from.minute);
+                fillClockSelect(endHour, hours.slice(), to.hour);
+                fillClockSelect(endMinute, minutes.slice(), to.minute);
+            }
+        };
     }
 
     function openPlanEvent(plan, iso) {
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, plan.name || kindLong(plan.kind)));
-            dialog.appendChild(el('p', null, kindLong(plan.kind) + ' · ' + (plan.assetName || '') + (plan.objectKey ? ' · ' + plan.objectKey : '')));
-            var meta = formatFieldDate(iso || plan.nextDue || '');
-            if (plan.startTime) meta += ' · ' + plan.startTime + (plan.endTime ? '–' + plan.endTime : '');
-            if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
-            dialog.appendChild(el('p', null, meta));
-            if (plan.note) dialog.appendChild(el('p', null, plan.note));
+            var place = (plan.assetName || '') + (plan.objectKey ? ' · ' + plan.objectKey : '');
+            if (place) dialog.appendChild(el('p', null, place));
+            var when = iso || plan.nextDue || plan.lastDone || '';
+            var draft = {
+                name: plan.name || '',
+                kind: plan.kind || 'event',
+                date: when,
+                assigneeKey: plan.assigneeKey || '',
+                assigneeName: plan.assigneeName || '',
+                note: plan.note || ''
+            };
+            if (state.canEdit) {
+                var name = document.createElement('input');
+                name.value = draft.name;
+                name.maxLength = 80;
+                name.setAttribute('aria-label', t('name'));
+                var kind = document.createElement('select');
+                fillKindSelect(kind, draft.kind, true);
+                kind.value = draft.kind;
+                var date = document.createElement('input');
+                date.type = 'date';
+                var repeating = !!(plan.everyUnit && plan.everyUnit !== 'once');
+                var shownDay = String(when).slice(0, 10);
+                var shownClock = occurrenceClock(plan, shownDay);
+                date.value = String(repeating ? shownDay : (plan.lastDone || shownDay)).slice(0, 10);
+                date.setAttribute('aria-label', repeating ? t('schedulesWhen') : t('schedulesFirst'));
+                var every = document.createElement('input');
+                every.type = 'number';
+                every.min = '1';
+                every.max = '3650';
+                every.className = 'asset-tree-every-count';
+                every.value = String(plan.everyCount || 1);
+                every.setAttribute('aria-label', t('schedulesEveryCount'));
+                var repeat = document.createElement('select');
+                [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
+                    var option = document.createElement('option');
+                    option.value = pair[0];
+                    option.textContent = t(pair[1]);
+                    repeat.appendChild(option);
+                });
+                repeat.value = plan.everyUnit || 'once';
+                function syncEvery() {
+                    var onceUnit = repeat.value === 'once';
+                    every.disabled = onceUnit;
+                    if (onceUnit) every.value = '1';
+                }
+                var firstLabel = el('span', null, repeating ? t('schedulesWhen') : t('schedulesFirst'));
+                repeat.addEventListener('change', function () {
+                    syncEvery();
+                    firstLabel.textContent = repeat.value === 'once' || !repeating ? t('schedulesFirst') : t('schedulesWhen');
+                });
+                syncEvery();
+                var firstRow = el('div', 'asset-tree-time-row');
+                firstRow.appendChild(date);
+                firstRow.appendChild(every);
+                firstRow.appendChild(repeat);
+                var person = document.createElement('input');
+                person.type = 'search';
+                person.placeholder = t('schedulesFindUser');
+                person.value = draft.assigneeName;
+                person.setAttribute('aria-label', t('schedulesAssignee'));
+                var hits = el('div', 'asset-tree-user-results');
+                var timer = null;
+                var seq = 0;
+                person.addEventListener('input', function () {
+                    if (person.value.trim() !== draft.assigneeName) draft.assigneeKey = '';
+                    draft.assigneeName = person.value.trim();
+                    clearTimeout(timer);
+                    timer = setTimeout(function () {
+                        var query = person.value.trim();
+                        var mark = ++seq;
+                        hits.innerHTML = '';
+                        if (query.length < 2) return;
+                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                            if (mark !== seq) return;
+                            hits.innerHTML = '';
+                            (payload || []).forEach(function (user) {
+                                hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
+                                    draft.assigneeKey = user.userKey;
+                                    draft.assigneeName = user.displayName;
+                                    person.value = user.displayName;
+                                    hits.innerHTML = '';
+                                }));
+                            });
+                        });
+                    }, 200);
+                });
+                var note = document.createElement('textarea');
+                note.value = draft.note;
+                note.maxLength = 2000;
+                note.setAttribute('aria-label', t('schedulesWhat'));
+                var allDay = document.createElement('input');
+                allDay.type = 'radio';
+                allDay.name = 'asset-tree-edit-when';
+                allDay.checked = !shownClock.start;
+                var ranged = document.createElement('input');
+                ranged.type = 'radio';
+                ranged.name = 'asset-tree-edit-when';
+                ranged.checked = !!shownClock.start;
+                var clock = clockPair(shownClock.start || '', shownClock.end || '');
+                clock.setDisabled(!shownClock.start);
+                allDay.addEventListener('change', function () {
+                    clock.setDisabled(true);
+                });
+                ranged.addEventListener('change', function () {
+                    clock.setDisabled(false);
+                    if (!clock.start()) clock.setRange('09:00', '10:00');
+                });
+                var timeRow = el('div', 'asset-tree-time-row');
+                var allLabel = el('label', 'asset-tree-check');
+                allLabel.appendChild(allDay);
+                allLabel.appendChild(document.createTextNode(t('schedulesAllDay')));
+                var rangeLabel = el('label', 'asset-tree-check');
+                rangeLabel.appendChild(ranged);
+                timeRow.appendChild(allLabel);
+                timeRow.appendChild(rangeLabel);
+                timeRow.appendChild(clock.node);
+                dialog.appendChild(planField(t('name'), name));
+                dialog.appendChild(planField(t('schedulesKind'), kind));
+                var firstField = el('div', 'asset-tree-plan-field');
+                firstField.appendChild(firstLabel);
+                firstField.appendChild(firstRow);
+                dialog.appendChild(firstField);
+                var timeField = el('div', 'asset-tree-plan-field');
+                timeField.appendChild(el('span', null, t('schedulesTime')));
+                timeField.appendChild(timeRow);
+                dialog.appendChild(timeField);
+                dialog.appendChild(planField(t('schedulesAssignee'), person));
+                dialog.appendChild(hits);
+                dialog.appendChild(planField(t('schedulesWhat'), note));
+            } else {
+                var meta = formatFieldDate(when);
+                var readClock = occurrenceClock(plan, String(when).slice(0, 10));
+                if (readClock.start) meta += ' · ' + readClock.start + (readClock.end ? '–' + readClock.end : '');
+                if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
+                dialog.appendChild(el('p', null, meta));
+                if (plan.note) dialog.appendChild(el('p', null, plan.note));
+            }
             var actions = el('div', 'asset-tree-inline-actions');
+            if (state.canEdit) {
+                actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+                    var title = name.value.trim();
+                    if (!title) {
+                        notify(t('schedulesNeedName'));
+                        return;
+                    }
+                    if (!date.value) {
+                        notify(t('schedulesNeedDate'));
+                        return;
+                    }
+                    var unit = repeat.value || plan.everyUnit || 'once';
+                    var count = unit === 'once' ? 1 : (parseInt(every.value, 10) || 0);
+                    if (count < 1) {
+                        notify(t('schedulesNeedDate'));
+                        return;
+                    }
+                    var start = ranged.checked ? (clock.start() || '09:00') : '';
+                    var end = start ? (clock.end() || addMinutes(start, 60)) : '';
+                    var patch = {
+                        name: title,
+                        kind: kind.value || plan.kind,
+                        everyCount: count,
+                        everyUnit: unit,
+                        assigneeKey: person.value.trim() ? draft.assigneeKey : '',
+                        note: note.value
+                    };
+                    if (!repeating || unit === 'once') {
+                        patch.lastDone = scheduleAnchor(date.value, count, unit);
+                        patch.moves = '';
+                        patch.startTime = start;
+                        patch.endTime = end;
+                    } else if (String(count) !== String(plan.everyCount || 1) || unit !== (plan.everyUnit || 'once')) {
+                        patch.lastDone = scheduleAnchor(plan.nextDue || plan.lastDone || shownDay, count, unit);
+                        patch.moves = '';
+                    } else {
+                        patch.moves = occurrenceMoves(plan, seriesSource(plan, shownDay), date.value, start, end);
+                    }
+                    savePlan(plan, patch, function (ok) { if (ok) closeModal(); });
+                }));
+            }
             if (state.canEdit && !plan.completed) {
                 actions.appendChild(button(t('serviceDone'), 'asset-tree-btn primary', function () {
-                    ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, { done: true }, function (status, payload) {
+                    var body = { done: true };
+                    if (plan.everyUnit && plan.everyUnit !== 'once') {
+                        var source = seriesSource(plan, String(when).slice(0, 10));
+                        if (source) {
+                            body.doneOn = source;
+                            body.moves = dropMovesUntil(plan, source);
+                        }
+                    }
+                    ajax('PUT', '/assets/' + plan.assetId + '/plans/' + plan.id, body, function (status, payload) {
                         if (status >= 200 && status < 300) {
                             closeModal();
-                            state.scheduleRows = null;
-                            state.scheduleLoading = false;
-                            renderFrame();
+                            notify(serviceDoneText(payload));
+                            refreshSchedules();
                         } else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
@@ -11864,40 +17059,46 @@
                     ajax('DELETE', '/assets/' + plan.assetId + '/plans/' + plan.id, null, function (status, payload) {
                         if (status >= 200 && status < 300) {
                             closeModal();
-                            state.scheduleRows = null;
-                            state.scheduleLoading = false;
+                            state.scheduleRows = (state.scheduleRows || []).filter(function (row) {
+                                return !(row && row.id === plan.id && (row.assetId || 0) === (plan.assetId || 0));
+                            });
                             renderFrame();
+                            refreshSchedules();
                         } else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
             }
-            actions.appendChild(button(plan.assetName || t('open'), 'asset-tree-btn', function () {
-                closeModal();
-                var asset = byId()[plan.assetId];
-                if (asset) openListedAsset(asset);
-            }));
+            if (plan.assetId) {
+                actions.appendChild(button(plan.assetName || t('open'), 'asset-tree-btn', function () {
+                    closeModal();
+                    var asset = byId()[plan.assetId];
+                    if (asset) openListedAsset(asset);
+                }));
+            }
             actions.appendChild(button(t('close'), 'asset-tree-btn', closeModal));
             dialog.appendChild(actions);
         });
     }
 
-    function openScheduleDialog() {
+    function openScheduleDialog(presetDate, presetTime) {
+        var timed = typeof presetTime === 'string' && /^\d{2}:\d{2}$/.test(presetTime);
+        var startText = timed ? presetTime : '';
+        var endText = timed ? addMinutes(presetTime, 60) : '';
         var draft = {
-            name: '', kind: 'to', first: isoDate(new Date()), allDay: true, startTime: '', endTime: '',
+            name: '', kind: 'to', first: typeof presetDate === 'string' ? presetDate : isoDate(new Date()), allDay: !timed, startTime: startText, endTime: endText,
             repeat: 'once', assigneeKey: '', assigneeName: '', assetIds: {}, note: '', assetQuery: ''
         };
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, t('schedulesNew')));
             var kind = document.createElement('select');
-            var longLabels = { to: 'kindToLong', kts: 'kindKtsLong', verify: 'kindVerifyLong' };
-            enabledKinds().forEach(function (key) {
-                var option = document.createElement('option');
-                option.value = key;
-                option.textContent = t(longLabels[key]);
-                kind.appendChild(option);
-            });
-            kind.value = enabledKinds()[0] || 'to';
+            var preset = enabledKinds().indexOf(state.scheduleKindFilter) >= 0 ? state.scheduleKindFilter : (enabledKinds()[0] || 'event');
+            if (preset === 'staff') {
+                var others = enabledKinds().filter(function (id) { return id !== 'staff'; });
+                preset = others.length ? others[0] : 'event';
+            }
+            fillKindSelect(kind, preset, true);
+            kind.value = preset;
             var name = document.createElement('input');
             name.placeholder = t('name');
             name.setAttribute('aria-label', t('name'));
@@ -11907,25 +17108,21 @@
             var allDay = document.createElement('input');
             allDay.type = 'radio';
             allDay.name = 'asset-tree-when';
-            allDay.checked = true;
+            allDay.checked = !timed;
             var ranged = document.createElement('input');
             ranged.type = 'radio';
             ranged.name = 'asset-tree-when';
-            var startTime = document.createElement('input');
-            startTime.type = 'time';
-            var endTime = document.createElement('input');
-            endTime.type = 'time';
-            startTime.disabled = true;
-            endTime.disabled = true;
+            ranged.checked = timed;
+            var clock = clockPair(startText, endText);
+            clock.setDisabled(!timed);
             allDay.addEventListener('change', function () {
                 draft.allDay = true;
-                startTime.disabled = true;
-                endTime.disabled = true;
+                clock.setDisabled(true);
             });
             ranged.addEventListener('change', function () {
                 draft.allDay = false;
-                startTime.disabled = false;
-                endTime.disabled = false;
+                clock.setDisabled(false);
+                if (!clock.start()) clock.setRange('09:00', '10:00');
             });
             var timeRow = el('div', 'asset-tree-time-row');
             var allLabel = el('label', 'asset-tree-check');
@@ -11933,10 +17130,9 @@
             allLabel.appendChild(document.createTextNode(t('schedulesAllDay')));
             var rangeLabel = el('label', 'asset-tree-check');
             rangeLabel.appendChild(ranged);
-            rangeLabel.appendChild(startTime);
-            rangeLabel.appendChild(endTime);
             timeRow.appendChild(allLabel);
             timeRow.appendChild(rangeLabel);
+            timeRow.appendChild(clock.node);
             var repeat = document.createElement('select');
             [['once', 'schedulesOnce'], ['day', 'schedulesEachDay'], ['week', 'schedulesEachWeek'], ['month', 'schedulesEachMonth'], ['year', 'schedulesEachYear']].forEach(function (pair) {
                 var option = document.createElement('option');
@@ -11944,8 +17140,20 @@
                 option.textContent = t(pair[1]);
                 repeat.appendChild(option);
             });
-            repeat.value = moduleSetup().scheduleUnit || 'once';
-            if (!repeat.value) repeat.value = 'once';
+            repeat.value = 'once';
+            var everyCount = document.createElement('input');
+            everyCount.type = 'number';
+            everyCount.min = '1';
+            everyCount.max = '3650';
+            everyCount.value = '1';
+            everyCount.className = 'asset-tree-every-count';
+            everyCount.disabled = true;
+            everyCount.setAttribute('aria-label', t('schedulesEveryCount'));
+            repeat.addEventListener('change', function () {
+                var onceUnit = repeat.value === 'once';
+                everyCount.disabled = onceUnit;
+                if (onceUnit) everyCount.value = '1';
+            });
             var nobody = document.createElement('input');
             nobody.type = 'radio';
             nobody.name = 'asset-tree-who';
@@ -12041,6 +17249,7 @@
             when.appendChild(el('span', null, t('schedulesFirst')));
             var whenRow = el('div', 'asset-tree-time-row');
             whenRow.appendChild(first);
+            whenRow.appendChild(everyCount);
             whenRow.appendChild(repeat);
             when.appendChild(whenRow);
             dialog.appendChild(when);
@@ -12057,18 +17266,47 @@
             dialog.appendChild(whoField);
             var assetField = el('div', 'asset-tree-plan-field');
             assetField.appendChild(el('span', null, t('schedulesAssets')));
+            assetField.appendChild(el('span', 'asset-tree-hint', t('schedulesObjectsOptional')));
             assetField.appendChild(assetQuery);
             assetField.appendChild(assets);
             dialog.appendChild(assetField);
+            function syncScheduleKind() {
+                var rosterKind = kind.value === 'staff';
+                when.style.display = rosterKind ? 'none' : '';
+                timeField.style.display = rosterKind ? 'none' : '';
+                assetField.style.display = rosterKind ? 'none' : '';
+                note.parentNode.style.display = rosterKind ? 'none' : '';
+            }
+            kind.addEventListener('change', syncScheduleKind);
             dialog.appendChild(planField(t('schedulesWhat'), note));
+            syncScheduleKind();
             var actions = el('div', 'asset-tree-inline-actions');
             actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+                if (kind.value === 'staff') {
+                    if (!draft.assigneeKey) {
+                        notify(t('schedulesNeedPerson'));
+                        return;
+                    }
+                    closeModal();
+                    if (scheduleBoards().roster) state.scheduleBoard = 'roster';
+                    state.scheduleKindFilter = '';
+                    state.scheduleLayerSet = true;
+                    if (!staffHas(draft.assigneeKey)) saveStaffHours(draft.assigneeKey, 31, 8);
+                    else renderFrame();
+                    return;
+                }
+                if (!first.value) {
+                    notify(t('schedulesNeedDate'));
+                    return;
+                }
                 var ids = [];
                 Object.keys(draft.assetIds).forEach(function (id) {
                     if (draft.assetIds[id]) ids.push(parseInt(id, 10));
                 });
-                if (!ids.length || !first.value) {
-                    notify(t('schedulesAssets'));
+                var repeatUnit = repeat.value || 'once';
+                var repeatCount = repeatUnit === 'once' ? 1 : (parseInt(everyCount.value, 10) || 0);
+                if (repeatCount < 1) {
+                    notify(t('schedulesNeedDate'));
                     return;
                 }
                 var body = {
@@ -12076,27 +17314,30 @@
                     name: name.value.trim(),
                     kind: kind.value,
                     lastDone: first.value,
-                    everyCount: 1,
-                    everyUnit: repeat.value,
+                    everyCount: repeatCount,
+                    everyUnit: repeatUnit,
                     note: note.value,
                     notify: !!moduleSetup().scheduleNotify
                 };
-                if (!allDay.checked && startTime.value) {
-                    body.startTime = startTime.value;
-                    body.endTime = endTime.value;
+                if (!allDay.checked) {
+                    if (!clock.start()) clock.setRange('09:00', '10:00');
+                    body.startTime = clock.start();
+                    body.endTime = clock.end() || addMinutes(clock.start(), 60);
                 }
                 if (draft.assigneeKey) body.assigneeKey = draft.assigneeKey;
                 ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/schedule', body, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal();
-                        state.scheduleRows = null;
-                        state.scheduleLoading = false;
+                        if (scheduleBoards().calendar) state.scheduleBoard = 'calendar';
+                        state.scheduleKindFilter = kind.value || '';
+                        state.scheduleLayerSet = true;
                         var chosenDay = parseIsoDate(first.value);
                         if (chosenDay) {
                             state.scheduleYear = chosenDay.getFullYear();
                             state.scheduleMonth = chosenDay.getMonth() + 1;
                         }
                         renderFrame();
+                        refreshSchedules();
                     } else notify((payload && payload.message) || t('errorTitle'));
                 });
             }));
@@ -12107,31 +17348,491 @@
 
     function csvCell(value) {
         var text = String(value == null ? '' : value);
-        if (/[",\n;]/.test(text)) return '"' + text.split('"').join('""') + '"';
+        if (/["\n;]/.test(text)) return '"' + text.split('"').join('""') + '"';
         return text;
     }
 
+    function reportMoney(view) {
+        return !!(view && view.sum);
+    }
+
+    function reportRussian() {
+        return String(state.locale || 'ru').toLowerCase().indexOf('en') !== 0;
+    }
+
+    function reportMoneyParts(minor) {
+        var value = Math.round(Number(minor) || 0);
+        var sign = value < 0 ? '-' : '';
+        value = Math.abs(value);
+        var rubles = Math.floor(value / 100);
+        var kopecks = value % 100;
+        var whole = String(rubles);
+        var groups = [];
+        while (whole.length > 3) {
+            groups.unshift(whole.slice(-3));
+            whole = whole.slice(0, -3);
+        }
+        groups.unshift(whole || '0');
+        return { sign: sign, groups: groups, fraction: (kopecks < 10 ? '0' : '') + kopecks };
+    }
+
+    function reportMoneyLabel(minor) {
+        var parts = reportMoneyParts(minor);
+        var body = parts.sign + parts.groups.join(reportRussian() ? '\u00a0' : ',');
+        body += (reportRussian() ? ',' : '.') + parts.fraction;
+        return body + '\u00a0' + currencyMark(moduleSetup().lifeCurrency || 'RUB');
+    }
+
+    function reportMoneyCsv(minor) {
+        var parts = reportMoneyParts(minor);
+        var body = parts.sign + parts.groups.join('');
+        return body + (reportRussian() ? ',' : '.') + parts.fraction;
+    }
+
+    function reportMoneyMinor(text) {
+        var raw = String(text == null ? '' : text).replace(/[\s\u00a0]/g, '').replace(',', '.');
+        raw = raw.replace(/[^\d.-]/g, '');
+        if (!/^-?\d+(\.\d+)?$/.test(raw)) return null;
+        var sign = raw.charAt(0) === '-' ? -1 : 1;
+        if (raw.charAt(0) === '-') raw = raw.slice(1);
+        var bits = raw.split('.');
+        var minor = Math.round(Number(bits[0]) * 100);
+        minor += Number(((bits[1] || '') + '00').slice(0, 2));
+        return sign * minor;
+    }
+
+    function reportFileName(view) {
+        var name = String(view && view.title || 'report').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+        return (name || 'report') + '.csv';
+    }
+
+    function downloadReportBook() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports.xlsx', true);
+        xhr.responseType = 'blob';
+        xhr.setRequestHeader('Accept', '*/*');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(xhr.response);
+                link.download = 'reports-' + state.projectKey + '.xlsx';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                return;
+            }
+            var blob = xhr.response;
+            if (!blob || !blob.size) {
+                notify(t('errorTitle'));
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () {
+                var payload = null;
+                try {
+                    payload = JSON.parse(String(reader.result || ''));
+                } catch (error) {
+                    payload = null;
+                }
+                notify((payload && payload.message) || t('errorTitle'));
+            };
+            reader.onerror = function () { notify(t('errorTitle')); };
+            reader.readAsText(blob);
+        };
+        xhr.onerror = function () { notify(t('errorTitle')); };
+        xhr.send();
+    }
+
     function downloadReport(view) {
-        var rows = [csvCell(groupWord(view.groupBy)) + ',' + csvCell(t('reportCount')) + ',' + csvCell(t('reportShare'))];
-        var total = view.total || 0;
+        var shown = (view.lines || []).length;
+        var lineTotal = view.lineTotal || shown;
+        if (view.capped && shown < lineTotal && !view.linesComplete) {
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
+                if (status === 200 && payload) {
+                    var full = {};
+                    var key;
+                    for (key in view) if (Object.prototype.hasOwnProperty.call(view, key)) full[key] = view[key];
+                    full.lines = payload.lines || [];
+                    full.lineTotal = payload.lineTotal || full.lines.length;
+                    full.capped = !!payload.capped;
+                    full.linesComplete = true;
+                    downloadReport(full);
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+            return;
+        }
+        var money = reportMoney(view);
+        var shareTotal = 0;
+        var shareValues = [];
         (view.rows || []).forEach(function (row) {
-            rows.push([csvCell(row.label), csvCell(row.count), csvCell(shareText(row.count, total))].join(','));
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            shareTotal += value;
+            shareValues.push(value);
         });
-        rows.push([csvCell(t('reportTotalRow')), csvCell(total), csvCell(shareText(total, total))].join(','));
-        var blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+        if (!money) shareTotal = view.total || 0;
+        var shares = shareLabels(shareValues);
+        var head = [csvCell(groupWord(view.groupBy)), csvCell(t('reportCount'))];
+        if (money) head.push(csvCell(t('lifeBook')));
+        head.push(csvCell(t('reportShare')));
+        var rows = [head.join(';')];
+        (view.rows || []).forEach(function (row, index) {
+            var cells = [csvCell(row.label), csvCell(row.count)];
+            if (money) cells.push(csvCell(reportMoneyCsv(Number(row.amount) || 0)));
+            cells.push(csvCell(shares[index] || '0 %'));
+            rows.push(cells.join(';'));
+        });
+        var totalCells = [csvCell(t('reportTotalRow')), csvCell(view.total || 0)];
+        if (money) totalCells.push(csvCell(reportMoneyCsv(shareTotal)));
+        totalCells.push(csvCell(shareTotal ? '100 %' : '0 %'));
+        rows.push(totalCells.join(';'));
+        if (!(view.rows || []).length) rows.push(csvCell(view.reason || t('reportEmptyLines')));
+        if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
+        if (view.lines && view.lines.length) {
+            rows.push('');
+            var detailHead = money ? t('lifeBook') : detailWord(view.groupBy);
+            rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
+            view.lines.forEach(function (row) {
+                var detail = row.detail;
+                if (money) {
+                    var minor = reportMoneyMinor(detail);
+                    if (minor != null) detail = reportMoneyCsv(minor);
+                }
+                rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(detail)].join(';'));
+            });
+        }
+        var blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         var link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = 'report.csv';
+        link.download = reportFileName(view);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
     }
 
+    function reportFact(color, value, label) {
+        var chip = el('span', 'asset-tree-report-fact');
+        if (color) {
+            var dot = el('i');
+            dot.style.background = color;
+            chip.appendChild(dot);
+        }
+        chip.appendChild(el('strong', null, value));
+        if (label) chip.appendChild(document.createTextNode(label));
+        return chip;
+    }
+
+    function reportMeter(count, max, color) {
+        var track = el('span', 'asset-tree-report-track');
+        var fill = el('span');
+        var width = max ? Math.round(100 * (count || 0) / max) : 0;
+        fill.style.width = width + '%';
+        fill.style.background = color || '#0052CC';
+        track.appendChild(fill);
+        return track;
+    }
+
+    function viewerChartKey(projectKey, id) {
+        return 'assethub-report-chart:' + projectKey + ':' + id;
+    }
+
+    function viewerChart(projectKey, id) {
+        try {
+            var raw = window.localStorage.getItem(viewerChartKey(projectKey, id));
+            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'columns') return raw;
+        } catch (error) {
+            return '';
+        }
+        return '';
+    }
+
+    function rememberViewerChart(projectKey, id, kind) {
+        try {
+            window.localStorage.setItem(viewerChartKey(projectKey, id), kind);
+        } catch (error) {
+            return;
+        }
+    }
+
+    function reportChartKind(view) {
+        var stored = view.chart === 'donut' ? 'donut' : view.chart === 'pie' ? 'pie' : view.chart === 'bars' ? 'bars' : 'columns';
+        if (state.reportChartFor === String(view.id || '') && state.reportChart) return state.reportChart;
+        if (!state.canEdit) {
+            var local = viewerChart(state.projectKey, view.id);
+            if (local) return local;
+        }
+        return stored;
+    }
+
+    function reportChartSwitch(view, kind) {
+        var seg = el('div', 'asset-tree-seg asset-tree-report-switch');
+        [['donut', 'reportDonut'], ['pie', 'reportPie'], ['columns', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
+            seg.appendChild(button(t(pair[1]), 'asset-tree-seg-btn' + (kind === pair[0] ? ' is-on' : ''), function () {
+                state.reportChartFor = String(view.id || '');
+                state.reportChart = pair[0];
+                if (!paintReport()) renderFrame();
+                rememberReportChart(view, pair[0]);
+            }));
+        });
+        return seg;
+    }
+
+    function reportChartSession(wire) {
+        if (wire === 'donut' || wire === 'pie' || wire === 'bars') return wire;
+        return 'columns';
+    }
+
+    function rememberReportChart(view, kind) {
+        if (!view || !view.id) return;
+        if (!state.canEdit) {
+            rememberViewerChart(state.projectKey, view.id, kind);
+            return;
+        }
+        state.reportChartPending = {
+            view: view,
+            kind: kind,
+            projectKey: state.projectKey,
+            epoch: state.reportChartEpoch
+        };
+        if (state.reportChartBusy) return;
+        sendReportChart();
+    }
+
+    function sendReportChart() {
+        var job = state.reportChartPending;
+        if (!job) {
+            state.reportChartBusy = false;
+            return;
+        }
+        state.reportChartPending = null;
+        if (job.epoch !== state.reportChartEpoch || state.projectKey !== job.projectKey) {
+            state.reportChartBusy = false;
+            return;
+        }
+        state.reportChartBusy = true;
+        var wire = job.kind === 'columns' ? 'bar' : job.kind;
+        ajax('PUT', '/projects/' + encodeURIComponent(job.projectKey) + '/reports/' + encodeURIComponent(job.view.id), { chart: wire }, function (status, payload) {
+            if (job.epoch !== state.reportChartEpoch || state.projectKey !== job.projectKey) {
+                return;
+            }
+            state.reportChartBusy = false;
+            var saved = status >= 200 && status < 300;
+            var chart = (payload && payload.chart) || wire;
+            if (saved) {
+                job.view.chart = chart;
+                if (state.reportView && String(state.reportView.id) === String(job.view.id)) state.reportView.chart = chart;
+                (state.reportCatalog || []).forEach(function (item) {
+                    if (String(item.id) === String(job.view.id)) item.chart = chart;
+                });
+                if (job.view.standard) {
+                    var project = currentProject();
+                    if (project && project.setup) {
+                        var parts = String(project.setup.reportCharts || '').split(',').filter(function (part) {
+                            return part && part.indexOf(String(job.view.id) + ':') !== 0;
+                        });
+                        parts.push(String(job.view.id) + ':' + chart);
+                        project.setup.reportCharts = parts.filter(function (part) { return part; }).join(',');
+                    }
+                }
+            }
+            if (state.reportChartPending) {
+                sendReportChart();
+                return;
+            }
+            if (saved) return;
+            notify((payload && payload.message) || t('errorTitle'));
+            if (state.reportChartFor !== String(job.view.id) || state.reportChart !== job.kind) return;
+            state.reportChart = reportChartSession(job.view.chart);
+            if (state.reportView && String(state.reportView.id) === String(job.view.id) && !paintReport()) renderFrame();
+        });
+    }
+
+    function reportLegend(rows, total, money, shares) {
+        var list = el('ul', 'asset-tree-report-legend');
+        rows.forEach(function (row, index) {
+            var item = el('li', row.activate ? 'is-pick' : '');
+            var swatch = el('i');
+            swatch.style.background = row.color || '#0052CC';
+            item.appendChild(swatch);
+            var name = el('span', null, row.label || '');
+            name.title = row.label || '';
+            item.appendChild(name);
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            var shown = money ? reportMoneyLabel(value) : String(row.count);
+            item.appendChild(el('strong', null, shown + ' · ' + (shares && shares[index] ? shares[index] : '0 %')));
+            if (row.activate) {
+                item.tabIndex = 0;
+                item.addEventListener('click', function () { row.activate(); });
+                item.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
+            }
+            list.appendChild(item);
+        });
+        return list;
+    }
+
+    function reportColumnsChart(rows, max, money) {
+        var wrap = el('div', 'asset-tree-report-columns' + (money ? ' is-money' : ''));
+        rows.forEach(function (row) {
+            var col = el('div', 'asset-tree-report-column' + (row.activate ? ' is-pick' : ''));
+            if (row.activate) {
+                col.tabIndex = 0;
+                col.addEventListener('click', function () { row.activate(); });
+                col.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
+            }
+            var shown = row.text || String(row.count);
+            var count = el('span', 'asset-tree-report-column-count', shown);
+            count.title = shown;
+            col.appendChild(count);
+            var shaft = el('span', 'asset-tree-report-shaft');
+            var fill = el('span');
+            var pct = max ? Math.round(100 * (row.count || 0) / max) : 0;
+            if (row.count && pct < 8) pct = 8;
+            fill.style.height = pct + '%';
+            fill.style.background = row.color || '#0052CC';
+            shaft.appendChild(fill);
+            col.appendChild(shaft);
+            var label = el('span', 'asset-tree-report-column-label', row.label || '');
+            label.title = row.label || '';
+            col.appendChild(label);
+            wrap.appendChild(col);
+        });
+        return wrap;
+    }
+
+    function reportBarsChart(rows, max, money) {
+        var list = el('div', 'asset-tree-report-bars' + (money ? ' is-money' : ''));
+        rows.forEach(function (row) {
+            var line = el('div', 'asset-tree-report-bar' + (row.activate ? ' is-pick' : ''));
+            if (row.activate) {
+                line.tabIndex = 0;
+                line.addEventListener('click', function () { row.activate(); });
+                line.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
+            }
+            var label = el('span', 'asset-tree-report-bar-label', row.label || '');
+            label.title = row.label || '';
+            line.appendChild(label);
+            var track = el('span', 'asset-tree-report-bar-track');
+            var fill = el('span');
+            fill.style.width = (max ? Math.round(100 * (row.count || 0) / max) : 0) + '%';
+            fill.style.background = row.color || '#0052CC';
+            track.appendChild(fill);
+            line.appendChild(track);
+            var shown = row.text || String(row.count);
+            var value = el('strong', null, shown);
+            value.title = shown;
+            line.appendChild(value);
+            list.appendChild(line);
+        });
+        return list;
+    }
+
+    function measuredRows(rows, money) {
+        if (!money) return rows;
+        var next = [];
+        rows.forEach(function (row) {
+            next.push({
+                key: row.key,
+                label: row.label,
+                color: row.color,
+                count: Number(row.amount) || 0,
+                text: reportMoneyLabel(Number(row.amount) || 0),
+                activate: row.activate
+            });
+        });
+        return next;
+    }
+
+    function reportChartPanel(rows, total, max, kind, money, sumText, shares) {
+        var measured = measuredRows(rows, money);
+        if (!measured.length) return null;
+        var drawn = [];
+        measured.forEach(function (row) { if (row.count) drawn.push(row); });
+        if (kind === 'columns') {
+            var columns = el('div', 'asset-tree-report-chart');
+            columns.appendChild(reportColumnsChart(measured, max, money));
+            return columns;
+        }
+        if (kind === 'bars') {
+            var bars = el('div', 'asset-tree-report-chart');
+            bars.appendChild(reportBarsChart(measured, max, money));
+            return bars;
+        }
+        if (!drawn.length) return null;
+        var round = el('div', 'asset-tree-report-chart is-round');
+        var ring = el('div', 'asset-tree-report-ring');
+        var center = money ? reportMoneyLabel(maxShare(rows)) : String(total);
+        if (kind === 'pie') {
+            ring.appendChild(reportPieChart(drawn));
+        } else {
+            ring.appendChild(donutChart(drawn, true));
+            var figure = el('span', 'asset-tree-report-ring-value' + (center.length > 11 ? ' is-tiny' : center.length > 7 ? ' is-compact' : ''), center);
+            ring.appendChild(figure);
+        }
+        round.appendChild(ring);
+        round.appendChild(reportLegend(money ? rows : measured, money ? maxShare(rows) : total, money, shares));
+        return round;
+    }
+
+    function maxShare(rows) {
+        var total = 0;
+        rows.forEach(function (row) { total += Number(row.amount) || 0; });
+        return total;
+    }
+
+    function shareLabels(values) {
+        var total = 0;
+        var i;
+        for (i = 0; i < values.length; i++) total += Number(values[i]) || 0;
+        var texts = [];
+        if (!total || !values.length) {
+            for (i = 0; i < values.length; i++) texts.push('0 %');
+            return texts;
+        }
+        var floors = [];
+        var remainders = [];
+        var assigned = 0;
+        for (i = 0; i < values.length; i++) {
+            var exact = (Number(values[i]) || 0) * 1000 / total;
+            var floor = Math.floor(exact + 1e-9);
+            floors.push(floor);
+            remainders.push(exact - floor);
+            assigned += floor;
+        }
+        var left = 1000 - assigned;
+        if (left < 0) left = 0;
+        while (left > 0) {
+            var best = 0;
+            for (i = 1; i < remainders.length; i++) if (remainders[i] > remainders[best]) best = i;
+            floors[best] += 1;
+            remainders[best] = -1;
+            left -= 1;
+        }
+        for (i = 0; i < floors.length; i++) {
+            var tenths = floors[i];
+            var text = tenths % 10 === 0 ? String(tenths / 10) : String(Math.floor(tenths / 10)) + '.' + String(tenths % 10);
+            texts.push(text + ' %');
+        }
+        return texts;
+    }
+
     function shareText(count, total) {
-        if (!total) return '0 %';
-        var pct = count * 100 / total;
-        var text = Math.abs(pct - Math.round(pct)) < 0.05 ? String(Math.round(pct)) : pct.toFixed(1);
-        return text + ' %';
+        return shareLabels([count, Math.max(0, total - count)])[0] || '0 %';
     }
 
     function groupWord(group) {
@@ -12142,6 +17843,22 @@
         return t(map[group] || 'groupWordStatus');
     }
 
+    function groupPhrase(group) {
+        var map = {
+            status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder',
+            month: 'reportGroupMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind'
+        };
+        return t(map[group] || 'reportGroupStatus');
+    }
+
+    function detailWord(group) {
+        if (group === 'kind') return t('reportWorkDetail');
+        if (group === 'age' || group === 'month') return t('lifePurchase');
+        if (group === 'warranty') return t('lifeWarranty');
+        if (group === 'writeoff') return t('reportWriteoffDetail');
+        return groupWord(group);
+    }
+
     function loadGallery() {
         if (state.galleryLoading) return;
         state.galleryLoading = true;
@@ -12149,6 +17866,25 @@
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            state.reportEmptyNav = false;
+            if (status !== 200) {
+                state.galleryLoading = false;
+                state.reportView = null;
+                state.reportError = (payload && payload.message) || t('errorTitle');
+                if (state.view === 'reports' && !paintReport()) renderFrame();
+                return;
+            }
+            if (!reportVisible(state.reportKey)) {
+                state.reportKey = firstVisibleReport() || '';
+            }
+            if (!state.reportKey) {
+                state.galleryLoading = false;
+                state.reportView = null;
+                state.reportError = '';
+                state.reportEmptyNav = true;
+                if (state.view === 'reports' && !paintReport()) renderFrame();
+                return;
+            }
             fetchGalleryView(token);
         });
     }
@@ -12165,28 +17901,75 @@
                 state.reportView = null;
                 state.reportError = (payload && payload.message) || t('errorTitle');
             }
-            if (state.view === 'reports') renderFrame();
+            if (state.view === 'reports' && !paintReport()) renderFrame();
         });
     }
 
-    function openGallery(id) {
-        state.reportKey = id;
+    function highlightReport(id) {
+        var links = document.querySelectorAll('#asset-tree-app .asset-tree-report-nav button[data-report]');
+        if (!links.length) return false;
+        var key = String(id);
+        for (var i = 0; i < links.length; i++) {
+            if (links[i].getAttribute('data-report') === key) links[i].classList.add('is-current');
+            else links[i].classList.remove('is-current');
+        }
+        return true;
+    }
+
+    function paintReport() {
+        var current = document.querySelector('#asset-tree-app .asset-tree-report-main');
+        if (!current || !current.parentNode || state.reportCatalog == null) return false;
+        paintReportTools();
+        current.parentNode.replaceChild(reportCard(), current);
+        return true;
+    }
+
+    function forgetReports() {
+        state.reportCatalog = null;
         state.reportView = null;
-        state.galleryLoading = true;
+        state.galleryLoading = false;
+        state.galleryToken++;
+    }
+
+    function openGallery(id) {
+        if (!id) return;
+        closeAllModals();
+        state.reportKey = id;
+        highlightReport(id);
+        if (state.reportCatalog == null) return;
         var token = ++state.galleryToken;
-        renderFrame();
         fetchGalleryView(token);
+    }
+
+    function reportLink(item) {
+        var link = button(item.name, 'asset-tree-report-link' + (item.id === state.reportKey ? ' is-current' : ''), function () {
+            openGallery(item.id);
+        });
+        link.setAttribute('data-report', item.id);
+        return link;
+    }
+
+    function reportToolButtons() {
+        var tools = el('div', 'asset-tree-inline-actions asset-tree-report-tools');
+        tools.id = 'asset-tree-report-tools';
+        if (state.canEdit) tools.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
+        tools.appendChild(button(t('reportBook'), 'asset-tree-btn', downloadReportBook));
+        if (state.reportView) {
+            tools.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
+        }
+        return tools;
+    }
+
+    function paintReportTools() {
+        var current = document.getElementById('asset-tree-report-tools');
+        if (!current || !current.parentNode) return;
+        current.parentNode.replaceChild(reportToolButtons(), current);
     }
 
     function renderReports() {
         var panel = el('section', 'asset-tree-sheet');
-        var head = sheetHead('menuReports');
-        var actions = el('div', 'asset-tree-inline-actions');
-        if (state.canEdit) actions.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
-        if (state.reportView) actions.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
-        head.appendChild(actions);
-        panel.appendChild(head);
         panel.appendChild(el('p', 'asset-tree-hint', t('reportPageHint')));
+        paintReportTools();
         if (state.reportCatalog == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadGallery();
@@ -12197,113 +17980,372 @@
         nav.appendChild(el('span', 'asset-tree-nav-label', t('reportStandard')));
         (state.reportCatalog || []).forEach(function (item) {
             if (!item.standard || reportHidden(item.id)) return;
-            nav.appendChild(button(item.name, 'asset-tree-report-link' + (item.id === state.reportKey ? ' is-current' : ''), function () {
-                openGallery(item.id);
-            }));
+            nav.appendChild(reportLink(item));
         });
         var saved = (state.reportCatalog || []).filter(function (item) { return !item.standard; });
         if (saved.length) {
             nav.appendChild(el('span', 'asset-tree-nav-label', t('reportSavedTitle')));
             saved.forEach(function (item) {
-                nav.appendChild(button(item.name, 'asset-tree-report-link' + (item.id === state.reportKey ? ' is-current' : ''), function () {
-                    openGallery(item.id);
-                }));
+                nav.appendChild(reportLink(item));
             });
         }
         shell.appendChild(nav);
-        var main = el('div', 'asset-tree-report-main');
-        if (state.galleryLoading || !state.reportView) {
-            main.appendChild(el('p', 'asset-tree-hint', state.reportError || t('loading')));
-        } else {
-            var view = state.reportView;
-            main.appendChild(el('h3', null, view.title || ''));
-            main.appendChild(el('p', 'asset-tree-hint', t('reportGroupBy') + ': ' + groupWord(view.groupBy)));
-            if (view.rows && view.rows.length) {
-                var chartWrap = el('div', 'asset-tree-chart-wrap' + (view.chart === 'donut' ? ' is-donut' : ''));
-                chartWrap.appendChild(view.chart === 'donut' ? donutChart(view.rows) : barChart(view.rows));
-                if (view.chart === 'donut') {
-                    var legend = el('div', 'asset-tree-legend');
-                    legend.appendChild(el('strong', null, String(view.total || 0) + ' ' + t('reportTotalRow')));
-                    view.rows.forEach(function (row) {
-                        var line = el('span', 'asset-tree-legend-line');
-                        var swatch = el('i');
-                        swatch.style.background = row.color || '#0052CC';
-                        line.appendChild(swatch);
-                        line.appendChild(document.createTextNode((row.label || '') + ' ' + row.count));
-                        legend.appendChild(line);
-                    });
-                    chartWrap.appendChild(legend);
-                }
-                main.appendChild(chartWrap);
-            }
-            var table = el('table', 'asset-tree-sheet-table');
-            var header = el('tr');
-            header.appendChild(el('th', null, groupWord(view.groupBy)));
-            header.appendChild(el('th', null, t('reportCount')));
-            header.appendChild(el('th', null, t('reportShare')));
-            table.appendChild(header);
-            (view.rows || []).forEach(function (row) {
-                var line = el('tr');
-                line.appendChild(el('td', null, row.label || ''));
-                line.appendChild(el('td', null, String(row.count)));
-                line.appendChild(el('td', null, shareText(row.count, view.total || 0)));
-                table.appendChild(line);
-            });
-            var total = el('tr', 'is-total');
-            total.appendChild(el('td', null, t('reportTotalRow')));
-            total.appendChild(el('td', null, String(view.total || 0)));
-            total.appendChild(el('td', null, shareText(view.total || 0, view.total || 0)));
-            table.appendChild(total);
-            main.appendChild(table);
-            main.appendChild(el('p', 'asset-tree-hint', t('reportCounted')));
-            if (!view.standard && state.canEdit) {
-                main.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
-                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), null, function (status, payload) {
-                        if (status >= 200 && status < 300) {
-                            state.reportKey = 'status';
-                            state.reportCatalog = null;
-                            state.reportView = null;
-                            state.galleryLoading = false;
-                            renderFrame();
-                        } else notify((payload && payload.message) || t('errorTitle'));
-                    });
-                }));
-            }
-        }
-        shell.appendChild(main);
+        shell.appendChild(reportCard());
         panel.appendChild(shell);
         return panel;
     }
 
-    function openReportDialog() {
+    var reportAssetToken = 0;
+
+    function reportSavedItem(view) {
+        var found = null;
+        (state.reportCatalog || []).forEach(function (item) {
+            if (view && String(item.id) === String(view.id)) found = item;
+        });
+        return found;
+    }
+
+    function reportNeedsLines(view, saved) {
+        var group = (view && view.groupBy) || (saved && saved.groupBy) || '';
+        if (view && view.sum) return true;
+        if (saved && saved.metric === 'cost') return true;
+        if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind') return true;
+        var id = String((view && view.id) || '');
+        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'service';
+    }
+
+    function reportJoin(labels) {
+        var text = [];
+        (labels || []).forEach(function (label) {
+            if (label) text.push(label);
+        });
+        return text.join(', ');
+    }
+
+    function reportHolderName(key) {
+        if (!key) return t('reportUnassigned');
+        var name = '';
+        (state.assets || []).some(function (asset) {
+            if (holderKey(asset) !== key) return false;
+            name = (asset.custodian && asset.custodian.displayName) || key;
+            return true;
+        });
+        return name || key;
+    }
+
+    function reportPlaceName(id) {
+        if (!id) return t('root');
+        var node = byId()[id] || byId()[parseInt(id, 10)];
+        return node && node.name ? node.name : String(id);
+    }
+
+    function reportSplit(value) {
+        return String(value || '').split(',').filter(function (part) { return part; });
+    }
+
+    function reportMixRules(saved) {
+        var rules = [];
+        if (!saved) return rules;
+        var field = saved.filterField || '';
+        var value = saved.filterValue || '';
+        var types = [];
+        var statuses = [];
+        var holders = [];
+        var places = [];
+        if (field === 'mix') {
+            types = mixKeys(value, 't');
+            statuses = mixKeys(value, 's');
+            holders = mixKeys(value, 'h');
+            places = mixKeys(value, 'p');
+        } else if (field === 'type') {
+            types = reportSplit(value);
+        } else if (field === 'status') {
+            statuses = reportSplit(value);
+        } else if (field === 'holder') {
+            holders = reportSplit(value);
+        } else {
+            return rules;
+        }
+        if (types.length) {
+            rules.push({
+                field: 'type',
+                op: types.length === 1 ? 'eq' : 'in',
+                value: types.length === 1 ? types[0] : '',
+                values: types,
+                caption: t('type') + ': ' + reportJoin(types.map(function (key) { return typeOf(key).label || key; }))
+            });
+        }
+        if (statuses.length) {
+            rules.push({
+                field: 'status',
+                op: statuses.length === 1 ? 'eq' : 'in',
+                value: statuses.length === 1 ? statuses[0] : '',
+                values: statuses,
+                caption: t('status') + ': ' + reportJoin(statuses.map(function (key) { return statusLabel(key); }))
+            });
+        }
+        if (holders.length) {
+            rules.push({
+                field: 'custodian',
+                op: holders.length === 1 ? 'eq' : 'in',
+                userKey: holders.length === 1 ? holders[0] : '',
+                userKeys: holders,
+                caption: t('custodian') + ': ' + reportJoin(holders.map(reportHolderName))
+            });
+        }
+        if (places.length) {
+            rules.push({
+                field: 'place',
+                op: 'in',
+                values: places,
+                caption: groupWord('place') + ': ' + reportJoin(places.map(reportPlaceName))
+            });
+        }
+        return rules;
+    }
+
+    function reportBucketRule(view, row) {
+        var group = (view && view.groupBy) || 'status';
+        var key = row.key == null ? '' : String(row.key);
+        var label = row.label || '';
+        if (group === 'type') {
+            return { field: 'type', op: 'eq', value: key, caption: t('type') + ': ' + (label || typeOf(key).label || key) };
+        }
+        if (group === 'place') {
+            return { field: 'place', op: 'eq', value: key, caption: groupWord('place') + ': ' + (label || reportPlaceName(key)) };
+        }
+        if (group === 'holder') {
+            if (!key) return { field: 'custodian', op: 'empty', value: '', caption: t('custodian') + ' ' + t('opEmpty') };
+            return { field: 'custodian', op: 'eq', userKey: key, caption: t('custodian') + ': ' + (label || reportHolderName(key)) };
+        }
+        return { field: 'status', op: 'eq', value: key, caption: t('status') + ': ' + (label || statusLabel(key)) };
+    }
+
+    function reportAssetRules(view, row, saved) {
+        var bucket = reportBucketRule(view, row);
+        var group = (view && view.groupBy) || 'status';
+        var rules = reportMixRules(saved).filter(function (rule) {
+            if (group === 'status' && rule.field === 'status') return false;
+            if (group === 'type' && rule.field === 'type') return false;
+            if (group === 'holder' && rule.field === 'custodian') return false;
+            return true;
+        });
+        rules.push(bucket);
+        return rules;
+    }
+
+    function reportValueCaption(view, row) {
+        var title = (view && view.title) || '';
+        var label = (row && row.label) || '';
+        if (title && label) return title + ' · ' + label;
+        return label || title;
+    }
+
+    function openReportInAssets(view, row) {
+        if (!view || !row) return;
+        var saved = reportSavedItem(view);
+        if (!reportNeedsLines(view, saved)) {
+            showAssetRules(reportAssetRules(view, row, saved), true);
+            return;
+        }
+        var key = row.key == null ? '' : String(row.key);
+        var token = ++reportAssetToken;
+        var projectKey = state.projectKey;
+        var path = '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(view.id)
+            + '?bucket=' + encodeURIComponent(key) + '&lines=all';
+        ajax('GET', path, null, function (status, payload) {
+            if (token !== reportAssetToken || state.projectKey !== projectKey) return;
+            if (status !== 200 || !payload) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            var ids = {};
+            ((payload && payload.lines) || []).forEach(function (line) {
+                if (line && line.assetId) ids[line.assetId] = true;
+            });
+            showAssetRules([{ ids: ids, caption: reportValueCaption(view, row) }], true);
+        });
+    }
+
+    function reportCard() {
+        var main = el('div', 'asset-tree-report-main');
+        var view = state.reportView;
+        if (state.reportEmptyNav) {
+            main.appendChild(el('p', 'asset-tree-hint', t('reportNone')));
+            return main;
+        }
+        if (state.galleryLoading || !view) {
+            main.appendChild(el('p', 'asset-tree-hint', state.reportError || t('loading')));
+            return main;
+        }
+        var rows = view.rows || [];
+        rows.forEach(function (row) {
+            row.activate = function () { openReportInAssets(view, row); };
+        });
+        var money = reportMoney(view);
+        var shareTotal = 0;
+        var shareValues = [];
+        var maxValue = 1;
+        rows.forEach(function (row) {
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            shareTotal += value;
+            shareValues.push(value);
+            if (value > maxValue) maxValue = value;
+        });
+        if (!money) shareTotal = view.total || 0;
+        var shares = shareLabels(shareValues);
+        var kind = reportChartKind(view);
+        var titleRow = el('div', 'asset-tree-report-title');
+        var titles = el('div');
+        titles.appendChild(el('h3', null, view.title || ''));
+        titles.appendChild(el('p', null, groupPhrase(view.groupBy)));
+        titleRow.appendChild(titles);
+        titleRow.appendChild(reportChartSwitch(view, kind));
+        main.appendChild(titleRow);
+        var facts = el('div', 'asset-tree-report-facts');
+        facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
+        if (view.sum) facts.appendChild(reportFact('', reportMoneyLabel(shareTotal), t('lifeBook')));
+        main.appendChild(facts);
+        if (!rows.length) {
+            main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
+            if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
+        } else {
+            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares);
+            if (chartPanel) main.appendChild(chartPanel);
+            var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
+            var header = el('tr');
+            header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy)));
+            header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
+            header.appendChild(el('th', 'is-num', t('reportCount')));
+            if (money) header.appendChild(el('th', 'is-num is-money', t('lifeBook')));
+            header.appendChild(el('th', 'is-num', t('reportShare')));
+            table.appendChild(header);
+            rows.forEach(function (row, index) {
+                var line = el('tr', 'is-pick');
+                line.tabIndex = 0;
+                line.addEventListener('click', function () { row.activate(); });
+                line.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        row.activate();
+                    }
+                });
+                var name = el('td', 'asset-tree-report-name');
+                name.title = row.label || '';
+                var dot = el('i');
+                dot.style.background = row.color || '#0052CC';
+                name.appendChild(dot);
+                name.appendChild(document.createTextNode(row.label || ''));
+                line.appendChild(name);
+                var meter = el('td', 'asset-tree-report-meter');
+                var meterValue = money ? (Number(row.amount) || 0) : (row.count || 0);
+                meter.appendChild(reportMeter(meterValue, maxValue, row.color));
+                line.appendChild(meter);
+                line.appendChild(el('td', 'is-num', String(row.count)));
+                if (money) line.appendChild(el('td', 'is-num is-money', reportMoneyLabel(Number(row.amount) || 0)));
+                line.appendChild(el('td', 'is-num', shares[index] || '0 %'));
+                table.appendChild(line);
+            });
+            var total = el('tr', 'is-total');
+            total.appendChild(el('td', null, t('reportTotalRow')));
+            total.appendChild(el('td', 'asset-tree-report-meter', ''));
+            total.appendChild(el('td', 'is-num', String(view.total || 0)));
+            if (money) total.appendChild(el('td', 'is-num is-money', reportMoneyLabel(shareTotal)));
+            total.appendChild(el('td', 'is-num', shareTotal ? '100 %' : '0 %'));
+            table.appendChild(total);
+            main.appendChild(table);
+        }
+        var foot = el('div', 'asset-tree-report-foot');
+        var note = view.hint || t('reportCounted');
+        if (rows.length) note += ' ' + t('reportClickValue');
+        foot.appendChild(el('p', null, note));
+        if (!view.standard && state.canEdit) {
+            var savedItem = null;
+            (state.reportCatalog || []).forEach(function (item) {
+                if (String(item.id) === String(view.id)) savedItem = item;
+            });
+            foot.appendChild(button(t('reportEdit'), 'asset-tree-btn', function () {
+                openReportDialog(savedItem || { id: view.id, name: view.title, groupBy: view.groupBy, chart: view.chart, metric: view.sum ? 'cost' : 'count', filterField: '', filterValue: '' });
+            }));
+            foot.appendChild(button(t('reportDelete'), 'asset-tree-btn', function () {
+                if (!window.confirm(t('reportDeleteConfirm', view.title || ''))) return;
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id), null, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        state.reportKey = 'status';
+                        state.reportChart = '';
+                        state.reportChartFor = '';
+                        state.reportCatalog = null;
+                        state.reportView = null;
+                        state.galleryLoading = false;
+                        renderFrame();
+                    } else notify((payload && payload.message) || t('errorTitle'));
+                });
+            }));
+        }
+        main.appendChild(foot);
+        return main;
+    }
+
+    function mixKeys(value, name) {
+        var parts = String(value || '').split(';');
+        var i;
+        for (i = 0; i < parts.length; i++) {
+            if (parts[i].indexOf(name + '=') === 0) {
+                return parts[i].slice(name.length + 1).split(',').filter(function (part) { return part; });
+            }
+        }
+        return [];
+    }
+
+    function openReportDialog(existing) {
+        var editing = !!(existing && existing.id);
         var pickedTypes = {};
         var pickedStatuses = {};
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
-            dialog.appendChild(el('h2', null, t('reportCreate')));
+            dialog.appendChild(el('h2', null, t(editing ? 'reportEdit' : 'reportCreate')));
             var name = document.createElement('input');
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
             var group = document.createElement('select');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder']].forEach(function (pair) {
+            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
                 group.appendChild(option);
             });
-            group.value = 'type';
+            group.value = editing && existing.groupBy ? existing.groupBy : 'type';
             var chart = document.createElement('select');
-            [['bar', 'reportColumns'], ['donut', 'reportDonut']].forEach(function (pair) {
+            [['donut', 'reportDonut'], ['pie', 'reportPie'], ['bar', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
                 chart.appendChild(option);
             });
+            chart.value = editing && existing.chart ? existing.chart : 'bar';
+            if (editing && existing.name) name.value = existing.name;
             var metric = document.createElement('select');
-            var countOption = document.createElement('option');
-            countOption.value = 'count';
-            countOption.textContent = t('reportCount');
-            metric.appendChild(countOption);
+            [['count', 'reportCount'], ['cost', 'lifeBook']].forEach(function (pair) {
+                var option = document.createElement('option');
+                option.value = pair[0];
+                option.textContent = t(pair[1]);
+                metric.appendChild(option);
+            });
+            if (editing && existing.metric === 'cost') metric.value = 'cost';
+            var initialTypes = editing ? mixKeys(existing.filterValue, 't') : [];
+            var initialStatuses = editing ? mixKeys(existing.filterValue, 's') : [];
+            var initialHolders = editing ? mixKeys(existing.filterValue, 'h') : [];
+            var initialPlaces = editing ? mixKeys(existing.filterValue, 'p') : [];
+            initialTypes.forEach(function (key) { pickedTypes[key] = true; });
+            initialStatuses.forEach(function (key) { pickedStatuses[key] = true; });
+            function syncMetric() {
+                var cost = metric.querySelector('option[value="cost"]');
+                var kindGroup = group.value === 'kind';
+                if (cost) cost.disabled = kindGroup;
+                if (kindGroup && metric.value === 'cost') metric.value = 'count';
+            }
+            group.addEventListener('change', syncMetric);
+            syncMetric();
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
             row.appendChild(planField(t('reportChart'), chart));
@@ -12317,6 +18359,7 @@
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
+                box.checked = !!pickedTypes[type.typeKey];
                 box.addEventListener('change', function () {
                     if (box.checked) pickedTypes[type.typeKey] = true;
                     else delete pickedTypes[type.typeKey];
@@ -12332,6 +18375,7 @@
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
+                box.checked = !!pickedStatuses[status.statusKey];
                 box.addEventListener('change', function () {
                     if (box.checked) pickedStatuses[status.statusKey] = true;
                     else delete pickedStatuses[status.statusKey];
@@ -12341,33 +18385,101 @@
                 statuses.appendChild(label);
             });
             dialog.appendChild(statuses);
+            var pickedHolders = {};
+            var pickedPlaces = {};
+            initialHolders.forEach(function (key) { pickedHolders[key] = true; });
+            initialPlaces.forEach(function (key) { pickedPlaces[key] = true; });
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyHolders')));
+            var holders = el('div', 'asset-tree-check-list');
+            var holderSeen = {};
+            (state.assets || []).forEach(function (asset) {
+                var person = asset && asset.custodian;
+                if (!person || !person.userKey || holderSeen[person.userKey]) return;
+                holderSeen[person.userKey] = true;
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = !!pickedHolders[person.userKey];
+                box.addEventListener('change', function () {
+                    if (box.checked) pickedHolders[person.userKey] = true;
+                    else delete pickedHolders[person.userKey];
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(person.displayName || person.userKey));
+                holders.appendChild(label);
+            });
+            dialog.appendChild(holders);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyPlaces')));
+            var places = el('div', 'asset-tree-check-list');
+            (state.assets || []).forEach(function (asset) {
+                if (!asset || !typeOf(asset.typeKey).location) return;
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = !!pickedPlaces[String(asset.id)];
+                box.addEventListener('change', function () {
+                    if (box.checked) pickedPlaces[String(asset.id)] = true;
+                    else delete pickedPlaces[String(asset.id)];
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(asset.name || String(asset.id)));
+                places.appendChild(label);
+            });
+            dialog.appendChild(places);
             var actions = el('div', 'asset-tree-inline-actions');
-            actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+            var hold = dialog.parentNode;
+            var save = button(t('save'), 'asset-tree-btn primary', function () {
+                if (save.disabled) return;
                 if (!name.value.trim()) {
                     notify(t('reportName'));
+                    name.focus();
                     return;
                 }
+                save.disabled = true;
                 var typeKeys = Object.keys(pickedTypes);
                 var statusKeys = Object.keys(pickedStatuses);
+                var holderKeys = Object.keys(pickedHolders);
+                var placeKeys = Object.keys(pickedPlaces);
                 var body = { name: name.value.trim(), groupBy: group.value, chart: chart.value, metric: metric.value, filterField: '', filterValue: '' };
-                if (typeKeys.length || statusKeys.length) {
+                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length) {
                     body.filterField = 'mix';
                     var parts = [];
                     if (typeKeys.length) parts.push('t=' + typeKeys.join(','));
                     if (statusKeys.length) parts.push('s=' + statusKeys.join(','));
+                    if (holderKeys.length) parts.push('h=' + holderKeys.join(','));
+                    if (placeKeys.length) parts.push('p=' + placeKeys.join(','));
                     body.filterValue = parts.join(';');
                 }
-                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', body, function (status, payload) {
-                    if (status >= 200 && status < 300 && payload && payload.id) {
-                        closeModal();
-                        state.reportKey = payload.id;
+                if (body.filterValue && body.filterValue.length > 4000) {
+                    save.disabled = false;
+                    notify(t('reportFilterLong'));
+                    return;
+                }
+                var path = '/projects/' + encodeURIComponent(state.projectKey) + '/reports' + (editing ? '/' + encodeURIComponent(existing.id) : '');
+                ajax(editing ? 'PUT' : 'POST', path, body, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        closeModal(hold);
+                        var created = payload && (payload.id || payload.key || '');
+                        state.reportChart = '';
+                        state.reportChartFor = '';
+                        if (created) state.reportKey = created;
                         state.reportCatalog = null;
                         state.reportView = null;
                         state.galleryLoading = false;
                         renderFrame();
-                    } else notify((payload && payload.message) || t('errorTitle'));
+                    } else {
+                        save.disabled = false;
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
                 });
-            }));
+            });
+            name.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    save.click();
+                }
+            });
+            actions.appendChild(save);
             actions.appendChild(button(t('cancel'), 'asset-tree-btn', closeModal));
             dialog.appendChild(actions);
         });
@@ -12384,7 +18496,13 @@
         var project = currentProject();
         var setup = project && project.setup ? project.setup : {};
         return {
-            scheduleKinds: setup.scheduleKinds || 'to,kts,verify',
+            scheduleKinds: setup.scheduleKinds || DEFAULT_KINDS,
+            scheduleLayer: (function () {
+                var id = String(setup.scheduleLayer || '').toLowerCase();
+                if (id === 'roster' || id === 'staff') return 'roster';
+                var known = parseKindList(setup.scheduleKinds || DEFAULT_KINDS);
+                return known.some(function (row) { return row.id === id; }) ? id : '';
+            })(),
             scheduleUnit: setup.scheduleUnit || 'month',
             scheduleNotify: !!setup.scheduleNotify,
             mapWidth: clampNum(setup.mapWidth || 1200, 640, 2400),
@@ -12392,29 +18510,159 @@
             mapGrid: [8, 12, 16, 24, 32].indexOf(Number(setup.mapGrid)) >= 0 ? Number(setup.mapGrid) : 24,
             mapSnap: setup.mapSnap !== false,
             reportHidden: setup.reportHidden || '',
+            reportCharts: setup.reportCharts || '',
+            reportMail: !!setup.reportMail,
+            reportMailEvery: setup.reportMailEvery === 'month' ? 'month' : 'week',
+            reportMailDay: (function () {
+                var day = clampNum(setup.reportMailDay || 1, 1, setup.reportMailEvery === 'month' ? 31 : 7);
+                return day;
+            })(),
+            reportMailTo: setup.reportMailTo || '',
+            reportMailSent: setup.reportMailSent || '',
+            reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,
             lifeApprover: setup.lifeApprover || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',
-            lifeMonths: clampNum(setup.lifeMonths || 0, 0, 600)
+            lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
+            staffMarks: setup.staffMarks || '',
+            staffOrder: setup.staffOrder || '',
+            staffPlaceOrder: setup.staffPlaceOrder || '',
+            scheduleBoards: (function () {
+                var parts = String(setup.scheduleBoards || '').toLowerCase().split(',');
+                var calendar = parts.indexOf('calendar') >= 0;
+                var roster = parts.indexOf('roster') >= 0;
+                if (!calendar && !roster) return 'calendar,roster';
+                var chosen = [];
+                if (calendar) chosen.push('calendar');
+                if (roster) chosen.push('roster');
+                return chosen.join(',');
+            })(),
+            scheduleOpen: (function () {
+                var open = String(setup.scheduleOpen || '').toLowerCase();
+                if (open === 'calendar' || open === 'roster') return open;
+                var layer = String(setup.scheduleLayer || '').toLowerCase();
+                return layer === 'roster' || layer === 'staff' ? 'roster' : 'calendar';
+            })(),
+            furniture: setup.furniture || ''
         };
     }
 
     function enabledKinds() {
-        var known = ['to', 'kts', 'verify'];
-        var picked = String(moduleSetup().scheduleKinds || '').split(',');
-        var kept = [];
-        known.forEach(function (key) {
-            if (picked.indexOf(key) >= 0) kept.push(key);
-        });
-        return kept.length ? kept : known;
+        return parseKindList(moduleSetup().scheduleKinds).map(function (row) { return row.id; });
     }
 
     function reportHidden(id) {
         return String(moduleSetup().reportHidden || '').split(',').indexOf(id) >= 0;
     }
 
+    function reportVisible(id) {
+        var items = state.reportCatalog || [];
+        for (var i = 0; i < items.length; i++) {
+            if (String(items[i].id) === String(id)) return !items[i].standard || !reportHidden(items[i].id);
+        }
+        return false;
+    }
+
+    function firstVisibleReport() {
+        var items = state.reportCatalog || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i] && (!items[i].standard || !reportHidden(items[i].id))) return items[i].id;
+        }
+        return '';
+    }
+
     function roomColor(value) {
         return /^#[0-9a-fA-F]{6}$/.test(String(value || '')) ? String(value).toLowerCase() : '';
+    }
+
+    function buildingAssets() {
+        return placeAssets().filter(function (asset) {
+            return !!(asset && asset.id);
+        }).sort(function (left, right) {
+            return crumbs(left).localeCompare(crumbs(right), 'ru');
+        });
+    }
+
+    function floorsForBuilding(placeId) {
+        var buildings = buildingAssets();
+        var firstId = buildings.length ? buildings[0].id : 0;
+        return (state.floors || []).filter(function (floor) {
+            var id = floor.placeId || 0;
+            if (id === placeId) return true;
+            return !id && placeId && placeId === firstId;
+        });
+    }
+
+    function assetInBuilding(asset, placeId) {
+        if (!asset || !placeId) return false;
+        var guard = 0;
+        var current = asset;
+        while (current && guard < 24) {
+            if (current.id === placeId) return true;
+            if (!current.parentId) return false;
+            current = byId()[current.parentId];
+            guard++;
+        }
+        return false;
+    }
+
+    function currentBuilding() {
+        var found = null;
+        buildingAssets().forEach(function (asset) {
+            if (asset.id === state.mapPlaceId) found = asset;
+        });
+        return found;
+    }
+
+    function roomMin(kind) {
+        if (kind === 'room' || kind === 'stair') return 16;
+        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || isRouteKind(kind)) return 4;
+        return 8;
+    }
+
+    function ensureBuilding() {
+        var buildings = buildingAssets();
+        var known = false;
+        buildings.forEach(function (item) { if (item.id === state.mapPlaceId) known = true; });
+        if (!known) state.mapPlaceId = buildings.length ? buildings[0].id : 0;
+        if (state.mapDirty) return;
+        var floors = floorsForBuilding(state.mapPlaceId);
+        var current = null;
+        floors.forEach(function (floor) { if (floor.id === state.floorId) current = floor; });
+        if (current) {
+            if (!state.mapDraft || state.mapDraft.id !== current.id) {
+                state.mapDraft = cloneFloor(current);
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+            }
+            return;
+        }
+        state.floorId = floors.length ? floors[0].id : 0;
+        state.mapDraft = floors.length ? cloneFloor(floors[0]) : null;
+        state.mapSelection = null;
+        state.mapGroup = [];
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
+    }
+
+    function chooseBuilding(id) {
+        if (id === state.mapPlaceId) return;
+        if (state.mapDirty && !window.confirm(t('mapDirty'))) return;
+        state.mapPlaceId = id;
+        var floors = floorsForBuilding(id);
+        state.floorId = floors.length ? floors[0].id : 0;
+        state.mapDraft = floors.length ? cloneFloor(floors[0]) : null;
+        state.mapDirty = false;
+        state.mapSelection = null;
+        state.mapGroup = [];
+        state.mapCam = null;
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
+        resetMapHistory();
+        if (!floors.length) state.mapEditing = false;
+        renderFrame();
     }
 
     function planSize(floor) {
@@ -12426,25 +18674,58 @@
     }
 
     function snapCoord(value) {
-        if (!moduleSetup().mapSnap) return Math.round(value);
-        var grid = moduleSetup().mapGrid || 24;
-        return Math.round(value / grid) * grid;
+        var step = state.mapStep || 8;
+        if (step < 1) step = 8;
+        return Math.round(value / step) * step;
+    }
+
+    function normalizeAngle(value) {
+        var number = Math.round(Number(value) || 0) % 360;
+        if (number < 0) number += 360;
+        return number;
+    }
+
+    function snapAngle(value, loose) {
+        var number = normalizeAngle(value);
+        if (loose) return number;
+        return (Math.round(number / 15) * 15) % 360;
     }
 
     function clampRoom(room, size) {
         var box = size || planSize(state.mapDraft || currentFloor());
         var kind = room.kind || 'room';
-        var min = kind === 'room' ? 36 : 6;
-        var x = clampNum(room.x, 0, box.w - min);
-        var y = clampNum(room.y, 0, box.h - min);
+        var min = roomMin(kind);
         var w = Math.max(min, Math.round(Number(room.w) || min));
         var h = Math.max(min, Math.round(Number(room.h) || min));
-        if (x + w > box.w) w = box.w - x;
-        if (y + h > box.h) h = box.h - y;
+        var angle = normalizeAngle(room.angle);
+        var x = Math.round(Number(room.x) || 0);
+        var y = Math.round(Number(room.y) || 0);
+        // A rotated shape is stored as a long box and then turned around its center.
+        // Fitting that box to the sheet moves the center and breaks wall corners.
+        if (angle % 180 === 0) {
+            x = clampNum(x, 0, box.w - min);
+            y = clampNum(y, 0, box.h - min);
+            if (x + w > box.w) w = Math.max(min, box.w - x);
+            if (y + h > box.h) h = Math.max(min, box.h - y);
+        } else {
+            x = clampNum(x, -2400, 4800);
+            y = clampNum(y, -2400, 4800);
+            if (w > 4800) w = 4800;
+            if (h > 4800) h = 4800;
+        }
+        var groupId = parseInt(room.groupId, 10) || 0;
+        if (groupId < 0) groupId = 0;
+        if (groupId > 1000000) groupId = 1000000;
         return {
-            name: room.name || (kind === 'room' ? t('mapRoom') : ''),
+            name: room.name || '',
             kind: kind,
             color: roomColor(room.color),
+            angle: normalizeAngle(room.angle),
+            points: roomPoints(room),
+            placeId: parseInt(room.placeId, 10) || 0,
+            assetId: Math.max(0, parseInt(room.assetId, 10) || 0),
+            swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
+            groupId: groupId,
             x: x, y: y, w: w, h: h
         };
     }
@@ -12481,22 +18762,257 @@
         state.mapDrag = null;
     }
 
-    function svgPoint(svg, event) {
-        var rect = svg.getBoundingClientRect();
+    function fittedCamera(size) {
+        var pad = 48;
+        return { x: -pad, y: -pad, w: size.w + pad * 2, h: size.h + pad * 2 };
+    }
+
+    function activeCamera(size) {
+        var cam = state.mapCam;
+        if (cam && cam.w && cam.h) return cam;
+        return fittedCamera(size);
+    }
+
+    function zoomPercent() {
         var size = planSize(state.mapDraft || currentFloor());
+        var cam = activeCamera(size);
+        var fit = fittedCamera(size);
+        return Math.max(1, Math.round(fit.w / cam.w * 100));
+    }
+
+    function viewMetrics(svg) {
+        var rect = svg.getBoundingClientRect();
+        var raw = (svg.getAttribute('viewBox') || '0 0 1 1').replace(/,/g, ' ').split(/\s+/);
+        var vx = Number(raw[0]) || 0;
+        var vy = Number(raw[1]) || 0;
+        var vw = Number(raw[2]) || 1;
+        var vh = Number(raw[3]) || 1;
+        var rw = rect.width || 1;
+        var rh = rect.height || 1;
+        var scale = Math.min(rw / vw, rh / vh) || 1;
         return {
-            x: ((event.clientX - rect.left) / (rect.width || 1)) * size.w,
-            y: ((event.clientY - rect.top) / (rect.height || 1)) * size.h
+            vx: vx, vy: vy, vw: vw, vh: vh,
+            scale: scale,
+            padX: (rw - vw * scale) / 2,
+            padY: (rh - vh * scale) / 2,
+            rect: rect
         };
+    }
+
+    function svgPoint(svg, event) {
+        var metrics = viewMetrics(svg);
+        return {
+            x: metrics.vx + (event.clientX - metrics.rect.left - metrics.padX) / metrics.scale,
+            y: metrics.vy + (event.clientY - metrics.rect.top - metrics.padY) / metrics.scale
+        };
+    }
+
+    function applyCamera(svg) {
+        var cam = state.mapCam;
+        if (!cam || !svg) return;
+        svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
+        var label = document.querySelector('.asset-tree-zoom-readout');
+        if (label) label.textContent = zoomPercent() + '%';
+    }
+
+    function zoomAt(svg, event, factor) {
+        var size = planSize(state.mapDraft || currentFloor());
+        var metrics = viewMetrics(svg);
+        var before = svgPoint(svg, event);
+        var aspect = (metrics.rect.width || 1) / (metrics.rect.height || 1);
+        var w = clampNum(metrics.vw / factor, size.w / 8, Math.max(size.w, size.h) * 2.4);
+        var h = w / aspect;
+        var rx = (event.clientX - metrics.rect.left) / (metrics.rect.width || 1);
+        var ry = (event.clientY - metrics.rect.top) / (metrics.rect.height || 1);
+        state.mapCam = {
+            x: before.x - rx * w,
+            y: before.y - ry * h,
+            w: w,
+            h: h
+        };
+        applyCamera(svg);
+    }
+
+    function zoomMap(factor) {
+        var svg = document.querySelector('#asset-tree-app .asset-tree-floorplan .asset-tree-canvas');
+        if (!svg) return;
+        var rect = svg.getBoundingClientRect();
+        zoomAt(svg, {
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+        }, factor);
+    }
+
+    function shapeBounds(room) {
+        var points = isPolygonRoom(room) ? roomPoints(room) : shapeCorners(room);
+        var minX = points[0] ? points[0].x : 0;
+        var minY = points[0] ? points[0].y : 0;
+        var maxX = minX;
+        var maxY = minY;
+        points.forEach(function (point) {
+            minX = Math.min(minX, point.x);
+            minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x);
+            maxY = Math.max(maxY, point.y);
+        });
+        return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+    }
+
+    function boundsHit(left, right) {
+        return left.x < right.x + right.w && left.x + left.w > right.x && left.y < right.y + right.h && left.y + left.h > right.y;
+    }
+
+    function selectionMembers(rooms, index) {
+        var already = index === state.mapSelection || (state.mapGroup || []).indexOf(index) >= 0;
+        var seed = already ? [state.mapSelection].concat(state.mapGroup || []) : [index];
+        var set = [];
+        function add(at) {
+            if (at == null || at < 0 || !rooms[at] || set.indexOf(at) >= 0) return;
+            set.push(at);
+        }
+        seed.forEach(add);
+        var extra = [];
+        set.forEach(function (at) {
+            if (rooms[at] && isFurnKind(rooms[at].kind)) {
+                groupIndexes(rooms, at).forEach(function (mate) { extra.push(mate); });
+            }
+        });
+        extra.forEach(add);
+        return set;
+    }
+
+    function paintMarquee(svg, drag) {
+        var node = svg.querySelector('#asset-tree-marquee');
+        if (!drag || !drag.moved) {
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+            return;
+        }
+        if (!node) {
+            node = svgEl('rect');
+            node.id = 'asset-tree-marquee';
+            node.setAttribute('class', 'asset-tree-rubber is-marquee');
+            svg.appendChild(node);
+        }
+        node.setAttribute('x', String(Math.min(drag.x0, drag.x1)));
+        node.setAttribute('y', String(Math.min(drag.y0, drag.y1)));
+        node.setAttribute('width', String(Math.abs(drag.x1 - drag.x0)));
+        node.setAttribute('height', String(Math.abs(drag.y1 - drag.y0)));
+    }
+
+    function applyMarquee(floor, drag) {
+        var box = {
+            x: Math.min(drag.x0, drag.x1),
+            y: Math.min(drag.y0, drag.y1),
+            w: Math.abs(drag.x1 - drag.x0),
+            h: Math.abs(drag.y1 - drag.y0)
+        };
+        var hits = [];
+        (floor.rooms || []).forEach(function (room, index) {
+            if ((room.kind || 'room') === 'room' || !shapeShown(room)) return;
+            if (boundsHit(shapeBounds(room), box)) hits.push(index);
+        });
+        if (drag.shift) {
+            if (state.mapSelection != null && hits.indexOf(state.mapSelection) < 0) hits.unshift(state.mapSelection);
+            (state.mapGroup || []).forEach(function (index) {
+                if (hits.indexOf(index) < 0) hits.push(index);
+            });
+        }
+        if (!hits.length) {
+            if (!drag.shift) {
+                state.mapSelection = null;
+                state.mapGroup = [];
+            }
+            return;
+        }
+        state.mapSelection = hits[0];
+        state.mapGroup = hits.slice(1);
+    }
+
+    function startMarquee(svg, floor, event, clickIndex) {
+        event.preventDefault();
+        event.stopPropagation();
+        var point = svgPoint(svg, event);
+        beginDrag(svg, {
+            kind: 'marquee',
+            x0: point.x,
+            y0: point.y,
+            x1: point.x,
+            y1: point.y,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            shift: !!event.shiftKey,
+            moved: false,
+            clickIndex: clickIndex == null ? -1 : clickIndex
+        }, function (move) {
+            var next = svgPoint(svg, move);
+            var cdx = move.clientX - state.mapDrag.clientX;
+            var cdy = move.clientY - state.mapDrag.clientY;
+            if (cdx * cdx + cdy * cdy > 16) state.mapDrag.moved = true;
+            state.mapDrag.x1 = next.x;
+            state.mapDrag.y1 = next.y;
+            paintMarquee(svg, state.mapDrag);
+        }, function (finished) {
+            paintMarquee(svg, null);
+            if (!finished || !finished.moved) {
+                if (finished && finished.clickIndex >= 0) {
+                    state.mapSelection = finished.clickIndex;
+                    state.mapGroup = [];
+                } else if (!finished || !finished.shift) {
+                    state.mapSelection = null;
+                    state.mapGroup = [];
+                }
+                renderFrame();
+                return;
+            }
+            applyMarquee(floor, finished);
+            renderFrame();
+        });
+    }
+
+    function startPan(svg, event) {
+        event.preventDefault();
+        event.stopPropagation();
+        var metrics = viewMetrics(svg);
+        var originX = event.clientX;
+        var originY = event.clientY;
+        var cam = { x: metrics.vx, y: metrics.vy, w: metrics.vw, h: metrics.vh };
+        var moved = false;
+        beginDrag(svg, { kind: 'pan', moved: false }, function (move) {
+            var dx = move.clientX - originX;
+            var dy = move.clientY - originY;
+            if (dx * dx + dy * dy > 9) moved = true;
+            state.mapCam = {
+                x: cam.x - dx / metrics.scale,
+                y: cam.y - dy / metrics.scale,
+                w: cam.w,
+                h: cam.h
+            };
+            applyCamera(svg);
+        }, function () {
+            if (!moved && state.mapEditing && state.mapTool === 'select' && !state.mapArmId) {
+                state.mapAssetId = 0;
+                state.mapSelection = null;
+                state.mapGroup = [];
+                renderFrame();
+            }
+        });
     }
 
     function beginDrag(svg, drag, onMove, onUp) {
         clearMapDrag();
+        var before = null;
+        if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'end' || drag.kind === 'pin') {
+            before = mapSnapshot();
+        }
         state.mapDrag = drag;
         state.mapMove = function (event) { onMove(event, svg); };
         state.mapUp = function () {
             var finished = state.mapDrag;
             clearMapDrag();
+            if (before && state.mapDraft && !state.mapHistoryLock) {
+                var after = mapSnapshot();
+                if (after !== before) pushMapUndo(before);
+            }
             onUp(finished);
         };
         window.addEventListener('mousemove', state.mapMove);
@@ -12528,14 +19044,9 @@
             if (token !== state.mapToken) return;
             state.mapLoading = false;
             state.floors = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
-            var current = null;
-            state.floors.forEach(function (floor) {
-                if (floor.id === state.floorId) current = floor;
-            });
-            if (!current && state.floors.length) current = state.floors[0];
-            state.floorId = current ? current.id : 0;
-            state.mapDraft = current ? cloneFloor(current) : null;
             state.mapDirty = false;
+            resetMapHistory();
+            ensureBuilding();
             if (state.view === 'map') renderFrame();
         });
     }
@@ -12548,136 +19059,1754 @@
         return found;
     }
 
-    function renderMap() {
-        var panel = el('section', 'asset-tree-sheet');
-        var head = sheetHead('mapPageTitle');
-        if (state.mapEditing) {
-            head.appendChild(el('span', 'asset-tree-dirty', state.mapDirty ? t('mapDirty') : ''));
-            head.appendChild(button(t('save'), 'asset-tree-btn primary', saveMap));
-            head.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
-                state.mapEditing = false;
-                state.mapDirty = false;
-                var floor = currentFloor();
-                state.mapDraft = floor ? cloneFloor(floor) : null;
-                renderFrame();
-            }));
-        } else {
-            head.appendChild(button(t('mapEdit'), 'asset-tree-linkish', function () {
-                if (!(state.floors || []).length) {
-                    addFloor(true);
-                    return;
-                }
-                state.mapEditing = true;
-                renderFrame();
-            }));
+    function furnLabel(raw) {
+        return String(raw || '').replace(/[,;|^!=]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+
+    function builtinFurniture() {
+        function piece(id, key, kind, w, h) {
+            return { id: id, name: t(key), builtin: true, shapes: [{ kind: kind, name: t(key), color: '', angle: 0, x: 0, y: 0, w: w, h: h }] };
         }
-        panel.appendChild(head);
-        panel.appendChild(el('p', 'asset-tree-hint', t('mapHint')));
+        function bit(kind, x, y, w, h, angle) {
+            return { kind: kind, name: '', color: '', angle: angle || 0, x: x, y: y, w: w, h: h };
+        }
+        function group(id, key, shapes) {
+            if (shapes.length && !shapes[0].name) shapes[0].name = t(key);
+            return { id: id, name: t(key), builtin: true, shapes: shapes };
+        }
+        return [
+            group('bed', 'mapBed', [
+                bit('rug', 0, 18, 148, 176, 0),
+                bit('bed', 14, 0, 120, 168, 0)
+            ]),
+            piece('sofa', 'mapSofa', 'sofa', 148, 52),
+            piece('table', 'mapTable', 'table', 96, 56),
+            piece('chair', 'mapChair', 'chair', 36, 36),
+            piece('rug', 'mapRug', 'rug', 160, 110),
+            piece('plant', 'mapPlant', 'plant', 40, 40),
+            piece('bath', 'mapBath', 'bath', 68, 148),
+            piece('toilet', 'mapToilet', 'toilet', 44, 68),
+            piece('sink', 'mapSink', 'sink', 56, 44),
+            piece('stove', 'mapStove', 'stove', 56, 56),
+            piece('seat', 'mapSeat', 'seat', 48, 48),
+            piece('cabinet', 'mapCabinet', 'cabinet', 80, 36),
+            piece('pedestal', 'mapPedestal', 'pedestal', 36, 52),
+            group('work', 'mapWorkstation', [
+                bit('chair', 42, 0, 36, 36, 0),
+                bit('desk', 0, 44, 120, 60, 0)
+            ]),
+            group('twin', 'mapTwinDesk', [
+                bit('desk', 0, 0, 104, 56, 0),
+                bit('chair', 34, 64, 36, 36, 180),
+                bit('desk', 120, 0, 104, 56, 0),
+                bit('chair', 154, 64, 36, 36, 180)
+            ]),
+            group('round', 'mapRound', [
+                bit('table', 34, 34, 92, 92, 0),
+                bit('chair', 62, 0, 36, 30, 0),
+                bit('chair', 62, 130, 36, 30, 180),
+                bit('chair', 0, 62, 30, 36, 270),
+                bit('chair', 130, 62, 30, 36, 90)
+            ]),
+            group('kitchen', 'mapKitchen', [
+                bit('cabinet', 0, 0, 220, 52, 0),
+                bit('sink', 18, 8, 64, 36, 0),
+                bit('stove', 148, 6, 52, 40, 0)
+            ]),
+            group('meet', 'mapMeeting', [
+                bit('table', 40, 40, 128, 72, 0),
+                bit('chair', 88, 0, 36, 36, 0),
+                bit('chair', 88, 116, 36, 36, 180),
+                bit('chair', 0, 58, 36, 36, 270),
+                bit('chair', 172, 58, 36, 36, 90)
+            ]),
+            group('front', 'mapReception', [
+                bit('desk', 0, 0, 168, 44, 0),
+                bit('chair', 66, 52, 36, 36, 180)
+            ]),
+            group('wait', 'mapWaiting', [
+                bit('sofa', 0, 0, 140, 48, 0),
+                bit('table', 28, 60, 56, 40, 0),
+                bit('seat', 100, 60, 44, 44, 0)
+            ]),
+            group('store', 'mapStorage', [
+                bit('cabinet', 0, 0, 72, 36, 0),
+                bit('cabinet', 80, 0, 72, 36, 0),
+                bit('pedestal', 160, 0, 36, 48, 0)
+            ]),
+            piece('wardrobe', 'mapWardrobe', 'cabinet', 90, 56),
+            group('shelf', 'mapShelf', [
+                bit('cabinet', 0, 0, 140, 28, 0),
+                bit('cabinet', 0, 36, 140, 28, 0),
+                bit('cabinet', 0, 72, 140, 28, 0)
+            ]),
+            group('filing', 'mapFiling', [
+                bit('pedestal', 0, 0, 36, 52, 0),
+                bit('pedestal', 40, 0, 36, 52, 0),
+                bit('pedestal', 80, 0, 36, 52, 0)
+            ]),
+            group('printer', 'mapPrinter', [
+                bit('desk', 0, 16, 90, 50, 0),
+                bit('pedestal', 26, 0, 38, 22, 0)
+            ]),
+            piece('cooler', 'mapCooler', 'pedestal', 40, 40),
+            piece('board', 'mapBoard', 'cabinet', 160, 12),
+            group('locker', 'mapLocker', [
+                bit('cabinet', 0, 0, 32, 48, 0),
+                bit('cabinet', 36, 0, 32, 48, 0),
+                bit('cabinet', 72, 0, 32, 48, 0),
+                bit('cabinet', 108, 0, 32, 48, 0)
+            ]),
+            piece('bench', 'mapBench', 'sofa', 140, 40),
+            piece('coffee', 'mapCoffee', 'table', 80, 48),
+            piece('armchair', 'mapArmchair', 'seat', 64, 64),
+            piece('fridge', 'mapFridge', 'cabinet', 60, 64),
+            piece('safe', 'mapSafe', 'cabinet', 48, 48),
+            piece('screen', 'mapScreen', 'cabinet', 180, 10)
+        ];
+    }
+
+    function parseFurniture(raw) {
+        var list = [];
+        String(raw || '').split('|').forEach(function (template) {
+            if (!template || list.length >= 24) return;
+            var head = template.split('^');
+            if (head.length < 3) return;
+            var id = String(head[0] || '').toLowerCase();
+            if (!/^[a-z][a-z0-9]{0,7}$/.test(id)) return;
+            var name = furnLabel(head[1]);
+            if (!name) return;
+            var shapes = [];
+            head.slice(2).join('^').split('!').forEach(function (part) {
+                if (!part || shapes.length >= 16) return;
+                var bits = part.split(',');
+                if (bits.length < 5) return;
+                var kind = bits[0] || 'desk';
+                var color = /^[0-9a-fA-F]{6}$/.test(bits[5] || '') ? '#' + String(bits[5]).toLowerCase() : '';
+                var labelBits = bits.slice(6);
+                var shapeAngle = 0;
+                if (labelBits.length > 1) shapeAngle = normalizeAngle(labelBits.pop());
+                shapes.push({
+                    kind: kind,
+                    x: clampNum(bits[1], 0, 2000),
+                    y: clampNum(bits[2], 0, 2000),
+                    w: Math.max(roomMin(kind), clampNum(bits[3], 0, 800)),
+                    h: Math.max(roomMin(kind), clampNum(bits[4], 0, 800)),
+                    color: color,
+                    name: furnLabel(labelBits.join(',')),
+                    angle: shapeAngle
+                });
+            });
+            if (shapes.length) list.push({ id: id, name: name, builtin: false, shapes: shapes });
+        });
+        return list;
+    }
+
+    function packFurniture(list) {
+        return (list || []).slice(0, 24).map(function (tpl) {
+            var shapes = (tpl.shapes || []).slice(0, 16).map(function (shape) {
+                return [
+                    shape.kind || 'desk', shape.x || 0, shape.y || 0, shape.w, shape.h,
+                    String(shape.color || '').replace('#', ''), furnLabel(shape.name), normalizeAngle(shape.angle)
+                ].join(',');
+            }).join('!');
+            return shapes ? (tpl.id + '^' + furnLabel(tpl.name) + '^' + shapes) : '';
+        }).filter(function (row) { return row; }).join('|');
+    }
+
+    function customFurniture() {
+        return parseFurniture(moduleSetup().furniture);
+    }
+
+    function furnitureLibrary() {
+        return builtinFurniture().concat(customFurniture());
+    }
+
+    function furnitureById(id) {
+        var found = null;
+        furnitureLibrary().forEach(function (item) { if (item.id === id) found = item; });
+        return found;
+    }
+
+    function selectedShapeList() {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var indexes = [];
+        if (state.mapSelection != null && rooms[state.mapSelection]) indexes.push(state.mapSelection);
+        (state.mapGroup || []).forEach(function (index) {
+            if (indexes.indexOf(index) < 0 && rooms[index]) indexes.push(index);
+        });
+        return indexes.map(function (index) { return rooms[index]; });
+    }
+
+    function removeMapSelection() {
+        if (!state.mapDraft || !state.mapDraft.rooms) return;
+        var indexes = [];
+        if (state.mapSelection != null) indexes.push(state.mapSelection);
+        (state.mapGroup || []).forEach(function (index) {
+            if (indexes.indexOf(index) < 0) indexes.push(index);
+        });
+        if (!indexes.length) return;
+        rememberMap();
+        indexes.sort(function (left, right) { return right - left; });
+        indexes.forEach(function (index) {
+            if (state.mapDraft.rooms[index]) state.mapDraft.rooms.splice(index, 1);
+        });
+        state.mapSelection = null;
+        state.mapGroup = [];
+        state.mapNaming = false;
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function duplicateMapSelection() {
+        if (!state.mapDraft || !state.mapDraft.rooms) return;
+        var copies = selectedShapeList();
+        if (!copies.length) return;
+        rememberMap();
+        var step = state.mapStep || 8;
+        var box = planSize(state.mapDraft);
+        var first = state.mapDraft.rooms.length;
+        var groups = freshGroupIds(copies);
+        copies.forEach(function (source) {
+            var shifted = roomPoints(source).map(function (point) {
+                return { x: point.x + step, y: point.y + step };
+            });
+            state.mapDraft.rooms.push(clampRoom({
+                name: source.name,
+                kind: source.kind,
+                color: source.color,
+                angle: source.angle,
+                points: shifted,
+                swing: source.swing,
+                assetId: 0,
+                groupId: groups[parseInt(source.groupId, 10) || 0] || 0,
+                x: Math.max(0, Math.min(source.x + step, box.w - source.w)),
+                y: Math.max(0, Math.min(source.y + step, box.h - source.h)),
+                w: source.w,
+                h: source.h
+            }));
+        });
+        state.mapSelection = first;
+        state.mapGroup = [];
+        var index;
+        for (index = first + 1; index < state.mapDraft.rooms.length; index++) state.mapGroup.push(index);
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function copyMapSelection() {
+        var shapes = selectedShapeList();
+        if (!shapes.length) return;
+        state.mapClipboard = shapes.map(function (shape) {
+            return {
+                name: shape.name || '',
+                kind: shape.kind || 'room',
+                color: shape.color || '',
+                angle: normalizeAngle(shape.angle),
+                points: roomPoints(shape),
+                swing: parseInt(shape.swing, 10) === 1 ? 1 : 0,
+                groupId: parseInt(shape.groupId, 10) || 0,
+                x: shape.x,
+                y: shape.y,
+                w: shape.w,
+                h: shape.h
+            };
+        });
+    }
+
+    function pasteMapClipboard(x, y) {
+        var copies = state.mapClipboard;
+        if (!copies || !copies.length || !state.mapDraft) return;
+        rememberMap();
+        var minX = copies[0].x;
+        var minY = copies[0].y;
+        copies.forEach(function (shape) {
+            minX = Math.min(minX, shape.x);
+            minY = Math.min(minY, shape.y);
+        });
+        var originX = x == null ? minX + (state.mapStep || 8) : snapCoord(x);
+        var originY = y == null ? minY + (state.mapStep || 8) : snapCoord(y);
+        var box = planSize(state.mapDraft);
+        state.mapDraft.rooms = state.mapDraft.rooms || [];
+        var first = state.mapDraft.rooms.length;
+        var groups = freshGroupIds(copies);
+        copies.forEach(function (source) {
+            var shifted = roomPoints(source).map(function (point) {
+                return { x: point.x - minX + originX, y: point.y - minY + originY };
+            });
+            state.mapDraft.rooms.push(clampRoom({
+                name: source.name,
+                kind: source.kind,
+                color: source.color,
+                angle: source.angle,
+                points: shifted,
+                swing: source.swing,
+                assetId: 0,
+                groupId: groups[parseInt(source.groupId, 10) || 0] || 0,
+                x: originX + (source.x - minX),
+                y: originY + (source.y - minY),
+                w: source.w,
+                h: source.h
+            }, box));
+        });
+        state.mapSelection = first;
+        state.mapGroup = [];
+        var index;
+        for (index = first + 1; index < state.mapDraft.rooms.length; index++) state.mapGroup.push(index);
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function closeMapMenu() {
+        var menu = document.querySelector('.asset-tree-plan-menu');
+        var back = document.querySelector('.asset-tree-plan-menu-back');
+        if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+        if (back && back.parentNode) back.parentNode.removeChild(back);
+    }
+
+    function openMapMenu(x, y, point) {
+        closeMapMenu();
+        if (!state.mapMenuBound) {
+            state.mapMenuBound = true;
+            function dismiss(event) {
+                var menu = document.querySelector('.asset-tree-plan-menu');
+                if (!menu) return;
+                if (event && event.target && menu.contains(event.target)) return;
+                closeMapMenu();
+            }
+            document.addEventListener('mousedown', dismiss, true);
+            document.addEventListener('pointerdown', dismiss, true);
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' || event.keyCode === 27) closeMapMenu();
+            }, true);
+            document.addEventListener('scroll', function () { closeMapMenu(); }, true);
+            document.addEventListener('wheel', function () {
+                if (document.querySelector('.asset-tree-plan-menu')) closeMapMenu();
+            }, true);
+            window.addEventListener('resize', closeMapMenu);
+        }
+        var back = el('div', 'asset-tree-plan-menu-back');
+        back.addEventListener('mousedown', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeMapMenu();
+        });
+        back.addEventListener('contextmenu', function (event) {
+            event.preventDefault();
+            closeMapMenu();
+        });
+        back.addEventListener('wheel', function () { closeMapMenu(); });
+        document.body.appendChild(back);
+        var menu = el('div', 'asset-tree-plan-menu');
+        function item(label, enabled, danger, action) {
+            var node = button(label, 'asset-tree-plan-menu-item' + (danger ? ' is-danger' : ''), function () {
+                closeMapMenu();
+                if (enabled) action();
+            });
+            node.disabled = !enabled;
+            menu.appendChild(node);
+        }
+        var selected = selectedShapeList().length > 0;
+        item(t('delete'), selected, true, removeMapSelection);
+        item(t('mapDuplicate'), selected, false, duplicateMapSelection);
+        item(t('mapCopy'), selected, false, copyMapSelection);
+        item(t('mapPaste'), !!(state.mapClipboard && state.mapClipboard.length), false, function () {
+            pasteMapClipboard(point ? point.x : null, point ? point.y : null);
+        });
+        item(t('mapSaveTemplate'), selected, false, function () {
+            state.mapNaming = true;
+            renderFrame();
+        });
+        item(t('mapUndo'), !!(state.mapUndo && state.mapUndo.length), false, undoMap);
+        item(t('mapRedo'), !!(state.mapRedo && state.mapRedo.length), false, redoMap);
+        document.body.appendChild(menu);
+        var rect = menu.getBoundingClientRect();
+        var left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+        var top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+    }
+
+    function persistFurniture(list, quiet) {
+        var packed = packFurniture(list);
+        var next = moduleSetup();
+        next.furniture = packed;
+        var project = currentProject();
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.furniture = packed;
+        }
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                if (project && payload && payload.setup) {
+                    project.setup = payload.setup;
+                    if (!project.setup.furniture) project.setup.furniture = packed;
+                }
+                if (!quiet) notify(t('mapTemplateSaved'));
+            } else notify((payload && payload.message) || t('errorTitle'));
+            if (state.view === 'map') renderFrame();
+        });
+    }
+
+    function saveFurnitureTemplate(name) {
+        var label = furnLabel(name);
+        var shapes = selectedShapeList();
+        if (!label || !shapes.length) return;
+        var minX = shapes[0].x;
+        var minY = shapes[0].y;
+        shapes.forEach(function (shape) {
+            minX = Math.min(minX, shape.x);
+            minY = Math.min(minY, shape.y);
+        });
+        var custom = customFurniture();
+        var used = {};
+        custom.forEach(function (item) { used[item.id] = true; });
+        var number = 1;
+        while (used['c' + number]) number++;
+        custom.push({
+            id: 'c' + number,
+            name: label,
+            shapes: shapes.map(function (shape) {
+                return {
+                    kind: shape.kind || 'desk',
+                    name: shape.name || label,
+                    color: shape.color || '',
+                    angle: normalizeAngle(shape.angle),
+                    x: shape.x - minX,
+                    y: shape.y - minY,
+                    w: shape.w,
+                    h: shape.h
+                };
+            })
+        });
+        state.mapNaming = false;
+        persistFurniture(custom, false);
+    }
+
+    function removeFurniture(id) {
+        if (state.mapStamp === id) {
+            state.mapStamp = '';
+            state.mapTool = 'select';
+        }
+        persistFurniture(customFurniture().filter(function (item) { return item.id !== id; }), true);
+    }
+
+    function isFurnKind(kind) {
+        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug';
+    }
+
+    function nextGroupId(floor) {
+        var max = 0;
+        ((floor && floor.rooms) || []).forEach(function (room) {
+            var id = parseInt(room.groupId, 10) || 0;
+            if (id > max) max = id;
+        });
+        return max + 1;
+    }
+
+    function freshGroupIds(copies) {
+        var counts = {};
+        copies.forEach(function (source) {
+            var id = parseInt(source.groupId, 10) || 0;
+            if (id) counts[id] = (counts[id] || 0) + 1;
+        });
+        var map = {};
+        var next = nextGroupId(state.mapDraft);
+        copies.forEach(function (source) {
+            var id = parseInt(source.groupId, 10) || 0;
+            if (id && counts[id] > 1 && !map[id]) {
+                map[id] = next;
+                next += 1;
+            }
+        });
+        return map;
+    }
+
+    function groupIndexes(rooms, index) {
+        var room = rooms && rooms[index];
+        var list = [];
+        if (!room) return list;
+        list.push(index);
+        var id = parseInt(room.groupId, 10) || 0;
+        if (!id) return list;
+        rooms.forEach(function (item, at) {
+            if (at !== index && (parseInt(item.groupId, 10) || 0) === id) list.push(at);
+        });
+        return list;
+    }
+
+    function groupCenter(rooms, indexes) {
+        var sx = 0;
+        var sy = 0;
+        var count = 0;
+        indexes.forEach(function (at) {
+            var room = rooms[at];
+            if (!room) return;
+            sx += room.x + room.w / 2;
+            sy += room.y + room.h / 2;
+            count += 1;
+        });
+        if (!count) return { x: 0, y: 0 };
+        return { x: sx / count, y: sy / count };
+    }
+
+    function rotateMembers(rooms, indexes, deg, px, py) {
+        var rad = deg * Math.PI / 180;
+        var cos = Math.cos(rad);
+        var sin = Math.sin(rad);
+        indexes.forEach(function (at) {
+            var room = rooms[at];
+            if (!room) return;
+            var rcx = room.x + room.w / 2;
+            var rcy = room.y + room.h / 2;
+            var dx = rcx - px;
+            var dy = rcy - py;
+            var nx = px + dx * cos - dy * sin;
+            var ny = py + dx * sin + dy * cos;
+            room.x = nx - room.w / 2;
+            room.y = ny - room.h / 2;
+            room.angle = normalizeAngle((room.angle || 0) + deg);
+        });
+    }
+
+    function shapeCorners(room) {
+        return [
+            localToWorld(room, 0, 0),
+            localToWorld(room, room.w, 0),
+            localToWorld(room, 0, room.h),
+            localToWorld(room, room.w, room.h)
+        ];
+    }
+
+    function pointHitsWall(x, y, rooms) {
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (!isSegmentKind(rooms[i].kind)) continue;
+            var ends = segmentEnds(rooms[i]);
+            var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, x, y);
+            if (!hit || hit.t < -0.02 || hit.t > 1.02) continue;
+            var thick = rooms[i].w >= rooms[i].h ? rooms[i].h : rooms[i].w;
+            if (hit.dist < thick / 2 - 0.5) return true;
+        }
+        return false;
+    }
+
+    function shapeHitsWall(room, rooms) {
+        var u;
+        var v;
+        for (u = 0; u <= 4; u++) {
+            for (v = 0; v <= 4; v++) {
+                var point = localToWorld(room, room.w * u / 4, room.h * v / 4);
+                if (pointHitsWall(point.x, point.y, rooms)) return true;
+            }
+        }
+        return false;
+    }
+
+    function groupHitsWall(rooms, indexes) {
+        var i;
+        for (i = 0; i < indexes.length; i++) {
+            var room = rooms[indexes[i]];
+            if (!room || !isFurnKind(room.kind)) continue;
+            if (shapeHitsWall(room, rooms)) return true;
+        }
+        return false;
+    }
+
+    function centerGroupInRoom(floor, indexes) {
+        var rooms = floor.rooms || [];
+        var center = groupCenter(rooms, indexes);
+        var poly = null;
+        var best = Infinity;
+        rooms.forEach(function (room) {
+            if (!isPolygonRoom(room)) return;
+            var points = roomPoints(room);
+            if (!pointInPoly(center.x, center.y, points)) return;
+            var area = Math.abs(polygonArea(points));
+            if (area < best) {
+                best = area;
+                poly = points;
+            }
+        });
+        if (!poly || !poly.length) return;
+        var sx = 0;
+        var sy = 0;
+        var i;
+        for (i = 0; i < poly.length; i++) {
+            sx += poly[i].x;
+            sy += poly[i].y;
+        }
+        var dx = sx / poly.length - center.x;
+        var dy = sy / poly.length - center.y;
+        indexes.forEach(function (at) {
+            if (!rooms[at]) return;
+            rooms[at].x += dx;
+            rooms[at].y += dy;
+        });
+    }
+
+    function firstWallHit(rooms, indexes) {
+        var i;
+        var u;
+        var v;
+        for (i = 0; i < indexes.length; i++) {
+            var room = rooms[indexes[i]];
+            if (!room || !isFurnKind(room.kind)) continue;
+            for (u = 0; u <= 4; u++) {
+                for (v = 0; v <= 4; v++) {
+                    var point = localToWorld(room, room.w * u / 4, room.h * v / 4);
+                    var w;
+                    for (w = 0; w < rooms.length; w++) {
+                        if (!isSegmentKind(rooms[w].kind)) continue;
+                        var ends = segmentEnds(rooms[w]);
+                        var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, point.x, point.y);
+                        if (!hit || hit.t < -0.02 || hit.t > 1.02) continue;
+                        var thick = rooms[w].w >= rooms[w].h ? rooms[w].h : rooms[w].w;
+                        if (hit.dist < thick / 2 - 0.5) {
+                            return { x: point.x, y: point.y, projX: hit.x, projY: hit.y };
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    function settleFurniture(floor, indexes) {
+        var rooms = floor.rooms || [];
+        var furn = false;
+        indexes.forEach(function (at) {
+            if (rooms[at] && isFurnKind(rooms[at].kind)) furn = true;
+        });
+        if (!furn) return;
+        var guard = 0;
+        var hit = firstWallHit(rooms, indexes);
+        while (guard < 48 && hit) {
+            var dx = hit.x - hit.projX;
+            var dy = hit.y - hit.projY;
+            var len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 0.5) {
+                var center = groupCenter(rooms, indexes);
+                dx = center.x - hit.projX;
+                dy = center.y - hit.projY;
+                len = Math.sqrt(dx * dx + dy * dy) || 1;
+            }
+            indexes.forEach(function (at) {
+                if (!rooms[at]) return;
+                rooms[at].x += dx / len * 4;
+                rooms[at].y += dy / len * 4;
+            });
+            guard += 1;
+            hit = firstWallHit(rooms, indexes);
+        }
+        if (hit) centerGroupInRoom(floor, indexes);
+        indexes.forEach(function (at) {
+            if (!rooms[at]) return;
+            rooms[at].x = Math.round(rooms[at].x);
+            rooms[at].y = Math.round(rooms[at].y);
+            rooms[at].angle = normalizeAngle(rooms[at].angle);
+        });
+    }
+
+    function placeStamp(floor, x, y) {
+        var tpl = furnitureById(state.mapStamp);
+        if (!tpl || !tpl.shapes.length) return;
+        var originX = snapCoord(x);
+        var originY = snapCoord(y);
+        var box = planSize(floor);
+        var minX = Infinity;
+        var minY = Infinity;
+        var maxX = -Infinity;
+        var maxY = -Infinity;
+        tpl.shapes.forEach(function (shape) {
+            var sx = Number(shape.x) || 0;
+            var sy = Number(shape.y) || 0;
+            minX = Math.min(minX, sx);
+            minY = Math.min(minY, sy);
+            maxX = Math.max(maxX, sx + (Number(shape.w) || 0));
+            maxY = Math.max(maxY, sy + (Number(shape.h) || 0));
+        });
+        rememberMap();
+        floor.rooms = floor.rooms || [];
+        var first = floor.rooms.length;
+        var groupId = tpl.shapes.length > 1 ? nextGroupId(floor) : 0;
+        tpl.shapes.forEach(function (shape) {
+            floor.rooms.push(clampRoom({
+                kind: shape.kind,
+                name: shape.name || '',
+                color: shape.color || '',
+                angle: shape.angle || 0,
+                groupId: groupId,
+                x: originX + (Number(shape.x) || 0),
+                y: originY + (Number(shape.y) || 0),
+                w: shape.w,
+                h: shape.h
+            }, box));
+        });
+        var indexes = [];
+        var index;
+        for (index = first; index < floor.rooms.length; index++) indexes.push(index);
+        var anchorX = originX + (minX + maxX) / 2;
+        var anchorY = originY + (minY + maxY) / 2;
+        var backExtent = (maxY - minY) / 2;
+        var hit = nearestWall(x, y, 56);
+        if (hit) {
+            var ends = segmentEnds(hit.room);
+            var proj = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, x, y);
+            var thick = hit.room.w >= hit.room.h ? hit.room.h : hit.room.w;
+            if (proj && proj.dist <= 30 + thick / 2) {
+                var vx = proj.x - x;
+                var vy = proj.y - y;
+                var span = Math.sqrt(vx * vx + vy * vy);
+                if (span > 1) {
+                    var bx = vx / span;
+                    var by = vy / span;
+                    var turn = Math.atan2(bx, -by) * 180 / Math.PI;
+                    rotateMembers(floor.rooms, indexes, turn, anchorX, anchorY);
+                    var inwardX = -bx;
+                    var inwardY = -by;
+                    var wantX = proj.x + inwardX * (thick / 2 + backExtent + 2);
+                    var wantY = proj.y + inwardY * (thick / 2 + backExtent + 2);
+                    indexes.forEach(function (at) {
+                        floor.rooms[at].x += wantX - anchorX;
+                        floor.rooms[at].y += wantY - anchorY;
+                    });
+                }
+            }
+        }
+        settleFurniture(floor, indexes);
+        state.mapSelection = first;
+        state.mapGroup = [];
+        for (index = first + 1; index < floor.rooms.length; index++) state.mapGroup.push(index);
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function shiftBuilding(delta) {
+        var buildings = buildingAssets();
+        if (!buildings.length) return;
+        var index = 0;
+        buildings.forEach(function (asset, at) { if (asset.id === state.mapPlaceId) index = at; });
+        var next = buildings[(index + delta + buildings.length) % buildings.length];
+        if (next) chooseBuilding(next.id);
+    }
+
+    function mapShapeOn(index) {
+        if (state.mapSelection === index) return true;
+        return (state.mapGroup || []).indexOf(index) >= 0;
+    }
+
+    function bindFloorplanSize(panel) {
+        function apply() {
+            if (!panel.parentNode) {
+                window.removeEventListener('resize', apply);
+                if (state.mapResize === apply) state.mapResize = null;
+                return;
+            }
+            var top = panel.getBoundingClientRect().top;
+            panel.style.height = Math.max(420, Math.round(window.innerHeight - top - 20)) + 'px';
+        }
+        if (!panel.parentNode) return;
+        apply();
+        if (state.mapResize) window.removeEventListener('resize', state.mapResize);
+        state.mapResize = apply;
+        window.addEventListener('resize', apply);
+    }
+
+    function renderMap() {
+        var panel = el('section', 'asset-tree-floorplan');
         if (state.floors == null) {
+            panel.appendChild(mapTopBar([]));
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadFloors();
+            setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
             return panel;
         }
-        var shell = el('div', 'asset-tree-map-shell');
-        shell.appendChild(mapRail());
-        var stage = el('div', 'asset-tree-map-stage');
-        if (!(state.floors || []).length) {
-            stage.appendChild(el('p', 'asset-tree-map-empty', t('mapEmpty')));
-            if (state.canEdit) stage.appendChild(button(t('mapAddFloor'), 'asset-tree-btn primary', function () { addFloor(true); }));
-        } else if (state.mapEditing && state.mapDraft) {
-            stage.appendChild(mapEditorBar());
-            stage.appendChild(floorCanvas(state.mapDraft, true));
-        } else {
-            var floor = currentFloor();
-            if (floor) stage.appendChild(floorCanvas(floor, false));
+        ensureBuilding();
+        var buildings = buildingAssets();
+        var floors = floorsForBuilding(state.mapPlaceId);
+        var editing = !!(state.mapEditing && state.canEdit && state.mapDraft);
+        if (buildings.length) prepareShownPlan(editing);
+        panel.appendChild(mapTopBar(floors));
+        if (!buildings.length) {
+            panel.appendChild(el('p', 'asset-tree-map-empty', t('mapNoBuilding')));
+            setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
+            return panel;
         }
-        shell.appendChild(stage);
-        panel.appendChild(shell);
+        var body = el('div', 'asset-tree-floorplan-body' + (editing ? '' : ' is-view'));
+        if (editing) body.appendChild(mapCatalog());
+        else body.appendChild(mapViewSide());
+        body.appendChild(mapStage(floors, editing));
+        panel.appendChild(body);
+        setTimeout(function () { if (panel.parentNode) bindFloorplanSize(panel); }, 0);
         return panel;
     }
 
-    function mapRail() {
-        var rail = el('aside', 'asset-tree-map-rail');
-        rail.appendChild(el('h3', null, t('mapFloors')));
-        var search = document.createElement('input');
-        search.type = 'search';
-        search.placeholder = t('mapSearch');
-        search.addEventListener('input', function () {
-            var needle = search.value.trim().toLowerCase();
-            var nodes = rail.querySelectorAll('.asset-tree-report-link');
-            for (var i = 0; i < nodes.length; i++) {
-                var text = (nodes[i].textContent || '').toLowerCase();
-                nodes[i].hidden = !!(needle && text.indexOf(needle) < 0);
-            }
+    function beginMapEdit() {
+        if (!state.mapPlaceId) {
+            notify(t('mapNoBuilding'));
+            return;
+        }
+        if (!floorsForBuilding(state.mapPlaceId).length) {
+            addFloor(true);
+            return;
+        }
+        state.mapEditing = true;
+        resetMapHistory();
+        renderFrame();
+    }
+
+    function cancelMapEdit() {
+        state.mapEditing = false;
+        state.mapDirty = false;
+        state.mapStamp = '';
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
+        state.mapNaming = false;
+        state.mapGroup = [];
+        state.mapSelection = null;
+        state.mapAnchor = null;
+        state.mapArc = null;
+        state.mapClickAt = 0;
+        var floor = currentFloor();
+        state.mapDraft = floor ? cloneFloor(floor) : null;
+        resetMapHistory();
+        closeMapMenu();
+        renderFrame();
+    }
+
+    function mapChevron(dir) {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('aria-hidden', 'true');
+        var path = svgEl('path');
+        path.setAttribute('d', dir === 'prev' ? 'M10 3L5 8l5 5' : 'M6 3l5 5-5 5');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.6');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function mapNavButton(dir, onClick) {
+        var label = t(dir === 'prev' ? 'mapPrevBuilding' : 'mapNextBuilding');
+        var node = button('', 'asset-tree-month-btn', onClick);
+        node.title = label;
+        node.setAttribute('aria-label', label);
+        node.appendChild(mapChevron(dir));
+        return node;
+    }
+
+    function mapZoomGlyph(kind) {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('aria-hidden', 'true');
+        var path = svgEl('path');
+        path.setAttribute('d', kind === 'minus' ? 'M3 8h10' : 'M8 3v10M3 8h10');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.6');
+        path.setAttribute('stroke-linecap', 'round');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function mapTopBar(floors) {
+        var bar = el('div', 'asset-tree-plan-top');
+        var row = el('div', 'asset-tree-plan-row');
+        var title = el('div', 'asset-tree-plan-title');
+        title.appendChild(mapNavButton('prev', function () { shiftBuilding(-1); }));
+        var buildings = buildingAssets();
+        var buildingPick = document.createElement('select');
+        buildingPick.className = 'asset-tree-building-pick';
+        buildingPick.setAttribute('aria-label', t('mapBuildings'));
+        buildings.forEach(function (asset) {
+            var option = document.createElement('option');
+            option.value = String(asset.id);
+            option.textContent = crumbs(asset);
+            buildingPick.appendChild(option);
         });
-        rail.appendChild(search);
-        (state.floors || []).forEach(function (floor) {
-            rail.appendChild(button(floor.name || t('mapFloorName'), 'asset-tree-report-link' + (floor.id === state.floorId ? ' is-current' : ''), function () {
-                state.floorId = floor.id;
+        if (state.mapPlaceId) buildingPick.value = String(state.mapPlaceId);
+        buildingPick.addEventListener('change', function () {
+            chooseBuilding(parseInt(buildingPick.value, 10) || 0);
+        });
+        title.appendChild(buildingPick);
+        title.appendChild(mapNavButton('next', function () { shiftBuilding(1); }));
+        row.appendChild(title);
+        var chips = el('div', 'asset-tree-plan-floors');
+        (floors || []).forEach(function (floor) {
+            var on = floor.id === state.floorId;
+            var chip = button(floor.name || t('mapFloor'), 'asset-tree-floor-chip' + (on ? ' is-on' : ''), function () {
+                if (floor.id === state.floorId) return;
                 if (state.mapDirty && !window.confirm(t('mapDirty'))) return;
+                state.floorId = floor.id;
                 state.mapDraft = cloneFloor(floor);
                 state.mapDirty = false;
+                state.mapSelection = null;
+                state.mapGroup = [];
+                state.mapCam = null;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+                state.mapArmId = 0;
+                state.mapAssetId = 0;
+                resetMapHistory();
+                closeMapMenu();
                 renderFrame();
-            }));
-        });
-        if (state.mapEditing && state.canEdit) {
-            rail.appendChild(button('+ ' + t('mapAddFloor'), 'asset-tree-linkish', function () { addFloor(false); }));
-            rail.appendChild(button(t('mapRename'), 'asset-tree-linkish', function () {
-                var input = document.querySelector('.asset-tree-floor-name');
-                if (input) input.focus();
-            }));
-            rail.appendChild(button(t('delete'), 'asset-tree-linkish', deleteCurrentFloor));
-            rail.appendChild(el('h3', null, t('mapEdit')));
-            var tools = el('div', 'asset-tree-map-tools');
-            [['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['door', 'mapDoor'], ['window', 'mapWindow']].forEach(function (pair) {
-                var tool = button('', 'asset-tree-btn asset-tree-tool' + (state.mapTool === pair[0] ? ' is-on' : ''), function () {
-                    state.mapTool = pair[0];
-                    renderFrame();
-                });
-                tool.title = t(pair[1]);
-                tool.setAttribute('aria-label', t(pair[1]));
-                tool.appendChild(mapToolIcon(pair[0]));
-                tool.appendChild(el('span', null, t(pair[1])));
-                tools.appendChild(tool);
             });
-            rail.appendChild(tools);
-            rail.appendChild(el('p', 'asset-tree-hint', t('mapDrawHint')));
-            rail.appendChild(mapInspector());
-            rail.appendChild(el('h3', null, t('mapGear')));
-            var gearQuery = document.createElement('input');
-            gearQuery.type = 'search';
-            gearQuery.placeholder = t('schedulesFindAssets');
-            gearQuery.addEventListener('input', function () {
-                var needle = gearQuery.value.trim().toLowerCase();
-                var nodes = list.querySelectorAll('.asset-tree-gear-row');
-                for (var i = 0; i < nodes.length; i++) {
-                    var text = (nodes[i].textContent || '').toLowerCase();
-                    nodes[i].hidden = !!(needle && text.indexOf(needle) < 0);
+            chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+            chips.appendChild(chip);
+        });
+        if (state.canEdit && state.mapPlaceId) {
+            chips.appendChild(button('+', 'asset-tree-floor-chip', function () { addFloor(!!state.mapEditing); }));
+        }
+        row.appendChild(chips);
+        var filters = el('div', 'asset-tree-sheet-filters');
+        if (state.mapEditing) {
+            if (state.mapDirty) filters.appendChild(el('span', 'asset-tree-dirty', t('mapDirty')));
+            if (floors && floors.length) filters.appendChild(button(t('delete'), 'asset-tree-btn', deleteCurrentFloor));
+            filters.appendChild(button(t('save'), 'asset-tree-btn primary', saveMap));
+            filters.appendChild(button(t('cancel'), 'asset-tree-btn', cancelMapEdit));
+        } else if (state.canEdit) {
+            filters.appendChild(button(t('mapEdit'), 'asset-tree-btn primary', beginMapEdit));
+        }
+        if (filters.childNodes.length) row.appendChild(filters);
+        bar.appendChild(row);
+        if (state.mapEditing && state.mapDraft) bar.appendChild(mapEditorBar());
+        return bar;
+    }
+
+    function mapHint() {
+        if (state.mapArmId || state.mapStamp) return t('mapPlaceHint');
+        if (state.mapTool === 'route') return state.mapAnchor ? t('mapRouteHint') : t('mapRouteIdle');
+        if (state.mapAnchor && (state.mapTool === 'wall' || state.mapTool === 'partition' || state.mapTool === 'room')) return t('mapChainHint');
+        return t('mapDrawHint');
+    }
+
+    function shownPlan() {
+        if (state.mapEditing && state.mapDraft) return state.mapDraft;
+        return state.mapShown || currentFloor();
+    }
+
+    function prepareShownPlan(editing) {
+        if (editing && state.mapDraft) {
+            syncClosedRooms(state.mapDraft, true);
+            state.mapShown = state.mapDraft;
+            return;
+        }
+        var source = currentFloor();
+        if (!source) {
+            state.mapShown = null;
+            return;
+        }
+        var copy = cloneFloor(source);
+        syncClosedRooms(copy, false);
+        state.mapShown = copy;
+    }
+
+    function mapLayerIds() {
+        return ['plan', 'power', 'scs', 'comm', 'vent', 'water'];
+    }
+
+    function mapLayerLabel(id) {
+        if (id === 'power') return t('mapLayerPower');
+        if (id === 'scs') return t('mapLayerScs');
+        if (id === 'comm') return t('mapLayerComm');
+        if (id === 'vent') return t('mapLayerVent');
+        if (id === 'water') return t('mapLayerWater');
+        return t('mapLayerPlan');
+    }
+
+    function mapLayerOn(id) {
+        var show = state.mapLayerShow || {};
+        return show[id] !== false;
+    }
+
+    function shapeShown(room) {
+        if (!room) return false;
+        if (isRouteKind(room.kind)) return mapLayerOn(room.kind);
+        return mapLayerOn('plan');
+    }
+
+    function activateMapLayer(id) {
+        var show = state.mapLayerShow || {};
+        show[id] = true;
+        state.mapLayerShow = show;
+        state.mapLayer = id;
+        state.mapAnchor = null;
+        state.mapArc = null;
+        state.mapClickAt = 0;
+        state.mapArmId = 0;
+        state.mapStamp = '';
+        if (isRouteKind(id)) state.mapTool = 'route';
+        else if (state.mapTool === 'route') state.mapTool = 'select';
+        renderFrame();
+    }
+
+    function toggleMapLayer(id) {
+        var show = state.mapLayerShow || {};
+        var next = !mapLayerOn(id);
+        show[id] = next;
+        state.mapLayerShow = show;
+        if (!next && state.mapLayer === id) {
+            state.mapLayer = 'plan';
+            if (state.mapTool === 'route') state.mapTool = 'select';
+            state.mapAnchor = null;
+            state.mapClickAt = 0;
+        }
+        renderFrame();
+    }
+
+    function mapLayerBar(editing) {
+        var bar = el('div', 'asset-tree-map-layers');
+        mapLayerIds().forEach(function (id) {
+            var active = !!(editing && state.mapLayer === id);
+            var shown = mapLayerOn(id);
+            var chip = button('', 'asset-tree-map-layer' + (active ? ' is-on' : '') + (shown ? '' : ' is-off'), function () {
+                if (!editing) {
+                    toggleMapLayer(id);
+                    return;
+                }
+                activateMapLayer(id);
+            });
+            var eye = el('i', 'asset-tree-map-eye', shown ? '\u25CF' : '\u25CB');
+            eye.title = t('mapLayerEye');
+            eye.addEventListener('mousedown', function (event) {
+                event.stopPropagation();
+            });
+            eye.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleMapLayer(id);
+            });
+            var swatch = el('i', 'asset-tree-map-swatch');
+            swatch.style.background = id === 'plan' ? '#172b4d' : routeColor(id);
+            chip.appendChild(eye);
+            chip.appendChild(swatch);
+            chip.appendChild(el('span', null, mapLayerLabel(id)));
+            chip.title = mapLayerLabel(id);
+            bar.appendChild(chip);
+        });
+        return bar;
+    }
+
+    function mapViewSide() {
+        var side = el('aside', 'asset-tree-catalog');
+        side.appendChild(mapLayerBar(false));
+        side.appendChild(button(t('mapPrint'), 'asset-tree-btn', printPlanSheet));
+        side.appendChild(mapExplication());
+        return side;
+    }
+
+    function mapExplication() {
+        var block = el('div', 'asset-tree-explic');
+        block.appendChild(el('h3', null, t('mapExplic')));
+        var plan = shownPlan();
+        var rooms = (plan && plan.rooms) || [];
+        var rows = [];
+        var total = 0;
+        rooms.forEach(function (room, index) {
+            if ((room.kind || 'room') !== 'room') return;
+            var points = roomPoints(room);
+            if (points.length < 3) return;
+            var meters = Math.abs(polygonArea(points)) / 10000;
+            total += meters;
+            rows.push({
+                index: index,
+                name: room.name || t('mapRoom'),
+                area: (Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq')
+            });
+        });
+        if (!rows.length) {
+            block.appendChild(el('p', 'asset-tree-catalog-hint', t('mapExplicEmpty')));
+            return block;
+        }
+        rows.forEach(function (row) {
+            var line = button('', 'asset-tree-explic-row' + (state.mapSelection === row.index ? ' is-on' : ''), function () {
+                state.mapTool = 'select';
+                state.mapStamp = '';
+                state.mapSelection = row.index;
+                state.mapGroup = [];
+                renderFrame();
+            });
+            line.appendChild(el('span', null, row.name));
+            line.appendChild(el('span', null, row.area));
+            block.appendChild(line);
+        });
+        block.appendChild(el('p', 'asset-tree-catalog-hint', t('mapExplicTotal') + ' ' + (Math.round(total * 10) / 10).toFixed(1) + ' ' + t('mapSq')));
+        return block;
+    }
+
+    function mapCatalog() {
+        var side = el('aside', 'asset-tree-catalog');
+        side.appendChild(mapLayerBar(true));
+        side.appendChild(el('p', 'asset-tree-catalog-hint', t('mapLayersHint')));
+        side.appendChild(mapToolGrid());
+        side.appendChild(mapPlanActions());
+        side.appendChild(el('h3', null, t('mapFurnReady')));
+        side.appendChild(el('p', 'asset-tree-catalog-hint is-steps', t('mapFurnHint')));
+        var saveRow = el('div', 'asset-tree-template-save');
+        var saveTpl = button(t('mapSaveTemplate'), 'asset-tree-btn', function () {
+            if (!selectedShapeList().length) return;
+            state.mapNaming = true;
+            renderFrame();
+        });
+        saveTpl.disabled = !selectedShapeList().length;
+        saveTpl.title = t('mapFurnHint');
+        saveRow.appendChild(saveTpl);
+        side.appendChild(saveRow);
+        if (state.mapNaming && selectedShapeList().length) {
+            var templateName = document.createElement('input');
+            templateName.className = 'asset-tree-template-name';
+            templateName.maxLength = 40;
+            templateName.placeholder = t('mapTemplateName');
+            templateName.setAttribute('aria-label', t('mapTemplateName'));
+            templateName.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                saveFurnitureTemplate(templateName.value);
+            });
+            side.appendChild(templateName);
+            setTimeout(function () { if (templateName.parentNode) templateName.focus(); }, 0);
+        }
+        var ready = el('div', 'asset-tree-thumb-grid');
+        builtinFurniture().forEach(function (tpl) { ready.appendChild(thumbCard(tpl)); });
+        side.appendChild(ready);
+        side.appendChild(el('h3', null, t('mapMyTemplates')));
+        var mine = el('div', 'asset-tree-thumb-grid');
+        var custom = customFurniture();
+        custom.forEach(function (tpl) { mine.appendChild(thumbCard(tpl)); });
+        side.appendChild(mine);
+        side.appendChild(el('p', 'asset-tree-catalog-hint', t('mapObjectHint')));
+        side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
+        side.appendChild(mapExplication());
+        side.appendChild(mapGearCard());
+        return side;
+    }
+
+    function pinStyle(node, props) {
+        var key;
+        for (key in props) {
+            if (Object.prototype.hasOwnProperty.call(props, key)) node.style.setProperty(key, props[key], 'important');
+        }
+    }
+
+    function planExchangeModel(floor) {
+        var size = planSize(floor);
+        var items = [];
+        (floor.rooms || []).forEach(function (room) {
+            if (isSegmentKind(room.kind) || isRouteKind(room.kind) || room.kind === 'dim' || room.kind === 'door' || room.kind === 'window') {
+                var ends = segmentEnds(room);
+                items.push({ kind: room.kind, x1: ends[0].x, y1: ends[0].y, x2: ends[1].x, y2: ends[1].y, name: room.name || '' });
+            } else if (room.kind === 'arc') {
+                items.push({ kind: 'arc', points: roomPoints(room), name: '' });
+            } else if (room.kind === 'text') {
+                items.push({ kind: 'text', x: room.x, y: room.y + 14, name: room.name || '' });
+            } else if (isPolygonRoom(room)) {
+                items.push({ kind: 'room', points: roomPoints(room), name: room.name || '' });
+            }
+        });
+        return { planW: size.w, planH: size.h, items: items };
+    }
+
+    function downloadPlanFile(name, bytes, mime) {
+        var list = new Uint8Array(bytes.length);
+        var i;
+        for (i = 0; i < bytes.length; i++) list[i] = bytes.charCodeAt(i) & 255;
+        var blob = new Blob([list], { type: mime });
+        var link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function exportPlan(kind) {
+        if (!state.mapDraft || !window.AssetTreePlan) return;
+        var model = planExchangeModel(state.mapDraft);
+        var base = (state.mapDraft.name || 'plan').replace(/[^\w\u0400-\u04FF\-]+/g, '-');
+        if (kind === 'pdf') downloadPlanFile(base + '.pdf', window.AssetTreePlan.exportPdf(model), 'application/pdf');
+        else if (kind === 'dwg') downloadPlanFile(base + '.dwg', window.AssetTreePlan.exportDwg(model), 'application/acad');
+        else downloadPlanFile(base + '.dxf', window.AssetTreePlan.exportDxf(model), 'application/dxf');
+    }
+
+    function printPlanSheet() {
+        var source = shownPlan();
+        if (!source) return;
+        var plan = cloneFloor(source);
+        var size = planSize(plan);
+        var node = floorCanvas(plan, false);
+        node.setAttribute('viewBox', '-28 -28 ' + (size.w + 56) + ' ' + (size.h + 56));
+        node.setAttribute('width', '1100');
+        node.setAttribute('height', '700');
+        var rooms = plan.rooms || [];
+        var explic = [];
+        var total = 0;
+        rooms.forEach(function (room) {
+            if ((room.kind || 'room') !== 'room') return;
+            var points = roomPoints(room);
+            if (points.length < 3) return;
+            var meters = Math.abs(polygonArea(points)) / 10000;
+            total += meters;
+            explic.push('<tr><td>' + htmlEscape(room.name || t('mapRoom')) + '</td><td>' + htmlEscape((Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq')) + '</td></tr>');
+        });
+        function nameAt(x, y) {
+            var best = '';
+            var bestArea = Infinity;
+            rooms.forEach(function (room) {
+                if (!isPolygonRoom(room)) return;
+                var points = roomPoints(room);
+                if (!pointInPoly(x, y, points)) return;
+                var area = Math.abs(polygonArea(points));
+                if (area < bestArea) {
+                    bestArea = area;
+                    best = room.name || t('mapRoom');
                 }
             });
-            rail.appendChild(gearQuery);
-            var list = el('div', 'asset-tree-schedule-assets');
-            var onFloor = 0;
-            var pins = (state.mapDraft && state.mapDraft.pins) || [];
-            equipmentAssets().forEach(function (asset) {
-                var placed = false;
-                pins.forEach(function (pin) { if (pin.assetId === asset.id) placed = true; });
-                if (placed) onFloor++;
-                var place = assetPlaceName(asset);
-                var typeLabel = typeFor(asset).label || '';
-                var row = button('', 'asset-tree-gear-row' + (state.mapAssetId === asset.id ? ' is-current' : ''), function () {
-                    state.mapAssetId = asset.id;
-                    state.mapTool = 'select';
-                    renderFrame();
-                });
-                row.appendChild(el('strong', null, asset.name || asset.objectKey || ''));
-                row.appendChild(el('span', null, [asset.objectKey || '', typeLabel, place].filter(function (part) { return part; }).join(' · ')));
-                list.appendChild(row);
-            });
-            rail.appendChild(list);
-            rail.appendChild(el('p', 'asset-tree-hint', t('mapOnFloor') + ': ' + onFloor));
+            return best;
         }
-        return rail;
+        var openings = [];
+        rooms.forEach(function (room) {
+            if (room.kind !== 'door' && room.kind !== 'window') return;
+            var angle = normalizeAngle(room.angle) * Math.PI / 180;
+            var cx = room.x + room.w / 2;
+            var cy = room.y + room.h / 2;
+            var nx = -Math.sin(angle);
+            var ny = Math.cos(angle);
+            var left = nameAt(cx + nx * 36, cy + ny * 36);
+            var right = nameAt(cx - nx * 36, cy - ny * 36);
+            var where = left && right && left !== right ? left + ' / ' + right : (left || right || '');
+            var width = Math.round(room.w >= room.h ? room.w : room.h);
+            var side = room.kind === 'door' ? (parseInt(room.swing, 10) === 1 ? t('mapSideB') : t('mapSideA')) : '';
+            openings.push('<tr><td>' + htmlEscape(room.kind === 'door' ? t('mapDoor') : t('mapWindow')) + '</td><td>' + htmlEscape(where) + '</td><td>' + width + '</td><td>' + htmlEscape(side) + '</td></tr>');
+        });
+        var sheet = window.open('', '_blank');
+        if (!sheet) {
+            notify(t('printBlocked'));
+            return;
+        }
+        var title = (plan.name || t('mapFloor')) + '';
+        sheet.document.open();
+        sheet.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + htmlEscape(title) + '</title><style>'
+            + 'body{margin:0;font:14px Arial,sans-serif;color:#172b4d;background:#fff}'
+            + '.bar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #dfe1e6}'
+            + 'button{font:14px Arial,sans-serif;padding:6px 12px}'
+            + '.sheet{padding:16px 20px 28px}'
+            + 'h1{font-size:20px;margin:0 0 12px}'
+            + 'h2{font-size:15px;margin:18px 0 8px}'
+            + 'table{border-collapse:collapse;width:100%;max-width:720px}'
+            + 'td,th{border-bottom:1px solid #dfe1e6;text-align:left;padding:4px 8px}'
+            + 'svg{width:100%;height:auto;border:1px solid #dfe1e6;background:#fff}'
+            + '@media print{.bar{display:none} .sheet{padding:0}}'
+            + '</style></head><body><div class="bar"><p>' + htmlEscape(t('mapSheet')) + '</p>'
+            + '<button type="button" onclick="window.print()">' + htmlEscape(t('mapPrint')) + '</button></div><div class="sheet">'
+            + '<h1>' + htmlEscape(title) + '</h1>' + node.outerHTML
+            + '<h2>' + htmlEscape(t('mapExplic')) + '</h2><table><tr><th>' + htmlEscape(t('name')) + '</th><th>' + htmlEscape(t('mapSq')) + '</th></tr>'
+            + (explic.join('') || '<tr><td colspan="2">' + htmlEscape(t('mapExplicEmpty')) + '</td></tr>')
+            + '<tr><td>' + htmlEscape(t('mapExplicTotal')) + '</td><td>' + htmlEscape((Math.round(total * 10) / 10).toFixed(1) + ' ' + t('mapSq')) + '</td></tr></table>'
+            + '<h2>' + htmlEscape(t('mapOpenings')) + '</h2><table><tr><th></th><th>' + htmlEscape(t('mapOpeningWhere')) + '</th><th>' + htmlEscape(t('mapOpeningWidth')) + '</th><th>' + htmlEscape(t('mapSwing')) + '</th></tr>'
+            + (openings.join('') || '<tr><td colspan="4">—</td></tr>')
+            + '</table></div></body></html>');
+        sheet.document.close();
+    }
+
+    function applyPlanImport(name, raw) {
+        if (!state.mapDraft || !window.AssetTreePlan) return;
+        var parsed = window.AssetTreePlan.importDrawing(name, raw);
+        if (!parsed || parsed.error) {
+            notify(t(parsed && parsed.error ? parsed.error : 'mapImportNone'));
+            return;
+        }
+        if (!parsed.rooms || !parsed.rooms.length) {
+            notify(t('mapImportNone'));
+            return;
+        }
+        rememberMap();
+        var box = planSize(state.mapDraft);
+        parsed.rooms.forEach(function (room) {
+            pushShape(state.mapDraft, clampRoom(room, box));
+        });
+        state.mapDirty = true;
+        state.mapSelection = state.mapDraft.rooms.length - 1;
+        renderFrame();
+    }
+
+    function selectedPlanItems() {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var indexes = (state.mapGroup || []).slice();
+        if (state.mapSelection != null && indexes.indexOf(state.mapSelection) < 0) indexes.push(state.mapSelection);
+        return indexes.map(function (index) {
+            return { index: index, room: rooms[index] };
+        }).filter(function (item) { return item.room; });
+    }
+
+    function offsetWalls() {
+        var items = selectedPlanItems().filter(function (item) { return isSegmentKind(item.room.kind); });
+        if (!items.length || !state.mapDraft) return;
+        rememberMap();
+        items.forEach(function (item) {
+            var ends = segmentEnds(item.room);
+            var dx = ends[1].x - ends[0].x;
+            var dy = ends[1].y - ends[0].y;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            commitSegment(state.mapDraft, item.room.kind, ends[0].x - dy / len * 20, ends[0].y + dx / len * 20, ends[1].x - dy / len * 20, ends[1].y + dx / len * 20);
+        });
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function mirrorSelection() {
+        var items = selectedPlanItems();
+        if (!items.length) return;
+        var minX = Infinity;
+        var maxX = -Infinity;
+        items.forEach(function (item) {
+            var room = item.room;
+            if (isSegmentKind(room.kind) || room.kind === 'dim') {
+                var ends = segmentEnds(room);
+                minX = Math.min(minX, ends[0].x, ends[1].x);
+                maxX = Math.max(maxX, ends[0].x, ends[1].x);
+            } else {
+                minX = Math.min(minX, room.x);
+                maxX = Math.max(maxX, room.x + room.w);
+            }
+        });
+        var mid = (minX + maxX) / 2;
+        rememberMap();
+        items.forEach(function (item) {
+            var room = item.room;
+            if (isSegmentKind(room.kind) || room.kind === 'dim') {
+                var ends = segmentEnds(room);
+                var next = applySegment(room, mid - (ends[0].x - mid), ends[0].y, mid - (ends[1].x - mid), ends[1].y);
+                if (!next) return;
+                room.x = next.x;
+                room.y = next.y;
+                room.w = next.w;
+                room.h = next.h;
+                room.angle = next.angle;
+                return;
+            }
+            room.x = Math.round(mid - (room.x + room.w - mid) - room.w);
+            room.angle = normalizeAngle(180 - (room.angle || 0));
+            (room.points || []).forEach(function (point) { point.x = mid - (point.x - mid); });
+        });
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function arcShape(a, b, c) {
+        var points = [a, b, c];
+        var samples = window.AssetTreePlan ? window.AssetTreePlan.arcPoints(points, 8) : points;
+        var minX = samples[0].x;
+        var minY = samples[0].y;
+        var maxX = samples[0].x;
+        var maxY = samples[0].y;
+        samples.forEach(function (point) {
+            if (point.x < minX) minX = point.x;
+            if (point.y < minY) minY = point.y;
+            if (point.x > maxX) maxX = point.x;
+            if (point.y > maxY) maxY = point.y;
+        });
+        return clampRoom({
+            kind: 'arc',
+            name: '',
+            angle: 0,
+            x: minX,
+            y: minY,
+            w: Math.max(8, maxX - minX),
+            h: Math.max(8, maxY - minY),
+            points: points
+        });
+    }
+
+    function placeArcPoint(floor, point) {
+        if (!state.mapArc) {
+            state.mapArc = { a: point };
+            state.mapAnchor = point;
+            renderFrame();
+            return;
+        }
+        if (!state.mapArc.b) {
+            if (Math.abs(point.x - state.mapArc.a.x) + Math.abs(point.y - state.mapArc.a.y) < 8) return;
+            state.mapArc.b = point;
+            state.mapAnchor = point;
+            renderFrame();
+            return;
+        }
+        if (pushShape(floor, arcShape(state.mapArc.a, state.mapArc.b, point))) {
+            state.mapSelection = floor.rooms.length - 1;
+        }
+        state.mapArc = null;
+        state.mapAnchor = null;
+        state.mapDirty = true;
+        renderFrame();
+    }
+
+    function mapPlanActions() {
+        var row = el('div', 'asset-tree-plan-actions');
+        var ortho = button(t('mapOrtho'), 'asset-tree-btn slim' + (state.mapOrtho ? ' is-on' : ''), function () {
+            state.mapOrtho = !state.mapOrtho;
+            renderFrame();
+        });
+        ortho.title = t('mapFree');
+        row.appendChild(ortho);
+        row.appendChild(button(t('mapOffset'), 'asset-tree-btn slim', offsetWalls));
+        row.appendChild(button(t('mapMirror'), 'asset-tree-btn slim', mirrorSelection));
+        var file = document.createElement('input');
+        file.type = 'file';
+        file.accept = '.dxf,.dwg,.pdf,application/pdf';
+        file.className = 'asset-tree-plan-file';
+        file.addEventListener('change', function () {
+            var picked = file.files && file.files[0];
+            if (!picked) return;
+            var reader = new FileReader();
+            reader.onload = function () {
+                var bytes = new Uint8Array(reader.result);
+                var text = '';
+                var i;
+                for (i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
+                applyPlanImport(picked.name, text);
+                file.value = '';
+            };
+            reader.readAsArrayBuffer(picked);
+        });
+        var importer = button(t('mapImport'), 'asset-tree-btn slim', function () { file.click(); });
+        row.appendChild(importer);
+        row.appendChild(file);
+        row.appendChild(button(t('mapExportDxf'), 'asset-tree-btn slim', function () { exportPlan('dxf'); }));
+        row.appendChild(button(t('mapExportDwg'), 'asset-tree-btn slim', function () { exportPlan('dwg'); }));
+        row.appendChild(button(t('mapExportPdf'), 'asset-tree-btn slim', function () { exportPlan('pdf'); }));
+        row.appendChild(button(t('mapPrint'), 'asset-tree-btn slim', printPlanSheet));
+        window.AssetTreePlanApply = function (name, raw) { applyPlanImport(name, raw); };
+        return row;
+    }
+
+    function mapToolGrid() {
+        var grid = el('div', 'asset-tree-tool-grid');
+        [
+            ['select', 'mapSelect'], ['room', 'mapRoom'], ['wall', 'mapWall'], ['partition', 'mapPartition'],
+            ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['desk', 'mapDesk'],
+            ['arc', 'mapArc'], ['dim', 'mapDim'], ['text', 'mapText']
+        ].forEach(function (pair) {
+            var on = state.mapTool === pair[0] && !state.mapStamp && !state.mapArmId;
+            var tool = button('', 'asset-tree-tool' + (on ? ' is-on' : ''), function () {
+                state.mapTool = pair[0];
+                state.mapStamp = '';
+                state.mapArmId = 0;
+                state.mapAnchor = null;
+                state.mapArc = null;
+                state.mapClickAt = 0;
+                if (pair[0] !== 'select' && isRouteKind(state.mapLayer)) state.mapLayer = 'plan';
+                renderFrame();
+            });
+            pinStyle(tool, {
+                display: 'grid',
+                'grid-template-rows': '22px 16px',
+                'grid-template-columns': 'minmax(0, 1fr)',
+                'align-items': 'center',
+                'justify-items': 'center',
+                'align-content': 'center',
+                'justify-content': 'center',
+                'flex-direction': 'column',
+                'flex-wrap': 'nowrap',
+                gap: '2px',
+                width: '100%',
+                height: '46px',
+                'min-height': '46px',
+                'max-height': '46px',
+                margin: '0',
+                padding: '4px 2px',
+                'box-sizing': 'border-box',
+                'text-align': 'center',
+                'line-height': '0',
+                'white-space': 'nowrap',
+                float: 'none',
+                overflow: 'hidden',
+                'vertical-align': 'top',
+                'font-size': '12px',
+                'font-weight': '400'
+            });
+            var glyph = el('span', 'asset-tree-tool-glyph');
+            pinStyle(glyph, {
+                display: 'flex',
+                'align-items': 'center',
+                'justify-content': 'center',
+                width: '20px',
+                height: '20px',
+                margin: '0',
+                padding: '0',
+                'line-height': '0',
+                float: 'none',
+                'grid-row': '1',
+                'grid-column': '1',
+                'box-sizing': 'border-box'
+            });
+            glyph.appendChild(mapToolIcon(pair[0]));
+            tool.appendChild(glyph);
+            var label = el('span', 'asset-tree-tool-label', t(pair[1]));
+            pinStyle(label, {
+                display: 'flex',
+                'align-items': 'center',
+                'justify-content': 'center',
+                width: '100%',
+                height: '16px',
+                margin: '0',
+                padding: '0',
+                overflow: 'hidden',
+                'font-size': '11px',
+                'font-weight': '400',
+                'line-height': '16px',
+                'letter-spacing': '0',
+                'text-align': 'center',
+                'text-indent': '0',
+                'white-space': 'nowrap',
+                'text-overflow': 'ellipsis',
+                float: 'none',
+                'grid-row': '2',
+                'grid-column': '1',
+                'box-sizing': 'border-box'
+            });
+            tool.appendChild(label);
+            tool.title = t(pair[1]);
+            tool.setAttribute('aria-label', t(pair[1]));
+            tool.setAttribute('aria-pressed', on ? 'true' : 'false');
+            grid.appendChild(tool);
+        });
+        return grid;
+    }
+
+    function thumbCard(tpl) {
+        var on = state.mapStamp === tpl.id;
+        var card = button('', 'asset-tree-thumb-card' + (on ? ' is-on' : ''), function (event) {
+            if (state.mapSuppressClick) {
+                state.mapSuppressClick = false;
+                return;
+            }
+            var target = event && event.target;
+            if (target && target.classList && target.classList.contains('asset-tree-furn-x')) {
+                removeFurniture(tpl.id);
+                return;
+            }
+            if (state.mapStamp === tpl.id) {
+                state.mapStamp = '';
+                state.mapTool = 'select';
+            } else {
+                state.mapStamp = tpl.id;
+                state.mapTool = 'stamp';
+                state.mapAssetId = 0;
+                state.mapArmId = 0;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+            }
+            renderFrame();
+        });
+        card.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            var target = event.target;
+            if (target && target.classList && target.classList.contains('asset-tree-furn-x')) return;
+            var startX = event.clientX;
+            var startY = event.clientY;
+            var ghost = null;
+            var dragging = false;
+            function move(ev) {
+                var dx = ev.clientX - startX;
+                var dy = ev.clientY - startY;
+                if (!dragging && dx * dx + dy * dy < 25) return;
+                if (!dragging) ev.preventDefault();
+                dragging = true;
+                if (!ghost) {
+                    ghost = document.createElement('div');
+                    ghost.className = 'asset-tree-plan-ghost';
+                    ghost.appendChild(furnitureThumb(tpl));
+                    document.body.appendChild(ghost);
+                }
+                ghost.style.left = (ev.clientX + 12) + 'px';
+                ghost.style.top = (ev.clientY + 12) + 'px';
+            }
+            function up(ev) {
+                window.removeEventListener('mousemove', move);
+                window.removeEventListener('mouseup', up);
+                if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+                if (!dragging) return;
+                state.mapSuppressClick = true;
+                setTimeout(function () { state.mapSuppressClick = false; }, 0);
+                var canvas = document.querySelector('#asset-tree-app .asset-tree-floorplan .asset-tree-canvas');
+                if (!canvas || !state.mapDraft) return;
+                var rect = canvas.getBoundingClientRect();
+                if (ev.clientX < rect.left || ev.clientX > rect.right || ev.clientY < rect.top || ev.clientY > rect.bottom) return;
+                state.mapStamp = tpl.id;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+                var point = svgPoint(canvas, ev);
+                placeStamp(state.mapDraft, point.x, point.y);
+                state.mapStamp = '';
+                state.mapTool = 'select';
+                renderFrame();
+            }
+            window.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', up);
+        });
+        card.appendChild(furnitureThumb(tpl));
+        var caption = el('span', 'asset-tree-thumb-name', tpl.name);
+        card.appendChild(caption);
+        if (!tpl.builtin) {
+            var remove = el('span', 'asset-tree-furn-x', '\u00d7');
+            remove.title = t('mapRemoveTemplate');
+            card.appendChild(remove);
+        }
+        card.title = tpl.name;
+        card.setAttribute('aria-pressed', on ? 'true' : 'false');
+        return card;
+    }
+
+    function furnitureThumb(tpl) {
+        var svg = svgEl('svg');
+        svg.setAttribute('class', 'asset-tree-thumb');
+        var maxX = 8;
+        var maxY = 8;
+        (tpl.shapes || []).forEach(function (shape) {
+            maxX = Math.max(maxX, (Number(shape.x) || 0) + (Number(shape.w) || 1));
+            maxY = Math.max(maxY, (Number(shape.y) || 0) + (Number(shape.h) || 1));
+        });
+        svg.setAttribute('viewBox', '-8 -8 ' + (maxX + 16) + ' ' + (maxY + 16));
+        var paper = svgEl('rect');
+        paper.setAttribute('x', '-8');
+        paper.setAttribute('y', '-8');
+        paper.setAttribute('width', String(maxX + 16));
+        paper.setAttribute('height', String(maxY + 16));
+        paper.setAttribute('fill', '#e4e4e4');
+        svg.appendChild(paper);
+        (tpl.shapes || []).forEach(function (shape) {
+            svg.appendChild(shapeNode({
+                kind: shape.kind,
+                name: '',
+                color: shape.color || '',
+                angle: shape.angle || 0,
+                x: Number(shape.x) || 0,
+                y: Number(shape.y) || 0,
+                w: Number(shape.w) || 8,
+                h: Number(shape.h) || 8
+            }, null));
+        });
+        return svg;
+    }
+
+    function mapStage(floors, editing) {
+        var stage = el('div', 'asset-tree-floorplan-stage');
+        if (!floors.length) {
+            var empty = el('div', 'asset-tree-map-empty');
+            empty.appendChild(el('p', null, t('mapNoFloors')));
+            if (state.canEdit) empty.appendChild(button(t('mapAddFloor'), 'asset-tree-btn primary', function () { addFloor(true); }));
+            stage.appendChild(empty);
+            return stage;
+        }
+        var floor = editing ? state.mapDraft : state.mapShown;
+        var view = el('div', 'asset-tree-floorplan-view');
+        if (floor) view.appendChild(floorCanvas(floor, editing));
+        stage.appendChild(view);
+        stage.appendChild(mapZoomDock());
+        if (editing && state.mapSelection != null) stage.appendChild(mapInspector());
+        return stage;
+    }
+
+    function mapZoomDock() {
+        var dock = el('div', 'asset-tree-zoom-dock');
+        var zoomOut = button('', 'asset-tree-zoom-btn', function () { zoomMap(1 / 1.25); });
+        zoomOut.title = t('mapZoomOut');
+        zoomOut.setAttribute('aria-label', t('mapZoomOut'));
+        zoomOut.appendChild(mapZoomGlyph('minus'));
+        var zoomIn = button('', 'asset-tree-zoom-btn', function () { zoomMap(1.25); });
+        zoomIn.title = t('mapZoomIn');
+        zoomIn.setAttribute('aria-label', t('mapZoomIn'));
+        zoomIn.appendChild(mapZoomGlyph('plus'));
+        var fit = button('', 'asset-tree-zoom-btn', function () {
+            state.mapCam = null;
+            renderFrame();
+        });
+        fit.title = t('mapFit');
+        fit.setAttribute('aria-label', t('mapFit'));
+        fit.appendChild(mapFitIcon());
+        dock.appendChild(zoomOut);
+        dock.appendChild(el('span', 'asset-tree-zoom-readout', zoomPercent() + '%'));
+        dock.appendChild(zoomIn);
+        dock.appendChild(fit);
+        return dock;
+    }
+
+    function mapFitIcon() {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('aria-hidden', 'true');
+        var path = svgEl('path');
+        path.setAttribute('d', 'M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.6');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function mapGearCard() {
+        var card = el('div', 'asset-tree-catalog-gear');
+        var pins = (state.mapDraft && state.mapDraft.pins) || [];
+        var onFloor = 0;
+        var rows = [];
+        equipmentAssets().forEach(function (asset) {
+            if (!assetInBuilding(asset, state.mapPlaceId)) return;
+            var placed = false;
+            pins.forEach(function (pin) { if (pin.assetId === asset.id) placed = true; });
+            ((state.mapDraft && state.mapDraft.rooms) || []).forEach(function (room) {
+                if (parseInt(room.assetId, 10) === asset.id) placed = true;
+            });
+            if (placed) onFloor++;
+            rows.push({ asset: asset, placed: placed });
+        });
+        card.appendChild(el('h3', null, t('mapGear') + ' · ' + onFloor));
+        var query = document.createElement('input');
+        query.type = 'search';
+        query.placeholder = t('schedulesFindAssets');
+        query.addEventListener('input', function () {
+            var needle = query.value.trim().toLowerCase();
+            var nodes = card.querySelectorAll('.asset-tree-gear-row');
+            for (var i = 0; i < nodes.length; i++) {
+                nodes[i].hidden = !!(needle && (nodes[i].textContent || '').toLowerCase().indexOf(needle) < 0);
+            }
+        });
+        card.appendChild(query);
+        var list = el('div', 'asset-tree-map-gear-list');
+        rows.forEach(function (row) {
+            var asset = row.asset;
+            var typeLabel = typeFor(asset).label || '';
+            var armed = state.mapArmId === asset.id;
+            var picked = state.mapAssetId === asset.id;
+            var buttonRow = button('', 'asset-tree-gear-row' + (armed ? ' is-armed' : '') + (picked ? ' is-current' : ''), function () {
+                if (state.mapArmId === asset.id) {
+                    state.mapArmId = 0;
+                } else {
+                    state.mapArmId = asset.id;
+                    state.mapAssetId = 0;
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    state.mapAnchor = null;
+                    state.mapArc = null;
+                    state.mapClickAt = 0;
+                }
+                renderFrame();
+            });
+            buttonRow.appendChild(el('strong', null, asset.name || asset.objectKey || ''));
+            buttonRow.appendChild(el('span', null, [asset.objectKey || '', typeLabel, row.placed ? t('mapOnFloor') : ''].filter(function (part) { return part; }).join(' · ')));
+            list.appendChild(buttonRow);
+        });
+        card.appendChild(list);
+        return card;
     }
 
     function mapEditorBar() {
@@ -12691,27 +20820,31 @@
             state.mapDraft.name = name.value;
             state.mapDirty = true;
             var dirty = document.querySelector('.asset-tree-dirty');
-            if (dirty) dirty.textContent = t('mapDirty');
+            if (dirty) {
+                dirty.textContent = t('mapDirty');
+                return;
+            }
+            var filters = document.querySelector('.asset-tree-plan-top .asset-tree-sheet-filters');
+            if (filters) filters.insertBefore(el('span', 'asset-tree-dirty', t('mapDirty')), filters.firstChild);
         });
         bar.appendChild(name);
-        bar.appendChild(button(t('mapFit'), 'asset-tree-btn slim', function () {
-            state.mapZoom = 1;
-            renderFrame();
-        }));
-        var zoomOut = button('−', 'asset-tree-btn slim asset-tree-zoom', function () {
-            state.mapZoom = Math.max(0.5, Math.round(((state.mapZoom || 1) - 0.25) * 100) / 100);
-            renderFrame();
+        var undo = button(t('mapUndo'), 'asset-tree-btn slim', undoMap);
+        undo.disabled = !(state.mapUndo && state.mapUndo.length);
+        undo.title = t('mapUndo');
+        var redo = button(t('mapRedo'), 'asset-tree-btn slim', redoMap);
+        redo.disabled = !(state.mapRedo && state.mapRedo.length);
+        redo.title = t('mapRedo');
+        bar.appendChild(undo);
+        bar.appendChild(redo);
+        bar.appendChild(el('span', 'asset-tree-plan-label', t('mapSnap')));
+        [4, 8, 16, 24].forEach(function (step) {
+            var snap = button(String(step), 'asset-tree-btn slim' + ((state.mapStep || 8) === step ? ' is-on' : ''), function () {
+                state.mapStep = step;
+                renderFrame();
+            });
+            snap.title = t('mapSnap') + ' ' + step;
+            bar.appendChild(snap);
         });
-        zoomOut.title = t('mapZoomOut');
-        zoomOut.setAttribute('aria-label', t('mapZoomOut'));
-        var zoomIn = button('+', 'asset-tree-btn slim asset-tree-zoom', function () {
-            state.mapZoom = Math.min(2, Math.round(((state.mapZoom || 1) + 0.25) * 100) / 100);
-            renderFrame();
-        });
-        zoomIn.title = t('mapZoomIn');
-        zoomIn.setAttribute('aria-label', t('mapZoomIn'));
-        bar.appendChild(zoomOut);
-        bar.appendChild(zoomIn);
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapPlanSize')));
         var width = document.createElement('input');
         width.type = 'number';
@@ -12728,6 +20861,7 @@
         height.className = 'asset-tree-plan-size';
         height.setAttribute('aria-label', t('setupPlanH'));
         function resizePlan() {
+            rememberMap();
             state.mapDraft.planW = clampNum(width.value, 640, 2400);
             state.mapDraft.planH = clampNum(height.value, 480, 1600);
             var next = planSize(state.mapDraft);
@@ -12737,21 +20871,32 @@
                 pin.y = clampNum(pin.y, 0, next.h);
                 return pin;
             });
+            state.mapCam = null;
             state.mapDirty = true;
             renderFrame();
         }
         width.addEventListener('change', resizePlan);
         height.addEventListener('change', resizePlan);
         bar.appendChild(width);
-        bar.appendChild(el('span', null, '×'));
+        bar.appendChild(el('span', null, '\u00d7'));
         bar.appendChild(height);
         return bar;
     }
 
     function addFloor(edit) {
-        var level = (state.floors || []).length + 1;
+        if (!state.mapPlaceId) {
+            notify(t('mapNoBuilding'));
+            return;
+        }
+        var level = floorsForBuilding(state.mapPlaceId).length + 1;
         var setup = moduleSetup();
-        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/floors', { name: t('mapFloor') + ' ' + level, level: level, planW: setup.mapWidth, planH: setup.mapHeight }, function (status, payload) {
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/floors', {
+            name: t('mapFloor') + ' ' + level,
+            level: level,
+            planW: setup.mapWidth,
+            planH: setup.mapHeight,
+            placeId: state.mapPlaceId
+        }, function (status, payload) {
             if (status >= 200 && status < 300 && payload) {
                 state.floors = state.floors || [];
                 state.floors.push(payload);
@@ -12759,6 +20904,10 @@
                 state.mapDraft = cloneFloor(payload);
                 state.mapEditing = !!edit || state.mapEditing;
                 state.mapDirty = false;
+                state.mapCam = null;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+                resetMapHistory();
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
         });
@@ -12771,10 +20920,17 @@
         ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/floors/' + floor.id, null, function (status, payload) {
             if (status >= 200 && status < 300) {
                 state.floors = (state.floors || []).filter(function (item) { return item.id !== floor.id; });
-                state.floorId = state.floors.length ? state.floors[0].id : 0;
-                state.mapDraft = state.floors.length ? cloneFloor(state.floors[0]) : null;
+                var left = floorsForBuilding(state.mapPlaceId);
+                state.floorId = left.length ? left[0].id : 0;
+                state.mapDraft = left.length ? cloneFloor(left[0]) : null;
                 state.mapDirty = false;
-                if (!state.floors.length) state.mapEditing = false;
+                state.mapSelection = null;
+                state.mapGroup = [];
+                state.mapCam = null;
+                state.mapAnchor = null;
+                state.mapClickAt = 0;
+                resetMapHistory();
+                if (!left.length) state.mapEditing = false;
                 renderFrame();
             } else notify((payload && payload.message) || t('errorTitle'));
         });
@@ -12783,7 +20939,31 @@
     function saveMap() {
         var draft = state.mapDraft;
         if (!draft) return;
-        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/floors/' + draft.id, draft, function (status, payload) {
+        if (!draft.placeId) draft.placeId = state.mapPlaceId;
+        var body = {
+            id: draft.id,
+            name: draft.name || '',
+            level: draft.level || 0,
+            placeId: draft.placeId,
+            planW: draft.planW,
+            planH: draft.planH,
+            pins: draft.pins || [],
+            rooms: (draft.rooms || []).map(function (room) {
+                return {
+                    name: room.name || '',
+                    kind: room.kind || 'room',
+                    color: room.color || '',
+                    angle: normalizeAngle(room.angle),
+                    x: room.x, y: room.y, w: room.w, h: room.h,
+                    points: packPoints(room.points),
+                    placeId: parseInt(room.placeId, 10) || 0,
+                    assetId: Math.max(0, parseInt(room.assetId, 10) || 0),
+                    swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
+                    groupId: Math.max(0, parseInt(room.groupId, 10) || 0)
+                };
+            })
+        };
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/floors/' + draft.id, body, function (status, payload) {
             if (status >= 200 && status < 300 && payload) {
                 storeFloor(payload);
                 renderFrame();
@@ -12791,117 +20971,1250 @@
         });
     }
 
-    function floorCanvas(floor, editing) {
-        var size = planSize(floor);
-        var step = moduleSetup().mapGrid || 24;
-        var svg = svgEl('svg');
-        svg.setAttribute('viewBox', '0 0 ' + size.w + ' ' + size.h);
-        svg.setAttribute('class', 'asset-tree-canvas');
-        var zoom = editing ? (state.mapZoom || 1) : 1;
-        if (editing) {
-            svg.style.width = Math.round(size.w * zoom) + 'px';
-            svg.style.height = Math.round(size.h * zoom) + 'px';
-        } else {
-            svg.style.width = '100%';
-            svg.style.height = 'auto';
+    function shapeTransform(room) {
+        var angle = normalizeAngle(room.angle);
+        if (!angle) return 'translate(' + room.x + ' ' + room.y + ')';
+        return 'translate(' + room.x + ' ' + room.y + ') rotate(' + angle + ' ' + (room.w / 2) + ' ' + (room.h / 2) + ')';
+    }
+
+    function localToWorld(room, lx, ly) {
+        var angle = normalizeAngle(room.angle) * Math.PI / 180;
+        var cos = Math.cos(angle);
+        var sin = Math.sin(angle);
+        var dx = lx - room.w / 2;
+        var dy = ly - room.h / 2;
+        var cx = room.x + room.w / 2;
+        var cy = room.y + room.h / 2;
+        return {
+            x: cx + dx * cos - dy * sin,
+            y: cy + dx * sin + dy * cos
+        };
+    }
+
+    function isSegmentKind(kind) {
+        return kind === 'wall' || kind === 'partition';
+    }
+
+    function isRouteKind(kind) {
+        return kind === 'power' || kind === 'scs' || kind === 'comm' || kind === 'vent' || kind === 'water';
+    }
+
+    function routeColor(kind) {
+        if (kind === 'power') return '#ff5630';
+        if (kind === 'scs') return '#0065ff';
+        if (kind === 'comm') return '#6554c0';
+        if (kind === 'vent') return '#36b37e';
+        if (kind === 'water') return '#00b8d9';
+        return '#172b4d';
+    }
+
+    function isThinKind(kind) {
+        return kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'dim' || isRouteKind(kind);
+    }
+
+    function segmentLocalEnds(room) {
+        if (room.w >= room.h) return [[0, room.h / 2], [room.w, room.h / 2]];
+        return [[room.w / 2, 0], [room.w / 2, room.h]];
+    }
+
+    function segmentEnds(room) {
+        var local = segmentLocalEnds(room);
+        return [
+            localToWorld(room, local[0][0], local[0][1]),
+            localToWorld(room, local[1][0], local[1][1])
+        ];
+    }
+
+    function wallAngle(room) {
+        if (room.h > room.w) return normalizeAngle((room.angle || 0) + 90);
+        return normalizeAngle(room.angle || 0);
+    }
+
+    function angleDelta(a, b) {
+        var d = Math.abs(normalizeAngle(a) - normalizeAngle(b));
+        if (d > 180) d = 360 - d;
+        if (d > 90) d = 180 - d;
+        return d;
+    }
+
+    function nearestEnd(x, y, ignoreIndex, radius, kindFilter) {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var best = null;
+        var limit = radius * radius;
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (i === ignoreIndex) continue;
+            if (kindFilter) {
+                if (rooms[i].kind !== kindFilter || !shapeShown(rooms[i])) continue;
+            } else if (!isSegmentKind(rooms[i].kind)) continue;
+            var ends = segmentEnds(rooms[i]);
+            var n;
+            for (n = 0; n < ends.length; n++) {
+                var dx = ends[n].x - x;
+                var dy = ends[n].y - y;
+                var dist = dx * dx + dy * dy;
+                if (dist <= limit) {
+                    limit = dist;
+                    best = ends[n];
+                }
+            }
         }
-        var defs = svgEl('defs');
-        var pattern = svgEl('pattern');
-        pattern.setAttribute('id', 'asset-tree-grid');
-        pattern.setAttribute('width', String(step));
-        pattern.setAttribute('height', String(step));
-        pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-        var grid = svgEl('path');
-        grid.setAttribute('d', 'M ' + step + ' 0 L 0 0 0 ' + step);
-        grid.setAttribute('fill', 'none');
-        grid.setAttribute('stroke', '#dfe1e6');
-        grid.setAttribute('stroke-width', '1');
-        pattern.appendChild(grid);
-        defs.appendChild(pattern);
-        svg.appendChild(defs);
-        var paper = svgEl('rect');
-        paper.setAttribute('width', String(size.w));
-        paper.setAttribute('height', String(size.h));
-        paper.setAttribute('fill', 'url(#asset-tree-grid)');
-        svg.appendChild(paper);
-        (floor.rooms || []).forEach(function (room, index) {
-            var rect = svgEl('rect');
-            rect.setAttribute('x', String(room.x));
-            rect.setAttribute('y', String(room.y));
-            rect.setAttribute('width', String(room.w));
-            rect.setAttribute('height', String(room.h));
-            rect.setAttribute('class', 'asset-tree-room is-' + (room.kind || 'room') + (state.mapSelection === index ? ' is-selected' : ''));
-            if ((room.kind || 'room') === 'room' && room.color) rect.setAttribute('fill', room.color);
-            if (editing) {
-                rect.addEventListener('mousedown', function (event) {
-                    if (state.mapTool !== 'select') return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    state.mapSelection = index;
-                    var point = svgPoint(svg, event);
-                    beginDrag(svg, { kind: 'move', index: index, dx: point.x - room.x, dy: point.y - room.y, moved: false, x0: point.x, y0: point.y }, function (move) {
-                        var next = svgPoint(svg, move);
-                        var dx = next.x - state.mapDrag.x0;
-                        var dy = next.y - state.mapDrag.y0;
-                        if (!state.mapDrag.moved && dx * dx + dy * dy < 16) return;
-                        state.mapDrag.moved = true;
-                        room.x = clampNum(next.x - state.mapDrag.dx, 0, size.w - room.w);
-                        room.y = clampNum(next.y - state.mapDrag.dy, 0, size.h - room.h);
-                        rect.setAttribute('x', String(room.x));
-                        rect.setAttribute('y', String(room.y));
-                        state.mapDirty = true;
-                    }, function (finished) {
-                        if (finished && !finished.moved && state.mapAssetId) placeArmedPin(floor, finished.x0, finished.y0);
-                        renderFrame();
-                    });
-                });
-            }
-            svg.appendChild(rect);
-            var kindName = room.kind || 'room';
-            if (kindName === 'door' || kindName === 'window') {
-                var markLine = svgEl('path');
-                var horizontal = room.w >= room.h;
-                var d = kindName === 'door'
-                    ? (horizontal
-                        ? 'M ' + room.x + ' ' + (room.y + room.h) + ' A ' + room.w + ' ' + room.w + ' 0 0 1 ' + (room.x + room.w) + ' ' + room.y
-                        : 'M ' + room.x + ' ' + room.y + ' A ' + room.h + ' ' + room.h + ' 0 0 1 ' + (room.x + room.w) + ' ' + (room.y + room.h))
-                    : (horizontal
-                        ? 'M ' + room.x + ' ' + (room.y + room.h / 2) + ' L ' + (room.x + room.w) + ' ' + (room.y + room.h / 2)
-                        : 'M ' + (room.x + room.w / 2) + ' ' + room.y + ' L ' + (room.x + room.w / 2) + ' ' + (room.y + room.h));
-                markLine.setAttribute('d', d);
-                markLine.setAttribute('class', 'asset-tree-opening');
-                svg.appendChild(markLine);
-            }
-            if (kindName === 'room' && room.name) {
-                var label = svgEl('text');
-                label.setAttribute('x', String(room.x + 8));
-                label.setAttribute('y', String(room.y + 20));
-                label.setAttribute('class', 'asset-tree-room-label');
-                label.textContent = room.name;
-                svg.appendChild(label);
+        return best;
+    }
+
+    function snapStart(x, y, kindFilter) {
+        var join = nearestEnd(x, y, -1, 16, kindFilter);
+        if (join) return { x: join.x, y: join.y };
+        return { x: snapCoord(x), y: snapCoord(y) };
+    }
+
+    function aimWallEnd(origin, point, loose) {
+        var dx = point.x - origin.x;
+        var dy = point.y - origin.y;
+        var length = Math.sqrt(dx * dx + dy * dy);
+        if (length < 1) return { x: origin.x, y: origin.y };
+        var ortho = !!state.mapOrtho;
+        if (loose) ortho = !ortho;
+        var angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        if (ortho) angle = Math.round(angle / 90) * 90;
+        else {
+            var near = Math.round(angle / 45) * 45;
+            if (Math.abs(angle - near) <= 2.5) angle = near;
+        }
+        var rad = angle * Math.PI / 180;
+        var snapped = Math.max(8, snapCoord(length));
+        return {
+            x: origin.x + Math.cos(rad) * snapped,
+            y: origin.y + Math.sin(rad) * snapped
+        };
+    }
+
+    function resolveEnd(origin, point, loose, ignoreIndex, kindFilter) {
+        var join = nearestEnd(point.x, point.y, ignoreIndex, 18, kindFilter);
+        if (join) {
+            var dx = join.x - origin.x;
+            var dy = join.y - origin.y;
+            if (dx * dx + dy * dy >= 64) return { x: join.x, y: join.y };
+        }
+        return aimWallEnd(origin, point, loose);
+    }
+
+    function applySegment(room, ax, ay, bx, by) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var length = Math.sqrt(dx * dx + dy * dy);
+        var kind = room.kind || 'wall';
+        var min = Math.max(roomMin(kind), 8);
+        if (length < min) return null;
+        var thick = room.h;
+        if (room.w && room.w < room.h) thick = room.w;
+        if (!thick || thick < 1) thick = kind === 'partition' ? 4 : (kind === 'wall' ? 8 : 10);
+        var w = Math.max(min, Math.round(length));
+        var h = Math.max(roomMin(kind), Math.round(thick));
+        var mx = (ax + bx) / 2;
+        var my = (ay + by) / 2;
+        return clampRoom({
+            name: room.name || '',
+            kind: kind,
+            color: room.color || '',
+            angle: normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI),
+            x: mx - w / 2,
+            y: my - h / 2,
+            w: w,
+            h: h
+        });
+    }
+
+    function projectOnSegment(ax, ay, bx, by, px, py) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var span2 = dx * dx + dy * dy;
+        if (span2 < 1) return null;
+        var t = ((px - ax) * dx + (py - ay) * dy) / span2;
+        var qx = ax + dx * t;
+        var qy = ay + dy * t;
+        var ex = px - qx;
+        var ey = py - qy;
+        return { t: t, x: qx, y: qy, dist: Math.sqrt(ex * ex + ey * ey), span: Math.sqrt(span2) };
+    }
+
+    function nearestWall(x, y, maxDist) {
+        var rooms = (state.mapDraft && state.mapDraft.rooms) || [];
+        var best = null;
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (!isSegmentKind(rooms[i].kind)) continue;
+            var ends = segmentEnds(rooms[i]);
+            var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, x, y);
+            if (!hit || hit.t < 0 || hit.t > 1 || hit.dist > maxDist) continue;
+            if (!best || hit.dist < best.dist) best = { index: i, room: rooms[i], t: hit.t, dist: hit.dist };
+        }
+        return best;
+    }
+
+    function seatOpening(kind, wall, t, length) {
+        var wallThick = wall.w >= wall.h ? wall.h : wall.w;
+        var thick = Math.max(wallThick, 10);
+        var span = wall.w >= wall.h ? wall.w : wall.h;
+        var len = length || (kind === 'window' ? 96 : 80);
+        if (len < 8) len = 8;
+        var use = t;
+        if (span <= len) {
+            use = 0.5;
+            len = Math.max(8, Math.round(span));
+        } else {
+            var margin = (len / 2) / span;
+            if (use < margin) use = margin;
+            if (use > 1 - margin) use = 1 - margin;
+        }
+        var ends = segmentEnds(wall);
+        var px = ends[0].x + (ends[1].x - ends[0].x) * use;
+        var py = ends[0].y + (ends[1].y - ends[0].y) * use;
+        return clampRoom({
+            kind: kind,
+            name: '',
+            color: '',
+            angle: wallAngle(wall),
+            swing: 0,
+            x: px - len / 2,
+            y: py - thick / 2,
+            w: Math.round(len),
+            h: thick
+        });
+    }
+
+    function openingsOnWall(wallIndex, rooms) {
+        rooms = rooms || (state.mapDraft && state.mapDraft.rooms) || [];
+        var wall = rooms[wallIndex];
+        var list = [];
+        if (!wall || !isSegmentKind(wall.kind)) return list;
+        var ends = segmentEnds(wall);
+        var direction = wallAngle(wall);
+        rooms.forEach(function (room, index) {
+            if (room.kind !== 'door' && room.kind !== 'window') return;
+            var cx = room.x + room.w / 2;
+            var cy = room.y + room.h / 2;
+            var hit = projectOnSegment(ends[0].x, ends[0].y, ends[1].x, ends[1].y, cx, cy);
+            if (!hit || hit.t < -0.02 || hit.t > 1.02 || hit.dist > 22) return;
+            if (angleDelta(room.angle, direction) > 15) return;
+            list.push({ index: index, t: hit.t, length: room.w >= room.h ? room.w : room.h });
+        });
+        return list;
+    }
+
+    function reseatOpenings(svg, wallIndex, attached) {
+        var rooms = state.mapDraft && state.mapDraft.rooms;
+        if (!rooms || !attached) return;
+        var wall = rooms[wallIndex];
+        if (!wall) return;
+        attached.forEach(function (item) {
+            var opening = rooms[item.index];
+            if (!opening) return;
+            var next = seatOpening(opening.kind, wall, item.t, item.length);
+            if (!next) return;
+            opening.x = next.x;
+            opening.y = next.y;
+            opening.w = next.w;
+            opening.h = next.h;
+            opening.angle = next.angle;
+            if (!svg) return;
+            var group = svg.querySelector('.asset-tree-shape[data-index="' + item.index + '"]');
+            if (!group) return;
+            group.setAttribute('transform', shapeTransform(opening));
+            var rect = group.querySelector('.asset-tree-room');
+            if (rect) {
+                rect.setAttribute('width', String(opening.w));
+                rect.setAttribute('height', String(opening.h));
             }
         });
-        (floor.pins || []).forEach(function (pin) {
+    }
+
+    function mapSnapshot() {
+        if (!state.mapDraft) return '';
+        return JSON.stringify({
+            rooms: state.mapDraft.rooms || [],
+            pins: state.mapDraft.pins || []
+        });
+    }
+
+    function resetMapHistory() {
+        state.mapUndo = [];
+        state.mapRedo = [];
+    }
+
+    function pushMapUndo(snap) {
+        if (!snap || state.mapHistoryLock) return;
+        var stack = state.mapUndo || [];
+        if (stack.length && stack[stack.length - 1] === snap) return;
+        stack.push(snap);
+        if (stack.length > 50) stack.shift();
+        state.mapUndo = stack;
+        state.mapRedo = [];
+    }
+
+    function rememberMap() {
+        pushMapUndo(mapSnapshot());
+    }
+
+    function applyMapSnapshot(raw) {
+        if (!state.mapDraft || !raw) return;
+        var data = JSON.parse(raw);
+        state.mapHistoryLock = true;
+        state.mapDraft.rooms = data.rooms || [];
+        state.mapDraft.pins = data.pins || [];
+        state.mapSelection = null;
+        state.mapGroup = [];
+        state.mapAnchor = null;
+        state.mapClickAt = 0;
+        state.mapDirty = true;
+        state.mapHistoryLock = false;
+        renderFrame();
+    }
+
+    function undoMap() {
+        var stack = state.mapUndo || [];
+        if (!stack.length || !state.mapDraft) return;
+        var current = mapSnapshot();
+        var prev = stack.pop();
+        state.mapUndo = stack;
+        var redo = state.mapRedo || [];
+        redo.push(current);
+        state.mapRedo = redo;
+        applyMapSnapshot(prev);
+    }
+
+    function redoMap() {
+        var stack = state.mapRedo || [];
+        if (!stack.length || !state.mapDraft) return;
+        var current = mapSnapshot();
+        var next = stack.pop();
+        state.mapRedo = stack;
+        var undo = state.mapUndo || [];
+        undo.push(current);
+        state.mapUndo = undo;
+        applyMapSnapshot(next);
+    }
+
+    function pushShape(floor, shape) {
+        if (!shape) return false;
+        floor.rooms = floor.rooms || [];
+        if (floor.rooms.length >= 400) return false;
+        rememberMap();
+        floor.rooms.push(shape);
+        state.mapSelection = null;
+        state.mapGroup = [];
+        state.mapDirty = true;
+        return true;
+    }
+
+    function commitSegment(floor, tool, ax, ay, bx, by) {
+        var thick = tool === 'partition' ? 6 : 18;
+        return pushShape(floor, applySegment({ kind: tool, name: '', color: '', h: thick, w: thick }, ax, ay, bx, by));
+    }
+
+    function commitRoute(floor, kind, ax, ay, bx, by) {
+        return pushShape(floor, applySegment({ kind: kind, name: '', color: routeColor(kind), h: 6, w: 6 }, ax, ay, bx, by));
+    }
+
+    function placeOpeningAt(floor, kind, x, y) {
+        var hit = nearestWall(x, y, 28);
+        if (hit) return pushShape(floor, seatOpening(kind, hit.room, hit.t, kind === 'window' ? 96 : 80));
+        var len = kind === 'window' ? 96 : 80;
+        return pushShape(floor, clampRoom({
+            kind: kind,
+            name: '',
+            angle: 0,
+            x: snapCoord(x) - len / 2,
+            y: snapCoord(y) - 5,
+            w: len,
+            h: 10
+        }));
+    }
+
+    function applyWallCap(rect, room) {
+        var kind = room.kind || 'room';
+        if (isSegmentKind(kind) && room.w >= room.h) {
+            rect.setAttribute('x', String(-room.h / 2));
+            rect.setAttribute('y', '0');
+            rect.setAttribute('width', String(room.w + room.h));
+            rect.setAttribute('height', String(room.h));
+            return;
+        }
+        if (isSegmentKind(kind) && room.h > room.w) {
+            rect.setAttribute('x', '0');
+            rect.setAttribute('y', String(-room.w / 2));
+            rect.setAttribute('width', String(room.w));
+            rect.setAttribute('height', String(room.h + room.w));
+            return;
+        }
+        rect.setAttribute('x', '0');
+        rect.setAttribute('y', '0');
+        rect.setAttribute('width', String(room.w));
+        rect.setAttribute('height', String(room.h));
+    }
+
+    function dimensionPath(room) {
+        var long = room.w >= room.h ? room.w : room.h;
+        if (long < 40) return '';
+        if (room.w >= room.h) {
+            return 'M 0 -26 L 0 -16 M ' + room.w + ' -26 L ' + room.w + ' -16 M 0 -21 L ' + room.w + ' -21';
+        }
+        return 'M -26 0 L -16 0 M -26 ' + room.h + ' L -16 ' + room.h + ' M -21 0 L -21 ' + room.h;
+    }
+
+    function placeDimension(node, room) {
+        var long = room.w >= room.h ? room.w : room.h;
+        node.textContent = String(Math.round(long));
+        node.setAttribute('text-anchor', 'middle');
+        node.setAttribute('dominant-baseline', 'middle');
+        if (room.w >= room.h) {
+            node.setAttribute('x', String(room.w / 2));
+            node.setAttribute('y', '-21');
+            node.removeAttribute('transform');
+            return;
+        }
+        node.setAttribute('x', '-21');
+        node.setAttribute('y', String(room.h / 2));
+        node.setAttribute('transform', 'rotate(-90 -21 ' + (room.h / 2) + ')');
+    }
+
+    function appendDimension(parent, room) {
+        if (!isSegmentKind(room.kind)) return;
+        var path = dimensionPath(room);
+        if (!path) return;
+        var line = svgEl('path');
+        line.setAttribute('class', 'asset-tree-dim-line');
+        line.setAttribute('d', path);
+        parent.appendChild(line);
+        var node = svgEl('text');
+        node.setAttribute('class', 'asset-tree-dim');
+        placeDimension(node, room);
+        parent.appendChild(node);
+    }
+
+    function wallBody(room) {
+        var ends = segmentEnds(room);
+        var ax = ends[0].x;
+        var ay = ends[0].y;
+        var bx = ends[1].x;
+        var by = ends[1].y;
+        var dx = bx - ax;
+        var dy = by - ay;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var thick = room.w >= room.h ? room.h : room.w;
+        return {
+            room: room,
+            a: { x: ax, y: ay },
+            b: { x: bx, y: by },
+            ux: dx / len,
+            uy: dy / len,
+            nx: -dy / len,
+            ny: dx / len,
+            len: len,
+            thick: thick,
+            half: thick / 2
+        };
+    }
+
+    function planRound(value) {
+        return Math.round(value * 10) / 10;
+    }
+
+    function pathPoint(command, point) {
+        return command + ' ' + planRound(point.x) + ' ' + planRound(point.y);
+    }
+
+    function lineMeet(p, d, q, e) {
+        var det = d.x * e.y - d.y * e.x;
+        if (Math.abs(det) < 1e-6) return null;
+        var t = ((q.x - p.x) * e.y - (q.y - p.y) * e.x) / det;
+        return { x: p.x + d.x * t, y: p.y + d.y * t, t: t };
+    }
+
+    function axesParallel(left, right) {
+        return Math.abs(left.ux * right.uy - left.uy * right.ux) < 0.14;
+    }
+
+    function nearPoint(p, q) {
+        var dx = p.x - q.x;
+        var dy = p.y - q.y;
+        return dx * dx + dy * dy <= 144;
+    }
+
+    function wallJoins(bodies, index, point) {
+        var list = [];
+        bodies.forEach(function (body, at) {
+            if (at === index) return;
+            if (nearPoint(body.a, point)) list.push({ body: body, atStart: true });
+            else if (nearPoint(body.b, point)) list.push({ body: body, atStart: false });
+        });
+        return list;
+    }
+
+    function offsetAt(body, s, side) {
+        return {
+            x: body.a.x + body.ux * s + body.nx * body.half * side,
+            y: body.a.y + body.uy * s + body.ny * body.half * side
+        };
+    }
+
+    function wallCap(body, atStart, bodies, index) {
+        var point = atStart ? body.a : body.b;
+        var joins = wallJoins(bodies, index, point);
+        var parallel = [];
+        var angled = [];
+        joins.forEach(function (join) {
+            if (axesParallel(body, join.body)) parallel.push(join);
+            else angled.push(join);
+        });
+        var left = offsetAt(body, atStart ? 0 : body.len, 1);
+        var right = offsetAt(body, atStart ? 0 : body.len, -1);
+        if (parallel.length) return { left: left, right: right, cap: false };
+        if (angled.length >= 2) {
+            var through = false;
+            var i;
+            var j;
+            for (i = 0; i < angled.length; i++) {
+                for (j = i + 1; j < angled.length; j++) {
+                    if (axesParallel(angled[i].body, angled[j].body)) through = true;
+                }
+            }
+            if (through) {
+                var other = angled[0].body;
+                var sin = Math.abs(body.ux * other.uy - body.uy * other.ux);
+                if (sin < 0.2) sin = 0.2;
+                var back = Math.min(body.len * 0.45, other.half / sin);
+                var s = atStart ? back : body.len - back;
+                return { left: offsetAt(body, s, 1), right: offsetAt(body, s, -1), cap: false };
+            }
+        }
+        if (!angled.length) return { left: left, right: right, cap: true };
+        var best = angled[0];
+        var bestTurn = 999;
+        angled.forEach(function (join) {
+            var dirx = join.atStart ? join.body.ux : -join.body.ux;
+            var diry = join.atStart ? join.body.uy : -join.body.uy;
+            var ours = atStart ? { x: -body.ux, y: -body.uy } : { x: body.ux, y: body.uy };
+            var cross = ours.x * diry - ours.y * dirx;
+            var dot = ours.x * dirx + ours.y * diry;
+            var turn = Math.abs(Math.atan2(cross, dot));
+            if (turn < bestTurn) {
+                bestTurn = turn;
+                best = join;
+            }
+        });
+        var self = atStart
+            ? { x: -body.ux, y: -body.uy, nx: -body.nx, ny: -body.ny }
+            : { x: body.ux, y: body.uy, nx: body.nx, ny: body.ny };
+        var otherDir = best.atStart
+            ? { x: best.body.ux, y: best.body.uy, nx: best.body.nx, ny: best.body.ny }
+            : { x: -best.body.ux, y: -best.body.uy, nx: -best.body.nx, ny: -best.body.ny };
+        var meetL = lineMeet(
+            { x: point.x + self.nx * body.half, y: point.y + self.ny * body.half },
+            self,
+            { x: point.x + otherDir.nx * best.body.half, y: point.y + otherDir.ny * best.body.half },
+            otherDir
+        );
+        var meetR = lineMeet(
+            { x: point.x - self.nx * body.half, y: point.y - self.ny * body.half },
+            self,
+            { x: point.x - otherDir.nx * best.body.half, y: point.y - otherDir.ny * best.body.half },
+            otherDir
+        );
+        function extension(meet) {
+            if (!meet) return 9999;
+            var along = (meet.x - point.x) * body.ux + (meet.y - point.y) * body.uy;
+            return atStart ? -along : along;
+        }
+        var limit = body.thick * 3;
+        if (!meetL || !meetR || extension(meetL) > limit || extension(meetR) > limit || extension(meetL) < -body.len + 4 || extension(meetR) < -body.len + 4) {
+            return { left: left, right: right, cap: true };
+        }
+        if (atStart) return { left: meetR, right: meetL, cap: false };
+        return { left: meetL, right: meetR, cap: false };
+    }
+
+    function openingSpans(body, index, rooms) {
+        var spans = [];
+        openingsOnWall(index, rooms).forEach(function (item) {
+            var mid = item.t * body.len;
+            var half = item.length / 2;
+            var a = Math.max(0, mid - half);
+            var b = Math.min(body.len, mid + half);
+            if (b - a > 2) spans.push([a, b]);
+        });
+        spans.sort(function (p, q) { return p[0] - q[0]; });
+        var merged = [];
+        spans.forEach(function (span) {
+            if (!merged.length || span[0] > merged[merged.length - 1][1]) merged.push(span);
+            else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], span[1]);
+        });
+        return merged;
+    }
+
+    function solidSpans(len, gaps) {
+        var solids = [];
+        var cursor = 0;
+        gaps.forEach(function (gap) {
+            if (gap[0] > cursor + 1) solids.push([cursor, gap[0]]);
+            cursor = Math.max(cursor, gap[1]);
+        });
+        if (cursor < len - 1) solids.push([cursor, len]);
+        return solids;
+    }
+
+    function pieceCorners(body, span, startCap, endCap) {
+        var atStart = span[0] <= 0.5;
+        var atEnd = span[1] >= body.len - 0.5;
+        return {
+            left0: atStart ? startCap.left : offsetAt(body, span[0], 1),
+            left1: atEnd ? endCap.left : offsetAt(body, span[1], 1),
+            right0: atStart ? startCap.right : offsetAt(body, span[0], -1),
+            right1: atEnd ? endCap.right : offsetAt(body, span[1], -1),
+            atStart: atStart,
+            atEnd: atEnd
+        };
+    }
+
+    function insidePlanRoom(x, y, rooms) {
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (!isPolygonRoom(rooms[i])) continue;
+            if (pointInPoly(x, y, roomPoints(rooms[i]))) return true;
+        }
+        return false;
+    }
+
+    function wallInkLayer(rooms) {
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-ink');
+        group.setAttribute('pointer-events', 'none');
+        var bodies = [];
+        var indexes = [];
+        (rooms || []).forEach(function (room, index) {
+            if (!isSegmentKind(room.kind) || !shapeShown(room)) return;
+            bodies.push(wallBody(room));
+            indexes.push(index);
+        });
+        bodies.forEach(function (body, at) {
+            var index = indexes[at];
+            var startCap = wallCap(body, true, bodies, at);
+            var endCap = wallCap(body, false, bodies, at);
+            var gaps = openingSpans(body, index, rooms);
+            var solids = solidSpans(body.len, gaps);
+            var faceClass = 'asset-tree-plan-mark is-face' + (body.room.kind === 'partition' ? ' is-partition' : '');
+            var fillD = [];
+            var faceD = [];
+            solids.forEach(function (span) {
+                var piece = pieceCorners(body, span, startCap, endCap);
+                fillD.push(pathPoint('M', piece.left0) + ' ' + pathPoint('L', piece.left1) + ' ' + pathPoint('L', piece.right1) + ' ' + pathPoint('L', piece.right0) + ' Z');
+                faceD.push(pathPoint('M', piece.left0) + ' ' + pathPoint('L', piece.left1));
+                faceD.push(pathPoint('M', piece.right0) + ' ' + pathPoint('L', piece.right1));
+                if (piece.atStart && startCap.cap) faceD.push(pathPoint('M', piece.left0) + ' ' + pathPoint('L', piece.right0));
+                if (piece.atEnd && endCap.cap) faceD.push(pathPoint('M', piece.left1) + ' ' + pathPoint('L', piece.right1));
+            });
+            gaps.forEach(function (gap) {
+                if (gap[0] > 1 && gap[0] < body.len - 1) faceD.push(pathPoint('M', offsetAt(body, gap[0], 1)) + ' ' + pathPoint('L', offsetAt(body, gap[0], -1)));
+                if (gap[1] > 1 && gap[1] < body.len - 1) faceD.push(pathPoint('M', offsetAt(body, gap[1], 1)) + ' ' + pathPoint('L', offsetAt(body, gap[1], -1)));
+            });
+            if (fillD.length) {
+                var fill = svgEl('path');
+                fill.setAttribute('class', 'asset-tree-wall-fill');
+                fill.setAttribute('d', fillD.join(' '));
+                group.appendChild(fill);
+            }
+            if (faceD.length) {
+                var face = svgEl('path');
+                face.setAttribute('class', faceClass);
+                face.setAttribute('d', faceD.join(' '));
+                group.appendChild(face);
+            }
+        });
+        appendRunDimensions(group, bodies, rooms);
+        return group;
+    }
+
+    function appendRunDimensions(parent, bodies, rooms) {
+        var parentOf = [];
+        var i;
+        for (i = 0; i < bodies.length; i++) parentOf.push(i);
+        function find(id) {
+            while (parentOf[id] !== id) id = parentOf[id];
+            return id;
+        }
+        function unite(a, b) {
+            var pa = find(a);
+            var pb = find(b);
+            if (pa !== pb) parentOf[pb] = pa;
+        }
+        for (i = 0; i < bodies.length; i++) {
+            var j;
+            for (j = i + 1; j < bodies.length; j++) {
+                if (!axesParallel(bodies[i], bodies[j])) continue;
+                var linked = (nearPoint(bodies[i].a, bodies[j].a) || nearPoint(bodies[i].a, bodies[j].b) || nearPoint(bodies[i].b, bodies[j].a) || nearPoint(bodies[i].b, bodies[j].b));
+                if (!linked) continue;
+                var onLine = true;
+                [bodies[j].a, bodies[j].b].forEach(function (point) {
+                    var off = (point.x - bodies[i].a.x) * bodies[i].nx + (point.y - bodies[i].a.y) * bodies[i].ny;
+                    if (Math.abs(off) > 10) onLine = false;
+                });
+                if (onLine) unite(i, j);
+            }
+        }
+        var runs = {};
+        for (i = 0; i < bodies.length; i++) {
+            var root = find(i);
+            if (!runs[root]) runs[root] = [];
+            runs[root].push(i);
+        }
+        Object.keys(runs).forEach(function (key) {
+            var members = runs[key].map(function (id) { return bodies[id]; });
+            var axis = members[0];
+            var minS = Infinity;
+            var maxS = -Infinity;
+            var minP = axis.a;
+            var maxP = axis.b;
+            members.forEach(function (body) {
+                [body.a, body.b].forEach(function (point) {
+                    var s = point.x * axis.ux + point.y * axis.uy;
+                    if (s < minS) {
+                        minS = s;
+                        minP = point;
+                    }
+                    if (s > maxS) {
+                        maxS = s;
+                        maxP = point;
+                    }
+                });
+            });
+            var length = maxS - minS;
+            if (length < 40) return;
+            var mid = { x: (minP.x + maxP.x) / 2, y: (minP.y + maxP.y) / 2 };
+            var probe = axis.half + 24;
+            var plusIn = insidePlanRoom(mid.x + axis.nx * probe, mid.y + axis.ny * probe, rooms);
+            var minusIn = insidePlanRoom(mid.x - axis.nx * probe, mid.y - axis.ny * probe, rooms);
+            if (plusIn && minusIn) return;
+            var nx = axis.nx;
+            var ny = axis.ny;
+            if (plusIn || (!plusIn && !minusIn)) {
+                nx = -axis.nx;
+                ny = -axis.ny;
+            }
+            var off = axis.half + 18;
+            var textOff = axis.half + 30;
+            var line = svgEl('path');
+            var a = { x: minP.x + nx * off, y: minP.y + ny * off };
+            var b = { x: maxP.x + nx * off, y: maxP.y + ny * off };
+            var tick = 7;
+            line.setAttribute('class', 'asset-tree-dim-line');
+            line.setAttribute('d', pathPoint('M', a) + ' ' + pathPoint('L', b)
+                + ' ' + pathPoint('M', { x: a.x - nx * tick, y: a.y - ny * tick }) + ' ' + pathPoint('L', { x: a.x + nx * tick, y: a.y + ny * tick })
+                + ' ' + pathPoint('M', { x: b.x - nx * tick, y: b.y - ny * tick }) + ' ' + pathPoint('L', { x: b.x + nx * tick, y: b.y + ny * tick }));
+            parent.appendChild(line);
+            var node = svgEl('text');
+            node.setAttribute('class', 'asset-tree-dim');
+            node.setAttribute('text-anchor', 'middle');
+            node.setAttribute('dominant-baseline', 'middle');
+            var deg = Math.atan2(axis.uy, axis.ux) * 180 / Math.PI;
+            while (deg > 90) deg -= 180;
+            while (deg < -90) deg += 180;
+            node.setAttribute('transform', 'translate(' + planRound(mid.x + nx * textOff) + ' ' + planRound(mid.y + ny * textOff) + ') rotate(' + planRound(deg) + ')');
+            node.textContent = String(Math.round(length));
+            parent.appendChild(node);
+        });
+    }
+
+    function roomPoints(room) {
+        var raw = room && room.points;
+        var list = [];
+        if (!raw) return list;
+        if (Object.prototype.toString.call(raw) === '[object Array]') {
+            raw.forEach(function (point) {
+                if (!point) return;
+                var x = Number(point.x);
+                var y = Number(point.y);
+                if (isFinite(x) && isFinite(y)) list.push({ x: x, y: y });
+            });
+            return list;
+        }
+        String(raw).split(';').forEach(function (part) {
+            var bits = part.split(',');
+            if (bits.length < 2) return;
+            var x = Number(bits[0]);
+            var y = Number(bits[1]);
+            if (isFinite(x) && isFinite(y)) list.push({ x: x, y: y });
+        });
+        return list;
+    }
+
+    function packPoints(points) {
+        return roomPoints({ points: points }).map(function (point) {
+            return Math.round(point.x) + ',' + Math.round(point.y);
+        }).join(';');
+    }
+
+    function isPolygonRoom(room) {
+        return !!room && (room.kind || 'room') === 'room' && roomPoints(room).length >= 3;
+    }
+
+    function polygonArea(points) {
+        var area = 0;
+        var i;
+        for (i = 0; i < points.length; i++) {
+            var next = points[(i + 1) % points.length];
+            area += points[i].x * next.y - next.x * points[i].y;
+        }
+        return area / 2;
+    }
+
+    function polygonCenter(points) {
+        var area = polygonArea(points);
+        if (Math.abs(area) < 1) {
+            var sx = 0;
+            var sy = 0;
+            points.forEach(function (point) { sx += point.x; sy += point.y; });
+            return { x: sx / points.length, y: sy / points.length };
+        }
+        var cx = 0;
+        var cy = 0;
+        var i;
+        for (i = 0; i < points.length; i++) {
+            var next = points[(i + 1) % points.length];
+            var cross = points[i].x * next.y - next.x * points[i].y;
+            cx += (points[i].x + next.x) * cross;
+            cy += (points[i].y + next.y) * cross;
+        }
+        return { x: cx / (6 * area), y: cy / (6 * area) };
+    }
+
+    function polygonBounds(points) {
+        var minX = points[0].x;
+        var minY = points[0].y;
+        var maxX = minX;
+        var maxY = minY;
+        var i;
+        for (i = 1; i < points.length; i++) {
+            minX = Math.min(minX, points[i].x);
+            minY = Math.min(minY, points[i].y);
+            maxX = Math.max(maxX, points[i].x);
+            maxY = Math.max(maxY, points[i].y);
+        }
+        return {
+            x: Math.round(minX),
+            y: Math.round(minY),
+            w: Math.max(16, Math.round(maxX - minX)),
+            h: Math.max(16, Math.round(maxY - minY))
+        };
+    }
+
+    function pointInPoly(x, y, points) {
+        var inside = false;
+        var i;
+        for (i = 0; i < points.length; i++) {
+            var a = points[i];
+            var b = points[(i + 1) % points.length];
+            if (((a.y > y) !== (b.y > y)) && (x < (b.x - a.x) * (y - a.y) / ((b.y - a.y) || 1) + a.x)) inside = !inside;
+        }
+        return inside;
+    }
+
+    function orderedFace(points) {
+        var start = 0;
+        var i;
+        for (i = 1; i < points.length; i++) {
+            if (points[i].y < points[start].y || (points[i].y === points[start].y && points[i].x < points[start].x)) start = i;
+        }
+        var seq = [];
+        for (i = 0; i < points.length; i++) seq.push(points[(start + i) % points.length]);
+        var rev = [];
+        for (i = seq.length - 1; i >= 0; i--) rev.push(seq[i]);
+        return packPoints(seq) <= packPoints(rev) ? seq : rev;
+    }
+
+    function planMeters(units) {
+        var meters = Math.abs(Number(units) || 0) / 100;
+        var text = (Math.round(meters * 100) / 100).toFixed(2);
+        text = text.replace(/0$/, '').replace(/\.0$/, '');
+        return text || '0';
+    }
+
+    function planAreaText(points) {
+        var meters = Math.abs(polygonArea(points)) / 10000;
+        return (Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq');
+    }
+
+    function segmentCross(a, b, c, d) {
+        var rx = b.x - a.x;
+        var ry = b.y - a.y;
+        var sx = d.x - c.x;
+        var sy = d.y - c.y;
+        var den = rx * sy - ry * sx;
+        if (Math.abs(den) < 1) return null;
+        var t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / den;
+        var u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / den;
+        if (t <= 0.04 || t >= 0.96 || u <= 0.04 || u >= 0.96) return null;
+        return { t: t, u: u, x: a.x + t * rx, y: a.y + t * ry };
+    }
+
+    function shiftMapIndex(index, at, extra) {
+        if (index == null || index < 0) return index;
+        if (index > at) return index + extra;
+        return index;
+    }
+
+    function planGraphSegments(rooms) {
+        var list = [];
+        (rooms || []).forEach(function (room, index) {
+            if (isSegmentKind(room.kind)) {
+                var ends = segmentEnds(room);
+                list.push({ index: index, a: ends[0], b: ends[1] });
+                return;
+            }
+            if ((room.kind || '') !== 'arc' || !window.AssetTreePlan) return;
+            var samples = window.AssetTreePlan.arcPoints(roomPoints(room), 8);
+            var n;
+            for (n = 0; n < samples.length - 1; n++) {
+                list.push({ index: -1, a: samples[n], b: samples[n + 1] });
+            }
+        });
+        return list;
+    }
+
+    function splitJunctions(rooms) {
+        if (!rooms) return false;
+        var guard = 0;
+        var any = false;
+        var changed = true;
+        while (changed && guard < 6) {
+            changed = false;
+            guard++;
+            var walls = planGraphSegments(rooms);
+            var cuts = {};
+            function addCut(index, t, x, y) {
+                if (index < 0) return;
+                if (t < 0.04 || t > 0.96) return;
+                var bucket = cuts[index] || (cuts[index] = []);
+                var n;
+                for (n = 0; n < bucket.length; n++) {
+                    if (Math.abs(bucket[n].t - t) < 0.02) return;
+                }
+                bucket.push({ t: t, x: x, y: y });
+                changed = true;
+            }
+            var i;
+            var j;
+            for (i = 0; i < walls.length; i++) {
+                for (j = i + 1; j < walls.length; j++) {
+                    var left = walls[i];
+                    var right = walls[j];
+                    [right.a, right.b].forEach(function (point) {
+                        var hit = projectOnSegment(left.a.x, left.a.y, left.b.x, left.b.y, point.x, point.y);
+                        if (hit && hit.dist <= 12) addCut(left.index, hit.t, hit.x, hit.y);
+                    });
+                    [left.a, left.b].forEach(function (point) {
+                        var hit = projectOnSegment(right.a.x, right.a.y, right.b.x, right.b.y, point.x, point.y);
+                        if (hit && hit.dist <= 12) addCut(right.index, hit.t, hit.x, hit.y);
+                    });
+                    var cross = segmentCross(left.a, left.b, right.a, right.b);
+                    if (cross) {
+                        addCut(left.index, cross.t, cross.x, cross.y);
+                        addCut(right.index, cross.u, cross.x, cross.y);
+                    }
+                }
+            }
+            if (!changed) break;
+            any = true;
+            Object.keys(cuts).map(Number).sort(function (a, b) { return b - a; }).forEach(function (index) {
+                var room = rooms[index];
+                if (!room) return;
+                var ends = segmentEnds(room);
+                var points = [{ x: ends[0].x, y: ends[0].y }].concat(cuts[index].slice().sort(function (a, b) {
+                    return a.t - b.t;
+                })).concat([{ x: ends[1].x, y: ends[1].y }]);
+                var pieces = [];
+                var k;
+                for (k = 0; k < points.length - 1; k++) {
+                    var piece = applySegment(room, points[k].x, points[k].y, points[k + 1].x, points[k + 1].y);
+                    if (piece) pieces.push(piece);
+                }
+                if (pieces.length < 2) return;
+                var first = pieces[0];
+                room.x = first.x;
+                room.y = first.y;
+                room.w = first.w;
+                room.h = first.h;
+                room.angle = first.angle;
+                var extra = pieces.slice(1);
+                Array.prototype.splice.apply(rooms, [index + 1, 0].concat(extra));
+                var added = extra.length;
+                state.mapSelection = shiftMapIndex(state.mapSelection, index, added);
+                state.mapGroup = (state.mapGroup || []).map(function (item) { return shiftMapIndex(item, index, added); });
+            });
+        }
+        return any;
+    }
+
+    function closedFaces(rooms) {
+        var nodes = [];
+        var adj = [];
+        function nodeAt(x, y) {
+            var i;
+            for (i = 0; i < nodes.length; i++) {
+                var dx = nodes[i].x - x;
+                var dy = nodes[i].y - y;
+                if (dx * dx + dy * dy <= 100) return i;
+            }
+            nodes.push({ x: x, y: y });
+            adj.push([]);
+            return nodes.length - 1;
+        }
+        planGraphSegments(rooms).forEach(function (edge) {
+            var a = nodeAt(edge.a.x, edge.a.y);
+            var b = nodeAt(edge.b.x, edge.b.y);
+            if (a === b) return;
+            if (adj[a].indexOf(b) < 0) adj[a].push(b);
+            if (adj[b].indexOf(a) < 0) adj[b].push(a);
+        });
+        var half = [];
+        var i;
+        var j;
+        for (i = 0; i < nodes.length; i++) {
+            for (j = 0; j < adj[i].length; j++) {
+                var to = adj[i][j];
+                half.push({
+                    from: i,
+                    to: to,
+                    ang: Math.atan2(nodes[to].y - nodes[i].y, nodes[to].x - nodes[i].x)
+                });
+            }
+        }
+        var outgoing = [];
+        for (i = 0; i < nodes.length; i++) outgoing.push([]);
+        half.forEach(function (edge, id) { outgoing[edge.from].push(id); });
+        outgoing.forEach(function (list) {
+            list.sort(function (left, right) { return half[left].ang - half[right].ang; });
+        });
+        var used = {};
+        var faces = [];
+        half.forEach(function (edge, startId) {
+            if (used[startId] || faces.length >= 80) return;
+            var loop = [];
+            var id = startId;
+            var guard = 0;
+            var closed = false;
+            while (guard < half.length + 2) {
+                if (used[id] && id !== startId) break;
+                used[id] = true;
+                loop.push(half[id].from);
+                var arrive = half[id].to;
+                var list = outgoing[arrive] || [];
+                var rev = -1;
+                var k;
+                for (k = 0; k < list.length; k++) {
+                    if (half[list[k]].to === half[id].from) rev = k;
+                }
+                if (rev < 0 || !list.length) break;
+                id = list[(rev - 1 + list.length) % list.length];
+                guard++;
+                if (id === startId) {
+                    closed = true;
+                    break;
+                }
+            }
+            if (!closed || loop.length < 3) return;
+            var pts = loop.map(function (nid) { return { x: nodes[nid].x, y: nodes[nid].y }; });
+            if (polygonArea(pts) > 2500) faces.push(orderedFace(pts));
+        });
+        return faces.filter(function (face, index) {
+            var area = Math.abs(polygonArea(face));
+            var holdsAnother = false;
+            faces.forEach(function (other, otherIndex) {
+                if (otherIndex === index) return;
+                var center = polygonCenter(other);
+                if (pointInPoly(center.x, center.y, face) && Math.abs(polygonArea(other)) < area * 0.95) holdsAnother = true;
+            });
+            return !holdsAnother;
+        });
+    }
+
+    function syncClosedRooms(floor, editing) {
+        if (!floor) return;
+        if (splitJunctions(floor.rooms || []) && editing) state.mapDirty = true;
+        var faces = closedFaces(floor.rooms || []);
+        var rooms = floor.rooms || [];
+        floor.rooms = rooms;
+        var used = {};
+        var changed = false;
+        var i;
+        for (i = 0; i < rooms.length; i++) {
+            if (!isPolygonRoom(rooms[i])) continue;
+            var center = polygonCenter(roomPoints(rooms[i]));
+            var best = -1;
+            var bestDist = 360;
+            var j;
+            for (j = 0; j < faces.length; j++) {
+                if (used[j]) continue;
+                var faceCenter = polygonCenter(faces[j]);
+                var dx = faceCenter.x - center.x;
+                var dy = faceCenter.y - center.y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < bestDist) {
+                    best = j;
+                    bestDist = dist;
+                }
+            }
+            if (best < 0) {
+                rooms.splice(i, 1);
+                if (state.mapSelection === i) state.mapSelection = null;
+                else if (state.mapSelection > i) state.mapSelection--;
+                changed = true;
+                i--;
+                continue;
+            }
+            used[best] = true;
+            var box = polygonBounds(faces[best]);
+            if (packPoints(rooms[i].points) !== packPoints(faces[best])) {
+                rooms[i].points = faces[best];
+                rooms[i].x = box.x;
+                rooms[i].y = box.y;
+                rooms[i].w = box.w;
+                rooms[i].h = box.h;
+                rooms[i].angle = 0;
+                changed = true;
+            }
+        }
+        faces.forEach(function (face, index) {
+            if (used[index]) return;
+            var box = polygonBounds(face);
+            rooms.push(clampRoom({
+                kind: 'room',
+                name: '',
+                color: '',
+                angle: 0,
+                points: face,
+                x: box.x, y: box.y, w: box.w, h: box.h
+            }, planSize(floor)));
+            changed = true;
+        });
+        if (changed && editing) state.mapDirty = true;
+        if (state.mapSelection != null && state.mapSelection >= rooms.length) state.mapSelection = null;
+    }
+
+    function roomUnder(x, y) {
+        var plan = shownPlan();
+        var rooms = (plan && plan.rooms) || [];
+        var best = '';
+        var bestArea = Infinity;
+        rooms.forEach(function (room) {
+            if (!isPolygonRoom(room)) return;
+            var points = roomPoints(room);
+            if (!pointInPoly(x, y, points)) return;
+            var area = Math.abs(polygonArea(points));
+            if (area < bestArea) {
+                bestArea = area;
+                best = room.name || t('mapRoom');
+            }
+        });
+        return best;
+    }
+
+    function placesForPlan() {
+        var placeId = state.mapPlaceId;
+        return placeAssets().filter(function (asset) {
+            return assetInBuilding(asset, placeId);
+        });
+    }
+
+    function gridDotPath(size) {
+        var path = svgEl('path');
+        var step = 20;
+        var parts = [];
+        var x;
+        var y;
+        for (x = step; x < size.w; x += step) {
+            for (y = step; y < size.h; y += step) {
+                parts.push('M' + x + ' ' + y + 'm-1.2 0a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0');
+            }
+        }
+        path.setAttribute('d', parts.join(''));
+        path.setAttribute('class', 'asset-tree-grid-dots');
+        path.setAttribute('pointer-events', 'none');
+        return path;
+    }
+
+    function floorCanvas(floor, editing) {
+        syncClosedRooms(floor, editing);
+        var size = planSize(floor);
+        var cam = activeCamera(size);
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
+        var mode = 'is-pan';
+        if (editing && (state.mapStamp || state.mapArmId)) mode = 'is-stamp';
+        else if (editing && state.mapTool && state.mapTool !== 'select') mode = 'is-draw';
+        svg.setAttribute('class', 'asset-tree-canvas ' + mode);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
+        var paper = svgEl('rect');
+        paper.setAttribute('x', '0');
+        paper.setAttribute('y', '0');
+        paper.setAttribute('width', String(size.w));
+        paper.setAttribute('height', String(size.h));
+        paper.setAttribute('class', 'asset-tree-paper');
+        paper.setAttribute('fill', '#ffffff');
+        svg.appendChild(paper);
+        var gridPaper = gridDotPath(size);
+        var shapeOptions = function (room, index) {
+            return {
+                editing: editing,
+                selected: editing ? !!mapShapeOn(index) : !!(isPolygonRoom(room) && state.mapSelection === index),
+                primary: state.mapSelection === index,
+                index: index,
+                floor: floor,
+                size: size,
+                svg: svg
+            };
+        };
+        var drawnRooms = [];
+        var drawnWalls = [];
+        var drawnRest = [];
+        var drawnRoutes = [];
+        (floor.rooms || []).forEach(function (room, index) {
+            if (!shapeShown(room)) return;
+            var kind = room.kind || 'room';
+            if (kind === 'room') drawnRooms.push([room, index]);
+            else if (isSegmentKind(kind)) drawnWalls.push([room, index]);
+            else if (isRouteKind(kind)) drawnRoutes.push([room, index]);
+            else drawnRest.push([room, index]);
+        });
+        drawnRooms.forEach(function (pair) {
+            svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
+        });
+        svg.appendChild(gridPaper);
+        drawnWalls.forEach(function (pair) {
+            svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
+        });
+        svg.appendChild(wallInkLayer(floor.rooms || []));
+        drawnRest.forEach(function (pair) {
+            svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
+        });
+        if (mapLayerOn('plan')) (floor.pins || []).forEach(function (pin) {
             var mark = svgEl('g');
             mark.setAttribute('class', 'asset-tree-pin' + (state.mapAssetId === pin.assetId ? ' is-selected' : ''));
             mark.setAttribute('transform', 'translate(' + pin.x + ' ' + pin.y + ')');
-            var plate = svgEl('rect');
-            plate.setAttribute('x', '-12');
-            plate.setAttribute('y', '-12');
-            plate.setAttribute('width', '24');
-            plate.setAttribute('height', '24');
-            plate.setAttribute('rx', '4');
-            plate.setAttribute('class', 'asset-tree-pin-plate');
-            var glyph = svgEl('path');
-            glyph.setAttribute('d', 'M-6 -6h12v8h-12zM-4 2h8M-2 5h4');
-            glyph.setAttribute('class', 'asset-tree-pin-glyph');
-            mark.appendChild(plate);
-            mark.appendChild(glyph);
+            pinFace(mark);
             if (editing) {
                 mark.addEventListener('mousedown', function (event) {
+                    if (event.button !== 0) return;
                     event.preventDefault();
                     event.stopPropagation();
+                    if (state.mapArmId) {
+                        if (placeArmedPin(floor, pin.x, pin.y)) renderFrame();
+                        return;
+                    }
                     state.mapAssetId = pin.assetId;
+                    state.mapSelection = null;
+                    state.mapGroup = [];
                     beginDrag(svg, { kind: 'pin' }, function (move) {
                         var next = svgPoint(svg, move);
                         pin.x = clampNum(snapCoord(next.x), 0, size.w);
@@ -12913,47 +22226,968 @@
             }
             svg.appendChild(mark);
             var caption = svgEl('text');
-            caption.setAttribute('x', String(pin.x + 16));
-            caption.setAttribute('y', String(pin.y + 4));
+            var inside = roomUnder(pin.x, pin.y);
+            caption.setAttribute('x', String(inside ? pin.x : pin.x + 16));
+            caption.setAttribute('y', String(pin.y + (inside ? 28 : 4)));
+            caption.setAttribute('text-anchor', inside ? 'middle' : 'start');
             caption.setAttribute('class', 'asset-tree-pin-label');
-            caption.textContent = pin.assetName || pin.objectKey || '';
+            var pinLabel = pin.assetName || pin.objectKey || '';
+            if (inside) pinLabel += ' · ' + inside;
+            caption.textContent = pinLabel;
             svg.appendChild(caption);
         });
+        drawnRoutes.forEach(function (pair) {
+            svg.appendChild(shapeNode(pair[0], shapeOptions(pair[0], pair[1])));
+        });
+        if (editing && state.mapArmId) {
+            var ghost = svgEl('g');
+            ghost.id = 'asset-tree-pin-ghost';
+            ghost.setAttribute('class', 'asset-tree-pin is-ghost');
+            ghost.setAttribute('visibility', 'hidden');
+            pinFace(ghost);
+            svg.appendChild(ghost);
+        }
+        paper.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            if (!editing) {
+                startPan(svg, event);
+                return;
+            }
+            if (state.mapTool === 'select' || state.mapArmId) {
+                if (state.mapArmId) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var point = svgPoint(svg, event);
+                    if (placeArmedPin(floor, point.x, point.y)) renderFrame();
+                    return;
+                }
+                if (event.altKey) {
+                    startPan(svg, event);
+                    return;
+                }
+                state.mapAssetId = 0;
+                startMarquee(svg, floor, event);
+            }
+        });
+        if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room' || state.mapTool === 'route')) {
+            var anchorDot = svgEl('circle');
+            anchorDot.setAttribute('cx', String(state.mapAnchor.x));
+            anchorDot.setAttribute('cy', String(state.mapAnchor.y));
+            anchorDot.setAttribute('r', '6');
+            anchorDot.setAttribute('class', 'asset-tree-anchor');
+            svg.appendChild(anchorDot);
+        }
         if (editing) {
-            paper.addEventListener('mousedown', function (event) {
-                if (state.mapTool !== 'select' || !state.mapAssetId) return;
+            svg.addEventListener('contextmenu', function (event) {
+                event.preventDefault();
+                var node = event.target;
+                var index = null;
+                while (node && node !== svg) {
+                    if (node.getAttribute && node.getAttribute('data-index')) {
+                        index = Number(node.getAttribute('data-index'));
+                        break;
+                    }
+                    node = node.parentNode;
+                }
+                if (index != null && !isNaN(index)) {
+                    state.mapSelection = index;
+                    state.mapGroup = [];
+                } else {
+                    state.mapSelection = null;
+                    state.mapGroup = [];
+                }
                 var point = svgPoint(svg, event);
-                if (!placeArmedPin(floor, point.x, point.y)) return;
                 renderFrame();
+                openMapMenu(event.clientX, event.clientY, point);
             });
             svg.addEventListener('mousedown', function (event) {
-                if (state.mapTool === 'select') return;
+                if (event.button === 1) {
+                    startPan(svg, event);
+                    return;
+                }
+                if (event.button !== 0) return;
+                if (state.mapTool === 'stamp') {
+                    event.preventDefault();
+                    var stamped = svgPoint(svg, event);
+                    placeStamp(floor, stamped.x, stamped.y);
+                    return;
+                }
+                if (state.mapTool === 'select') {
+                    if (event.target === svg && !state.mapArmId) {
+                        state.mapAssetId = 0;
+                        if (event.altKey) startPan(svg, event);
+                        else startMarquee(svg, floor, event);
+                    }
+                    return;
+                }
+                if (state.mapTool === 'route' && !isRouteKind(state.mapLayer)) {
+                    state.mapTool = 'select';
+                    return;
+                }
+                if (state.mapTool === 'text') {
+                    event.preventDefault();
+                    var written = svgPoint(svg, event);
+                    if (pushShape(floor, clampRoom({
+                        kind: 'text',
+                        name: t('mapTextSample'),
+                        angle: 0,
+                        x: snapCoord(written.x),
+                        y: snapCoord(written.y) - 8,
+                        w: 120,
+                        h: 28
+                    }))) state.mapSelection = floor.rooms.length - 1;
+                    renderFrame();
+                    return;
+                }
+                if (state.mapTool === 'arc') {
+                    event.preventDefault();
+                    var aimed = svgPoint(svg, event);
+                    placeArcPoint(floor, snapStart(aimed.x, aimed.y));
+                    return;
+                }
+                var routeKind = state.mapTool === 'route' && isRouteKind(state.mapLayer) ? state.mapLayer : '';
+                var segmentTool = isSegmentKind(state.mapTool) || state.mapTool === 'room' || !!routeKind;
+                var openingTool = state.mapTool === 'door' || state.mapTool === 'window';
+                if (segmentTool && state.mapChainDoneAt && (Date.now() - state.mapChainDoneAt) < 450) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                if (segmentTool && state.mapClickAt && (Date.now() - state.mapClickAt) < 400
+                    && Math.abs(event.clientX - state.mapClickX) < 8
+                    && Math.abs(event.clientY - state.mapClickY) < 8) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    state.mapAnchor = null;
+                    state.mapClickAt = 0;
+                    state.mapChainDoneAt = Date.now();
+                    renderFrame();
+                    return;
+                }
                 event.preventDefault();
                 var point = svgPoint(svg, event);
-                beginDrag(svg, { kind: state.mapTool, x0: point.x, y0: point.y, x1: point.x, y1: point.y }, function (move) {
+                beginDrag(svg, {
+                    kind: routeKind || state.mapTool,
+                    downX: point.x,
+                    downY: point.y,
+                    x0: point.x,
+                    y0: point.y,
+                    x1: point.x,
+                    y1: point.y,
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    shift: !!event.shiftKey,
+                    loose: false,
+                    moved: false
+                }, function (move) {
                     var next = svgPoint(svg, move);
-                    state.mapDrag.x1 = next.x;
-                    state.mapDrag.y1 = next.y;
+                    var cdx = move.clientX - state.mapDrag.clientX;
+                    var cdy = move.clientY - state.mapDrag.clientY;
+                    if (cdx * cdx + cdy * cdy > 36) state.mapDrag.moved = true;
+                    state.mapDrag.shift = !!move.shiftKey;
+                    if (segmentTool || openingTool) {
+                        var origin = snapStart(state.mapDrag.downX, state.mapDrag.downY, routeKind);
+                        var end = resolveEnd(origin, next, move.shiftKey, -1, routeKind);
+                        state.mapDrag.x0 = origin.x;
+                        state.mapDrag.y0 = origin.y;
+                        state.mapDrag.x1 = end.x;
+                        state.mapDrag.y1 = end.y;
+                        state.mapDrag.loose = true;
+                    } else {
+                        state.mapDrag.x1 = next.x;
+                        state.mapDrag.y1 = next.y;
+                    }
                     paintRoomPreview(svg);
                 }, function (finished) {
                     if (!finished) return;
-                    var shape = shapeFromDrag(finished.kind, finished.x0, finished.y0, finished.x1, finished.y1);
-                    if (shape) {
-                        floor.rooms = floor.rooms || [];
-                        floor.rooms.push(shape);
+                    var tool = finished.kind === 'room' ? 'wall' : finished.kind;
+                    if (isSegmentKind(tool) || isRouteKind(tool)) {
+                        var facesBefore = isSegmentKind(tool) ? closedFaces(floor.rooms || []).length : -1;
+                        var commitChain = function (ax, ay, bx, by) {
+                            if (isRouteKind(tool)) return commitRoute(floor, tool, ax, ay, bx, by);
+                            return commitSegment(floor, tool, ax, ay, bx, by);
+                        };
+                        if (finished.moved) {
+                            if (commitChain(finished.x0, finished.y0, finished.x1, finished.y1)) {
+                                state.mapAnchor = { x: finished.x1, y: finished.y1 };
+                            }
+                            state.mapClickAt = 0;
+                        } else if (state.mapAnchor) {
+                            var chained = resolveEnd(state.mapAnchor, { x: finished.downX, y: finished.downY }, finished.shift, -1, isRouteKind(tool) ? tool : '');
+                            if (commitChain(state.mapAnchor.x, state.mapAnchor.y, chained.x, chained.y)) {
+                                state.mapAnchor = { x: chained.x, y: chained.y };
+                            }
+                            state.mapClickAt = Date.now();
+                            state.mapClickX = finished.clientX;
+                            state.mapClickY = finished.clientY;
+                        } else {
+                            state.mapAnchor = snapStart(finished.downX, finished.downY, isRouteKind(tool) ? tool : '');
+                            state.mapClickAt = Date.now();
+                            state.mapClickX = finished.clientX;
+                            state.mapClickY = finished.clientY;
+                        }
+                        if (isSegmentKind(tool) && closedFaces(floor.rooms || []).length > facesBefore) {
+                            state.mapAnchor = null;
+                            state.mapClickAt = 0;
+                        }
+                        renderFrame();
+                        return;
+                    }
+                    state.mapAnchor = null;
+                    state.mapClickAt = 0;
+                    if (tool === 'door' || tool === 'window') {
+                        if (finished.moved) pushShape(floor, shapeFromDrag(tool, finished.x0, finished.y0, finished.x1, finished.y1, true));
+                        else placeOpeningAt(floor, tool, finished.downX, finished.downY);
+                    } else if (pushShape(floor, shapeFromDrag(tool, finished.x0, finished.y0, finished.x1, finished.y1, false))) {
                         state.mapSelection = floor.rooms.length - 1;
-                        state.mapDirty = true;
                     }
                     renderFrame();
                 });
             });
+            svg.addEventListener('mousemove', function (event) {
+                var ghost = svg.querySelector('#asset-tree-pin-ghost');
+                if (ghost && state.mapArmId && !state.mapDrag) {
+                    var hover = svgPoint(svg, event);
+                    ghost.setAttribute('visibility', 'visible');
+                    ghost.setAttribute('transform', 'translate(' + snapCoord(hover.x) + ' ' + snapCoord(hover.y) + ')');
+                }
+                var hoverRoute = state.mapTool === 'route' && isRouteKind(state.mapLayer) ? state.mapLayer : '';
+                if (state.mapDrag || !state.mapAnchor || !(isSegmentKind(state.mapTool) || state.mapTool === 'room' || hoverRoute)) return;
+                var next = svgPoint(svg, event);
+                var end = resolveEnd(state.mapAnchor, next, event.shiftKey, -1, hoverRoute);
+                var previewKind = hoverRoute || (state.mapTool === 'room' ? 'wall' : state.mapTool);
+                paintPreviewBox(svg, shapeFromDrag(previewKind, state.mapAnchor.x, state.mapAnchor.y, end.x, end.y, true));
+            });
         }
+        svg.addEventListener('wheel', function (event) {
+            if (state.mapDrag) return;
+            event.preventDefault();
+            zoomAt(svg, event, event.deltaY > 0 ? (1 / 1.12) : 1.12);
+        }, { passive: false });
         return svg;
     }
 
+    function polygonNode(room, options) {
+        var points = roomPoints(room);
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-shape');
+        if (options && options.index != null) group.setAttribute('data-index', String(options.index));
+        var poly = svgEl('polygon');
+        poly.setAttribute('points', points.map(function (point) {
+            return Math.round(point.x) + ' ' + Math.round(point.y);
+        }).join(' '));
+        poly.setAttribute('class', 'asset-tree-room is-room' + (options && options.selected ? ' is-selected' : ''));
+        if (room.color) poly.setAttribute('fill', room.color);
+        group.appendChild(poly);
+        var center = polygonCenter(points);
+        var lifted = false;
+        ((shownPlan() && shownPlan().pins) || []).forEach(function (pin) {
+            var dx = (pin.x || 0) - center.x;
+            var dy = (pin.y || 0) - center.y;
+            if (dx * dx + dy * dy < 1600) lifted = true;
+        });
+        var label = svgEl('text');
+        label.setAttribute('x', String(Math.round(center.x)));
+        label.setAttribute('y', String(Math.round(center.y) - (room.name ? (lifted ? 30 : 6) : 0)));
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('class', 'asset-tree-room-label');
+        if (room.name) {
+            var title = svgEl('tspan');
+            title.setAttribute('x', String(Math.round(center.x)));
+            title.textContent = room.name;
+            label.appendChild(title);
+        }
+        var area = svgEl('tspan');
+        area.setAttribute('x', String(Math.round(center.x)));
+        area.setAttribute('dy', room.name ? '14' : '0');
+        area.setAttribute('class', 'asset-tree-room-area');
+        area.textContent = planAreaText(points);
+        label.appendChild(area);
+        group.appendChild(label);
+        if (options && options.editing) {
+            poly.addEventListener('mousedown', function (event) {
+                if (event.button !== 0 || state.mapTool !== 'select') return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (state.mapArmId) {
+                    var point = svgPoint(options.svg, event);
+                    if (placeArmedPin(options.floor, point.x, point.y)) renderFrame();
+                    return;
+                }
+                state.mapAssetId = 0;
+                if (event.altKey) {
+                    startPan(options.svg, event);
+                    return;
+                }
+                startMarquee(options.svg, options.floor, event, options.index);
+            });
+        }
+        return group;
+    }
+
+    function shapeNode(room, options) {
+        if (isPolygonRoom(room)) return polygonNode(room, options);
+        var group = svgEl('g');
+        group.setAttribute('class', 'asset-tree-shape');
+        if (options && options.index != null) group.setAttribute('data-index', String(options.index));
+        group.setAttribute('transform', shapeTransform(room));
+        var rect = svgEl('rect');
+        applyWallCap(rect, room);
+        var kindName = room.kind || 'room';
+        rect.setAttribute('class', 'asset-tree-room is-' + kindName + (options && options.selected ? ' is-selected' : ''));
+        if (kindName === 'sofa' || kindName === 'seat' || kindName === 'chair' || kindName === 'bath' || kindName === 'toilet' || kindName === 'bed') {
+            rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
+        }
+        if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
+        if (kindName === 'table' && Math.abs(room.w - room.h) <= Math.max(room.w, room.h) * 0.2) {
+            rect.setAttribute('fill', 'transparent');
+        }
+        group.appendChild(rect);
+        if (isRouteKind(kindName)) {
+            var routeEnds = segmentLocalEnds(room);
+            if (options && options.selected) {
+                var halo = svgEl('line');
+                halo.setAttribute('x1', String(routeEnds[0][0]));
+                halo.setAttribute('y1', String(routeEnds[0][1]));
+                halo.setAttribute('x2', String(routeEnds[1][0]));
+                halo.setAttribute('y2', String(routeEnds[1][1]));
+                halo.setAttribute('stroke', '#ffab00');
+                halo.setAttribute('stroke-width', '10');
+                halo.setAttribute('stroke-linecap', 'round');
+                halo.setAttribute('class', 'asset-tree-route-halo');
+                group.appendChild(halo);
+            }
+            var routeLine = svgEl('line');
+            routeLine.setAttribute('x1', String(routeEnds[0][0]));
+            routeLine.setAttribute('y1', String(routeEnds[0][1]));
+            routeLine.setAttribute('x2', String(routeEnds[1][0]));
+            routeLine.setAttribute('y2', String(routeEnds[1][1]));
+            routeLine.setAttribute('stroke', room.color || routeColor(kindName));
+            routeLine.setAttribute('stroke-width', '4');
+            routeLine.setAttribute('stroke-linecap', 'round');
+            routeLine.setAttribute('class', 'asset-tree-route');
+            group.appendChild(routeLine);
+        }
+        decorateRoom(group, room);
+        appendOpening(group, room);
+        appendLabel(group, room);
+        if (options && options.editing) {
+            rect.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                if (state.mapTool !== 'select') return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (state.mapArmId) {
+                    var armedAt = svgPoint(options.svg, event);
+                    if (placeArmedPin(options.floor, armedAt.x, armedAt.y)) renderFrame();
+                    return;
+                }
+                state.mapAssetId = 0;
+                var index = options.index;
+                if (event.shiftKey) {
+                    var grouped = (state.mapGroup || []).slice();
+                    var at = grouped.indexOf(index);
+                    if (at >= 0) grouped.splice(at, 1);
+                    else if (state.mapSelection !== index) grouped.push(index);
+                    state.mapGroup = grouped;
+                    if (state.mapSelection == null) state.mapSelection = index;
+                    renderFrame();
+                    return;
+                }
+                var mates = selectionMembers(options.floor.rooms, index);
+                state.mapSelection = index;
+                state.mapGroup = mates.filter(function (at) { return at !== index; });
+                var origins = {};
+                mates.forEach(function (at) {
+                    origins[at] = { x: options.floor.rooms[at].x, y: options.floor.rooms[at].y };
+                });
+                var point = svgPoint(options.svg, event);
+                beginDrag(options.svg, {
+                    kind: 'move',
+                    index: index,
+                    dx: point.x - room.x,
+                    dy: point.y - room.y,
+                    moved: false,
+                    x0: point.x,
+                    y0: point.y,
+                    attached: isSegmentKind(room.kind) ? openingsOnWall(index) : null
+                }, function (move) {
+                    var next = svgPoint(options.svg, move);
+                    var dx = next.x - state.mapDrag.x0;
+                    var dy = next.y - state.mapDrag.y0;
+                    if (!state.mapDrag.moved && dx * dx + dy * dy < 16) return;
+                    state.mapDrag.moved = true;
+                    if (mates.length === 1 && (room.kind === 'door' || room.kind === 'window')) {
+                        var hit = nearestWall(next.x, next.y, 40);
+                        if (hit) {
+                            var seated = seatOpening(room.kind, hit.room, hit.t, room.w >= room.h ? room.w : room.h);
+                            if (seated) {
+                                room.x = seated.x;
+                                room.y = seated.y;
+                                room.w = seated.w;
+                                room.h = seated.h;
+                                room.angle = seated.angle;
+                                rect.setAttribute('width', String(room.w));
+                                rect.setAttribute('height', String(room.h));
+                                group.setAttribute('transform', shapeTransform(room));
+                                state.mapDirty = true;
+                                return;
+                            }
+                        }
+                    }
+                    if (mates.length > 1) {
+                        var shiftX = snapCoord(next.x) - snapCoord(state.mapDrag.x0);
+                        var shiftY = snapCoord(next.y) - snapCoord(state.mapDrag.y0);
+                        mates.forEach(function (at) {
+                            var item = options.floor.rooms[at];
+                            item.x = origins[at].x + shiftX;
+                            item.y = origins[at].y + shiftY;
+                            var node = options.svg.querySelector('.asset-tree-shape[data-index="' + at + '"]');
+                            if (node) node.setAttribute('transform', shapeTransform(item));
+                        });
+                    } else {
+                        room.x = clampNum(snapCoord(next.x - state.mapDrag.dx), 0, options.size.w - room.w);
+                        room.y = clampNum(snapCoord(next.y - state.mapDrag.dy), 0, options.size.h - room.h);
+                        group.setAttribute('transform', shapeTransform(room));
+                        if (state.mapDrag.attached) reseatOpenings(options.svg, index, state.mapDrag.attached);
+                    }
+                    state.mapDirty = true;
+                }, function (finished) {
+                    if (finished && finished.moved) {
+                        var furn = mates.filter(function (at) {
+                            return options.floor.rooms[at] && isFurnKind(options.floor.rooms[at].kind);
+                        });
+                        if (furn.length) settleFurniture(options.floor, furn);
+                    }
+                    renderFrame();
+                });
+            });
+            if (options.primary && state.mapTool === 'select' && !state.mapStamp) drawRoomHandles(group, rect, room, options);
+        }
+        return group;
+    }
+
+    function decorateRoom(parent, room) {
+        var kind = room.kind || 'room';
+        if (isRouteKind(kind)) return;
+        var x = 0;
+        var y = 0;
+        var w = room.w;
+        var h = room.h;
+        if (kind === 'text') {
+            var caption = svgEl('text');
+            caption.setAttribute('x', '2');
+            caption.setAttribute('y', String(Math.max(12, Math.min(18, h - 4))));
+            caption.setAttribute('class', 'asset-tree-room-label');
+            caption.textContent = room.name || t('mapTextSample');
+            parent.appendChild(caption);
+            return;
+        }
+        if (kind === 'dim') {
+            var local = segmentLocalEnds(room);
+            var dim = svgEl('path');
+            var x1 = local[0][0];
+            var y1 = local[0][1];
+            var x2 = local[1][0];
+            var y2 = local[1][1];
+            dim.setAttribute('d', 'M ' + x1 + ' ' + (y1 - 6) + ' L ' + x1 + ' ' + (y1 + 6) + ' M ' + x2 + ' ' + (y2 - 6) + ' L ' + x2 + ' ' + (y2 + 6) + ' M ' + x1 + ' ' + y1 + ' L ' + x2 + ' ' + y2);
+            dim.setAttribute('class', 'asset-tree-plan-mark');
+            parent.appendChild(dim);
+            var measure = svgEl('text');
+            measure.setAttribute('x', String((x1 + x2) / 2));
+            measure.setAttribute('y', String((y1 + y2) / 2 - 6));
+            measure.setAttribute('class', 'asset-tree-room-area');
+            measure.textContent = String(Math.round(Math.max(room.w, room.h)));
+            parent.appendChild(measure);
+            return;
+        }
+        if (kind === 'arc' && window.AssetTreePlan) {
+            var samples = window.AssetTreePlan.arcPoints(roomPoints(room), 12);
+            if (samples.length >= 2) {
+                var curve = svgEl('path');
+                curve.setAttribute('d', samples.map(function (point, index) {
+                    return (index ? 'L ' : 'M ') + (point.x - room.x) + ' ' + (point.y - room.y);
+                }).join(' '));
+                curve.setAttribute('class', 'asset-tree-plan-mark is-arc');
+                parent.appendChild(curve);
+            }
+            return;
+        }
+        if (kind === 'column') {
+            var mark = svgEl('circle');
+            mark.setAttribute('cx', String(x + w / 2));
+            mark.setAttribute('cy', String(y + h / 2));
+            mark.setAttribute('r', String(Math.max(2, Math.min(w, h) / 2 - 2)));
+            mark.setAttribute('class', 'asset-tree-plan-mark is-fill');
+            parent.appendChild(mark);
+            return;
+        }
+        if (kind === 'stair') {
+            var lines = svgEl('path');
+            var parts = [];
+            var count = Math.max(3, Math.floor((w >= h ? h : w) / 8));
+            var i;
+            if (w >= h) {
+                for (i = 1; i < count; i++) {
+                    var lineY = y + (h * i / count);
+                    parts.push('M ' + x + ' ' + lineY + ' L ' + (x + w) + ' ' + lineY);
+                }
+            } else {
+                for (i = 1; i < count; i++) {
+                    var lineX = x + (w * i / count);
+                    parts.push('M ' + lineX + ' ' + y + ' L ' + lineX + ' ' + (y + h));
+                }
+            }
+            lines.setAttribute('d', parts.join(' '));
+            lines.setAttribute('class', 'asset-tree-plan-mark');
+            parent.appendChild(lines);
+            return;
+        }
+        function markBox(bx, by, bw, bh, tone) {
+            var node = svgEl('rect');
+            node.setAttribute('x', String(bx));
+            node.setAttribute('y', String(by));
+            node.setAttribute('width', String(Math.max(1, bw)));
+            node.setAttribute('height', String(Math.max(1, bh)));
+            node.setAttribute('class', 'asset-tree-plan-mark' + (tone ? ' is-fill is-' + tone : ''));
+            parent.appendChild(node);
+        }
+        function markOval(cx, cy, rx, ry, tone) {
+            var node = svgEl('ellipse');
+            node.setAttribute('cx', String(cx));
+            node.setAttribute('cy', String(cy));
+            node.setAttribute('rx', String(Math.max(1, rx)));
+            node.setAttribute('ry', String(Math.max(1, ry)));
+            node.setAttribute('class', 'asset-tree-plan-mark' + (tone ? ' is-fill is-' + tone : ''));
+            parent.appendChild(node);
+        }
+        function markLine(d) {
+            var node = svgEl('path');
+            node.setAttribute('d', d);
+            node.setAttribute('class', 'asset-tree-plan-mark');
+            parent.appendChild(node);
+        }
+        if (kind === 'table' && Math.abs(w - h) <= Math.max(w, h) * 0.2) {
+            markOval(x + w / 2, y + h / 2, Math.max(4, w / 2 - 1), Math.max(4, h / 2 - 1), 'wood');
+            return;
+        }
+        if (kind === 'table' || kind === 'desk') {
+            markBox(x + 1, y + 1, w - 2, h - 2, 'wood');
+            if (kind === 'desk') markLine('M ' + (x + 6) + ' ' + (y + h * 0.62) + ' L ' + (x + w - 6) + ' ' + (y + h * 0.62));
+            return;
+        }
+        if (kind === 'rug') {
+            markBox(x + 4, y + 4, w - 8, h - 8);
+            markBox(x + 9, y + 9, w - 18, h - 18);
+            return;
+        }
+        if (kind === 'chair') {
+            markBox(x + w * 0.18, y + h * 0.42, w * 0.64, h * 0.4, 'fabric');
+            markBox(x + w * 0.16, y + 2, w * 0.68, h * 0.28, 'fabric');
+            markLine('M ' + (x + w * 0.22) + ' ' + (y + h * 0.42) + ' L ' + (x + w * 0.22) + ' ' + (y + h - 2) + ' M ' + (x + w * 0.78) + ' ' + (y + h * 0.42) + ' L ' + (x + w * 0.78) + ' ' + (y + h - 2));
+            return;
+        }
+        if (kind === 'seat') {
+            markBox(x + 2, y + 2, w * 0.16, h - 4);
+            markBox(x + w - w * 0.16 - 2, y + 2, w * 0.16, h - 4);
+            markBox(x + w * 0.16, y + 2, w * 0.68, Math.max(4, h * 0.24));
+            markBox(x + w * 0.24, y + h * 0.36, w * 0.52, h * 0.48);
+            return;
+        }
+        if (kind === 'sofa') {
+            var arm = Math.max(5, Math.round(w * 0.08));
+            var back = Math.max(6, Math.round(h * 0.36));
+            markBox(x + 2, y + 2, arm, h - 4, 'fabric');
+            markBox(x + w - arm - 2, y + 2, arm, h - 4, 'fabric');
+            markBox(x + arm + 2, y + 3, w - arm * 2 - 4, back, 'fabric');
+            var inner = w - arm * 2 - 8;
+            var count = inner > 80 ? 3 : 2;
+            var slice = inner / count;
+            var index;
+            for (index = 0; index < count; index++) {
+                markBox(x + arm + 4 + slice * index, y + back + 6, slice - 3, h - back - 12, 'fabric');
+            }
+            return;
+        }
+        if (kind === 'cabinet') {
+            markBox(x, y, w, h);
+            markLine('M ' + (x + w / 2) + ' ' + y + ' L ' + (x + w / 2) + ' ' + (y + h));
+            markBox(x + w / 2 - 7, y + h / 2 - 2, 4, 4);
+            markBox(x + w / 2 + 3, y + h / 2 - 2, 4, 4);
+            return;
+        }
+        if (kind === 'pedestal') {
+            markBox(x, y, w, h);
+            markLine('M ' + x + ' ' + (y + h / 3) + ' L ' + (x + w) + ' ' + (y + h / 3) + ' M ' + x + ' ' + (y + h * 2 / 3) + ' L ' + (x + w) + ' ' + (y + h * 2 / 3));
+            markBox(x + w / 2 - 2, y + h / 6 - 2, 4, 4);
+            markBox(x + w / 2 - 2, y + h / 2 - 2, 4, 4);
+            markBox(x + w / 2 - 2, y + h * 5 / 6 - 2, 4, 4);
+            return;
+        }
+        if (kind === 'bed') {
+            markBox(x + 3, y + 3, w - 6, h - 6, 'wood');
+            markBox(x + 7, y + h * 0.22, w - 14, h * 0.72, 'fabric');
+            markBox(x + w * 0.1, y + h * 0.08, w * 0.34, h * 0.16, 'fabric');
+            markBox(x + w * 0.56, y + h * 0.08, w * 0.34, h * 0.16, 'fabric');
+            return;
+        }
+        if (kind === 'plant') {
+            var cx = x + w / 2;
+            var cy = y + h / 2;
+            var radius = Math.max(5, Math.min(w, h) / 2 - 1);
+            var petal;
+            var parts = [];
+            for (petal = 0; petal < 8; petal++) {
+                var angle = petal * Math.PI / 4;
+                parts.push('M ' + cx + ' ' + cy + ' L ' + (cx + Math.cos(angle) * radius) + ' ' + (cy + Math.sin(angle) * radius));
+            }
+            markLine(parts.join(' '));
+            var core = svgEl('circle');
+            core.setAttribute('cx', String(cx));
+            core.setAttribute('cy', String(cy));
+            core.setAttribute('r', String(Math.max(1.6, radius * 0.16)));
+            core.setAttribute('class', 'asset-tree-plan-mark is-solid');
+            parent.appendChild(core);
+            return;
+        }
+        if (kind === 'bath') {
+            markBox(x + 3, y + 3, w - 6, h - 6, 'ceramic');
+            markOval(x + w / 2, y + h * 0.56, Math.max(4, w / 2 - 8), Math.max(4, h * 0.34));
+            markOval(x + w / 2 - 5, y + h * 0.12, 2.4, 2.4);
+            markOval(x + w / 2 + 5, y + h * 0.12, 2.4, 2.4);
+            markOval(x + w / 2, y + h * 0.78, 2, 2);
+            return;
+        }
+        if (kind === 'toilet') {
+            markBox(x + w * 0.18, y + 2, w * 0.64, h * 0.28, 'ceramic');
+            markOval(x + w / 2, y + h * 0.66, w * 0.32, h * 0.22);
+            markOval(x + w / 2, y + h * 0.66, w * 0.14, h * 0.1);
+            return;
+        }
+        if (kind === 'sink') {
+            markBox(x + 3, y + h * 0.32, w - 6, h * 0.58, 'ceramic');
+            markOval(x + w / 2, y + h * 0.62, w * 0.26, h * 0.18);
+            markOval(x + w / 2, y + h * 0.16, 2.6, 2.6);
+            markLine('M ' + (x + w / 2) + ' ' + (y + h * 0.16) + ' L ' + (x + w / 2) + ' ' + (y + 2));
+            return;
+        }
+        if (kind === 'stove') {
+            markBox(x, y, w, h);
+            markOval(x + w * 0.32, y + h * 0.32, w * 0.13, h * 0.13);
+            markOval(x + w * 0.68, y + h * 0.32, w * 0.13, h * 0.13);
+            markOval(x + w * 0.32, y + h * 0.68, w * 0.13, h * 0.13);
+            markOval(x + w * 0.68, y + h * 0.68, w * 0.13, h * 0.13);
+        }
+    }
+
+    function appendOpening(parent, room) {
+        var kind = room.kind || 'room';
+        if (kind !== 'door' && kind !== 'window') return;
+        var x = 0;
+        var y = 0;
+        var w = room.w;
+        var h = room.h;
+        var alongX = w >= h;
+        var d;
+        if (kind === 'window') {
+            d = alongX
+                ? 'M ' + x + ' ' + (y + h * 0.28) + ' L ' + (x + w) + ' ' + (y + h * 0.28)
+                    + ' M ' + x + ' ' + (y + h * 0.5) + ' L ' + (x + w) + ' ' + (y + h * 0.5)
+                    + ' M ' + x + ' ' + (y + h * 0.72) + ' L ' + (x + w) + ' ' + (y + h * 0.72)
+                : 'M ' + (x + w * 0.28) + ' ' + y + ' L ' + (x + w * 0.28) + ' ' + (y + h)
+                    + ' M ' + (x + w * 0.5) + ' ' + y + ' L ' + (x + w * 0.5) + ' ' + (y + h)
+                    + ' M ' + (x + w * 0.72) + ' ' + y + ' L ' + (x + w * 0.72) + ' ' + (y + h);
+        } else if (alongX && parseInt(room.swing, 10) === 1) {
+            d = 'M ' + x + ' ' + y + ' L ' + x + ' ' + (y - w)
+                + ' M ' + x + ' ' + (y - w) + ' A ' + w + ' ' + w + ' 0 0 1 ' + (x + w) + ' ' + y;
+        } else if (alongX) {
+            d = 'M ' + x + ' ' + (y + h) + ' L ' + x + ' ' + (y + h + w)
+                + ' M ' + x + ' ' + (y + h + w) + ' A ' + w + ' ' + w + ' 0 0 0 ' + (x + w) + ' ' + (y + h);
+        } else if (parseInt(room.swing, 10) === 1) {
+            d = 'M ' + x + ' ' + y + ' L ' + (x - h) + ' ' + y
+                + ' M ' + (x - h) + ' ' + y + ' A ' + h + ' ' + h + ' 0 0 0 ' + x + ' ' + (y + h);
+        } else {
+            d = 'M ' + (x + w) + ' ' + y + ' L ' + (x + w + h) + ' ' + y
+                + ' M ' + (x + w + h) + ' ' + y + ' A ' + h + ' ' + h + ' 0 0 1 ' + (x + w) + ' ' + (y + h);
+        }
+        var markLine = svgEl('path');
+        markLine.setAttribute('d', d);
+        markLine.setAttribute('class', 'asset-tree-opening');
+        parent.appendChild(markLine);
+    }
+
+    function furnitureCaption(room) {
+        var asset = room && room.assetId ? byId()[room.assetId] : null;
+        if (asset) {
+            var key = asset.objectKey || '';
+            var name = asset.name || room.name || '';
+            if (key && name) return key + ' ' + name;
+            return key || name;
+        }
+        return room && room.name ? room.name : '';
+    }
+
+    function appendLabel(parent, room) {
+        var kindName = room.kind || 'room';
+        var named = kindName === 'room' || kindName === 'stair' || kindName === 'column' || isFurnKind(kindName);
+        var caption = isFurnKind(kindName) ? furnitureCaption(room) : (room.name || '');
+        if (!named || !caption || room.h < 12 || room.w < 20) return;
+        var label = svgEl('text');
+        var font = Math.max(8, Math.min(14, Math.floor(room.h / 2)));
+        label.setAttribute('x', String(Math.min(8, Math.floor(room.w / 5))));
+        label.setAttribute('y', String(Math.min(font + 4, room.h - 2)));
+        label.setAttribute('class', 'asset-tree-room-label');
+        label.style.fontSize = font + 'px';
+        label.textContent = caption;
+        parent.appendChild(label);
+    }
+
+    function syncShape(group, rect, room) {
+        applyWallCap(rect, room);
+        group.setAttribute('transform', shapeTransform(room));
+        var nodes = group.querySelectorAll('.asset-tree-handle');
+        var spots = [[0, 0], [room.w, 0], [0, room.h], [room.w, room.h]];
+        var i;
+        for (i = 0; i < nodes.length && i < spots.length; i++) {
+            nodes[i].setAttribute('x', String(spots[i][0] - 5));
+            nodes[i].setAttribute('y', String(spots[i][1] - 5));
+        }
+        var ends = group.querySelectorAll('.asset-tree-end');
+        if (ends.length) {
+            var local = segmentLocalEnds(room);
+            for (i = 0; i < ends.length && i < local.length; i++) {
+                ends[i].setAttribute('cx', String(local[i][0]));
+                ends[i].setAttribute('cy', String(local[i][1]));
+            }
+        }
+        var dim = group.querySelector('.asset-tree-dim');
+        if (dim) placeDimension(dim, room);
+        var dimLine = group.querySelector('.asset-tree-dim-line');
+        if (dimLine) dimLine.setAttribute('d', dimensionPath(room));
+        var knob = group.querySelector('.asset-tree-rotate');
+        if (knob) {
+            knob.setAttribute('cx', String(room.w / 2));
+            knob.setAttribute('cy', '-18');
+        }
+        var stem = group.querySelector('.asset-tree-rotate-stem');
+        if (stem) stem.setAttribute('d', 'M ' + (room.w / 2) + ' 0 L ' + (room.w / 2) + ' -12');
+    }
+
+    function resizeRotated(room, drag, point, size) {
+        var angle = normalizeAngle(drag.angle);
+        var rad = angle * Math.PI / 180;
+        var ux = Math.cos(rad);
+        var uy = Math.sin(rad);
+        var vx = -Math.sin(rad);
+        var vy = Math.cos(rad);
+        var dx = point.x - drag.fixed.x;
+        var dy = point.y - drag.fixed.y;
+        var lx = dx * ux + dy * uy;
+        var ly = dx * vx + dy * vy;
+        var min = roomMin(room.kind || 'room');
+        var corner = drag.corner;
+        var alongX = corner === 'ne' || corner === 'se' ? lx : -lx;
+        var alongY = corner === 'sw' || corner === 'se' ? ly : -ly;
+        var w;
+        var h;
+        if (drag.thin) {
+            if (drag.long === 'x') {
+                w = Math.max(min, snapCoord(Math.max(min, alongX)));
+                h = drag.thick;
+            } else {
+                w = drag.thick;
+                h = Math.max(min, snapCoord(Math.max(min, alongY)));
+            }
+        } else if (room.kind === 'column') {
+            var side = Math.max(min, snapCoord(Math.max(alongX, alongY)));
+            w = side;
+            h = side;
+        } else {
+            w = Math.max(min, snapCoord(Math.max(min, alongX)));
+            h = Math.max(min, snapCoord(Math.max(min, alongY)));
+        }
+        var ox = (corner === 'nw' || corner === 'sw') ? -w : 0;
+        var oy = (corner === 'nw' || corner === 'ne') ? -h : 0;
+        var tlx = drag.fixed.x + ox * ux + oy * vx;
+        var tly = drag.fixed.y + ox * uy + oy * vy;
+        var cx = tlx + (w / 2) * ux + (h / 2) * vx;
+        var cy = tly + (w / 2) * uy + (h / 2) * vy;
+        var next = clampRoom({
+            name: room.name,
+            kind: room.kind,
+            color: room.color,
+            angle: angle,
+            x: cx - w / 2,
+            y: cy - h / 2,
+            w: w,
+            h: h
+        }, size);
+        room.x = next.x;
+        room.y = next.y;
+        room.w = next.w;
+        room.h = next.h;
+        room.angle = next.angle;
+    }
+
+    function drawEndHandles(group, rect, room, options) {
+        var local = segmentLocalEnds(room);
+        local.forEach(function (spot, which) {
+            var handle = svgEl('circle');
+            handle.setAttribute('cx', String(spot[0]));
+            handle.setAttribute('cy', String(spot[1]));
+            handle.setAttribute('r', '7');
+            handle.setAttribute('class', 'asset-tree-end');
+            handle.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                var ends = segmentEnds(room);
+                var fixed = which === 0 ? ends[1] : ends[0];
+                var attached = isSegmentKind(room.kind) ? openingsOnWall(options.index) : null;
+                beginDrag(options.svg, { kind: 'end' }, function (move) {
+                    var point = svgPoint(options.svg, move);
+                    var end = resolveEnd(fixed, point, move.shiftKey, options.index);
+                    var ax = which === 0 ? end.x : fixed.x;
+                    var ay = which === 0 ? end.y : fixed.y;
+                    var bx = which === 0 ? fixed.x : end.x;
+                    var by = which === 0 ? fixed.y : end.y;
+                    var next = applySegment(room, ax, ay, bx, by);
+                    if (!next) return;
+                    room.x = next.x;
+                    room.y = next.y;
+                    room.w = next.w;
+                    room.h = next.h;
+                    room.angle = next.angle;
+                    syncShape(group, rect, room);
+                    if (attached) reseatOpenings(options.svg, options.index, attached);
+                    state.mapDirty = true;
+                }, function () { renderFrame(); });
+            });
+            group.appendChild(handle);
+        });
+    }
+
+    function drawRoomHandles(group, rect, room, options) {
+        if (isThinKind(room.kind)) {
+            drawEndHandles(group, rect, room, options);
+            return;
+        }
+        var opposite = { nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' };
+        [
+            ['nw', 0, 0, 'nwse-resize'],
+            ['ne', room.w, 0, 'nesw-resize'],
+            ['sw', 0, room.h, 'nesw-resize'],
+            ['se', room.w, room.h, 'nwse-resize']
+        ].forEach(function (corner) {
+            var handle = svgEl('rect');
+            handle.setAttribute('x', String(corner[1] - 5));
+            handle.setAttribute('y', String(corner[2] - 5));
+            handle.setAttribute('width', '10');
+            handle.setAttribute('height', '10');
+            handle.setAttribute('class', 'asset-tree-handle');
+            handle.style.cursor = corner[3];
+            handle.addEventListener('mousedown', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var fixedName = opposite[corner[0]];
+                var fixed = localToWorld(room, (fixedName === 'ne' || fixedName === 'se') ? room.w : 0, (fixedName === 'sw' || fixedName === 'se') ? room.h : 0);
+                var thin = room.kind === 'wall' || room.kind === 'partition' || room.kind === 'door' || room.kind === 'window';
+                beginDrag(options.svg, {
+                    kind: 'resize',
+                    corner: corner[0],
+                    fixed: fixed,
+                    angle: normalizeAngle(room.angle),
+                    thin: thin,
+                    long: room.w >= room.h ? 'x' : 'y',
+                    thick: room.w >= room.h ? room.h : room.w
+                }, function (move) {
+                    resizeRotated(room, state.mapDrag, svgPoint(options.svg, move), options.size);
+                    syncShape(group, rect, room);
+                    state.mapDirty = true;
+                }, function () { renderFrame(); });
+            });
+            group.appendChild(handle);
+        });
+        var stem = svgEl('path');
+        stem.setAttribute('d', 'M ' + (room.w / 2) + ' 0 L ' + (room.w / 2) + ' -12');
+        stem.setAttribute('class', 'asset-tree-rotate-stem');
+        group.appendChild(stem);
+        var knob = svgEl('circle');
+        knob.setAttribute('cx', String(room.w / 2));
+        knob.setAttribute('cy', '-18');
+        knob.setAttribute('r', '7');
+        knob.setAttribute('class', 'asset-tree-rotate');
+        knob.addEventListener('mousedown', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var members = isFurnKind(room.kind) ? groupIndexes(options.floor.rooms, options.index) : [options.index];
+            var center = members.length > 1
+                ? groupCenter(options.floor.rooms, members)
+                : { x: room.x + room.w / 2, y: room.y + room.h / 2 };
+            var baseMembers = members.map(function (at) {
+                var item = options.floor.rooms[at];
+                return { index: at, x: item.x, y: item.y, w: item.w, h: item.h, angle: item.angle || 0 };
+            });
+            var pointer = svgPoint(options.svg, event);
+            beginDrag(options.svg, {
+                kind: 'rotate',
+                base: Math.atan2(pointer.y - center.y, pointer.x - center.x)
+            }, function (move) {
+                var point = svgPoint(options.svg, move);
+                if (members.length < 2) {
+                    var deg = Math.atan2(point.y - center.y, point.x - center.x) * 180 / Math.PI + 90;
+                    room.angle = snapAngle(deg, move.shiftKey);
+                    group.setAttribute('transform', shapeTransform(room));
+                } else {
+                    var now = Math.atan2(point.y - center.y, point.x - center.x);
+                    var delta = (now - state.mapDrag.base) * 180 / Math.PI;
+                    var stepped = move.shiftKey ? Math.round(delta) : Math.round(delta / 15) * 15;
+                    baseMembers.forEach(function (item) {
+                        var target = options.floor.rooms[item.index];
+                        var rcx = item.x + item.w / 2;
+                        var rcy = item.y + item.h / 2;
+                        var rad = stepped * Math.PI / 180;
+                        var cos = Math.cos(rad);
+                        var sin = Math.sin(rad);
+                        var dx = rcx - center.x;
+                        var dy = rcy - center.y;
+                        var nx = center.x + dx * cos - dy * sin;
+                        var ny = center.y + dx * sin + dy * cos;
+                        target.x = nx - item.w / 2;
+                        target.y = ny - item.h / 2;
+                        target.angle = normalizeAngle(item.angle + stepped);
+                        var node = options.svg.querySelector('.asset-tree-shape[data-index="' + item.index + '"]');
+                        if (node) node.setAttribute('transform', shapeTransform(target));
+                    });
+                }
+                state.mapDirty = true;
+            }, function () {
+                if (members.length > 1) settleFurniture(options.floor, members);
+                renderFrame();
+            });
+        });
+        group.appendChild(knob);
+    }
+
+    function pinFace(mark) {
+        var plate = svgEl('rect');
+        plate.setAttribute('x', '-12');
+        plate.setAttribute('y', '-12');
+        plate.setAttribute('width', '24');
+        plate.setAttribute('height', '24');
+        plate.setAttribute('rx', '4');
+        plate.setAttribute('class', 'asset-tree-pin-plate');
+        var glyph = svgEl('path');
+        glyph.setAttribute('d', 'M-6 -6h12v8h-12zM-4 2h8M-2 5h4');
+        glyph.setAttribute('class', 'asset-tree-pin-glyph');
+        mark.appendChild(plate);
+        mark.appendChild(glyph);
+    }
+
     function placeArmedPin(floor, x, y) {
-        var asset = byId()[state.mapAssetId];
+        var asset = byId()[state.mapArmId];
         if (!asset) return false;
+        rememberMap();
         var box = planSize(floor);
         var px = snapCoord(x);
         var py = snapCoord(y);
@@ -12973,6 +23207,8 @@
             });
             floor.pins = pins;
         }
+        state.mapArmId = 0;
+        state.mapAssetId = 0;
         state.mapDirty = true;
         return true;
     }
@@ -12980,45 +23216,231 @@
     function mapToolIcon(kind) {
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '20');
+        svg.setAttribute('height', '20');
         svg.setAttribute('class', 'asset-tree-tool-icon');
-        var path = svgEl('path');
-        var d = 'M5 5h6v6H5zM13 13h6v6h-6z';
-        if (kind === 'select') d = 'M5 3l6 14 2-5 5-2z';
-        if (kind === 'room') d = 'M4 4h16v16H4z';
-        if (kind === 'wall') d = 'M3 10h18v4H3z';
-        if (kind === 'door') d = 'M6 20V5h8v15M14 5a8 8 0 0 1 0 15';
-        if (kind === 'window') d = 'M4 6h16v12H4zM12 6v12M4 12h16';
-        path.setAttribute('d', d);
-        path.setAttribute('fill', kind === 'select' || kind === 'wall' ? 'currentColor' : 'none');
-        path.setAttribute('stroke', 'currentColor');
-        path.setAttribute('stroke-width', '1.6');
-        svg.appendChild(path);
+        svg.style.setProperty('display', 'block', 'important');
+        svg.style.setProperty('width', '20px', 'important');
+        svg.style.setProperty('height', '20px', 'important');
+        svg.style.setProperty('margin', '0', 'important');
+        svg.style.setProperty('float', 'none', 'important');
+        svg.style.setProperty('flex', '0 0 auto', 'important');
+        svg.style.setProperty('vertical-align', 'top', 'important');
+        function add(d, fill) {
+            var path = svgEl('path');
+            path.setAttribute('d', d);
+            path.setAttribute('fill', fill || 'none');
+            path.setAttribute('stroke', 'currentColor');
+            path.setAttribute('stroke-width', '1.6');
+            path.setAttribute('stroke-linejoin', 'round');
+            path.setAttribute('stroke-linecap', 'round');
+            svg.appendChild(path);
+        }
+        if (kind === 'select') add('M8 4.5l.2 12.2 2.6-2.8 2.4 4.6 2.2-1.2-2.4-4.6H17z', 'currentColor');
+        else if (kind === 'room') add('M5 5h14v14H5z');
+        else if (kind === 'wall') add('M4 9h16v6H4z', 'currentColor');
+        else if (kind === 'partition') add('M5 7h14M5 12h14M5 17h14');
+        else if (kind === 'door') add('M7 19V6h6v13M13 6a7 7 0 0 1 0 13');
+        else if (kind === 'window') add('M5 6h14v12H5zM12 6v12M5 12h14');
+        else if (kind === 'column') add('M12 5a7 7 0 1 0 0.01 0z');
+        else if (kind === 'stair') add('M5 19h5v-4h4V11h5V6');
+        else if (kind === 'arc') add('M5 17c2-8 12-8 14 0');
+        else if (kind === 'dim') add('M4 16h16M4 16v-3M20 16v-3M12 8v8');
+        else if (kind === 'text') add('M6 6h12M12 6v12');
+        else add('M4 8h16v9H4zM7 11h10');
         return svg;
     }
 
     function mapInspector() {
-        var block = el('div', 'asset-tree-inspector');
-        block.appendChild(el('h3', null, t('mapChosen')));
         var rooms = state.mapDraft && state.mapDraft.rooms;
         var room = rooms && state.mapSelection != null ? rooms[state.mapSelection] : null;
-        if (!room) {
-            block.appendChild(el('p', 'asset-tree-hint', '—'));
-            return block;
-        }
+        if (!room) return el('div');
+        var block = el('div', 'asset-tree-plan-inspector');
+        block.appendChild(el('strong', null, mapSelectionLabel()));
         var name = document.createElement('input');
         name.value = room.name || '';
         name.setAttribute('aria-label', t('name'));
         name.addEventListener('change', function () {
+            if ((room.name || '') === name.value) return;
+            rememberMap();
             room.name = name.value;
             state.mapDirty = true;
-            var dirty = document.querySelector('.asset-tree-dirty');
-            if (dirty) dirty.textContent = t('mapDirty');
+            renderFrame();
         });
         block.appendChild(name);
+        if (isFurnKind(room.kind)) {
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapObject')));
+            var objectPick = document.createElement('select');
+            objectPick.setAttribute('aria-label', t('mapObject'));
+            var emptyObject = document.createElement('option');
+            emptyObject.value = '0';
+            emptyObject.textContent = t('mapObjectNone');
+            objectPick.appendChild(emptyObject);
+            var objectChoices = [];
+            equipmentAssets().forEach(function (asset) {
+                if (assetInBuilding(asset, state.mapPlaceId)) objectChoices.push(asset);
+            });
+            if (room.assetId && byId()[room.assetId] && !objectChoices.some(function (asset) { return asset.id === room.assetId; })) {
+                objectChoices.push(byId()[room.assetId]);
+            }
+            objectChoices.forEach(function (asset) {
+                var option = document.createElement('option');
+                option.value = String(asset.id);
+                option.textContent = [asset.objectKey || '', asset.name || ''].filter(function (part) { return part; }).join(' ');
+                objectPick.appendChild(option);
+            });
+            objectPick.value = String(parseInt(room.assetId, 10) || 0);
+            objectPick.addEventListener('change', function () {
+                rememberMap();
+                var nextId = parseInt(objectPick.value, 10) || 0;
+                (state.mapDraft.rooms || []).forEach(function (other) {
+                    if (other !== room && nextId && parseInt(other.assetId, 10) === nextId) other.assetId = 0;
+                });
+                room.assetId = nextId;
+                var linkedAsset = byId()[nextId];
+                if (linkedAsset && !room.name) room.name = linkedAsset.name || '';
+                state.mapDirty = true;
+                renderFrame();
+            });
+            block.appendChild(objectPick);
+            if (state.canObjects) {
+                block.appendChild(button(t('mapObjectCreate'), 'asset-tree-btn slim', function () {
+                    state.mapMakingAsset = !state.mapMakingAsset;
+                    renderFrame();
+                }));
+            }
+            if (state.mapMakingAsset && state.canObjects) {
+                var objectName = document.createElement('input');
+                objectName.value = room.name || furnitureCaption(room) || mapSelectionLabel();
+                objectName.setAttribute('aria-label', t('mapObjectName'));
+                objectName.placeholder = t('mapObjectName');
+                var typePick = document.createElement('select');
+                typePick.setAttribute('aria-label', t('mapObjectType'));
+                state.types.filter(function (type) { return !type.location; }).forEach(function (type) {
+                    var option = document.createElement('option');
+                    option.value = type.typeKey;
+                    option.textContent = type.label || type.typeKey;
+                    typePick.appendChild(option);
+                });
+                var createObject = button(t('mapObjectCreate'), 'asset-tree-btn slim primary', function () {
+                    if (!typePick.value || !state.mapPlaceId) {
+                        notify(t('needType'));
+                        return;
+                    }
+                    ajax('POST', '/assets', {
+                        name: objectName.value || t('mapObject'),
+                        projectKey: state.projectKey,
+                        typeKey: typePick.value,
+                        status: 'in_use',
+                        description: '',
+                        custodianKey: '',
+                        parentId: state.mapPlaceId,
+                        attributes: {}
+                    }, function (status, payload) {
+                        if (status < 200 || status >= 300 || !payload || !payload.id) {
+                            notify((payload && payload.message) || t('errorTitle'));
+                            return;
+                        }
+                        reloadTree(function () {
+                            rememberMap();
+                            room.assetId = payload.id;
+                            if (!room.name) room.name = payload.name || objectName.value;
+                            state.mapMakingAsset = false;
+                            state.mapDirty = true;
+                            renderFrame();
+                        });
+                    });
+                });
+                block.appendChild(objectName);
+                block.appendChild(typePick);
+                block.appendChild(createObject);
+            }
+        }
+        if (isPolygonRoom(room)) {
+            block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(roomPoints(room))));
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapPlace')));
+            var placePick = document.createElement('select');
+            placePick.setAttribute('aria-label', t('mapPlace'));
+            var none = document.createElement('option');
+            none.value = '0';
+            none.textContent = t('mapPlaceNone');
+            placePick.appendChild(none);
+            placesForPlan().forEach(function (place) {
+                var option = document.createElement('option');
+                option.value = String(place.id);
+                option.textContent = place.name || '';
+                placePick.appendChild(option);
+            });
+            placePick.value = String(parseInt(room.placeId, 10) || 0);
+            placePick.addEventListener('change', function () {
+                rememberMap();
+                room.placeId = parseInt(placePick.value, 10) || 0;
+                if (room.placeId && !room.name) {
+                    var linked = byId()[room.placeId];
+                    if (linked && linked.name) room.name = linked.name;
+                }
+                state.mapDirty = true;
+                renderFrame();
+            });
+            block.appendChild(placePick);
+        }
+        if (isRouteKind(room.kind)) {
+            var routeEnds = segmentEnds(room);
+            var routeDx = routeEnds[1].x - routeEnds[0].x;
+            var routeDy = routeEnds[1].y - routeEnds[0].y;
+            block.appendChild(el('span', 'asset-tree-plan-label', mapLayerLabel(room.kind) + ' · ' + Math.round(Math.sqrt(routeDx * routeDx + routeDy * routeDy)) + ' ' + t('mapCm')));
+        }
+        if (isSegmentKind(room.kind)) {
+            var ends = segmentEnds(room);
+            var thick = room.w >= room.h ? room.h : room.w;
+            block.appendChild(el('span', 'asset-tree-plan-label', Math.round(Math.max(room.w, room.h)) + ' ' + t('mapCm')));
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapThick')));
+            var thickInput = document.createElement('input');
+            thickInput.type = 'number';
+            thickInput.min = '4';
+            thickInput.max = '80';
+            thickInput.value = String(thick);
+            thickInput.className = 'asset-tree-plan-size';
+            thickInput.setAttribute('aria-label', t('mapThick'));
+            thickInput.addEventListener('change', function () {
+                var attached = openingsOnWall(state.mapSelection);
+                rememberMap();
+                var next = applySegment({
+                    kind: room.kind,
+                    name: room.name,
+                    color: room.color,
+                    h: Number(thickInput.value),
+                    w: Number(thickInput.value)
+                }, ends[0].x, ends[0].y, ends[1].x, ends[1].y);
+                if (!next) return;
+                room.x = next.x;
+                room.y = next.y;
+                room.w = next.w;
+                room.h = next.h;
+                room.angle = next.angle;
+                if (attached) reseatOpenings(null, state.mapSelection, attached);
+                state.mapDirty = true;
+                renderFrame();
+            });
+            block.appendChild(thickInput);
+        }
+        if (room.kind === 'door') {
+            var swingBtn = button(t('mapSwing'), 'asset-tree-btn slim', function () {
+                rememberMap();
+                room.swing = parseInt(room.swing, 10) === 1 ? 0 : 1;
+                state.mapDirty = true;
+                renderFrame();
+            });
+            swingBtn.title = t('mapSwing');
+            block.appendChild(el('span', 'asset-tree-plan-label', parseInt(room.swing, 10) === 1 ? t('mapSideB') : t('mapSideA')));
+            block.appendChild(swingBtn);
+        }
         if ((room.kind || 'room') === 'room') {
             var colors = el('div', 'asset-tree-swatches');
             ['', '#deebff', '#e3fcef', '#fff0b3', '#ffebe6', '#eae6ff'].forEach(function (color) {
-                var swatch = button('', 'asset-tree-swatch' + (roomColor(room.color) === roomColor(color) ? ' is-on' : ''), function () {
+                var swatch = button('', 'asset-tree-swatch' + (roomColor(room.color) === roomColor(color) ? ' is-selected' : ''), function () {
+                    if ((room.color || '') === (color || '')) return;
+                    rememberMap();
                     room.color = color;
                     state.mapDirty = true;
                     renderFrame();
@@ -13029,71 +23451,292 @@
             });
             block.appendChild(colors);
         }
-        block.appendChild(el('p', 'asset-tree-hint', mapSelectionLabel() + ' · ' + room.w + ' × ' + room.h));
-        block.appendChild(button(t('mapDeleteShape'), 'asset-tree-btn', function () {
-            state.mapDraft.rooms.splice(state.mapSelection, 1);
-            state.mapSelection = null;
+        var sizes = el('div', 'asset-tree-size-row');
+        var width = document.createElement('input');
+        width.type = 'number';
+        width.min = String(roomMin(room.kind || 'room'));
+        width.max = '2400';
+        width.value = String(room.w);
+        width.className = 'asset-tree-plan-size';
+        width.setAttribute('aria-label', t('setupPlanW'));
+        var height = document.createElement('input');
+        height.type = 'number';
+        height.min = String(roomMin(room.kind || 'room'));
+        height.max = '1600';
+        height.value = String(room.h);
+        height.className = 'asset-tree-plan-size';
+        height.setAttribute('aria-label', t('setupPlanH'));
+        var angle = document.createElement('input');
+        angle.type = 'number';
+        angle.min = '0';
+        angle.max = '359';
+        angle.step = '1';
+        angle.value = String(normalizeAngle(room.angle));
+        angle.className = 'asset-tree-plan-size';
+        angle.setAttribute('aria-label', t('mapAngle'));
+        function applySize() {
+            rememberMap();
+            var attached = isSegmentKind(room.kind) ? openingsOnWall(state.mapSelection) : null;
+            var next = clampRoom({
+                name: room.name,
+                kind: room.kind,
+                color: room.color,
+                angle: normalizeAngle(angle.value),
+                x: room.x,
+                y: room.y,
+                w: Number(width.value),
+                h: Number(height.value)
+            });
+            if ((room.kind || 'room') === 'column') {
+                var side = Math.max(next.w, next.h);
+                next = clampRoom({
+                    name: room.name, kind: room.kind, color: room.color, angle: next.angle,
+                    x: room.x, y: room.y, w: side, h: side
+                });
+            }
+            room.x = next.x;
+            room.y = next.y;
+            room.w = next.w;
+            room.h = next.h;
+            room.angle = next.angle;
+            if (attached) reseatOpenings(null, state.mapSelection, attached);
             state.mapDirty = true;
             renderFrame();
+        }
+        width.addEventListener('change', applySize);
+        height.addEventListener('change', applySize);
+        angle.addEventListener('change', applySize);
+        sizes.appendChild(width);
+        sizes.appendChild(el('span', null, '\u00d7'));
+        sizes.appendChild(height);
+        sizes.appendChild(el('span', 'asset-tree-plan-label', t('mapAngle')));
+        sizes.appendChild(angle);
+        if (!isPolygonRoom(room) && !isSegmentKind(room.kind) && !isRouteKind(room.kind)) block.appendChild(sizes);
+        var actions = el('div', 'asset-tree-inline-actions');
+        actions.appendChild(button(t('mapDuplicate'), 'asset-tree-btn', duplicateMapSelection));
+        actions.appendChild(button(t('mapSaveTemplate'), 'asset-tree-btn', function () {
+            state.mapNaming = true;
+            renderFrame();
         }));
+        actions.appendChild(button(t('mapDeleteShape'), 'asset-tree-btn', function () {
+            removeMapSelection();
+        }));
+        block.appendChild(actions);
+        if (state.mapNaming) {
+            var templateName = document.createElement('input');
+            templateName.maxLength = 40;
+            templateName.placeholder = t('mapTemplateName');
+            templateName.setAttribute('aria-label', t('mapTemplateName'));
+            templateName.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                saveFurnitureTemplate(templateName.value);
+            });
+            block.appendChild(templateName);
+        }
         return block;
     }
 
     function mapSelectionLabel() {
         var rooms = state.mapDraft && state.mapDraft.rooms;
         var room = rooms && state.mapSelection != null ? rooms[state.mapSelection] : null;
-        if (!room) return '—';
+        if (!room) return '\u2014';
         var kind = room.kind || 'room';
         if (kind === 'wall') return t('mapWall');
         if (kind === 'door') return t('mapDoor');
         if (kind === 'window') return t('mapWindow');
+        if (kind === 'column') return room.name || t('mapColumn');
+        if (kind === 'stair') return room.name || t('mapStair');
+        if (kind === 'desk') return room.name || t('mapDesk');
+        if (kind === 'table') return room.name || t('mapTable');
+        if (kind === 'chair') return room.name || t('mapChair');
+        if (kind === 'cabinet') return room.name || t('mapCabinet');
+        if (kind === 'sofa') return room.name || t('mapSofa');
+        if (kind === 'seat') return room.name || t('mapSeat');
+        if (kind === 'pedestal') return room.name || t('mapPedestal');
+        if (kind === 'bed') return room.name || t('mapBed');
+        if (kind === 'plant') return room.name || t('mapPlant');
+        if (kind === 'bath') return room.name || t('mapBath');
+        if (kind === 'toilet') return room.name || t('mapToilet');
+        if (kind === 'sink') return room.name || t('mapSink');
+        if (kind === 'stove') return room.name || t('mapStove');
+        if (kind === 'rug') return room.name || t('mapRug');
+        if (kind === 'partition') return t('mapPartition');
+        if (isRouteKind(kind)) return mapLayerLabel(kind);
+        if (kind === 'arc') return t('mapArc');
+        if (kind === 'dim') return t('mapDim');
+        if (kind === 'text') return room.name || t('mapText');
         return room.name || t('mapRoom');
+    }
+
+    function paintPreviewBox(svg, shape) {
+        var node = svg.querySelector('#asset-tree-room-preview');
+        var aim = svg.querySelector('#asset-tree-aim');
+        if (aim && aim.parentNode) aim.parentNode.removeChild(aim);
+        if (!shape) {
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+            return;
+        }
+        if (!node || node.tagName.toLowerCase() !== 'g') {
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+            node = svgEl('g');
+            node.id = 'asset-tree-room-preview';
+            node.setAttribute('pointer-events', 'none');
+            svg.appendChild(node);
+        }
+        while (node.firstChild) node.removeChild(node.firstChild);
+        if (isRouteKind(shape.kind)) {
+            var routeEnds = segmentEnds(shape);
+            var routeLine = svgEl('line');
+            routeLine.setAttribute('x1', String(routeEnds[0].x));
+            routeLine.setAttribute('y1', String(routeEnds[0].y));
+            routeLine.setAttribute('x2', String(routeEnds[1].x));
+            routeLine.setAttribute('y2', String(routeEnds[1].y));
+            routeLine.setAttribute('stroke', routeColor(shape.kind));
+            routeLine.setAttribute('stroke-width', '4');
+            routeLine.setAttribute('stroke-linecap', 'round');
+            routeLine.setAttribute('stroke-dasharray', '8 6');
+            routeLine.setAttribute('class', 'asset-tree-route');
+            node.appendChild(routeLine);
+            var routeDot = svgEl('circle');
+            routeDot.setAttribute('cx', String(routeEnds[1].x));
+            routeDot.setAttribute('cy', String(routeEnds[1].y));
+            routeDot.setAttribute('r', '5');
+            routeDot.setAttribute('fill', routeColor(shape.kind));
+            node.appendChild(routeDot);
+            var routeLabel = svgEl('text');
+            var routeDx = routeEnds[1].x - routeEnds[0].x;
+            var routeDy = routeEnds[1].y - routeEnds[0].y;
+            var routeLen = Math.sqrt(routeDx * routeDx + routeDy * routeDy) || 1;
+            routeLabel.setAttribute('class', 'asset-tree-rubber-label');
+            routeLabel.setAttribute('x', String((routeEnds[0].x + routeEnds[1].x) / 2));
+            routeLabel.setAttribute('y', String((routeEnds[0].y + routeEnds[1].y) / 2 - 10));
+            routeLabel.textContent = Math.round(normalizeAngle(Math.atan2(routeDy, routeDx) * 180 / Math.PI)) + '\u00b0  ' + Math.round(routeLen) + ' ' + t('mapCm');
+            node.appendChild(routeLabel);
+            return;
+        }
+        if (isThinKind(shape.kind)) {
+            var ends = segmentEnds(shape);
+            var dx = ends[1].x - ends[0].x;
+            var dy = ends[1].y - ends[0].y;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var thick = shape.w >= shape.h ? shape.h : shape.w;
+            var nx = -dy / len * thick / 2;
+            var ny = dx / len * thick / 2;
+            function rubberLine(x1, y1, x2, y2, edge) {
+                var line = svgEl('line');
+                line.setAttribute('x1', String(x1));
+                line.setAttribute('y1', String(y1));
+                line.setAttribute('x2', String(x2));
+                line.setAttribute('y2', String(y2));
+                line.setAttribute('class', 'asset-tree-rubber' + (edge ? ' is-edge' : ''));
+                node.appendChild(line);
+            }
+            rubberLine(ends[0].x, ends[0].y, ends[1].x, ends[1].y, false);
+            rubberLine(ends[0].x + nx, ends[0].y + ny, ends[1].x + nx, ends[1].y + ny, true);
+            rubberLine(ends[0].x - nx, ends[0].y - ny, ends[1].x - nx, ends[1].y - ny, true);
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(ends[1].x));
+            dot.setAttribute('cy', String(ends[1].y));
+            dot.setAttribute('r', '5');
+            dot.setAttribute('class', 'asset-tree-anchor');
+            node.appendChild(dot);
+            var label = svgEl('text');
+            var deg = Math.round(normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI));
+            label.setAttribute('class', 'asset-tree-rubber-label');
+            label.setAttribute('x', String((ends[0].x + ends[1].x) / 2));
+            label.setAttribute('y', String((ends[0].y + ends[1].y) / 2 - 10));
+            label.textContent = deg + '\u00b0  ' + Math.round(len) + ' ' + t('mapCm');
+            node.appendChild(label);
+            return;
+        }
+        var rect = svgEl('rect');
+        rect.setAttribute('class', 'asset-tree-rubber is-box');
+        rect.setAttribute('x', String(shape.x));
+        rect.setAttribute('y', String(shape.y));
+        rect.setAttribute('width', String(shape.w));
+        rect.setAttribute('height', String(shape.h));
+        var angle = normalizeAngle(shape.angle);
+        if (angle) rect.setAttribute('transform', 'rotate(' + angle + ' ' + (shape.x + shape.w / 2) + ' ' + (shape.y + shape.h / 2) + ')');
+        node.appendChild(rect);
     }
 
     function paintRoomPreview(svg) {
         var drag = state.mapDrag;
-        var node = svg.querySelector('#asset-tree-room-preview');
-        if (!drag || drag.kind === 'move' || drag.kind === 'pin') {
-            if (node && node.parentNode) node.parentNode.removeChild(node);
+        if (!drag || drag.kind === 'move' || drag.kind === 'pin' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'pan' || drag.kind === 'end') {
+            paintPreviewBox(svg, null);
             return;
         }
-        if (!node) {
-            node = svgEl('rect');
-            node.id = 'asset-tree-room-preview';
-            svg.appendChild(node);
-        }
-        var x = Math.min(drag.x0, drag.x1);
-        var y = Math.min(drag.y0, drag.y1);
-        node.setAttribute('x', String(Math.round(x)));
-        node.setAttribute('y', String(Math.round(y)));
-        node.setAttribute('width', String(Math.max(1, Math.round(Math.abs(drag.x1 - drag.x0)))));
-        node.setAttribute('height', String(Math.max(1, Math.round(Math.abs(drag.y1 - drag.y0)))));
+        var previewKind = drag.kind === 'room' ? 'wall' : drag.kind;
+        paintPreviewBox(svg, shapeFromDrag(previewKind, drag.x0, drag.y0, drag.x1, drag.y1, drag.loose));
     }
 
-    function shapeFromDrag(tool, x0, y0, x1, y1) {
-        x0 = snapCoord(x0);
-        y0 = snapCoord(y0);
-        x1 = snapCoord(x1);
-        y1 = snapCoord(y1);
+    function shapeFromDrag(tool, x0, y0, x1, y1, loose) {
+        if (!loose) {
+            x0 = snapCoord(x0);
+            y0 = snapCoord(y0);
+            x1 = snapCoord(x1);
+            y1 = snapCoord(y1);
+        }
+        var thin = isThinKind(tool);
+        if (thin) {
+            var dx = x1 - x0;
+            var dy = y1 - y0;
+            var length = Math.sqrt(dx * dx + dy * dy);
+            var minThin = roomMin(tool);
+            if (length < Math.max(minThin, 8)) return null;
+            var thick = isRouteKind(tool) ? 6 : (tool === 'partition' ? 6 : (tool === 'wall' ? 18 : (tool === 'dim' ? 8 : 10)));
+            var w = Math.max(minThin, Math.round(length));
+            var h = thick;
+            var mx = (x0 + x1) / 2;
+            var my = (y0 + y1) / 2;
+            var deg = Math.atan2(dy, dx) * 180 / Math.PI;
+            return clampRoom({
+                kind: tool,
+                name: '',
+                angle: loose ? normalizeAngle(deg) : snapAngle(deg),
+                x: mx - w / 2,
+                y: my - h / 2,
+                w: w,
+                h: h
+            });
+        }
         var x = Math.min(x0, x1);
         var y = Math.min(y0, y1);
-        var w = Math.abs(x1 - x0);
-        var h = Math.abs(y1 - y0);
-        if (tool === 'wall' || tool === 'door' || tool === 'window') {
-            var thick = tool === 'wall' ? 12 : 16;
-            if (w >= h) h = thick;
-            else w = thick;
+        var width = Math.abs(x1 - x0);
+        var height = Math.abs(y1 - y0);
+        if (tool === 'column') {
+            var side = Math.max(width, height);
+            width = side;
+            height = side;
         }
-        if (w < 6 || h < 6) return null;
-        if (tool === 'room' && (w < 36 || h < 36)) return null;
-        return clampRoom({ kind: tool, name: tool === 'room' ? t('mapRoom') : '', x: x, y: y, w: w, h: h });
+        var min = roomMin(tool);
+        if (width < min || height < min) return null;
+        var label = '';
+        if (tool === 'room') label = t('mapRoom');
+        else if (tool === 'stair') label = t('mapStair');
+        else if (tool === 'column') label = t('mapColumn');
+        else if (tool === 'desk') label = t('mapDesk');
+        return clampRoom({ kind: tool, name: label, angle: 0, x: x, y: y, w: width, h: height });
     }
 
     function moneyInput(value) {
-        if (value == null || value === '') return '0.00';
-        var text = String(value);
-        if (text.indexOf('.') < 0) return text + '.00';
+        var text = value == null || value === '' ? '0' : String(value).replace(/\s/g, '').replace(',', '.');
+        if (!/^\d+(\.\d+)?$/.test(text)) text = '0';
+        var parts = text.split('.');
+        text = parts[0] + '.' + ((parts[1] || '') + '00').slice(0, 2);
+        if (String(state.locale || 'ru').toLowerCase().indexOf('en') !== 0) text = text.replace('.', ',');
         return text;
+    }
+
+    function moneyWire(value) {
+        return String(value || '').replace(/\s/g, '').replace(',', '.');
+    }
+
+    function currencyMark(code) {
+        if (code === 'USD') return '$';
+        if (code === 'EUR') return '\u20AC';
+        return '\u20BD';
     }
 
     function lifeBlank(life) {
@@ -13116,11 +23759,10 @@
 
     function lifeStepper(life) {
         var row = el('ol', 'asset-tree-steps');
-        lifeSteps(life).forEach(function (step, index) {
-            if (index) row.appendChild(el('li', 'asset-tree-step-line' + (step.on ? ' is-on' : ''), ''));
+        lifeSteps(life).forEach(function (step) {
             var item = el('li', 'asset-tree-step' + (step.on ? ' is-on' : ''));
             item.appendChild(el('span', 'asset-tree-step-dot', ''));
-            item.appendChild(el('span', null, t(step.key)));
+            item.appendChild(el('span', 'asset-tree-step-label', t(step.key)));
             row.appendChild(item);
         });
         return row;
@@ -13143,54 +23785,72 @@
         });
     }
 
+    function lifeModule(asset, inner) {
+        var block = moduleBlock(t('lifeTitle'), inner, false);
+        block.classList.add('asset-tree-life-module');
+        var title = block.querySelector('.asset-tree-module-head > span:last-child');
+        if (title) {
+            title.classList.add('asset-tree-life-heading');
+            title.appendChild(stageMark('beta'));
+        }
+        return block;
+    }
+
     function lifeBlock(asset) {
-        var host = el('section', 'asset-tree-life-block');
-        var head = el('h3', null, t('lifeTitle'));
-        head.appendChild(el('span', 'asset-tree-beta', t('modulesBeta')));
-        host.appendChild(head);
-        if (state.life[asset.id]) host.appendChild(lifeBody(asset, state.life[asset.id]));
-        else if (state.lifeFailed[asset.id]) {
-            host.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
-            host.appendChild(button(t('retry'), 'asset-tree-btn', function () {
+        if (state.life[asset.id]) return lifeModule(asset, lifeBody(asset, state.life[asset.id]));
+        var inner = el('div', 'asset-tree-life');
+        if (state.lifeFailed[asset.id]) {
+            inner.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
+            inner.appendChild(button(t('retry'), 'asset-tree-btn', function () {
                 state.lifeFailed[asset.id] = false;
                 state.lifeLoading[asset.id] = false;
                 loadLife(asset.id);
             }));
         } else {
-            host.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            inner.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadLife(asset.id);
         }
-        return host;
+        return lifeModule(asset, inner);
+    }
+
+    function lifeWide(field) {
+        field.classList.add('is-wide');
+        return field;
     }
 
     function lifeBody(asset, life) {
         var body = el('div', 'asset-tree-life');
-        body.appendChild(lifeStepper(life));
         var editingLife = !!(state.lifeEditing[asset.id] && life.writeoffState !== 'approved');
-        if (editingLife) body.appendChild(lifeForm(asset, life));
-        else if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
+        if (editingLife) {
+            body.appendChild(lifeForm(asset, life));
+            return body;
+        }
+        body.appendChild(lifeStepper(life));
+        if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
         else {
             var facts = el('div', 'asset-tree-life-facts');
-            if (life.price) facts.appendChild(el('span', null, t('lifePrice') + ': ' + life.price + ' ' + (life.currency || '')));
-            if (life.monthly) facts.appendChild(el('span', null, t('lifeMonthly') + ': ' + life.monthly));
-            if (life.book) facts.appendChild(el('span', null, t('lifeBook') + ': ' + life.book));
+            if (life.price) facts.appendChild(el('span', null, t('lifePrice') + ': ' + moneyInput(life.price) + ' ' + currencyMark(life.currency || 'RUB')));
+            if (life.monthly) facts.appendChild(el('span', null, t('lifeMonthly') + ': ' + moneyInput(life.monthly)));
+            if (life.book) facts.appendChild(el('span', null, t('lifeBook') + ': ' + moneyInput(life.book)));
             if (life.warrantyUntil) facts.appendChild(el('span', null, life.warrantyActive ? t('lifeWarrantyOn') : t('lifeWarrantyOff')));
             body.appendChild(facts);
         }
-        if (life.writeoffState === 'rejected') body.appendChild(el('p', 'asset-tree-life-state', t('lifeRejected')));
-        if (mayEdit(asset) || life.writeoffState) body.appendChild(lifeApprovalBlock(asset, life));
-        var actions = el('div', 'asset-tree-inline-actions');
-        if (!editingLife && mayEdit(asset) && life.writeoffState !== 'approved' && life.writeoffState !== 'pending') {
+        if (life.writeoffState === 'pending') {
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifePending') + (life.approverName ? ' · ' + life.approverName : '')));
+        } else if (life.writeoffState === 'approved') {
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifeApproved') + (life.approverName ? ' · ' + life.approverName : '')));
+        } else if (life.writeoffState === 'rejected') {
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifeRejected')));
+        }
+        var actions = el('div', 'asset-tree-life-actions');
+        if (mayEdit(asset) && life.writeoffState !== 'approved' && life.writeoffState !== 'pending') {
             if (moduleSetup().lifeApproval) {
                 actions.appendChild(button(t('lifeAsk'), 'asset-tree-btn', function () { openWriteoffDialog(asset, life); }));
             } else {
                 actions.appendChild(button(t('lifeWriteoffNow'), 'asset-tree-btn', function () { openWriteoffDialog(asset, life, true); }));
             }
-            actions.appendChild(button(t('lifeFill'), 'asset-tree-btn', function () {
-                state.lifeEditing[asset.id] = true;
-                showDetail(state.detail || asset, false);
-            }));
-        } else if (!editingLife && mayEdit(asset) && life.writeoffState !== 'approved') {
+        }
+        if (mayEdit(asset) && life.writeoffState !== 'approved') {
             actions.appendChild(button(t('lifeFill'), 'asset-tree-btn', function () {
                 state.lifeEditing[asset.id] = true;
                 showDetail(state.detail || asset, false);
@@ -13200,14 +23860,15 @@
             actions.appendChild(button(t('lifeApprove'), 'asset-tree-btn primary', function () { decideWriteoff(asset, true); }));
             actions.appendChild(button(t('lifeReject'), 'asset-tree-btn', function () { decideWriteoff(asset, false); }));
         }
-        body.appendChild(actions);
+        if (actions.childNodes.length) body.appendChild(actions);
         return body;
     }
 
     function lifeForm(asset, life) {
         var form = el('form', 'asset-tree-life-form');
         form.addEventListener('submit', function (event) { event.preventDefault(); });
-        form.appendChild(el('h4', null, t('lifeSectionBuy')));
+        var buyPanel = el('section', 'asset-tree-life-panel');
+        buyPanel.appendChild(el('h4', null, t('lifeSectionBuy')));
         var buy = el('div', 'asset-tree-life-grid');
         var purchased = document.createElement('input');
         purchased.type = 'date';
@@ -13222,17 +23883,19 @@
         ['RUB', 'USD', 'EUR'].forEach(function (code) {
             var option = document.createElement('option');
             option.value = code;
-            option.textContent = code;
+            option.textContent = currencyMark(code);
             currency.appendChild(option);
         });
         currency.value = lifeBlank(life) ? (moduleSetup().lifeCurrency || 'RUB') : (life.currency || moduleSetup().lifeCurrency || 'RUB');
         buy.appendChild(planField(t('lifePurchase'), purchased));
         buy.appendChild(planField(t('lifeSupplier'), supplier));
-        buy.appendChild(planField(t('lifeDocument'), documentNo));
+        buy.appendChild(lifeWide(planField(t('lifeDocument'), documentNo)));
         buy.appendChild(planField(t('lifePrice'), price));
         buy.appendChild(planField(t('lifeCurrency'), currency));
-        form.appendChild(buy);
-        form.appendChild(el('h4', null, t('lifeSectionUse')));
+        buyPanel.appendChild(buy);
+        form.appendChild(buyPanel);
+        var usePanel = el('section', 'asset-tree-life-panel');
+        usePanel.appendChild(el('h4', null, t('lifeSectionUse')));
         var use = el('div', 'asset-tree-life-grid');
         var commissioned = document.createElement('input');
         commissioned.type = 'date';
@@ -13244,15 +23907,17 @@
         service.value = life.warrantyService || '';
         use.appendChild(planField(t('lifeCommissioned'), commissioned));
         use.appendChild(planField(t('lifeWarranty'), warranty));
-        use.appendChild(planField(t('lifeWarrantyService'), service));
-        form.appendChild(use);
-        form.appendChild(el('h4', null, t('lifeSectionMethod')));
-        var method = el('div', 'asset-tree-life-grid');
+        use.appendChild(lifeWide(planField(t('lifeWarrantyService'), service)));
+        usePanel.appendChild(use);
+        form.appendChild(usePanel);
+        var methodPanel = el('section', 'asset-tree-life-panel');
+        methodPanel.appendChild(el('h4', null, t('lifeSectionMethod')));
+        var method = el('div', 'asset-tree-life-grid is-three');
         var months = document.createElement('input');
         months.type = 'number';
         months.min = '0';
         months.max = '600';
-        months.value = life.lifeMonths ? String(life.lifeMonths) : String(moduleSetup().lifeMonths || 0);
+        months.value = String(life.lifeMonths || moduleSetup().lifeMonths || 60);
         var methodSelect = document.createElement('select');
         var linear = document.createElement('option');
         linear.value = 'linear';
@@ -13263,20 +23928,21 @@
         method.appendChild(planField(t('lifeMonths'), months));
         method.appendChild(planField(t('lifeMethod'), methodSelect));
         method.appendChild(planField(t('lifeResidual'), residual));
-        form.appendChild(method);
+        methodPanel.appendChild(method);
+        form.appendChild(methodPanel);
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
             ajax('PUT', '/assets/' + asset.id + '/lifecycle', {
                 purchased: purchased.value,
                 supplier: supplier.value,
                 document: documentNo.value,
-                price: price.value,
+                price: moneyWire(price.value),
                 currency: currency.value,
                 commissioned: commissioned.value,
                 warrantyUntil: warranty.value,
                 warrantyService: service.value,
                 lifeMonths: parseInt(months.value, 10) || 0,
-                residual: residual.value
+                residual: moneyWire(residual.value)
             }, function (status, payload) {
                 if (status >= 200 && status < 300 && payload) {
                     state.life[asset.id] = payload;
@@ -13293,80 +23959,6 @@
         return form;
     }
 
-    function lifePayload(life, approverKey) {
-        return {
-            purchased: life.purchased || '',
-            supplier: life.supplier || '',
-            document: life.document || '',
-            price: life.price || '0',
-            currency: lifeBlank(life) ? (moduleSetup().lifeCurrency || life.currency || 'RUB') : (life.currency || moduleSetup().lifeCurrency || 'RUB'),
-            commissioned: life.commissioned || '',
-            warrantyUntil: life.warrantyUntil || '',
-            warrantyService: life.warrantyService || '',
-            lifeMonths: life.lifeMonths || moduleSetup().lifeMonths || 0,
-            residual: life.residual || '0',
-            approverKey: approverKey || ''
-        };
-    }
-
-    function saveLifeApprover(asset, life, key, name) {
-        ajax('PUT', '/assets/' + asset.id + '/lifecycle', lifePayload(life, key), function (status, payload) {
-            if (status >= 200 && status < 300 && payload) {
-                payload.approverName = name || payload.approverName;
-                state.life[asset.id] = payload;
-                showDetail(state.detail || asset, false);
-            } else notify((payload && payload.message) || t('errorTitle'));
-        });
-    }
-
-    function lifeApprovalBlock(asset, life) {
-        var block = el('section', 'asset-tree-approval');
-        block.appendChild(el('h4', null, t('lifeApproval')));
-        if (life.writeoffState === 'approved') {
-            block.appendChild(el('p', null, t('lifeApproved') + (life.approverName ? ' · ' + life.approverName : '')));
-            return block;
-        }
-        if (life.writeoffState === 'pending') {
-            block.appendChild(el('p', null, t('lifePending') + (life.approverName ? ' · ' + life.approverName : '')));
-            return block;
-        }
-        var chosenKey = life.approverKey || moduleSetup().lifeApprover || '';
-        var chosenName = life.approverName || (chosenKey && chosenKey === state.userKey ? (state.displayName || chosenKey) : chosenKey);
-        var chosen = el('div', 'asset-tree-userpick-name', chosenName || t('lifeApproverEmpty'));
-        var finder = document.createElement('input');
-        finder.type = 'search';
-        finder.placeholder = t('schedulesFindUser');
-        var hits = el('div', 'asset-tree-user-results');
-        var timer = null;
-        var seq = 0;
-        finder.addEventListener('input', function () {
-            clearTimeout(timer);
-            timer = setTimeout(function () {
-                var query = finder.value.trim();
-                var mark = ++seq;
-                hits.innerHTML = '';
-                if (query.length < 2) return;
-                ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                    if (mark !== seq) return;
-                    hits.innerHTML = '';
-                    (payload || []).forEach(function (user) {
-                        hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
-                            saveLifeApprover(asset, life, user.userKey, user.displayName);
-                        }));
-                    });
-                });
-            }, 200);
-        });
-        block.appendChild(el('span', null, t('lifeApprover')));
-        block.appendChild(button(t('schedulesMe'), 'asset-tree-btn slim', function () {
-            saveLifeApprover(asset, life, state.userKey || '', state.displayName || '');
-        }));
-        block.appendChild(chosen);
-        block.appendChild(finder);
-        block.appendChild(hits);
-        return block;
-    }
-
     function openWriteoffDialog(asset, life, direct) {
         var approverKey = life.approverKey || moduleSetup().lifeApprover || state.userKey || '';
         openModal(function (dialog) {
@@ -13375,44 +23967,66 @@
             var reason = document.createElement('textarea');
             reason.placeholder = t('lifeReason');
             reason.value = life.writeoffReason || '';
-            var chosen = el('div', 'asset-tree-userpick-name', life.approverName || (approverKey === state.userKey ? (state.displayName || '') : approverKey));
-            var finder = document.createElement('input');
-            finder.type = 'search';
-            finder.placeholder = t('schedulesFindUser');
-            var hits = el('div', 'asset-tree-user-results');
-            var timer = null;
-            var seq = 0;
-            finder.addEventListener('input', function () {
-                clearTimeout(timer);
-                timer = setTimeout(function () {
-                    var query = finder.value.trim();
-                    var mark = ++seq;
-                    hits.innerHTML = '';
-                    if (query.length < 2) return;
-                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                        if (mark !== seq) return;
-                        hits.innerHTML = '';
-                        (payload || []).forEach(function (user) {
-                            hits.appendChild(button(user.displayName, 'asset-tree-user-hit', function () {
-                                approverKey = user.userKey;
-                                chosen.textContent = user.displayName;
-                                hits.innerHTML = '';
-                            }));
-                        });
-                    });
-                }, 200);
-            });
             dialog.appendChild(planField(t('lifeReason'), reason));
-            var who = el('div', 'asset-tree-plan-field');
-            who.appendChild(el('span', null, t('lifeApprover')));
-            who.appendChild(button(t('schedulesMe'), 'asset-tree-btn slim', function () {
-                approverKey = state.userKey || '';
-                chosen.textContent = state.displayName || '';
-            }));
-            who.appendChild(chosen);
-            who.appendChild(finder);
-            who.appendChild(hits);
-            dialog.appendChild(who);
+            if (!direct) {
+                var knownName = life.approverName || (approverKey === state.userKey ? (state.displayName || '') : '');
+                var chosen = el('div', 'asset-tree-userpick-name is-empty', t('lifeApproverEmpty'));
+                var finder = document.createElement('input');
+                finder.type = 'search';
+                finder.placeholder = t('schedulesFindUser');
+                finder.setAttribute('aria-label', t('lifeApprover'));
+                var hits = el('div', 'asset-tree-user-results');
+                var timer = null;
+                var seq = 0;
+                function showApprover(name) {
+                    chosen.textContent = name || t('lifeApproverEmpty');
+                    if (name) chosen.classList.remove('is-empty');
+                    else chosen.classList.add('is-empty');
+                }
+                showApprover(knownName);
+                finder.addEventListener('input', function () {
+                    clearTimeout(timer);
+                    timer = setTimeout(function () {
+                        var query = finder.value.trim();
+                        var mark = ++seq;
+                        hits.innerHTML = '';
+                        if (query.length < 2) return;
+                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                            if (mark !== seq) return;
+                            hits.innerHTML = '';
+                            (payload || []).forEach(function (user) {
+                                var label = user.displayName || user.userKey;
+                                if (user.email) label += ' · ' + user.email;
+                                hits.appendChild(button(label, 'asset-tree-user-hit', function () {
+                                    approverKey = user.userKey;
+                                    showApprover(user.displayName || user.userKey);
+                                    hits.innerHTML = '';
+                                    finder.value = '';
+                                }));
+                            });
+                        });
+                    }, 200);
+                });
+                var who = el('div', 'asset-tree-approver-pick');
+                var head = el('div', 'asset-tree-approver-head');
+                head.appendChild(el('span', null, t('lifeApprover')));
+                head.appendChild(button(t('schedulesMe'), 'asset-tree-linkish', function () {
+                    approverKey = state.userKey || '';
+                    showApprover(state.displayName || '');
+                    hits.innerHTML = '';
+                    finder.value = '';
+                }));
+                who.appendChild(head);
+                who.appendChild(chosen);
+                who.appendChild(finder);
+                who.appendChild(hits);
+                dialog.appendChild(who);
+                if (approverKey && !knownName) {
+                    ajax('GET', '/users/' + encodeURIComponent(approverKey), null, function (status, user) {
+                        if (status === 200 && user && user.displayName) showApprover(user.displayName);
+                    });
+                }
+            }
             var actions = el('div', 'asset-tree-inline-actions');
             actions.appendChild(button(direct ? t('lifeWriteoffNow') : t('lifeAsk'), 'asset-tree-btn primary', function () {
                 var who = direct ? (state.userKey || '') : approverKey;
@@ -13690,7 +24304,7 @@
                 state.flowReady = true;
                 state.flowLoading = false;
                 if (!state.flowDraft) state.flowDraft = cloneBook(state.flowBook);
-                if (state.moduleDialog === 'portal') refreshModuleDialog();
+                refreshPortalSettings();
             }
             ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/flow-graph', null, function (status, payload) {
                 if (state.projectKey !== projectKey) return;
@@ -14130,7 +24744,7 @@
                     state.portalRules = [];
                     notify((payload && payload.message) || t('errorTitle'));
                 }
-                if (state.moduleDialog === 'portal') refreshModuleDialog();
+                refreshPortalSettings();
             });
             renderFlowSettings(layout);
             return;
@@ -14430,14 +25044,24 @@
         }
         state.grants.forEach(function (grant) {
             var row = el('div', 'asset-tree-grant');
-            row.setAttribute('data-name', grant.groupName || '');
+            var label = grantLabel(grant);
+            row.setAttribute('data-name', [label, grant.username, grant.groupName, grant.userKey].filter(Boolean).join(' '));
             var head = el('div', 'asset-tree-grant-head');
-            head.appendChild(el('strong', null, grant.groupName));
+            var title = el('span', 'asset-tree-grant-title');
+            title.appendChild(el('strong', null, label));
+            if (grant.userKey && grant.username && grant.username !== label) {
+                title.appendChild(el('span', null, grant.username));
+            }
+            head.appendChild(title);
+            head.appendChild(el('span', 'asset-tree-key', grant.userKey ? t('accessUser') : t('accessGroup')));
             head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/grants?group=' + encodeURIComponent(grant.groupName), null, function (status, payload) {
+                var suffix = grant.userKey
+                    ? '?user=' + encodeURIComponent(grant.userKey)
+                    : '?group=' + encodeURIComponent(grant.groupName || '');
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/grants' + suffix, null, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         state.grants = (state.grants || []).filter(function (item) {
-                            return item.groupName !== grant.groupName;
+                            return grantIdentity(item) !== grantIdentity(grant);
                         });
                         renderFrame();
                     } else {
@@ -14455,7 +25079,7 @@
                     renderFrame();
                     return;
                 }
-                postGrant(grant.groupName, caps, null);
+                postGrant(grant, caps, null);
             }));
             grantList.appendChild(row);
             grantRows.push(row);
@@ -14463,9 +25087,19 @@
         grantList.appendChild(grantEmpty);
         applyListFilter(state.grantQuery, grantRows, grantEmpty);
         var form = el('form', 'asset-tree-grant asset-tree-grant-add');
-        var groupInput = input('grant-group', '', false);
-        groupInput.placeholder = t('groupSearch');
-        form.appendChild(field(t('accessGroup'), groupInput, true));
+        var mode = 'group';
+        var pickedUser = null;
+        var kind = el('div', 'asset-tree-grant-kind');
+        var groupMode = button(t('accessGroup'), 'asset-tree-btn primary', function () { setMode('group'); });
+        var userMode = button(t('accessUser'), 'asset-tree-btn', function () { setMode('user'); });
+        kind.appendChild(groupMode);
+        kind.appendChild(userMode);
+        form.appendChild(kind);
+        var principalInput = input('grant-principal', '', false);
+        principalInput.placeholder = t('groupSearch');
+        var principalField = field(t('accessGroup'), principalInput, true);
+        var principalLabel = principalField.querySelector('span');
+        form.appendChild(principalField);
         var suggest = el('div', 'asset-tree-suggest');
         form.appendChild(suggest);
         var chosen = { view: true };
@@ -14496,39 +25130,97 @@
         var error = el('div', 'asset-tree-form-error');
         error.hidden = true;
         form.appendChild(error);
-        groupInput.addEventListener('input', function () {
-            var query = groupInput.value.trim();
+        var userTimer = null;
+        principalInput.addEventListener('input', function () {
+            pickedUser = null;
+            var query = principalInput.value.trim();
             suggest.innerHTML = '';
             if (!query) return;
+            if (mode === 'user') {
+                clearTimeout(userTimer);
+                userTimer = setTimeout(function () {
+                    if (principalInput.value.trim() !== query || query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mode !== 'user' || principalInput.value.trim() !== query) return;
+                        suggest.innerHTML = '';
+                        if (status !== 200) return;
+                        (payload || []).forEach(function (user) {
+                            if (!user || !user.userKey) return;
+                            var text = user.displayName || user.username || user.userKey;
+                            if (user.department) text += ' · ' + user.department;
+                            suggest.appendChild(button(text, 'asset-tree-btn', function () {
+                                principalInput.value = user.displayName || user.username || user.userKey;
+                                pickedUser = user;
+                                suggest.innerHTML = '';
+                            }));
+                        });
+                    });
+                }, 220);
+                return;
+            }
             ajax('GET', '/groups?q=' + encodeURIComponent(query), null, function (status, payload) {
-                if (groupInput.value.trim() !== query) return;
+                if (mode !== 'group' || principalInput.value.trim() !== query) return;
                 suggest.innerHTML = '';
                 (payload || []).forEach(function (item) {
                     var name = typeof item === 'string' ? item : (item.groupName || item.name || '');
                     if (!name) return;
                     suggest.appendChild(button(name, 'asset-tree-btn', function () {
-                        groupInput.value = name;
+                        principalInput.value = name;
                         suggest.innerHTML = '';
                     }));
                 });
             });
         });
-        form.appendChild(button(t('accessAdd'), 'asset-tree-btn primary', function () {
-            var groupName = groupInput.value.trim();
+        var addButton = button(t('accessAdd'), 'asset-tree-btn primary', function () {
+            var caps = capsJoined(CAP_KEYS.filter(function (key) { return chosen[key]; }));
+            if (mode === 'user') {
+                var userKey = pickedUser && pickedUser.userKey ? pickedUser.userKey : principalInput.value.trim();
+                if (!userKey) {
+                    error.hidden = false;
+                    error.textContent = t('userSearch');
+                    return;
+                }
+                if (!caps) {
+                    error.hidden = false;
+                    error.textContent = t('capRequired');
+                    return;
+                }
+                error.hidden = true;
+                postGrant({ userKey: userKey }, caps, error);
+                return;
+            }
+            var groupName = principalInput.value.trim();
             if (!groupName) {
                 error.hidden = false;
                 error.textContent = t('groupSearch');
                 return;
             }
-            var caps = capsJoined(CAP_KEYS.filter(function (key) { return chosen[key]; }));
             if (!caps) {
                 error.hidden = false;
                 error.textContent = t('capRequired');
                 return;
             }
             error.hidden = true;
-            postGrant(groupName, caps, error);
-        }));
+            postGrant({ groupName: groupName }, caps, error);
+        });
+        function paintMode() {
+            groupMode.className = 'asset-tree-btn' + (mode === 'group' ? ' primary' : '');
+            userMode.className = 'asset-tree-btn' + (mode === 'user' ? ' primary' : '');
+            principalInput.placeholder = mode === 'user' ? t('userSearch') : t('groupSearch');
+            if (principalLabel) principalLabel.textContent = mode === 'user' ? t('accessUser') : t('accessGroup');
+            addButton.textContent = mode === 'user' ? t('accessAddUser') : t('accessAdd');
+        }
+        function setMode(next) {
+            if (mode === next) return;
+            mode = next;
+            pickedUser = null;
+            principalInput.value = '';
+            suggest.innerHTML = '';
+            error.hidden = true;
+            paintMode();
+        }
+        paintMode();
+        form.appendChild(addButton);
         form.addEventListener('submit', function (event) {
             event.preventDefault();
         });
@@ -14654,13 +25346,14 @@
         return svg;
     }
 
-    function donutChart(rows) {
+    function donutChart(rows, hideTotal) {
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', '0 0 120 120');
         svg.setAttribute('class', 'asset-tree-donut');
         svg.setAttribute('role', 'img');
         var total = 0;
         rows.forEach(function (row) { total += row.count; });
+        if (!total) return svg;
         if (rows.length === 1) {
             var ring = svgEl('circle');
             ring.setAttribute('cx', '60');
@@ -14671,18 +25364,33 @@
             ring.setAttribute('stroke-width', '14');
             bindSlice(ring, rows[0]);
             svg.appendChild(ring);
-            var only = svgEl('text');
-            only.setAttribute('x', '60');
-            only.setAttribute('y', '64');
-            only.setAttribute('text-anchor', 'middle');
-            only.setAttribute('class', 'asset-tree-chart-value');
-            only.textContent = String(total);
-            svg.appendChild(only);
+            if (!hideTotal) {
+                var only = svgEl('text');
+                only.setAttribute('x', '60');
+                only.setAttribute('y', '64');
+                only.setAttribute('text-anchor', 'middle');
+                only.setAttribute('class', 'asset-tree-chart-value');
+                only.textContent = String(total);
+                svg.appendChild(only);
+            }
             return svg;
         }
         var angle = -Math.PI / 2;
         rows.forEach(function (row) {
             var slice = (row.count / total) * Math.PI * 2;
+            if (slice >= Math.PI * 2 - 0.0001) {
+                var full = svgEl('circle');
+                full.setAttribute('cx', '60');
+                full.setAttribute('cy', '60');
+                full.setAttribute('r', '35');
+                full.setAttribute('fill', 'none');
+                full.setAttribute('stroke', row.color || '#0052CC');
+                full.setAttribute('stroke-width', '14');
+                bindSlice(full, row);
+                svg.appendChild(full);
+                angle += slice;
+                return;
+            }
             var path = svgEl('path');
             path.setAttribute('d', donutSlice(60, 60, 42, 28, angle, angle + slice));
             path.setAttribute('fill', row.color || '#0052CC');
@@ -14690,13 +25398,15 @@
             svg.appendChild(path);
             angle += slice;
         });
-        var caption = svgEl('text');
-        caption.setAttribute('x', '60');
-        caption.setAttribute('y', '64');
-        caption.setAttribute('text-anchor', 'middle');
-        caption.setAttribute('class', 'asset-tree-chart-value');
-        caption.textContent = String(total);
-        svg.appendChild(caption);
+        if (!hideTotal) {
+            var caption = svgEl('text');
+            caption.setAttribute('x', '60');
+            caption.setAttribute('y', '64');
+            caption.setAttribute('text-anchor', 'middle');
+            caption.setAttribute('class', 'asset-tree-chart-value');
+            caption.textContent = String(total);
+            svg.appendChild(caption);
+        }
         return svg;
     }
 
@@ -14707,6 +25417,54 @@
         title.textContent = row.label + ' (' + row.count + ')';
         node.appendChild(title);
         node.addEventListener('click', function () { row.activate(); });
+    }
+
+    function reportPieChart(rows) {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 120 120');
+        svg.setAttribute('class', 'asset-tree-donut');
+        svg.setAttribute('role', 'img');
+        var total = 0;
+        rows.forEach(function (row) { total += row.count; });
+        if (!total) return svg;
+        var angle = -Math.PI / 2;
+        var drawn = 0;
+        rows.forEach(function (row) {
+            if (!row.count) return;
+            var slice = (row.count / total) * Math.PI * 2;
+            if (rows.length === 1 || slice >= Math.PI * 2 - 0.0001) {
+                var disk = svgEl('circle');
+                disk.setAttribute('cx', '60');
+                disk.setAttribute('cy', '60');
+                disk.setAttribute('r', '52');
+                disk.setAttribute('fill', row.color || '#0052CC');
+                bindSlice(disk, row);
+                svg.appendChild(disk);
+                drawn += 1;
+                return;
+            }
+            var path = svgEl('path');
+            path.setAttribute('d', pieSlice(60, 60, 52, angle, angle + slice));
+            path.setAttribute('fill', row.color || '#0052CC');
+            bindSlice(path, row);
+            svg.appendChild(path);
+            angle += slice;
+            drawn += 1;
+        });
+        if (!drawn) return svg;
+        return svg;
+    }
+
+    function pieSlice(cx, cy, radius, start, end) {
+        var large = end - start > Math.PI ? 1 : 0;
+        var x1 = cx + Math.cos(start) * radius;
+        var y1 = cy + Math.sin(start) * radius;
+        var x2 = cx + Math.cos(end) * radius;
+        var y2 = cy + Math.sin(end) * radius;
+        return 'M ' + cx + ' ' + cy
+            + ' L ' + x1 + ' ' + y1
+            + ' A ' + radius + ' ' + radius + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2
+            + ' Z';
     }
 
     function donutSlice(cx, cy, outer, inner, start, end) {
@@ -14745,6 +25503,7 @@
     }
 
     function boot() {
+        loadTreeSort();
         state.loading = true;
         state.error = null;
         renderFrame();
@@ -14767,6 +25526,7 @@
             state.locale = payload.locale || 'ru';
             state.userKey = payload.userKey || '';
             state.displayName = payload.displayName || '';
+            loadMinePrefs();
             chooseProject();
             if (state.view === 'mine') {
                 mount();
@@ -14818,6 +25578,7 @@
     }
 
     document.addEventListener('keydown', function (event) {
+        staffHotkeys(event);
         if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S')) {
             var form = document.getElementById('asset-detail-form');
             if (form && state.canEdit) {
@@ -14826,8 +25587,114 @@
             }
         }
         if (event.key === 'Escape') {
+            closeMapMenu();
             closeColorMenu();
             closeModal();
+        }
+        if (state.view === 'map' && state.mapEditing && state.mapDraft && !document.querySelector('.asset-tree-backdrop')) {
+            var tag = event.target && event.target.tagName;
+            if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+                if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === 'z' || event.key === 'Z')) {
+                    event.preventDefault();
+                    if (event.shiftKey) redoMap();
+                    else undoMap();
+                    return;
+                }
+                if ((event.ctrlKey || event.metaKey) && (event.key === 'y' || event.key === 'Y')) {
+                    event.preventDefault();
+                    redoMap();
+                    return;
+                }
+                if ((event.ctrlKey || event.metaKey) && (event.key === 'c' || event.key === 'C')) {
+                    event.preventDefault();
+                    copyMapSelection();
+                    return;
+                }
+                if ((event.ctrlKey || event.metaKey) && (event.key === 'v' || event.key === 'V')) {
+                    event.preventDefault();
+                    pasteMapClipboard(null, null);
+                    return;
+                }
+                if ((event.ctrlKey || event.metaKey) && (event.key === 'a' || event.key === 'A')) {
+                    event.preventDefault();
+                    var every = [];
+                    (state.mapDraft.rooms || []).forEach(function (item, at) {
+                        if ((item.kind || 'room') !== 'room' && shapeShown(item)) every.push(at);
+                    });
+                    state.mapSelection = every.length ? every[0] : null;
+                    state.mapGroup = every.slice(1);
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    renderFrame();
+                    return;
+                }
+                if (event.key === 'Escape' && (state.mapAnchor || state.mapArmId || state.mapAssetId || state.mapArc)) {
+                    event.preventDefault();
+                    state.mapAnchor = null;
+                    state.mapArmId = 0;
+                    state.mapAssetId = 0;
+                    state.mapArc = null;
+                    state.mapClickAt = 0;
+                    state.mapChainDoneAt = 0;
+                    renderFrame();
+                    return;
+                }
+                var rooms = state.mapDraft.rooms || [];
+                var room = state.mapSelection != null ? rooms[state.mapSelection] : null;
+                var step = state.mapStep || 8;
+                if (room && (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+                    event.preventDefault();
+                    rememberMap();
+                    var box = planSize(state.mapDraft);
+                    var dx = event.key === 'ArrowLeft' ? -step : (event.key === 'ArrowRight' ? step : 0);
+                    var dy = event.key === 'ArrowUp' ? -step : (event.key === 'ArrowDown' ? step : 0);
+                    var attached = isSegmentKind(room.kind) ? openingsOnWall(state.mapSelection) : null;
+                    if (room.kind === 'door' || room.kind === 'window') {
+                        var hit = nearestWall(room.x + room.w / 2 + dx, room.y + room.h / 2 + dy, 64);
+                        var seated = hit ? seatOpening(room.kind, hit.room, hit.t, room.w >= room.h ? room.w : room.h) : null;
+                        if (seated) {
+                            room.x = seated.x;
+                            room.y = seated.y;
+                            room.w = seated.w;
+                            room.h = seated.h;
+                            room.angle = seated.angle;
+                        } else {
+                            room.x = clampNum(room.x + dx, 0, box.w - room.w);
+                            room.y = clampNum(room.y + dy, 0, box.h - room.h);
+                        }
+                    } else {
+                        room.x = clampNum(room.x + dx, 0, box.w - room.w);
+                        room.y = clampNum(room.y + dy, 0, box.h - room.h);
+                        if (attached) reseatOpenings(null, state.mapSelection, attached);
+                    }
+                    state.mapDirty = true;
+                    renderFrame();
+                }
+                if (room && (event.key === 'Delete' || event.key === 'Backspace')) {
+                    event.preventDefault();
+                    removeMapSelection();
+                }
+            }
+        }
+        if (state.view === 'schedules' && rosterOn() && !document.querySelector('.asset-tree-backdrop')) {
+            var staffField = event.target && event.target.tagName;
+            if (staffField !== 'INPUT' && staffField !== 'TEXTAREA' && staffField !== 'SELECT') {
+                if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === 'a' || event.key === 'A')) {
+                    event.preventDefault();
+                    staffSelectAll();
+                    return;
+                }
+                if ((event.ctrlKey || event.metaKey) && (event.key === 'c' || event.key === 'C')) {
+                    event.preventDefault();
+                    staffCopySelection();
+                    return;
+                }
+                if ((event.ctrlKey || event.metaKey) && (event.key === 'v' || event.key === 'V')) {
+                    event.preventDefault();
+                    staffPasteSelection();
+                    return;
+                }
+            }
         }
     });
 

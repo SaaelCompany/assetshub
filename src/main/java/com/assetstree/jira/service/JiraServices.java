@@ -6,11 +6,32 @@ import org.osgi.framework.BundleContext;
 import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.ServiceReference;
 
-final class JiraServices {
+/**
+ * Looks up Active Objects for this plugin.
+ * The service is an OSGi {@link org.osgi.framework.ServiceFactory}: the instance
+ * is bound to the calling bundle. A lookup through Jira's own bundle does not
+ * see this plugin's entities.
+ */
+public final class JiraServices {
+    private static volatile ActiveObjects cached;
+
     private JiraServices() {
     }
 
-    static ActiveObjects activeObjects() {
+    public static ActiveObjects activeObjects() {
+        ActiveObjects current = cached;
+        if (current != null) {
+            return current;
+        }
+        synchronized (JiraServices.class) {
+            if (cached == null) {
+                cached = lookup();
+            }
+            return cached;
+        }
+    }
+
+    private static ActiveObjects lookup() {
         Bundle bundle = FrameworkUtil.getBundle(JiraServices.class);
         if (bundle == null) {
             throw new IllegalStateException("Asset Tree is not running as an OSGi bundle");
