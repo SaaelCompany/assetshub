@@ -370,12 +370,10 @@ public class AssetServiceImpl implements AssetService {
         Project project = requireReadableProject(user, projectKey);
         final String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         final String key = project.getKey();
-        final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
         AssetListDto list = ao().executeInTransaction(new TransactionCallback<AssetListDto>() {
             @Override
             public AssetListDto doInTransaction() {
                 AssetEntity[] rows = assetsIn(key);
-                applyDueFor(key, rows, notices);
                 Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
                 Map<String, String[]> holders = new HashMap<String, String[]>();
                 List<AssetEntity> matched = new ArrayList<AssetEntity>();
@@ -403,26 +401,22 @@ public class AssetServiceImpl implements AssetService {
                 return list;
             }
         });
-        dispatchNotices(notices);
         return list;
     }
 
     @Override
     public AssetDto getAsset(ApplicationUser user, int id) {
         requireUser(user);
-        final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
         AssetDto dto = ao().executeInTransaction(new TransactionCallback<AssetDto>() {
             @Override
             public AssetDto doInTransaction() {
                 AssetEntity entity = requireReadable(user, id);
                 String projectKey = entity.getProjectKey();
                 AssetEntity[] rows = assetsIn(projectKey);
-                applyDueFor(projectKey, rows, notices);
                 entity = requireReadable(user, id);
                 return toDto(entity, attributesFor(id), indexTypes(typeDtos(projectKey, rows)), indexAssets(rows), true);
             }
         });
-        dispatchNotices(notices);
         return dto;
     }
 
