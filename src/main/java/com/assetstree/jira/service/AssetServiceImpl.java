@@ -467,6 +467,19 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
+    private <T> T readRepairing(String label, TransactionCallback<T> load) {
+        try {
+            return ao().executeInTransaction(load);
+        } catch (AssetException ex) {
+            throw ex;
+        } catch (RuntimeException first) {
+            log.warn("{} failed", label, first);
+            SchemaReady.force();
+            SchemaReady.ensure(ao());
+            return ao().executeInTransaction(load);
+        }
+    }
+
     private UserPropertyManager userProperties() {
         UserPropertyManager current = userPropertyManagerRef;
         if (current == null) {
@@ -487,6 +500,7 @@ public class AssetServiceImpl implements AssetService {
         TransactionCallback<AssetListDto> load = new TransactionCallback<AssetListDto>() {
             @Override
             public AssetListDto doInTransaction() {
+                notices.clear();
                 AssetEntity[] rows = assetsIn(key);
                 applyDueFor(key, rows, notices);
                 Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
@@ -524,15 +538,10 @@ public class AssetServiceImpl implements AssetService {
         };
         AssetListDto list;
         try {
-            list = ao().executeInTransaction(load);
-        } catch (AssetException ex) {
-            throw ex;
+            list = readRepairing("Asset list " + key, load);
         } catch (RuntimeException ex) {
-            log.warn("Asset list failed for {}", key, ex);
             notices.clear();
-            SchemaReady.force();
-            SchemaReady.ensure(ao());
-            list = ao().executeInTransaction(load);
+            throw ex;
         }
         dispatchNotices(notices);
         return list;
@@ -3699,9 +3708,10 @@ public class AssetServiceImpl implements AssetService {
         }
         final String holder = userKey.trim();
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
-        List<AssetDto> result = ao().executeInTransaction(new TransactionCallback<List<AssetDto>>() {
+        List<AssetDto> result = readRepairing("My assets", new TransactionCallback<List<AssetDto>>() {
             @Override
             public List<AssetDto> doInTransaction() {
+                notices.clear();
                 List<AssetDto> found = new ArrayList<AssetDto>();
                 for (ProjectDto project : visibleProjects(user)) {
                     AssetEntity[] rows = assetsIn(project.getKey());
