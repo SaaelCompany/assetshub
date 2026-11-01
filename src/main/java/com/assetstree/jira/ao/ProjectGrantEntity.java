@@ -37,4 +37,22 @@ public interface ProjectGrantEntity extends Entity {
     String getCaps();
 
     void setCaps(String caps);
+
+    /** Comma-separated equipment type keys. Empty means every type. */
+    @StringLength(StringLength.UNLIMITED)
+    String getTypeScope();
+
+    void setTypeScope(String typeScope);
+
+    /** fieldKey:read or fieldKey:write. Empty means every field. */
+    @StringLength(StringLength.UNLIMITED)
+    String getFieldScope();
+
+    void setFieldScope(String fieldScope);
+
+    /** Name of a saved type schema. When set, it replaces the type list. */
+    @StringLength(80)
+    String getSchemaName();
+
+    void setSchemaName(String schemaName);
 }

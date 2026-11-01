@@ -451,7 +451,7 @@ def canonical_field_value(kind, options, raw):
                 kept.append(token)
         return "\n".join(kept) if kept else None
     return text
-CAP_ORDER = ["view", "places", "types", "object", "assets", "admin"]
+CAP_ORDER = ["view", "places", "types", "object", "assets", "admin", "reports", "map"]
 STATUS_KEY = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 
 PROJECTS = [{"key": "TEST", "name": "test"}, {"key": "STP", "name": "STP"}]
@@ -491,6 +491,7 @@ STATE = {
     "flows": {}, "flow_seq": 1, "flow_graphs": {},
     "comment_seq": 1, "file_seq": 1, "comments": {}, "files": {}, "share_seq": 1, "shares": {},
     "activity_seq": 1, "activities": {}, "statuses": {}, "grants": {},
+    "schemas": {}, "webhooks": {}, "exports": {}, "uploads": {},
     "plan_seq": 1, "plans": {}, "mails": [],
     "duty_seq": 1, "duties": {},
     "floor_seq": 1, "floors": {},
@@ -743,6 +744,9 @@ def project_rights():
         "canAssets": True,
         "canAdmin": True,
         "canArrange": True,
+        "canView": True,
+        "canReports": True,
+        "canMap": True,
     }
 
 
@@ -755,6 +759,10 @@ def caps_from_level(level):
         return "view,places,object"
     if level == "view":
         return "view"
+    if level == "reports":
+        return "reports"
+    if level == "map":
+        return "map"
     return ""
 
 
@@ -776,7 +784,7 @@ def normalize_caps(raw):
         chosen.add("assets")
     if "assets" in chosen:
         chosen.update(("places", "types", "object"))
-    if chosen - {"view"}:
+    if chosen & {"places", "types", "object", "assets", "admin"}:
         chosen.add("view")
     return ",".join(key for key in CAP_ORDER if key in chosen)
 
@@ -789,6 +797,12 @@ def level_of(caps):
         return "assets"
     if parts & {"places", "types", "object"}:
         return "edit"
+    if "view" in parts:
+        return "view"
+    if "reports" in parts:
+        return "reports"
+    if "map" in parts:
+        return "map"
     return "view"
 
 
@@ -3366,6 +3380,24 @@ def life_dto(asset_id):
             active = False
     approver = row.get("approverKey") or ""
     requester = row.get("requesterKey") or ""
+    replace_on = ""
+    months_left = 0
+    if purchased and months > 0:
+        try:
+            start = datetime.date.fromisoformat(purchased)
+            today = datetime.date.today()
+            elapsed = (today.year - start.year) * 12 + today.month - start.month
+            if today.day < start.day:
+                elapsed -= 1
+            elapsed = max(0, elapsed)
+            months_left = max(0, months - elapsed)
+            month_index = start.month - 1 + months
+            year = start.year + month_index // 12
+            month = month_index % 12 + 1
+            replace_on = datetime.date(year, month, min(start.day, 28)).isoformat()
+        except ValueError:
+            replace_on = ""
+            months_left = 0
     return {
         "assetId": asset_id,
         "purchased": purchased,
@@ -3388,6 +3420,8 @@ def life_dto(asset_id):
         "currency": row.get("currency") or "RUB",
         "commissioned": row.get("commissioned") or "",
         "warrantyService": row.get("warrantyService") or "",
+        "replaceOn": replace_on,
+        "monthsLeft": months_left,
     }
 
 
@@ -3811,11 +3845,8 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
                 detail += " " + shown["start"]
                 if shown.get("end"):
                     detail += "–" + shown["end"]
-            if len(lines) < 5000:
-                lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail})
-                line_keys.append(bucket)
-            else:
-                truncated = True
+            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail})
+            line_keys.append(bucket)
     rows = list(buckets.values())
     rank = {row["key"]: index for index, row in enumerate(rows)}
     paired = list(zip(lines, line_keys))
@@ -3980,11 +4011,8 @@ def report_view(project_key, report_key, text, query=None):
         slot["count"] += 1
         if money:
             slot["amount"] += book
-        if len(lines) < 5000:
-            lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
-            line_keys.append(bucket)
-        else:
-            capped = True
+        lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
+        line_keys.append(bucket)
     rows = list(buckets.values())
     if money:
         for row in rows:
@@ -5237,8 +5265,179 @@ def find_preview_place(project_key, path, index=None):
     return parent
 
 
+def forecast_rows(project_key, query):
+    raw = "12"
+    if query and query.get("within"):
+        raw = query.get("within")[0]
+    try:
+        window = int(raw)
+    except (TypeError, ValueError):
+        window = 12
+    if window <= 0:
+        window = 12
+    window = min(window, 120)
+    rows = []
+    for asset in project_assets(project_key):
+        if is_location_id(asset["id"]):
+            continue
+        life = life_dto(asset["id"])
+        if not life.get("replaceOn"):
+            continue
+        if int(life.get("monthsLeft") or 0) > window:
+            continue
+        rows.append({
+            "assetId": asset["id"],
+            "objectKey": asset.get("objectKey") or "",
+            "name": asset.get("name") or "",
+            "replaceOn": life.get("replaceOn") or "",
+            "monthsLeft": int(life.get("monthsLeft") or 0),
+            "book": life.get("book") or "",
+        })
+    rows.sort(key=lambda item: (item["replaceOn"], (item["name"] or "").lower()))
+    return rows
+
+
+def schema_route(project_key, schema_id, method, body, text):
+    if project_key not in {item["key"] for item in PROJECTS}:
+        return 404, {"message": text["asset-tree.error.project.notFound"]}
+    rows = STATE.setdefault("schemas", {}).setdefault(project_key, [])
+    if method == "GET" and not schema_id:
+        return 200, list(rows)
+    if method == "POST":
+        name = ((body or {}).get("name") or "").strip()
+        if not name or len(name) > 80:
+            return 400, {"message": text.get("asset-tree.error.schema", "Schema")}
+        keys = (body or {}).get("typeKeys") or []
+        if isinstance(keys, str):
+            keys = [part.strip() for part in keys.split(",") if part.strip()]
+        current = next((item for item in rows if item.get("name") == name), None)
+        saved = {"id": current["id"] if current else STATE.get("seq", 1), "name": name, "typeKeys": list(keys)}
+        if current:
+            current.clear()
+            current.update(saved)
+        else:
+            STATE["seq"] = STATE.get("seq", 1) + 1
+            rows.append(saved)
+        return 200, saved
+    if method == "DELETE" and schema_id:
+        STATE["schemas"][project_key] = [item for item in rows if str(item.get("id")) != str(schema_id)]
+        return 204, None
+    return 404, {"message": text["asset-tree.error.notFound"]}
+
+
+def webhook_route(project_key, webhook_id, method, body, text):
+    if project_key not in {item["key"] for item in PROJECTS}:
+        return 404, {"message": text["asset-tree.error.project.notFound"]}
+    rows = STATE.setdefault("webhooks", {}).setdefault(project_key, [])
+    if method == "GET" and not webhook_id:
+        return 200, list(rows)
+    if method == "POST":
+        url = ((body or {}).get("url") or "").strip()
+        if not (url.startswith("http://") or url.startswith("https://")) or len(url) > 500:
+            return 400, {"message": text.get("asset-tree.error.webhook", "Webhook")}
+        saved = {
+            "id": STATE.get("seq", 1),
+            "url": url,
+            "secret": ((body or {}).get("secret") or "").strip()[:80],
+            "events": ((body or {}).get("events") or "").strip()[:255],
+            "enabled": (body or {}).get("enabled", True) is not False,
+        }
+        STATE["seq"] = STATE.get("seq", 1) + 1
+        rows.append(saved)
+        return 200, saved
+    if method == "DELETE" and webhook_id:
+        STATE["webhooks"][project_key] = [item for item in rows if str(item.get("id")) != str(webhook_id)]
+        return 204, None
+    return 404, {"message": text["asset-tree.error.notFound"]}
+
+
+def export_route(project_key, job_id, method, body, text):
+    if project_key not in {item["key"] for item in PROJECTS}:
+        return 404, {"message": text["asset-tree.error.project.notFound"]}
+    jobs = STATE.setdefault("exports", {})
+    if method == "POST":
+        kind = ((body or {}).get("kind") or "").strip()
+        if kind == "reports":
+            payload = reports_xlsx(project_key, text)
+            file_name = "reports-%s.xlsx" % project_key
+        elif kind == "equipment":
+            payload = equipment_xlsx(project_key, text, True)
+            file_name = "equipment-%s.xlsx" % project_key
+        else:
+            return 400, {"message": text.get("asset-tree.error.export", "Export")}
+        job_id = "job-%s" % STATE.get("seq", 1)
+        STATE["seq"] = STATE.get("seq", 1) + 1
+        jobs[job_id] = {
+            "id": job_id, "state": "done", "projectKey": project_key,
+            "body": payload, "fileName": file_name, "message": "",
+        }
+        return 200, {"id": job_id, "state": "done", "message": ""}
+    if method == "GET" and job_id:
+        job = jobs.get(job_id)
+        if not job or job.get("projectKey") != project_key:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        return 200, {"id": job_id, "state": job.get("state") or "done", "message": job.get("message") or ""}
+    return 404, {"message": text["asset-tree.error.notFound"]}
+
+
+def slice_pages(pages, body):
+    pages = pages or []
+    total = 0
+    for item in pages:
+        total += len(item[2] or [])
+    chunked = bool((body or {}).get("chunked"))
+    offset = int((body or {}).get("offset") or 0)
+    if offset < 0:
+        offset = 0
+    if not chunked:
+        return pages, total, total, True
+    seen = 0
+    taken = 0
+    sliced = []
+    for name, headers, records in pages:
+        chunk = []
+        for record in records or []:
+            if seen >= offset and taken < 400:
+                chunk.append(record)
+                taken += 1
+            seen += 1
+        if chunk:
+            sliced.append((name, headers, chunk))
+    nxt = offset + taken
+    return sliced, total, nxt, nxt >= total
+
+
+def annotate_import(result, pages, body):
+    _sliced, total, nxt, done = slice_pages(pages, body)
+    result = dict(result or {"created": 0, "updated": 0, "errors": []})
+    upload_id = str((body or {}).get("uploadId") or "")
+    if (body or {}).get("chunked") and not done and not upload_id:
+        upload_id = "up-%s" % STATE.get("seq", 1)
+        STATE["seq"] = STATE.get("seq", 1) + 1
+        STATE.setdefault("uploads", {})[upload_id] = pages
+    result["totalRows"] = total
+    result["nextOffset"] = nxt
+    result["done"] = done
+    result["uploadId"] = "" if done else upload_id
+    return result
+
+
 def import_request(project_key, body, text):
     body = body or {}
+    upload_id = str(body.get("uploadId") or "")
+    if upload_id and upload_id in STATE.get("uploads", {}):
+        pages = STATE["uploads"][upload_id]
+        sliced, total, _nxt, _done = slice_pages(pages, body)
+        if total > 20000:
+            message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "20000")
+            return {"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}], "done": True, "totalRows": total, "nextOffset": 0, "uploadId": ""}
+        if pages and pages[0][0]:
+            result = import_book(project_key, sliced, text)
+        else:
+            headers = sliced[0][1] if sliced else []
+            records = sliced[0][2] if sliced else []
+            result = import_rows(project_key, headers, records, text) if records else {"created": 0, "updated": 0, "errors": []}
+        return annotate_import(result, pages, body)
     content = body.get("content") or ""
     if content:
         try:
@@ -5256,12 +5455,23 @@ def import_request(project_key, body, text):
             except Exception:
                 message = text.get("asset-tree.error.import.workbook", "Workbook")
                 return {"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}]}
-            return import_book(project_key, pages, text)
+            sliced, total, _nxt, _done = slice_pages(pages, body)
+            if total > 20000:
+                message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "20000")
+                return {"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}], "done": True, "totalRows": total, "nextOffset": 0, "uploadId": ""}
+            return annotate_import(import_book(project_key, sliced, text), pages, body)
         source = data.decode("utf-8", "replace")
     else:
         source = body.get("csv") or ""
     headers, records = parse_sheet(source)
-    return import_rows(project_key, headers, records, text)
+    pages = [("", headers, records)]
+    sliced, total, _nxt, _done = slice_pages(pages, body)
+    if total > 20000:
+        message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "20000")
+        return {"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}], "done": True, "totalRows": total, "nextOffset": 0, "uploadId": ""}
+    used = sliced[0][2] if sliced else []
+    result = import_rows(project_key, headers, used, text) if used else {"created": 0, "updated": 0, "errors": []}
+    return annotate_import(result, pages, body)
 
 
 def import_equipment(project_key, source, text):
@@ -5274,8 +5484,8 @@ def import_book(project_key, pages, text):
     total = 0
     for _name, _headers, records in pages:
         total += len(records)
-    if total > 2000:
-        message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "2000")
+    if total > 20000:
+        message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "20000")
         return {"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}]}
     created = 0
     updated = 0
@@ -5370,8 +5580,8 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": text.get("asset-tree.error.import.header", "Header")}]})
     if not records:
         return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": text.get("asset-tree.error.import.empty", "Empty")}]})
-    if len(records) > 2000:
-        message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "2000")
+    if len(records) > 20000:
+        message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "20000")
         return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}]})
     types = [row for row in STATE["types"].values() if row["projectKey"] == project_key]
     statuses = status_dtos(project_key, text)
@@ -6145,6 +6355,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
                     "Content-Disposition": 'attachment; filename="equipment-%s.xlsx"' % project_key,
                 })
+            export_file = re.fullmatch(r"/projects/([A-Za-z0-9]+)/exports/([^/]+)/file", rest)
+            if method == "GET" and export_file:
+                job = STATE.get("exports", {}).get(export_file.group(2))
+                if not job or job.get("projectKey") != export_file.group(1):
+                    return self.respond(404, b'{"message":"missing"}', "application/json")
+                return self.respond(200, job.get("body") or b"", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
+                    "Content-Disposition": 'attachment; filename="%s"' % (job.get("fileName") or "export.xlsx"),
+                })
             if method == "GET" and re.fullmatch(r"/projects/[A-Za-z0-9]+/equipment\.csv", rest):
                 project_key = rest.split("/")[2]
                 body = equipment_csv(project_key, self.text()).encode("utf-8")
@@ -6735,6 +6953,21 @@ setTimeout(function () {
             if match.group(1) not in {item["key"] for item in PROJECTS}:
                 return 400, {"message": text["asset-tree.error.project.required"]}
             return bulk_apply(match.group(1), self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/lifecycle/forecast", path)
+        if match and method == "GET":
+            return 200, forecast_rows(match.group(1), query)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemas(?:/(\d+))?", path)
+        if match:
+            return schema_route(match.group(1), match.group(2), method, self.read_json() if method == "POST" else None, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/webhooks(?:/(\d+))?", path)
+        if match:
+            return webhook_route(match.group(1), match.group(2), method, self.read_json() if method == "POST" else None, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/exports(?:/([^/]+))?", path)
+        if match and "/file" not in path:
+            return export_route(match.group(1), match.group(2), method, self.read_json() if method == "POST" else None, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/(?:import|discovery)", path)
+        if match and method == "POST":
+            return 200, {"created": 0, "updated": 0, "errors": [], "done": True, "totalRows": 0, "nextOffset": 0, "uploadId": ""}
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/equipment", path)
         if match and method == "POST":
             if match.group(1) not in {item["key"] for item in PROJECTS}:
@@ -7394,6 +7627,9 @@ setTimeout(function () {
                 "displayName": person["displayName"],
                 "level": level_of(caps),
                 "caps": caps,
+                "typeScope": ((body or {}).get("typeScope") or "").strip(),
+                "fieldScope": ((body or {}).get("fieldScope") or "").strip(),
+                "schemaName": ((body or {}).get("schemaName") or "").strip(),
             }
             current = next((item for item in rows if item.get("userKey") == person["userKey"]), None)
             if current:
@@ -7407,7 +7643,12 @@ setTimeout(function () {
             return 201, saved
         if group_name not in GROUPS or not caps:
             return 400, {"message": text["asset-tree.error.group"]}
-        row = {"groupName": group_name, "level": level_of(caps), "caps": caps}
+        row = {
+            "groupName": group_name, "level": level_of(caps), "caps": caps,
+            "typeScope": ((body or {}).get("typeScope") or "").strip(),
+            "fieldScope": ((body or {}).get("fieldScope") or "").strip(),
+            "schemaName": ((body or {}).get("schemaName") or "").strip(),
+        }
         current = next((item for item in rows if not item.get("userKey") and item.get("groupName") == group_name), None)
         if current:
             current.clear()

@@ -100,4 +100,11 @@ public interface AssetEntity extends Entity {
     String getCardImage();
 
     void setCardImage(String cardImage);
+
+    /** Id from an external CMDB. Empty until a discovery import sets it. */
+    @Indexed
+    @StringLength(120)
+    String getExternalKey();
+
+    void setExternalKey(String externalKey);
 }

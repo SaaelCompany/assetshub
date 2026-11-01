@@ -26,6 +26,8 @@ public class LifecycleDto {
     private String currency;
     private String commissioned;
     private String warrantyService;
+    private String replaceOn;
+    private int monthsLeft;
 
     public int getAssetId() { return assetId; }
     public void setAssetId(int assetId) { this.assetId = assetId; }
@@ -69,4 +71,8 @@ public class LifecycleDto {
     public void setCommissioned(String commissioned) { this.commissioned = commissioned; }
     public String getWarrantyService() { return warrantyService; }
     public void setWarrantyService(String warrantyService) { this.warrantyService = warrantyService; }
+    public String getReplaceOn() { return replaceOn; }
+    public void setReplaceOn(String replaceOn) { this.replaceOn = replaceOn; }
+    public int getMonthsLeft() { return monthsLeft; }
+    public void setMonthsLeft(int monthsLeft) { this.monthsLeft = monthsLeft; }
 }

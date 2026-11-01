@@ -15,7 +15,11 @@ import com.assetstree.jira.dto.AssetTypeDto;
 import com.assetstree.jira.dto.CommentDto;
 import com.assetstree.jira.dto.FieldDto;
 import com.assetstree.jira.dto.FileDto;
+import com.assetstree.jira.dto.ExportJobDto;
+import com.assetstree.jira.dto.ForecastRowDto;
 import com.assetstree.jira.dto.GrantDto;
+import com.assetstree.jira.dto.SchemaDto;
+import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.InventoryDto;
@@ -38,7 +42,9 @@ import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkDraft;
 import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.model.ExportDraft;
 import com.assetstree.jira.model.ImportDraft;
+import com.assetstree.jira.model.JsonImportDraft;
 import com.assetstree.jira.dto.FlowRuleDto;
 import com.assetstree.jira.dto.IssueTypeDto;
 import com.assetstree.jira.dto.FlowBookDto;
@@ -284,4 +290,30 @@ public interface AssetService {
     LifecycleDto requestWriteoff(ApplicationUser user, int assetId, WriteoffDraft draft);
 
     LifecycleDto decideWriteoff(ApplicationUser user, int assetId, WriteoffDraft draft);
+
+    ImportResultDto importJson(ApplicationUser user, String projectKey, JsonImportDraft draft);
+
+    AssetDto patchByKey(ApplicationUser user, String projectKey, String objectKey, AssetDraft draft, boolean skipBlank);
+
+    List<SchemaDto> listSchemas(ApplicationUser user, String projectKey);
+
+    SchemaDto saveSchema(ApplicationUser user, String projectKey, SchemaDto draft);
+
+    void deleteSchema(ApplicationUser user, String projectKey, int schemaId);
+
+    List<WebhookDto> listWebhooks(ApplicationUser user, String projectKey);
+
+    WebhookDto saveWebhook(ApplicationUser user, String projectKey, WebhookDto draft);
+
+    void deleteWebhook(ApplicationUser user, String projectKey, int webhookId);
+
+    ExportJobDto startExport(ApplicationUser user, String projectKey, ExportDraft draft);
+
+    ExportJobDto exportStatus(ApplicationUser user, String projectKey, String jobId);
+
+    byte[] exportFile(ApplicationUser user, String projectKey, String jobId);
+
+    String exportFileName(ApplicationUser user, String projectKey, String jobId);
+
+    List<ForecastRowDto> forecast(ApplicationUser user, String projectKey, int within);
 }

@@ -15,6 +15,7 @@ public class AssetDraft {
     private String projectKey;
     private String custodianKey;
     private String issuedKey;
+    private String externalId;
     private List<AttributeDraft> attributes;
 
     public String getName() {
@@ -79,6 +80,14 @@ public class AssetDraft {
 
     public void setIssuedKey(String issuedKey) {
         this.issuedKey = issuedKey;
+    }
+
+    public String getExternalId() {
+        return externalId;
+    }
+
+    public void setExternalId(String externalId) {
+        this.externalId = externalId;
     }
 
     public List<AttributeDraft> getAttributes() {

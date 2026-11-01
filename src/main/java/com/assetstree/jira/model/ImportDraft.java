@@ -8,6 +8,10 @@ public class ImportDraft {
     private String csv;
     private String content;
     private String name;
+    private Integer offset;
+    private String uploadId;
+    private String idempotencyKey;
+    private Boolean chunked;
 
     public String getCsv() {
         return csv;
@@ -32,5 +36,38 @@ public class ImportDraft {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public Integer getOffset() {
+        return offset;
+    }
+
+    public void setOffset(Integer offset) {
+        this.offset = offset;
+    }
+
+    public String getUploadId() {
+        return uploadId;
+    }
+
+    public void setUploadId(String uploadId) {
+        this.uploadId = uploadId;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
+    }
+
+    /** When true, one request writes only a slice and returns an upload id. */
+    public Boolean getChunked() {
+        return chunked;
+    }
+
+    public void setChunked(Boolean chunked) {
+        this.chunked = chunked;
     }
 }

@@ -18,6 +18,10 @@ public final class GrantCaps {
     public static final String OBJECT = "object";
     public static final String ASSETS = "assets";
     public static final String ADMIN = "admin";
+    /** Opens reports and nothing else when it is the only kind. */
+    public static final String REPORTS = "reports";
+    /** Opens the floor plan and nothing else when it is the only kind. */
+    public static final String MAP = "map";
     public static final String ALL_PROJECTS = "*";
 
     public static final String CREATE = "create";
@@ -29,7 +33,7 @@ public final class GrantCaps {
     public static final String ACCESS = "access";
 
     private static final String[] ORDER = new String[] {
-            VIEW, PLACES, TYPES, OBJECT, ASSETS, ADMIN
+            VIEW, PLACES, TYPES, OBJECT, ASSETS, ADMIN, REPORTS, MAP
     };
 
     private GrantCaps() {
@@ -44,6 +48,12 @@ public final class GrantCaps {
         }
         if ("view".equals(level) || VIEW.equals(level)) {
             return VIEW;
+        }
+        if (REPORTS.equals(level)) {
+            return REPORTS;
+        }
+        if (MAP.equals(level)) {
+            return MAP;
         }
         return "";
     }
@@ -67,7 +77,8 @@ public final class GrantCaps {
             chosen.add(TYPES);
             chosen.add(OBJECT);
         }
-        if (chosen.size() > 1 || !chosen.contains(VIEW)) {
+        if (chosen.contains(PLACES) || chosen.contains(TYPES) || chosen.contains(OBJECT)
+                || chosen.contains(ASSETS) || chosen.contains(ADMIN)) {
             chosen.add(VIEW);
         }
         StringBuilder builder = new StringBuilder();
@@ -97,6 +108,12 @@ public final class GrantCaps {
         if (CREATE.equals(cap) || EDIT.equals(cap) || MOVE.equals(cap) || REMOVE.equals(cap) || COMMENT.equals(cap)) {
             return contains(normalized, PLACES) || contains(normalized, OBJECT);
         }
+        if (REPORTS.equals(cap)) {
+            return contains(normalized, REPORTS) || contains(normalized, VIEW);
+        }
+        if (MAP.equals(cap)) {
+            return contains(normalized, MAP) || contains(normalized, VIEW);
+        }
         return contains(normalized, cap);
     }
 
@@ -110,12 +127,22 @@ public final class GrantCaps {
         if (has(caps, PLACES) || has(caps, TYPES) || has(caps, OBJECT)) {
             return "edit";
         }
+        if (contains(normalize(caps), VIEW)) {
+            return VIEW;
+        }
+        if (contains(normalize(caps), REPORTS)) {
+            return REPORTS;
+        }
+        if (contains(normalize(caps), MAP)) {
+            return MAP;
+        }
         return VIEW;
     }
 
     private static void addToken(Set<String> chosen, String token) {
         if (VIEW.equals(token) || PLACES.equals(token) || TYPES.equals(token)
-                || OBJECT.equals(token) || ASSETS.equals(token) || ADMIN.equals(token)) {
+                || OBJECT.equals(token) || ASSETS.equals(token) || ADMIN.equals(token)
+                || REPORTS.equals(token) || MAP.equals(token)) {
             chosen.add(token);
             return;
         }
