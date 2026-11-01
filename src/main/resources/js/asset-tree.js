@@ -5407,7 +5407,7 @@
     function selectableTable(records, headers, pick) {
         var pageKey = (pick && pick.scope) || 'list';
         if (!state.listPage) state.listPage = {};
-        var pageSize = 100;
+        var pageSize = 1000;
         var pages = Math.max(1, Math.ceil((records || []).length / pageSize));
         var page = state.listPage[pageKey] || 0;
         if (page > pages - 1) page = pages - 1;
