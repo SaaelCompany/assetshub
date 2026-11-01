@@ -9663,6 +9663,70 @@ a.asset-tree-preview-icon:focus {
     flex: 1 1 140px;
 }
 
+#asset-tree-app .asset-tree-type-field.is-inherited {
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-link-graph {
+    margin: 8px 0 12px;
+}
+
+#asset-tree-app .asset-tree-link-svg {
+    width: 100%;
+    max-width: 420px;
+    height: auto;
+    display: block;
+    background: #f4f5f7;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-link-edge {
+    stroke: #4c9aff;
+    stroke-width: 1.5;
+}
+
+#asset-tree-app .asset-tree-link-edge-label,
+#asset-tree-app .asset-tree-link-node-label,
+#asset-tree-app .asset-tree-link-hub-label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-link-edge-label {
+    fill: #0747a6;
+    text-anchor: middle;
+    stroke: #f4f5f7;
+    stroke-width: 3px;
+    paint-order: stroke;
+}
+
+#asset-tree-app .asset-tree-link-node {
+    fill: #ffffff;
+    stroke: #4c9aff;
+}
+
+#asset-tree-app .asset-tree-link-node-label {
+    fill: #172b4d;
+    text-anchor: start;
+}
+
+#asset-tree-app .asset-tree-link-hub {
+    fill: #0052cc;
+}
+
+#asset-tree-app .asset-tree-link-hub-label {
+    fill: #172b4d;
+    text-anchor: start;
+}
+
+#asset-tree-app .asset-tree-webhook-sample {
+    white-space: pre-wrap;
+    background: #f4f5f7;
+    padding: 8px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
 #asset-tree-app .asset-tree-link-type {
     display: inline-block;
     margin-right: 8px;

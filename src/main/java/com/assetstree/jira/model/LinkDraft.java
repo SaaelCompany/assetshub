@@ -10,6 +10,7 @@ import javax.xml.bind.annotation.XmlAccessorType;
 public class LinkDraft {
     private Integer assetId;
     private String type;
+    private String inbound;
     private List<LinkAttrDto> attributes;
     /** When null or true, a blank attribute keeps the stored value. */
     private Boolean skipBlank;
@@ -18,6 +19,8 @@ public class LinkDraft {
     public void setAssetId(Integer assetId) { this.assetId = assetId; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
+    public String getInbound() { return inbound; }
+    public void setInbound(String inbound) { this.inbound = inbound; }
     public List<LinkAttrDto> getAttributes() { return attributes; }
     public void setAttributes(List<LinkAttrDto> attributes) { this.attributes = attributes; }
     public Boolean getSkipBlank() { return skipBlank; }

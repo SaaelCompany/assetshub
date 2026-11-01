@@ -416,6 +416,7 @@
         focusSearch: String(app.getAttribute('data-view') || '').toLowerCase() === 'search',
         loading: true,
         error: null,
+        treeError: null,
         draggingId: null,
         busy: false,
         report: null,
@@ -8280,21 +8281,30 @@
         return moduleBlock(t('peers'), body);
     }
 
-    function linkTypeLabel(type) {
-        if (type === 'part') return t('linkPart');
-        if (type === 'depends') return t('linkDepends');
-        if (type === 'installed') return t('linkInstalled');
+    function linkPhrase(link) {
+        var type = link && link.type;
+        var incoming = !!(link && link.direction === 'in');
+        if (incoming && link.inbound) return link.inbound;
+        if (type === 'part') return incoming ? t('linkIncludes') : t('linkPart');
+        if (type === 'depends') return incoming ? t('linkNeeded') : t('linkDepends');
+        if (type === 'installed') return incoming ? t('linkCarries') : t('linkInstalled');
         return type || '';
+    }
+
+    function linkOtherId(link) {
+        if (link && link.direction === 'in') return link.fromId;
+        return link ? link.toId : 0;
     }
 
     function linkRow(asset, link) {
         var block = el('div', 'asset-tree-peer' + (link.open ? '' : ' is-locked'));
         var line = el('div', 'asset-tree-peer-line');
-        line.appendChild(el('span', 'asset-tree-link-type', linkTypeLabel(link.type)));
+        line.appendChild(el('span', 'asset-tree-link-type', linkPhrase(link)));
         var caption = (link.name || link.objectKey || '') + (link.objectKey ? ' · ' + link.objectKey : '');
-        if (link.open && link.toId) {
+        var otherId = linkOtherId(link);
+        if (link.open && otherId) {
             line.appendChild(button(caption, 'asset-tree-linkish', function () {
-                goToAsset(link.projectKey, link.toId);
+                goToAsset(link.projectKey, otherId);
             }));
         } else {
             line.appendChild(el('span', 'asset-tree-peer-name', caption));
@@ -8345,6 +8355,10 @@
         var attrValue = el('input');
         attrValue.type = 'text';
         attrValue.placeholder = t('linkAttrValue');
+        var inbound = el('input');
+        inbound.type = 'text';
+        inbound.placeholder = t('linkInbound');
+        inbound.title = t('linkInboundHint');
         var search = el('input');
         search.type = 'search';
         search.placeholder = t('peerSearch');
@@ -8375,7 +8389,7 @@
                     }
                     payload.forEach(function (peer) {
                         results.appendChild(button((peer.name || peer.objectKey || '') + (peer.objectKey ? ' · ' + peer.objectKey : ''), 'asset-tree-user-hit', function () {
-                            var body = { assetId: peer.id, type: chosenType(), attributes: [] };
+                            var body = { assetId: peer.id, type: chosenType(), inbound: (inbound.value || '').trim(), attributes: [] };
                             var key = (attrKey.value || '').trim();
                             var value = (attrValue.value || '').trim();
                             if (key && value) body.attributes.push({ key: key, value: value });
@@ -8396,6 +8410,7 @@
         box.appendChild(custom);
         box.appendChild(attrKey);
         box.appendChild(attrValue);
+        box.appendChild(inbound);
         box.appendChild(search);
         box.appendChild(results);
         return box;
@@ -8410,11 +8425,89 @@
         } else if (!asset.links.length) {
             body.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         } else {
+            var graph = linkGraph(asset);
+            if (graph) body.appendChild(graph);
             asset.links.forEach(function (link) {
                 body.appendChild(linkRow(asset, link));
             });
         }
         return moduleBlock(t('links'), body);
+    }
+
+    function linkGraph(asset) {
+        var links = asset.links || [];
+        if (!links.length) return null;
+        var box = el('div', 'asset-tree-link-graph');
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        var count = links.length;
+        var width = 230;
+        var row = 36;
+        var height = 8 + count * row;
+        svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+        svg.setAttribute('class', 'asset-tree-link-svg');
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', t('linkGraph'));
+        var hx = 86;
+        var hy = height / 2;
+        var selfName = asset.name || asset.objectKey || '';
+        if (selfName.length > 12) selfName = selfName.substring(0, 11) + '\u2026';
+        for (var i = 0; i < count; i++) {
+            var y = 8 + row / 2 + i * row;
+            var edge = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            edge.setAttribute('x1', String(hx + 8));
+            edge.setAttribute('y1', String(hy));
+            edge.setAttribute('x2', '128');
+            edge.setAttribute('y2', String(y));
+            edge.setAttribute('class', 'asset-tree-link-edge');
+            svg.appendChild(edge);
+            var phrase = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            phrase.setAttribute('x', '108');
+            phrase.setAttribute('y', String(y - 7));
+            phrase.setAttribute('class', 'asset-tree-link-edge-label');
+            phrase.textContent = linkPhrase(links[i]);
+            svg.appendChild(phrase);
+            var node = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', '136');
+            circle.setAttribute('cy', String(y));
+            circle.setAttribute('r', '5');
+            circle.setAttribute('class', 'asset-tree-link-node');
+            node.appendChild(circle);
+            var name = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            name.setAttribute('x', '148');
+            name.setAttribute('y', String(y + 4));
+            name.setAttribute('class', 'asset-tree-link-node-label');
+            var caption = links[i].name || links[i].objectKey || '';
+            if (caption.length > 14) caption = caption.substring(0, 13) + '\u2026';
+            name.textContent = caption;
+            node.appendChild(name);
+            var otherId = linkOtherId(links[i]);
+            if (links[i].open && otherId) {
+                node.style.cursor = 'pointer';
+                (function (projectKey, id) {
+                    node.addEventListener('click', function () {
+                        goToAsset(projectKey, id);
+                    });
+                })(links[i].projectKey, otherId);
+            }
+            svg.appendChild(node);
+        }
+        var hub = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        var hubCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        hubCircle.setAttribute('cx', String(hx));
+        hubCircle.setAttribute('cy', String(hy));
+        hubCircle.setAttribute('r', '6');
+        hubCircle.setAttribute('class', 'asset-tree-link-hub');
+        hub.appendChild(hubCircle);
+        var hubText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        hubText.setAttribute('x', '4');
+        hubText.setAttribute('y', String(hy + 4));
+        hubText.setAttribute('class', 'asset-tree-link-hub-label');
+        hubText.textContent = selfName;
+        hub.appendChild(hubText);
+        svg.appendChild(hub);
+        box.appendChild(svg);
+        return box;
     }
 
     function issueRow(assetId, issue) {
@@ -9934,7 +10027,9 @@
         }
         wrap.appendChild(fieldTools);
         var fields = el('div', 'asset-tree-schema-scroll asset-tree-field-list');
-        var fieldOrder = (type.fields || []).map(function (fieldDef) { return fieldDef.fieldKey; });
+        var fieldOrder = (type.fields || []).filter(function (fieldDef) {
+            return fieldDef && !fieldDef.inherited;
+        }).map(function (fieldDef) { return fieldDef.fieldKey; });
         function reorderFields(movingKey, targetKey, after) {
             if (!movingKey || movingKey === targetKey) return;
             var next = fieldOrder.filter(function (key) { return key !== movingKey; });
@@ -9957,10 +10052,11 @@
             return false;
         }
         (type.fields || []).forEach(function (fieldDef) {
-            var fieldRow = el('div', 'asset-tree-type-field' + (state.canConfigure ? ' is-editable' : ''));
+            var inherited = !!fieldDef.inherited;
+            var fieldRow = el('div', 'asset-tree-type-field' + (!inherited && state.canConfigure ? ' is-editable' : '') + (inherited ? ' is-inherited' : ''));
             fieldRow.setAttribute('data-name', fieldDef.label || '');
             fieldRow.setAttribute('data-field', fieldDef.fieldKey);
-            if (state.canConfigure) {
+            if (state.canConfigure && !inherited) {
                 fieldRow.draggable = true;
                 var grip = el('span', 'asset-tree-field-grip', '\u2807');
                 grip.title = t('fieldDragHint');
@@ -10016,8 +10112,10 @@
                 });
             }
             fieldRow.appendChild(el('span', 'asset-tree-field-label', fieldDef.label));
-            fieldRow.appendChild(el('span', 'asset-tree-key', kindLabel(fieldDef.kind) + (fieldDef.required ? ' · ' + t('requiredMark') : '')));
-            if (state.canConfigure) {
+            var fieldKind = kindLabel(fieldDef.kind) + (fieldDef.required ? ' · ' + t('requiredMark') : '');
+            if (inherited) fieldKind += ' · ' + t('fieldInherited', fieldDef.inheritedFrom || '');
+            fieldRow.appendChild(el('span', 'asset-tree-key', fieldKind));
+            if (state.canConfigure && !inherited) {
                 var editField = button(t('editField'), 'asset-tree-btn', function () {
                     openFieldModal(type, null, fieldDef);
                 });
@@ -10204,6 +10302,11 @@
         state.moduleDialog = '';
     }
 
+    function appendTreeError(panel) {
+        if (!panel || !state.treeError) return;
+        panel.appendChild(el('p', 'asset-tree-banner', state.treeError));
+    }
+
     function reloadTree(done) {
         var key = state.projectKey;
         var token = ++treeToken;
@@ -10214,10 +10317,21 @@
             if (status !== 200) {
                 state.treeReady = false;
                 state.loading = false;
-                state.error = (payload && payload.message) || t('errorTitle');
+                var message = (payload && payload.message) || t('errorTitle');
+                if (state.view === 'settings' || state.view === 'reports' || state.view === 'map' || state.view === 'schedules') {
+                    state.treeError = message;
+                    state.error = null;
+                    if (done) done();
+                    else renderFrame();
+                    return;
+                }
+                state.treeError = null;
+                state.error = message;
                 renderFrame();
                 return;
             }
+            state.treeError = null;
+            state.error = null;
             state.treeReady = true;
             state.assets = payload.assets || [];
             state.types = payload.types || [];
@@ -13121,6 +13235,7 @@
 
     function renderSettings() {
         var panel = el('section', 'asset-tree-report');
+        appendTreeError(panel);
         var project = currentProject();
         var name = project ? (project.name || project.key) : state.projectKey;
         panel.appendChild(el('h2', null, t('settingsProject', name)));
@@ -13879,6 +13994,7 @@
         if (rosterOn() && !boards.roster) state.scheduleBoard = 'calendar';
         if (!rosterOn() && !boards.calendar) state.scheduleBoard = 'roster';
         var panel = el('section', 'asset-tree-sheet asset-tree-board');
+        appendTreeError(panel);
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadSchedules();
@@ -18562,6 +18678,7 @@
                     full.lines = payload.lines || [];
                     full.lineTotal = payload.lineTotal || full.lines.length;
                     full.capped = !!payload.capped;
+                    full.exportLimited = !!payload.exportLimited;
                     full.linesComplete = true;
                     downloadReport(full);
                 } else notify((payload && payload.message) || t('errorTitle'));
@@ -18593,7 +18710,8 @@
         totalCells.push(csvCell(shareTotal ? '100 %' : '0 %'));
         rows.push(totalCells.join(';'));
         if (!(view.rows || []).length) rows.push(csvCell(view.reason || t('reportEmptyLines')));
-        if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
+        if (view.exportLimited) rows.push(csvCell(t('reportExportCut', '50000')));
+        else if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
         if (view.lines && view.lines.length) {
             rows.push('');
             var detailHead = money ? t('lifeBook') : detailWord(view.groupBy);
@@ -19091,6 +19209,7 @@
 
     function renderReports() {
         var panel = el('section', 'asset-tree-sheet');
+        appendTreeError(panel);
         panel.appendChild(el('p', 'asset-tree-hint', t('reportPageHint')));
         if (moduleOn('life')) panel.appendChild(forecastNote());
         paintReportTools();
@@ -21015,6 +21134,7 @@
 
     function renderMap() {
         var panel = el('section', 'asset-tree-floorplan');
+        appendTreeError(panel);
         if (state.floors == null) {
             panel.appendChild(mapTopBar([]));
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -25855,8 +25975,22 @@
         panel.appendChild(webhookSettings());
     }
 
+    function freshSecret() {
+        var alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        var value = '';
+        for (var i = 0; i < 24; i++) value += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+        return value;
+    }
+
     function webhookSettings() {
         var block = el('div', 'asset-tree-settings-block');
+        block.appendChild(el('h3', null, t('webhookRecipeTitle')));
+        block.appendChild(el('p', 'asset-tree-hint', t('webhookRecipe')));
+        var importUrl = (state.baseUrl || '') + '/rest/asset-tree/1.0/projects/' + state.projectKey + '/import';
+        block.appendChild(el('p', 'asset-tree-hint', t('webhookImportUrl')));
+        block.appendChild(el('p', 'asset-tree-key', importUrl));
+        block.appendChild(el('p', 'asset-tree-hint', t('webhookImportHeaders')));
+        block.appendChild(el('pre', 'asset-tree-webhook-sample', t('webhookSample')));
         block.appendChild(el('p', 'asset-tree-hint', t('webhookHint')));
         if (state.webhooks === null) {
             state.webhooks = [];
@@ -25888,6 +26022,18 @@
         block.appendChild(url);
         block.appendChild(events);
         block.appendChild(secret);
+        block.appendChild(button(t('webhookSecretNew'), 'asset-tree-btn', function () {
+            secret.value = freshSecret();
+        }));
+        block.appendChild(button(t('webhookTest'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/test', {
+                url: url.value.trim(),
+                secret: secret.value.trim()
+            }, function (status, payload) {
+                if (status >= 200 && status < 300 && payload && payload.ok) notify(t('webhookTestOk'));
+                else notify((payload && payload.message) || t('webhookTestFail'));
+            });
+        }));
         block.appendChild(button(t('webhookSave'), 'asset-tree-btn primary', function () {
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', {
                 url: url.value.trim(),

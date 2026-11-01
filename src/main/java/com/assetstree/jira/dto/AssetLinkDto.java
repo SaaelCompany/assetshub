@@ -11,6 +11,8 @@ public class AssetLinkDto {
     private int fromId;
     private int toId;
     private String type;
+    private String direction;
+    private String inbound;
     private String objectKey;
     private String name;
     private String projectKey;
@@ -25,6 +27,10 @@ public class AssetLinkDto {
     public void setToId(int toId) { this.toId = toId; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
+    public String getDirection() { return direction; }
+    public void setDirection(String direction) { this.direction = direction == null ? "" : direction; }
+    public String getInbound() { return inbound; }
+    public void setInbound(String inbound) { this.inbound = inbound == null ? "" : inbound; }
     public String getObjectKey() { return objectKey; }
     public void setObjectKey(String objectKey) { this.objectKey = objectKey; }
     public String getName() { return name; }

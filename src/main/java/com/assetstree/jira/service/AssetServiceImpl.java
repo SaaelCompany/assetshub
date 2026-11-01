@@ -104,6 +104,7 @@ import com.assetstree.jira.dto.ForecastRowDto;
 import com.assetstree.jira.dto.GrantDto;
 import com.assetstree.jira.dto.SchemaDto;
 import com.assetstree.jira.dto.WebhookDto;
+import com.assetstree.jira.dto.WebhookProbeDto;
 import com.assetstree.jira.dto.ImportIssueDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.InventoryDto;
@@ -175,8 +176,10 @@ import com.assetstree.jira.model.JsonImport;
 import com.assetstree.jira.model.JsonImportDraft;
 import com.assetstree.jira.model.JsonItem;
 import com.assetstree.jira.model.FloorBounds;
+import com.assetstree.jira.model.FieldInheritance;
 import com.assetstree.jira.model.LinkDraft;
 import com.assetstree.jira.model.LinkRules;
+import com.assetstree.jira.model.ReportLines;
 import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
@@ -260,6 +263,7 @@ public class AssetServiceImpl implements AssetService {
             current = JiraServices.activeObjects();
             aoRef = current;
         }
+        SchemaReady.ensure(current);
         return current;
     }
 
@@ -470,7 +474,7 @@ public class AssetServiceImpl implements AssetService {
         final String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         final String key = project.getKey();
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
-        AssetListDto list = ao().executeInTransaction(new TransactionCallback<AssetListDto>() {
+        TransactionCallback<AssetListDto> load = new TransactionCallback<AssetListDto>() {
             @Override
             public AssetListDto doInTransaction() {
                 AssetEntity[] rows = assetsIn(key);
@@ -507,7 +511,19 @@ public class AssetServiceImpl implements AssetService {
                 list.setStatuses(statusDtos(key, rows));
                 return list;
             }
-        });
+        };
+        AssetListDto list;
+        try {
+            list = ao().executeInTransaction(load);
+        } catch (AssetException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.warn("Asset list failed for {}", key, ex);
+            notices.clear();
+            SchemaReady.force();
+            SchemaReady.ensure(ao());
+            list = ao().executeInTransaction(load);
+        }
         dispatchNotices(notices);
         return list;
         } finally {
@@ -526,7 +542,7 @@ public class AssetServiceImpl implements AssetService {
         bindScope(user, peeked);
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
         try {
-        AssetDto dto = ao().executeInTransaction(new TransactionCallback<AssetDto>() {
+        TransactionCallback<AssetDto> load = new TransactionCallback<AssetDto>() {
             @Override
             public AssetDto doInTransaction() {
                 AssetEntity entity = requireReadable(user, id);
@@ -541,7 +557,19 @@ public class AssetServiceImpl implements AssetService {
                 }
                 return toDto(entity, attributesFor(id), typeIndex, indexAssets(rows), true);
             }
-        });
+        };
+        AssetDto dto;
+        try {
+            dto = ao().executeInTransaction(load);
+        } catch (AssetException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.warn("Asset card failed for {}", Integer.valueOf(id), ex);
+            notices.clear();
+            SchemaReady.force();
+            SchemaReady.ensure(ao());
+            dto = ao().executeInTransaction(load);
+        }
         dispatchNotices(notices);
         return dto;
         } finally {
@@ -2002,9 +2030,10 @@ public class AssetServiceImpl implements AssetService {
                         new DBParam("TO_ID", Integer.valueOf(otherId)),
                         new DBParam("LINK_TYPE", type));
                 row.setAttrs(LinkRules.merge("", linkAttrs(draft), true));
+                row.setInbound(LinkRules.inbound(draft == null ? null : draft.getInbound()));
                 row.save();
                 recordActivity(source.getID(), user.getKey(), "link_add", type, "", objectKey(target));
-                return linkDto(user, row, target);
+                return linkDto(user, row, target, "out");
             }
         });
     }
@@ -2024,18 +2053,22 @@ public class AssetServiceImpl implements AssetService {
                     if (type.isEmpty()) {
                         throw new AssetException(400, "asset-tree.error.link.type");
                     }
-                    if (!type.equals(row.getLinkType()) && sameLink(assetId, row.getToId(), type, row.getID()) != null) {
+                    if (!type.equals(row.getLinkType()) && sameLink(row.getFromId(), row.getToId(), type, row.getID()) != null) {
                         throw new AssetException(409, "asset-tree.error.link.exists");
                     }
                     row.setLinkType(type);
+                }
+                if (draft.getInbound() != null) {
+                    row.setInbound(LinkRules.inbound(draft.getInbound()));
                 }
                 if (draft.getAttributes() != null) {
                     boolean skipBlank = draft.getSkipBlank() == null || draft.getSkipBlank().booleanValue();
                     row.setAttrs(LinkRules.merge(row.getAttrs(), linkAttrs(draft), skipBlank));
                 }
                 row.save();
-                AssetEntity target = ao().get(AssetEntity.class, row.getToId());
-                return linkDto(user, row, target);
+                boolean outgoing = row.getFromId() == assetId;
+                AssetEntity other = ao().get(AssetEntity.class, outgoing ? row.getToId() : row.getFromId());
+                return linkDto(user, row, other, outgoing ? "out" : "in");
             }
         });
     }
@@ -2045,12 +2078,14 @@ public class AssetServiceImpl implements AssetService {
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
-                AssetEntity source = requireAssetCap(user, assetId, GrantCaps.OBJECT);
+                requireAssetCap(user, assetId, GrantCaps.OBJECT);
                 AssetLinkEntity row = requireLink(assetId, linkId);
+                AssetEntity owner = ao().get(AssetEntity.class, row.getFromId());
                 AssetEntity target = ao().get(AssetEntity.class, row.getToId());
                 String type = row.getLinkType() == null ? "" : row.getLinkType();
                 ao().delete(row);
-                recordActivity(source.getID(), user.getKey(), "link_remove", type, target == null ? "" : objectKey(target), "");
+                recordActivity(owner == null ? row.getFromId() : owner.getID(), user.getKey(), "link_remove", type,
+                        target == null ? "" : objectKey(target), "");
                 return null;
             }
         });
@@ -2058,7 +2093,7 @@ public class AssetServiceImpl implements AssetService {
 
     private AssetLinkEntity requireLink(int assetId, int linkId) {
         AssetLinkEntity row = ao().get(AssetLinkEntity.class, linkId);
-        if (row == null || row.getFromId() != assetId) {
+        if (row == null || (row.getFromId() != assetId && row.getToId() != assetId)) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         return row;
@@ -2096,30 +2131,41 @@ public class AssetServiceImpl implements AssetService {
         List<AssetLinkDto> links = new ArrayList<AssetLinkDto>();
         try {
             ApplicationUser user = authenticationContext().getLoggedInUser();
-            AssetLinkEntity[] rows = ao().find(AssetLinkEntity.class, Query.select().where("FROM_ID = ?", assetId));
-            if (rows == null) {
-                return links;
-            }
-            for (int i = 0; i < rows.length; i++) {
-                AssetLinkEntity row = rows[i];
-                if (row == null) {
-                    continue;
-                }
-                AssetEntity target = ao().get(AssetEntity.class, row.getToId());
-                links.add(linkDto(user, row, target));
-            }
+            AssetLinkEntity[] outgoing = ao().find(AssetLinkEntity.class, Query.select().where("FROM_ID = ?", assetId));
+            AssetLinkEntity[] incoming = ao().find(AssetLinkEntity.class, Query.select().where("TO_ID = ?", assetId));
+            appendLinks(links, user, outgoing, true);
+            appendLinks(links, user, incoming, false);
         } catch (RuntimeException ex) {
             log.warn("Links were not loaded for {}", Integer.valueOf(assetId), ex);
         }
         return links;
     }
 
-    private AssetLinkDto linkDto(ApplicationUser user, AssetLinkEntity row, AssetEntity target) {
+    private void appendLinks(List<AssetLinkDto> links, ApplicationUser user, AssetLinkEntity[] rows, boolean outgoing) {
+        if (rows == null) {
+            return;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            AssetLinkEntity row = rows[i];
+            if (row == null) {
+                continue;
+            }
+            if (!outgoing && row.getFromId() == row.getToId()) {
+                continue;
+            }
+            AssetEntity other = ao().get(AssetEntity.class, outgoing ? row.getToId() : row.getFromId());
+            links.add(linkDto(user, row, other, outgoing ? "out" : "in"));
+        }
+    }
+
+    private AssetLinkDto linkDto(ApplicationUser user, AssetLinkEntity row, AssetEntity target, String direction) {
         AssetLinkDto dto = new AssetLinkDto();
         dto.setId(row.getID());
         dto.setFromId(row.getFromId());
         dto.setToId(row.getToId());
         dto.setType(row.getLinkType() == null ? "" : row.getLinkType());
+        dto.setDirection(direction == null ? "out" : direction);
+        dto.setInbound(row.getInbound() == null ? "" : row.getInbound());
         List<LinkAttrDto> attributes = new ArrayList<LinkAttrDto>();
         List<LinkRules.Attr> stored = LinkRules.read(row.getAttrs());
         for (int i = 0; i < stored.size(); i++) {
@@ -5462,6 +5508,22 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private Map<Integer, List<AssetAttributeEntity>> attributesByAsset(Collection<Integer> assetIds) {
+        try {
+            return attributesByAssetOnce(assetIds);
+        } catch (RuntimeException ex) {
+            log.warn("Attributes were not loaded", ex);
+            SchemaReady.force();
+            SchemaReady.ensure(ao());
+            try {
+                return attributesByAssetOnce(assetIds);
+            } catch (RuntimeException again) {
+                log.warn("Attributes stayed unread", again);
+                return new HashMap<Integer, List<AssetAttributeEntity>>();
+            }
+        }
+    }
+
+    private Map<Integer, List<AssetAttributeEntity>> attributesByAssetOnce(Collection<Integer> assetIds) {
         Map<Integer, List<AssetAttributeEntity>> map = new HashMap<Integer, List<AssetAttributeEntity>>();
         for (AssetAttributeEntity attribute : findIn(AssetAttributeEntity.class, "ASSET_ID", assetIds, "ATTR_POSITION ASC")) {
             Integer assetId = Integer.valueOf(attribute.getAssetId());
@@ -5616,7 +5678,7 @@ public class AssetServiceImpl implements AssetService {
         }
         String[] cached = holders.get(userKey);
         if (cached == null) {
-            ApplicationUser person = userManager().getUserByKey(userKey);
+            ApplicationUser person = lookupUser(userKey);
             String name = person == null || person.getDisplayName() == null ? "" : person.getDisplayName();
             String email = person == null || person.getEmailAddress() == null ? "" : person.getEmailAddress();
             cached = new String[] {name, email};
@@ -5658,7 +5720,7 @@ public class AssetServiceImpl implements AssetService {
         }
         String[] cached = holders.get(userKey);
         if (cached == null) {
-            ApplicationUser person = userManager().getUserByKey(userKey);
+            ApplicationUser person = lookupUser(userKey);
             String name = person == null || person.getDisplayName() == null ? "" : person.getDisplayName();
             String email = person == null || person.getEmailAddress() == null ? "" : person.getEmailAddress();
             cached = new String[] {name, email};
@@ -5704,6 +5766,7 @@ public class AssetServiceImpl implements AssetService {
             result.add(toTypeDto(type, labels, count == null ? 0 : count.intValue(),
                     typeFields == null ? Collections.<AssetFieldEntity>emptyList() : typeFields));
         }
+        FieldInheritance.apply(result);
         return result;
     }
 
@@ -6752,11 +6815,20 @@ public class AssetServiceImpl implements AssetService {
         return dto;
     }
 
+    private ApplicationUser lookupUser(String userKey) {
+        try {
+            return userManager().getUserByKey(userKey);
+        } catch (RuntimeException ex) {
+            log.debug("User lookup failed for {}", userKey, ex);
+            return null;
+        }
+    }
+
     private UserProfileDto profile(String userKey) {
         if (userKey == null || userKey.isEmpty()) {
             return null;
         }
-        ApplicationUser user = userManager().getUserByKey(userKey);
+        ApplicationUser user = lookupUser(userKey);
         UserProfileDto dto = new UserProfileDto();
         dto.setUserKey(userKey);
         if (user == null) {
@@ -9231,13 +9303,21 @@ public class AssetServiceImpl implements AssetService {
         }
         sortReportLines(rows, lines, lineKeys);
         int lineTotal = lines.size();
+        boolean exportCut = false;
+        if (allLines && ReportLines.cutsExport(lines.size())) {
+            lines = new ArrayList<ReportLineDto>(lines.subList(0, ReportLines.EXPORT_MAX));
+            if (lineKeys.size() > ReportLines.EXPORT_MAX) {
+                lineKeys = new ArrayList<String>(lineKeys.subList(0, ReportLines.EXPORT_MAX));
+            }
+            exportCut = true;
+        }
         List<ReportLineDto> page = lines;
         if (!allLines) {
             int from = lineFrom < 0 ? 0 : lineFrom;
             if (from > lines.size()) {
                 from = lines.size();
             }
-            int to = Math.min(lines.size(), from + 300);
+            int to = Math.min(lines.size(), from + ReportLines.PAGE);
             page = new ArrayList<ReportLineDto>(lines.subList(from, to));
             lineFrom = from;
         }
@@ -9250,7 +9330,8 @@ public class AssetServiceImpl implements AssetService {
         view.setRows(rows);
         view.setLines(page);
         view.setLineTotal(lineTotal);
-        view.setCapped(truncated || (!allLines && lineFrom + page.size() < lineTotal));
+        view.setExportLimited(exportCut);
+        view.setCapped(truncated || exportCut || (!allLines && lineFrom + page.size() < lineTotal));
         view.setSum(money ? MoneyText.format(sum) : "");
         if (rows.isEmpty()) {
             view.setReason(reason == null ? "" : reason);
@@ -9721,7 +9802,11 @@ public class AssetServiceImpl implements AssetService {
                 lines.add(cells);
             }
         }
-        if (view.isCapped()) {
+        if (view.isExportLimited()) {
+            List<String> note = new ArrayList<String>();
+            note.add(i18n().getText("asset-tree.ui.reportExportCut", Integer.valueOf(ReportLines.EXPORT_MAX)));
+            lines.add(note);
+        } else if (view.isCapped()) {
             List<String> note = new ArrayList<String>();
             note.add(i18n().getText("asset-tree.ui.reportLinesCut"));
             lines.add(note);
@@ -11523,6 +11608,22 @@ public class AssetServiceImpl implements AssetService {
                 return toWebhookDto(row);
             }
         });
+    }
+
+    @Override
+    public WebhookProbeDto probeWebhook(ApplicationUser user, String projectKey, WebhookDto draft) {
+        Project project = requireIntegrator(user, projectKey);
+        String url = webhookUrl(draft == null ? "" : draft.getUrl());
+        String secret = draft == null || draft.getSecret() == null ? "" : draft.getSecret().trim();
+        if (secret.length() > 80) {
+            throw new AssetException(400, "asset-tree.error.webhook");
+        }
+        String body = "{\"event\":\"webhook.test\",\"projectKey\":\"" + project.getKey().replace("\"", "") + "\"}";
+        int status = WebhookBus.deliver(url, secret, "webhook.test", body);
+        WebhookProbeDto result = new WebhookProbeDto();
+        result.setStatus(status);
+        result.setOk(status >= 200 && status < 300);
+        return result;
     }
 
     @Override

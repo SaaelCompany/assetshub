@@ -21,6 +21,7 @@ import com.assetstree.jira.dto.ForecastRowDto;
 import com.assetstree.jira.dto.GrantDto;
 import com.assetstree.jira.dto.SchemaDto;
 import com.assetstree.jira.dto.WebhookDto;
+import com.assetstree.jira.dto.WebhookProbeDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.InventoryDto;
@@ -311,6 +312,8 @@ public interface AssetService {
     List<WebhookDto> listWebhooks(ApplicationUser user, String projectKey);
 
     WebhookDto saveWebhook(ApplicationUser user, String projectKey, WebhookDto draft);
+
+    WebhookProbeDto probeWebhook(ApplicationUser user, String projectKey, WebhookDto draft);
 
     void deleteWebhook(ApplicationUser user, String projectKey, int webhookId);
 

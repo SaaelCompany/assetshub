@@ -913,6 +913,17 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("projects/{projectKey}/webhooks/test")
+    public Response probeWebhook(@PathParam("projectKey") final String projectKey, final WebhookDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.probeWebhook(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
     @DELETE
     @Path("projects/{projectKey}/webhooks/{webhookId}")
     public Response deleteWebhook(@PathParam("projectKey") final String projectKey, @PathParam("webhookId") final int webhookId) {

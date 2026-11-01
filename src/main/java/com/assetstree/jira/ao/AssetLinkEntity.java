@@ -28,6 +28,12 @@ public interface AssetLinkEntity extends Entity {
 
     void setLinkType(String linkType);
 
+    /** Phrase shown on the target card. Empty uses the built-in reverse label. */
+    @StringLength(80)
+    String getInbound();
+
+    void setInbound(String inbound);
+
     /** Lines of {@code key=value}. Empty when the link has no attributes. */
     @StringLength(StringLength.UNLIMITED)
     String getAttrs();

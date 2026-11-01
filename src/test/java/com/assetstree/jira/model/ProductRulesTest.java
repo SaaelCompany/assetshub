@@ -1,5 +1,7 @@
 package com.assetstree.jira.model;
 
+import com.assetstree.jira.dto.AssetTypeDto;
+import com.assetstree.jira.dto.FieldDto;
 import com.assetstree.jira.dto.FlowGraphDto;
 import com.assetstree.jira.dto.FlowLinkDto;
 import com.assetstree.jira.dto.FlowNodeDto;
@@ -183,6 +185,57 @@ public class ProductRulesTest {
         node.setIssueStatusId(issueStatusId);
         node.setStatusKey(statusKey);
         return node;
+    }
+
+    @Test
+    public void subtypeKeepsParentFieldsUntilItsOwnKeyReplacesThem() {
+        AssetTypeDto parent = typeDto("laptop", "\u041d\u043e\u0443\u0442\u0431\u0443\u043a", "");
+        parent.setFields(Arrays.asList(fieldDto("serial", "\u0421\u0435\u0440\u0438\u0439\u043d\u044b\u0439"), fieldDto("model", "\u041c\u043e\u0434\u0435\u043b\u044c")));
+        AssetTypeDto child = typeDto("thin", "\u0423\u043b\u044c\u0442\u0440\u0430\u0431\u0443\u043a", "laptop");
+        child.setFields(new ArrayList<FieldDto>(Collections.singletonList(fieldDto("model", "\u0421\u0432\u043e\u044f"))));
+        FieldInheritance.apply(Arrays.asList(parent, child));
+        assertEquals(2, child.getFields().size());
+        assertTrue(child.getFields().get(0).isInherited());
+        assertEquals("serial", child.getFields().get(0).getFieldKey());
+        assertEquals("\u041d\u043e\u0443\u0442\u0431\u0443\u043a", child.getFields().get(0).getInheritedFrom());
+        assertFalse(child.getFields().get(1).isInherited());
+        assertEquals("\u0421\u0432\u043e\u044f", child.getFields().get(1).getLabel());
+        assertFalse(parent.getFields().get(0).isInherited());
+        FieldInheritance.apply(Arrays.asList(parent, child));
+        assertEquals(2, child.getFields().size());
+        assertTrue(child.getFields().get(0).isInherited());
+    }
+
+    @Test
+    public void exportKeepsFiftyThousandRows() {
+        assertFalse(ReportLines.cutsExport(50000));
+        assertTrue(ReportLines.cutsExport(50001));
+        assertEquals(300, ReportLines.PAGE);
+        assertEquals(50000, ReportLines.EXPORT_MAX);
+    }
+
+    @Test
+    public void inboundPhraseReplacesTheDefaultOnTheWayIn() {
+        assertEquals("linkIncludes", LinkRules.shownPhrase(LinkRules.PART, true, ""));
+        assertEquals("linkPart", LinkRules.shownPhrase(LinkRules.PART, false, "\u0432\u043a\u043b\u044e\u0447\u0430\u0435\u0442"));
+        assertEquals("\u043d\u0435\u0441\u0451\u0442", LinkRules.shownPhrase(LinkRules.INSTALLED, true, "\u043d\u0435\u0441\u0451\u0442"));
+        assertEquals(80, LinkRules.inbound(new String(new char[90]).replace('\0', 'a')).length());
+    }
+
+    private static AssetTypeDto typeDto(String key, String label, String parent) {
+        AssetTypeDto type = new AssetTypeDto();
+        type.setTypeKey(key);
+        type.setLabel(label);
+        type.setParentTypeKey(parent);
+        return type;
+    }
+
+    private static FieldDto fieldDto(String key, String label) {
+        FieldDto field = new FieldDto();
+        field.setFieldKey(key);
+        field.setLabel(label);
+        field.setKind("text");
+        return field;
     }
 
     private static FlowLinkDto link(String from, String to) {

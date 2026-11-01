@@ -17,6 +17,7 @@ public class ReportViewDto {
     private String groupBy;
     private String chart;
     private boolean capped;
+    private boolean exportLimited;
     private int lineTotal;
     private String reason;
     private List<ReportBucketDto> rows = new ArrayList<ReportBucketDto>();
@@ -40,6 +41,8 @@ public class ReportViewDto {
     public void setChart(String chart) { this.chart = chart; }
     public boolean isCapped() { return capped; }
     public void setCapped(boolean capped) { this.capped = capped; }
+    public boolean isExportLimited() { return exportLimited; }
+    public void setExportLimited(boolean exportLimited) { this.exportLimited = exportLimited; }
     public int getLineTotal() { return lineTotal; }
     public void setLineTotal(int lineTotal) { this.lineTotal = lineTotal; }
     public String getReason() { return reason; }

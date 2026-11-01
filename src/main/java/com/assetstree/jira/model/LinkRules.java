@@ -13,12 +13,47 @@ public final class LinkRules {
     public static final String INSTALLED = "installed";
     public static final int MAX_ATTRS = 12;
     public static final int MAX_VALUE = 200;
+    public static final int MAX_INBOUND = 80;
 
     private LinkRules() {
     }
 
     public static boolean builtIn(String key) {
         return PART.equals(key) || DEPENDS.equals(key) || INSTALLED.equals(key);
+    }
+
+    public static String inbound(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String value = raw.replace('\n', ' ').replace('\r', ' ').trim();
+        if (value.length() > MAX_INBOUND) {
+            return value.substring(0, MAX_INBOUND);
+        }
+        return value;
+    }
+
+    /** Ui key for the default phrase. A stored inbound sentence replaces it on the way in. */
+    public static String phraseKey(String type, boolean incoming) {
+        if (PART.equals(type)) {
+            return incoming ? "linkIncludes" : "linkPart";
+        }
+        if (DEPENDS.equals(type)) {
+            return incoming ? "linkNeeded" : "linkDepends";
+        }
+        if (INSTALLED.equals(type)) {
+            return incoming ? "linkCarries" : "linkInstalled";
+        }
+        return "";
+    }
+
+    public static String shownPhrase(String type, boolean incoming, String inboundText) {
+        String text = inbound(inboundText);
+        if (incoming && !text.isEmpty()) {
+            return text;
+        }
+        String key = phraseKey(type, incoming);
+        return key.isEmpty() ? (type == null ? "" : type) : key;
     }
 
     /** Empty when the type is not a short latin slug. */
