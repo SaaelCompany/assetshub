@@ -9642,6 +9642,38 @@ a.asset-tree-preview-icon:focus {
     pointer-events: none;
 }
 
+#asset-tree-app .asset-tree-overdue {
+    margin: 8px 16px 0;
+    padding: 8px 12px;
+    background: #ffebe6;
+    color: #bf2600;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-link-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+#asset-tree-app .asset-tree-link-form .asset-tree-filter,
+#asset-tree-app .asset-tree-link-form input {
+    flex: 1 1 140px;
+}
+
+#asset-tree-app .asset-tree-link-type {
+    display: inline-block;
+    margin-right: 8px;
+    padding: 0 6px;
+    border-radius: 3px;
+    background: #deebff;
+    color: #0747a6;
+    font-size: 12px;
+    line-height: 20px;
+}
+
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-due {
     border-color: #ff5630 !important;
     background: #ffebe6 !important;

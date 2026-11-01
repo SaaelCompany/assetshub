@@ -1,4 +1,4 @@
-# Niout AssetHub for JSM версия 1.3.119
+# Niout AssetHub for JSM версия 1.3.120
 
 Дерево активов для Jira Service Management **4.21.1** (платформа Jira **8.21.1**, байткод **Java 8**). Экран встроен в страницу Jira. Готовых макетов нет: в списке только ваши проекты, типы объектов и активы вы создаёте сами. Чужой проект в дереве не появляется.
 
@@ -50,7 +50,7 @@ export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 mvn -B package
 ```
 
-Готовый файл: `target/asset-tree-1.3.119.jar`.
+Готовый файл: `target/asset-tree-1.3.120.jar`.
 
 ```bash
 mvn -B test
@@ -125,8 +125,11 @@ mvn -B test
 | GET, POST | `/assets/{id}/comments` | Комментарии |
 | GET, POST, DELETE | `/assets/{id}/files` | Файлы карточки |
 | GET, POST, DELETE | `/assets/{id}/shares` | Общий доступ |
-| GET, POST, DELETE | `/assets/{id}/peers` | Связанные объекты |
-| GET | `/projects/{key}/inventory` | Инвентаризация |
+| GET, POST, DELETE | `/assets/{id}/peers` | Связанные объекты без типа: пара хранится один раз |
+| POST | `/assets/{id}/links` | Типизированная связь: `type` (`part`, `depends`, `installed` или свой ключ), `assetId`, `attributes` |
+| PUT | `/assets/{id}/links/{linkId}` | Сменить тип или атрибуты. Пустое значение атрибута не стирает записанное, пока `skipBlank` не равен `false` |
+| DELETE | `/assets/{id}/links/{linkId}` | Удалить связь |
+| GET | `/projects/{key}/inventory` | Инвентаризация: кто и когда отметил объект |
 | POST | `/assets/{id}/inventory` | Отметка инвентаризации |
 | POST | `/types` | Свой тип |
 | PUT | `/types/{typeKey}` | Частичное обновление типа |
@@ -135,16 +138,20 @@ mvn -B test
 | DELETE | `/types/{typeKey}/fields/{fieldKey}` | Удалить поле |
 | GET, POST | `/projects/{key}/statuses` | Статусы проекта |
 | PUT, DELETE | `/projects/{key}/statuses/{statusKey}` | Изменить или удалить статус |
-| GET | `/projects/{key}/schedule` | График работ |
-| POST | `/projects/{key}/schedule` | Поставить работу |
-| GET, POST | `/projects/{key}/staff` | Табель |
+| GET | `/projects/{key}/schedule` | График работ, включая проведённые дни |
+| POST | `/projects/{key}/schedule` | Поставить работу без объекта |
+| PUT, DELETE | `/assets/{id}/plans/{planId}` | Изменить или удалить работу. `done: true` отмечает проведение и оставляет день в календаре |
+| GET, PUT | `/projects/{key}/staff` | Табель месяца |
+| POST | `/projects/{key}/staff/leave` | Отпуск или больничный на диапазон дней |
+| DELETE | `/projects/{key}/staff/{dutyId}` | Снять отметку табеля |
 | GET | `/projects/{key}/floors` | Этажи карты. Достаточно вида «Только карта» |
 | POST | `/projects/{key}/floors` | Новый этаж |
-| PUT, DELETE | `/projects/{key}/floors/{floorId}` | Сохранить или удалить этаж |
+| PUT, DELETE | `/projects/{key}/floors/{floorId}` | Сохранить план, комнаты и метки или удалить этаж |
 | GET | `/projects/{key}/report` | Сводка проекта |
 | GET | `/projects/{key}/reports` | Каталог отчётов |
 | POST | `/projects/{key}/reports` | Свой отчёт |
 | GET | `/projects/{key}/reports/{reportKey}` | Карточка отчёта. `lineFrom` и `lines=all` листают строки |
+| PUT, DELETE | `/projects/{key}/reports/{reportKey}` | Изменить или удалить свой отчёт |
 | GET | `/projects/{key}/reports.xlsx` | Книга отчётов сразу, для автоматизации |
 | POST | `/projects/{key}/reports/mail` | Поставить письмо с книгой |
 | GET | `/assets/{id}/lifecycle` | Закупка, амортизация, дата замены |
@@ -167,12 +174,47 @@ mvn -B test
 | GET | `/projects/{key}/grants` | Права. `caps` включает `reports` и `map`. `typeScope`, `fieldScope`, `schemaName` сужают типы и поля |
 | POST | `/projects/{key}/grants` | Выдать право группе или `userKey` |
 | DELETE | `/projects/{key}/grants?group=` | Снять право |
-| GET | `/projects/{key}/flows` | Правила процессов |
-| GET, PUT | `/projects/{key}/flow-graph` | Схема процесса |
+| GET, PUT | `/projects/{key}/card` | Макет наклейки: размер листа, блоки, QR |
+| GET, POST | `/projects/{key}/flows` | Правила процессов |
+| DELETE | `/projects/{key}/flows/{ruleId}` | Удалить правило |
+| GET, PUT | `/projects/{key}/flow-graph` | Схема процесса: узлы заявки, статуса заявки и статуса оборудования |
+| PUT | `/projects/{key}/view` | Вид проекта. В `setup` записываются только присланные ключи |
 | GET | `/projects/{key}/picker` | Дерево для портала |
 | GET | `/users?q=` | Поиск пользователя |
 | GET | `/issues/{id}/assets` | Активы заявки |
 | POST | `/assets/{id}/issues` | Связать заявку |
+
+### Этажи
+
+`GET /projects/{key}/floors` отдаёт этажи проекта. Вида «Только карта» достаточно, чтобы читать план. `POST` создаёт этаж с именем и уровнем. `PUT /projects/{key}/floors/{floorId}` сохраняет лист, комнаты и метки оборудования. `DELETE` удаляет этаж. Лист измеряется в сантиметрах, предел 400 на 300 метров.
+
+### Графики и табель
+
+`GET /projects/{key}/schedule` возвращает работы календаря. Проведённый день остаётся в этом списке и на экране выглядит выполненным. `POST /projects/{key}/schedule` ставит работу без объекта, `POST /assets/{id}/plans` — работу на оборудовании. `PUT /assets/{id}/plans/{planId}` с `done: true` отмечает проведение. `GET` и `PUT /projects/{key}/staff` читают и записывают табель. `POST /projects/{key}/staff/leave` ставит отпуск или больничный, `DELETE /projects/{key}/staff/{dutyId}` снимает отметку.
+
+### Отчёты
+
+`GET /projects/{key}/report` — сводка. `GET /projects/{key}/reports` — каталог, `POST` создаёт свой отчёт, `GET /projects/{key}/reports/{reportKey}` открывает его. `lineFrom` и `lines=all` листают строки. `PUT` и `DELETE` меняют или удаляют свой отчёт. `GET /projects/{key}/reports.xlsx` собирает книгу сразу, `POST /projects/{key}/reports/mail` ставит письмо. Длинная книга также готовится через `POST /projects/{key}/exports`.
+
+### Жизненный цикл
+
+`GET /assets/{id}/lifecycle` читает закупку, амортизацию и дату замены. `PUT` сохраняет их и пересчитывает книгу. `POST /assets/{id}/lifecycle/writeoff` запрашивает списание, `POST /assets/{id}/lifecycle/decision` его согласовывает. `GET /projects/{key}/lifecycle/forecast?within=12` перечисляет оборудование к замене. `within` от 1 до 120 месяцев, просроченное входит в ответ.
+
+### Наклейки
+
+`GET /projects/{key}/card` отдаёт макет наклейки, `PUT` сохраняет размер листа и блоки. Пока свой макет не сохранён, печать берёт имя, тип, место, ключ и QR.
+
+### Процессы
+
+`GET /projects/{key}/issue-types` и `GET /projects/{key}/issue-statuses` отдают типы и статусы заявок Jira. `GET /projects/{key}/flows` читает правила, `POST` добавляет правило, `DELETE /projects/{key}/flows/{ruleId}` удаляет его. `GET` и `PUT /projects/{key}/flow-graph` читают и сохраняют схему: линия от типа заявки к статусу оборудования срабатывает при добавлении актива, линия через статус заявки — при переходе заявки в этот статус.
+
+### Инвентаризация
+
+`GET /projects/{key}/inventory` перечисляет отметки. `POST /assets/{id}/inventory` записывает, что объект проверен. Отдельного пункта меню для этого нет.
+
+### Связи
+
+`GET`, `POST` и `DELETE /assets/{id}/peers` ведут симметричную связь двух объектов без типа. `POST /assets/{id}/links` создаёт направленную связь с типом и атрибутами: `part` — «входит в», `depends` — «зависит от», `installed` — «установлено на». Свой тип — короткий латинский ключ. `PUT /assets/{id}/links/{linkId}` меняет тип и атрибуты, не стирая пропущенные. `DELETE` удаляет связь. На карточке связи приходят вместе с `GET /assets/{id}`.
 
 События исходящего вызова: `asset.created`, `asset.updated`, `asset.deleted`, `import.completed`, `lifecycle.forecast`. Заголовки `X-Asset-Tree-Event` и `X-Asset-Tree-Token`. Пустой список событий означает все. Сбой адреса не отменяет сохранение актива. Массовый импорт шлёт одно событие `import.completed`, а не событие на каждую строку.
 

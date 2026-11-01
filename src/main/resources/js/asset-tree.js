@@ -7858,6 +7858,7 @@
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
         aside.appendChild(peerBlock(asset));
+        aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
         form.appendChild(main);
@@ -8012,6 +8013,7 @@
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
         if (!placePage) aside.appendChild(peerBlock(asset));
+        if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
             ? state.types.map(function (type) { return { value: type.typeKey, label: type.label }; })
@@ -8276,6 +8278,143 @@
             });
         }
         return moduleBlock(t('peers'), body);
+    }
+
+    function linkTypeLabel(type) {
+        if (type === 'part') return t('linkPart');
+        if (type === 'depends') return t('linkDepends');
+        if (type === 'installed') return t('linkInstalled');
+        return type || '';
+    }
+
+    function linkRow(asset, link) {
+        var block = el('div', 'asset-tree-peer' + (link.open ? '' : ' is-locked'));
+        var line = el('div', 'asset-tree-peer-line');
+        line.appendChild(el('span', 'asset-tree-link-type', linkTypeLabel(link.type)));
+        var caption = (link.name || link.objectKey || '') + (link.objectKey ? ' · ' + link.objectKey : '');
+        if (link.open && link.toId) {
+            line.appendChild(button(caption, 'asset-tree-linkish', function () {
+                goToAsset(link.projectKey, link.toId);
+            }));
+        } else {
+            line.appendChild(el('span', 'asset-tree-peer-name', caption));
+        }
+        if (mayEdit(asset)) {
+            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                ajax('DELETE', '/assets/' + asset.id + '/links/' + link.id, null, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            remove.setAttribute('aria-label', t('unlink'));
+            line.appendChild(remove);
+        }
+        block.appendChild(line);
+        var attrs = link.attributes || [];
+        if (attrs.length) {
+            var meta = el('p', 'asset-tree-hint');
+            meta.textContent = attrs.map(function (item) {
+                return (item.key || '') + ': ' + (item.value || '');
+            }).join(' · ');
+            block.appendChild(meta);
+        }
+        return block;
+    }
+
+    function linkForm(asset) {
+        var box = el('div', 'asset-tree-link-form');
+        var type = document.createElement('select');
+        type.className = 'asset-tree-filter';
+        [['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = t(pair[1]);
+            type.appendChild(option);
+        });
+        var custom = el('input');
+        custom.type = 'text';
+        custom.placeholder = t('linkTypeKey');
+        custom.hidden = true;
+        type.addEventListener('change', function () {
+            custom.hidden = type.value !== 'custom';
+        });
+        var attrKey = el('input');
+        attrKey.type = 'text';
+        attrKey.placeholder = t('linkAttr');
+        var attrValue = el('input');
+        attrValue.type = 'text';
+        attrValue.placeholder = t('linkAttrValue');
+        var search = el('input');
+        search.type = 'search';
+        search.placeholder = t('peerSearch');
+        var results = el('div', 'asset-tree-user-results');
+        var timer = null;
+        var seq = 0;
+        function chosenType() {
+            if (type.value !== 'custom') return type.value;
+            return (custom.value || '').trim().toLowerCase();
+        }
+        search.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var query = search.value.trim();
+                var token = ++seq;
+                results.innerHTML = '';
+                if (query.length < 2) return;
+                ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                    if (token !== seq || search.value.trim() !== query) return;
+                    results.innerHTML = '';
+                    if (status !== 200) {
+                        results.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
+                        return;
+                    }
+                    if (!payload || !payload.length) {
+                        results.appendChild(el('p', 'asset-tree-hint', t('noResults')));
+                        return;
+                    }
+                    payload.forEach(function (peer) {
+                        results.appendChild(button((peer.name || peer.objectKey || '') + (peer.objectKey ? ' · ' + peer.objectKey : ''), 'asset-tree-user-hit', function () {
+                            var body = { assetId: peer.id, type: chosenType(), attributes: [] };
+                            var key = (attrKey.value || '').trim();
+                            var value = (attrValue.value || '').trim();
+                            if (key && value) body.attributes.push({ key: key, value: value });
+                            ajax('POST', '/assets/' + asset.id + '/links', body, function (st, answer) {
+                                if (st >= 200 && st < 300) {
+                                    notify(t('linkAdded'));
+                                    selectAsset(asset.id, true);
+                                } else {
+                                    setFormError((answer && answer.message) || t('errorTitle'));
+                                }
+                            });
+                        }));
+                    });
+                });
+            }, 220);
+        });
+        box.appendChild(type);
+        box.appendChild(custom);
+        box.appendChild(attrKey);
+        box.appendChild(attrValue);
+        box.appendChild(search);
+        box.appendChild(results);
+        return box;
+    }
+
+    function linkBlock(asset) {
+        var body = el('div');
+        body.appendChild(el('p', 'asset-tree-hint', t('linksHint')));
+        if (mayEdit(asset)) body.appendChild(linkForm(asset));
+        if (asset.links == null) {
+            body.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        } else if (!asset.links.length) {
+            body.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
+        } else {
+            asset.links.forEach(function (link) {
+                body.appendChild(linkRow(asset, link));
+            });
+        }
+        return moduleBlock(t('links'), body);
     }
 
     function issueRow(assetId, issue) {
@@ -13301,7 +13440,37 @@
             cursor = planNextDate(isoDate(cursor), count, unit);
             seen++;
         }
-        return movedDates(plan, found, year, month);
+        return rememberCompleted(plan, movedDates(plan, found, year, month), year, month);
+    }
+
+    function doneSources(plan) {
+        var dates = [];
+        String(plan && plan.moves || '').split(',').forEach(function (part) {
+            var at = part.indexOf('>');
+            if (at < 1 || part.slice(at + 1) !== 'done') return;
+            var source = part.slice(0, at);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(source) && dates.indexOf(source) < 0) dates.push(source);
+        });
+        if (plan && plan.completedOn && plan.lastDone && plan.everyUnit && plan.everyUnit !== 'once' && dates.indexOf(plan.lastDone) < 0) {
+            dates.push(plan.lastDone);
+        }
+        return dates;
+    }
+
+    function rememberCompleted(plan, found, year, month) {
+        var dates = found || [];
+        doneSources(plan).forEach(function (source) {
+            var parsed = parseIsoDate(source);
+            if (!parsed || parsed.getFullYear() !== year || parsed.getMonth() + 1 !== month) return;
+            if (dates.indexOf(source) < 0) dates.push(source);
+        });
+        return dates;
+    }
+
+    function occurrenceDone(plan, iso) {
+        if (!plan || !iso) return false;
+        if (plan.completed) return true;
+        return doneSources(plan).indexOf(iso) >= 0;
     }
 
     function planMoveMap(plan) {
@@ -13580,6 +13749,14 @@
         });
     }
 
+    function scheduleHasOverdue() {
+        var rows = state.scheduleRows || [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i] && rows[i].due) return true;
+        }
+        return false;
+    }
+
     function scheduleVisible(plan) {
         if (state.scheduleKindFilter && plan.kind !== state.scheduleKindFilter) return false;
         if (state.schedulePersonFilter === '__none__') return !plan.assigneeKey;
@@ -13708,6 +13885,7 @@
             return panel;
         }
         if (state.scheduleError) panel.appendChild(el('p', 'asset-tree-hint', state.scheduleError));
+        if (scheduleHasOverdue()) panel.appendChild(el('p', 'asset-tree-overdue', t('schedulesOverdue')));
         panel.appendChild(scheduleBoardHead());
         if (rosterOn()) {
             panel.appendChild(el('p', 'asset-tree-hint', t('staffHint')));
@@ -14339,7 +14517,7 @@
     function scheduleEventCard(plan, iso, onClock) {
         var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
         var source = seriesSource(plan, iso);
-        var done = !!plan.completed;
+        var done = occurrenceDone(plan, iso);
         var due = occurrenceIsDue(plan, iso);
         var card = button('', 'asset-tree-event' + (done ? ' is-done' : '') + (due ? ' is-due' : '') + (focused ? ' is-focus' : ''), function () {
             if (state.scheduleSuppressClick) {
@@ -14355,6 +14533,7 @@
         var meta = kindName(plan.kind);
         var clock = occurrenceClock(plan, iso);
         if (clock.start) meta = clock.start + (clock.end ? '–' + clock.end : '') + ' · ' + meta;
+        if (done) meta += ' · ' + t('serviceMarked');
         if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
         if (plan.assetId) {
             var placeName = assetPlaceName(byId()[plan.assetId]);

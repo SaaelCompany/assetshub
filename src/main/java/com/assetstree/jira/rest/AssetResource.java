@@ -25,6 +25,7 @@ import com.assetstree.jira.model.ImportDraft;
 import com.assetstree.jira.model.JsonImportDraft;
 import com.assetstree.jira.model.InventoryDraft;
 import com.assetstree.jira.model.IssueLinkDraft;
+import com.assetstree.jira.model.LinkDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.dto.PortalFieldsDto;
 import com.assetstree.jira.dto.PortalProjectDto;
@@ -57,6 +58,8 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.servlet.http.HttpServletRequest;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.concurrent.Callable;
@@ -68,6 +71,9 @@ public class AssetResource {
     private static final Logger log = LoggerFactory.getLogger(AssetResource.class);
 
     private final AssetService assetService;
+
+    @Context
+    private HttpServletRequest request;
 
     public AssetResource() {
         this.assetService = AssetBridge.service();
@@ -387,6 +393,40 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.unlinkPeer(user(), id, otherId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/links")
+    public Response addLink(@PathParam("id") final int id, final LinkDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.addLink(user(), id, draft)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("assets/{id}/links/{linkId}")
+    public Response updateLink(@PathParam("id") final int id, @PathParam("linkId") final int linkId, final LinkDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.updateLink(user(), id, linkId, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/links/{linkId}")
+    public Response deleteLink(@PathParam("id") final int id, @PathParam("linkId") final int linkId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteLink(user(), id, linkId);
                 return Response.noContent().build();
             }
         });
@@ -1443,7 +1483,8 @@ public class AssetResource {
             return message(ex.getStatus(), ex.getMessageKey(), ex.getArgs());
         } catch (Exception ex) {
             log.error("Asset tree request failed", ex);
-            return message(500, "asset-tree.error.unexpected");
+            boolean reading = request != null && "GET".equalsIgnoreCase(request.getMethod());
+            return message(500, reading ? "asset-tree.error.load" : "asset-tree.error.unexpected");
         }
     }
 

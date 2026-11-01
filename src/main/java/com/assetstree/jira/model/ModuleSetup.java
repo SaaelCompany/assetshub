@@ -238,7 +238,7 @@ public final class ModuleSetup {
             String label = markLabel(piece.length > 1 ? piece[1] : "");
             String color = markColor(piece.length > 2 ? piece[2] : "");
             int hours = markHours(piece.length > 3 ? piece[3] : "8");
-            int factor = markFactor(piece, hours, id);
+            int factor = TimesheetMath.factor(id, hours, explicitFactor(piece));
             rows.put(id, new String[] { label, color, String.valueOf(hours), String.valueOf(factor) });
         }
         if (!rows.containsKey("work")) {
@@ -267,20 +267,53 @@ public final class ModuleSetup {
     }
 
     /** 0 leaves the day out of the totals, 1 uses the person's hours, 2 doubles them. A missing field keeps the old meaning. */
-    private static int markFactor(String[] piece, int hours, String id) {
+    private static Integer explicitFactor(String[] piece) {
         if (piece.length > 4 && piece[4] != null && !piece[4].trim().isEmpty()) {
             int value = number(piece[4]);
             if (value == 0 || value == 1 || value == 2) {
-                return value;
+                return Integer.valueOf(value);
             }
         }
-        if (hours <= 0) {
-            return 0;
-        }
-        if ("night".equals(id)) {
-            return 2;
-        }
-        return 1;
+        return null;
+    }
+
+    /**
+     * Starts from the stored setup and copies only the fields the caller sent.
+     * A null field is omitted, so one key does not wipe kinds, the timesheet, furniture, or the sheet size.
+     */
+    public static ModuleSetupDto merge(ModuleSetupDto stored, ModuleSetupDto patch) {
+        ModuleSetupDto base = stored == null ? new ModuleSetupDto() : stored;
+        ModuleSetupDto incoming = patch == null ? new ModuleSetupDto() : patch;
+        ModuleSetupDto merged = new ModuleSetupDto();
+        merged.setScheduleKinds(incoming.getScheduleKinds() != null ? incoming.getScheduleKinds() : base.getScheduleKinds());
+        merged.setScheduleUnit(incoming.getScheduleUnit() != null ? incoming.getScheduleUnit() : base.getScheduleUnit());
+        merged.setScheduleLayer(incoming.getScheduleLayer() != null ? incoming.getScheduleLayer() : base.getScheduleLayer());
+        merged.setScheduleNotify(incoming.getScheduleNotify() != null ? incoming.getScheduleNotify() : base.getScheduleNotify());
+        merged.setMapWidth(incoming.getMapWidth() != null ? incoming.getMapWidth() : base.getMapWidth());
+        merged.setMapHeight(incoming.getMapHeight() != null ? incoming.getMapHeight() : base.getMapHeight());
+        merged.setMapGrid(incoming.getMapGrid() != null ? incoming.getMapGrid() : base.getMapGrid());
+        merged.setMapSnap(incoming.getMapSnap() != null ? incoming.getMapSnap() : base.getMapSnap());
+        merged.setReportHidden(incoming.getReportHidden() != null ? incoming.getReportHidden() : base.getReportHidden());
+        merged.setReportCharts(incoming.getReportCharts() != null ? incoming.getReportCharts() : base.getReportCharts());
+        merged.setReportMail(incoming.getReportMail() != null ? incoming.getReportMail() : base.getReportMail());
+        merged.setReportMailEvery(incoming.getReportMailEvery() != null ? incoming.getReportMailEvery() : base.getReportMailEvery());
+        merged.setReportMailDay(incoming.getReportMailDay() != null ? incoming.getReportMailDay() : base.getReportMailDay());
+        merged.setReportMailTo(incoming.getReportMailTo() != null ? incoming.getReportMailTo() : base.getReportMailTo());
+        merged.setReportMailSent(incoming.getReportMailSent() != null ? incoming.getReportMailSent() : base.getReportMailSent());
+        merged.setReportMailPart(incoming.getReportMailPart() != null ? incoming.getReportMailPart() : base.getReportMailPart());
+        merged.setLifeApproval(incoming.getLifeApproval() != null ? incoming.getLifeApproval() : base.getLifeApproval());
+        merged.setLifeApprover(incoming.getLifeApprover() != null ? incoming.getLifeApprover() : base.getLifeApprover());
+        merged.setLifeCurrency(incoming.getLifeCurrency() != null ? incoming.getLifeCurrency() : base.getLifeCurrency());
+        merged.setLifeMonths(incoming.getLifeMonths() != null ? incoming.getLifeMonths() : base.getLifeMonths());
+        merged.setStaffMarks(incoming.getStaffMarks() != null ? incoming.getStaffMarks() : base.getStaffMarks());
+        merged.setStaffOrder(incoming.getStaffOrder() != null ? incoming.getStaffOrder() : base.getStaffOrder());
+        merged.setStaffPlaceOrder(incoming.getStaffPlaceOrder() != null ? incoming.getStaffPlaceOrder() : base.getStaffPlaceOrder());
+        merged.setScheduleBoards(incoming.getScheduleBoards() != null ? incoming.getScheduleBoards() : base.getScheduleBoards());
+        merged.setScheduleOpen(incoming.getScheduleOpen() != null ? incoming.getScheduleOpen() : base.getScheduleOpen());
+        merged.setFurniture(incoming.getFurniture() != null ? incoming.getFurniture() : base.getFurniture());
+        merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
+        merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
+        return merged;
     }
 
     private static String boards(String raw) {
