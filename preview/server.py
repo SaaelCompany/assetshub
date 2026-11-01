@@ -842,11 +842,30 @@ def load_properties(path):
     return result
 
 
+def message_text(value):
+    """Same literals as Jira MessageFormat. Quotes hide braces; '' is one apostrophe."""
+    if not value:
+        return value or ""
+    out = []
+    index = 0
+    while index < len(value):
+        if value.startswith("''", index):
+            out.append("'")
+            index += 2
+            continue
+        if value[index] == "'":
+            index += 1
+            continue
+        out.append(value[index])
+        index += 1
+    return "".join(out)
+
+
 def messages(lang):
     english = load_properties(os.path.join(RES, "i18n", "asset-tree.properties"))
     if lang.startswith("ru"):
         english.update(load_properties(os.path.join(RES, "i18n", "asset-tree_ru_RU.properties")))
-    return english
+    return {key: message_text(value) for key, value in english.items()}
 
 
 def label_of(stored, text):

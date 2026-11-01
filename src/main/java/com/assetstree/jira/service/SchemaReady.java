@@ -69,7 +69,7 @@ public final class SchemaReady {
                 if (ao.moduleMetaData() != null && !ao.moduleMetaData().isInitialized()) {
                     ao.moduleMetaData().awaitInitialization(30L, TimeUnit.SECONDS);
                 }
-            } catch (Exception ex) {
+            } catch (Throwable ex) {
                 log.warn("Asset schema was not ready", ex);
             }
             try {
@@ -108,7 +108,7 @@ public final class SchemaReady {
                         IdempotencyEntity.class);
                 ready = true;
                 failedAt = 0L;
-            } catch (RuntimeException ex) {
+            } catch (Throwable ex) {
                 failedAt = now;
                 log.warn("Asset schema was not updated", ex);
             }

@@ -380,7 +380,7 @@ public class AssetServiceImpl implements AssetService {
         meta.setUserKey(user.getKey());
         Map<String, String> labels = new LinkedHashMap<String, String>();
         for (String key : UiCatalog.KEYS) {
-            labels.put(key, i18n.getText("asset-tree.ui." + key));
+            labels.put(key, label(i18n, "asset-tree.ui." + key));
         }
         meta.setI18n(labels);
         List<ProjectDto> projects = visibleProjects(user);
@@ -408,6 +408,16 @@ public class AssetServiceImpl implements AssetService {
         attachMine(meta, user);
         meta.setProjects(projects);
         return meta;
+    }
+
+    /** One broken pattern must not hide every label and block the asset screen. */
+    private String label(I18nHelper i18n, String key) {
+        try {
+            return i18n.getText(key);
+        } catch (RuntimeException ex) {
+            log.warn("Label {} was not formatted", key, ex);
+            return key;
+        }
     }
 
     @Override
