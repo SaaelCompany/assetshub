@@ -402,6 +402,7 @@
         sortKey: 'tree',
         sortDir: 'asc',
         listTops: {},
+        listPage: {},
         treeSort: 'order',
         treeSortDir: 'asc',
         mineColumns: null,
@@ -897,7 +898,7 @@
         return trigger;
     }
 
-    var CAP_KEYS = ['view', 'places', 'types', 'object', 'assets', 'admin'];
+    var CAP_KEYS = ['view', 'places', 'types', 'object', 'assets', 'admin', 'reports', 'map'];
     var CAP_CHOICES = CAP_KEYS;
 
     function applyRights(project) {
@@ -919,6 +920,9 @@
         state.canComment = places || objects;
         state.canConfigure = state.canTypes;
         state.canGrant = present('canGrant') ? !!project.canGrant : (state.canAssets || state.canAdmin);
+        state.canView = present('canView') ? !!project.canView : true;
+        state.canReports = present('canReports') ? !!project.canReports : state.canView;
+        state.canMap = present('canMap') ? !!project.canMap : state.canView;
     }
 
     function mayEdit(asset) {
@@ -935,6 +939,8 @@
         if (grant && grant.level === 'admin') return CAP_KEYS.slice();
         if (grant && grant.level === 'assets' || grant && grant.level === 'manage') return ['view', 'places', 'types', 'object', 'assets'];
         if (grant && grant.level === 'edit') return ['view', 'places', 'object'];
+        if (grant && grant.level === 'reports') return ['reports'];
+        if (grant && grant.level === 'map') return ['map'];
         return ['view'];
     }
 
@@ -945,7 +951,9 @@
             types: 'roleTypes',
             object: 'roleObject',
             assets: 'roleAssets',
-            admin: 'roleAdmin'
+            admin: 'roleAdmin',
+            reports: 'roleReports',
+            map: 'roleMap'
         };
         return t(names[key] || 'roleView');
     }
@@ -957,7 +965,9 @@
             types: 'roleTypesHint',
             object: 'roleObjectHint',
             assets: 'roleAssetsHint',
-            admin: 'roleAdminHint'
+            admin: 'roleAdminHint',
+            reports: 'roleReportsHint',
+            map: 'roleMapHint'
         };
         return t(names[key] || 'roleViewHint');
     }
@@ -965,6 +975,7 @@
     function roleOn(chosen, key, checked) {
         if (checked) {
             chosen[key] = true;
+            if (key === 'reports' || key === 'map') return;
             chosen.view = true;
             if (key === 'assets' || key === 'admin') {
                 chosen.places = true;
@@ -975,11 +986,15 @@
             if (key === 'admin') chosen.admin = true;
             return;
         }
+        chosen[key] = false;
         if (key === 'view') {
-            chosen.view = true;
+            chosen.places = false;
+            chosen.types = false;
+            chosen.object = false;
+            chosen.assets = false;
+            chosen.admin = false;
             return;
         }
-        chosen[key] = false;
         if (key !== 'admin') chosen.assets = false;
         chosen.admin = false;
     }
@@ -997,10 +1012,7 @@
             present.assets = true;
         }
         if (present.admin) present.admin = true;
-        var other = CAP_KEYS.some(function (key) {
-            return key !== 'view' && present[key];
-        });
-        if (other) present.view = true;
+        if (present.places || present.types || present.object) present.view = true;
         var visible = CAP_KEYS.filter(function (key) {
             if (key === 'admin' && !state.canAdmin) return false;
             return present[key];
@@ -1035,9 +1047,13 @@
         state.grants = next;
     }
 
-    function postGrant(principal, caps, errorNode) {
+    function postGrant(principal, caps, errorNode, scope) {
         var body = grantBody(principal);
         body.caps = caps;
+        var extra = scope || principal || {};
+        body.typeScope = extra.typeScope || '';
+        body.fieldScope = extra.fieldScope || '';
+        body.schemaName = extra.schemaName || '';
         ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', body, function (status, payload) {
             if (status >= 200 && status < 300) {
                 rememberGrant(payload);
@@ -1969,6 +1985,7 @@
     }
 
     function inlineAttribute(asset, attribute) {
+        if (attribute && attribute.writable === false) return attributeView(attribute);
         if (!mayEdit(asset) || !inlineKind(attribute.kind)) return attributeView(attribute);
         var host = el('div', 'asset-tree-inline');
         var editing = false;
@@ -2115,14 +2132,19 @@
     function viewTabs() {
         var bar = el('div', 'asset-tree-viewtabs');
         bar.setAttribute('role', 'tablist');
-        var items = [
-            { view: 'mine', label: t('menuMine') },
-            { view: 'all', label: t('tabAssets') }
-        ];
-        if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules') });
-        if (moduleOn('reports')) items.push({ view: 'reports', label: t('menuReports') });
-        if (moduleOn('map')) items.push({ view: 'map', label: t('menuMap') });
-        if (state.canManage) {
+        var items = [];
+        if (state.canView !== false) {
+            items.push({ view: 'mine', label: t('menuMine') });
+            items.push({ view: 'all', label: t('tabAssets') });
+            if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules') });
+        }
+        if (moduleOn('reports') && (state.canView !== false || state.canReports)) {
+            items.push({ view: 'reports', label: t('menuReports') });
+        }
+        if (moduleOn('map') && (state.canView !== false || state.canMap)) {
+            items.push({ view: 'map', label: t('menuMap') });
+        }
+        if (state.canManage && state.canView !== false) {
             items.push({ view: 'settings', label: t('menuSettings') });
         }
         items.forEach(function (item) {
@@ -5383,17 +5405,48 @@
     }
 
     function selectableTable(records, headers, pick) {
-        var rows = pick && pick.rows ? pick.rows.filter(function (row) { return canBulk(row.kind); }) : [];
+        var pageKey = (pick && pick.scope) || 'list';
+        if (!state.listPage) state.listPage = {};
+        var pageSize = 1000;
+        var pages = Math.max(1, Math.ceil((records || []).length / pageSize));
+        var page = state.listPage[pageKey] || 0;
+        if (page > pages - 1) page = pages - 1;
+        if (page < 0) page = 0;
+        state.listPage[pageKey] = page;
+        var start = page * pageSize;
+        var shown = (records || []).slice(start, start + pageSize);
+        var shownRows = pick && pick.rows ? pick.rows.slice(start, start + pageSize) : null;
+        function pager() {
+            if (pages < 2) return null;
+            var bar = el('div', 'asset-tree-pager');
+            bar.appendChild(button(t('listPrev'), 'asset-tree-btn', function () {
+                state.listPage[pageKey] = Math.max(0, page - 1);
+                renderFrame();
+            }));
+            bar.appendChild(el('span', null, t('listPage', (page + 1) + ' / ' + pages)));
+            bar.appendChild(button(t('listNext'), 'asset-tree-btn', function () {
+                state.listPage[pageKey] = Math.min(pages - 1, page + 1);
+                renderFrame();
+            }));
+            return bar;
+        }
+        var rows = shownRows ? shownRows.filter(function (row) { return canBulk(row.kind); }) : [];
         if (!rows.length) {
-            return assetTable(records, headers);
+            var plain = el('div', 'asset-tree-pick-wrap');
+            var nav = pager();
+            if (nav) plain.appendChild(nav);
+            plain.appendChild(assetTable(shown, headers));
+            return plain;
         }
         syncPick(pick.scope, pick.rows);
         var wrap = el('div', 'asset-tree-pick-wrap');
         if (pickedItems().length || (state.bulkErrors && state.bulkErrors.length)) {
             wrap.appendChild(bulkBar());
         }
-        var body = records.map(function (cells, index) {
-            var row = pick.rows[index];
+        var navBar = pager();
+        if (navBar) wrap.appendChild(navBar);
+        var body = shown.map(function (cells, index) {
+            var row = shownRows[index];
             if (!row || !canBulk(row.kind)) {
                 return [el('span')].concat(cells);
             }
@@ -10091,6 +10144,10 @@
         });
         if (!match && state.projects.length) match = state.projects[0];
         state.projectKey = match ? match.key : '';
+        state.listPage = {};
+        state.forecast = null;
+        state.schemas = null;
+        state.webhooks = null;
         applyRights(match);
         state.grants = null;
         state.portalRules = null;
@@ -18211,7 +18268,71 @@
         return (name || 'report') + '.csv';
     }
 
+    function startWorkbook(kind) {
+        notify(t('exportQueued'));
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/exports', { kind: kind }, function (status, payload) {
+            if (status < 200 || status >= 300 || !payload || !payload.id) {
+                notify((payload && payload.message) || t('exportFailed'));
+                return;
+            }
+            pollExport(payload.id, 0);
+        });
+    }
+
+    function pollExport(id, attempt) {
+        if (attempt > 40) {
+            notify(t('exportFailed'));
+            return;
+        }
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/exports/' + encodeURIComponent(id), null, function (status, payload) {
+            if (status < 200 || status >= 300 || !payload) {
+                notify(t('exportFailed'));
+                return;
+            }
+            if (payload.state === 'done') {
+                downloadExportFile(id);
+                return;
+            }
+            if (payload.state === 'failed' || payload.state === 'missing') {
+                notify(payload.message || t('exportFailed'));
+                return;
+            }
+            setTimeout(function () { pollExport(id, attempt + 1); }, 700);
+        });
+    }
+
+    function downloadExportFile(id) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/exports/' + encodeURIComponent(id) + '/file', true);
+        xhr.responseType = 'blob';
+        xhr.setRequestHeader('Accept', '*/*');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(xhr.response);
+                var named = 'export.xlsx';
+                var header = xhr.getResponseHeader('Content-Disposition') || '';
+                var match = header.match(/filename="([^"]+)"/);
+                if (match && match[1]) named = match[1];
+                link.download = named;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                notify(t('exportReady'));
+                return;
+            }
+            notify(t('exportFailed'));
+        };
+        xhr.send();
+    }
+
     function downloadReportBook() {
+        startWorkbook('reports');
+    }
+
+    function downloadReportBookSync() {
         var xhr = new XMLHttpRequest();
         xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports.xlsx', true);
         xhr.responseType = 'blob';
@@ -18771,9 +18892,28 @@
         current.parentNode.replaceChild(reportToolButtons(), current);
     }
 
+    function forecastNote() {
+        if (state.forecast === null) {
+            state.forecast = { loading: true };
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/lifecycle/forecast?within=12', null, function (status, payload) {
+                state.forecast = status === 200 && payload && payload.length !== undefined ? payload : [];
+                if (state.view === 'reports') renderFrame();
+            });
+            return el('p', 'asset-tree-hint', t('loading'));
+        }
+        if (state.forecast.loading) return el('p', 'asset-tree-hint', t('loading'));
+        var rows = state.forecast || [];
+        if (!rows.length) return el('p', 'asset-tree-hint', t('lifeForecastEmpty'));
+        var names = rows.slice(0, 8).map(function (row) {
+            return (row.objectKey || row.name || '') + ' ' + (row.replaceOn || '');
+        }).join(', ');
+        return el('p', 'asset-tree-hint', t('lifeForecast') + ': ' + names);
+    }
+
     function renderReports() {
         var panel = el('section', 'asset-tree-sheet');
         panel.appendChild(el('p', 'asset-tree-hint', t('reportPageHint')));
+        if (moduleOn('life')) panel.appendChild(forecastNote());
         paintReportTools();
         if (state.reportCatalog == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -25207,6 +25347,8 @@
             if (life.price) facts.appendChild(el('span', null, t('lifePrice') + ': ' + moneyInput(life.price) + ' ' + currencyMark(life.currency || 'RUB')));
             if (life.monthly) facts.appendChild(el('span', null, t('lifeMonthly') + ': ' + moneyInput(life.monthly)));
             if (life.book) facts.appendChild(el('span', null, t('lifeBook') + ': ' + moneyInput(life.book)));
+            if (life.replaceOn) facts.appendChild(el('span', null, t('lifeReplace') + ': ' + life.replaceOn));
+            if (life.replaceOn) facts.appendChild(el('span', null, t('lifeMonthsLeft') + ': ' + (life.monthsLeft || 0)));
             if (life.warrantyUntil) facts.appendChild(el('span', null, life.warrantyActive ? t('lifeWarrantyOn') : t('lifeWarrantyOff')));
             body.appendChild(facts);
         }
@@ -25450,13 +25592,7 @@
         block.appendChild(picker);
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('exchangeExport'), 'asset-tree-btn', function () {
-            var frame = document.createElement('iframe');
-            frame.hidden = true;
-            frame.src = state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/equipment.xlsx';
-            document.body.appendChild(frame);
-            setTimeout(function () {
-                if (frame.parentNode) frame.parentNode.removeChild(frame);
-            }, 60000);
+            startWorkbook('equipment');
         }));
         actions.appendChild(button(t('exchangeImport'), 'asset-tree-btn primary', function () {
             if (needsAssetKey()) {
@@ -25479,28 +25615,45 @@
                     notify(t('exchangeWorkbook'));
                     return;
                 }
+                var token = 'excel-' + Date.now();
                 var body = excel
-                    ? { name: name, content: bytesToBase64(bytes) }
-                    : { name: name, csv: decodeSheet(reader.result) };
+                    ? { name: name, content: bytesToBase64(bytes), chunked: true, idempotencyKey: token + ':0' }
+                    : { name: name, csv: decodeSheet(reader.result), chunked: true, idempotencyKey: token + ':0' };
+                var totals = { created: 0, updated: 0, errors: [] };
                 setBusy(true);
-                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/equipment', body, function (status, payload) {
-                    setBusy(false);
-                    if (status < 200 || status >= 300) {
-                        state.importResult = null;
-                        notify((payload && payload.message) || t('errorTitle'));
-                        return;
-                    }
-                    state.importResult = payload;
-                    state.report = null;
-                    state.mineAssets = null;
-                    reportToken++;
-                    reloadTree(function () {
-                        renderFrame();
-                        var created = payload.created || 0;
-                        var updated = payload.updated || 0;
-                        notify(t('exchangeCreated', created) + ' ' + t('exchangeUpdated', updated));
+                function sendChunk(part) {
+                    ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/equipment', part, function (status, payload) {
+                        if (status < 200 || status >= 300) {
+                            setBusy(false);
+                            state.importResult = null;
+                            notify((payload && payload.message) || t('errorTitle'));
+                            return;
+                        }
+                        totals.created += payload.created || 0;
+                        totals.updated += payload.updated || 0;
+                        (payload.errors || []).forEach(function (error) { totals.errors.push(error); });
+                        if (payload.done === false && payload.uploadId) {
+                            notify(t('exchangeChunk', (payload.nextOffset || 0) + ' / ' + (payload.totalRows || 0)));
+                            sendChunk({
+                                uploadId: payload.uploadId,
+                                offset: payload.nextOffset || 0,
+                                chunked: true,
+                                idempotencyKey: token + ':' + (payload.nextOffset || 0)
+                            });
+                            return;
+                        }
+                        setBusy(false);
+                        state.importResult = { created: totals.created, updated: totals.updated, errors: totals.errors, done: true };
+                        state.report = null;
+                        state.mineAssets = null;
+                        reportToken++;
+                        reloadTree(function () {
+                            renderFrame();
+                            notify(t('exchangeCreated', totals.created) + ' ' + t('exchangeUpdated', totals.updated));
+                        });
                     });
-                });
+                }
+                sendChunk(body);
             };
             reader.readAsArrayBuffer(chosen);
         }));
@@ -25520,6 +25673,56 @@
             }
         }
         panel.appendChild(block);
+        panel.appendChild(webhookSettings());
+    }
+
+    function webhookSettings() {
+        var block = el('div', 'asset-tree-settings-block');
+        block.appendChild(el('p', 'asset-tree-hint', t('webhookHint')));
+        if (state.webhooks === null) {
+            state.webhooks = [];
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', null, function (status, payload) {
+                state.webhooks = status === 200 ? (payload || []) : [];
+                if (state.view === 'settings') renderFrame();
+            });
+        }
+        (state.webhooks || []).forEach(function (hook) {
+            var line = el('div', 'asset-tree-grant');
+            line.appendChild(el('strong', null, hook.url || ''));
+            line.appendChild(el('span', null, hook.events || t('webhookEvents')));
+            line.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/' + hook.id, null, function (status) {
+                    if (status >= 200 && status < 300) {
+                        state.webhooks = (state.webhooks || []).filter(function (item) { return item.id !== hook.id; });
+                        renderFrame();
+                    }
+                });
+            }));
+            block.appendChild(line);
+        });
+        var url = document.createElement('input');
+        url.placeholder = t('webhookUrl');
+        var events = document.createElement('input');
+        events.placeholder = t('webhookEvents');
+        var secret = document.createElement('input');
+        secret.placeholder = 'token';
+        block.appendChild(url);
+        block.appendChild(events);
+        block.appendChild(secret);
+        block.appendChild(button(t('webhookSave'), 'asset-tree-btn primary', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', {
+                url: url.value.trim(),
+                events: events.value.trim(),
+                secret: secret.value.trim(),
+                enabled: true
+            }, function (status, payload) {
+                if (status >= 200 && status < 300 && payload) {
+                    state.webhooks = (state.webhooks || []).concat([payload]);
+                    renderFrame();
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        return block;
     }
 
     function bytesToBase64(bytes) {
@@ -26501,9 +26704,79 @@
         panel.appendChild(block);
     }
 
+    function scopeEditor(grant, onSave) {
+        var box = el('div', 'asset-tree-scope');
+        var types = document.createElement('input');
+        types.value = (grant && grant.typeScope) || '';
+        types.placeholder = t('scopeTypes');
+        var schema = document.createElement('input');
+        schema.value = (grant && grant.schemaName) || '';
+        schema.placeholder = t('scopeSchema');
+        var fields = document.createElement('input');
+        fields.value = (grant && grant.fieldScope) || '';
+        fields.placeholder = t('scopeFields');
+        function read() {
+            return { typeScope: types.value.trim(), schemaName: schema.value.trim(), fieldScope: fields.value.trim() };
+        }
+        types.addEventListener('change', function () { onSave(read()); });
+        schema.addEventListener('change', function () { onSave(read()); });
+        fields.addEventListener('change', function () { onSave(read()); });
+        box.appendChild(types);
+        box.appendChild(schema);
+        box.appendChild(fields);
+        return box;
+    }
+
+    function schemaSettings() {
+        var block = el('div', 'asset-tree-settings-block');
+        block.appendChild(el('p', 'asset-tree-hint', t('accessScopeHint')));
+        if (state.schemas === null) {
+            state.schemas = [];
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas', null, function (status, payload) {
+                state.schemas = status === 200 ? (payload || []) : [];
+                if (state.view === 'settings') renderFrame();
+            });
+        }
+        (state.schemas || []).forEach(function (schema) {
+            var line = el('div', 'asset-tree-grant');
+            var keys = (schema.typeKeys || []).join(', ');
+            line.appendChild(el('strong', null, schema.name || ''));
+            line.appendChild(el('span', null, keys));
+            line.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas/' + schema.id, null, function (status) {
+                    if (status >= 200 && status < 300) {
+                        state.schemas = (state.schemas || []).filter(function (item) { return item.id !== schema.id; });
+                        renderFrame();
+                    }
+                });
+            }));
+            block.appendChild(line);
+        });
+        var name = document.createElement('input');
+        name.placeholder = t('schemaName');
+        var types = document.createElement('input');
+        types.placeholder = t('scopeTypes');
+        block.appendChild(name);
+        block.appendChild(types);
+        block.appendChild(button(t('schemaSave'), 'asset-tree-btn primary', function () {
+            var keys = types.value.split(',').map(function (item) { return item.trim(); }).filter(function (item) { return item; });
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas', {
+                name: name.value.trim(),
+                typeKeys: keys
+            }, function (status, payload) {
+                if (status >= 200 && status < 300 && payload) {
+                    state.schemas = (state.schemas || []).filter(function (item) { return item.name !== payload.name; }).concat([payload]);
+                    renderFrame();
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        return block;
+    }
+
     function renderAccessSettings(panel) {
         var block = el('div', 'asset-tree-settings-block');
         block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
+        panel.appendChild(schemaSettings());
         if (state.grants === null) {
             state.grants = [];
             block.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -26571,6 +26844,9 @@
                 }
                 postGrant(grant, caps, null);
             }));
+            row.appendChild(scopeEditor(grant, function (scope) {
+                postGrant(grant, capsJoined(grantCaps(grant)), null, scope);
+            }));
             grantList.appendChild(row);
             grantRows.push(row);
         });
@@ -26617,6 +26893,12 @@
             grid.appendChild(label);
         });
         form.appendChild(grid);
+        var scopeDraft = { typeScope: '', fieldScope: '', schemaName: '' };
+        form.appendChild(scopeEditor(scopeDraft, function (scope) {
+            scopeDraft.typeScope = scope.typeScope;
+            scopeDraft.fieldScope = scope.fieldScope;
+            scopeDraft.schemaName = scope.schemaName;
+        }));
         var error = el('div', 'asset-tree-form-error');
         error.hidden = true;
         form.appendChild(error);
@@ -26676,7 +26958,7 @@
                     return;
                 }
                 error.hidden = true;
-                postGrant({ userKey: userKey }, caps, error);
+                postGrant({ userKey: userKey, typeScope: scopeDraft.typeScope, fieldScope: scopeDraft.fieldScope, schemaName: scopeDraft.schemaName }, caps, error);
                 return;
             }
             var groupName = principalInput.value.trim();
@@ -26691,7 +26973,7 @@
                 return;
             }
             error.hidden = true;
-            postGrant({ groupName: groupName }, caps, error);
+            postGrant({ groupName: groupName, typeScope: scopeDraft.typeScope, fieldScope: scopeDraft.fieldScope, schemaName: scopeDraft.schemaName }, caps, error);
         });
         function paintMode() {
             groupMode.className = 'asset-tree-btn' + (mode === 'group' ? ' primary' : '');
@@ -27025,6 +27307,13 @@
                 if (state.mineColumns) rememberMinePrefs();
             }
             chooseProject();
+            if (state.canView === false) {
+                state.loading = false;
+                if (state.canReports && moduleOn('reports')) state.view = 'reports';
+                else if (state.canMap && moduleOn('map')) state.view = 'map';
+                mount();
+                return;
+            }
             if (state.view === 'mine') {
                 mount();
                 loadMine();

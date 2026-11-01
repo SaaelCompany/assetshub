@@ -3759,6 +3759,9 @@ a.asset-tree-url {
     color: #5e6c84;
 }
 
+.asset-tree-pager { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.asset-tree-scope { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.asset-tree-scope input { min-width: 180px; }
 .asset-tree-bulk {
     display: flex;
     flex-wrap: wrap;

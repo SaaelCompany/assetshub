@@ -83,4 +83,21 @@ public interface LifecycleEntity extends Entity {
     String getWarrantyService();
 
     void setWarrantyService(String warrantyService);
+
+    /** Book value in minor units after the latest monthly pass. */
+    long getBookMinor();
+
+    void setBookMinor(long bookMinor);
+
+    /** Month of that pass, yyyy-MM. Empty until the first pass. */
+    @StringLength(16)
+    String getBookMonth();
+
+    void setBookMonth(String bookMonth);
+
+    /** Forecast replacement day, yyyy-MM-dd. */
+    @StringLength(16)
+    String getReplaceOn();
+
+    void setReplaceOn(String replaceOn);
 }

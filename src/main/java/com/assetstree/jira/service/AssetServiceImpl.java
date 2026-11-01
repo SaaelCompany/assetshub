@@ -61,7 +61,10 @@ import com.assetstree.jira.ao.ProjectGrantEntity;
 import com.assetstree.jira.ao.ProjectStatusEntity;
 import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.ao.FloorEntity;
+import com.assetstree.jira.ao.IdempotencyEntity;
 import com.assetstree.jira.ao.LifecycleEntity;
+import com.assetstree.jira.ao.TypeSchemaEntity;
+import com.assetstree.jira.ao.WebhookEntity;
 import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.RoomEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
@@ -93,7 +96,11 @@ import com.assetstree.jira.dto.FlowProcessDto;
 import com.assetstree.jira.dto.FlowRuleDto;
 import com.assetstree.jira.dto.IssueTypeDto;
 import com.assetstree.jira.dto.FileDto;
+import com.assetstree.jira.dto.ExportJobDto;
+import com.assetstree.jira.dto.ForecastRowDto;
 import com.assetstree.jira.dto.GrantDto;
+import com.assetstree.jira.dto.SchemaDto;
+import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.dto.ImportIssueDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.InventoryDto;
@@ -158,7 +165,12 @@ import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.model.ProjectKeys;
 import com.assetstree.jira.model.StatusCategories;
+import com.assetstree.jira.model.AccessScope;
 import com.assetstree.jira.model.Depreciation;
+import com.assetstree.jira.model.ExportDraft;
+import com.assetstree.jira.model.JsonImport;
+import com.assetstree.jira.model.JsonImportDraft;
+import com.assetstree.jira.model.JsonItem;
 import com.assetstree.jira.model.FloorBounds;
 import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.LifecycleDraft;
@@ -214,6 +226,8 @@ import java.util.regex.Pattern;
 
 public class AssetServiceImpl implements AssetService {
     private static final Logger log = LoggerFactory.getLogger(AssetServiceImpl.class);
+    private final ThreadLocal<AccessScope> activeScope = new ThreadLocal<AccessScope>();
+    private final Map<String, String> exportOwners = new ConcurrentHashMap<String, String>();
     private static final int SEARCH_LIMIT = 30;
     private static final int ID_BATCH = 200;
     private static final ConcurrentHashMap<String, Object> KEY_LOCKS = new ConcurrentHashMap<String, Object>();
@@ -446,6 +460,8 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public AssetListDto listAssets(ApplicationUser user, String projectKey, String query) {
         Project project = requireReadableProject(user, projectKey);
+        bindScope(user, project);
+        try {
         final String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         final String key = project.getKey();
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
@@ -473,22 +489,37 @@ public class AssetServiceImpl implements AssetService {
                 AssetListDto list = new AssetListDto();
                 List<AssetDto> assets = new ArrayList<AssetDto>();
                 for (AssetEntity row : matched) {
+                    AssetTypeDto type = typeIndex.get(row.getTypeKey());
+                    boolean location = type != null && type.isLocation();
+                    if (!currentScope().allowsType(row.getTypeKey(), location)) {
+                        continue;
+                    }
                     assets.add(toDto(row, attributes.get(row.getID()), typeIndex, index, false));
                 }
                 list.setAssets(assets);
-                list.setTypes(types);
+                list.setTypes(visibleTypes(types));
                 list.setStatuses(statusDtos(key, rows));
                 return list;
             }
         });
         dispatchNotices(notices);
         return list;
+        } finally {
+            clearScope();
+        }
     }
 
     @Override
     public AssetDto getAsset(ApplicationUser user, int id) {
         requireUser(user);
+        AssetEntity peek = requireAsset(id);
+        Project peeked = project(peek.getProjectKey());
+        if (peeked == null || !canSee(user, peeked)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        bindScope(user, peeked);
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
+        try {
         AssetDto dto = ao().executeInTransaction(new TransactionCallback<AssetDto>() {
             @Override
             public AssetDto doInTransaction() {
@@ -497,11 +528,19 @@ public class AssetServiceImpl implements AssetService {
                 AssetEntity[] rows = assetsIn(projectKey);
                 applyDueFor(projectKey, rows, notices);
                 entity = requireReadable(user, id);
-                return toDto(entity, attributesFor(id), indexTypes(typeDtos(projectKey, rows)), indexAssets(rows), true);
+                Map<String, AssetTypeDto> typeIndex = indexTypes(typeDtos(projectKey, rows));
+                AssetTypeDto type = typeIndex.get(entity.getTypeKey());
+                if (!currentScope().allowsType(entity.getTypeKey(), type != null && type.isLocation())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                return toDto(entity, attributesFor(id), typeIndex, indexAssets(rows), true);
             }
         });
         dispatchNotices(notices);
         return dto;
+        } finally {
+            clearScope();
+        }
     }
 
     @Override
@@ -516,13 +555,18 @@ public class AssetServiceImpl implements AssetService {
         if (storedAssetPrefix(project.getKey()).isEmpty()) {
             throw new AssetException(400, "asset-tree.error.assetKey.required");
         }
-        return ao().executeInTransaction(new TransactionCallback<AssetDto>() {
+        bindScope(user, project);
+        try {
+        AssetDto created = ao().executeInTransaction(new TransactionCallback<AssetDto>() {
             @Override
             public AssetDto doInTransaction() {
                 String typeKey = draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
                 AssetTypeEntity type = requireType(typeKey);
                 if (!ProjectKeys.same(type.getProjectKey(), project.getKey())) {
                     throw new AssetException(400, "asset-tree.error.type");
+                }
+                if (!currentScope().allowsType(type.getTypeKey(), type.isLocation())) {
+                    throw new AssetException(403, "asset-tree.error.forbidden");
                 }
                 Integer parentId = TreeLogic.normalizeParent(draft.getParentId());
                 if (parentId != null) {
@@ -558,6 +602,9 @@ public class AssetServiceImpl implements AssetService {
                 }
                 entity.setCustodianKey(custodian);
                 entity.setIssuedKey(issued);
+                if (draft.getExternalId() != null && !draft.getExternalId().trim().isEmpty()) {
+                    entity.setExternalKey(draft.getExternalId().trim());
+                }
                 entity.save();
                 replaceAttributes(entity, draft.getAttributes());
                 AssetEntity[] rows = assetsIn(project.getKey());
@@ -566,6 +613,11 @@ public class AssetServiceImpl implements AssetService {
                 return toDto(entity, attributesFor(entity.getID()), indexTypes(typeDtos(project.getKey(), rows)), indexAssets(rows), true);
             }
         });
+        emitAsset(project.getKey(), "asset.created", created);
+        return created;
+        } finally {
+            clearScope();
+        }
     }
 
     @Override
@@ -614,15 +666,25 @@ public class AssetServiceImpl implements AssetService {
         if (error != null) {
             throw new AssetException(400, error);
         }
-        return ao().executeInTransaction(new TransactionCallback<AssetDto>() {
+        AssetEntity peek = requireAsset(id);
+        Project peeked = project(peek.getProjectKey());
+        bindScope(user, peeked);
+        try {
+        AssetDto updated = ao().executeInTransaction(new TransactionCallback<AssetDto>() {
             @Override
             public AssetDto doInTransaction() {
                 AssetEntity entity = requireWritable(user, id);
+                if (!currentScope().allowsType(entity.getTypeKey(), isLocation(entity))) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
                 String typeKey = draft.getTypeKey() == null || draft.getTypeKey().trim().isEmpty()
                         ? entity.getTypeKey() : draft.getTypeKey().trim();
                 AssetTypeEntity type = requireType(typeKey);
                 if (!ProjectKeys.same(type.getProjectKey(), entity.getProjectKey())) {
                     throw new AssetException(400, "asset-tree.error.type");
+                }
+                if (!currentScope().allowsType(type.getTypeKey(), type.isLocation())) {
+                    throw new AssetException(403, "asset-tree.error.forbidden");
                 }
                 String oldName = entity.getName() == null ? "" : entity.getName();
                 String oldDescription = entity.getDescription() == null ? "" : entity.getDescription();
@@ -663,6 +725,11 @@ public class AssetServiceImpl implements AssetService {
                 return toDto(entity, attributesFor(id), indexTypes(typeDtos(entity.getProjectKey(), rows)), indexAssets(rows), true);
             }
         });
+        emitAsset(peek.getProjectKey(), "asset.updated", updated);
+        return updated;
+        } finally {
+            clearScope();
+        }
     }
 
     @Override
@@ -1072,10 +1139,14 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteAsset(ApplicationUser user, int id, boolean cascade) {
+        final String[] gone = new String[3];
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
                 AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                gone[0] = entity.getProjectKey();
+                gone[1] = entity.getObjectKey();
+                gone[2] = entity.getName();
                 AssetEntity[] all = assetsIn(entity.getProjectKey());
                 List<Integer> descendants = TreeLogic.descendants(childrenMap(all), id);
                 if (!descendants.isEmpty() && !cascade) {
@@ -1129,6 +1200,10 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
+        if (gone[0] != null) {
+            emit(gone[0], "asset.deleted", "{\"event\":\"asset.deleted\",\"project\":\"" + jsonEscape(gone[0])
+                    + "\",\"id\":" + id + ",\"key\":\"" + jsonEscape(gone[1]) + "\",\"name\":\"" + jsonEscape(gone[2]) + "\"}");
+        }
     }
 
     @Override
@@ -1713,8 +1788,9 @@ public class AssetServiceImpl implements AssetService {
                 } else {
                     row.setLevel(level);
                     row.setCaps(caps);
-                    row.save();
                 }
+                applyGrantScope(project.getKey(), row, draft);
+                row.save();
                 return toGrantDto(row);
             }
         });
@@ -1967,7 +2043,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ReportDto report(ApplicationUser user, String projectKey) {
-        Project project = requireReadableProject(user, projectKey);
+        Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
         return ao().executeInTransaction(new TransactionCallback<ReportDto>() {
             @Override
             public ReportDto doInTransaction() {
@@ -2103,27 +2179,79 @@ public class AssetServiceImpl implements AssetService {
         if (storedAssetPrefix(project.getKey()).isEmpty()) {
             throw new AssetException(400, "asset-tree.error.assetKey.required");
         }
-        final List<EquipmentSheet.Sheet> sheets = equipmentSheets(draft);
+        final boolean chunked = draft != null && Boolean.TRUE.equals(draft.getChunked());
+        final int offset = draft == null || draft.getOffset() == null ? 0 : Math.max(0, draft.getOffset().intValue());
+        final String uploadId = draft == null || draft.getUploadId() == null ? "" : draft.getUploadId().trim();
+        final String idem = idempotencyToken(draft == null ? null : draft.getIdempotencyKey());
         final String storedKey = project.getKey();
-        final ImportMemory memory = new ImportMemory();
-        // Read the project once. People are resolved after this transaction
-        // closes: a directory search must not sit inside the database transaction,
-        // or the whole Jira waits on the held connection.
-        final PreparedImport prepared = ao().executeInTransaction(new TransactionCallback<PreparedImport>() {
-            @Override
-            public PreparedImport doInTransaction() {
-                return prepareEquipmentImport(storedKey, memory);
+        final String replayKey = idem.isEmpty() ? "" : storedKey + "\n" + idem;
+        ImportSessions.Claim claim = ImportSessions.claim(replayKey);
+        if (!claim.isOwner()) {
+            if (claim.getSlot().isReady()) {
+                return claim.getSlot().getResult();
             }
-        });
-        rememberProjectPeople(memory);
-        EquipmentExchange.Plan plan = EquipmentExchange.planBook(sheets, prepared.types, prepared.statuses, prepared.nodes,
-                Statuses.IN_USE, prepared.headerLabels, new EquipmentExchange.Directory() {
+            throw new AssetException(409, "asset-tree.error.import.busy");
+        }
+        if (!idem.isEmpty()) {
+            ImportResultDto stored = recallIdem(storedKey, idem);
+            if (stored != null) {
+                claim.getSlot().setResult(stored);
+                return stored;
+            }
+        }
+        try {
+            List<EquipmentSheet.Sheet> sheets = uploadId.isEmpty()
+                    ? equipmentSheets(draft) : ImportSessions.sheets(uploadId);
+            if (sheets == null) {
+                throw new AssetException(400, "asset-tree.error.import.workbook");
+            }
+            int total = EquipmentExchange.countRows(sheets);
+            if (total > EquipmentExchange.MAX_ROWS) {
+                throw new AssetException(400, "asset-tree.error.import.limit", Integer.valueOf(EquipmentExchange.MAX_ROWS));
+            }
+            List<EquipmentSheet.Sheet> slice = sheets;
+            int next = total;
+            boolean done = true;
+            String keptId = uploadId;
+            if (chunked) {
+                EquipmentExchange.Window window = EquipmentExchange.window(sheets, offset, EquipmentExchange.CHUNK_ROWS);
+                slice = window.getSheets();
+                next = window.getNext();
+                done = window.isDone();
+                if (!done && keptId.isEmpty()) {
+                    keptId = ImportSessions.keep(sheets);
+                }
+            }
+            ImportResultDto result;
+            if (slice == null || EquipmentExchange.countRows(slice) == 0) {
+                result = new ImportResultDto();
+            } else {
+                final ImportMemory memory = new ImportMemory();
+                final PreparedImport prepared = ao().executeInTransaction(new TransactionCallback<PreparedImport>() {
                     @Override
-                    public EquipmentExchange.Person find(String raw) {
-                        return lookupPerson(raw, memory);
+                    public PreparedImport doInTransaction() {
+                        return prepareEquipmentImport(storedKey, memory);
                     }
                 });
-        return applyPlannedImport(user, storedKey, plan, memory);
+                rememberProjectPeople(memory);
+                EquipmentExchange.Plan plan = EquipmentExchange.planBook(slice, prepared.types, prepared.statuses, prepared.nodes,
+                        Statuses.IN_USE, prepared.headerLabels, personDirectory(memory));
+                result = applyPlannedImport(user, storedKey, plan, memory);
+            }
+            result.setTotalRows(total);
+            result.setNextOffset(next);
+            result.setDone(done);
+            result.setUploadId(done ? "" : keptId);
+            claim.getSlot().setResult(result);
+            rememberIdem(storedKey, idem, result);
+            if (done) {
+                emitImport(storedKey, result);
+            }
+            return result;
+        } catch (RuntimeException ex) {
+            ImportSessions.forget(replayKey);
+            throw ex;
+        }
     }
 
     @Override
@@ -3654,7 +3782,7 @@ public class AssetServiceImpl implements AssetService {
     private List<EquipmentSheet.Sheet> equipmentSheets(ImportDraft draft) {
         String content = draft == null ? null : draft.getContent();
         if (content != null && !content.trim().isEmpty()) {
-            if (content.length() > 4_000_000) {
+            if (content.length() > 16_000_000) {
                 throw new AssetException(400, "asset-tree.error.import.limit", Integer.valueOf(EquipmentExchange.MAX_ROWS));
             }
             byte[] bytes;
@@ -3663,13 +3791,13 @@ public class AssetServiceImpl implements AssetService {
             } catch (IllegalArgumentException ex) {
                 throw new AssetException(400, "asset-tree.error.import.workbook");
             }
-            if (bytes.length > 2_000_000) {
+            if (bytes.length > 8_000_000) {
                 throw new AssetException(400, "asset-tree.error.import.limit", Integer.valueOf(EquipmentExchange.MAX_ROWS));
             }
             return WorkbookSheet.readAll(bytes);
         }
         String csv = draft == null || draft.getCsv() == null ? "" : draft.getCsv();
-        if (csv.length() > 1_500_000) {
+        if (csv.length() > 8_000_000) {
             throw new AssetException(400, "asset-tree.error.import.limit", Integer.valueOf(EquipmentExchange.MAX_ROWS));
         }
         return Collections.singletonList(EquipmentSheet.read(csv));
@@ -3938,6 +4066,16 @@ public class AssetServiceImpl implements AssetService {
         private final Set<String> directoryKeys = new LinkedHashSet<String>();
         private final Map<String, List<String>> known = new HashMap<String, List<String>>();
         private final Map<String, EquipmentExchange.Person> people = new HashMap<String, EquipmentExchange.Person>();
+        private String pendingExternal = "";
+        private int touchedId;
+
+        private void setPendingExternal(String value) {
+            pendingExternal = value == null ? "" : value.trim();
+        }
+
+        private void note(int id) {
+            touchedId = id;
+        }
 
         private void keepUser(String userKey) {
             if (userKey == null) {
@@ -4190,7 +4328,7 @@ public class AssetServiceImpl implements AssetService {
 
     private void createImported(ApplicationUser user, String projectKey, EquipmentExchange.Change change, ImportMemory memory) {
         Date now = new Date();
-        Integer parentId = Integer.valueOf(change.getParentId());
+        Integer parentId = TreeLogic.normalizeParent(Integer.valueOf(change.getParentId()));
         AssetEntity entity = ao().create(AssetEntity.class,
                 new DBParam("NAME", change.getName()),
                 new DBParam("OBJECT_KEY", nextKey(projectKey)),
@@ -4206,7 +4344,11 @@ public class AssetServiceImpl implements AssetService {
         entity.setParentId(parentId);
         entity.setCustodianKey(change.getCustodianKey());
         entity.setIssuedKey(change.getIssuedKey());
+        if (!memory.pendingExternal.isEmpty()) {
+            entity.setExternalKey(memory.pendingExternal);
+        }
         entity.save();
+        memory.note(entity.getID());
         replaceAttributes(entity, drafts(change));
         logActivity(entity.getID(), user.getKey(), "created", "", "", entity.getName());
         logPlaceChange(user, memory.place(parentId), "place_add", entity);
@@ -4224,8 +4366,9 @@ public class AssetServiceImpl implements AssetService {
         String oldCustodian = entity.getCustodianKey() == null ? "" : entity.getCustodianKey();
         String oldIssued = entity.getIssuedKey() == null ? "" : entity.getIssuedKey();
         Integer oldParent = TreeLogic.normalizeParent(entity.getParentId());
+        Integer nextParent = TreeLogic.normalizeParent(Integer.valueOf(change.getParentId()));
         Integer fromPlace = memory.place(oldParent);
-        Integer toPlace = memory.place(Integer.valueOf(change.getParentId()));
+        Integer toPlace = memory.place(nextParent);
         Map<String, String> oldAttributes = attributeValues(entity.getID());
         String newDescription = change.getDescription() == null ? oldDescription : change.getDescription();
         String newCustodian = change.isCustodianPresent()
@@ -4240,7 +4383,10 @@ public class AssetServiceImpl implements AssetService {
         entity.setStatus(change.getStatusKey());
         entity.setCustodianKey(newCustodian.isEmpty() ? null : newCustodian);
         entity.setIssuedKey(newIssued.isEmpty() ? null : newIssued);
-        entity.setParentId(Integer.valueOf(change.getParentId()));
+        entity.setParentId(nextParent);
+        if (!memory.pendingExternal.isEmpty()) {
+            entity.setExternalKey(memory.pendingExternal);
+        }
         entity.setUpdated(new Date());
         entity.setUpdatedBy(user.getKey());
         entity.save();
@@ -4254,8 +4400,8 @@ public class AssetServiceImpl implements AssetService {
         // directory for phone and department, which is wasted on an import row.
         logActivity(id, user.getKey(), "custodian", "", userLabel(oldCustodian), userLabel(newCustodian));
         logActivity(id, user.getKey(), "issued", "", userLabel(oldIssued), userLabel(newIssued));
-        if (oldParent == null || oldParent.intValue() != change.getParentId()) {
-            logActivity(id, user.getKey(), "move", "", memory.name(oldParent), memory.name(Integer.valueOf(change.getParentId())));
+        if (!TreeLogic.sameParent(oldParent, nextParent)) {
+            logActivity(id, user.getKey(), "move", "", memory.name(oldParent), memory.name(nextParent));
         }
         if (fromPlace != null && !fromPlace.equals(toPlace)) {
             logPlaceChange(user, fromPlace, "place_out", entity);
@@ -4264,6 +4410,7 @@ public class AssetServiceImpl implements AssetService {
             logPlaceChange(user, toPlace, "place_in", entity);
         }
         logAttributeChanges(id, user.getKey(), change.getTypeKey(), oldAttributes);
+        memory.note(id);
     }
 
     private List<AttributeDraft> drafts(EquipmentExchange.Change change) {
@@ -4305,6 +4452,15 @@ public class AssetServiceImpl implements AssetService {
             text = issue.getSheet() + ": " + text;
         }
         return new ImportIssueDto(issue.getRow(), text);
+    }
+
+    private EquipmentExchange.Directory personDirectory(final ImportMemory memory) {
+        return new EquipmentExchange.Directory() {
+            @Override
+            public EquipmentExchange.Person find(String raw) {
+                return lookupPerson(raw, memory);
+            }
+        };
     }
 
     private EquipmentExchange.Person lookupPerson(String raw, ImportMemory memory) {
@@ -4455,6 +4611,8 @@ public class AssetServiceImpl implements AssetService {
         for (AssetFieldEntity field : fields(entity.getTypeKey())) {
             schema.put(field.getFieldKey(), field);
         }
+        Map<String, String> kept = attributeValues(entity.getID());
+        AccessScope scope = currentScope();
         ao().deleteWithSQL(AssetAttributeEntity.class, "ASSET_ID = ?", entity.getID());
         Map<String, String> values = new HashMap<String, String>();
         if (attributes != null) {
@@ -4466,13 +4624,21 @@ public class AssetServiceImpl implements AssetService {
                 if (!schema.containsKey(fieldKey) || values.containsKey(fieldKey)) {
                     continue;
                 }
+                if (!AccessScope.WRITE.equals(scope.fieldMode(fieldKey))) {
+                    continue;
+                }
                 values.put(fieldKey, attribute.getValue() == null ? "" : attribute.getValue());
             }
         }
         I18nHelper labels = i18n();
         int position = 0;
         for (AssetFieldEntity field : schema.values()) {
-            String value = values.containsKey(field.getFieldKey()) ? values.get(field.getFieldKey()) : "";
+            String value;
+            if (!AccessScope.WRITE.equals(scope.fieldMode(field.getFieldKey()))) {
+                value = kept.containsKey(field.getFieldKey()) ? kept.get(field.getFieldKey()) : "";
+            } else {
+                value = values.containsKey(field.getFieldKey()) ? values.get(field.getFieldKey()) : "";
+            }
             String trimmed = value == null ? "" : value.trim();
             if (field.isRequired() && trimmed.isEmpty()) {
                 throw new AssetException(400, "asset-tree.error.field.required", fieldLabel(field, labels));
@@ -4770,6 +4936,21 @@ public class AssetServiceImpl implements AssetService {
         return project;
     }
 
+    private Project requireOpenOrCap(ApplicationUser user, String projectKey, String cap) {
+        requireUser(user);
+        if (projectKey == null || projectKey.trim().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.project.required");
+        }
+        Project project = project(projectKey.trim());
+        if (project == null) {
+            throw new AssetException(404, "asset-tree.error.project.notFound");
+        }
+        if (canOpen(user, project) || hasCap(user, project, cap)) {
+            return project;
+        }
+        throw new AssetException(403, "asset-tree.error.project.forbidden");
+    }
+
     private Project requireVisibleProject(ApplicationUser user, String projectKey) {
         requireUser(user);
         if (projectKey == null || projectKey.trim().isEmpty()) {
@@ -4914,6 +5095,10 @@ public class AssetServiceImpl implements AssetService {
         dto.setCanConfigure(types);
         dto.setCanGrant(assets || admin);
         dto.setCanArrange(canArrangeTypes(user, project));
+        boolean open = canOpen(user, project);
+        dto.setCanView(open);
+        dto.setCanReports(open || hasCap(user, project, GrantCaps.REPORTS));
+        dto.setCanMap(open || hasCap(user, project, GrantCaps.MAP));
     }
 
     private boolean canArrangeTypes(ApplicationUser user, Project project) {
@@ -5623,6 +5808,9 @@ public class AssetServiceImpl implements AssetService {
         }
         dto.setCaps(caps);
         dto.setLevel(GrantCaps.levelOf(caps));
+        dto.setTypeScope(row.getTypeScope() == null ? "" : row.getTypeScope());
+        dto.setFieldScope(row.getFieldScope() == null ? "" : row.getFieldScope());
+        dto.setSchemaName(row.getSchemaName() == null ? "" : row.getSchemaName());
         return dto;
     }
 
@@ -6138,7 +6326,12 @@ public class AssetServiceImpl implements AssetService {
         if (type == null || type.getFields() == null) {
             return result;
         }
+        AccessScope scope = currentScope();
         for (FieldDto field : type.getFields()) {
+            String mode = scope.fieldMode(field.getFieldKey());
+            if (AccessScope.HIDE.equals(mode)) {
+                continue;
+            }
             AttributeDto dto = new AttributeDto();
             dto.setFieldKey(field.getFieldKey());
             dto.setName(field.getLabel());
@@ -6148,6 +6341,7 @@ public class AssetServiceImpl implements AssetService {
             String value = values.containsKey(field.getFieldKey()) ? values.get(field.getFieldKey()) : "";
             dto.setValue(value);
             dto.setDisplayValue(FieldKinds.USER.equals(field.getKind()) ? userLabel(value) : value);
+            dto.setWritable(AccessScope.WRITE.equals(mode));
             result.add(dto);
         }
         return result;
@@ -6764,15 +6958,20 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void applyDuePlans() {
-        List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
+        final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
+        final List<String> forecastProjects = new ArrayList<String>();
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
                 applyDueInside(null, null, notices);
+                refreshBooks(forecastProjects);
                 return null;
             }
         });
         dispatchNotices(notices);
+        for (String key : forecastProjects) {
+            emit(key, "lifecycle.forecast", "{\"event\":\"lifecycle.forecast\",\"project\":\"" + jsonEscape(key) + "\"}");
+        }
     }
 
     private void applyDueQuietly(String projectKey, List<ServiceNotice> notices) {
@@ -7882,7 +8081,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public List<FloorDto> floors(ApplicationUser user, String projectKey) {
-        final Project project = requireReadableProject(user, projectKey);
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.MAP);
         requireModule(project.getKey(), ProjectModules.MAP);
         return ao().executeInTransaction(new TransactionCallback<List<FloorDto>>() {
             @Override
@@ -8191,7 +8390,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public List<SavedReportDto> reports(ApplicationUser user, String projectKey) {
-        final Project project = requireReadableProject(user, projectKey);
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         return ao().executeInTransaction(new TransactionCallback<List<SavedReportDto>>() {
             @Override
@@ -8365,7 +8564,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ReportViewDto reportView(ApplicationUser user, final String projectKey, final String reportKey, final int lineFrom, final boolean allLines, final String bucket) {
-        final Project project = requireReadableProject(user, projectKey);
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         return ao().executeInTransaction(new TransactionCallback<ReportViewDto>() {
             @Override
@@ -8652,14 +8851,10 @@ public class AssetServiceImpl implements AssetService {
                 bucket.setAmount(bucket.getAmount() + book);
                 detail = MoneyText.format(book);
             }
-            if (lines.size() < 5000) {
-                ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(), detail);
-                line.setBucket(bucketKey);
-                lines.add(line);
-                lineKeys.add(bucketKey);
-            } else {
-                truncated = true;
-            }
+            ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(), detail);
+            line.setBucket(bucketKey);
+            lines.add(line);
+            lineKeys.add(bucketKey);
         }
         return finishReport(key, title, standard, group, money, chosen.size(), sum, buckets, lines, lineKeys, onlyBucket, lineFrom, allLines, truncated,
                 emptyReason(key, group, money, anyPurchase), placeSort);
@@ -8768,14 +8963,10 @@ public class AssetServiceImpl implements AssetService {
                         detail.append('–').append(shown.getEnd());
                     }
                 }
-                if (lines.size() < 5000) {
-                    ReportLineDto line = new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString());
-                    line.setBucket(bucketKey);
-                    lines.add(line);
-                    lineKeys.add(bucketKey);
-                } else {
-                    truncated = true;
-                }
+                ReportLineDto line = new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString());
+                line.setBucket(bucketKey);
+                lines.add(line);
+                lineKeys.add(bucketKey);
             }
         }
         int total = 0;
@@ -8910,7 +9101,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public byte[] exportReports(ApplicationUser user, String projectKey) {
-        final Project project = requireReadableProject(user, projectKey);
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         return ao().executeInTransaction(new TransactionCallback<byte[]>() {
             @Override
@@ -10170,7 +10361,7 @@ public class AssetServiceImpl implements AssetService {
                     }
                     row.setApproverKey(approver);
                 }
-                row.save();
+                stampBook(row);
                 return lifecycleDto(asset, row);
             }
         });
@@ -10293,6 +10484,8 @@ public class AssetServiceImpl implements AssetService {
             dto.setCurrency("RUB");
             dto.setCommissioned("");
             dto.setWarrantyService("");
+            dto.setReplaceOn("");
+            dto.setMonthsLeft(0);
             return dto;
         }
         dto.setPurchased(row.getPurchased() == null ? "" : row.getPurchased());
@@ -10316,7 +10509,975 @@ public class AssetServiceImpl implements AssetService {
         dto.setCurrency(row.getCurrency() == null || row.getCurrency().isEmpty() ? "RUB" : row.getCurrency());
         dto.setCommissioned(row.getCommissioned() == null ? "" : row.getCommissioned());
         dto.setWarrantyService(row.getWarrantyService() == null ? "" : row.getWarrantyService());
+        LocalDate replace = replaceDate(row);
+        dto.setReplaceOn(replace == null ? "" : replace.toString());
+        dto.setMonthsLeft(monthsLeftOf(row, today));
         return dto;
+    }
+
+    private void bindScope(ApplicationUser user, Project project) {
+        activeScope.set(scopeFor(user, project));
+    }
+
+    private void clearScope() {
+        activeScope.remove();
+    }
+
+    private AccessScope currentScope() {
+        AccessScope scope = activeScope.get();
+        return scope == null ? AccessScope.all() : scope;
+    }
+
+    private AccessScope scopeFor(ApplicationUser user, Project project) {
+        if (user == null || project == null) {
+            return AccessScope.all();
+        }
+        if (isAdmin(user) || hasGlobalManage(user)
+                || permissionManager().hasPermission(ProjectPermissions.BROWSE_PROJECTS, project, user)
+                || permissionManager().hasPermission(ProjectPermissions.ADMINISTER_PROJECTS, project, user)
+                || permissionManager().hasPermission(EDIT_ASSETS, project, user)) {
+            return AccessScope.all();
+        }
+        List<AccessScope.Slice> slices = new ArrayList<AccessScope.Slice>();
+        collectSlices(user, project.getKey(), slices);
+        collectSlices(user, GrantCaps.ALL_PROJECTS, slices);
+        if (slices.isEmpty()) {
+            return AccessScope.all();
+        }
+        return AccessScope.merge(slices, schemaIndex(project.getKey()));
+    }
+
+    private void collectSlices(ApplicationUser user, String projectKey, List<AccessScope.Slice> slices) {
+        ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (!grantApplies(user, rows[i])) {
+                continue;
+            }
+            slices.add(new AccessScope.Slice(rows[i].getTypeScope(), rows[i].getSchemaName(), rows[i].getFieldScope()));
+        }
+    }
+
+    private Map<String, Set<String>> schemaIndex(String projectKey) {
+        Map<String, Set<String>> index = new HashMap<String, Set<String>>();
+        TypeSchemaEntity[] rows = ao().find(TypeSchemaEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return index;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            String name = rows[i].getName() == null ? "" : rows[i].getName().trim();
+            if (!name.isEmpty()) {
+                index.put(name, splitKeys(rows[i].getTypeKeys()));
+            }
+        }
+        return index;
+    }
+
+    private List<AssetTypeDto> visibleTypes(List<AssetTypeDto> types) {
+        List<AssetTypeDto> visible = new ArrayList<AssetTypeDto>();
+        if (types == null) {
+            return visible;
+        }
+        AccessScope scope = currentScope();
+        for (AssetTypeDto type : types) {
+            if (type == null || !scope.allowsType(type.getTypeKey(), type.isLocation())) {
+                continue;
+            }
+            if (!scope.isAllFields() && type.getFields() != null) {
+                List<FieldDto> kept = new ArrayList<FieldDto>();
+                for (FieldDto field : type.getFields()) {
+                    if (field != null && !AccessScope.HIDE.equals(scope.fieldMode(field.getFieldKey()))) {
+                        kept.add(field);
+                    }
+                }
+                type.setFields(kept);
+            }
+            visible.add(type);
+        }
+        return visible;
+    }
+
+    private void applyGrantScope(String projectKey, ProjectGrantEntity row, GrantDraft draft) {
+        String schema = draft == null || draft.getSchemaName() == null ? "" : draft.getSchemaName().trim();
+        if (schema.length() > 80) {
+            throw new AssetException(400, "asset-tree.error.schema");
+        }
+        if (!schema.isEmpty() && !schemaIndex(projectKey).containsKey(schema)) {
+            throw new AssetException(400, "asset-tree.error.schema");
+        }
+        row.setTypeScope(cleanList(draft == null ? null : draft.getTypeScope(), 64, 40));
+        row.setFieldScope(cleanFieldScope(draft == null ? null : draft.getFieldScope()));
+        row.setSchemaName(schema);
+    }
+
+    private String cleanList(String raw, int maxPart, int maxCount) {
+        StringBuilder builder = new StringBuilder();
+        if (raw == null) {
+            return "";
+        }
+        String[] parts = raw.split(",");
+        int count = 0;
+        for (int i = 0; i < parts.length && count < maxCount; i++) {
+            String key = parts[i] == null ? "" : parts[i].trim();
+            if (key.isEmpty() || key.length() > maxPart) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(key);
+            count++;
+        }
+        return builder.toString();
+    }
+
+    private String cleanFieldScope(String raw) {
+        StringBuilder builder = new StringBuilder();
+        if (raw == null) {
+            return "";
+        }
+        String[] parts = raw.split(",");
+        int count = 0;
+        for (int i = 0; i < parts.length && count < 80; i++) {
+            String part = parts[i] == null ? "" : parts[i].trim();
+            if (part.isEmpty()) {
+                continue;
+            }
+            int colon = part.indexOf(':');
+            String key = colon < 0 ? part : part.substring(0, colon).trim();
+            String mode = colon < 0 ? AccessScope.WRITE : part.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
+            if (key.isEmpty() || key.length() > 64) {
+                continue;
+            }
+            if (!AccessScope.WRITE.equals(mode) && !AccessScope.READ.equals(mode)) {
+                mode = AccessScope.WRITE;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(key).append(':').append(mode);
+            count++;
+        }
+        return builder.toString();
+    }
+
+    private Set<String> splitKeys(String raw) {
+        Set<String> keys = new LinkedHashSet<String>();
+        if (raw == null) {
+            return keys;
+        }
+        String[] parts = raw.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            String key = parts[i] == null ? "" : parts[i].trim();
+            if (!key.isEmpty() && key.length() <= 64) {
+                keys.add(key);
+            }
+        }
+        return keys;
+    }
+
+    private String joinKeys(Collection<String> keys) {
+        StringBuilder builder = new StringBuilder();
+        if (keys == null) {
+            return "";
+        }
+        for (String key : keys) {
+            if (key == null || key.trim().isEmpty() || key.trim().length() > 64) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(key.trim());
+        }
+        return builder.toString();
+    }
+
+    private String idempotencyToken(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String token = raw.trim();
+        if (token.length() > 120) {
+            return token.substring(0, 120);
+        }
+        return token;
+    }
+
+    private ImportResultDto recallIdem(final String projectKey, final String token) {
+        return ao().executeInTransaction(new TransactionCallback<ImportResultDto>() {
+            @Override
+            public ImportResultDto doInTransaction() {
+                IdempotencyEntity[] rows = ao().find(IdempotencyEntity.class,
+                        Query.select().where("PROJECT_KEY = ? AND TOKEN = ?", projectKey, token));
+                if (rows == null || rows.length == 0) {
+                    return null;
+                }
+                return parseIdem(rows[0].getSummary());
+            }
+        });
+    }
+
+    private ImportResultDto parseIdem(String summary) {
+        ImportResultDto dto = new ImportResultDto();
+        dto.setDone(true);
+        if (summary == null) {
+            return dto;
+        }
+        String[] parts = summary.split(";");
+        for (int i = 0; i < parts.length; i++) {
+            int eq = parts[i].indexOf('=');
+            if (eq < 0) {
+                continue;
+            }
+            String key = parts[i].substring(0, eq);
+            String value = parts[i].substring(eq + 1);
+            if ("c".equals(key)) {
+                dto.setCreated(parseCount(value));
+            } else if ("u".equals(key)) {
+                dto.setUpdated(parseCount(value));
+            } else if ("n".equals(key)) {
+                dto.setNextOffset(parseCount(value));
+            } else if ("t".equals(key)) {
+                dto.setTotalRows(parseCount(value));
+            } else if ("d".equals(key)) {
+                dto.setDone(!"0".equals(value));
+            } else if ("s".equals(key)) {
+                dto.setUploadId(value);
+            }
+        }
+        return dto;
+    }
+
+    private int parseCount(String raw) {
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    private void rememberIdem(final String projectKey, final String token, final ImportResultDto result) {
+        if (token == null || token.isEmpty() || result == null) {
+            return;
+        }
+        StringBuilder summary = new StringBuilder();
+        summary.append("c=").append(result.getCreated());
+        summary.append(";u=").append(result.getUpdated());
+        summary.append(";n=").append(result.getNextOffset());
+        summary.append(";t=").append(result.getTotalRows());
+        summary.append(";d=").append(result.isDone() ? "1" : "0");
+        summary.append(";s=").append(result.getUploadId() == null ? "" : result.getUploadId());
+        final String stored = summary.length() > 255 ? summary.substring(0, 255) : summary.toString();
+        try {
+            ao().executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    ao().create(IdempotencyEntity.class,
+                            new DBParam("PROJECT_KEY", projectKey),
+                            new DBParam("TOKEN", token),
+                            new DBParam("SUMMARY", stored),
+                            new DBParam("CREATED_AT", Long.valueOf(System.currentTimeMillis())));
+                    return null;
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.warn("Import replay key was not stored", ex);
+        }
+    }
+
+    private void emitImport(String projectKey, ImportResultDto result) {
+        int errors = result == null || result.getErrors() == null ? 0 : result.getErrors().size();
+        int created = result == null ? 0 : result.getCreated();
+        int updated = result == null ? 0 : result.getUpdated();
+        emit(projectKey, "import.completed", "{\"event\":\"import.completed\",\"project\":\"" + jsonEscape(projectKey)
+                + "\",\"created\":" + created + ",\"updated\":" + updated + ",\"errors\":" + errors + "}");
+    }
+
+    private void emitAsset(String projectKey, String event, AssetDto asset) {
+        if (asset == null) {
+            return;
+        }
+        emit(projectKey, event, "{\"event\":\"" + event + "\",\"project\":\"" + jsonEscape(projectKey)
+                + "\",\"id\":" + asset.getId() + ",\"key\":\"" + jsonEscape(asset.getObjectKey())
+                + "\",\"name\":\"" + jsonEscape(asset.getName()) + "\"}");
+    }
+
+    private void emit(String projectKey, String event, String json) {
+        if (projectKey == null || projectKey.isEmpty() || json == null) {
+            return;
+        }
+        try {
+            WebhookEntity[] rows = ao().find(WebhookEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+            if (rows == null) {
+                return;
+            }
+            for (int i = 0; i < rows.length; i++) {
+                WebhookEntity row = rows[i];
+                if (row == null || !row.isEnabled() || !hookWants(row.getEvents(), event)) {
+                    continue;
+                }
+                WebhookBus.post(row.getUrl(), row.getSecret(), event, json);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Webhook lookup failed", ex);
+        }
+    }
+
+    private boolean hookWants(String events, String event) {
+        if (events == null || events.trim().isEmpty()) {
+            return true;
+        }
+        String[] parts = events.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            if (event.equals(parts[i] == null ? "" : parts[i].trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (current == '\\' || current == '"') {
+                builder.append('\\').append(current);
+            } else if (current == '\n') {
+                builder.append("\\n");
+            } else if (current == '\r') {
+                builder.append("\\r");
+            } else if (current >= 32) {
+                builder.append(current);
+            }
+        }
+        return builder.toString();
+    }
+
+    private void stampBook(LifecycleEntity row) {
+        if (row == null) {
+            return;
+        }
+        LocalDate today = businessToday();
+        String month = today.toString().substring(0, 7);
+        row.setBookMinor(bookOf(row, today));
+        row.setBookMonth(month);
+        LocalDate replace = replaceDate(row);
+        row.setReplaceOn(replace == null ? "" : replace.toString());
+        row.save();
+    }
+
+    private LocalDate replaceDate(LifecycleEntity row) {
+        if (row == null) {
+            return null;
+        }
+        String iso = FieldDates.canonical(row.getPurchased());
+        LocalDate purchased = iso == null || iso.isEmpty() ? null : LocalDate.parse(iso);
+        return Depreciation.replaceOn(purchased, row.getLifeMonths());
+    }
+
+    private int monthsLeftOf(LifecycleEntity row, LocalDate today) {
+        if (row == null) {
+            return 0;
+        }
+        String iso = FieldDates.canonical(row.getPurchased());
+        LocalDate purchased = iso == null || iso.isEmpty() ? null : LocalDate.parse(iso);
+        return Depreciation.monthsLeft(row.getLifeMonths(), Depreciation.elapsedMonths(purchased, today));
+    }
+
+    private void refreshBooks(List<String> forecastProjects) {
+        String month = businessToday().toString().substring(0, 7);
+        LifecycleEntity[] rows = ao().find(LifecycleEntity.class);
+        if (rows == null) {
+            return;
+        }
+        Set<String> announced = new HashSet<String>();
+        LocalDate today = businessToday();
+        for (int i = 0; i < rows.length; i++) {
+            LifecycleEntity row = rows[i];
+            if (row == null || month.equals(row.getBookMonth())) {
+                continue;
+            }
+            stampBook(row);
+            if (replaceDate(row) == null || monthsLeftOf(row, today) > 12) {
+                continue;
+            }
+            AssetEntity asset = ao().get(AssetEntity.class, row.getAssetId());
+            if (asset == null || asset.getProjectKey() == null || !announced.add(asset.getProjectKey())) {
+                continue;
+            }
+            forecastProjects.add(asset.getProjectKey());
+        }
+    }
+
+    private static final class JsonReady {
+        private final PreparedImport prepared;
+        private final List<JsonImport.Existing> existing;
+
+        private JsonReady(PreparedImport prepared, List<JsonImport.Existing> existing) {
+            this.prepared = prepared;
+            this.existing = existing;
+        }
+    }
+
+    private JsonReady prepareJson(String projectKey, ImportMemory memory) {
+        PreparedImport prepared = prepareEquipmentImport(projectKey, memory);
+        List<JsonImport.Existing> existing = new ArrayList<JsonImport.Existing>();
+        for (AssetEntity row : assetsIn(projectKey)) {
+            Integer parent = TreeLogic.normalizeParent(row.getParentId());
+            existing.add(new JsonImport.Existing(row.getID(), row.getObjectKey(), row.getExternalKey(), row.getName(),
+                    row.getDescription(), row.getTypeKey(), row.getStatus(), parent == null ? 0 : parent.intValue(),
+                    row.getCustodianKey(), row.getIssuedKey()));
+        }
+        return new JsonReady(prepared, existing);
+    }
+
+    private List<JsonImport.Item> jsonItems(JsonImportDraft draft) {
+        List<JsonImport.Item> items = new ArrayList<JsonImport.Item>();
+        if (draft == null || draft.getItems() == null) {
+            return items;
+        }
+        for (JsonItem item : draft.getItems()) {
+            if (item == null) {
+                continue;
+            }
+            items.add(new JsonImport.Item(item.getKey(), item.getExternalId(), item.getName(), item.getType(),
+                    item.getStatus(), item.getPlace(), item.getCustodian(), item.getIssued(), item.getDescription(),
+                    item.getDescription() != null, item.getFields()));
+        }
+        return items;
+    }
+
+    @Override
+    public ImportResultDto importJson(ApplicationUser user, final String projectKey, final JsonImportDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        if (storedAssetPrefix(project.getKey()).isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.assetKey.required");
+        }
+        final boolean skipBlank = draft == null || draft.getSkipBlank() == null || draft.getSkipBlank().booleanValue();
+        final List<JsonImport.Item> items = jsonItems(draft);
+        final String idem = idempotencyToken(draft == null ? null : draft.getIdempotencyKey());
+        final String storedKey = project.getKey();
+        final String replayKey = idem.isEmpty() ? "" : storedKey + "\njson\n" + idem;
+        ImportSessions.Claim claim = ImportSessions.claim(replayKey);
+        if (!claim.isOwner()) {
+            if (claim.getSlot().isReady()) {
+                return claim.getSlot().getResult();
+            }
+            throw new AssetException(409, "asset-tree.error.import.busy");
+        }
+        if (!idem.isEmpty()) {
+            ImportResultDto stored = recallIdem(storedKey, idem);
+            if (stored != null) {
+                claim.getSlot().setResult(stored);
+                return stored;
+            }
+        }
+        try {
+            final ImportMemory memory = new ImportMemory();
+            final JsonReady ready = ao().executeInTransaction(new TransactionCallback<JsonReady>() {
+                @Override
+                public JsonReady doInTransaction() {
+                    return prepareJson(storedKey, memory);
+                }
+            });
+            rememberProjectPeople(memory);
+            JsonImport.Plan plan = JsonImport.plan(items, ready.existing, ready.prepared.nodes, ready.prepared.types,
+                    ready.prepared.statuses, Statuses.IN_USE, skipBlank, personDirectory(memory));
+            I18nHelper labels = i18n();
+            ImportResultDto result = new ImportResultDto();
+            List<ImportIssueDto> errors = new ArrayList<ImportIssueDto>();
+            for (EquipmentExchange.Issue issue : plan.getIssues()) {
+                errors.add(translateIssue(labels, issue));
+            }
+            int created = 0;
+            int updated = 0;
+            for (JsonImport.Planned planned : plan.getChanges()) {
+                memory.setPendingExternal(planned.getExternalId());
+                try {
+                    applyImportedChange(user, storedKey, planned.getChange(), memory);
+                    if (planned.getChange().getExistingId() == null) {
+                        created++;
+                    } else {
+                        updated++;
+                    }
+                } catch (AssetException ex) {
+                    errors.add(new ImportIssueDto(planned.getChange().getRow(), exceptionText(labels, ex)));
+                } catch (RuntimeException ex) {
+                    log.warn("JSON import row {} failed", Integer.valueOf(planned.getChange().getRow()), ex);
+                    errors.add(new ImportIssueDto(planned.getChange().getRow(), labels.getText("asset-tree.error.unexpected")));
+                }
+            }
+            result.setCreated(created);
+            result.setUpdated(updated);
+            result.setErrors(errors);
+            result.setTotalRows(items.size());
+            result.setNextOffset(items.size());
+            result.setDone(true);
+            result.setUploadId("");
+            claim.getSlot().setResult(result);
+            rememberIdem(storedKey, idem, result);
+            emitImport(storedKey, result);
+            return result;
+        } catch (RuntimeException ex) {
+            ImportSessions.forget(replayKey);
+            throw ex;
+        }
+    }
+
+    @Override
+    public AssetDto patchByKey(ApplicationUser user, String projectKey, String objectKey, AssetDraft draft, boolean skipBlank) {
+        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final AssetEntity found = ao().executeInTransaction(new TransactionCallback<AssetEntity>() {
+            @Override
+            public AssetEntity doInTransaction() {
+                return findByObjectKey(project.getKey(), objectKey);
+            }
+        });
+        if (found == null) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        if (draft == null) {
+            throw new AssetException(400, "asset-tree.error.name.required");
+        }
+        AssetDraft merged = new AssetDraft();
+        merged.setProjectKey(project.getKey());
+        merged.setName(keptText(draft.getName(), found.getName(), skipBlank));
+        merged.setDescription(keptText(draft.getDescription(), found.getDescription(), skipBlank));
+        String typeKey = draft.getTypeKey();
+        merged.setTypeKey(typeKey == null || typeKey.trim().isEmpty() ? found.getTypeKey() : typeKey.trim());
+        String status = draft.getStatus();
+        merged.setStatus(status == null || status.trim().isEmpty() ? found.getStatus() : status.trim());
+        merged.setCustodianKey(keptPerson(draft.getCustodianKey(), found.getCustodianKey(), skipBlank));
+        merged.setIssuedKey(keptPerson(draft.getIssuedKey(), found.getIssuedKey(), skipBlank));
+        merged.setAttributes(mergedAttributes(found.getID(), draft.getAttributes(), skipBlank));
+        AssetDto updated = updateAsset(user, found.getID(), merged);
+        String external = draft.getExternalId();
+        if (external != null && !(skipBlank && external.trim().isEmpty())) {
+            final String stored = external.trim();
+            ao().executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    AssetEntity entity = ao().get(AssetEntity.class, found.getID());
+                    if (entity != null) {
+                        entity.setExternalKey(stored.isEmpty() ? null : stored);
+                        entity.save();
+                    }
+                    return null;
+                }
+            });
+        }
+        Integer parent = TreeLogic.normalizeParent(draft.getParentId());
+        if (parent != null && !TreeLogic.sameParent(parent, found.getParentId())) {
+            MoveDraft move = new MoveDraft();
+            move.setParentId(parent);
+            return moveAsset(user, found.getID(), move);
+        }
+        return updated;
+    }
+
+    private String keptText(String incoming, String current, boolean skipBlank) {
+        if (incoming == null || (skipBlank && incoming.trim().isEmpty())) {
+            return current == null ? "" : current;
+        }
+        return incoming;
+    }
+
+    private String keptPerson(String incoming, String current, boolean skipBlank) {
+        if (incoming == null || (skipBlank && incoming.trim().isEmpty())) {
+            return current;
+        }
+        return incoming;
+    }
+
+    private List<AttributeDraft> mergedAttributes(final int assetId, List<AttributeDraft> incoming, boolean skipBlank) {
+        Map<String, String> values = ao().executeInTransaction(new TransactionCallback<Map<String, String>>() {
+            @Override
+            public Map<String, String> doInTransaction() {
+                return new HashMap<String, String>(attributeValues(assetId));
+            }
+        });
+        if (incoming != null) {
+            for (AttributeDraft attribute : incoming) {
+                if (attribute == null || attribute.getFieldKey() == null) {
+                    continue;
+                }
+                String key = attribute.getFieldKey().trim();
+                String value = attribute.getValue() == null ? "" : attribute.getValue();
+                if (key.isEmpty() || (skipBlank && value.trim().isEmpty())) {
+                    continue;
+                }
+                values.put(key, value);
+            }
+        }
+        List<AttributeDraft> merged = new ArrayList<AttributeDraft>();
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            AttributeDraft item = new AttributeDraft();
+            item.setFieldKey(entry.getKey());
+            item.setValue(entry.getValue() == null ? "" : entry.getValue());
+            merged.add(item);
+        }
+        return merged;
+    }
+
+    private AssetEntity findByObjectKey(String projectKey, String objectKey) {
+        if (objectKey == null || objectKey.trim().isEmpty()) {
+            return null;
+        }
+        String wanted = objectKey.trim();
+        AssetEntity[] rows = assetsIn(projectKey);
+        if (rows == null) {
+            return null;
+        }
+        for (AssetEntity row : rows) {
+            if (row.getObjectKey() != null && row.getObjectKey().equalsIgnoreCase(wanted)) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public List<SchemaDto> listSchemas(ApplicationUser user, final String projectKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        return ao().executeInTransaction(new TransactionCallback<List<SchemaDto>>() {
+            @Override
+            public List<SchemaDto> doInTransaction() {
+                return schemaDtos(project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public SchemaDto saveSchema(ApplicationUser user, String projectKey, final SchemaDto draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        if (draft == null || draft.getName() == null || draft.getName().trim().isEmpty() || draft.getName().trim().length() > 80) {
+            throw new AssetException(400, "asset-tree.error.schema");
+        }
+        final String name = draft.getName().trim();
+        final String typeKeys = joinKeys(draft.getTypeKeys());
+        final int id = draft.getId();
+        return ao().executeInTransaction(new TransactionCallback<SchemaDto>() {
+            @Override
+            public SchemaDto doInTransaction() {
+                TypeSchemaEntity row = null;
+                if (id > 0) {
+                    row = ao().get(TypeSchemaEntity.class, id);
+                    if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                        throw new AssetException(404, "asset-tree.error.notFound");
+                    }
+                } else {
+                    TypeSchemaEntity[] same = ao().find(TypeSchemaEntity.class,
+                            Query.select().where("PROJECT_KEY = ? AND NAME = ?", project.getKey(), name));
+                    if (same != null && same.length > 0) {
+                        row = same[0];
+                    }
+                }
+                if (row == null) {
+                    row = ao().create(TypeSchemaEntity.class,
+                            new DBParam("PROJECT_KEY", project.getKey()),
+                            new DBParam("NAME", name));
+                }
+                row.setName(name);
+                row.setTypeKeys(typeKeys);
+                row.save();
+                return toSchemaDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void deleteSchema(ApplicationUser user, String projectKey, final int schemaId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                TypeSchemaEntity row = ao().get(TypeSchemaEntity.class, schemaId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    private List<SchemaDto> schemaDtos(String projectKey) {
+        List<SchemaDto> result = new ArrayList<SchemaDto>();
+        TypeSchemaEntity[] rows = ao().find(TypeSchemaEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return result;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            result.add(toSchemaDto(rows[i]));
+        }
+        Collections.sort(result, new Comparator<SchemaDto>() {
+            @Override
+            public int compare(SchemaDto left, SchemaDto right) {
+                String a = left.getName() == null ? "" : left.getName();
+                String b = right.getName() == null ? "" : right.getName();
+                return a.compareToIgnoreCase(b);
+            }
+        });
+        return result;
+    }
+
+    private SchemaDto toSchemaDto(TypeSchemaEntity row) {
+        SchemaDto dto = new SchemaDto();
+        dto.setId(row.getID());
+        dto.setName(row.getName() == null ? "" : row.getName());
+        dto.setTypeKeys(new ArrayList<String>(splitKeys(row.getTypeKeys())));
+        return dto;
+    }
+
+    private Project requireIntegrator(ApplicationUser user, String projectKey) {
+        Project project = requireReadableProject(user, projectKey);
+        if (isAdmin(user) || hasGlobalManage(user)
+                || permissionManager().hasPermission(ProjectPermissions.ADMINISTER_PROJECTS, project, user)
+                || grantHas(user, project, GrantCaps.ADMIN)) {
+            return project;
+        }
+        throw new AssetException(403, "asset-tree.error.forbidden");
+    }
+
+    @Override
+    public List<WebhookDto> listWebhooks(ApplicationUser user, final String projectKey) {
+        final Project project = requireIntegrator(user, projectKey);
+        return ao().executeInTransaction(new TransactionCallback<List<WebhookDto>>() {
+            @Override
+            public List<WebhookDto> doInTransaction() {
+                return webhookDtos(project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public WebhookDto saveWebhook(ApplicationUser user, String projectKey, final WebhookDto draft) {
+        final Project project = requireIntegrator(user, projectKey);
+        if (draft == null) {
+            throw new AssetException(400, "asset-tree.error.webhook");
+        }
+        final String url = webhookUrl(draft.getUrl());
+        String secretRaw = draft.getSecret() == null ? "" : draft.getSecret().trim();
+        if (secretRaw.length() > 80) {
+            throw new AssetException(400, "asset-tree.error.webhook");
+        }
+        final String secret = secretRaw;
+        String eventsRaw = draft.getEvents() == null ? "" : draft.getEvents().trim();
+        if (eventsRaw.length() > 255) {
+            throw new AssetException(400, "asset-tree.error.webhook");
+        }
+        final String events = eventsRaw;
+        final boolean enabled = draft.isEnabled();
+        final int id = draft.getId();
+        return ao().executeInTransaction(new TransactionCallback<WebhookDto>() {
+            @Override
+            public WebhookDto doInTransaction() {
+                WebhookEntity row = null;
+                if (id > 0) {
+                    row = ao().get(WebhookEntity.class, id);
+                    if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                        throw new AssetException(404, "asset-tree.error.notFound");
+                    }
+                }
+                if (row == null) {
+                    row = ao().create(WebhookEntity.class,
+                            new DBParam("PROJECT_KEY", project.getKey()),
+                            new DBParam("URL", url));
+                }
+                row.setUrl(url);
+                row.setSecret(secret);
+                row.setEvents(events);
+                row.setEnabled(enabled);
+                row.save();
+                return toWebhookDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void deleteWebhook(ApplicationUser user, String projectKey, final int webhookId) {
+        final Project project = requireIntegrator(user, projectKey);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                WebhookEntity row = ao().get(WebhookEntity.class, webhookId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    private String webhookUrl(String raw) {
+        String url = raw == null ? "" : raw.trim();
+        if (url.length() < 8 || url.length() > 500 || !(url.startsWith("https://") || url.startsWith("http://"))) {
+            throw new AssetException(400, "asset-tree.error.webhook");
+        }
+        return url;
+    }
+
+    private List<WebhookDto> webhookDtos(String projectKey) {
+        List<WebhookDto> result = new ArrayList<WebhookDto>();
+        WebhookEntity[] rows = ao().find(WebhookEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return result;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            result.add(toWebhookDto(rows[i]));
+        }
+        return result;
+    }
+
+    private WebhookDto toWebhookDto(WebhookEntity row) {
+        WebhookDto dto = new WebhookDto();
+        dto.setId(row.getID());
+        dto.setUrl(row.getUrl() == null ? "" : row.getUrl());
+        dto.setSecret(row.getSecret() == null ? "" : row.getSecret());
+        dto.setEvents(row.getEvents() == null ? "" : row.getEvents());
+        dto.setEnabled(row.isEnabled());
+        return dto;
+    }
+
+    @Override
+    public ExportJobDto startExport(ApplicationUser user, String projectKey, ExportDraft draft) {
+        String kind = draft == null || draft.getKind() == null ? "" : draft.getKind().trim();
+        final Project project;
+        final boolean reports;
+        if ("reports".equals(kind)) {
+            project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
+            requireModule(project.getKey(), ProjectModules.REPORTS);
+            reports = true;
+        } else if ("equipment".equals(kind)) {
+            project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+            reports = false;
+        } else {
+            throw new AssetException(400, "asset-tree.error.export");
+        }
+        final String storedKey = project.getKey();
+        final ApplicationUser actor = user;
+        final String fileName = (reports ? "reports-" : "equipment-") + storedKey + ".xlsx";
+        ExportJobDto job = ExportJobs.start(fileName, new ExportJobs.Work() {
+            @Override
+            public byte[] build() {
+                ApplicationUser previous = authenticationContext().getLoggedInUser();
+                try {
+                    authenticationContext().setLoggedInUser(actor);
+                    return ao().executeInTransaction(new TransactionCallback<byte[]>() {
+                        @Override
+                        public byte[] doInTransaction() {
+                            if (reports) {
+                                Project current = project(storedKey);
+                                return reportBook(current);
+                            }
+                            return buildEquipmentBook(storedKey);
+                        }
+                    });
+                } finally {
+                    authenticationContext().setLoggedInUser(previous);
+                }
+            }
+        });
+        if (job.getId() != null) {
+            exportOwners.put(job.getId(), storedKey);
+        }
+        return job;
+    }
+
+    @Override
+    public ExportJobDto exportStatus(ApplicationUser user, String projectKey, String jobId) {
+        requireExport(user, projectKey, jobId);
+        return ExportJobs.status(jobId);
+    }
+
+    @Override
+    public byte[] exportFile(ApplicationUser user, String projectKey, String jobId) {
+        requireExport(user, projectKey, jobId);
+        byte[] body = ExportJobs.body(jobId);
+        if (body == null) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        return body;
+    }
+
+    @Override
+    public String exportFileName(ApplicationUser user, String projectKey, String jobId) {
+        requireExport(user, projectKey, jobId);
+        return ExportJobs.fileName(jobId);
+    }
+
+    private void requireExport(ApplicationUser user, String projectKey, String jobId) {
+        requireUser(user);
+        String owner = jobId == null ? null : exportOwners.get(jobId);
+        Project project = project(projectKey);
+        if (project == null || owner == null || !owner.equals(project.getKey())) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        if (canOpen(user, project) || hasCap(user, project, GrantCaps.REPORTS) || hasCap(user, project, GrantCaps.OBJECT)) {
+            return;
+        }
+        throw new AssetException(403, "asset-tree.error.forbidden");
+    }
+
+    @Override
+    public List<ForecastRowDto> forecast(ApplicationUser user, String projectKey, int within) {
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
+        if (!moduleOn(project.getKey(), ProjectModules.LIFE)) {
+            return new ArrayList<ForecastRowDto>();
+        }
+        final int window = within <= 0 ? 12 : Math.min(120, within);
+        return ao().executeInTransaction(new TransactionCallback<List<ForecastRowDto>>() {
+            @Override
+            public List<ForecastRowDto> doInTransaction() {
+                AssetEntity[] rows = assetsIn(project.getKey());
+                Map<Integer, LifecycleEntity> lives = lifeIndex(idsOf(rows));
+                LocalDate today = businessToday();
+                List<ForecastRowDto> list = new ArrayList<ForecastRowDto>();
+                if (rows == null) {
+                    return list;
+                }
+                for (AssetEntity asset : rows) {
+                    if (asset == null || isLocation(asset)) {
+                        continue;
+                    }
+                    LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
+                    LocalDate replace = replaceDate(life);
+                    if (replace == null) {
+                        continue;
+                    }
+                    int left = monthsLeftOf(life, today);
+                    if (left > window) {
+                        continue;
+                    }
+                    ForecastRowDto item = new ForecastRowDto();
+                    item.setAssetId(asset.getID());
+                    item.setObjectKey(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+                    item.setName(asset.getName() == null ? "" : asset.getName());
+                    item.setReplaceOn(replace.toString());
+                    item.setMonthsLeft(left);
+                    item.setBook(MoneyText.format(bookOf(life, today)));
+                    list.add(item);
+                }
+                Collections.sort(list, new Comparator<ForecastRowDto>() {
+                    @Override
+                    public int compare(ForecastRowDto left, ForecastRowDto right) {
+                        int byDate = left.getReplaceOn().compareTo(right.getReplaceOn());
+                        if (byDate != 0) {
+                            return byDate;
+                        }
+                        return left.getName().compareToIgnoreCase(right.getName());
+                    }
+                });
+                return list;
+            }
+        });
     }
 
     private static final class ServiceNotice {

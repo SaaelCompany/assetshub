@@ -14,7 +14,10 @@ import java.util.regex.Pattern;
  * Places and types must already exist: the file does not invent the tree.
  */
 public final class EquipmentExchange {
-    public static final int MAX_ROWS = 2000;
+    /** One workbook, across every sheet. A larger book is refused. */
+    public static final int MAX_ROWS = 20000;
+    /** Rows written by one request when the client asks for chunks. */
+    public static final int CHUNK_ROWS = 400;
 
     private static final Pattern NUMBER = Pattern.compile("^-?\\d{1,12}(\\.\\d{1,4})?$");
     private static final String[] ROLES = {"key", "name", "type", "status", "place", "custodian", "issued", "description"};
@@ -914,5 +917,94 @@ public final class EquipmentExchange {
 
     private static boolean same(String left, String right) {
         return norm(left).equals(norm(right));
+    }
+
+    public static int countRows(List<EquipmentSheet.Sheet> sheets) {
+        int rows = 0;
+        if (sheets == null) {
+            return 0;
+        }
+        for (EquipmentSheet.Sheet sheet : sheets) {
+            if (sheet != null && sheet.getRecords() != null) {
+                rows += sheet.getRecords().size();
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * A slice of data rows, headers kept on every sheet that still has rows.
+     * {@code next} is the offset of the following slice. {@code done} is true
+     * when this slice reaches the end.
+     */
+    public static Window window(List<EquipmentSheet.Sheet> sheets, int offset, int limit) {
+        int from = offset < 0 ? 0 : offset;
+        int size = limit <= 0 ? CHUNK_ROWS : limit;
+        List<EquipmentSheet.Sheet> source = sheets == null ? new ArrayList<EquipmentSheet.Sheet>() : sheets;
+        int total = countRows(source);
+        List<EquipmentSheet.Sheet> sliced = new ArrayList<EquipmentSheet.Sheet>();
+        int seen = 0;
+        int taken = 0;
+        for (EquipmentSheet.Sheet sheet : source) {
+            if (sheet == null || sheet.getRecords() == null) {
+                continue;
+            }
+            List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+            for (EquipmentSheet.Record record : sheet.getRecords()) {
+                if (seen >= from && taken < size) {
+                    records.add(copyRecord(record));
+                    taken++;
+                }
+                seen++;
+            }
+            if (!records.isEmpty()) {
+                sliced.add(new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records));
+            }
+        }
+        int next = from + taken;
+        return new Window(sliced, total, next, next >= total);
+    }
+
+    public static Integer findPlace(String place, List<Node> nodes, int row, List<Issue> issues) {
+        return matchPlace(place, indexPlaces(nodes), row, issues);
+    }
+
+    private static EquipmentSheet.Record copyRecord(EquipmentSheet.Record record) {
+        List<String> cells = new ArrayList<String>();
+        int width = record == null ? 0 : record.width();
+        for (int i = 0; i < width; i++) {
+            cells.add(record.cell(i));
+        }
+        return new EquipmentSheet.Record(record == null ? 0 : record.getRow(), cells);
+    }
+
+    public static final class Window {
+        private final List<EquipmentSheet.Sheet> sheets;
+        private final int total;
+        private final int next;
+        private final boolean done;
+
+        Window(List<EquipmentSheet.Sheet> sheets, int total, int next, boolean done) {
+            this.sheets = sheets;
+            this.total = total;
+            this.next = next;
+            this.done = done;
+        }
+
+        public List<EquipmentSheet.Sheet> getSheets() {
+            return sheets;
+        }
+
+        public int getTotal() {
+            return total;
+        }
+
+        public int getNext() {
+            return next;
+        }
+
+        public boolean isDone() {
+            return done;
+        }
     }
 }

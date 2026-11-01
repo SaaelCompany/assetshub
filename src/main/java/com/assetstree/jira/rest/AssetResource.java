@@ -17,7 +17,12 @@ import com.assetstree.jira.model.ShareDraft;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemaDto;
+import com.assetstree.jira.dto.WebhookDto;
+import com.assetstree.jira.model.ExportDraft;
 import com.assetstree.jira.model.ImportDraft;
+import com.assetstree.jira.model.JsonImportDraft;
 import com.assetstree.jira.model.InventoryDraft;
 import com.assetstree.jira.model.IssueLinkDraft;
 import com.assetstree.jira.model.MoveDraft;
@@ -28,7 +33,6 @@ import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
-import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleDraft;
@@ -46,6 +50,7 @@ import org.slf4j.LoggerFactory;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
+import javax.ws.rs.HeaderParam;
 import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
@@ -772,11 +777,160 @@ public class AssetResource {
 
     @POST
     @Path("projects/{projectKey}/equipment")
-    public Response importEquipment(@PathParam("projectKey") final String projectKey, final ImportDraft draft) {
+    public Response importEquipment(@PathParam("projectKey") final String projectKey, final ImportDraft draft,
+                                    @HeaderParam("X-Idempotency-Key") final String idempotencyKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
+                applyIdempotency(draft, idempotencyKey);
                 return Response.ok(assetService.importEquipment(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/import")
+    public Response importJson(@PathParam("projectKey") final String projectKey, final JsonImportDraft draft,
+                               @HeaderParam("X-Idempotency-Key") final String idempotencyKey) {
+        return receiveJson(projectKey, draft, idempotencyKey);
+    }
+
+    @POST
+    @Path("projects/{projectKey}/discovery")
+    public Response discovery(@PathParam("projectKey") final String projectKey, final JsonImportDraft draft,
+                              @HeaderParam("X-Idempotency-Key") final String idempotencyKey) {
+        return receiveJson(projectKey, draft, idempotencyKey);
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/objects/{objectKey}")
+    public Response patchObject(@PathParam("projectKey") final String projectKey,
+                                @PathParam("objectKey") final String objectKey,
+                                final AssetDraft draft,
+                                @QueryParam("skipBlank") final Boolean skipBlank) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                boolean skip = skipBlank == null || skipBlank.booleanValue();
+                return Response.ok(assetService.patchByKey(user(), projectKey, objectKey, draft, skip)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/schemas")
+    public Response schemas(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listSchemas(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/schemas")
+    public Response saveSchema(@PathParam("projectKey") final String projectKey, final SchemaDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveSchema(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/schemas/{schemaId}")
+    public Response deleteSchema(@PathParam("projectKey") final String projectKey, @PathParam("schemaId") final int schemaId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteSchema(user(), projectKey, schemaId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/webhooks")
+    public Response webhooks(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listWebhooks(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/webhooks")
+    public Response saveWebhook(@PathParam("projectKey") final String projectKey, final WebhookDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveWebhook(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/webhooks/{webhookId}")
+    public Response deleteWebhook(@PathParam("projectKey") final String projectKey, @PathParam("webhookId") final int webhookId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteWebhook(user(), projectKey, webhookId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/exports")
+    public Response startExport(@PathParam("projectKey") final String projectKey, final ExportDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.startExport(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/exports/{jobId}")
+    public Response exportStatus(@PathParam("projectKey") final String projectKey, @PathParam("jobId") final String jobId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.exportStatus(user(), projectKey, jobId)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/exports/{jobId}/file")
+    @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public Response exportFile(@PathParam("projectKey") final String projectKey, @PathParam("jobId") final String jobId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                byte[] book = assetService.exportFile(user(), projectKey, jobId);
+                String file = assetService.exportFileName(user(), projectKey, jobId);
+                return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
+                        .build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/lifecycle/forecast")
+    public Response forecast(@PathParam("projectKey") final String projectKey, @QueryParam("within") final Integer within) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                int window = within == null ? 12 : within.intValue();
+                return Response.ok(assetService.forecast(user(), projectKey, window)).build();
             }
         });
     }
@@ -1249,6 +1403,29 @@ public class AssetResource {
                 return Response.noContent().build();
             }
         });
+    }
+
+    private Response receiveJson(final String projectKey, final JsonImportDraft draft, final String idempotencyKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                if (draft != null && (draft.getIdempotencyKey() == null || draft.getIdempotencyKey().trim().isEmpty())
+                        && idempotencyKey != null && !idempotencyKey.trim().isEmpty()) {
+                    draft.setIdempotencyKey(idempotencyKey.trim());
+                }
+                return Response.ok(assetService.importJson(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    private void applyIdempotency(ImportDraft draft, String header) {
+        if (draft == null) {
+            return;
+        }
+        if ((draft.getIdempotencyKey() == null || draft.getIdempotencyKey().trim().isEmpty())
+                && header != null && !header.trim().isEmpty()) {
+            draft.setIdempotencyKey(header.trim());
+        }
     }
 
     private ApplicationUser user() {

@@ -40,6 +40,9 @@
         <entity>com.assetstree.jira.ao.SavedReportEntity</entity>
         <entity>com.assetstree.jira.ao.LifecycleEntity</entity>
         <entity>com.assetstree.jira.ao.CardTemplateEntity</entity>
+        <entity>com.assetstree.jira.ao.TypeSchemaEntity</entity>
+        <entity>com.assetstree.jira.ao.WebhookEntity</entity>
+        <entity>com.assetstree.jira.ao.IdempotencyEntity</entity>
     </ao>
 
     <customfield-type key="asset-cf" name="Project asset" i18n-name-key="asset-tree.field.cf.name" class="com.assetstree.jira.field.AssetCustomField">
