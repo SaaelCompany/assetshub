@@ -51,6 +51,57 @@
     var report = null;
     var sentAt = 0;
     var closed = false;
+    armTransport();
+
+    function reportPayload() {
+        if (!report) return '';
+        try {
+            var payload = encodeURIComponent(JSON.stringify(report));
+            return payload.length > 3500 ? '' : payload;
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function armTransport() {
+        if (window.__assetTreeTniArmed) return;
+        window.__assetTreeTniArmed = true;
+        var proto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+        if (proto && proto.send && !proto.__assetTreeTniSend) {
+            var send = proto.send;
+            proto.send = function () {
+                try {
+                    var payload = reportPayload();
+                    if (payload) this.setRequestHeader('X-Asset-Tree-Tni', payload);
+                } catch (error) {
+                    /* The request is already open without this header. */
+                }
+                return send.apply(this, arguments);
+            };
+            proto.__assetTreeTniSend = true;
+        }
+        if (typeof window.fetch === 'function' && !window.fetch.__assetTreeTni) {
+            var nativeFetch = window.fetch;
+            var wrapped = function (input, init) {
+                var payload = reportPayload();
+                if (payload && window.Headers) {
+                    init = init ? init : {};
+                    var headers = new window.Headers(init.headers || (input && input.headers) || undefined);
+                    headers.set('X-Asset-Tree-Tni', payload);
+                    init = init;
+                    var next = {};
+                    for (var key in init) {
+                        if (Object.prototype.hasOwnProperty.call(init, key)) next[key] = init[key];
+                    }
+                    next.headers = headers;
+                    init = next;
+                }
+                return nativeFetch.call(this, input, init);
+            };
+            wrapped.__assetTreeTni = true;
+            window.fetch = wrapped;
+        }
+    }
 
     function screenSize() {
         var screen = window.screen || {};
@@ -173,9 +224,10 @@
     function rememberLocal() {
         if (!report) return;
         try {
-            var payload = encodeURIComponent(JSON.stringify(report));
-            if (payload.length > 3500) return;
-            var path = (contextPath() || '') + '/servicedesk/customer';
+            var payload = reportPayload();
+            if (!payload) return;
+            var path = contextPath() || '/';
+            if (path.charAt(path.length - 1) !== '/') path += '/';
             document.cookie = 'asset-tree-tni=' + payload + '; path=' + path + '; max-age=600; SameSite=Lax';
         } catch (error) {
             /* The create request still carries a cookie written on an earlier pass. */

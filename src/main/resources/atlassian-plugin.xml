@@ -148,6 +148,13 @@
         <description>Moves linked equipment when a request changes status.</description>
     </listener>
 
+    <servlet-filter name="Asset Tree TNI Sight" key="asset-tree-tni-sight" class="com.assetstree.jira.servlet.TniSightFilter" location="before-dispatch" weight="10">
+        <description>Keeps the portal device report that arrives with the request which creates the issue.</description>
+        <url-pattern>/*</url-pattern>
+        <dispatcher>REQUEST</dispatcher>
+        <dispatcher>FORWARD</dispatcher>
+    </servlet-filter>
+
     <servlet-filter name="Asset Tree Portal Field" key="asset-tree-portal-filter" class="com.assetstree.jira.servlet.PortalPageFilter" location="before-decoration" weight="50">
         <description>Adds the asset dropdown to the customer portal create form.</description>
         <url-pattern>/servicedesk/customer/*</url-pattern>

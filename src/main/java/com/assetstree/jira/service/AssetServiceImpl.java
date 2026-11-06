@@ -11995,7 +11995,10 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         if (draft == null) {
-            draft = TniCookie.read(requestCookie(TniCookie.NAME));
+            draft = TniCookie.read(requestValue(TniCookie.HEADER, true));
+        }
+        if (draft == null) {
+            draft = TniCookie.read(requestValue(TniCookie.NAME, false));
         }
         if (draft == null || owner == null || projectKey == null || projectKey.trim().isEmpty()) {
             return;
@@ -12007,10 +12010,16 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private String requestCookie(String name) {
+    private String requestValue(String name, boolean header) {
         try {
             HttpServletRequest request = ExecutingHttpRequest.get();
-            if (request == null || request.getCookies() == null || name == null) {
+            if (request == null || name == null) {
+                return null;
+            }
+            if (header) {
+                return request.getHeader(name);
+            }
+            if (request.getCookies() == null) {
                 return null;
             }
             Cookie[] cookies = request.getCookies();

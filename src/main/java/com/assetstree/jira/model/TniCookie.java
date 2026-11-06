@@ -6,12 +6,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The device report travels with the portal create request itself.
- * A separate REST call can be refused for a customer, so the browser also
- * leaves the same report in a cookie on the customer portal path.
+ * The device report travels with the request that creates the portal issue.
+ * A separate call to this plugin is often refused for a customer, so the
+ * browser attaches the same report as a header and a cookie.
  */
 public final class TniCookie {
     public static final String NAME = "asset-tree-tni";
+    public static final String HEADER = "X-Asset-Tree-Tni";
 
     private TniCookie() {
     }
