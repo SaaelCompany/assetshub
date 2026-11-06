@@ -17,7 +17,7 @@ public interface WebhookEntity extends Entity {
     void setProjectKey(String projectKey);
 
     @NotNull
-    @StringLength(500)
+    @StringLength(StringLength.UNLIMITED)
     String getUrl();
 
     void setUrl(String url);
