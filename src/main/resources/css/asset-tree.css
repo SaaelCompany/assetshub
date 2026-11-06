@@ -9719,12 +9719,89 @@ a.asset-tree-preview-icon:focus {
     text-anchor: start;
 }
 
-#asset-tree-app .asset-tree-webhook-sample {
-    white-space: pre-wrap;
-    background: #f4f5f7;
-    padding: 8px;
-    border-radius: 3px;
+#asset-tree-app .asset-tree-field-label {
+    margin: 0 0 4px;
+    color: #6b778c;
     font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-code,
+#asset-tree-app .asset-tree-webhook-sample {
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #f4f5f7;
+    color: #172b4d;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+#asset-tree-app .asset-tree-key-field.wide {
+    width: 100%;
+    max-width: 640px;
+}
+
+#asset-tree-app .asset-tree-webhook-secret {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    max-width: 640px;
+    margin-bottom: 12px;
+}
+
+#asset-tree-app .asset-tree-webhook-secret .asset-tree-key-field {
+    flex: 1 1 auto;
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-webhook-secret > button.asset-tree-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-project-card .asset-tree-grant-list {
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-schema-tabs + .asset-tree-project-card {
+    margin-top: 16px;
+}
+
+#asset-tree-app .asset-tree-project-card + .asset-tree-settings-block {
+    margin-top: 16px;
+    padding-top: 0;
+    border-top: 0;
+}
+
+#asset-tree-app .asset-tree-scope {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 12px;
+}
+
+#asset-tree-app .asset-tree-scope .asset-tree-key-field {
+    width: auto;
+    max-width: none;
+}
+
+#asset-tree-app .asset-tree-scope input {
+    min-width: 0;
+}
+
+@media (max-width: 860px) {
+    #asset-tree-app .asset-tree-scope {
+        grid-template-columns: 1fr;
+    }
+
+    #asset-tree-app .asset-tree-webhook-secret {
+        flex-direction: column;
+        align-items: stretch;
+    }
 }
 
 #asset-tree-app .asset-tree-link-type {

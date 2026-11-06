@@ -25871,7 +25871,9 @@
     }
 
     function renderExchangeSettings(panel) {
-        var block = el('div', 'asset-tree-settings-block');
+        var stack = el('div', 'asset-tree-project-stack');
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('exchangeSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('exchangeHint')));
         var file = el('input', 'asset-tree-import-file');
         file.type = 'file';
@@ -25971,8 +25973,9 @@
                 block.appendChild(list);
             }
         }
-        panel.appendChild(block);
-        panel.appendChild(webhookSettings());
+        stack.appendChild(block);
+        stack.appendChild(webhookSettings());
+        panel.appendChild(stack);
     }
 
     function freshSecret() {
@@ -25982,15 +25985,32 @@
         return value;
     }
 
+    function settingField(label, control) {
+        var field = el('label', 'asset-tree-key-field wide');
+        field.appendChild(el('span', null, label));
+        field.appendChild(control);
+        return field;
+    }
+
+    function textControl(placeholder) {
+        var node = el('input', 'asset-tree-text');
+        node.type = 'text';
+        node.autocomplete = 'off';
+        node.spellcheck = false;
+        node.placeholder = placeholder || '';
+        return node;
+    }
+
     function webhookSettings() {
-        var block = el('div', 'asset-tree-settings-block');
-        block.appendChild(el('h3', null, t('webhookRecipeTitle')));
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('webhookRecipeTitle')));
         block.appendChild(el('p', 'asset-tree-hint', t('webhookRecipe')));
         var importUrl = (state.baseUrl || '') + '/rest/asset-tree/1.0/projects/' + state.projectKey + '/import';
-        block.appendChild(el('p', 'asset-tree-hint', t('webhookImportUrl')));
-        block.appendChild(el('p', 'asset-tree-key', importUrl));
+        block.appendChild(el('p', 'asset-tree-field-label', t('webhookImportUrl')));
+        block.appendChild(el('p', 'asset-tree-code', importUrl));
         block.appendChild(el('p', 'asset-tree-hint', t('webhookImportHeaders')));
-        block.appendChild(el('pre', 'asset-tree-webhook-sample', t('webhookSample')));
+        block.appendChild(el('p', 'asset-tree-field-label', t('webhookSampleLabel')));
+        block.appendChild(el('pre', 'asset-tree-webhook-sample asset-tree-code', t('webhookSample')));
         block.appendChild(el('p', 'asset-tree-hint', t('webhookHint')));
         if (state.webhooks === null) {
             state.webhooks = [];
@@ -25999,33 +26019,45 @@
                 if (state.view === 'settings') renderFrame();
             });
         }
-        (state.webhooks || []).forEach(function (hook) {
-            var line = el('div', 'asset-tree-grant');
-            line.appendChild(el('strong', null, hook.url || ''));
-            line.appendChild(el('span', null, hook.events || t('webhookEvents')));
-            line.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/' + hook.id, null, function (status) {
-                    if (status >= 200 && status < 300) {
-                        state.webhooks = (state.webhooks || []).filter(function (item) { return item.id !== hook.id; });
-                        renderFrame();
-                    }
-                });
-            }));
-            block.appendChild(line);
-        });
-        var url = document.createElement('input');
-        url.placeholder = t('webhookUrl');
-        var events = document.createElement('input');
-        events.placeholder = t('webhookEvents');
-        var secret = document.createElement('input');
-        secret.placeholder = 'token';
-        block.appendChild(url);
-        block.appendChild(events);
-        block.appendChild(secret);
-        block.appendChild(button(t('webhookSecretNew'), 'asset-tree-btn', function () {
+        var saved = state.webhooks || [];
+        if (saved.length) {
+            var list = el('div', 'asset-tree-grant-list');
+            saved.forEach(function (hook) {
+                var line = el('div', 'asset-tree-grant');
+                var head = el('div', 'asset-tree-grant-head');
+                var title = el('span', 'asset-tree-grant-title');
+                title.appendChild(el('strong', null, hook.url || ''));
+                if (hook.events) title.appendChild(el('span', null, hook.events));
+                head.appendChild(title);
+                head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/' + hook.id, null, function (status) {
+                        if (status >= 200 && status < 300) {
+                            state.webhooks = (state.webhooks || []).filter(function (item) { return item.id !== hook.id; });
+                            renderFrame();
+                        }
+                    });
+                }));
+                line.appendChild(head);
+                list.appendChild(line);
+            });
+            block.appendChild(list);
+        }
+        var url = textControl(t('webhookUrl'));
+        url.setAttribute('aria-label', t('webhookAddress'));
+        var events = textControl(t('webhookEvents'));
+        events.setAttribute('aria-label', t('webhookEvents'));
+        var secret = textControl('');
+        secret.setAttribute('aria-label', t('webhookSecret'));
+        block.appendChild(settingField(t('webhookAddress'), url));
+        block.appendChild(settingField(t('webhookEvents'), events));
+        var secretRow = el('div', 'asset-tree-webhook-secret');
+        secretRow.appendChild(settingField(t('webhookSecret'), secret));
+        secretRow.appendChild(button(t('webhookSecretNew'), 'asset-tree-btn', function () {
             secret.value = freshSecret();
         }));
-        block.appendChild(button(t('webhookTest'), 'asset-tree-btn', function () {
+        block.appendChild(secretRow);
+        var actions = el('div', 'asset-tree-inline-actions');
+        actions.appendChild(button(t('webhookTest'), 'asset-tree-btn', function () {
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/test', {
                 url: url.value.trim(),
                 secret: secret.value.trim()
@@ -26034,7 +26066,7 @@
                 else notify((payload && payload.message) || t('webhookTestFail'));
             });
         }));
-        block.appendChild(button(t('webhookSave'), 'asset-tree-btn primary', function () {
+        actions.appendChild(button(t('webhookSave'), 'asset-tree-btn primary', function () {
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', {
                 url: url.value.trim(),
                 events: events.value.trim(),
@@ -26047,6 +26079,7 @@
                 } else notify((payload && payload.message) || t('errorTitle'));
             });
         }));
+        block.appendChild(actions);
         return block;
     }
 
@@ -27031,13 +27064,13 @@
 
     function scopeEditor(grant, onSave) {
         var box = el('div', 'asset-tree-scope');
-        var types = document.createElement('input');
+        var types = textControl('');
         types.value = (grant && grant.typeScope) || '';
         types.placeholder = t('scopeTypes');
-        var schema = document.createElement('input');
+        var schema = textControl('');
         schema.value = (grant && grant.schemaName) || '';
         schema.placeholder = t('scopeSchema');
-        var fields = document.createElement('input');
+        var fields = textControl('');
         fields.value = (grant && grant.fieldScope) || '';
         fields.placeholder = t('scopeFields');
         function read() {
@@ -27046,14 +27079,15 @@
         types.addEventListener('change', function () { onSave(read()); });
         schema.addEventListener('change', function () { onSave(read()); });
         fields.addEventListener('change', function () { onSave(read()); });
-        box.appendChild(types);
-        box.appendChild(schema);
-        box.appendChild(fields);
+        box.appendChild(settingField(t('scopeTypes'), types));
+        box.appendChild(settingField(t('scopeSchema'), schema));
+        box.appendChild(settingField(t('scopeFields'), fields));
         return box;
     }
 
     function schemaSettings() {
-        var block = el('div', 'asset-tree-settings-block');
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('schemaTitle')));
         block.appendChild(el('p', 'asset-tree-hint', t('accessScopeHint')));
         if (state.schemas === null) {
             state.schemas = [];
@@ -27062,28 +27096,38 @@
                 if (state.view === 'settings') renderFrame();
             });
         }
-        (state.schemas || []).forEach(function (schema) {
-            var line = el('div', 'asset-tree-grant');
-            var keys = (schema.typeKeys || []).join(', ');
-            line.appendChild(el('strong', null, schema.name || ''));
-            line.appendChild(el('span', null, keys));
-            line.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas/' + schema.id, null, function (status) {
-                    if (status >= 200 && status < 300) {
-                        state.schemas = (state.schemas || []).filter(function (item) { return item.id !== schema.id; });
-                        renderFrame();
-                    }
-                });
-            }));
-            block.appendChild(line);
-        });
-        var name = document.createElement('input');
-        name.placeholder = t('schemaName');
-        var types = document.createElement('input');
-        types.placeholder = t('scopeTypes');
-        block.appendChild(name);
-        block.appendChild(types);
-        block.appendChild(button(t('schemaSave'), 'asset-tree-btn primary', function () {
+        var saved = state.schemas || [];
+        if (saved.length) {
+            var list = el('div', 'asset-tree-grant-list');
+            saved.forEach(function (schema) {
+                var line = el('div', 'asset-tree-grant');
+                var head = el('div', 'asset-tree-grant-head');
+                var title = el('span', 'asset-tree-grant-title');
+                title.appendChild(el('strong', null, schema.name || ''));
+                var keys = (schema.typeKeys || []).join(', ');
+                if (keys) title.appendChild(el('span', null, keys));
+                head.appendChild(title);
+                head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas/' + schema.id, null, function (status) {
+                        if (status >= 200 && status < 300) {
+                            state.schemas = (state.schemas || []).filter(function (item) { return item.id !== schema.id; });
+                            renderFrame();
+                        }
+                    });
+                }));
+                line.appendChild(head);
+                list.appendChild(line);
+            });
+            block.appendChild(list);
+        }
+        var name = textControl(t('schemaName'));
+        name.setAttribute('aria-label', t('schemaName'));
+        var types = textControl(t('scopeTypes'));
+        types.setAttribute('aria-label', t('scopeTypes'));
+        block.appendChild(settingField(t('schemaName'), name));
+        block.appendChild(settingField(t('scopeTypes'), types));
+        var actions = el('div', 'asset-tree-inline-actions');
+        actions.appendChild(button(t('schemaSave'), 'asset-tree-btn primary', function () {
             var keys = types.value.split(',').map(function (item) { return item.trim(); }).filter(function (item) { return item; });
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas', {
                 name: name.value.trim(),
@@ -27095,6 +27139,7 @@
                 } else notify((payload && payload.message) || t('errorTitle'));
             });
         }));
+        block.appendChild(actions);
         return block;
     }
 
