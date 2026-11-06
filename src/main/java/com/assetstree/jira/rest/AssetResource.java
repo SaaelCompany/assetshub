@@ -43,6 +43,7 @@ import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.TypeDraft;
+import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
 import org.slf4j.Logger;
@@ -1451,6 +1452,18 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.deleteType(user(), typeKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("tni/sight")
+    public Response tniSight(final TniSightDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.rememberTni(user(), draft);
                 return Response.noContent().build();
             }
         });

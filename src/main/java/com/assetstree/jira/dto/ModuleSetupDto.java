@@ -34,6 +34,14 @@ public class ModuleSetupDto {
     private String furniture;
     private Boolean portalMine;
     private String portalColumns;
+    private Integer tniKeep;
+    private Integer tniProbeDays;
+    private Integer tniProbeTries;
+    private String tniAction;
+    private String tniComputer;
+    private String tniLaptop;
+    private String tniPhone;
+    private String tniTablet;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -91,4 +99,20 @@ public class ModuleSetupDto {
     public void setPortalMine(Boolean portalMine) { this.portalMine = portalMine; }
     public String getPortalColumns() { return portalColumns; }
     public void setPortalColumns(String portalColumns) { this.portalColumns = portalColumns; }
+    public Integer getTniKeep() { return tniKeep; }
+    public void setTniKeep(Integer tniKeep) { this.tniKeep = tniKeep; }
+    public Integer getTniProbeDays() { return tniProbeDays; }
+    public void setTniProbeDays(Integer tniProbeDays) { this.tniProbeDays = tniProbeDays; }
+    public Integer getTniProbeTries() { return tniProbeTries; }
+    public void setTniProbeTries(Integer tniProbeTries) { this.tniProbeTries = tniProbeTries; }
+    public String getTniAction() { return tniAction; }
+    public void setTniAction(String tniAction) { this.tniAction = tniAction; }
+    public String getTniComputer() { return tniComputer; }
+    public void setTniComputer(String tniComputer) { this.tniComputer = tniComputer; }
+    public String getTniLaptop() { return tniLaptop; }
+    public void setTniLaptop(String tniLaptop) { this.tniLaptop = tniLaptop; }
+    public String getTniPhone() { return tniPhone; }
+    public void setTniPhone(String tniPhone) { this.tniPhone = tniPhone; }
+    public String getTniTablet() { return tniTablet; }
+    public void setTniTablet(String tniTablet) { this.tniTablet = tniTablet; }
 }

@@ -44,6 +44,7 @@
         <entity>com.assetstree.jira.ao.TypeSchemaEntity</entity>
         <entity>com.assetstree.jira.ao.WebhookEntity</entity>
         <entity>com.assetstree.jira.ao.IdempotencyEntity</entity>
+        <entity>com.assetstree.jira.ao.TniDeviceEntity</entity>
     </ao>
 
     <customfield-type key="asset-cf" name="Project asset" i18n-name-key="asset-tree.field.cf.name" class="com.assetstree.jira.field.AssetCustomField">
@@ -140,6 +141,7 @@
         <context>customerportal</context>
         <resource type="download" name="asset-field.css" location="css/asset-field.css"/>
         <resource type="download" name="asset-field.js" location="js/asset-field.js"/>
+        <resource type="download" name="tni-portal.js" location="js/tni-portal.js"/>
     </web-resource>
 
     <listener key="asset-tree-flow-listener" name="Asset Tree Flow Listener" class="com.assetstree.jira.event.AssetFlowListener">

@@ -22,5 +22,10 @@ public class ServiceDueJob implements PluginJob {
         } catch (RuntimeException ex) {
             log.warn("Report mail was not sent", ex);
         }
+        try {
+            AssetBridge.service().applyTniRetention();
+        } catch (RuntimeException ex) {
+            log.warn("TNI retention was not applied", ex);
+        }
     }
 }

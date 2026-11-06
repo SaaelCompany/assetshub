@@ -12719,6 +12719,7 @@
         if (moduleKey === 'life') return 'moduleLife';
         if (moduleKey === 'portal') return 'modulePortal';
         if (moduleKey === 'card') return 'moduleCard';
+        if (moduleKey === 'tni') return 'moduleTni';
         return 'setupTitle';
     }
 
@@ -13217,6 +13218,93 @@
                 saveSetup(next);
             }));
         }
+        if (moduleKey === 'tni') {
+            panel.appendChild(el('p', 'asset-tree-hint', t('tniHint')));
+            var keep = document.createElement('input');
+            keep.type = 'number';
+            keep.min = '1';
+            keep.max = '3650';
+            keep.value = String(setup.tniKeep || 90);
+            keep.setAttribute('aria-label', t('tniKeep'));
+            panel.appendChild(planField(t('tniKeep'), keep));
+            panel.appendChild(el('p', 'asset-tree-hint', t('tniKeepHint')));
+            var probeDays = document.createElement('input');
+            probeDays.type = 'number';
+            probeDays.min = '1';
+            probeDays.max = '30';
+            probeDays.value = String(setup.tniProbeDays || 3);
+            probeDays.setAttribute('aria-label', t('tniProbeDays'));
+            var probeTries = document.createElement('input');
+            probeTries.type = 'number';
+            probeTries.min = '1';
+            probeTries.max = '30';
+            probeTries.value = String(setup.tniProbeTries || 3);
+            probeTries.setAttribute('aria-label', t('tniProbeTries'));
+            var probeRow = el('div', 'asset-tree-tni-types');
+            probeRow.appendChild(planField(t('tniProbeDays'), probeDays));
+            probeRow.appendChild(planField(t('tniProbeTries'), probeTries));
+            panel.appendChild(probeRow);
+            panel.appendChild(el('p', 'asset-tree-hint', t('tniProbeHint')));
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('tniAction')));
+            var action = el('div', 'asset-tree-tni-action');
+            function actionChoice(value, label) {
+                var line = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'radio';
+                box.name = 'asset-tree-tni-action';
+                box.value = value;
+                box.checked = (setup.tniAction || 'trash') === value;
+                line.appendChild(box);
+                line.appendChild(document.createTextNode(label));
+                action.appendChild(line);
+                return box;
+            }
+            var trashBox = actionChoice('trash', t('tniTrash'));
+            actionChoice('delete', t('tniDelete'));
+            panel.appendChild(action);
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('tniTypes')));
+            panel.appendChild(el('p', 'asset-tree-hint', t('tniTypesHint')));
+            var types = el('div', 'asset-tree-tni-types');
+            function typeSelect(current, label) {
+                var select = document.createElement('select');
+                select.setAttribute('aria-label', label);
+                var empty = document.createElement('option');
+                empty.value = '';
+                empty.textContent = t('tniTypeNone');
+                select.appendChild(empty);
+                placeFacts().forEach(function (type) {
+                    if (!type || type.location) return;
+                    var option = document.createElement('option');
+                    option.value = type.typeKey;
+                    option.textContent = type.label || type.typeKey;
+                    select.appendChild(option);
+                });
+                var known = false;
+                for (var i = 0; i < select.options.length; i++) {
+                    if (select.options[i].value === current) known = true;
+                }
+                select.value = known ? current : '';
+                types.appendChild(planField(label, select));
+                return select;
+            }
+            var computer = typeSelect(setup.tniComputer || '', t('tniKindComputer'));
+            var laptop = typeSelect(setup.tniLaptop || '', t('tniKindLaptop'));
+            var phone = typeSelect(setup.tniPhone || '', t('tniKindPhone'));
+            var tablet = typeSelect(setup.tniTablet || '', t('tniKindTablet'));
+            panel.appendChild(types);
+            panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
+                var next = moduleSetup();
+                next.tniKeep = clampNum(keep.value, 1, 3650);
+                next.tniProbeDays = clampNum(probeDays.value, 1, 30);
+                next.tniProbeTries = clampNum(probeTries.value, 1, 30);
+                next.tniAction = trashBox.checked ? 'trash' : 'delete';
+                next.tniComputer = computer.value;
+                next.tniLaptop = laptop.value;
+                next.tniPhone = phone.value;
+                next.tniTablet = tablet.value;
+                saveSetup(next);
+            }));
+        }
         return panel;
     }
 
@@ -13396,7 +13484,8 @@
             ['reports', 'moduleReports', 'moduleReportsHint', 'reports', 'beta'],
             ['life', 'moduleLife', 'moduleLifeHint', '', 'beta'],
             ['portal', 'modulePortal', 'modulePortalHint', '', 'beta'],
-            ['card', 'moduleCard', 'moduleCardHint', '', 'beta']
+            ['card', 'moduleCard', 'moduleCardHint', '', 'beta'],
+            ['tni', 'moduleTni', 'moduleTniHint', '', 'beta']
         ].forEach(function (item) {
             var option = el('div', 'asset-tree-module-option');
             var label = el('label');
@@ -13409,7 +13498,7 @@
             box.addEventListener('change', function () {
                 var want = box.checked;
                 var next = [];
-                var order = ['service', 'map', 'reports', 'life', 'portal', 'card'];
+                var order = ['service', 'map', 'reports', 'life', 'portal', 'card', 'tni'];
                 order.forEach(function (key) {
                     var on = key === item[0] ? want : moduleOn(key);
                     if (on) next.push(key);
@@ -19813,6 +19902,14 @@
             })(),
             furniture: setup.furniture || '',
             portalMine: !!setup.portalMine,
+            tniKeep: clampNum(setup.tniKeep || 90, 1, 3650),
+            tniProbeDays: clampNum(setup.tniProbeDays || 3, 1, 30),
+            tniProbeTries: clampNum(setup.tniProbeTries || 3, 1, 30),
+            tniAction: setup.tniAction === 'delete' ? 'delete' : 'trash',
+            tniComputer: setup.tniComputer || '',
+            tniLaptop: setup.tniLaptop || '',
+            tniPhone: setup.tniPhone || '',
+            tniTablet: setup.tniTablet || '',
             portalColumns: (function () {
                 var raw = setup.portalColumns;
                 if (raw == null || raw === '' || raw === '*') return 'key,type,status,location';

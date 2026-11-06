@@ -53,6 +53,14 @@ public final class ModuleSetup {
         setup.setFurniture(furniture(values.get("furn")));
         setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
         setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
+        setup.setTniKeep(Integer.valueOf(TniPolicy.keepDays(number(values.get("tkeep")))));
+        setup.setTniProbeDays(Integer.valueOf(TniPolicy.probeDays(number(values.get("tdays")))));
+        setup.setTniProbeTries(Integer.valueOf(TniPolicy.probeTries(number(values.get("ttry")))));
+        setup.setTniAction(TniPolicy.action(values.get("tact")));
+        setup.setTniComputer(TniPolicy.typeKey(values.get("tpc")));
+        setup.setTniLaptop(TniPolicy.typeKey(values.get("tnb")));
+        setup.setTniPhone(TniPolicy.typeKey(values.get("tph")));
+        setup.setTniTablet(TniPolicy.typeKey(values.get("ttb")));
         return setup;
     }
 
@@ -90,6 +98,14 @@ public final class ModuleSetup {
         append(stored, "furn", furniture(value.getFurniture()));
         append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
         append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
+        append(stored, "tkeep", String.valueOf(TniPolicy.keepDays(value.getTniKeep() == null ? 0 : value.getTniKeep().intValue())));
+        append(stored, "tdays", String.valueOf(TniPolicy.probeDays(value.getTniProbeDays() == null ? 0 : value.getTniProbeDays().intValue())));
+        append(stored, "ttry", String.valueOf(TniPolicy.probeTries(value.getTniProbeTries() == null ? 0 : value.getTniProbeTries().intValue())));
+        append(stored, "tact", TniPolicy.action(value.getTniAction()));
+        append(stored, "tpc", TniPolicy.typeKey(value.getTniComputer()));
+        append(stored, "tnb", TniPolicy.typeKey(value.getTniLaptop()));
+        append(stored, "tph", TniPolicy.typeKey(value.getTniPhone()));
+        append(stored, "ttb", TniPolicy.typeKey(value.getTniTablet()));
         return stored.toString();
     }
 
@@ -313,6 +329,14 @@ public final class ModuleSetup {
         merged.setFurniture(incoming.getFurniture() != null ? incoming.getFurniture() : base.getFurniture());
         merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
         merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
+        merged.setTniKeep(incoming.getTniKeep() != null ? incoming.getTniKeep() : base.getTniKeep());
+        merged.setTniProbeDays(incoming.getTniProbeDays() != null ? incoming.getTniProbeDays() : base.getTniProbeDays());
+        merged.setTniProbeTries(incoming.getTniProbeTries() != null ? incoming.getTniProbeTries() : base.getTniProbeTries());
+        merged.setTniAction(incoming.getTniAction() != null ? incoming.getTniAction() : base.getTniAction());
+        merged.setTniComputer(incoming.getTniComputer() != null ? incoming.getTniComputer() : base.getTniComputer());
+        merged.setTniLaptop(incoming.getTniLaptop() != null ? incoming.getTniLaptop() : base.getTniLaptop());
+        merged.setTniPhone(incoming.getTniPhone() != null ? incoming.getTniPhone() : base.getTniPhone());
+        merged.setTniTablet(incoming.getTniTablet() != null ? incoming.getTniTablet() : base.getTniTablet());
         return merged;
     }
 

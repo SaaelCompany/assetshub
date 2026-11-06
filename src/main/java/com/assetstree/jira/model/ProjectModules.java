@@ -16,9 +16,10 @@ public final class ProjectModules {
     public static final String LIFE = "life";
     public static final String PORTAL = "portal";
     public static final String CARD = "card";
+    public static final String TNI = "tni";
 
     private static final List<String> KNOWN = Collections.unmodifiableList(Arrays.asList(
-            SERVICE, MAP, REPORTS, LIFE, PORTAL, CARD));
+            SERVICE, MAP, REPORTS, LIFE, PORTAL, CARD, TNI));
 
     private ProjectModules() {
     }

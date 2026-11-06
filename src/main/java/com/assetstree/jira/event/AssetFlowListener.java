@@ -20,6 +20,22 @@ public class AssetFlowListener extends AbstractIssueEventListener {
     private static final Logger log = LoggerFactory.getLogger(AssetFlowListener.class);
 
     @Override
+    public void issueCreated(IssueEvent event) {
+        if (event == null || event.getIssue() == null) {
+            return;
+        }
+        AssetService service = AssetBridge.service();
+        if (service == null) {
+            return;
+        }
+        try {
+            service.attachTni(event.getUser(), event.getIssue());
+        } catch (RuntimeException ex) {
+            log.warn("TNI did not record a device for {}", event.getIssue().getKey(), ex);
+        }
+    }
+
+    @Override
     public void workflowEvent(IssueEvent event) {
         onStatus(event);
     }

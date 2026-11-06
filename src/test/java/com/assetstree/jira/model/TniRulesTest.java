@@ -1,0 +1,140 @@
+package com.assetstree.jira.model;
+
+import com.assetstree.jira.dto.ModuleSetupDto;
+import com.assetstree.jira.servlet.PortalPageMarkup;
+import org.junit.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collections;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+public class TniRulesTest {
+    private static final long DAY = TniClock.DAY;
+
+    @Test
+    public void privateAddressWinsAndDangerousTargetsAreRefused() {
+        assertEquals("192.168.1.20", TniAddress.choose(Arrays.asList("8.8.8.8", "192.168.1.20", "10.0.0.5")));
+        assertEquals("8.8.8.8", TniAddress.choose(Collections.singletonList("8.8.8.8")));
+        assertEquals("", TniAddress.choose(Arrays.asList("127.0.0.1", "169.254.169.254", "0.0.0.0", "224.0.0.1", "010.1.2.3", "localhost")));
+        assertFalse(TniAddress.allowed("169.254.1.1"));
+        assertTrue(TniAddress.allowed("10.2.3.4"));
+    }
+
+    @Test
+    public void browserReportPicksKindAddressAndStableIdentity() {
+        TniSightDraft phone = draft("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", "iPhone", null);
+        phone.setScreen("390x844");
+        phone.setAddresses(Collections.singletonList("10.8.0.4"));
+        TniFacts facts = TniFacts.from(phone);
+        assertEquals(TniPolicy.PHONE, facts.kind);
+        assertEquals("iOS", facts.os);
+        assertEquals("10.8.0.4", facts.address);
+        assertEquals("390x844", facts.screen);
+
+        TniSightDraft laptop = draft("Mozilla/5.0 (Windows NT 10.0) Chrome/120.0", "Win32", Boolean.TRUE);
+        laptop.setScreen("1920x1080");
+        laptop.setCores(Integer.valueOf(8));
+        laptop.setMemory(Double.valueOf(16));
+        assertEquals(TniPolicy.LAPTOP, TniFacts.from(laptop).kind);
+        assertEquals("Windows", TniFacts.from(laptop).os);
+        assertEquals("Chrome", TniFacts.from(laptop).browser);
+        assertEquals("8", TniFacts.from(laptop).cores);
+        assertEquals("16", TniFacts.from(laptop).memory);
+
+        TniSightDraft tablet = draft("Mozilla/5.0 (iPad; CPU OS 15_0 like Mac OS X) Safari/605", "iPad", null);
+        assertEquals(TniPolicy.TABLET, TniFacts.from(tablet).kind);
+        assertEquals("Safari", TniFacts.from(tablet).browser);
+
+        TniSightDraft desk = draft("Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0", "Linux", Boolean.FALSE);
+        desk.setScreen("2560x1440");
+        assertEquals(TniPolicy.COMPUTER, TniFacts.from(desk).kind);
+
+        String id = TniFacts.identity("STP", "ivanov", facts);
+        assertEquals(id, TniFacts.identity("STP", "ivanov", TniFacts.parse(facts.summary())));
+        assertFalse(id.equals(TniFacts.identity("STP", "petrova", facts)));
+        String card = TniText.describe(facts, "TNI. Collected from the portal.", "Address", "System",
+                "Browser", "Screen", "Cores", "Memory", "Video", "Request", "STP-12");
+        assertTrue(card.startsWith("TNI"));
+        assertTrue(card.contains("Address: 10.8.0.4"));
+        assertTrue(card.contains("Request: STP-12"));
+        assertEquals("Phone Ivanov", TniText.name("Phone", "Ivanov", "10.8.0.4"));
+        assertTrue(TniText.owned(card));
+        assertFalse(TniText.owned("A note written by a person"));
+    }
+
+    @Test
+    public void storageThenThreeChecksThenDropOrRenew() {
+        long seen = 1_000_000L;
+        assertEquals(TniClock.Action.WAIT, look(seen, 0, 0, 0, true, seen + 89 * DAY).action);
+        TniClock.Mark first = look(seen, 0, 0, 0, true, seen + 90 * DAY);
+        assertEquals(TniClock.Action.PING, first.action);
+        assertEquals(TniClock.Action.WAIT, look(seen, 0, 0, 0, false, seen + 90 * DAY).action);
+        long probed = seen + 90 * DAY;
+        assertEquals(TniClock.Action.WAIT, look(seen, probed, 1, probed, true, probed + DAY - 1000).action);
+        assertEquals(TniClock.Action.PING, look(seen, probed, 1, probed, true, probed + DAY).action);
+        assertEquals(TniClock.Action.DROP, look(seen, probed, 3, probed + 2 * DAY, true, probed + 3 * DAY).action);
+        assertEquals(TniClock.Action.WAIT, look(0, 0, 0, 0, true, probed).action);
+    }
+
+    @Test
+    public void settingsRoundTripKeepsTypesAndDefaults() {
+        ModuleSetupDto draft = new ModuleSetupDto();
+        draft.setTniKeep(Integer.valueOf(14));
+        draft.setTniProbeDays(Integer.valueOf(3));
+        draft.setTniProbeTries(Integer.valueOf(3));
+        draft.setTniAction("delete");
+        draft.setTniComputer("pc");
+        draft.setTniLaptop("laptop");
+        draft.setTniPhone("Not A Key");
+        draft.setTniTablet("tablet");
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(draft));
+        assertEquals(Integer.valueOf(14), read.getTniKeep());
+        assertEquals(Integer.valueOf(3), read.getTniProbeDays());
+        assertEquals(Integer.valueOf(3), read.getTniProbeTries());
+        assertEquals(TniPolicy.DELETE, read.getTniAction());
+        assertEquals("pc", read.getTniComputer());
+        assertEquals("laptop", TniPolicy.typeFor(read, TniPolicy.LAPTOP));
+        assertEquals("", read.getTniPhone());
+        assertEquals("tablet", TniPolicy.typeFor(read, TniPolicy.TABLET));
+
+        ModuleSetupDto defaults = ModuleSetup.read("");
+        assertEquals(Integer.valueOf(90), defaults.getTniKeep());
+        assertEquals(TniPolicy.TRASH, defaults.getTniAction());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setMapWidth(Integer.valueOf(800));
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals(Integer.valueOf(14), merged.getTniKeep());
+        assertEquals("pc", merged.getTniComputer());
+    }
+
+    @Test
+    public void createPageCanCarryTheDeviceScriptBesideTheField() {
+        byte[] page = "<html><body><p>portal</p></body></html>".getBytes(StandardCharsets.UTF_8);
+        byte[] withField = PortalPageMarkup.insertBoot(page, PortalPageMarkup.snippet("/jira", 4, "STP", "customfield_1", true, true));
+        String html = new String(PortalPageMarkup.insertTni(withField, PortalPageMarkup.tniScript("/jira")), StandardCharsets.UTF_8);
+        assertTrue(html.contains("tni-portal.js"));
+        assertTrue(html.contains("data-tni=\"1\""));
+        assertTrue(html.contains("data-project=\"STP\""));
+        assertEquals(html, new String(PortalPageMarkup.insertTni(html.getBytes(StandardCharsets.UTF_8), PortalPageMarkup.tniScript("/jira")), StandardCharsets.UTF_8));
+        byte[] already = "<html><body><div id=\"asset-tree-portal-boot\"></div></body></html>".getBytes(StandardCharsets.UTF_8);
+        String added = new String(PortalPageMarkup.insertTni(already, PortalPageMarkup.tniScript("/jira")), StandardCharsets.UTF_8);
+        assertTrue(added.contains("tni-portal.js"));
+        assertTrue(added.indexOf("tni-portal.js") < added.indexOf("</body>"));
+    }
+
+    private static TniClock.Mark look(long seen, long probeFrom, int fails, long lastProbe, boolean address, long now) {
+        return TniClock.look(seen, probeFrom, fails, lastProbe, 90, 3, 3, address, now);
+    }
+
+    private static TniSightDraft draft(String ua, String platform, Boolean battery) {
+        TniSightDraft draft = new TniSightDraft();
+        draft.setUa(ua);
+        draft.setPlatform(platform);
+        draft.setBattery(battery);
+        return draft;
+    }
+}
