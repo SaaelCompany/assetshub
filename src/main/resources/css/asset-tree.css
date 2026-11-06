@@ -7115,9 +7115,16 @@ a.asset-tree-preview-icon:focus {
     font-size: 12px;
 }
 
-#asset-tree-app .asset-tree-report-switch {
+#asset-tree-app .asset-tree-report-switch,
+#asset-tree-app .asset-tree-report-chart-pick {
     margin-left: auto;
     flex: 0 0 auto;
+    min-width: 180px;
+}
+
+#asset-tree-app .asset-tree-report-dialog,
+.asset-tree-backdrop .asset-tree-report-dialog {
+    width: min(920px, calc(100vw - 32px));
 }
 
 #asset-tree-app .asset-tree-report-switch button.asset-tree-seg-btn:last-child {
@@ -7276,6 +7283,87 @@ a.asset-tree-preview-icon:focus {
     display: block;
     width: 100%;
     border-radius: 3px 3px 0 0;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-histogram {
+    gap: 0;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-histogram .asset-tree-report-column {
+    min-width: 28px;
+    flex-basis: 28px;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-histogram .asset-tree-report-shaft {
+    width: 100%;
+    border-radius: 0;
+}
+
+#asset-tree-app .asset-tree-report-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+#asset-tree-app .asset-tree-report-line {
+    fill: none;
+    stroke: #0052cc;
+    stroke-width: 2;
+}
+
+#asset-tree-app .asset-tree-report-area {
+    fill: #deebff;
+    stroke: none;
+}
+
+#asset-tree-app .asset-tree-report-radar-grid {
+    fill: none;
+    stroke: #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-report-radar {
+    fill: rgba(0, 82, 204, 0.25);
+    stroke: #0052cc;
+    stroke-width: 2;
+}
+
+#asset-tree-app .asset-tree-report-svg-label,
+#asset-tree-app .asset-tree-report-venn-num {
+    fill: #172b4d;
+    font-size: 12px;
+    font-weight: 600;
+    text-anchor: middle;
+}
+
+#asset-tree-app .asset-tree-report-gantt {
+    display: grid;
+    grid-template-columns: 160px minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    margin: 0 0 6px;
+}
+
+#asset-tree-app .asset-tree-report-gantt > span:first-child {
+    overflow: hidden;
+    color: #172b4d;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-report-gantt-track {
+    position: relative;
+    height: 14px;
+    border-radius: 3px;
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-report-gantt-track span {
+    position: absolute;
+    top: 0;
+    height: 14px;
+    border-radius: 3px;
+    background: #0052cc;
 }
 
 #asset-tree-app .asset-tree-report-columns.is-money .asset-tree-report-column {

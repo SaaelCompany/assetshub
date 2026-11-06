@@ -136,6 +136,7 @@ import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.dto.LifecycleDto;
 import com.assetstree.jira.dto.PinDto;
 import com.assetstree.jira.dto.ReportLineDto;
+import com.assetstree.jira.dto.ReportVennDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
 import com.assetstree.jira.dto.SavedReportDto;
@@ -8769,7 +8770,10 @@ public class AssetServiceImpl implements AssetService {
         final String value = draft.getFilterValue() == null ? "" : draft.getFilterValue().trim();
         final String chart = ReportCatalog.chart(draft.getChart());
         final String metric = reportMetric(draft.getMetric());
-        checkReportDraft(name, group, filter, value);
+        final String fieldKey = ReportCatalog.FIELD.equals(group) ? ReportCatalog.fieldKey(draft.getFieldKey()) : "";
+        final String attrKey = ReportCatalog.fieldKey(draft.getAttrKey());
+        final String attrValue = draft.getAttrValue() == null ? "" : draft.getAttrValue().trim();
+        checkReportDraft(name, group, filter, value, fieldKey, attrKey, attrValue);
         return ao().executeInTransaction(new TransactionCallback<SavedReportDto>() {
             @Override
             public SavedReportDto doInTransaction() {
@@ -8781,6 +8785,9 @@ public class AssetServiceImpl implements AssetService {
                 writeFilter(row, value);
                 row.setChart(chart.isEmpty() ? "bar" : chart);
                 row.setMetric(metric);
+                row.setFieldKey(fieldKey);
+                row.setAttrKey(attrKey);
+                row.setAttrValue(attrValue);
                 row.save();
                 return savedReportDto(row);
             }
@@ -8800,7 +8807,10 @@ public class AssetServiceImpl implements AssetService {
         final String value = draft.getFilterValue() == null ? "" : draft.getFilterValue().trim();
         final String chart = ReportCatalog.chart(draft.getChart());
         final String metric = reportMetric(draft.getMetric());
-        checkReportDraft(name, group, filter, value);
+        final String fieldKey = ReportCatalog.FIELD.equals(group) ? ReportCatalog.fieldKey(draft.getFieldKey()) : "";
+        final String attrKey = ReportCatalog.fieldKey(draft.getAttrKey());
+        final String attrValue = draft.getAttrValue() == null ? "" : draft.getAttrValue().trim();
+        checkReportDraft(name, group, filter, value, fieldKey, attrKey, attrValue);
         final int id = ReportCatalog.savedId(reportKey);
         if (id <= 0) {
             throw new AssetException(400, "asset-tree.error.report");
@@ -8818,14 +8828,23 @@ public class AssetServiceImpl implements AssetService {
                 writeFilter(row, value);
                 row.setChart(chart.isEmpty() ? "bar" : chart);
                 row.setMetric("kind".equals(group) ? "count" : metric);
+                row.setFieldKey(fieldKey);
+                row.setAttrKey(attrKey);
+                row.setAttrValue(attrValue);
                 row.save();
                 return savedReportDto(row);
             }
         });
     }
 
-    private void checkReportDraft(String name, String group, String filter, String value) {
+    private void checkReportDraft(String name, String group, String filter, String value, String fieldKey, String attrKey, String attrValue) {
         if (name.isEmpty() || name.length() > 80 || group.isEmpty() || (filter.isEmpty() != value.isEmpty())) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        if (ReportCatalog.FIELD.equals(group) && (fieldKey == null || fieldKey.isEmpty())) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        if ((attrKey == null || attrKey.isEmpty()) != (attrValue == null || attrValue.isEmpty()) || (attrValue != null && attrValue.length() > 80)) {
             throw new AssetException(400, "asset-tree.error.report");
         }
         if (value.length() > 4000) {
@@ -8936,6 +8955,9 @@ public class AssetServiceImpl implements AssetService {
         String value = "";
         String chart = "";
         String metric = "count";
+        String fieldKey = "";
+        String attrKey = "";
+        String attrValue = "";
         String title;
         boolean standard = true;
         String key = reportKey == null ? "" : reportKey.trim().toLowerCase(Locale.ROOT);
@@ -8962,13 +8984,17 @@ public class AssetServiceImpl implements AssetService {
                 chart = "bar";
             }
             metric = reportMetric(saved.getMetric());
+            fieldKey = saved.getFieldKey() == null ? "" : saved.getFieldKey();
+            attrKey = saved.getAttrKey() == null ? "" : saved.getAttrKey();
+            attrValue = saved.getAttrValue() == null ? "" : saved.getAttrValue();
             key = ReportCatalog.savedKey(saved.getID());
         }
         if ("kind".equals(group)) {
             metric = "count";
         }
-        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket);
+        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue);
         view.setGroupBy(group);
+        view.setFieldKey(fieldKey);
         view.setChart(chart);
         return view;
     }
@@ -9015,6 +9041,9 @@ public class AssetServiceImpl implements AssetService {
         dto.setFilterValue(storedFilter(row));
         dto.setChart(ReportCatalog.chart(row.getChart()).isEmpty() ? "bar" : ReportCatalog.chart(row.getChart()));
         dto.setMetric(reportMetric(row.getMetric()));
+        dto.setFieldKey(row.getFieldKey() == null ? "" : row.getFieldKey());
+        dto.setAttrKey(row.getAttrKey() == null ? "" : row.getAttrKey());
+        dto.setAttrValue(row.getAttrValue() == null ? "" : row.getAttrValue());
         dto.setStandard(false);
         return dto;
     }
@@ -9116,7 +9145,8 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private ReportViewDto buildReport(Project project, String key, String title, boolean standard,
-            String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket) {
+            String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket,
+            String fieldKey, String attrKey, String attrValue) {
         AssetEntity[] assets = assetsIn(project.getKey());
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), assets));
         Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
@@ -9130,9 +9160,14 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         boolean money = ReportCatalog.COST.equals(key) || "cost".equals(metric);
+        boolean byField = ReportCatalog.FIELD.equals(group);
+        boolean needAttrs = byField || (attrKey != null && !attrKey.isEmpty());
+        Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
+                ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
+        String valueKind = byField ? fieldKind(types, fieldKey) : "";
         boolean works = ReportCatalog.WORK.equals(key) || ReportCatalog.SERVICE.equals(key) || "kind".equals(group);
         if (works) {
-            return buildWorkReport(project, key, title, standard, group, filter, value, assets, types, index, statusNames, lineFrom, allLines, onlyBucket);
+            return buildWorkReport(project, key, title, standard, group, filter, value, assets, types, index, statusNames, lineFrom, allLines, onlyBucket, attrKey, attrValue);
         }
         boolean needsLife = reportNeedsLife(key, group, money);
         List<Integer> lifeIds = new ArrayList<Integer>();
@@ -9161,6 +9196,9 @@ public class AssetServiceImpl implements AssetService {
             if (!reportFilterMatches(asset, filter, value, types, index)) {
                 continue;
             }
+            if (!attributeMatches(attributes, asset, attrKey, attrValue)) {
+                continue;
+            }
             LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
             String purchased = life == null ? "" : FieldDates.canonical(life.getPurchased());
             if (purchased != null && !purchased.isEmpty()) {
@@ -9178,9 +9216,19 @@ public class AssetServiceImpl implements AssetService {
         boolean truncated = false;
         LocalDate today = businessToday();
         Map<String, String> kindNames = kindNames(project.getKey());
+        int memberships = 0;
         for (AssetEntity asset : chosen) {
-            String bucketKey = reportBucketKey(key, group, asset, types, index, lives, nextPlan, today);
-            String label = reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames, statusNames);
+            List<String> bucketKeys = new ArrayList<String>();
+            if (byField) {
+                bucketKeys.addAll(fieldParts(attributeText(attributes, asset.getID(), fieldKey), valueKind));
+            } else {
+                bucketKeys.add(reportBucketKey(key, group, asset, types, index, lives, nextPlan, today));
+            }
+            String[] span = reportSpan(lives.get(Integer.valueOf(asset.getID())), today);
+            for (String bucketKey : bucketKeys) {
+            String label = byField
+                    ? (bucketKey.isEmpty() ? i18n().getText("asset-tree.ui.reportBlank") : bucketKey)
+                    : reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames, statusNames);
             ReportBucketDto bucket = buckets.get(bucketKey);
             if (bucket == null) {
                 bucket = new ReportBucketDto(bucketKey, label, reportColor(key, group, bucketKey, types), 0);
@@ -9191,7 +9239,8 @@ public class AssetServiceImpl implements AssetService {
                 }
             }
             bucket.setCount(bucket.getCount() + 1);
-            String detail = reportDetail(key, group, asset, lives, nextPlan, today, kindNames);
+            memberships++;
+            String detail = byField ? label : reportDetail(key, group, asset, lives, nextPlan, today, kindNames);
             if (ReportCatalog.PLACE.equals(group)) {
                 String path = placePath(asset, types, index);
                 if (!path.isEmpty()) {
@@ -9209,11 +9258,209 @@ public class AssetServiceImpl implements AssetService {
             }
             ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(), detail);
             line.setBucket(bucketKey);
+            line.setFrom(span[0]);
+            line.setTo(span[1]);
+            if (FieldKinds.DATE.equals(valueKind) && bucketKey.length() >= 10) {
+                line.setFrom(bucketKey.substring(0, 10));
+                line.setTo(bucketKey.substring(0, 10));
+            }
             lines.add(line);
             lineKeys.add(bucketKey);
+            }
         }
-        return finishReport(key, title, standard, group, money, chosen.size(), sum, buckets, lines, lineKeys, onlyBucket, lineFrom, allLines, truncated,
+        ReportViewDto view = finishReport(key, title, standard, group, money, byField ? memberships : chosen.size(), sum, buckets, lines, lineKeys, onlyBucket, lineFrom, allLines, truncated,
                 emptyReason(key, group, money, anyPurchase), placeSort);
+        view.setFieldKey(fieldKey == null ? "" : fieldKey);
+        view.setFieldLabel(fieldLabel(types, fieldKey));
+        return view;
+    }
+
+    private boolean attributeMatches(Map<Integer, List<AssetAttributeEntity>> attributes, AssetEntity asset, String attrKey, String attrValue) {
+        if (attrKey == null || attrKey.isEmpty() || asset == null) {
+            return true;
+        }
+        String raw = attributeText(attributes, asset.getID(), attrKey).toLowerCase(Locale.ROOT);
+        String wanted = attrValue == null ? "" : attrValue.toLowerCase(Locale.ROOT);
+        return raw.contains(wanted);
+    }
+
+    private String attributeText(Map<Integer, List<AssetAttributeEntity>> attributes, int assetId, String attrKey) {
+        if (attributes == null || attrKey == null) {
+            return "";
+        }
+        List<AssetAttributeEntity> rows = attributes.get(Integer.valueOf(assetId));
+        if (rows == null) {
+            return "";
+        }
+        for (AssetAttributeEntity row : rows) {
+            if (row != null && attrKey.equals(row.getAttrName())) {
+                return row.getAttrValue() == null ? "" : row.getAttrValue();
+            }
+        }
+        return "";
+    }
+
+    private String fieldKind(Map<String, AssetTypeDto> types, String fieldKey) {
+        if (types == null || fieldKey == null) {
+            return FieldKinds.TEXT;
+        }
+        for (AssetTypeDto type : types.values()) {
+            if (type == null || type.getFields() == null) {
+                continue;
+            }
+            for (FieldDto field : type.getFields()) {
+                if (field != null && fieldKey.equals(field.getFieldKey()) && field.getKind() != null) {
+                    return field.getKind();
+                }
+            }
+        }
+        return FieldKinds.TEXT;
+    }
+
+    private String fieldLabel(Map<String, AssetTypeDto> types, String fieldKey) {
+        if (fieldKey == null || fieldKey.isEmpty()) {
+            return "";
+        }
+        if (types != null) {
+            for (AssetTypeDto type : types.values()) {
+                if (type == null || type.getFields() == null) {
+                    continue;
+                }
+                for (FieldDto field : type.getFields()) {
+                    if (field != null && fieldKey.equals(field.getFieldKey()) && field.getLabel() != null && !field.getLabel().isEmpty()) {
+                        return field.getLabel();
+                    }
+                }
+            }
+        }
+        return fieldKey;
+    }
+
+    private List<String> fieldParts(String raw, String kind) {
+        List<String> parts = new ArrayList<String>();
+        boolean many = FieldKinds.CHECKS.equals(kind) || FieldKinds.SELECTS.equals(kind) || FieldKinds.LABELS.equals(kind);
+        if (raw == null || raw.trim().isEmpty()) {
+            parts.add("");
+            return parts;
+        }
+        if (!many) {
+            parts.add(raw.trim());
+            return parts;
+        }
+        String[] lines = raw.split("\\r?\\n");
+        for (int i = 0; i < lines.length; i++) {
+            String text = lines[i].trim();
+            if (!text.isEmpty() && !parts.contains(text)) {
+                parts.add(text);
+            }
+        }
+        if (parts.isEmpty()) {
+            parts.add("");
+        }
+        return parts;
+    }
+
+    private String[] reportSpan(LifecycleEntity life, LocalDate today) {
+        String from = life == null ? "" : textOf(FieldDates.canonical(life.getPurchased()));
+        String to = life == null ? "" : textOf(FieldDates.canonical(life.getWarrantyUntil()));
+        if (to.isEmpty() && !from.isEmpty() && today != null) {
+            to = today.toString();
+        }
+        if (!from.isEmpty() && !to.isEmpty() && to.compareTo(from) < 0) {
+            to = from;
+        }
+        return new String[] { from, to };
+    }
+
+    private ReportVennDto reportVenn(List<ReportBucketDto> rows, List<ReportLineDto> lines) {
+        ReportVennDto venn = new ReportVennDto();
+        List<ReportBucketDto> top = new ArrayList<ReportBucketDto>();
+        if (rows != null) {
+            for (int i = 0; i < rows.size() && top.size() < 3; i++) {
+                if (rows.get(i) != null && rows.get(i).getCount() > 0) {
+                    top.add(rows.get(i));
+                }
+            }
+        }
+        List<String> keys = new ArrayList<String>();
+        List<String> labels = new ArrayList<String>();
+        for (ReportBucketDto bucket : top) {
+            keys.add(bucket.getKey() == null ? "" : bucket.getKey());
+            labels.add(bucket.getLabel() == null ? "" : bucket.getLabel());
+        }
+        venn.setKeys(keys);
+        venn.setLabels(labels);
+        Map<String, Set<String>> owned = new HashMap<String, Set<String>>();
+        if (lines != null) {
+            for (int i = 0; i < lines.size(); i++) {
+                ReportLineDto line = lines.get(i);
+                if (line == null) {
+                    continue;
+                }
+                String who = line.getAssetId() > 0 ? "a" + line.getAssetId() : "l" + i;
+                Set<String> buckets = owned.get(who);
+                if (buckets == null) {
+                    buckets = new HashSet<String>();
+                    owned.put(who, buckets);
+                }
+                buckets.add(line.getBucket() == null ? "" : line.getBucket());
+            }
+        }
+        int size = keys.size();
+        int[] only = new int[size];
+        int ab = 0;
+        int ac = 0;
+        int bc = 0;
+        int all = 0;
+        for (Set<String> buckets : owned.values()) {
+            boolean[] hit = new boolean[size];
+            int hits = 0;
+            for (int i = 0; i < size; i++) {
+                hit[i] = buckets.contains(keys.get(i));
+                if (hit[i]) {
+                    hits++;
+                }
+            }
+            if (hits == size && size > 0) {
+                if (size == 3) {
+                    all++;
+                } else if (size == 2) {
+                    ab++;
+                } else {
+                    only[0]++;
+                }
+                continue;
+            }
+            if (size == 3 && hit[0] && hit[1] && !hit[2]) {
+                ab++;
+            } else if (size == 3 && hit[0] && hit[2] && !hit[1]) {
+                ac++;
+            } else if (size == 3 && hit[1] && hit[2] && !hit[0]) {
+                bc++;
+            } else if (hits == 1) {
+                for (int i = 0; i < size; i++) {
+                    if (hit[i]) {
+                        only[i]++;
+                    }
+                }
+            }
+        }
+        List<Integer> onlyList = new ArrayList<Integer>();
+        for (int i = 0; i < size; i++) {
+            onlyList.add(Integer.valueOf(only[i]));
+        }
+        List<Integer> pairs = new ArrayList<Integer>();
+        if (size >= 2) {
+            pairs.add(Integer.valueOf(ab));
+        }
+        if (size == 3) {
+            pairs.add(Integer.valueOf(ac));
+            pairs.add(Integer.valueOf(bc));
+        }
+        venn.setOnly(onlyList);
+        venn.setPairs(pairs);
+        venn.setAll(all);
+        return venn;
     }
 
     private boolean reportIncludes(String key, String group, boolean money, AssetEntity asset, LifecycleEntity life) {
@@ -9236,8 +9483,10 @@ public class AssetServiceImpl implements AssetService {
 
     private ReportViewDto buildWorkReport(Project project, String key, String title, boolean standard, String group,
             String filter, String value, AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
-            Map<String, String> statusNames, int lineFrom, boolean allLines, String onlyBucket) {
+            Map<String, String> statusNames, int lineFrom, boolean allLines, String onlyBucket, String attrKey, String attrValue) {
         Map<String, String> kindNames = kindNames(project.getKey());
+        Map<Integer, List<AssetAttributeEntity>> attributes = attrKey != null && !attrKey.isEmpty()
+                ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         List<ServicePlanEntity> plans = new ArrayList<ServicePlanEntity>();
         boolean filtered = filter != null && !filter.isEmpty();
         List<Integer> wanted = new ArrayList<Integer>();
@@ -9246,7 +9495,7 @@ public class AssetServiceImpl implements AssetService {
             if (type != null && type.isLocation()) {
                 continue;
             }
-            if (!reportFilterMatches(asset, filter, value, types, index)) {
+            if (!reportFilterMatches(asset, filter, value, types, index) || !attributeMatches(attributes, asset, attrKey, attrValue)) {
                 continue;
             }
             wanted.add(Integer.valueOf(asset.getID()));
@@ -9321,6 +9570,8 @@ public class AssetServiceImpl implements AssetService {
                 }
                 ReportLineDto line = new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString());
                 line.setBucket(bucketKey);
+                line.setFrom(shown.getDay().toString());
+                line.setTo(shown.getDay().toString());
                 lines.add(line);
                 lineKeys.add(bucketKey);
             }
@@ -9380,9 +9631,11 @@ public class AssetServiceImpl implements AssetService {
             page = new ArrayList<ReportLineDto>(lines.subList(from, to));
             lineFrom = from;
         }
+        ReportVennDto overlap = reportVenn(rows, lines);
         ReportViewDto view = new ReportViewDto();
         view.setId(key);
         view.setTitle(title);
+        view.setVenn(overlap);
         view.setHint(i18n().getText("kind".equals(group) ? "asset-tree.ui.reportCountedWorks" : "asset-tree.ui.reportCounted"));
         view.setStandard(standard);
         view.setTotal(total);
@@ -9462,6 +9715,14 @@ public class AssetServiceImpl implements AssetService {
         next.append(reportKey).append(':').append(chart);
         wrote = true;
         return wrote ? next.toString() : reportKey + ":" + chart;
+    }
+
+    @Override
+    public byte[] exportReport(ApplicationUser user, String projectKey, String reportKey) {
+        ReportViewDto view = reportView(user, projectKey, reportKey, 0, true, null);
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(reportPage(view));
+        return WorkbookSheet.write(pages);
     }
 
     @Override
@@ -10252,7 +10513,7 @@ public class AssetServiceImpl implements AssetService {
             return;
         }
         if (ReportCatalog.TYPE.equals(group) || ReportCatalog.COST.equals(key) || ReportCatalog.HOLDER.equals(group)
-                || ReportCatalog.ISSUED.equals(group)) {
+                || ReportCatalog.ISSUED.equals(group) || ReportCatalog.FIELD.equals(group)) {
             Collections.sort(rows, new Comparator<ReportBucketDto>() {
                 @Override
                 public int compare(ReportBucketDto left, ReportBucketDto right) {

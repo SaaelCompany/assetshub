@@ -48,4 +48,21 @@ public interface SavedReportEntity extends Entity {
     String getMetric();
 
     void setMetric(String metric);
+
+    /** Type field used when {@link #getGroupBy()} is {@code field}. */
+    @StringLength(40)
+    String getFieldKey();
+
+    void setFieldKey(String fieldKey);
+
+    /** Optional type field the objects must match. */
+    @StringLength(40)
+    String getAttrKey();
+
+    void setAttrKey(String attrKey);
+
+    @StringLength(80)
+    String getAttrValue();
+
+    void setAttrValue(String attrValue);
 }

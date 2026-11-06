@@ -15,7 +15,10 @@ public class ReportViewDto {
     private String sum;
     private boolean standard;
     private String groupBy;
+    private String fieldKey;
+    private String fieldLabel;
     private String chart;
+    private ReportVennDto venn;
     private boolean capped;
     private boolean exportLimited;
     private int lineTotal;
@@ -37,6 +40,12 @@ public class ReportViewDto {
     public void setStandard(boolean standard) { this.standard = standard; }
     public String getGroupBy() { return groupBy; }
     public void setGroupBy(String groupBy) { this.groupBy = groupBy; }
+    public String getFieldKey() { return fieldKey; }
+    public void setFieldKey(String fieldKey) { this.fieldKey = fieldKey; }
+    public String getFieldLabel() { return fieldLabel; }
+    public void setFieldLabel(String fieldLabel) { this.fieldLabel = fieldLabel; }
+    public ReportVennDto getVenn() { return venn; }
+    public void setVenn(ReportVennDto venn) { this.venn = venn; }
     public String getChart() { return chart; }
     public void setChart(String chart) { this.chart = chart; }
     public boolean isCapped() { return capped; }
