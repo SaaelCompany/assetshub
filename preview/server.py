@@ -1167,7 +1167,7 @@ def module_setup(stored, migrate=True):
         chart_key, chart_kind = part.split(":", 1)
         chart_key = chart_key.strip().lower()
         chart_kind = chart_kind.strip().lower()
-        if chart_key in REPORT_STANDARD and chart_kind in ("donut", "pie", "bar", "bars") and chart_key not in seen_charts:
+        if chart_key in REPORT_STANDARD and chart_kind in REPORT_CHARTS and chart_key not in seen_charts:
             seen_charts.add(chart_key)
             charts.append("%s:%s" % (chart_key, chart_kind))
     every = "month" if str(stored.get("reportMailEvery") or "").strip().lower() == "month" else "week"
@@ -1742,6 +1742,9 @@ def ensure_profile_demo():
         view = STATE.setdefault("views", {}).setdefault(project, {})
         modules = [item for item in (view.get("modules") or []) if item != "portal"]
         modules.append("portal")
+        for extra in ("reports", "life", "service"):
+            if extra not in modules:
+                modules.append(extra)
         view["modules"] = modules
         setup = view.setdefault("setup", {})
         setup["portalMine"] = False
@@ -1809,6 +1812,11 @@ def ensure_profile_demo():
     else:
         thin = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "ASIT-2"), None)
         thin_id = thin["id"] if thin else None
+    lives = STATE.setdefault("lives", {})
+    if laptop and laptop["id"] not in lives:
+        lives[laptop["id"]] = {"purchased": "2022-03-01", "warrantyUntil": "2026-03-01", "priceMinor": 12000000, "residualMinor": 0, "lifeMonths": 36}
+    if thin_id and thin_id not in lives:
+        lives[thin_id] = {"purchased": "2024-01-15", "warrantyUntil": "2027-01-15", "priceMinor": 18000000, "residualMinor": 0, "lifeMonths": 36}
     if laptop and thin_id and not any(row.get("fromId") == laptop["id"] and row.get("toId") == thin_id for row in relation_rows()):
         row_id = STATE.get("relation_seq") or 1
         STATE["relation_seq"] = row_id + 1
@@ -3450,6 +3458,8 @@ def delete_floor(project_key, floor_id, text):
 
 
 REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work")
+REPORT_CHARTS = ("donut", "pie", "bar", "bars", "line", "area", "histogram", "scatter", "radar", "gantt", "venn")
+REPORT_GROUPS = ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind", "field")
 
 
 def parse_money(raw):
@@ -3629,7 +3639,7 @@ def stored_report_chart(project_key, report_key, fallback):
     for part in str(setup.get("reportCharts") or "").split(","):
         if part.startswith(report_key + ":"):
             chart = part.split(":", 1)[1]
-            if chart in ("donut", "pie", "bar", "bars"):
+            if chart in REPORT_CHARTS:
                 return chart
     return fallback
 
@@ -3658,7 +3668,7 @@ def report_catalog(project_key, text):
     own = [row for row in STATE.setdefault("saved_reports", {}).values() if row.get("projectKey") == project_key]
     own.sort(key=lambda item: item["id"])
     for row in own:
-        items.append({"id": "s%s" % row["id"], "name": row["name"], "groupBy": row["groupBy"], "filterField": row.get("filterField") or "", "filterValue": row.get("filterValue") or "", "chart": row.get("chart") or "bar", "metric": row.get("metric") or "count", "standard": False})
+        items.append({"id": "s%s" % row["id"], "name": row["name"], "groupBy": row["groupBy"], "filterField": row.get("filterField") or "", "filterValue": row.get("filterValue") or "", "chart": row.get("chart") or "bar", "metric": row.get("metric") or "count", "standard": False, "fieldKey": row.get("fieldKey") or "", "attrKey": row.get("attrKey") or "", "attrValue": row.get("attrValue") or ""})
     return items
 
 
@@ -3670,7 +3680,14 @@ def create_saved_report(project_key, body, text):
     group = (body.get("groupBy") or "").strip().lower()
     filt = (body.get("filterField") or "").strip().lower()
     value = (body.get("filterValue") or "").strip()
-    if group not in ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
+    field_key = (body.get("fieldKey") or "").strip().lower()
+    attr_key = (body.get("attrKey") or "").strip().lower()
+    attr_value = (body.get("attrValue") or "").strip()
+    if group not in REPORT_GROUPS or not name or len(name) > 80:
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if group == "field" and not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", field_key):
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if bool(attr_key) != bool(attr_value) or len(attr_value) > 80 or (attr_key and not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", attr_key)):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if filt and filt not in ("status", "type", "holder", "mix"):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
@@ -3683,7 +3700,7 @@ def create_saved_report(project_key, body, text):
             if not part.startswith(("t=", "s=", "h=", "p=")):
                 return 400, {"message": text.get("asset-tree.error.report", "Report")}
     chart = (body.get("chart") or "bar").strip().lower()
-    if chart not in ("bar", "bars", "donut", "pie"):
+    if chart not in REPORT_CHARTS:
         chart = "bar"
     metric = (body.get("metric") or "count").strip().lower()
     if metric not in ("count", "cost"):
@@ -3693,8 +3710,12 @@ def create_saved_report(project_key, body, text):
     STATE["saved_reports"][report_id] = {
         "id": report_id, "projectKey": project_key, "name": name, "groupBy": group,
         "filterField": filt, "filterValue": value, "chart": chart, "metric": metric,
+        "fieldKey": field_key if group == "field" else "",
+        "attrKey": attr_key,
+        "attrValue": attr_value,
     }
-    return 201, {"id": "s%s" % report_id, "name": name, "groupBy": group, "filterField": filt, "filterValue": value, "chart": chart, "metric": metric, "standard": False}
+    saved = STATE["saved_reports"][report_id]
+    return 201, {"id": "s%s" % report_id, "name": name, "groupBy": group, "filterField": filt, "filterValue": value, "chart": chart, "metric": metric, "standard": False, "fieldKey": saved["fieldKey"], "attrKey": saved["attrKey"], "attrValue": saved["attrValue"]}
 
 
 def delete_saved_report(project_key, report_key, text):
@@ -3735,10 +3756,11 @@ def update_report_chart(project_key, report_key, body, text):
         row.update({
             "name": saved["name"], "groupBy": saved["groupBy"], "filterField": saved["filterField"],
             "filterValue": saved["filterValue"], "chart": saved["chart"], "metric": "count" if saved["groupBy"] == "kind" else saved["metric"],
+            "fieldKey": saved.get("fieldKey") or "", "attrKey": saved.get("attrKey") or "", "attrValue": saved.get("attrValue") or "",
         })
-        return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False}
+        return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False, "fieldKey": row["fieldKey"], "attrKey": row["attrKey"], "attrValue": row["attrValue"]}
     chart = (body.get("chart") or "").strip().lower()
-    if chart not in ("donut", "pie", "bar", "bars"):
+    if chart not in REPORT_CHARTS:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if report_key in REPORT_STANDARD:
         view = STATE.setdefault("views", {}).setdefault(project_key, {})
@@ -3972,7 +3994,8 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
                 detail += " " + shown["start"]
                 if shown.get("end"):
                     detail += "–" + shown["end"]
-            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail})
+            day = shown["day"].isoformat()
+            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail, "bucket": bucket, "from": day, "to": day})
             line_keys.append(bucket)
     rows = list(buckets.values())
     rank = {row["key"]: index for index, row in enumerate(rows)}
@@ -3983,6 +4006,7 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
     lines, filtered = lines_for_bucket(lines, keys, query)
     if filtered:
         truncated = False
+    overlap = report_venn(rows, lines)
     page, line_total, capped, export_limited = report_line_page(lines, query, truncated)
     chart = spec.get("chart") or "bar"
     if spec.get("standard"):
@@ -3992,7 +4016,58 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         "total": sum(row["count"] for row in rows),
         "sum": "", "standard": bool(spec.get("standard")), "groupBy": "kind", "chart": chart,
         "capped": capped, "exportLimited": export_limited, "lineTotal": line_total, "reason": "", "rows": rows, "lines": page,
+        "venn": overlap,
     }
+
+
+def report_field_label(field_key):
+    if not field_key:
+        return ""
+    for type_row in STATE["types"].values():
+        for field in type_row.get("fields") or []:
+            if (field.get("fieldKey") or "") == field_key and field.get("label"):
+                return field["label"]
+    return field_key
+
+
+def report_venn(rows, lines):
+    top = [row for row in rows if row.get("count")][:3]
+    keys = [row.get("key") or "" for row in top]
+    labels = [row.get("label") or "" for row in top]
+    owned = {}
+    for index, line in enumerate(lines or []):
+        who = "a%s" % line.get("assetId") if line.get("assetId") else "l%s" % index
+        owned.setdefault(who, set()).add(line.get("bucket") or "")
+    size = len(keys)
+    only = [0] * size
+    ab = ac = bc = all_three = 0
+    for buckets in owned.values():
+        hit = [key in buckets for key in keys]
+        hits = sum(1 for item in hit if item)
+        if hits == size and size:
+            if size == 3:
+                all_three += 1
+            elif size == 2:
+                ab += 1
+            else:
+                only[0] += 1
+            continue
+        if size == 3 and hit[0] and hit[1] and not hit[2]:
+            ab += 1
+        elif size == 3 and hit[0] and hit[2] and not hit[1]:
+            ac += 1
+        elif size == 3 and hit[1] and hit[2] and not hit[0]:
+            bc += 1
+        elif hits == 1:
+            for index, item in enumerate(hit):
+                if item:
+                    only[index] += 1
+    pairs = []
+    if size >= 2:
+        pairs.append(ab)
+    if size == 3:
+        pairs.extend([ac, bc])
+    return {"keys": keys, "labels": labels, "only": only, "pairs": pairs, "all": all_three}
 
 
 def report_view(project_key, report_key, text, query=None):
@@ -4055,6 +4130,10 @@ def report_view(project_key, report_key, text, query=None):
     any_purchase = False
     place_sort = {}
     needs_life = money or report_key in ("warranty", "receipts", "age", "writeoff") or group in ("warranty", "month", "age", "writeoff")
+    attr_key = (spec.get("attrKey") or "").strip().lower()
+    attr_value = (spec.get("attrValue") or "").strip().lower()
+    if attr_key and attr_value:
+        assets = [asset for asset in assets if attr_value in str((asset.get("values") or {}).get(attr_key) or "").lower()]
     for asset in assets:
         life = (life_row(asset["id"]) or {}) if needs_life else {}
         if life.get("purchased"):
@@ -4116,6 +4195,10 @@ def report_view(project_key, report_key, text, query=None):
             bucket = asset.get("issuedKey") or ""
             person = USERS.get(bucket) or {}
             label = text.get("asset-tree.ui.custodianNone", "None") if not bucket else (person.get("displayName") or bucket)
+        elif group == "field":
+            raw = str((asset.get("values") or {}).get(spec.get("fieldKey") or "") or "").strip()
+            bucket = raw
+            label = raw or text.get("asset-tree.ui.reportBlank", "Blank")
         elif group == "place":
             place_id = place_root(asset["id"])
             place = STATE["assets"].get(place_id) if place_id else None
@@ -4138,7 +4221,10 @@ def report_view(project_key, report_key, text, query=None):
         slot["count"] += 1
         if money:
             slot["amount"] += book
-        lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
+        span = life_row(asset["id"]) or {}
+        start = str(span.get("purchased") or "")[:10]
+        end = str(span.get("warrantyUntil") or "")[:10] or start
+        lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail, "bucket": bucket, "from": start, "to": end})
         line_keys.append(bucket)
     rows = list(buckets.values())
     if money:
@@ -4159,16 +4245,21 @@ def report_view(project_key, report_key, text, query=None):
     lines, filtered = lines_for_bucket(lines, keys, query)
     if filtered:
         capped = False
+    overlap = report_venn(rows, lines)
     page, line_total, page_capped, export_limited = report_line_page(lines, query, capped)
     chart = spec.get("chart") or ("donut" if report_key == "status" else "bar")
     if spec.get("standard"):
         chart = stored_report_chart(project_key, report_key, chart)
+    field_key = spec.get("fieldKey") or ""
     return 200, {
         "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCounted", ""),
         "total": chosen,
         "sum": format_money(total_book) if money else "",
         "standard": bool(spec.get("standard")),
         "groupBy": group,
+        "fieldKey": field_key,
+        "fieldLabel": report_field_label(field_key),
+        "venn": overlap,
         "chart": chart,
         "capped": page_capped,
         "exportLimited": export_limited,
@@ -5298,6 +5389,8 @@ def queue_report_mail(project_key, text, force):
 
 
 def detail_word(group, text):
+    if group == "field":
+        return text.get("asset-tree.ui.reportField", "Field")
     if group == "kind":
         return text.get("asset-tree.ui.reportWorkDetail", "Kind, object, date and time")
     if group in ("age", "month"):
@@ -5320,6 +5413,7 @@ def group_word(group, text):
         "warranty": "asset-tree.ui.groupWordWarranty",
         "writeoff": "asset-tree.ui.groupWordWriteoff",
         "kind": "asset-tree.ui.groupWordKind",
+        "field": "asset-tree.ui.reportField",
     }
     return text.get(keys.get(group or "", "asset-tree.ui.groupWordStatus"), group or "")
 
@@ -6667,6 +6761,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_static(path.rsplit("/", 1)[-1])
         if path.startswith("/rest/asset-tree/1.0/"):
             rest = path[len("/rest/asset-tree/1.0"):]
+            one_book = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports/([A-Za-z0-9]+)/book\.xlsx", rest)
+            if method == "GET" and one_book:
+                status, view = report_view(one_book.group(1), one_book.group(2), self.text(), {"lines": ["all"]})
+                if status != 200:
+                    return self.respond(status, json.dumps(view).encode("utf-8"), "application/json; charset=utf-8")
+                body = workbook_bytes([report_sheet(view, self.text(), set())])
+                return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
+                    "Content-Disposition": 'attachment; filename="report-%s.xlsx"' % one_book.group(2),
+                })
             if method == "GET" and re.fullmatch(r"/projects/[A-Za-z0-9]+/reports\.xlsx", rest):
                 project_key = rest.split("/")[2]
                 body = reports_xlsx(project_key, self.text())

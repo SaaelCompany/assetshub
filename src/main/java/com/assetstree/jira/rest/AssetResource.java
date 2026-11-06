@@ -675,6 +675,22 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/reports/{reportKey}/book.xlsx")
+    @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public Response exportReport(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                byte[] book = assetService.exportReport(user(), projectKey, reportKey);
+                String file = "report-" + reportKey + ".xlsx";
+                return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
+                        .build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/reports.xlsx")
     @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     public Response exportReports(@PathParam("projectKey") final String projectKey) {

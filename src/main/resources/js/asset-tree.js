@@ -18735,7 +18735,7 @@
         });
         if (!money) shareTotal = view.total || 0;
         var shares = shareLabels(shareValues);
-        var head = [csvCell(groupWord(view.groupBy)), csvCell(t('reportCount'))];
+        var head = [csvCell(groupWord(view.groupBy, view)), csvCell(t('reportCount'))];
         if (money) head.push(csvCell(t('lifeBook')));
         head.push(csvCell(t('reportShare')));
         var rows = [head.join(';')];
@@ -18754,7 +18754,7 @@
         else if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
         if (view.lines && view.lines.length) {
             rows.push('');
-            var detailHead = money ? t('lifeBook') : detailWord(view.groupBy);
+            var detailHead = money ? t('lifeBook') : detailWord(view.groupBy, view);
             rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
             view.lines.forEach(function (row) {
                 var detail = row.detail;
@@ -18772,6 +18772,60 @@
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    }
+
+    function downloadReportFile(view) {
+        if (!view || !view.id) return;
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx', true);
+        xhr.responseType = 'blob';
+        xhr.setRequestHeader('Accept', '*/*');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(xhr.response);
+                link.download = reportFileName(view).replace(/\.csv$/i, '') + '.xlsx';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                return;
+            }
+            notify(t('errorTitle'));
+        };
+        xhr.onerror = function () { notify(t('errorTitle')); };
+        xhr.send();
+    }
+
+    function printReport(view) {
+        if (!view) return;
+        var chart = document.querySelector('#asset-tree-app .asset-tree-report-chart');
+        var rows = view.rows || [];
+        var money = reportMoney(view);
+        var body = '<h1>' + htmlEscape(view.title || '') + '</h1><p>' + htmlEscape(groupPhrase(view.groupBy, view)) + '</p>';
+        if (chart) body += '<div class="chart">' + chart.innerHTML + '</div>';
+        body += '<table><tr><th>' + htmlEscape(groupWord(view.groupBy, view)) + '</th><th>' + htmlEscape(t('reportCount')) + '</th>';
+        if (money) body += '<th>' + htmlEscape(t('lifeBook')) + '</th>';
+        body += '</tr>';
+        rows.forEach(function (row) {
+            body += '<tr><td>' + htmlEscape(row.label || '') + '</td><td class="num">' + htmlEscape(String(row.count || 0)) + '</td>';
+            if (money) body += '<td class="num">' + htmlEscape(reportMoneyLabel(Number(row.amount) || 0)) + '</td>';
+            body += '</tr>';
+        });
+        body += '</table>';
+        var page = window.open('', '_blank');
+        if (!page) {
+            notify(t('errorTitle'));
+            return;
+        }
+        page.document.open();
+        page.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + htmlEscape(view.title || '') + '</title><style>'
+            + 'body{font:14px -apple-system,Segoe UI,sans-serif;color:#172b4d;margin:24px}h1{font-size:20px;margin:0 0 4px}p{color:#6b778c;margin:0 0 16px}'
+            + 'table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #dfe1e6;padding:6px 8px;text-align:left}.num{text-align:right}'
+            + '.chart svg{width:100%;height:auto;max-height:320px}'
+            + '</style></head><body>' + body + '<script>window.print()<\\/script></body></html>');
+        page.document.close();
     }
 
     function reportFact(color, value, label) {
@@ -18803,7 +18857,7 @@
     function viewerChart(projectKey, id) {
         try {
             var raw = window.localStorage.getItem(viewerChartKey(projectKey, id));
-            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'columns') return raw;
+            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'columns' || raw === 'histogram' || raw === 'line' || raw === 'area' || raw === 'scatter' || raw === 'radar' || raw === 'gantt' || raw === 'venn') return raw;
         } catch (error) {
             return '';
         }
@@ -18819,7 +18873,7 @@
     }
 
     function reportChartKind(view) {
-        var stored = view.chart === 'donut' ? 'donut' : view.chart === 'pie' ? 'pie' : view.chart === 'bars' ? 'bars' : 'columns';
+        var stored = reportChartSession(view.chart);
         if (state.reportChartFor === String(view.id || '') && state.reportChart) return state.reportChart;
         if (!state.canEdit) {
             var local = viewerChart(state.projectKey, view.id);
@@ -18829,20 +18883,27 @@
     }
 
     function reportChartSwitch(view, kind) {
-        var seg = el('div', 'asset-tree-seg asset-tree-report-switch');
-        [['donut', 'reportDonut'], ['pie', 'reportPie'], ['columns', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
-            seg.appendChild(button(t(pair[1]), 'asset-tree-seg-btn' + (kind === pair[0] ? ' is-on' : ''), function () {
-                state.reportChartFor = String(view.id || '');
-                state.reportChart = pair[0];
-                if (!paintReport()) renderFrame();
-                rememberReportChart(view, pair[0]);
-            }));
+        var select = document.createElement('select');
+        select.className = 'asset-tree-filter asset-tree-report-chart-pick';
+        select.setAttribute('aria-label', t('reportChart'));
+        [['columns', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = t(pair[1]);
+            select.appendChild(option);
         });
-        return seg;
+        select.value = kind;
+        select.addEventListener('change', function () {
+            state.reportChartFor = String(view.id || '');
+            state.reportChart = select.value;
+            if (!paintReport()) renderFrame();
+            rememberReportChart(view, select.value);
+        });
+        return select;
     }
 
     function reportChartSession(wire) {
-        if (wire === 'donut' || wire === 'pie' || wire === 'bars') return wire;
+        if (wire === 'donut' || wire === 'pie' || wire === 'bars' || wire === 'histogram' || wire === 'line' || wire === 'area' || wire === 'scatter' || wire === 'radar' || wire === 'gantt' || wire === 'venn') return wire;
         return 'columns';
     }
 
@@ -19005,6 +19066,263 @@
         return list;
     }
 
+    function reportPlot(rows, max) {
+        var width = 720;
+        var height = 280;
+        var left = 36;
+        var right = 16;
+        var top = 16;
+        var bottom = 48;
+        var innerW = width - left - right;
+        var innerH = height - top - bottom;
+        var points = [];
+        var span = Math.max(rows.length - 1, 1);
+        rows.forEach(function (row, index) {
+            var x = left + (rows.length === 1 ? innerW / 2 : (index * innerW / span));
+            var value = row.count || 0;
+            var y = top + innerH - (max ? (value / max) * innerH : 0);
+            points.push({ x: x, y: y, row: row });
+        });
+        return { width: width, height: height, left: left, top: top, bottom: bottom, innerH: innerH, points: points };
+    }
+
+    function reportMark(node, row) {
+        if (!row || !row.activate) return;
+        node.style.cursor = 'pointer';
+        node.addEventListener('click', function () { row.activate(); });
+    }
+
+    function reportTrendChart(rows, max, area) {
+        var plot = reportPlot(rows, max);
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 ' + plot.width + ' ' + plot.height);
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        var coords = plot.points.map(function (point) { return point.x + ',' + point.y; }).join(' ');
+        if (area && plot.points.length) {
+            var shape = svgEl('polygon');
+            var base = plot.height - plot.bottom;
+            var first = plot.points[0];
+            var last = plot.points[plot.points.length - 1];
+            shape.setAttribute('points', first.x + ',' + base + ' ' + coords + ' ' + last.x + ',' + base);
+            shape.setAttribute('class', 'asset-tree-report-area');
+            svg.appendChild(shape);
+        }
+        var line = svgEl('polyline');
+        line.setAttribute('points', coords);
+        line.setAttribute('class', 'asset-tree-report-line');
+        svg.appendChild(line);
+        plot.points.forEach(function (point) {
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(point.x));
+            dot.setAttribute('cy', String(point.y));
+            dot.setAttribute('r', '5');
+            dot.setAttribute('fill', point.row.color || '#0052CC');
+            var title = svgEl('title');
+            title.textContent = (point.row.label || '') + ' · ' + (point.row.text || String(point.row.count || 0));
+            dot.appendChild(title);
+            reportMark(dot, point.row);
+            svg.appendChild(dot);
+            if (plot.points.length <= 10) {
+                var label = svgEl('text');
+                label.setAttribute('x', String(point.x));
+                label.setAttribute('y', String(plot.height - 16));
+                label.setAttribute('class', 'asset-tree-report-svg-label');
+                var caption = point.row.label || '';
+                if (caption.length > 12) caption = caption.substring(0, 11) + '\u2026';
+                label.textContent = caption;
+                svg.appendChild(label);
+            }
+        });
+        return svg;
+    }
+
+    function reportScatterChart(rows, money) {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 720 280');
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        var maxX = 1;
+        var maxY = 1;
+        rows.forEach(function (row, index) {
+            var x = money ? (row.count || 0) : index + 1;
+            var y = money ? (Number(row.amount) || 0) : (row.count || 0);
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+        });
+        rows.forEach(function (row, index) {
+            var x = 48 + ((money ? (row.count || 0) : index + 1) / maxX) * 640;
+            var y = 240 - ((money ? (Number(row.amount) || 0) : (row.count || 0)) / maxY) * 200;
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(x));
+            dot.setAttribute('cy', String(y));
+            dot.setAttribute('r', '7');
+            dot.setAttribute('fill', row.color || '#0052CC');
+            var title = svgEl('title');
+            title.textContent = (row.label || '') + ' · ' + (money ? reportMoneyLabel(Number(row.amount) || 0) : String(row.count || 0));
+            dot.appendChild(title);
+            reportMark(dot, row);
+            svg.appendChild(dot);
+        });
+        return svg;
+    }
+
+    function reportRadarChart(rows, max) {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 420 320');
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        var cx = 210;
+        var cy = 150;
+        var radius = 110;
+        var count = rows.length;
+        function at(index, scale) {
+            var angle = -Math.PI / 2 + (Math.PI * 2 * index / count);
+            return [cx + Math.cos(angle) * radius * scale, cy + Math.sin(angle) * radius * scale];
+        }
+        [0.25, 0.5, 0.75, 1].forEach(function (scale) {
+            var ring = svgEl('polygon');
+            var points = [];
+            for (var i = 0; i < count; i++) {
+                var spot = at(i, scale);
+                points.push(spot[0] + ',' + spot[1]);
+            }
+            ring.setAttribute('points', points.join(' '));
+            ring.setAttribute('class', 'asset-tree-report-radar-grid');
+            svg.appendChild(ring);
+        });
+        var shape = svgEl('polygon');
+        var points = [];
+        rows.forEach(function (row, index) {
+            var spot = at(index, max ? (row.count || 0) / max : 0);
+            points.push(spot[0] + ',' + spot[1]);
+            var label = svgEl('text');
+            var place = at(index, 1.18);
+            label.setAttribute('x', String(place[0]));
+            label.setAttribute('y', String(place[1]));
+            label.setAttribute('class', 'asset-tree-report-svg-label');
+            var caption = row.label || '';
+            if (caption.length > 16) caption = caption.substring(0, 15) + '\u2026';
+            label.textContent = caption;
+            svg.appendChild(label);
+        });
+        shape.setAttribute('points', points.join(' '));
+        shape.setAttribute('class', 'asset-tree-report-radar');
+        svg.appendChild(shape);
+        return svg;
+    }
+
+    function reportDay(value) {
+        var text = String(value || '');
+        if (text.length < 10) return null;
+        var year = parseInt(text.substring(0, 4), 10);
+        var month = parseInt(text.substring(5, 7), 10);
+        var day = parseInt(text.substring(8, 10), 10);
+        if (!year || !month || !day) return null;
+        return Date.UTC(year, month - 1, day);
+    }
+
+    function reportGanttChart(view) {
+        var box = el('div', 'asset-tree-report-chart');
+        var lines = (view && view.lines) || [];
+        var bars = [];
+        var min = 0;
+        var max = 0;
+        lines.forEach(function (line) {
+            var start = reportDay(line.from);
+            var end = reportDay(line.to);
+            if (start == null) return;
+            if (end == null || end < start) end = start;
+            bars.push({ line: line, start: start, end: end });
+            if (!min || start < min) min = start;
+            if (end > max) max = end;
+        });
+        if (!bars.length) {
+            box.appendChild(el('p', 'asset-tree-hint', t('reportGanttEmpty')));
+            return box;
+        }
+        var span = Math.max(max - min, 86400000);
+        var shown = bars.slice(0, 40);
+        shown.forEach(function (bar) {
+            var row = el('div', 'asset-tree-report-gantt');
+            var name = el('span', null, bar.line.name || bar.line.objectKey || '');
+            name.title = bar.line.name || '';
+            row.appendChild(name);
+            var track = el('span', 'asset-tree-report-gantt-track');
+            var fill = el('span');
+            fill.style.left = ((bar.start - min) / span * 100) + '%';
+            fill.style.width = Math.max(2, ((bar.end - bar.start) / span * 100)) + '%';
+            track.appendChild(fill);
+            row.appendChild(track);
+            if (bar.line.assetId) {
+                row.className += ' is-pick';
+                row.tabIndex = 0;
+                row.addEventListener('click', function () { goToAsset(state.projectKey, bar.line.assetId); });
+            }
+            box.appendChild(row);
+        });
+        return box;
+    }
+
+    function reportVennChart(view) {
+        var box = el('div', 'asset-tree-report-chart is-round');
+        var venn = view && view.venn;
+        var keys = venn && venn.keys ? venn.keys : [];
+        if (!keys.length) {
+            box.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
+            return box;
+        }
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 360 240');
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        var spots = keys.length === 1 ? [[180, 120]] : keys.length === 2 ? [[140, 120], [220, 120]] : [[130, 100], [230, 100], [180, 160]];
+        var colors = ['#0052CC', '#00875A', '#FF8B00'];
+        keys.forEach(function (key, index) {
+            var circle = svgEl('circle');
+            circle.setAttribute('cx', String(spots[index][0]));
+            circle.setAttribute('cy', String(spots[index][1]));
+            circle.setAttribute('r', '72');
+            circle.setAttribute('fill', colors[index]);
+            circle.setAttribute('fill-opacity', '0.35');
+            circle.setAttribute('stroke', colors[index]);
+            svg.appendChild(circle);
+        });
+        function number(x, y, value) {
+            var text = svgEl('text');
+            text.setAttribute('x', String(x));
+            text.setAttribute('y', String(y));
+            text.setAttribute('class', 'asset-tree-report-venn-num');
+            text.textContent = String(value || 0);
+            svg.appendChild(text);
+        }
+        var only = venn.only || [];
+        var pairs = venn.pairs || [];
+        if (keys.length === 1) number(180, 124, only[0]);
+        if (keys.length === 2) {
+            number(110, 124, only[0]);
+            number(250, 124, only[1]);
+            number(180, 124, pairs[0]);
+        }
+        if (keys.length === 3) {
+            number(100, 90, only[0]);
+            number(260, 90, only[1]);
+            number(180, 190, only[2]);
+            number(180, 88, pairs[0]);
+            number(140, 150, pairs[1]);
+            number(220, 150, pairs[2]);
+            number(180, 124, venn.all);
+        }
+        box.appendChild(svg);
+        var legend = el('ul', 'asset-tree-report-legend');
+        (venn.labels || []).forEach(function (label, index) {
+            var item = el('li');
+            var swatch = el('i');
+            swatch.style.background = colors[index];
+            item.appendChild(swatch);
+            item.appendChild(el('span', null, label || ''));
+            legend.appendChild(item);
+        });
+        box.appendChild(legend);
+        return box;
+    }
+
     function measuredRows(rows, money) {
         if (!money) return rows;
         var next = [];
@@ -19021,14 +19339,16 @@
         return next;
     }
 
-    function reportChartPanel(rows, total, max, kind, money, sumText, shares) {
+    function reportChartPanel(rows, total, max, kind, money, sumText, shares, view) {
         var measured = measuredRows(rows, money);
         if (!measured.length) return null;
         var drawn = [];
         measured.forEach(function (row) { if (row.count) drawn.push(row); });
-        if (kind === 'columns') {
+        if (kind === 'columns' || kind === 'histogram') {
             var columns = el('div', 'asset-tree-report-chart');
-            columns.appendChild(reportColumnsChart(measured, max, money));
+            var plot = reportColumnsChart(measured, max, money);
+            if (kind === 'histogram') plot.className += ' is-histogram';
+            columns.appendChild(plot);
             return columns;
         }
         if (kind === 'bars') {
@@ -19036,6 +19356,25 @@
             bars.appendChild(reportBarsChart(measured, max, money));
             return bars;
         }
+        if (kind === 'line' || kind === 'area') {
+            var trend = el('div', 'asset-tree-report-chart');
+            trend.appendChild(reportTrendChart(measured, max, kind === 'area'));
+            return trend;
+        }
+        if (kind === 'scatter') {
+            var scatter = el('div', 'asset-tree-report-chart');
+            scatter.appendChild(reportScatterChart(rows, money));
+            return scatter;
+        }
+        if (kind === 'radar') {
+            if (!drawn.length) return null;
+            var radar = el('div', 'asset-tree-report-chart is-round');
+            radar.appendChild(reportRadarChart(drawn, max));
+            radar.appendChild(reportLegend(money ? rows : measured, money ? maxShare(rows) : total, money, shares));
+            return radar;
+        }
+        if (kind === 'gantt') return reportGanttChart(view);
+        if (kind === 'venn') return reportVennChart(view);
         if (!drawn.length) return null;
         var round = el('div', 'asset-tree-report-chart is-round');
         var ring = el('div', 'asset-tree-report-ring');
@@ -19098,15 +19437,20 @@
         return shareLabels([count, Math.max(0, total - count)])[0] || '0 %';
     }
 
-    function groupWord(group) {
+    function groupWord(group, view) {
+        if (group === 'field' && view && view.fieldLabel) return view.fieldLabel;
         var map = {
             status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
-            month: 'groupWordMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind'
+            month: 'groupWordMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind',
+            field: 'reportField'
         };
         return t(map[group] || 'groupWordStatus');
     }
 
-    function groupPhrase(group) {
+    function groupPhrase(group, view) {
+        if (group === 'field') {
+            return view && view.fieldLabel ? t('reportGroupField') + ': ' + view.fieldLabel : t('reportGroupField');
+        }
         var map = {
             status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder', issued: 'reportGroupIssued',
             month: 'reportGroupMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind'
@@ -19114,12 +19458,12 @@
         return t(map[group] || 'reportGroupStatus');
     }
 
-    function detailWord(group) {
+    function detailWord(group, view) {
         if (group === 'kind') return t('reportWorkDetail');
         if (group === 'age' || group === 'month') return t('lifePurchase');
         if (group === 'warranty') return t('lifeWarranty');
         if (group === 'writeoff') return t('reportWriteoffDetail');
-        return groupWord(group);
+        return groupWord(group, view);
     }
 
     function loadGallery() {
@@ -19218,6 +19562,8 @@
         if (state.canEdit) tools.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
         tools.appendChild(button(t('reportBook'), 'asset-tree-btn', downloadReportBook));
         if (state.reportView) {
+            tools.appendChild(button(t('reportPrint'), 'asset-tree-btn', function () { printReport(state.reportView); }));
+            tools.appendChild(button(t('reportXlsx'), 'asset-tree-btn', function () { downloadReportFile(state.reportView); }));
             tools.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
         }
         return tools;
@@ -19292,7 +19638,7 @@
         var group = (view && view.groupBy) || (saved && saved.groupBy) || '';
         if (view && view.sum) return true;
         if (saved && saved.metric === 'cost') return true;
-        if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind') return true;
+        if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind' || group === 'field') return true;
         var id = String((view && view.id) || '');
         return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'service';
     }
@@ -19497,7 +19843,7 @@
         var titleRow = el('div', 'asset-tree-report-title');
         var titles = el('div');
         titles.appendChild(el('h3', null, view.title || ''));
-        titles.appendChild(el('p', null, groupPhrase(view.groupBy)));
+        titles.appendChild(el('p', null, groupPhrase(view.groupBy, view)));
         titleRow.appendChild(titles);
         titleRow.appendChild(reportChartSwitch(view, kind));
         main.appendChild(titleRow);
@@ -19509,11 +19855,11 @@
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
             if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
         } else {
-            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares);
+            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares, view);
             if (chartPanel) main.appendChild(chartPanel);
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
-            header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy)));
+            header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy, view)));
             header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
             header.appendChild(el('th', 'is-num', t('reportCount')));
             if (money) header.appendChild(el('th', 'is-num is-money', t('lifeBook')));
@@ -19596,18 +19942,33 @@
         return [];
     }
 
+    function reportFieldOptions() {
+        var seen = {};
+        var list = [];
+        (state.types || []).forEach(function (type) {
+            if (!type || type.location) return;
+            (type.fields || []).forEach(function (field) {
+                if (!field || !field.fieldKey || seen[field.fieldKey]) return;
+                seen[field.fieldKey] = true;
+                list.push({ key: field.fieldKey, label: field.label || field.fieldKey });
+            });
+        });
+        list.sort(function (left, right) { return left.label.localeCompare(right.label); });
+        return list;
+    }
+
     function openReportDialog(existing) {
         var editing = !!(existing && existing.id);
         var pickedTypes = {};
         var pickedStatuses = {};
         openModal(function (dialog) {
-            dialog.className += ' asset-tree-work-dialog';
+            dialog.className += ' asset-tree-work-dialog asset-tree-report-dialog';
             dialog.appendChild(el('h2', null, t(editing ? 'reportEdit' : 'reportCreate')));
             var name = document.createElement('input');
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
             var group = document.createElement('select');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
+            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['field', 'reportGroupField'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
@@ -19615,7 +19976,7 @@
             });
             group.value = editing && existing.groupBy ? existing.groupBy : 'type';
             var chart = document.createElement('select');
-            [['donut', 'reportDonut'], ['pie', 'reportPie'], ['bar', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
+            [['bar', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
@@ -19649,8 +20010,37 @@
             row.appendChild(planField(t('reportGroupBy'), group));
             row.appendChild(planField(t('reportChart'), chart));
             row.appendChild(planField(t('reportMetric'), metric));
+            var field = document.createElement('select');
+            field.appendChild(new Option('\u2014', ''));
+            reportFieldOptions().forEach(function (item) {
+                field.appendChild(new Option(item.label, item.key));
+            });
+            if (editing && existing.fieldKey) field.value = existing.fieldKey;
+            var fieldValue = document.createElement('input');
+            fieldValue.placeholder = t('reportFieldValue');
+            fieldValue.setAttribute('aria-label', t('reportFieldValue'));
+            if (editing && existing.attrValue) fieldValue.value = existing.attrValue;
+            var fieldFilter = document.createElement('select');
+            fieldFilter.appendChild(new Option(t('reportFieldAny'), ''));
+            reportFieldOptions().forEach(function (item) {
+                fieldFilter.appendChild(new Option(item.label, item.key));
+            });
+            if (editing && existing.attrKey) fieldFilter.value = existing.attrKey;
+            var fieldRow = el('div', 'asset-tree-report-picks');
+            fieldRow.appendChild(planField(t('reportField'), field));
+            fieldRow.hidden = group.value !== 'field';
+            group.addEventListener('change', function () {
+                fieldRow.hidden = group.value !== 'field';
+                syncMetric();
+            });
+            var attrRow = el('div', 'asset-tree-report-picks');
+            attrRow.appendChild(planField(t('reportField'), fieldFilter));
+            attrRow.appendChild(planField(t('reportFieldValue'), fieldValue));
             dialog.appendChild(planField(t('reportName'), name));
             dialog.appendChild(row);
+            dialog.appendChild(fieldRow);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyField')));
+            dialog.appendChild(attrRow);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyTypes')));
             var types = el('div', 'asset-tree-check-list');
             (state.types || []).forEach(function (type) {
@@ -19739,7 +20129,29 @@
                 var statusKeys = Object.keys(pickedStatuses);
                 var holderKeys = Object.keys(pickedHolders);
                 var placeKeys = Object.keys(pickedPlaces);
-                var body = { name: name.value.trim(), groupBy: group.value, chart: chart.value, metric: metric.value, filterField: '', filterValue: '' };
+                if (group.value === 'field' && !field.value) {
+                    save.disabled = false;
+                    notify(t('reportField'));
+                    field.focus();
+                    return;
+                }
+                if ((fieldFilter.value && !fieldValue.value.trim()) || (!fieldFilter.value && fieldValue.value.trim())) {
+                    save.disabled = false;
+                    notify(t('reportFieldValue'));
+                    fieldValue.focus();
+                    return;
+                }
+                var body = {
+                    name: name.value.trim(),
+                    groupBy: group.value,
+                    chart: chart.value,
+                    metric: metric.value,
+                    filterField: '',
+                    filterValue: '',
+                    fieldKey: group.value === 'field' ? field.value : '',
+                    attrKey: fieldFilter.value,
+                    attrValue: fieldValue.value.trim()
+                };
                 if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length) {
                     body.filterField = 'mix';
                     var parts = [];

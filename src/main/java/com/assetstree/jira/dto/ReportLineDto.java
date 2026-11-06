@@ -10,6 +10,8 @@ public class ReportLineDto {
     private String name;
     private String detail;
     private String bucket;
+    private String from;
+    private String to;
 
     public ReportLineDto() {
     }
@@ -31,4 +33,8 @@ public class ReportLineDto {
     public void setDetail(String detail) { this.detail = detail; }
     public String getBucket() { return bucket; }
     public void setBucket(String bucket) { this.bucket = bucket; }
+    public String getFrom() { return from; }
+    public void setFrom(String from) { this.from = from; }
+    public String getTo() { return to; }
+    public void setTo(String to) { this.to = to; }
 }
