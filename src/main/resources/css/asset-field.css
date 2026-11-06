@@ -78,6 +78,23 @@
 .asset-tree-picker-portal select:disabled {
     opacity: 1;
     color: #172b4d;
+    cursor: default;
+}
+
+.asset-tree-picker-portal-hint {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 6px 0 0;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    white-space: normal;
+}
+
+.select2-container.asset-tree-portal-select:not(.select2-dropdown-open) > .select2-drop {
+    display: none !important;
 }
 
 /* Jira sizes a plain text input to about 250px. That input, and select2's

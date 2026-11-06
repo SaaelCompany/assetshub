@@ -997,8 +997,9 @@ def ensure_portal_demo():
             {"field": "Площадка", "option": "Пункт А"},
             {"field": "Отделение", "option": "Пункт А"},
         ]},
+        {"id": 4, "assetId": department, "position": 4, "conditions": [{"field": "Кабинет", "option": "111"}]},
     ]
-    STATE["portal_seq"] = 4
+    STATE["portal_seq"] = 5
 
 
 def portal_rule_dto(rule):
@@ -7111,6 +7112,12 @@ form.vp-request-form .select2-container .select2-chosen { position: relative; z-
 <option value="10130">Пункт А</option>
 </select>
 </div>
+</div>
+<div class="field-group">
+<label>Кабинет <span class="vp-optional">(необязательно)</span></label>
+<div class="checkbox"><input type="checkbox" id="customfield_10200-1" name="customfield_10200" value="20111"><label for="customfield_10200-1">111</label></div>
+<div class="checkbox"><input type="checkbox" id="customfield_10200-2" name="customfield_10200" value="20112"><label for="customfield_10200-2">112</label></div>
+<div class="checkbox"><input type="checkbox" id="customfield_10200-3" name="customfield_10200" value="20113"><label for="customfield_10200-3">113</label></div>
 </div>
 <div id="asset-slot" class="field-group"></div>
 </form>

@@ -50,7 +50,16 @@
         return norm(copy.textContent || copy.innerText || '');
     }
 
+    function isChoice(control) {
+        var type = (control.type || '').toLowerCase();
+        return type === 'checkbox' || type === 'radio';
+    }
+
     function fieldCaption(control) {
+        if (isChoice(control)) {
+            var group = groupCaption(control);
+            if (group) return group;
+        }
         var linked = captionFor(control);
         if (linked) return linked;
         var wrapped = captionWrapped(control);
@@ -60,6 +69,34 @@
         var beside = captionBefore(control);
         if (beside) return beside;
         return tidy(control.getAttribute('aria-label') || control.name || control.id || '');
+    }
+
+    /* A portal checkbox's own label is the option ("111"), not the field ("Кабинет"). */
+    function groupCaption(control) {
+        var box = fieldBox(control);
+        var root = box || control.parentNode;
+        if (!root || !root.getElementsByTagName) return '';
+        var legends = root.getElementsByTagName('legend');
+        if (legends.length) {
+            var legendText = tidy(ownText(legends[0]));
+            if (legendText) return legendText;
+        }
+        if (box && box.getAttribute) {
+            var named = tidy(box.getAttribute('data-field-name') || '');
+            if (named) return named;
+        }
+        var labels = root.getElementsByTagName('label');
+        for (var i = 0; i < labels.length; i++) {
+            var label = labels[i];
+            if (control.id && label.htmlFor === control.id) continue;
+            if (label.htmlFor) {
+                var owner = document.getElementById(label.htmlFor);
+                if (owner && isChoice(owner)) continue;
+            }
+            var text = tidy(ownText(label));
+            if (text) return text;
+        }
+        return '';
     }
 
     function captionFor(control) {
@@ -183,6 +220,20 @@
         return false;
     }
 
+    function shownSelectText(select) {
+        var box = null;
+        if (select.id) box = document.getElementById('s2id_' + select.id);
+        if (!box) {
+            var next = select.nextSibling;
+            while (next && next.nodeType !== 1) next = next.nextSibling;
+            if (next && next.className && (' ' + next.className + ' ').indexOf(' select2-container ') !== -1) box = next;
+        }
+        if (!box || !box.querySelector) return '';
+        var chosen = box.querySelector('.select2-chosen');
+        if (!chosen) return '';
+        return String(chosen.textContent || '').replace(/^\s+|\s+$/g, '').replace(/\s+/g, ' ');
+    }
+
     function insideSelect2(node) {
         while (node) {
             var cls = node.className && typeof node.className === 'string' ? ' ' + node.className + ' ' : '';
@@ -199,14 +250,21 @@
         var i;
         for (i = 0; i < controls.length; i++) {
             var control = controls[i];
-            if (insidePicker(control) || insideSelect2(control) || control.getAttribute('data-asset-tree') === '1') continue;
             var tag = control.tagName ? control.tagName.toLowerCase() : '';
+            if (insidePicker(control) || control.getAttribute('data-asset-tree') === '1') continue;
+            if (tag !== 'select' && insideSelect2(control)) continue;
             if (tag === 'select') {
                 if (!control.options || control.selectedIndex < 0) continue;
                 var chosen = control.options[control.selectedIndex];
                 var text = chosen ? (chosen.text || '') : '';
-                if (blankChoice(text, control.value)) continue;
-                answers.push(answerOf(control, text, control.value || text));
+                var value = control.value || '';
+                if (blankChoice(text, value)) {
+                    var visible = shownSelectText(control);
+                    if (!visible || blankChoice(visible, visible)) continue;
+                    text = visible;
+                    value = value && !blankChoice('', value) ? value : visible;
+                }
+                answers.push(answerOf(control, text, value || text));
                 continue;
             }
             var type = (control.type || '').toLowerCase();
@@ -460,7 +518,8 @@
         }
 
         function canSelect2() {
-            return !!(flat && window.AJS && AJS.$ && AJS.$.fn && typeof AJS.$.fn.auiSelect2 === 'function');
+            if (!flat || !window.AJS || !AJS.$ || !AJS.$.fn || typeof AJS.$.fn.auiSelect2 !== 'function') return false;
+            return !!neighbourSelect2();
         }
 
         function neighbourSelect2() {
@@ -683,8 +742,43 @@
             return fallback;
         }
 
+        function clearHint() {
+            if (picker.portalHint && picker.portalHint.parentNode) {
+                picker.portalHint.parentNode.removeChild(picker.portalHint);
+            }
+            picker.portalHint = null;
+        }
+
+        function hintAnchor() {
+            var select = picker.portalSelect;
+            if (!select || !select.parentNode) return null;
+            if (select.id) {
+                var box = document.getElementById('s2id_' + select.id);
+                if (box && box.parentNode === select.parentNode) return box;
+            }
+            var next = select.nextSibling;
+            while (next && next.nodeType !== 1) next = next.nextSibling;
+            if (next && next.className && (' ' + next.className + ' ').indexOf(' select2-container ') !== -1) return next;
+            return select;
+        }
+
+        function showHint(text) {
+            clearHint();
+            if (!text) return;
+            var hint = el('p', 'asset-tree-picker-wait asset-tree-picker-portal-hint', text);
+            var anchor = hintAnchor();
+            if (anchor && anchor.parentNode) {
+                if (anchor.nextSibling) anchor.parentNode.insertBefore(hint, anchor.nextSibling);
+                else anchor.parentNode.appendChild(hint);
+            } else {
+                levels.appendChild(hint);
+            }
+            picker.portalHint = hint;
+        }
+
         function drawList(rootId, waiting) {
             levels.innerHTML = '';
+            clearHint();
             if (picker.portalFind && picker.portalFind.parentNode) {
                 picker.portalFind.parentNode.removeChild(picker.portalFind);
             }
@@ -692,12 +786,11 @@
             if (waiting) {
                 var waitingSelect = el('select');
                 dressSelect(waitingSelect);
-                waitingSelect.disabled = true;
                 var placeholder = el('option', null, blankLabel('—'));
                 placeholder.value = '';
                 waitingSelect.appendChild(placeholder);
                 attachSelect(waitingSelect);
-                levels.appendChild(el('p', 'asset-tree-picker-wait', waitText));
+                showHint(waitText);
                 if (current) current.textContent = '';
                 return;
             }
@@ -729,7 +822,7 @@
             });
             attachSelect(select);
             if (!select2Ready(select)) mountFind(select, paintOptions, function (value) { query = value; });
-            if (!options.length) levels.appendChild(el('p', 'asset-tree-picker-wait', emptyText));
+            if (!options.length) showHint(emptyText);
             show(hidden.value ? parseInt(hidden.value, 10) : null);
         }
 
@@ -1796,7 +1889,8 @@
         var target = event.target;
         if (!target || insidePicker(target)) return;
         var tag = target.tagName ? target.tagName.toLowerCase() : '';
-        if (tag !== 'select' && target.type !== 'radio') return;
+        var type = (target.type || '').toLowerCase();
+        if (tag !== 'select' && tag !== 'textarea' && type !== 'radio' && type !== 'checkbox' && type !== 'text') return;
         refresh();
     });
 
