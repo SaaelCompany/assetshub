@@ -38,6 +38,7 @@ import com.atlassian.jira.security.PermissionManager;
 import com.atlassian.jira.security.groups.GroupManager;
 import com.atlassian.jira.security.plugin.ProjectPermissionKey;
 import com.atlassian.jira.user.ApplicationUser;
+import com.atlassian.jira.web.ExecutingHttpRequest;
 import com.atlassian.jira.user.UserPropertyManager;
 import com.atlassian.jira.user.util.UserManager;
 import com.atlassian.jira.util.I18nHelper;
@@ -48,6 +49,8 @@ import com.atlassian.mail.queue.SingleMailQueueItem;
 import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMultipart;
 import com.atlassian.sal.api.transaction.TransactionCallback;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletRequest;
 import com.assetstree.jira.PluginInfo;
 import com.assetstree.jira.ao.AssetActivityEntity;
 import com.assetstree.jira.ao.AssetAttributeEntity;
@@ -205,7 +208,9 @@ import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.Statuses;
 import com.assetstree.jira.model.PortalRules;
+import com.assetstree.jira.model.TniCookie;
 import com.assetstree.jira.model.TniFacts;
+import com.assetstree.jira.model.TniHold;
 import com.assetstree.jira.model.TniPlace;
 import com.assetstree.jira.model.TniPolicy;
 import com.assetstree.jira.model.TniSightDraft;
@@ -11962,12 +11967,63 @@ public class AssetServiceImpl implements AssetService {
         }
         long issueId = issue.getId() == null ? 0L : issue.getId().longValue();
         String issueKey = issue.getKey() == null ? "" : issue.getKey();
+        String projectKey = issue.getProjectObject().getKey();
+        catchSight(user, reporter, projectKey);
+        Integer parent = null;
         try {
-            new TniBook().attach(ao(), tniHost(), issue.getProjectObject().getKey(), reporter.getKey(),
-                    issueId, issueKey, tniParent(issue), System.currentTimeMillis());
+            parent = tniParent(issue);
+        } catch (RuntimeException ex) {
+            log.debug("TNI did not resolve a site for {}", issue.getKey(), ex);
+        }
+        try {
+            new TniBook().attach(ao(), tniHost(), projectKey, reporter.getKey(),
+                    issueId, issueKey, parent, System.currentTimeMillis());
         } catch (RuntimeException ex) {
             log.warn("TNI did not record a device for {}", issue.getKey(), ex);
         }
+    }
+
+    private void catchSight(ApplicationUser actor, ApplicationUser reporter, String projectKey) {
+        String owner = reporter != null && reporter.getKey() != null
+                ? reporter.getKey()
+                : (actor == null ? null : actor.getKey());
+        TniSightDraft draft = TniHold.take(owner);
+        if (draft == null && actor != null && actor.getKey() != null && (owner == null || !actor.getKey().equals(owner))) {
+            draft = TniHold.take(actor.getKey());
+            if (draft != null && actor.getKey() != null) {
+                owner = actor.getKey();
+            }
+        }
+        if (draft == null) {
+            draft = TniCookie.read(requestCookie(TniCookie.NAME));
+        }
+        if (draft == null || owner == null || projectKey == null || projectKey.trim().isEmpty()) {
+            return;
+        }
+        try {
+            new TniBook().remember(ao(), projectKey, owner, TniFacts.from(draft), System.currentTimeMillis());
+        } catch (RuntimeException ex) {
+            log.warn("TNI did not keep the browser report for {}", projectKey, ex);
+        }
+    }
+
+    private String requestCookie(String name) {
+        try {
+            HttpServletRequest request = ExecutingHttpRequest.get();
+            if (request == null || request.getCookies() == null || name == null) {
+                return null;
+            }
+            Cookie[] cookies = request.getCookies();
+            for (int i = 0; i < cookies.length; i++) {
+                Cookie cookie = cookies[i];
+                if (cookie != null && name.equals(cookie.getName())) {
+                    return cookie.getValue();
+                }
+            }
+        } catch (RuntimeException ex) {
+            return null;
+        }
+        return null;
     }
 
     @Override

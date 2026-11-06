@@ -5,6 +5,9 @@ import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.model.ProjectModules;
+import com.assetstree.jira.model.TniCookie;
+import com.assetstree.jira.model.TniHold;
+import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.service.JiraServices;
 import com.assetstree.jira.web.PortalLookup;
 import net.java.ao.Query;
@@ -53,6 +56,13 @@ public class PortalPageFilter implements Filter {
         }
         HttpServletRequest http = (HttpServletRequest) request;
         String uri = http.getRequestURI() == null ? "" : http.getRequestURI();
+        if (uri.indexOf("/servicedesk/customer/") >= 0
+                && "POST".equalsIgnoreCase(http.getMethod())
+                && uri.contains("/create")) {
+            holdSight(http);
+            chain.doFilter(request, response);
+            return;
+        }
         if (!"GET".equalsIgnoreCase(http.getMethod()) || uri.indexOf("/servicedesk/customer/") < 0) {
             chain.doFilter(request, response);
             return;
@@ -107,7 +117,7 @@ public class PortalPageFilter implements Filter {
         boolean profile = uriContainsProfile(request);
         boolean portal = profile || portalModuleOn(projectKey);
         String path = request.getRequestURI() == null ? "" : request.getRequestURI();
-        boolean tni = path.contains("/create") && tniModuleOn(projectKey);
+        boolean tni = path.contains("/create") && (projectKey.isEmpty() || tniModuleOn(projectKey));
         if (!portal && !tni) {
             return new byte[0];
         }
@@ -132,11 +142,40 @@ public class PortalPageFilter implements Filter {
         } catch (RuntimeException ex) {
             log.debug("TNI project was not resolved", ex);
         }
-        if (!tniModuleOn(projectKey)) {
+        if (!projectKey.isEmpty() && !tniModuleOn(projectKey)) {
             return new byte[0];
         }
         String base = request.getContextPath() == null ? "" : request.getContextPath();
         return PortalPageMarkup.tniScript(base);
+    }
+
+    private static void holdSight(HttpServletRequest request) {
+        TniSightDraft draft = TniCookie.read(cookie(request, TniCookie.NAME));
+        if (draft == null) {
+            return;
+        }
+        try {
+            ApplicationUser user = ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser();
+            if (user != null && user.getKey() != null) {
+                TniHold.keep(user.getKey(), draft);
+            }
+        } catch (RuntimeException ex) {
+            log.debug("TNI report was not held for the new request", ex);
+        }
+    }
+
+    private static String cookie(HttpServletRequest request, String name) {
+        if (request == null || request.getCookies() == null || name == null) {
+            return null;
+        }
+        javax.servlet.http.Cookie[] cookies = request.getCookies();
+        for (int i = 0; i < cookies.length; i++) {
+            javax.servlet.http.Cookie cookie = cookies[i];
+            if (cookie != null && name.equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
     }
 
     private static boolean tniModuleOn(String projectKey) {

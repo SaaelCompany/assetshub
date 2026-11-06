@@ -116,6 +116,24 @@ public class TniRulesTest {
     }
 
     @Test
+    public void browserReportRidesTheCreateRequestAndRootIsTheFallback() {
+        String json = "{\"portalId\":4,\"projectKey\":\"STP\",\"ua\":\"Mozilla/5.0 (Windows NT 10.0) Chrome/120.0\","
+                + "\"platform\":\"Win32\",\"screen\":\"1920x1080\",\"cores\":8,\"memory\":8,\"touch\":0,"
+                + "\"gpu\":\"Intel\",\"battery\":false,\"addresses\":[\"10.1.1.8\",\"8.8.8.8\"]}";
+        TniSightDraft draft = TniCookie.read(json);
+        assertEquals("Win32", draft.getPlatform());
+        assertEquals("1920x1080", draft.getScreen());
+        assertEquals(Integer.valueOf(8), draft.getCores());
+        assertEquals(Boolean.FALSE, draft.getBattery());
+        assertEquals("10.1.1.8", draft.getAddresses().get(0));
+        TniHold.keep("customer", draft);
+        assertEquals("Win32", TniHold.take("customer").getPlatform());
+        assertNull(TniHold.take("customer"));
+        assertNull(TniPlace.choose(java.util.Collections.<TniPlace.Spot>emptyList(),
+                java.util.Collections.<PortalRules.Answer>emptyList(), null));
+    }
+
+    @Test
     public void deviceSitsOnTheBranchNamedInTheRequest() {
         java.util.List<TniPlace.Spot> spots = Arrays.asList(
                 new TniPlace.Spot(1, null, "Усть-Лабинск", true),

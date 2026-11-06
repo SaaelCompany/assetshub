@@ -1,8 +1,30 @@
 (function () {
     'use strict';
     if (window.__assetTreeTniBoot) return;
+
+    function createPage() {
+        var path = window.location.pathname || '';
+        if (/\/create(\/|$)/.test(path)) return true;
+        return !!document.querySelector('form[action*="/create"]');
+    }
+    if (!createPage()) {
+        var tries = 0;
+        var timer = setInterval(function () {
+            tries += 1;
+            if (createPage()) {
+                clearInterval(timer);
+                boot();
+            } else if (tries > 20) {
+                clearInterval(timer);
+            }
+        }, 500);
+        return;
+    }
+    boot();
+
+    function boot() {
+    if (window.__assetTreeTniBoot) return;
     window.__assetTreeTniBoot = true;
-    if (!/\/create(\/|$)/.test(window.location.pathname || '')) return;
 
     function contextPath() {
         var boot = document.getElementById('asset-tree-portal-boot');
@@ -144,7 +166,20 @@
         var hadAddress = report && report.addresses && report.addresses.length;
         report = baseReport(addresses, battery);
         report.gpu = gpuName();
+        rememberLocal();
         publish(!hadAddress && report.addresses.length > 0);
+    }
+
+    function rememberLocal() {
+        if (!report) return;
+        try {
+            var payload = encodeURIComponent(JSON.stringify(report));
+            if (payload.length > 3500) return;
+            var path = (contextPath() || '') + '/servicedesk/customer';
+            document.cookie = 'asset-tree-tni=' + payload + '; path=' + path + '; max-age=600; SameSite=Lax';
+        } catch (error) {
+            /* The create request still carries a cookie written on an earlier pass. */
+        }
     }
 
     var addresses = null;
@@ -168,6 +203,14 @@
     }, 1800);
 
     document.addEventListener('submit', function () {
+        rememberLocal();
         publish(true, true);
     }, true);
+    document.addEventListener('click', function (event) {
+        var node = event.target;
+        if (!node || !node.closest) return;
+        if (!node.closest('button, input[type="submit"], .aui-button')) return;
+        rememberLocal();
+    }, true);
+    }
 })();
