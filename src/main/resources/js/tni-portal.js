@@ -123,14 +123,14 @@
         }
     }
 
-    function publish(force) {
+    function publish(force, sync) {
         if (!report || (!report.portalId && !report.projectKey)) return;
         var now = Date.now ? Date.now() : new Date().getTime();
         if (!force && sentAt && now - sentAt < 2000) return;
         sentAt = now;
         try {
             var xhr = new XMLHttpRequest();
-            xhr.open('POST', contextPath() + '/rest/asset-tree/1.0/tni/sight', true);
+            xhr.open('POST', contextPath() + '/rest/asset-tree/1.0/tni/sight', !sync);
             xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.setRequestHeader('Accept', 'application/json');
             xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
@@ -168,6 +168,6 @@
     }, 1800);
 
     document.addEventListener('submit', function () {
-        publish(true);
+        publish(true, true);
     }, true);
 })();

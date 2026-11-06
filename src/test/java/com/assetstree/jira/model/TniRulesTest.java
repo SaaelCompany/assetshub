@@ -1,15 +1,19 @@
 package com.assetstree.jira.model;
 
 import com.assetstree.jira.dto.ModuleSetupDto;
+import com.assetstree.jira.dto.PortalRuleDto;
 import com.assetstree.jira.servlet.PortalPageMarkup;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class TniRulesTest {
@@ -112,6 +116,38 @@ public class TniRulesTest {
     }
 
     @Test
+    public void deviceSitsOnTheBranchNamedInTheRequest() {
+        java.util.List<TniPlace.Spot> spots = Arrays.asList(
+                new TniPlace.Spot(1, null, "Усть-Лабинск", true),
+                new TniPlace.Spot(2, Integer.valueOf(1), "111", true),
+                new TniPlace.Spot(3, Integer.valueOf(1), "112", true),
+                new TniPlace.Spot(4, Integer.valueOf(2), "Ноутбук Ивана", false));
+        assertEquals(Integer.valueOf(1), TniPlace.choose(spots,
+                Arrays.asList(answer("Филиал", "Усть-Лабинск")), null));
+        assertEquals(Integer.valueOf(2), TniPlace.choose(spots,
+                Arrays.asList(answer("Кабинет", "111")), null));
+        assertEquals(Integer.valueOf(1), TniPlace.choose(spots,
+                Arrays.asList(answer("Кабинет", "111"), answer("Кабинет", "112")), null));
+        assertNull(TniPlace.choose(spots, Arrays.asList(answer("Тест", "Не выбрано")), null));
+        assertEquals(Integer.valueOf(2), TniPlace.choose(spots, Collections.<PortalRules.Answer>emptyList(), Integer.valueOf(4)));
+        assertEquals(Integer.valueOf(1), TniPlace.choose(spots,
+                Arrays.asList(answer("Кабинет", "111")), Integer.valueOf(1)));
+
+        PortalConditionDraft condition = new PortalConditionDraft();
+        condition.setField("Филиал");
+        condition.setOption("Усть-Лабинск");
+        PortalRuleDto rule = new PortalRuleDto();
+        rule.setAssetId(1);
+        rule.setConditions(Collections.singletonList(condition));
+        Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+        parents.put(Integer.valueOf(1), null);
+        parents.put(Integer.valueOf(2), Integer.valueOf(1));
+        PortalRuleDto chosen = PortalRules.choose(Collections.singletonList(rule),
+                Arrays.asList(answer("Филиал", "Усть-Лабинск")), parents);
+        assertEquals(1, chosen.getAssetId());
+    }
+
+    @Test
     public void createPageCanCarryTheDeviceScriptBesideTheField() {
         byte[] page = "<html><body><p>portal</p></body></html>".getBytes(StandardCharsets.UTF_8);
         byte[] withField = PortalPageMarkup.insertBoot(page, PortalPageMarkup.snippet("/jira", 4, "STP", "customfield_1", true, true));
@@ -128,6 +164,10 @@ public class TniRulesTest {
 
     private static TniClock.Mark look(long seen, long probeFrom, int fails, long lastProbe, boolean address, long now) {
         return TniClock.look(seen, probeFrom, fails, lastProbe, 90, 3, 3, address, now);
+    }
+
+    private static PortalRules.Answer answer(String field, String option) {
+        return new PortalRules.Answer(field, "", "", option, option);
     }
 
     private static TniSightDraft draft(String ua, String platform, Boolean battery) {

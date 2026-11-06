@@ -16,8 +16,11 @@ import com.atlassian.jira.config.properties.APKeys;
 import com.atlassian.event.api.EventPublisher;
 import com.atlassian.jira.event.issue.IssueEvent;
 import com.atlassian.jira.event.type.EventType;
+import com.atlassian.jira.issue.CustomFieldManager;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.issue.IssueManager;
+import com.atlassian.jira.issue.customfields.option.Option;
+import com.atlassian.jira.issue.fields.CustomField;
 import com.atlassian.jira.issue.comments.Comment;
 import com.atlassian.jira.issue.comments.CommentManager;
 import com.atlassian.jira.issue.issuetype.IssueType;
@@ -201,7 +204,9 @@ import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.Statuses;
+import com.assetstree.jira.model.PortalRules;
 import com.assetstree.jira.model.TniFacts;
+import com.assetstree.jira.model.TniPlace;
 import com.assetstree.jira.model.TniPolicy;
 import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.web.PortalLookup;
@@ -11959,7 +11964,7 @@ public class AssetServiceImpl implements AssetService {
         String issueKey = issue.getKey() == null ? "" : issue.getKey();
         try {
             new TniBook().attach(ao(), tniHost(), issue.getProjectObject().getKey(), reporter.getKey(),
-                    issueId, issueKey, System.currentTimeMillis());
+                    issueId, issueKey, tniParent(issue), System.currentTimeMillis());
         } catch (RuntimeException ex) {
             log.warn("TNI did not record a device for {}", issue.getKey(), ex);
         }
@@ -11972,6 +11977,161 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             log.warn("TNI retention was not applied", ex);
         }
+    }
+
+    private Integer tniParent(final Issue issue) {
+        if (issue == null || issue.getProjectObject() == null) {
+            return null;
+        }
+        final String projectKey = issue.getProjectObject().getKey();
+        final List<PortalRules.Answer> answers = tniAnswers(issue);
+        final Integer picked = tniPickedAsset(issue);
+        try {
+            return ao().executeInTransaction(new TransactionCallback<Integer>() {
+                @Override
+                public Integer doInTransaction() {
+                    Map<String, Boolean> locations = new HashMap<String, Boolean>();
+                    AssetTypeEntity[] types = ao().find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+                    if (types != null) {
+                        for (AssetTypeEntity type : types) {
+                            if (type != null && type.getTypeKey() != null) {
+                                locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+                            }
+                        }
+                    }
+                    List<TniPlace.Spot> spots = new ArrayList<TniPlace.Spot>();
+                    Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+                    AssetEntity[] rows = assetsIn(projectKey);
+                    if (rows != null) {
+                        for (AssetEntity row : rows) {
+                            if (row == null) {
+                                continue;
+                            }
+                            boolean location = Boolean.TRUE.equals(locations.get(row.getTypeKey()));
+                            Integer parent = TreeLogic.normalizeParent(row.getParentId());
+                            spots.add(new TniPlace.Spot(row.getID(), parent, row.getName(), location));
+                            parents.put(Integer.valueOf(row.getID()), parent);
+                        }
+                    }
+                    Integer pointed = picked;
+                    if (pointed == null) {
+                        PortalRuleDto rule = PortalRules.choose(portalRules(projectKey), answers, parents);
+                        if (rule != null && rule.getAssetId() > 0) {
+                            pointed = Integer.valueOf(rule.getAssetId());
+                        }
+                    }
+                    return TniPlace.choose(spots, answers, pointed);
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.debug("TNI did not resolve a site for {}", issue.getKey(), ex);
+            return null;
+        }
+    }
+
+    private List<PortalRules.Answer> tniAnswers(Issue issue) {
+        List<PortalRules.Answer> answers = new ArrayList<PortalRules.Answer>();
+        CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+        if (manager == null) {
+            return answers;
+        }
+        List<CustomField> fields;
+        try {
+            fields = manager.getCustomFieldObjects(issue);
+        } catch (RuntimeException ex) {
+            return answers;
+        }
+        if (fields == null) {
+            return answers;
+        }
+        Set<String> assetFields = new HashSet<String>(PortalLookup.assetFieldIds());
+        for (CustomField field : fields) {
+            if (field == null || field.getId() == null || assetFields.contains(field.getId())) {
+                continue;
+            }
+            Object raw;
+            try {
+                raw = issue.getCustomFieldValue(field);
+            } catch (RuntimeException ex) {
+                continue;
+            }
+            addTniValue(answers, field.getName(), field.getId(), raw);
+        }
+        return answers;
+    }
+
+    private void addTniValue(List<PortalRules.Answer> answers, String label, String fieldId, Object raw) {
+        if (raw == null) {
+            return;
+        }
+        if (raw instanceof Option) {
+            addTniOption(answers, label, fieldId, (Option) raw);
+            return;
+        }
+        if (raw instanceof Collection) {
+            for (Object item : (Collection<?>) raw) {
+                addTniValue(answers, label, fieldId, item);
+            }
+            return;
+        }
+        if (raw instanceof Map) {
+            for (Object item : ((Map<?, ?>) raw).values()) {
+                addTniValue(answers, label, fieldId, item);
+            }
+            return;
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isEmpty() || text.length() > 80) {
+            return;
+        }
+        answers.add(new PortalRules.Answer(label, fieldId, fieldId, text, text));
+    }
+
+    private void addTniOption(List<PortalRules.Answer> answers, String label, String fieldId, Option option) {
+        if (option == null) {
+            return;
+        }
+        String text = option.getValue() == null ? "" : option.getValue().trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        String value = option.getOptionId() == null ? text : String.valueOf(option.getOptionId().longValue());
+        answers.add(new PortalRules.Answer(label, fieldId, fieldId, text, value));
+    }
+
+    private Integer tniPickedAsset(Issue issue) {
+        CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+        if (manager == null) {
+            return null;
+        }
+        for (String id : PortalLookup.assetFieldIds()) {
+            CustomField field = manager.getCustomFieldObject(id);
+            if (field == null) {
+                continue;
+            }
+            Object raw;
+            try {
+                raw = issue.getCustomFieldValue(field);
+            } catch (RuntimeException ex) {
+                continue;
+            }
+            if (raw == null) {
+                continue;
+            }
+            String text = String.valueOf(raw).trim();
+            if (!text.matches("\\d+")) {
+                continue;
+            }
+            try {
+                int parsed = Integer.parseInt(text);
+                if (parsed > 0) {
+                    return Integer.valueOf(parsed);
+                }
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private String tniProject(ApplicationUser user, TniSightDraft draft) {
