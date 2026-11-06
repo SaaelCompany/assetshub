@@ -479,6 +479,7 @@
         mapLayer: 'plan',
         mapLayerShow: {},
         mapMode: 'plan',
+        mapBoard: 'figures',
         mapQuery: '',
         mapFurnCat: 'living',
         mapDraft: null,
@@ -20341,7 +20342,7 @@
 
     function roomMin(kind) {
         if (kind === 'room' || kind === 'stair') return 16;
-        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || isRouteKind(kind)) return 4;
+        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || kind === 'flow' || isRouteKind(kind)) return 4;
         return 8;
     }
 
@@ -21252,6 +21253,10 @@
         return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug' || kind === 'png';
     }
 
+    function isFigureKind(kind) {
+        return kind === 'box' || kind === 'ellipse' || kind === 'diamond' || kind === 'triangle' || kind === 'note' || kind === 'flow' || kind === 'chart';
+    }
+
     function nextGroupId(floor) {
         var max = 0;
         ((floor && floor.rooms) || []).forEach(function (room) {
@@ -21758,7 +21763,6 @@
         if (filters.childNodes.length) row.appendChild(filters);
         bar.appendChild(row);
         if (state.mapEditing && state.mapDraft) bar.appendChild(mapEditorBar());
-        if (state.mapEditing) bar.appendChild(mapModeBar());
         return bar;
     }
 
@@ -21845,8 +21849,12 @@
 
     function mapHint() {
         if (state.mapArmId || state.mapStamp) return t('mapPlaceHint');
+        if (state.mapTool === 'flow') return state.mapAnchor ? t('mapFlowNext') : t('mapFlowHint');
+        if (isFigureKind(state.mapTool)) return t('mapFigureHint');
         if (state.mapTool === 'route') return state.mapAnchor ? t('mapRouteHint') : t('mapRouteIdle');
         if (state.mapAnchor && (state.mapTool === 'wall' || state.mapTool === 'partition' || state.mapTool === 'room')) return t('mapChainHint');
+        if ((state.mapBoard || 'figures') === 'figures') return t('mapSchemeHint');
+        if ((state.mapBoard || 'figures') === 'assets') return t('mapPlaceHint');
         return t('mapDrawHint');
     }
 
@@ -22218,17 +22226,55 @@
         return block;
     }
 
+    function figureTools() {
+        return [
+            ['select', 'mapSelect'],
+            ['box', 'mapBox'],
+            ['ellipse', 'mapEllipse'],
+            ['diamond', 'mapDiamond'],
+            ['triangle', 'mapTriangle'],
+            ['note', 'mapNote'],
+            ['text', 'mapText'],
+            ['flow', 'mapFlow'],
+            ['chart', 'mapChart']
+        ];
+    }
+
+    function mapStencilTabs() {
+        var row = el('div', 'asset-tree-stencil-tabs');
+        [['figures', 'mapBoardFigures'], ['plan', 'mapBoardPlan'], ['assets', 'mapBoardAssets']].forEach(function (pair) {
+            var on = (state.mapBoard || 'figures') === pair[0];
+            var tab = button(t(pair[1]), 'asset-tree-stencil-tab' + (on ? ' is-on' : ''), function () {
+                state.mapBoard = pair[0];
+                state.mapStamp = '';
+                state.mapArmId = 0;
+                if (pair[0] === 'figures' && !isFigureKind(state.mapTool) && state.mapTool !== 'select' && state.mapTool !== 'text') {
+                    state.mapTool = 'select';
+                }
+                renderFrame();
+            });
+            tab.setAttribute('aria-pressed', on ? 'true' : 'false');
+            row.appendChild(tab);
+        });
+        return row;
+    }
+
     function mapCatalog() {
         var side = el('aside', 'asset-tree-catalog');
+        var board = state.mapBoard || 'figures';
+        side.appendChild(mapStencilTabs());
         side.appendChild(mapCatalogSearch());
-        if ((state.mapMode || 'plan') === 'furniture') side.appendChild(furnitureCatalog());
-        else side.appendChild(mapToolGrid(mapModeTools()));
+        if (board === 'assets') side.appendChild(mapGearCard());
+        else if (board === 'plan') {
+            side.appendChild(mapModeBar());
+            if ((state.mapMode || 'plan') === 'furniture') side.appendChild(furnitureCatalog());
+            else side.appendChild(mapToolGrid(mapModeTools()));
+        } else side.appendChild(mapToolGrid(figureTools()));
         side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
         side.appendChild(mapPlanActions());
         side.appendChild(mapExplication());
         side.appendChild(el('h3', null, t('mapLayers')));
         side.appendChild(mapLayerBar(true));
-        side.appendChild(mapGearCard());
         return side;
     }
 
@@ -24408,7 +24454,7 @@
                 startMarquee(svg, floor, event);
             }
         });
-        if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room' || state.mapTool === 'route')) {
+        if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room' || state.mapTool === 'route' || state.mapTool === 'flow')) {
             var anchorDot = svgEl('circle');
             anchorDot.setAttribute('cx', String(state.mapAnchor.x));
             anchorDot.setAttribute('cy', String(state.mapAnchor.y));
@@ -24482,6 +24528,39 @@
                         w: 120,
                         h: 28
                     }))) state.mapSelection = floor.rooms.length - 1;
+                    renderFrame();
+                    return;
+                }
+                if (isFigureKind(state.mapTool) && state.mapTool !== 'flow') {
+                    event.preventDefault();
+                    var dropped = svgPoint(svg, event);
+                    var figureW = state.mapTool === 'chart' ? 180 : (state.mapTool === 'note' ? 140 : 120);
+                    var figureH = state.mapTool === 'chart' ? 110 : (state.mapTool === 'note' ? 88 : 72);
+                    if (pushShape(floor, clampRoom({
+                        kind: state.mapTool,
+                        name: t(state.mapTool === 'chart' ? 'mapChart' : 'mapTextSample'),
+                        color: '#deebff',
+                        angle: 0,
+                        x: snapCoord(dropped.x) - figureW / 2,
+                        y: snapCoord(dropped.y) - figureH / 2,
+                        w: figureW,
+                        h: figureH
+                    }))) state.mapSelection = floor.rooms.length - 1;
+                    renderFrame();
+                    return;
+                }
+                if (state.mapTool === 'flow') {
+                    event.preventDefault();
+                    var flowAt = svgPoint(svg, event);
+                    var flowPoint = snapStart(flowAt.x, flowAt.y);
+                    if (!state.mapAnchor) {
+                        state.mapAnchor = flowPoint;
+                        renderFrame();
+                        return;
+                    }
+                    var flow = applySegment({ kind: 'flow', name: '', color: '#0052cc', h: 2, w: 2 }, state.mapAnchor.x, state.mapAnchor.y, flowPoint.x, flowPoint.y);
+                    state.mapAnchor = null;
+                    if (flow && pushShape(floor, flow)) state.mapSelection = floor.rooms.length - 1;
                     renderFrame();
                     return;
                 }
@@ -24752,7 +24831,8 @@
         if (kindName === 'sofa' || kindName === 'seat' || kindName === 'chair' || kindName === 'bath' || kindName === 'toilet' || kindName === 'bed') {
             rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
         }
-        if (kindName === 'png') rect.setAttribute('fill', 'transparent');
+        if (kindName === 'png' || isFigureKind(kindName)) rect.setAttribute('fill', 'transparent');
+        if (isFigureKind(kindName)) rect.setAttribute('stroke', 'transparent');
         if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
         if (kindName === 'table' && Math.abs(room.w - room.h) <= Math.max(room.w, room.h) * 0.2) {
             rect.setAttribute('fill', 'transparent');
@@ -24894,12 +24974,165 @@
                 });
             });
             if (options.primary && state.mapTool === 'select' && !state.mapStamp) drawRoomHandles(group, rect, room, options);
+        } else if (room.assetId || room.placeId) {
+            group.style.cursor = 'pointer';
+            group.addEventListener('click', function () {
+                if (room.assetId) goToAsset(state.projectKey, room.assetId);
+                else if (room.placeId) chooseBuilding(room.placeId);
+            });
         }
         return group;
     }
 
+    function figureStroke(room) {
+        var selected = state.mapDraft && state.mapDraft.rooms && state.mapDraft.rooms[state.mapSelection] === room;
+        return selected ? '#ffab00' : '#0052cc';
+    }
+
+    function figureFill(room) {
+        return room.color || '#deebff';
+    }
+
+    function mutePointer(node) {
+        node.setAttribute('pointer-events', 'none');
+        return node;
+    }
+
+    function schemeCounts() {
+        var ids = {};
+        var pins = (state.mapDraft && state.mapDraft.pins) || [];
+        pins.forEach(function (pin) { if (pin.assetId) ids[pin.assetId] = true; });
+        ((state.mapDraft && state.mapDraft.rooms) || []).forEach(function (room) {
+            if (room.assetId) ids[room.assetId] = true;
+        });
+        if (!Object.keys(ids).length) {
+            equipmentAssets().forEach(function (asset) {
+                if (assetInBuilding(asset, state.mapPlaceId)) ids[asset.id] = true;
+            });
+        }
+        var counts = {};
+        Object.keys(ids).forEach(function (id) {
+            var asset = byId()[id];
+            if (!asset) return;
+            var key = asset.status || '';
+            counts[key] = (counts[key] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function drawFigure(parent, room) {
+        var kind = room.kind;
+        var fill = figureFill(room);
+        var stroke = figureStroke(room);
+        var node;
+        if (kind === 'ellipse') {
+            node = svgEl('ellipse');
+            node.setAttribute('cx', String(room.w / 2));
+            node.setAttribute('cy', String(room.h / 2));
+            node.setAttribute('rx', String(Math.max(1, room.w / 2 - 1)));
+            node.setAttribute('ry', String(Math.max(1, room.h / 2 - 1)));
+        } else if (kind === 'diamond') {
+            node = svgEl('polygon');
+            node.setAttribute('points', (room.w / 2) + ',2 ' + (room.w - 2) + ',' + (room.h / 2) + ' ' + (room.w / 2) + ',' + (room.h - 2) + ' 2,' + (room.h / 2));
+        } else if (kind === 'triangle') {
+            node = svgEl('polygon');
+            node.setAttribute('points', (room.w / 2) + ',2 ' + (room.w - 2) + ',' + (room.h - 2) + ' 2,' + (room.h - 2));
+        } else if (kind === 'chart') {
+            node = svgEl('rect');
+            node.setAttribute('x', '1');
+            node.setAttribute('y', '1');
+            node.setAttribute('width', String(Math.max(1, room.w - 2)));
+            node.setAttribute('height', String(Math.max(1, room.h - 2)));
+            node.setAttribute('rx', '4');
+        } else {
+            node = svgEl('rect');
+            node.setAttribute('x', '1');
+            node.setAttribute('y', '1');
+            node.setAttribute('width', String(Math.max(1, room.w - 2)));
+            node.setAttribute('height', String(Math.max(1, room.h - 2)));
+            node.setAttribute('rx', kind === 'note' ? '2' : '6');
+        }
+        node.setAttribute('fill', fill);
+        node.setAttribute('stroke', stroke);
+        node.setAttribute('stroke-width', '1.6');
+        parent.appendChild(mutePointer(node));
+        if (kind === 'note') {
+            var fold = svgEl('polygon');
+            fold.setAttribute('points', (room.w - 18) + ',1 ' + (room.w - 1) + ',18 ' + (room.w - 18) + ',18');
+            fold.setAttribute('fill', '#ffffff');
+            fold.setAttribute('stroke', stroke);
+            parent.appendChild(mutePointer(fold));
+        }
+        if (kind === 'chart') {
+            var counts = schemeCounts();
+            var keys = Object.keys(counts);
+            var max = 1;
+            keys.forEach(function (key) { if (counts[key] > max) max = counts[key]; });
+            var slot = Math.max(8, (room.w - 16) / Math.max(keys.length, 1));
+            keys.slice(0, 8).forEach(function (key, index) {
+                var height = Math.max(2, (counts[key] / max) * (room.h - 36));
+                var bar = svgEl('rect');
+                bar.setAttribute('x', String(8 + index * slot));
+                bar.setAttribute('y', String(room.h - 14 - height));
+                bar.setAttribute('width', String(Math.max(4, slot - 4)));
+                bar.setAttribute('height', String(height));
+                bar.setAttribute('fill', statusColor(key));
+                parent.appendChild(mutePointer(bar));
+            });
+        }
+        if (room.name) {
+            var caption = svgEl('text');
+            caption.setAttribute('x', String(room.w / 2));
+            caption.setAttribute('y', String(kind === 'chart' ? 16 : room.h / 2 + 4));
+            caption.setAttribute('text-anchor', 'middle');
+            caption.setAttribute('class', 'asset-tree-room-label');
+            var words = room.name;
+            if (words.length > 22) words = words.substring(0, 21) + '\u2026';
+            caption.textContent = words;
+            parent.appendChild(mutePointer(caption));
+        }
+    }
+
+    function drawFlow(parent, room) {
+        var ends = segmentLocalEnds(room);
+        var x1 = ends[0][0];
+        var y1 = ends[0][1];
+        var x2 = ends[1][0];
+        var y2 = ends[1][1];
+        var color = room.color || '#0052cc';
+        var line = svgEl('line');
+        line.setAttribute('x1', String(x1));
+        line.setAttribute('y1', String(y1));
+        line.setAttribute('x2', String(x2 - 8));
+        line.setAttribute('y2', String(y2));
+        line.setAttribute('stroke', color);
+        line.setAttribute('stroke-width', '2');
+        parent.appendChild(mutePointer(line));
+        var head = svgEl('polygon');
+        head.setAttribute('points', x2 + ',' + y2 + ' ' + (x2 - 12) + ',' + (y2 - 5) + ' ' + (x2 - 12) + ',' + (y2 + 5));
+        head.setAttribute('fill', color);
+        parent.appendChild(mutePointer(head));
+        if (room.name) {
+            var label = svgEl('text');
+            label.setAttribute('x', String((x1 + x2) / 2));
+            label.setAttribute('y', String(y1 - 6));
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('class', 'asset-tree-room-label');
+            label.textContent = room.name;
+            parent.appendChild(mutePointer(label));
+        }
+    }
+
     function decorateRoom(parent, room) {
         var kind = room.kind || 'room';
+        if (kind === 'flow') {
+            drawFlow(parent, room);
+            return;
+        }
+        if (isFigureKind(kind)) {
+            drawFigure(parent, room);
+            return;
+        }
         if (isRouteKind(kind)) return;
         var x = 0;
         var y = 0;
@@ -25514,6 +25747,12 @@
         else if (kind === 'arc') add('M5 17c2-8 12-8 14 0');
         else if (kind === 'dim') add('M4 16h16M4 16v-3M20 16v-3M12 8v8');
         else if (kind === 'text' || kind === 'label') add('M6 6h12M12 6v12');
+        else if (kind === 'box' || kind === 'note') add('M5 6h14v12H5z');
+        else if (kind === 'ellipse') add('M12 6a8 5 0 1 0 0.01 0z');
+        else if (kind === 'diamond') add('M12 4l8 8-8 8-8-8z');
+        else if (kind === 'triangle') add('M12 5l8 14H4z');
+        else if (kind === 'flow') add('M4 12h12M12 8l4 4-4 4');
+        else if (kind === 'chart') add('M6 16V10M12 16V7M18 16v-5');
         else if (kind === 'route') add('M4 16c4-8 12-8 16 0');
         else if (kind === 'outlet' || kind === 'socket' || kind === 'point') add('M12 5a7 7 0 1 0 0.01 0zM9 12h6M12 9v6');
         else if (kind === 'valve') add('M12 5a7 7 0 1 0 0.01 0zM6 12h12');
@@ -25541,7 +25780,22 @@
             renderFrame();
         });
         block.appendChild(name);
-        if (isFurnKind(room.kind)) {
+        if (isFigureKind(room.kind)) {
+            var colors = el('div', 'asset-tree-figure-colors');
+            ['#deebff', '#e3fcef', '#fffae6', '#ffebe6', '#eae6ff', '#ffffff'].forEach(function (color) {
+                var swatch = button('', 'asset-tree-figure-color' + (figureFill(room) === color ? ' is-on' : ''), function () {
+                    rememberMap();
+                    room.color = color;
+                    state.mapDirty = true;
+                    renderFrame();
+                });
+                swatch.style.background = color;
+                swatch.setAttribute('aria-label', color);
+                colors.appendChild(swatch);
+            });
+            block.appendChild(colors);
+        }
+        if (isFurnKind(room.kind) || isFigureKind(room.kind)) {
             block.appendChild(el('span', 'asset-tree-plan-label', t('mapObject')));
             var objectPick = document.createElement('select');
             objectPick.setAttribute('aria-label', t('mapObject'));
@@ -25631,6 +25885,8 @@
         }
         if (isPolygonRoom(room)) {
             block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(roomPoints(room))));
+        }
+        if (isPolygonRoom(room) || isFigureKind(room.kind)) {
             block.appendChild(el('span', 'asset-tree-plan-label', t('mapPlace')));
             var placePick = document.createElement('select');
             placePick.setAttribute('aria-label', t('mapPlace'));

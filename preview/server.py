@@ -1260,6 +1260,7 @@ def plan_kind(kind):
         "room", "wall", "door", "window", "column", "stair", "desk", "partition",
         "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant",
         "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text",
+        "box", "ellipse", "diamond", "triangle", "note", "flow", "chart",
         "power", "scs", "comm", "vent", "water", "heat", "fire", "guard", "png",
     }
     if value in allowed:
@@ -1742,7 +1743,7 @@ def ensure_profile_demo():
         view = STATE.setdefault("views", {}).setdefault(project, {})
         modules = [item for item in (view.get("modules") or []) if item != "portal"]
         modules.append("portal")
-        for extra in ("reports", "life", "service"):
+        for extra in ("reports", "life", "service", "map"):
             if extra not in modules:
                 modules.append(extra)
         view["modules"] = modules

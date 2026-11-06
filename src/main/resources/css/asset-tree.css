@@ -10762,6 +10762,61 @@ a.asset-tree-preview-icon:focus {
     border-right: 1px solid #dfe1e6;
 }
 
+#asset-tree-app .asset-tree-stencil-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-stencil-tab {
+    display: inline-flex !important;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    width: auto !important;
+    min-height: 28px;
+    margin: 0;
+    padding: 4px 6px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #f4f5f7 !important;
+    color: #42526e !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+}
+
+#asset-tree-app .asset-tree-catalog button.asset-tree-stencil-tab.is-on {
+    background: #deebff !important;
+    border-color: #0052cc !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-catalog .asset-tree-plan-modes {
+    flex-wrap: wrap;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-figure-colors {
+    display: flex;
+    gap: 4px;
+    margin: 6px 0;
+}
+
+#asset-tree-app .asset-tree-plan-inspector button.asset-tree-figure-color {
+    width: 22px !important;
+    min-width: 22px !important;
+    height: 22px !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-plan-inspector button.asset-tree-figure-color.is-on {
+    outline: 2px solid #0052cc;
+}
+
 #asset-tree-app .asset-tree-catalog h3 {
     margin: 8px 0 4px;
     color: #172b4d;
