@@ -8307,18 +8307,21 @@
     }
 
     function linkRow(asset, link) {
-        var block = el('div', 'asset-tree-peer' + (link.open ? '' : ' is-locked'));
-        var line = el('div', 'asset-tree-peer-line');
+        var block = el('div', 'asset-tree-link' + (link.open ? '' : ' is-locked'));
+        var line = el('div', 'asset-tree-link-line');
         line.appendChild(el('span', 'asset-tree-link-type', linkPhrase(link)));
-        var caption = (link.name || link.objectKey || '') + (link.objectKey ? ' · ' + link.objectKey : '');
+        var main = el('div', 'asset-tree-link-main');
+        var caption = link.name || link.objectKey || '';
         var otherId = linkOtherId(link);
         if (link.open && otherId) {
-            line.appendChild(button(caption, 'asset-tree-linkish', function () {
+            main.appendChild(button(caption, 'asset-tree-linkish', function () {
                 goToAsset(link.projectKey, otherId);
             }));
         } else {
-            line.appendChild(el('span', 'asset-tree-peer-name', caption));
+            main.appendChild(el('span', 'asset-tree-link-name', caption));
         }
+        if (link.objectKey) main.appendChild(el('span', 'asset-tree-link-key', link.objectKey));
+        line.appendChild(main);
         if (mayEdit(asset)) {
             var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
                 if (event && event.stopPropagation) event.stopPropagation();
@@ -8333,7 +8336,7 @@
         block.appendChild(line);
         var attrs = link.attributes || [];
         if (attrs.length) {
-            var meta = el('p', 'asset-tree-hint');
+            var meta = el('p', 'asset-tree-link-meta');
             meta.textContent = attrs.map(function (item) {
                 return (item.key || '') + ': ' + (item.value || '');
             }).join(' · ');
@@ -8369,6 +8372,15 @@
         inbound.type = 'text';
         inbound.placeholder = t('linkInbound');
         inbound.title = t('linkInboundHint');
+        var extra = el('div', 'asset-tree-link-extra');
+        extra.hidden = true;
+        extra.appendChild(attrKey);
+        extra.appendChild(attrValue);
+        extra.appendChild(inbound);
+        var more = button(t('linkMore'), 'asset-tree-linkish asset-tree-link-more', function () {
+            extra.hidden = !extra.hidden;
+            more.textContent = extra.hidden ? t('linkMore') : t('linkLess');
+        });
         var search = el('input');
         search.type = 'search';
         search.placeholder = t('peerSearch');
@@ -8418,106 +8430,27 @@
         });
         box.appendChild(type);
         box.appendChild(custom);
-        box.appendChild(attrKey);
-        box.appendChild(attrValue);
-        box.appendChild(inbound);
         box.appendChild(search);
         box.appendChild(results);
+        box.appendChild(more);
+        box.appendChild(extra);
         return box;
     }
 
     function linkBlock(asset) {
         var body = el('div');
         body.appendChild(el('p', 'asset-tree-hint', t('linksHint')));
-        if (mayEdit(asset)) body.appendChild(linkForm(asset));
         if (asset.links == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
-        } else if (!asset.links.length) {
+        } else if (!asset.links.length && !mayEdit(asset)) {
             body.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         } else {
-            var graph = linkGraph(asset);
-            if (graph) body.appendChild(graph);
             asset.links.forEach(function (link) {
                 body.appendChild(linkRow(asset, link));
             });
         }
+        if (mayEdit(asset)) body.appendChild(linkForm(asset));
         return moduleBlock(t('links'), body);
-    }
-
-    function linkGraph(asset) {
-        var links = asset.links || [];
-        if (!links.length) return null;
-        var box = el('div', 'asset-tree-link-graph');
-        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        var count = links.length;
-        var width = 230;
-        var row = 36;
-        var height = 8 + count * row;
-        svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-        svg.setAttribute('class', 'asset-tree-link-svg');
-        svg.setAttribute('role', 'img');
-        svg.setAttribute('aria-label', t('linkGraph'));
-        var hx = 86;
-        var hy = height / 2;
-        var selfName = asset.name || asset.objectKey || '';
-        if (selfName.length > 12) selfName = selfName.substring(0, 11) + '\u2026';
-        for (var i = 0; i < count; i++) {
-            var y = 8 + row / 2 + i * row;
-            var edge = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            edge.setAttribute('x1', String(hx + 8));
-            edge.setAttribute('y1', String(hy));
-            edge.setAttribute('x2', '128');
-            edge.setAttribute('y2', String(y));
-            edge.setAttribute('class', 'asset-tree-link-edge');
-            svg.appendChild(edge);
-            var phrase = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            phrase.setAttribute('x', '108');
-            phrase.setAttribute('y', String(y - 7));
-            phrase.setAttribute('class', 'asset-tree-link-edge-label');
-            phrase.textContent = linkPhrase(links[i]);
-            svg.appendChild(phrase);
-            var node = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('cx', '136');
-            circle.setAttribute('cy', String(y));
-            circle.setAttribute('r', '5');
-            circle.setAttribute('class', 'asset-tree-link-node');
-            node.appendChild(circle);
-            var name = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            name.setAttribute('x', '148');
-            name.setAttribute('y', String(y + 4));
-            name.setAttribute('class', 'asset-tree-link-node-label');
-            var caption = links[i].name || links[i].objectKey || '';
-            if (caption.length > 14) caption = caption.substring(0, 13) + '\u2026';
-            name.textContent = caption;
-            node.appendChild(name);
-            var otherId = linkOtherId(links[i]);
-            if (links[i].open && otherId) {
-                node.style.cursor = 'pointer';
-                (function (projectKey, id) {
-                    node.addEventListener('click', function () {
-                        goToAsset(projectKey, id);
-                    });
-                })(links[i].projectKey, otherId);
-            }
-            svg.appendChild(node);
-        }
-        var hub = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        var hubCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        hubCircle.setAttribute('cx', String(hx));
-        hubCircle.setAttribute('cy', String(hy));
-        hubCircle.setAttribute('r', '6');
-        hubCircle.setAttribute('class', 'asset-tree-link-hub');
-        hub.appendChild(hubCircle);
-        var hubText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        hubText.setAttribute('x', '4');
-        hubText.setAttribute('y', String(hy + 4));
-        hubText.setAttribute('class', 'asset-tree-link-hub-label');
-        hubText.textContent = selfName;
-        hub.appendChild(hubText);
-        svg.appendChild(hub);
-        box.appendChild(svg);
-        return box;
     }
 
     function issueRow(assetId, issue) {
