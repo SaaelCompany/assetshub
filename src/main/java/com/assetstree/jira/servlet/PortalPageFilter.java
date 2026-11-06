@@ -53,6 +53,13 @@ public class PortalPageFilter implements Filter {
         }
         HttpServletRequest http = (HttpServletRequest) request;
         String uri = http.getRequestURI() == null ? "" : http.getRequestURI();
+        if (uri.indexOf("/servicedesk/customer/") >= 0
+                && "POST".equalsIgnoreCase(http.getMethod())
+                && uri.contains("/create")) {
+            TniIntake.keep(http);
+            chain.doFilter(request, response);
+            return;
+        }
         if (!"GET".equalsIgnoreCase(http.getMethod()) || uri.indexOf("/servicedesk/customer/") < 0) {
             chain.doFilter(request, response);
             return;
@@ -107,7 +114,7 @@ public class PortalPageFilter implements Filter {
         boolean profile = uriContainsProfile(request);
         boolean portal = profile || portalModuleOn(projectKey);
         String path = request.getRequestURI() == null ? "" : request.getRequestURI();
-        boolean tni = path.contains("/create") && tniModuleOn(projectKey);
+        boolean tni = path.contains("/create") && (projectKey.isEmpty() || tniModuleOn(projectKey));
         if (!portal && !tni) {
             return new byte[0];
         }
@@ -132,7 +139,7 @@ public class PortalPageFilter implements Filter {
         } catch (RuntimeException ex) {
             log.debug("TNI project was not resolved", ex);
         }
-        if (!tniModuleOn(projectKey)) {
+        if (!projectKey.isEmpty() && !tniModuleOn(projectKey)) {
             return new byte[0];
         }
         String base = request.getContextPath() == null ? "" : request.getContextPath();

@@ -1,8 +1,30 @@
 (function () {
     'use strict';
     if (window.__assetTreeTniBoot) return;
+
+    function createPage() {
+        var path = window.location.pathname || '';
+        if (/\/create(\/|$)/.test(path)) return true;
+        return !!document.querySelector('form[action*="/create"]');
+    }
+    if (!createPage()) {
+        var tries = 0;
+        var timer = setInterval(function () {
+            tries += 1;
+            if (createPage()) {
+                clearInterval(timer);
+                boot();
+            } else if (tries > 20) {
+                clearInterval(timer);
+            }
+        }, 500);
+        return;
+    }
+    boot();
+
+    function boot() {
+    if (window.__assetTreeTniBoot) return;
     window.__assetTreeTniBoot = true;
-    if (!/\/create(\/|$)/.test(window.location.pathname || '')) return;
 
     function contextPath() {
         var boot = document.getElementById('asset-tree-portal-boot');
@@ -29,6 +51,57 @@
     var report = null;
     var sentAt = 0;
     var closed = false;
+    armTransport();
+
+    function reportPayload() {
+        if (!report) return '';
+        try {
+            var payload = encodeURIComponent(JSON.stringify(report));
+            return payload.length > 3500 ? '' : payload;
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function armTransport() {
+        if (window.__assetTreeTniArmed) return;
+        window.__assetTreeTniArmed = true;
+        var proto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+        if (proto && proto.send && !proto.__assetTreeTniSend) {
+            var send = proto.send;
+            proto.send = function () {
+                try {
+                    var payload = reportPayload();
+                    if (payload) this.setRequestHeader('X-Asset-Tree-Tni', payload);
+                } catch (error) {
+                    /* The request is already open without this header. */
+                }
+                return send.apply(this, arguments);
+            };
+            proto.__assetTreeTniSend = true;
+        }
+        if (typeof window.fetch === 'function' && !window.fetch.__assetTreeTni) {
+            var nativeFetch = window.fetch;
+            var wrapped = function (input, init) {
+                var payload = reportPayload();
+                if (payload && window.Headers) {
+                    init = init ? init : {};
+                    var headers = new window.Headers(init.headers || (input && input.headers) || undefined);
+                    headers.set('X-Asset-Tree-Tni', payload);
+                    init = init;
+                    var next = {};
+                    for (var key in init) {
+                        if (Object.prototype.hasOwnProperty.call(init, key)) next[key] = init[key];
+                    }
+                    next.headers = headers;
+                    init = next;
+                }
+                return nativeFetch.call(this, input, init);
+            };
+            wrapped.__assetTreeTni = true;
+            window.fetch = wrapped;
+        }
+    }
 
     function screenSize() {
         var screen = window.screen || {};
@@ -123,14 +196,14 @@
         }
     }
 
-    function publish(force) {
+    function publish(force, sync) {
         if (!report || (!report.portalId && !report.projectKey)) return;
         var now = Date.now ? Date.now() : new Date().getTime();
         if (!force && sentAt && now - sentAt < 2000) return;
         sentAt = now;
         try {
             var xhr = new XMLHttpRequest();
-            xhr.open('POST', contextPath() + '/rest/asset-tree/1.0/tni/sight', true);
+            xhr.open('POST', contextPath() + '/rest/asset-tree/1.0/tni/sight', !sync);
             xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.setRequestHeader('Accept', 'application/json');
             xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
@@ -144,7 +217,21 @@
         var hadAddress = report && report.addresses && report.addresses.length;
         report = baseReport(addresses, battery);
         report.gpu = gpuName();
+        rememberLocal();
         publish(!hadAddress && report.addresses.length > 0);
+    }
+
+    function rememberLocal() {
+        if (!report) return;
+        try {
+            var payload = reportPayload();
+            if (!payload) return;
+            var path = contextPath() || '/';
+            if (path.charAt(path.length - 1) !== '/') path += '/';
+            document.cookie = 'asset-tree-tni=' + payload + '; path=' + path + '; max-age=600; SameSite=Lax';
+        } catch (error) {
+            /* The create request still carries a cookie written on an earlier pass. */
+        }
     }
 
     var addresses = null;
@@ -168,6 +255,14 @@
     }, 1800);
 
     document.addEventListener('submit', function () {
-        publish(true);
+        rememberLocal();
+        publish(true, true);
     }, true);
+    document.addEventListener('click', function (event) {
+        var node = event.target;
+        if (!node || !node.closest) return;
+        if (!node.closest('button, input[type="submit"], .aui-button')) return;
+        rememberLocal();
+    }, true);
+    }
 })();

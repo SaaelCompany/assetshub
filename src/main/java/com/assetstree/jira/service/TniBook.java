@@ -72,7 +72,8 @@ public final class TniBook {
         });
     }
 
-    public void attach(ActiveObjects ao, TniHost host, String projectKey, String userKey, long issueId, String issueKey, long now) {
+    public void attach(ActiveObjects ao, TniHost host, String projectKey, String userKey, long issueId, String issueKey,
+                       Integer parentId, long now) {
         if (ao == null || host == null || blank(projectKey) || blank(userKey) || issueId <= 0) {
             return;
         }
@@ -83,10 +84,11 @@ public final class TniBook {
         if (prepared == null) {
             return;
         }
+        final Integer placeId = parentId;
         final Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
             @Override
             public Outcome doInTransaction() {
-                return writeAsset(ao, host, prepared, projectKey, userKey, issueId, issueKey, now);
+                return writeAsset(ao, host, prepared, projectKey, userKey, issueId, issueKey, placeId, now);
             }
         });
         if (outcome != null) {
@@ -292,7 +294,7 @@ public final class TniBook {
     }
 
     private Outcome writeAsset(ActiveObjects ao, TniHost host, Prepared prepared, String projectKey, String userKey,
-                               long issueId, String issueKey, long now) {
+                               long issueId, String issueKey, Integer parentId, long now) {
         TniDeviceEntity row = ao.get(TniDeviceEntity.class, prepared.rowId);
         if (row == null) {
             return null;
@@ -309,6 +311,7 @@ public final class TniBook {
         String person = host.personName(userKey);
         String name = TniText.name(kindLabel, person, facts.address);
         String description = TniText.describe(facts, host.text("asset-tree.ui.tniIntro"),
+                host.text("asset-tree.ui.tniSeen"), host.text("asset-tree.ui.tniHost"),
                 host.text("asset-tree.ui.tniAddress"), host.text("asset-tree.ui.tniSystem"),
                 host.text("asset-tree.ui.tniBrowser"), host.text("asset-tree.ui.tniScreen"),
                 host.text("asset-tree.ui.tniCores"), host.text("asset-tree.ui.tniMemory"),
@@ -318,6 +321,7 @@ public final class TniBook {
             asset = findExternal(ao, projectKey, row.getIdentity());
         }
         boolean created = asset == null;
+        Integer place = placeParent(ao, projectKey, parentId);
         if (created) {
             String objectKey;
             try {
@@ -342,6 +346,9 @@ public final class TniBook {
             asset.setCustodianKey(clip(userKey, 255));
             asset.setIssuedKey(clip(userKey, 255));
             asset.setExternalKey(external(row.getIdentity()));
+            if (place != null) {
+                asset.setParentId(place);
+            }
             asset.save();
         } else {
             if (TniText.owned(asset.getDescription())) {
@@ -361,6 +368,9 @@ public final class TniBook {
             }
             if (TniPolicy.TRASH.equals(asset.getStatus()) || row.getRetired() == 1) {
                 asset.setStatus(Statuses.IN_USE);
+            }
+            if (place != null && (asset.getParentId() == null || asset.getParentId().intValue() <= 0)) {
+                asset.setParentId(place);
             }
             asset.setUpdated(new Date(now));
             asset.setUpdatedBy(clip(userKey, 255));
@@ -425,6 +435,21 @@ public final class TniBook {
                 return prepared;
             }
         });
+    }
+
+    private Integer placeParent(ActiveObjects ao, String projectKey, Integer parentId) {
+        if (parentId == null || parentId.intValue() <= 0) {
+            return null;
+        }
+        AssetEntity parent = ao.get(AssetEntity.class, parentId.intValue());
+        if (parent == null || !ProjectKeys.same(parent.getProjectKey(), projectKey)) {
+            return null;
+        }
+        AssetTypeEntity[] types = ao.find(AssetTypeEntity.class, Query.select().where("TYPE_KEY = ?", parent.getTypeKey()));
+        if (types == null || types.length == 0 || types[0] == null || !types[0].isLocation()) {
+            return null;
+        }
+        return Integer.valueOf(parent.getID());
     }
 
     private AssetEntity findExternal(ActiveObjects ao, String projectKey, String identity) {

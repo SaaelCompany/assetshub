@@ -26,9 +26,9 @@ public final class TniText {
         return text.isEmpty() || text.startsWith("TNI");
     }
 
-    public static String describe(TniFacts facts, String intro, String addressLabel, String systemLabel,
-                                  String browserLabel, String screenLabel, String coresLabel, String memoryLabel,
-                                  String gpuLabel, String requestLabel, String issueKey) {
+    public static String describe(TniFacts facts, String intro, String seenLabel, String hostLabel, String addressLabel,
+                                  String systemLabel, String browserLabel, String screenLabel, String coresLabel,
+                                  String memoryLabel, String gpuLabel, String requestLabel, String issueKey) {
         TniFacts source = facts == null ? TniFacts.from(null) : facts;
         StringBuilder body = new StringBuilder();
         String head = clean(intro);
@@ -39,7 +39,11 @@ public final class TniText {
             head = "TNI. " + head;
         }
         body.append(head);
-        line(body, addressLabel, source.address);
+        line(body, seenLabel, source.seen);
+        line(body, hostLabel, source.host);
+        if (!clean(source.address).equals(clean(source.seen))) {
+            line(body, addressLabel, source.address);
+        }
         line(body, systemLabel, source.os);
         line(body, browserLabel, source.browser);
         line(body, screenLabel, source.screen);

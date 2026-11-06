@@ -9,6 +9,8 @@ import java.util.Locale;
 public final class TniFacts {
     public final String kind;
     public final String address;
+    public final String seen;
+    public final String host;
     public final String os;
     public final String browser;
     public final String screen;
@@ -16,10 +18,12 @@ public final class TniFacts {
     public final String memory;
     public final String gpu;
 
-    private TniFacts(String kind, String address, String os, String browser, String screen,
+    private TniFacts(String kind, String address, String seen, String host, String os, String browser, String screen,
                      String cores, String memory, String gpu) {
         this.kind = kind;
         this.address = address;
+        this.seen = seen;
+        this.host = host;
         this.os = os;
         this.browser = browser;
         this.screen = screen;
@@ -33,9 +37,14 @@ public final class TniFacts {
         String agent = clip(source.getUa(), 400);
         String platform = clip(source.getPlatform(), 80);
         String screen = screen(source.getScreen());
+        String seen = TniPeer.address(source.getSeen());
+        String browserAddress = TniAddress.choose(source.getAddresses());
+        String address = !browserAddress.isEmpty() ? browserAddress : (TniAddress.isPrivate(seen) ? seen : "");
         return new TniFacts(
                 kind(agent, platform, source.getTouch(), source.getBattery(), screen),
-                TniAddress.choose(source.getAddresses()),
+                address,
+                seen,
+                TniName.clean(source.getHost()),
                 operatingSystem(agent, platform),
                 browser(agent),
                 screen,
@@ -53,6 +62,8 @@ public final class TniFacts {
         String gpu = "";
         String kind = TniPolicy.COMPUTER;
         String address = "";
+        String seen = "";
+        String host = "";
         if (stored != null) {
             String[] lines = stored.split("\n");
             for (String line : lines) {
@@ -78,16 +89,22 @@ public final class TniFacts {
                     kind = knownKind(value);
                 } else if ("address".equals(key)) {
                     address = TniAddress.allowed(value) ? value : "";
+                } else if ("seen".equals(key)) {
+                    seen = TniPeer.address(value);
+                } else if ("host".equals(key)) {
+                    host = TniName.clean(value);
                 }
             }
         }
-        return new TniFacts(kind, address, os, browser, screen, cores, memory, gpu);
+        return new TniFacts(kind, address, seen, host, os, browser, screen, cores, memory, gpu);
     }
 
     public String summary() {
         StringBuilder body = new StringBuilder();
         pair(body, "kind", kind);
         pair(body, "address", address);
+        pair(body, "seen", seen);
+        pair(body, "host", host);
         pair(body, "os", os);
         pair(body, "browser", browser);
         pair(body, "screen", screen);

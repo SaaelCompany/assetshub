@@ -30,6 +30,14 @@ public final class PortalRules {
             this.text = text;
             this.value = value;
         }
+
+        public String getText() {
+            return text;
+        }
+
+        public String getValue() {
+            return value;
+        }
     }
 
     public static PortalRuleDto choose(List<PortalRuleDto> rules, List<Answer> answers, Map<Integer, Integer> parents) {

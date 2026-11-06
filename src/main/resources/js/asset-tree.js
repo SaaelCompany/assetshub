@@ -1611,8 +1611,10 @@
     }
 
     function objectInTree(asset) {
-        if (!treeObjectsOn() || isFolder(asset)) return false;
-        var parent = asset.parentId ? byId()[asset.parentId] : null;
+        if (!asset || isFolder(asset)) return false;
+        if (!asset.parentId) return true;
+        if (!treeObjectsOn()) return false;
+        var parent = byId()[asset.parentId];
         return !!(parent && isFolder(parent));
     }
 
@@ -2838,6 +2840,13 @@
             }
             container.appendChild(branch);
         });
+        if (parentId == null) {
+            childrenOf(null).forEach(function (asset) {
+                if (isFolder(asset)) return;
+                if (visible && !visible[asset.id]) return;
+                container.appendChild(objectTreeRow(asset));
+            });
+        }
         if (parentId && byId()[parentId] && isFolder(byId()[parentId])) {
             hierarchySorted(typeGroupsFor(parentId), 'type').forEach(function (type) {
                 container.appendChild(typeGroupRow(parentId, type));

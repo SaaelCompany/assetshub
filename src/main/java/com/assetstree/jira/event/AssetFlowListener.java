@@ -35,9 +35,14 @@ public class AssetFlowListener extends AbstractIssueEventListener {
         }
     }
 
+    /**
+     * Jira delivers every issue event here. The base method then calls
+     * issueCreated or issueUpdated. Without that dispatch a new portal
+     * request never reaches TNI.
+     */
     @Override
     public void workflowEvent(IssueEvent event) {
-        onStatus(event);
+        super.workflowEvent(event);
     }
 
     @Override
