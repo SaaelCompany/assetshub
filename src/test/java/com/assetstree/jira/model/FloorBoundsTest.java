@@ -1,0 +1,18 @@
+package com.assetstree.jira.model;
+
+import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
+
+public class FloorBoundsTest {
+    @Test
+    public void diagramShapesStayOnThePlan() {
+        assertEquals("box", FloorBounds.kind("box"));
+        assertEquals("ellipse", FloorBounds.kind("Ellipse"));
+        assertEquals("flow", FloorBounds.kind("flow"));
+        assertEquals("chart", FloorBounds.kind("chart"));
+        assertEquals("room", FloorBounds.kind("waffle"));
+        assertEquals(8, FloorBounds.minSize("diamond"));
+        assertEquals(4, FloorBounds.minSize("flow"));
+    }
+}
