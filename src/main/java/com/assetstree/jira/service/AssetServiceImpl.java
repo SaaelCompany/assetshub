@@ -17,7 +17,9 @@ import com.atlassian.event.api.EventPublisher;
 import com.atlassian.jira.event.issue.IssueEvent;
 import com.atlassian.jira.event.type.EventType;
 import com.atlassian.jira.issue.CustomFieldManager;
+import com.atlassian.jira.bc.issue.IssueService;
 import com.atlassian.jira.issue.Issue;
+import com.atlassian.jira.issue.IssueInputParameters;
 import com.atlassian.jira.issue.IssueManager;
 import com.atlassian.jira.issue.customfields.option.Option;
 import com.atlassian.jira.issue.fields.CustomField;
@@ -93,6 +95,8 @@ import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ModuleSetupDto;
 import com.assetstree.jira.dto.PortalCardDto;
+import com.assetstree.jira.dto.PortalRequestCreatedDto;
+import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.model.ProjectModules;
@@ -217,7 +221,10 @@ import com.assetstree.jira.model.TniPeer;
 import com.assetstree.jira.model.TniPlace;
 import com.assetstree.jira.model.TniPolicy;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.PortalRequestDraft;
+import com.assetstree.jira.web.PortalDesk;
 import com.assetstree.jira.web.PortalLookup;
+import com.assetstree.jira.web.PortalRequestForm;
 import com.assetstree.jira.model.StatusSummary;
 import com.assetstree.jira.model.TreeLogic;
 import com.assetstree.jira.model.TypeDraft;
@@ -1070,6 +1077,175 @@ public class AssetServiceImpl implements AssetService {
         dto.setFiles(fileDtos(id, false));
         dto.setViewerKey(user.getKey());
         return dto;
+    }
+
+    @Override
+    public PortalRequestFormDto portalRequestForm(ApplicationUser user, int assetId) {
+        AssetEntity asset = requirePortalAsset(user, assetId);
+        Project project = requirePortalProject(asset);
+        return toRequestForm(asset, PortalDesk.form(user, project));
+    }
+
+    @Override
+    public PortalRequestCreatedDto createPortalRequest(ApplicationUser user, int assetId, PortalRequestDraft draft) {
+        AssetEntity asset = requirePortalAsset(user, assetId);
+        Project project = requirePortalProject(asset);
+        PortalRequestForm form = PortalDesk.form(user, project);
+        String typeId = draft == null ? "" : draft.getRequestTypeId();
+        PortalRequestForm.Outcome outcome = PortalRequestForm.compose(form, typeId, requestValues(draft), String.valueOf(assetId));
+        if (outcome.getFailureKey() != null) {
+            throw requestFailure(outcome.getFailureKey(), outcome.getFailureArg());
+        }
+        PortalDesk.Created created = PortalDesk.create(user, project, outcome.getTypeId(), outcome.getValues());
+        if (created.getFailureKey() != null) {
+            throw requestFailure(created.getFailureKey(), created.getFailureArg());
+        }
+        if (created.getIssue() != null) {
+            attachPortalIssue(user, created.getIssue(), assetId);
+            writeAssetField(user, created.getIssue(), assetId);
+        }
+        PortalRequestCreatedDto dto = new PortalRequestCreatedDto();
+        dto.setKey(created.getKey());
+        dto.setUrl(created.getUrl());
+        dto.setAssetName(asset.getName() == null ? "" : asset.getName());
+        dto.setObjectKey(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+        return dto;
+    }
+
+    private Project requirePortalProject(AssetEntity asset) {
+        Project project = project(asset.getProjectKey());
+        if (project == null) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        return project;
+    }
+
+    private PortalRequestFormDto toRequestForm(AssetEntity asset, PortalRequestForm form) {
+        if (form.getFailureKey() != null) {
+            throw requestFailure(form.getFailureKey(), form.getFailureArg());
+        }
+        PortalRequestFormDto dto = new PortalRequestFormDto();
+        dto.setAssetId(asset.getID());
+        dto.setAssetName(asset.getName() == null ? "" : asset.getName());
+        dto.setObjectKey(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+        dto.setProjectKey(asset.getProjectKey() == null ? "" : asset.getProjectKey());
+        List<PortalRequestFormDto.Type> types = new ArrayList<PortalRequestFormDto.Type>();
+        for (PortalRequestForm.Type source : form.getTypes()) {
+            PortalRequestFormDto.Type type = new PortalRequestFormDto.Type();
+            type.setId(source.getId());
+            type.setName(source.getName());
+            type.setDescription(source.getDescription());
+            List<PortalRequestFormDto.Field> fields = new ArrayList<PortalRequestFormDto.Field>();
+            for (PortalRequestForm.Field field : source.getFields()) {
+                PortalRequestFormDto.Field copy = new PortalRequestFormDto.Field();
+                copy.setId(field.getId());
+                copy.setName(field.getName());
+                copy.setRequired(field.isRequired());
+                copy.setKind(field.getKind());
+                List<PortalRequestFormDto.Option> options = new ArrayList<PortalRequestFormDto.Option>();
+                for (PortalRequestForm.Option option : field.getOptions()) {
+                    PortalRequestFormDto.Option item = new PortalRequestFormDto.Option();
+                    item.setValue(option.getValue());
+                    item.setLabel(option.getLabel());
+                    options.add(item);
+                }
+                copy.setOptions(options);
+                fields.add(copy);
+            }
+            type.setFields(fields);
+            types.add(type);
+        }
+        dto.setTypes(types);
+        return dto;
+    }
+
+    private Map<String, String> requestValues(PortalRequestDraft draft) {
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        if (draft == null || draft.getValues() == null) {
+            return values;
+        }
+        int kept = 0;
+        for (PortalRequestDraft.Value row : draft.getValues()) {
+            if (row == null || row.getId() == null || row.getId().trim().isEmpty() || kept >= 40) {
+                continue;
+            }
+            values.put(row.getId().trim(), row.getValue() == null ? "" : row.getValue());
+            kept++;
+        }
+        return values;
+    }
+
+    private AssetException requestFailure(String key, String arg) {
+        if (arg == null || arg.isEmpty()) {
+            return new AssetException(400, key);
+        }
+        return new AssetException(400, key, arg);
+    }
+
+    private void attachPortalIssue(ApplicationUser user, Issue issue, final int assetId) {
+        if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
+            return;
+        }
+        final long issueId = issue.getId().longValue();
+        final String projectKey = issue.getProjectObject().getKey();
+        try {
+            Boolean created = ao().executeInTransaction(new TransactionCallback<Boolean>() {
+                @Override
+                public Boolean doInTransaction() {
+                    AssetEntity asset = requireAsset(assetId);
+                    if (!ProjectKeys.same(asset.getProjectKey(), projectKey)) {
+                        throw new AssetException(400, "asset-tree.error.project.mismatch");
+                    }
+                    AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
+                            Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, issueId));
+                    if (existing != null && existing.length > 0) {
+                        return Boolean.FALSE;
+                    }
+                    ao().create(AssetIssueLinkEntity.class,
+                            new DBParam("ASSET_ID", assetId),
+                            new DBParam("ISSUE_ID", issueId),
+                            new DBParam("STATUS_BEFORE", Statuses.canonical(asset.getStatus())));
+                    return Boolean.TRUE;
+                }
+            });
+            if (Boolean.TRUE.equals(created)) {
+                applyRequestFlow(user, assetId, issue);
+            }
+        } catch (AssetException ex) {
+            if (ex.getStatus() != 409) {
+                log.warn("Could not attach asset {} to {}", assetId, issue.getKey());
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Could not attach asset {} to {}", assetId, issue.getKey(), ex);
+        }
+    }
+
+    private void writeAssetField(ApplicationUser user, Issue issue, int assetId) {
+        if (issue == null || issue.getId() == null) {
+            return;
+        }
+        List<String> ids = PortalLookup.assetFieldIds();
+        if (ids.isEmpty()) {
+            return;
+        }
+        try {
+            IssueService issueService = ComponentAccessor.getComponent(IssueService.class);
+            if (issueService == null) {
+                return;
+            }
+            IssueInputParameters params = issueService.newIssueInputParameters();
+            params.setSkipScreenCheck(true);
+            String value = String.valueOf(assetId);
+            for (String id : ids) {
+                params.addCustomFieldValue(id, value);
+            }
+            IssueService.UpdateValidationResult result = issueService.validateUpdate(user, issue.getId(), params);
+            if (result != null && result.isValid()) {
+                issueService.update(user, result);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Could not write the asset field on {}", issue.getKey(), ex);
+        }
     }
 
     private AssetEntity requirePortalAsset(ApplicationUser user, int assetId) {

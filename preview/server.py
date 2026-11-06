@@ -1748,7 +1748,7 @@ def ensure_profile_demo():
                 modules.append(extra)
         view["modules"] = modules
         setup = view.setdefault("setup", {})
-        setup["portalMine"] = False
+        setup["portalMine"] = True
     if "stp-laptop" not in STATE["types"]:
         STATE["types"]["stp-laptop"] = {
             "typeKey": "stp-laptop", "projectKey": "STP", "baseKey": "laptop", "label": "Ноутбук",
@@ -1818,6 +1818,18 @@ def ensure_profile_demo():
         lives[laptop["id"]] = {"purchased": "2022-03-01", "warrantyUntil": "2026-03-01", "priceMinor": 12000000, "residualMinor": 0, "lifeMonths": 36}
     if thin_id and thin_id not in lives:
         lives[thin_id] = {"purchased": "2024-01-15", "warrantyUntil": "2027-01-15", "priceMinor": 18000000, "residualMinor": 0, "lifeMonths": 36}
+    parent_id = labinsk["id"] if labinsk else (laptop.get("parentId") if laptop else None)
+    for name, type_key, custodian, issued, values in (
+        ("HP ProBook", "stp-laptop", "ivanov", None, {"model": "ProBook 450", "serial": "HP-450"}),
+        ("Монитор Samsung", "stp-pc", "ivanov", None, {}),
+        ("iPhone Иванова", "stp-phone", None, "ivanov", {}),
+        ("Планшет Lenovo", "stp-tablet", "ivanov", None, {}),
+    ):
+        if any(asset.get("name") == name and asset.get("projectKey") == "STP" for asset in STATE["assets"].values()):
+            continue
+        extra_id = add_asset("STP", type_key, name, parent_id, "in_use", custodian, values)
+        if issued:
+            STATE["assets"][extra_id]["issuedKey"] = issued
     if laptop and thin_id and not any(row.get("fromId") == laptop["id"] and row.get("toId") == thin_id for row in relation_rows()):
         row_id = STATE.get("relation_seq") or 1
         STATE["relation_seq"] = row_id + 1
@@ -2003,6 +2015,101 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
         "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
         "lines": summary["lines"],
+    }
+
+
+def portal_request_types():
+    return [
+        {
+            "id": "1",
+            "name": "Сообщить о проблеме",
+            "description": "Что случилось с этим оборудованием",
+            "fields": [
+                {"id": "summary", "name": "Тема", "required": True, "kind": "text", "options": []},
+                {"id": "description", "name": "Описание", "required": True, "kind": "textarea", "options": []},
+            ],
+        },
+        {
+            "id": "2",
+            "name": "Запрос на обслуживание",
+            "description": "Плановая работа или настройка",
+            "fields": [
+                {"id": "summary", "name": "Тема", "required": True, "kind": "text", "options": []},
+                {"id": "description", "name": "Описание", "required": False, "kind": "textarea", "options": []},
+                {"id": "urgency", "name": "Срочность", "required": True, "kind": "select", "options": [
+                    {"value": "low", "label": "Низкая"},
+                    {"value": "normal", "label": "Обычная"},
+                    {"value": "high", "label": "Высокая"},
+                ]},
+            ],
+        },
+    ]
+
+
+def portal_request_form(asset_id, text):
+    detail = portal_detail(asset_id, text)
+    if not detail:
+        return 403, {"message": text["asset-tree.error.forbidden"]}
+    asset = STATE["assets"][asset_id]
+    return 200, {
+        "assetId": asset_id,
+        "assetName": detail["name"],
+        "objectKey": detail["objectKey"],
+        "projectKey": asset["projectKey"],
+        "types": portal_request_types(),
+    }
+
+
+def portal_request_create(asset_id, body, text):
+    detail = portal_detail(asset_id, text)
+    if not detail:
+        return 403, {"message": text["asset-tree.error.forbidden"]}
+    asset = STATE["assets"][asset_id]
+    types = {item["id"]: item for item in portal_request_types()}
+    type_id = str((body or {}).get("requestTypeId") or "")
+    chosen = types.get(type_id)
+    if not chosen:
+        return 400, {"message": text.get("asset-tree.error.portalRequest.type", "Choose a request type.")}
+    incoming = {}
+    for row in (body.get("values") or []):
+        if isinstance(row, dict) and row.get("id"):
+            incoming[str(row["id"])] = str(row.get("value") or "").strip()
+    for field in chosen["fields"]:
+        value = incoming.get(field["id"], "")
+        if field.get("required") and not value:
+            pattern = text.get("asset-tree.error.field.required", "Fill in {0}.")
+            return 400, {"message": pattern.replace("{0}", field["name"])}
+        if field.get("kind") == "select" and value:
+            allowed = {option["value"] for option in field.get("options") or []}
+            if value not in allowed:
+                pattern = text.get("asset-tree.error.portalRequest.option", "Choose a listed value for {0}.")
+                return 400, {"message": pattern.replace("{0}", field["name"])}
+    summary = incoming.get("summary") or detail["name"]
+    issue_id = (max(ISSUES_BY_ID) if ISSUES_BY_ID else 10000) + 1
+    number = 1 + sum(1 for item in ISSUES_BY_ID.values() if item.get("projectKey") == asset["projectKey"])
+    key = asset["projectKey"] + "-" + str(number)
+    while key in ISSUES:
+        number += 1
+        key = asset["projectKey"] + "-" + str(number)
+    issue = {
+        "issueId": issue_id,
+        "issueKey": key,
+        "projectKey": asset["projectKey"],
+        "summary": summary,
+        "status": "Открыта",
+        "assetId": asset_id,
+        "requestTypeId": type_id,
+        "values": incoming,
+    }
+    ISSUES[key] = issue
+    ISSUES_BY_ID[issue_id] = issue
+    if not any(link["assetId"] == asset_id and link["issueId"] == issue_id for link in STATE["links"]):
+        STATE["links"].append({"assetId": asset_id, "issueId": issue_id, "statusBefore": asset.get("status") or ""})
+    return 201, {
+        "key": key,
+        "url": "/browse/" + key,
+        "assetName": detail["name"],
+        "objectKey": detail["objectKey"],
     }
 
 
@@ -6932,7 +7039,7 @@ p { color: #5d6b82; }
 body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 header { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
 header a { color: #fff; text-decoration: none; }
-main { max-width: 560px; margin: 24px auto 48px; background: #fff; border: 1px solid #dfe1e6; border-radius: 3px; padding: 24px; }
+main { max-width: 720px; margin: 24px auto 48px; background: #fff; border: 1px solid #dfe1e6; border-radius: 3px; padding: 24px; }
 h1 { margin: 0 0 12px; font-size: 20px; }
 .muted { color: #6b778c; font-size: 12px; }
 dl { margin: 16px 0; }
@@ -7304,6 +7411,11 @@ setTimeout(function () {
             if not portal_detail(asset_id, text):
                 return 403, {"message": text["asset-tree.error.forbidden"]}
             return self.add_share(asset_id, (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/requests", path)
+        if match and method == "GET":
+            return portal_request_form(int(match.group(1)), text)
+        if match and method == "POST":
+            return portal_request_create(int(match.group(1)), self.read_json() or {}, text)
         match = re.fullmatch(r"/portal/assets/(\d+)", path)
         if match and method == "GET":
             detail = portal_detail(int(match.group(1)), text)

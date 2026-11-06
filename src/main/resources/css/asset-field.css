@@ -224,6 +224,34 @@ textarea.asset-tree-picker-native {
     font-weight: 400;
 }
 
+input.asset-tree-portal-mine-search {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0 0 14px;
+    padding: 8px 10px;
+    border: 2px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font: inherit;
+}
+
+input.asset-tree-portal-mine-search:focus {
+    border-color: #4c9aff;
+    outline: none;
+}
+
+.asset-tree-portal-mine-empty {
+    margin: 0 0 12px;
+    color: #6b778c;
+}
+
+.asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine-group.is-hidden {
+    display: none;
+}
+
 .asset-tree-portal-mine-group {
     margin: 0 0 14px;
 }
@@ -696,6 +724,74 @@ button.asset-tree-portal-send {
 
 button.asset-tree-portal-send:hover {
     background: #0747a6 !important;
+}
+
+.asset-tree-portal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
+.asset-tree-portal-request-note {
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    border-radius: 3px;
+    background: #deebff;
+    color: #172b4d;
+}
+
+.asset-tree-portal-request-help {
+    margin: 6px 0 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+.asset-tree-portal-request-error {
+    min-height: 1.2em;
+    margin: 8px 0 0;
+    color: #de350b;
+}
+
+.asset-tree-portal-request-fields label,
+.asset-tree-portal-sheet-body > .asset-tree-portal-section > label {
+    display: block;
+    margin: 12px 0 4px;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+input.asset-tree-portal-request-input,
+select.asset-tree-portal-request-input,
+textarea.asset-tree-portal-request-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 8px;
+    border: 2px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font: inherit;
+}
+
+textarea.asset-tree-portal-request-input {
+    min-height: 88px;
+    resize: vertical;
+}
+
+input.asset-tree-portal-request-input:focus,
+select.asset-tree-portal-request-input:focus,
+textarea.asset-tree-portal-request-input:focus {
+    border-color: #4c9aff;
+    outline: none;
+}
+
+.asset-tree-portal-request-note a {
+    color: #0052cc;
+    font-weight: 600;
 }
 
 .asset-tree-preview-overlay {

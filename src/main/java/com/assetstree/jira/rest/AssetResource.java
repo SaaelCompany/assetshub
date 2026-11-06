@@ -31,6 +31,7 @@ import com.assetstree.jira.dto.PortalFieldsDto;
 import com.assetstree.jira.dto.PortalProjectDto;
 import com.assetstree.jira.dto.FlowBookDto;
 import com.assetstree.jira.model.FlowRuleDraft;
+import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
@@ -1204,6 +1205,28 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.portalAsset(user(), id)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("portal/assets/{id}/requests")
+    public Response portalRequestForm(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.portalRequestForm(user(), id)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/requests")
+    public Response createPortalRequest(@PathParam("id") final int id, final PortalRequestDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createPortalRequest(user(), id, draft)).build();
             }
         });
     }
