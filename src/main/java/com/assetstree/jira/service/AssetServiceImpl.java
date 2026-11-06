@@ -201,6 +201,7 @@ import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
 import com.assetstree.jira.model.ReportCatalog;
+import com.assetstree.jira.model.ReportWorkbook;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleAnchor;
 import com.assetstree.jira.model.ScheduleOccurrences;
@@ -9894,8 +9895,16 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public byte[] exportReport(ApplicationUser user, String projectKey, String reportKey) {
+    public byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart) {
         ReportViewDto view = reportView(user, projectKey, reportKey, 0, true, null);
+        String chosen = chart == null ? "" : chart.trim();
+        if ("columns".equalsIgnoreCase(chosen)) {
+            chosen = "bar";
+        }
+        chosen = ReportCatalog.chart(chosen);
+        if (!chosen.isEmpty()) {
+            view.setChart(chosen);
+        }
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
         pages.add(reportPage(view));
         return WorkbookSheet.write(pages);
@@ -10307,7 +10316,12 @@ public class AssetServiceImpl implements AssetService {
             note.add(i18n().getText("asset-tree.ui.reportLinesCut"));
             lines.add(note);
         }
-        return new WorkbookSheet.Page(view.getTitle(), headers, lines);
+        WorkbookSheet.Chart chart = ReportWorkbook.chart(view,
+                i18n().getText("asset-tree.ui.reportCount"),
+                i18n().getText("asset-tree.ui.lifeBook"),
+                i18n().getText("asset-tree.ui.reportChartStart"),
+                i18n().getText("asset-tree.ui.reportChartSpan"));
+        return new WorkbookSheet.Page(view.getTitle(), headers, lines, chart);
     }
 
     private String bookCount(int count) {

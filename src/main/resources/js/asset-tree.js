@@ -18778,7 +18778,7 @@
     function downloadReportFile(view) {
         if (!view || !view.id) return;
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx', true);
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(reportChartWire(reportChartKind(view))), true);
         xhr.responseType = 'blob';
         xhr.setRequestHeader('Accept', '*/*');
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
@@ -18901,6 +18901,12 @@
             rememberReportChart(view, select.value);
         });
         return select;
+    }
+
+    function reportChartWire(kind) {
+        if (kind === 'columns') return 'bar';
+        if (kind === 'donut' || kind === 'pie' || kind === 'bars' || kind === 'histogram' || kind === 'line' || kind === 'area' || kind === 'scatter' || kind === 'radar' || kind === 'gantt' || kind === 'venn' || kind === 'bar') return kind;
+        return 'bar';
     }
 
     function reportChartSession(wire) {

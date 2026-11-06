@@ -678,11 +678,12 @@ public class AssetResource {
     @GET
     @Path("projects/{projectKey}/reports/{reportKey}/book.xlsx")
     @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    public Response exportReport(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey) {
+    public Response exportReport(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
+            @QueryParam("chart") final String chart) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                byte[] book = assetService.exportReport(user(), projectKey, reportKey);
+                byte[] book = assetService.exportReport(user(), projectKey, reportKey, chart);
                 String file = "report-" + reportKey + ".xlsx";
                 return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                         .header("Content-Disposition", "attachment; filename=\"" + file + "\"")

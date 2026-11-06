@@ -297,7 +297,7 @@ public interface AssetService {
 
     byte[] exportReports(ApplicationUser user, String projectKey);
 
-    byte[] exportReport(ApplicationUser user, String projectKey, String reportKey);
+    byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart);
 
     void sendReportMail(ApplicationUser user, String projectKey);
 
