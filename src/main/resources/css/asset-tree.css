@@ -9850,6 +9850,47 @@ a.asset-tree-preview-icon:focus {
     border-top: 0;
 }
 
+#asset-tree-app .asset-tree-scope-plain {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-scope-plain > .asset-tree-hint,
+#asset-tree-app .asset-tree-scope-plain > .asset-tree-field-label {
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-type-ticks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+}
+
+#asset-tree-app .asset-tree-field-modes {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#asset-tree-app .asset-tree-field-mode {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 180px;
+    gap: 8px;
+    align-items: center;
+}
+
+#asset-tree-app .asset-tree-automation-steps {
+    margin: 0;
+    padding-left: 18px;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-automation-steps li {
+    margin: 0 0 6px;
+}
+
 #asset-tree-app .asset-tree-scope {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

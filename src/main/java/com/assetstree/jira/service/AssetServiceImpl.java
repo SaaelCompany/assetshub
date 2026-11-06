@@ -13,8 +13,13 @@ import com.atlassian.jira.bc.user.search.UserSearchService;
 import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.config.ConstantsManager;
 import com.atlassian.jira.config.properties.APKeys;
+import com.atlassian.event.api.EventPublisher;
+import com.atlassian.jira.event.issue.IssueEvent;
+import com.atlassian.jira.event.type.EventType;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.issue.IssueManager;
+import com.atlassian.jira.issue.comments.Comment;
+import com.atlassian.jira.issue.comments.CommentManager;
 import com.atlassian.jira.issue.issuetype.IssueType;
 import com.atlassian.jira.issue.status.Status;
 import com.atlassian.jira.workflow.JiraWorkflow;
@@ -33,6 +38,7 @@ import com.atlassian.jira.user.ApplicationUser;
 import com.atlassian.jira.user.UserPropertyManager;
 import com.atlassian.jira.user.util.UserManager;
 import com.atlassian.jira.util.I18nHelper;
+import com.atlassian.jira.util.json.JSONObject;
 import com.atlassian.mail.Email;
 import com.atlassian.mail.queue.MailQueue;
 import com.atlassian.mail.queue.SingleMailQueueItem;
@@ -1193,6 +1199,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void deleteAsset(ApplicationUser user, int id, boolean cascade) {
         final String[] gone = new String[3];
+        final List<Long> linkedIssues = new ArrayList<Long>();
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
@@ -1215,6 +1222,15 @@ public class AssetServiceImpl implements AssetService {
                         continue;
                     }
                     logPlaceChange(user, placeContainer(TreeLogic.normalizeParent(gone.getParentId()), all, doomed), "place_remove", gone);
+                }
+                AssetIssueLinkEntity[] noted = ao().find(AssetIssueLinkEntity.class,
+                        Query.select().where("ASSET_ID = ?", id));
+                if (noted != null) {
+                    for (AssetIssueLinkEntity link : noted) {
+                        if (link != null) {
+                            linkedIssues.add(Long.valueOf(link.getIssueId()));
+                        }
+                    }
                 }
                 List<Integer> fileIds = new ArrayList<Integer>();
                 for (AssetFileEntity file : findIn(AssetFileEntity.class, "ASSET_ID", toDelete, null)) {
@@ -1256,6 +1272,7 @@ public class AssetServiceImpl implements AssetService {
         if (gone[0] != null) {
             emit(gone[0], "asset.deleted", "{\"event\":\"asset.deleted\",\"project\":\"" + jsonEscape(gone[0])
                     + "\",\"id\":" + id + ",\"key\":\"" + jsonEscape(gone[1]) + "\",\"name\":\"" + jsonEscape(gone[2]) + "\"}");
+            noteIssues(linkedIssues, "asset.deleted", gone[1], gone[2]);
         }
     }
 
@@ -2444,6 +2461,7 @@ public class AssetServiceImpl implements AssetService {
                 return stored;
             }
         }
+        quietNotes(true);
         try {
             List<EquipmentSheet.Sheet> sheets = uploadId.isEmpty()
                     ? equipmentSheets(draft) : ImportSessions.sheets(uploadId);
@@ -2496,6 +2514,8 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             ImportSessions.forget(replayKey);
             throw ex;
+        } finally {
+            quietNotes(false);
         }
     }
 
@@ -11133,7 +11153,77 @@ public class AssetServiceImpl implements AssetService {
         emit(projectKey, event, "{\"event\":\"" + event + "\",\"project\":\"" + jsonEscape(projectKey)
                 + "\",\"id\":" + asset.getId() + ",\"key\":\"" + jsonEscape(asset.getObjectKey())
                 + "\",\"name\":\"" + jsonEscape(asset.getName()) + "\"}");
+        noteAsset(event, asset);
     }
+
+    private static final ThreadLocal<Boolean> QUIET_NOTES = new ThreadLocal<Boolean>();
+
+    private void quietNotes(boolean quiet) {
+        if (quiet) {
+            QUIET_NOTES.set(Boolean.TRUE);
+        } else {
+            QUIET_NOTES.remove();
+        }
+    }
+
+    private void noteAsset(String event, AssetDto asset) {
+        if (asset == null || Boolean.TRUE.equals(QUIET_NOTES.get())) {
+            return;
+        }
+        try {
+            AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
+                    Query.select().where("ASSET_ID = ?", asset.getId()));
+            List<Long> issues = new ArrayList<Long>();
+            if (links != null) {
+                for (AssetIssueLinkEntity link : links) {
+                    if (link != null) {
+                        issues.add(Long.valueOf(link.getIssueId()));
+                    }
+                }
+            }
+            noteIssues(issues, event, asset.getObjectKey(), asset.getName());
+        } catch (RuntimeException ex) {
+            log.warn("Could not note the linked requests for {}", asset.getObjectKey(), ex);
+        }
+    }
+
+    private void noteIssues(List<Long> issueIds, String event, String objectKey, String name) {
+        if (issueIds == null || issueIds.isEmpty() || Boolean.TRUE.equals(QUIET_NOTES.get())) {
+            return;
+        }
+        ApplicationUser author = authenticationContext().getLoggedInUser();
+        if (author == null) {
+            return;
+        }
+        String verbKey = "asset.created".equals(event) ? "asset-tree.ui.automationCreated"
+                : "asset.deleted".equals(event) ? "asset-tree.ui.automationDeleted"
+                : "asset-tree.ui.automationUpdated";
+        String body = AutomationNote.text(i18n().getText("asset-tree.ui.automationNote"), objectKey, name,
+                i18n().getText(verbKey));
+        CommentManager comments = ComponentAccessor.getCommentManager();
+        EventPublisher events = ComponentAccessor.getComponent(EventPublisher.class);
+        for (Long issueId : issueIds) {
+            if (issueId == null) {
+                continue;
+            }
+            try {
+                Issue issue = issueManager().getIssueObject(issueId);
+                if (issue == null) {
+                    continue;
+                }
+                Map<String, JSONObject> properties = new HashMap<String, JSONObject>();
+                properties.put("sd.public.comment", new JSONObject("{\"internal\":true}"));
+                Comment comment = comments.create(issue, author, body, null, null, new Date(), properties, false);
+                if (events != null && comment != null) {
+                    events.publish(new IssueEvent(issue, author, comment, null, null,
+                            new HashMap<String, Object>(), EventType.ISSUE_COMMENTED_ID, false));
+                }
+            } catch (Exception ex) {
+                log.warn("Could not comment on linked request {}", issueId, ex);
+            }
+        }
+    }
+
 
     private void emit(String projectKey, String event, String json) {
         if (projectKey == null || projectKey.isEmpty() || json == null) {
@@ -11308,6 +11398,7 @@ public class AssetServiceImpl implements AssetService {
                 return stored;
             }
         }
+        quietNotes(true);
         try {
             final ImportMemory memory = new ImportMemory();
             final JsonReady ready = ao().executeInTransaction(new TransactionCallback<JsonReady>() {
@@ -11357,6 +11448,8 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             ImportSessions.forget(replayKey);
             throw ex;
+        } finally {
+            quietNotes(false);
         }
     }
 

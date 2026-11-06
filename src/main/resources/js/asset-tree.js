@@ -26013,82 +26013,12 @@
     function webhookSettings() {
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('webhookRecipeTitle')));
-        block.appendChild(el('p', 'asset-tree-hint', t('webhookRecipe')));
-        var importUrl = (state.baseUrl || '') + '/rest/asset-tree/1.0/projects/' + state.projectKey + '/import';
-        block.appendChild(el('p', 'asset-tree-field-label', t('webhookImportUrl')));
-        block.appendChild(el('p', 'asset-tree-code', importUrl));
-        block.appendChild(el('p', 'asset-tree-hint', t('webhookImportHeaders')));
-        block.appendChild(el('p', 'asset-tree-field-label', t('webhookSampleLabel')));
-        block.appendChild(el('pre', 'asset-tree-webhook-sample asset-tree-code', t('webhookSample')));
-        block.appendChild(el('p', 'asset-tree-hint', t('webhookHint')));
-        if (state.webhooks === null) {
-            state.webhooks = [];
-            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', null, function (status, payload) {
-                state.webhooks = status === 200 ? (payload || []) : [];
-                if (state.view === 'settings') renderFrame();
-            });
-        }
-        var saved = state.webhooks || [];
-        if (saved.length) {
-            var list = el('div', 'asset-tree-grant-list');
-            saved.forEach(function (hook) {
-                var line = el('div', 'asset-tree-grant');
-                var head = el('div', 'asset-tree-grant-head');
-                var title = el('span', 'asset-tree-grant-title');
-                title.appendChild(el('strong', null, hook.url || ''));
-                if (hook.events) title.appendChild(el('span', null, hook.events));
-                head.appendChild(title);
-                head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/' + hook.id, null, function (status) {
-                        if (status >= 200 && status < 300) {
-                            state.webhooks = (state.webhooks || []).filter(function (item) { return item.id !== hook.id; });
-                            renderFrame();
-                        }
-                    });
-                }));
-                line.appendChild(head);
-                list.appendChild(line);
-            });
-            block.appendChild(list);
-        }
-        var url = textControl(t('webhookUrl'));
-        url.setAttribute('aria-label', t('webhookAddress'));
-        var events = textControl(t('webhookEvents'));
-        events.setAttribute('aria-label', t('webhookEvents'));
-        var secret = textControl('');
-        secret.setAttribute('aria-label', t('webhookSecret'));
-        block.appendChild(settingField(t('webhookAddress'), url));
-        block.appendChild(settingField(t('webhookEvents'), events));
-        var secretRow = el('div', 'asset-tree-webhook-secret');
-        secretRow.appendChild(settingField(t('webhookSecret'), secret));
-        secretRow.appendChild(button(t('webhookSecretNew'), 'asset-tree-btn', function () {
-            secret.value = freshSecret();
-        }));
-        block.appendChild(secretRow);
-        var actions = el('div', 'asset-tree-inline-actions');
-        actions.appendChild(button(t('webhookTest'), 'asset-tree-btn', function () {
-            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/test', {
-                url: url.value.trim(),
-                secret: secret.value.trim()
-            }, function (status, payload) {
-                if (status >= 200 && status < 300 && payload && payload.ok) notify(t('webhookTestOk'));
-                else notify((payload && payload.message) || t('webhookTestFail'));
-            });
-        }));
-        actions.appendChild(button(t('webhookSave'), 'asset-tree-btn primary', function () {
-            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', {
-                url: url.value.trim(),
-                events: events.value.trim(),
-                secret: secret.value.trim(),
-                enabled: true
-            }, function (status, payload) {
-                if (status >= 200 && status < 300 && payload) {
-                    state.webhooks = (state.webhooks || []).concat([payload]);
-                    renderFrame();
-                } else notify((payload && payload.message) || t('errorTitle'));
-            });
-        }));
-        block.appendChild(actions);
+        block.appendChild(el('p', 'asset-tree-hint', t('automationPlain')));
+        var steps = el('ol', 'asset-tree-automation-steps');
+        [t('automationLink'), t('automationComment'), t('automationTrigger'), t('automationStatus')].forEach(function (line) {
+            steps.appendChild(el('li', null, line));
+        });
+        block.appendChild(steps);
         return block;
     }
 
@@ -27071,26 +27001,190 @@
         panel.appendChild(block);
     }
 
+    function equipmentTypes() {
+        return (state.types || []).filter(function (type) {
+            return type && !type.location;
+        });
+    }
+
+    function typeLabelOf(key) {
+        var type = typeByKey(key);
+        return type ? (type.label || key) : key;
+    }
+
+    function schemaByName(name) {
+        var found = null;
+        (state.schemas || []).forEach(function (schema) {
+            if (schema && schema.name === name) found = schema;
+        });
+        return found;
+    }
+
+    function typeTickList(chosen, onToggle) {
+        var list = el('div', 'asset-tree-type-ticks');
+        equipmentTypes().forEach(function (type) {
+            var label = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = !!chosen[type.typeKey];
+            box.addEventListener('change', function () {
+                onToggle(type.typeKey, box.checked);
+            });
+            label.appendChild(box);
+            label.appendChild(document.createTextNode(type.label || type.typeKey));
+            list.appendChild(label);
+        });
+        return list;
+    }
+
     function scopeEditor(grant, onSave) {
-        var box = el('div', 'asset-tree-scope');
-        var types = textControl('');
-        types.value = (grant && grant.typeScope) || '';
-        types.placeholder = t('scopeTypes');
-        var schema = textControl('');
-        schema.value = (grant && grant.schemaName) || '';
-        schema.placeholder = t('scopeSchema');
-        var fields = textControl('');
-        fields.value = (grant && grant.fieldScope) || '';
-        fields.placeholder = t('scopeFields');
-        function read() {
-            return { typeScope: types.value.trim(), schemaName: schema.value.trim(), fieldScope: fields.value.trim() };
+        var box = el('div', 'asset-tree-scope-plain');
+        var followed = (grant && grant.schemaName) || '';
+        var chosen = {};
+        var allTypes = !followed && !((grant && grant.typeScope) || '').trim();
+        if (followed) {
+            var set = schemaByName(followed);
+            ((set && set.typeKeys) || []).forEach(function (key) { chosen[key] = true; });
+        } else if (!allTypes) {
+            String(grant.typeScope || '').split(',').forEach(function (key) {
+                var clean = key.replace(/^\s+|\s+$/g, '');
+                if (clean) chosen[clean] = true;
+            });
         }
-        types.addEventListener('change', function () { onSave(read()); });
-        schema.addEventListener('change', function () { onSave(read()); });
-        fields.addEventListener('change', function () { onSave(read()); });
-        box.appendChild(settingField(t('scopeTypes'), types));
-        box.appendChild(settingField(t('scopeSchema'), schema));
-        box.appendChild(settingField(t('scopeFields'), fields));
+        var modes = {};
+        var allFields = !((grant && grant.fieldScope) || '').trim();
+        if (!allFields) {
+            String(grant.fieldScope).split(',').forEach(function (part) {
+                var clean = part.replace(/^\s+|\s+$/g, '');
+                var colon = clean.indexOf(':');
+                var key = colon < 0 ? clean : clean.slice(0, colon);
+                var mode = colon < 0 ? 'write' : clean.slice(colon + 1);
+                if (key) modes[key] = mode === 'read' ? 'read' : 'write';
+            });
+        }
+        function visibleFields() {
+            var seen = {};
+            var rows = [];
+            equipmentTypes().forEach(function (type) {
+                if (!allTypes && !chosen[type.typeKey]) return;
+                (type.fields || []).forEach(function (field) {
+                    if (!field || !field.fieldKey || seen[field.fieldKey]) return;
+                    seen[field.fieldKey] = true;
+                    rows.push(field);
+                });
+            });
+            return rows;
+        }
+        function payload() {
+            var typeKeys = [];
+            equipmentTypes().forEach(function (type) {
+                if (chosen[type.typeKey]) typeKeys.push(type.typeKey);
+            });
+            var fieldParts = [];
+            if (!allFields) {
+                visibleFields().forEach(function (field) {
+                    var mode = modes[field.fieldKey] || 'hide';
+                    if (mode === 'read' || mode === 'write') fieldParts.push(field.fieldKey + ':' + mode);
+                });
+            }
+            return {
+                typeScope: allTypes || followed ? '' : typeKeys.join(','),
+                schemaName: followed,
+                fieldScope: allFields ? '' : fieldParts.join(',')
+            };
+        }
+        function draw() {
+            box.innerHTML = '';
+            box.appendChild(el('p', 'asset-tree-field-label', t('scopeEquipment')));
+            box.appendChild(el('p', 'asset-tree-hint', t('scopeEquipmentHint')));
+            var sets = (state.schemas || []).filter(function (schema) { return schema && schema.name; });
+            if (sets.length) {
+                var presets = el('div', 'asset-tree-cap-presets');
+                sets.forEach(function (schema) {
+                    presets.appendChild(button(schema.name, 'asset-tree-btn' + (followed === schema.name ? ' primary' : ''), function () {
+                        followed = schema.name;
+                        allTypes = false;
+                        chosen = {};
+                        (schema.typeKeys || []).forEach(function (key) { chosen[key] = true; });
+                        onSave(payload());
+                        draw();
+                    }));
+                });
+                box.appendChild(presets);
+            }
+            if (followed) box.appendChild(el('p', 'asset-tree-hint', t('scopeFollowsSet', followed)));
+            var allTypeRow = el('label', 'asset-tree-check');
+            var allTypeBox = document.createElement('input');
+            allTypeBox.type = 'checkbox';
+            allTypeBox.checked = allTypes;
+            allTypeBox.addEventListener('change', function () {
+                allTypes = allTypeBox.checked;
+                if (allTypes) {
+                    followed = '';
+                    chosen = {};
+                }
+                onSave(payload());
+                draw();
+            });
+            allTypeRow.appendChild(allTypeBox);
+            allTypeRow.appendChild(document.createTextNode(t('scopeAllTypes')));
+            box.appendChild(allTypeRow);
+            if (!allTypes) {
+                box.appendChild(typeTickList(chosen, function (key, checked) {
+                    followed = '';
+                    chosen[key] = checked;
+                    var any = false;
+                    equipmentTypes().forEach(function (type) { if (chosen[type.typeKey]) any = true; });
+                    if (!any) {
+                        allTypes = true;
+                        chosen = {};
+                    }
+                    onSave(payload());
+                    draw();
+                }));
+            }
+            box.appendChild(el('p', 'asset-tree-field-label', t('scopeFieldsTitle')));
+            box.appendChild(el('p', 'asset-tree-hint', t('scopeFieldsHint')));
+            var allFieldRow = el('label', 'asset-tree-check');
+            var allFieldBox = document.createElement('input');
+            allFieldBox.type = 'checkbox';
+            allFieldBox.checked = allFields;
+            allFieldBox.addEventListener('change', function () {
+                allFields = allFieldBox.checked;
+                onSave(payload());
+                draw();
+            });
+            allFieldRow.appendChild(allFieldBox);
+            allFieldRow.appendChild(document.createTextNode(t('scopeAllFields')));
+            box.appendChild(allFieldRow);
+            if (!allFields) {
+                var rows = visibleFields();
+                if (!rows.length) {
+                    box.appendChild(el('p', 'asset-tree-hint', t('scopePickType')));
+                }
+                var fieldList = el('div', 'asset-tree-field-modes');
+                rows.forEach(function (field) {
+                    var line = el('div', 'asset-tree-field-mode');
+                    line.appendChild(el('span', null, field.label || field.fieldKey));
+                    var select = el('select', 'asset-tree-text');
+                    select.setAttribute('aria-label', field.label || field.fieldKey);
+                    [['hide', 'scopeHide'], ['read', 'scopeRead'], ['write', 'scopeWrite']].forEach(function (pair) {
+                        var option = el('option', null, t(pair[1]));
+                        option.value = pair[0];
+                        select.appendChild(option);
+                    });
+                    select.value = modes[field.fieldKey] || 'hide';
+                    select.addEventListener('change', function () {
+                        modes[field.fieldKey] = select.value;
+                        onSave(payload());
+                    });
+                    line.appendChild(select);
+                    fieldList.appendChild(line);
+                });
+                box.appendChild(fieldList);
+            }
+        }
+        draw();
         return box;
     }
 
@@ -27113,8 +27207,8 @@
                 var head = el('div', 'asset-tree-grant-head');
                 var title = el('span', 'asset-tree-grant-title');
                 title.appendChild(el('strong', null, schema.name || ''));
-                var keys = (schema.typeKeys || []).join(', ');
-                if (keys) title.appendChild(el('span', null, keys));
+                var names = (schema.typeKeys || []).map(typeLabelOf).join(', ');
+                if (names) title.appendChild(el('span', null, names));
                 head.appendChild(title);
                 head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
                     ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas/' + schema.id, null, function (status) {
@@ -27131,13 +27225,18 @@
         }
         var name = textControl(t('schemaName'));
         name.setAttribute('aria-label', t('schemaName'));
-        var types = textControl(t('scopeTypes'));
-        types.setAttribute('aria-label', t('scopeTypes'));
+        var picked = {};
         block.appendChild(settingField(t('schemaName'), name));
-        block.appendChild(settingField(t('scopeTypes'), types));
+        block.appendChild(el('p', 'asset-tree-field-label', t('schemaTypes')));
+        block.appendChild(typeTickList(picked, function (key, checked) {
+            picked[key] = checked;
+        }));
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('schemaSave'), 'asset-tree-btn primary', function () {
-            var keys = types.value.split(',').map(function (item) { return item.trim(); }).filter(function (item) { return item; });
+            var keys = [];
+            equipmentTypes().forEach(function (type) {
+                if (picked[type.typeKey]) keys.push(type.typeKey);
+            });
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas', {
                 name: name.value.trim(),
                 typeKeys: keys
