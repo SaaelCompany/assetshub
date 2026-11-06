@@ -1111,7 +1111,7 @@
         desktop: 'M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h4v2H6v-2h4v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z',
         box: 'M12 3l9 4v10l-9 4-9-4V7l9-4zm0 2.2L6.5 7.6 12 10l5.5-2.4L12 5.2zM5 9.1v6.9l6 2.7v-6.9L5 9.1zm14 0l-6 2.7v6.9l6-2.7V9.1z'
     };
-    var mineState = { payload: null, loading: false };
+    var mineState = { payload: null, loading: false, query: '', searching: false, caret: 0 };
 
     function profilePage() {
         return /\/user\/profile(?:\/|$|\?)/.test(location.pathname || '');
@@ -1163,12 +1163,67 @@
         return parts.join('\u0001');
     }
 
+    function cardHaystack(group, card) {
+        var parts = [group.key, card.name, card.objectKey, card.role, card.status, card.statusLabel];
+        (card.lines || []).forEach(function (line) {
+            parts.push(line.label, line.value);
+        });
+        return norm(parts.join(' '));
+    }
+
+    function applyMineFilter(root) {
+        if (!root) return;
+        var needle = norm(mineState.query);
+        var cards = root.querySelectorAll('.asset-tree-portal-mine-card');
+        var shown = 0;
+        for (var i = 0; i < cards.length; i++) {
+            var hit = !needle || (cards[i].getAttribute('data-hay') || '').indexOf(needle) !== -1;
+            if (hit) cards[i].classList.remove('is-hidden');
+            else cards[i].classList.add('is-hidden');
+            if (hit) shown++;
+        }
+        var groups = root.querySelectorAll('.asset-tree-portal-mine-group');
+        for (var g = 0; g < groups.length; g++) {
+            if (groups[g].querySelector('.asset-tree-portal-mine-card:not(.is-hidden)')) groups[g].classList.remove('is-hidden');
+            else groups[g].classList.add('is-hidden');
+        }
+        var empty = root.querySelector('.asset-tree-portal-mine-empty');
+        if (empty) empty.hidden = shown > 0;
+        var count = root.querySelector('.asset-tree-portal-mine-count');
+        if (count) count.textContent = needle ? (shown + ' / ' + (count.getAttribute('data-total') || '0')) : (count.getAttribute('data-label') || '');
+    }
+
     function renderMine(data) {
         var root = el('div', 'asset-tree-portal-mine-body');
         var head = el('div', 'asset-tree-portal-mine-head');
         head.appendChild(el('h2', null, data.title || 'My assets'));
-        head.appendChild(el('span', null, data.totalLabel || ''));
+        var count = el('span', 'asset-tree-portal-mine-count', data.totalLabel || '');
+        count.setAttribute('data-label', data.totalLabel || '');
+        count.setAttribute('data-total', String(data.total || 0));
+        head.appendChild(count);
         root.appendChild(head);
+        var search = el('input', 'asset-tree-portal-mine-search');
+        search.type = 'search';
+        search.placeholder = 'Поиск по имени, ключу или полю';
+        search.setAttribute('aria-label', 'Поиск по своим активам');
+        search.value = mineState.query || '';
+        search.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.keyCode === 13) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        });
+        search.addEventListener('input', function () {
+            mineState.query = search.value;
+            mineState.searching = true;
+            mineState.caret = search.selectionStart || search.value.length;
+            applyMineFilter(root);
+        });
+        search.addEventListener('blur', function () { mineState.searching = false; });
+        root.appendChild(search);
+        var empty = el('p', 'asset-tree-portal-mine-empty', 'Ничего не найдено');
+        empty.hidden = true;
+        root.appendChild(empty);
         (data.projects || []).forEach(function (group) {
             var block = el('section', 'asset-tree-portal-mine-group');
             var title = el('h3', null);
@@ -1177,6 +1232,7 @@
             block.appendChild(title);
             (group.assets || []).forEach(function (card) {
                 var item = el('article', 'asset-tree-portal-mine-card');
+                item.setAttribute('data-hay', cardHaystack(group, card));
                 item.appendChild(portalIcon(card));
                 var body = el('div', 'asset-tree-portal-mine-copy');
                 var row = el('div', 'asset-tree-portal-mine-title');
@@ -1205,6 +1261,14 @@
             });
             root.appendChild(block);
         });
+        applyMineFilter(root);
+        if (mineState.searching) {
+            setTimeout(function () {
+                if (!search.parentNode) return;
+                search.focus();
+                if (search.setSelectionRange) search.setSelectionRange(mineState.caret, mineState.caret);
+            }, 0);
+        }
         return root;
     }
 
@@ -1283,6 +1347,12 @@
             head.appendChild(closer);
             dialog.appendChild(head);
             var body = el('div', 'asset-tree-portal-sheet-body');
+            var actions = el('div', 'asset-tree-portal-actions');
+            var ask = el('button', 'asset-tree-portal-send', 'Создать заявку');
+            ask.type = 'button';
+            ask.addEventListener('click', function () { showPortalRequest(card, dialog, function () { paint(card); }); });
+            actions.appendChild(ask);
+            body.appendChild(actions);
             var details = portalSection('Детали');
             var grid = el('div', 'asset-tree-portal-fields');
             var described = false;
@@ -1784,6 +1854,151 @@
         document.addEventListener('keydown', onKey);
         paint(index);
         document.body.appendChild(overlay);
+    }
+
+    function portalRequestBack(restore, label) {
+        var back = el('button', 'asset-tree-portal-textbtn', label || 'К карточке');
+        back.type = 'button';
+        back.addEventListener('click', function () { if (restore) restore(); });
+        return back;
+    }
+
+    function showPortalRequest(card, dialog, restore) {
+        var body = dialog.querySelector('.asset-tree-portal-sheet-body');
+        if (!body) return;
+        body.innerHTML = '';
+        body.appendChild(el('p', 'asset-tree-portal-loading', '...'));
+        ajax('/portal/assets/' + card.id + '/requests', function (status, payload) {
+            if (!dialog.parentNode) return;
+            body.innerHTML = '';
+            if (status !== 200 || !payload) {
+                body.appendChild(el('p', 'asset-tree-portal-request-error', (payload && payload.message) || 'Не удалось открыть форму заявки'));
+                body.appendChild(portalRequestBack(restore));
+                return;
+            }
+            paintPortalRequest(card, dialog, payload, restore);
+        });
+    }
+
+    function paintPortalRequest(card, dialog, form, restore) {
+        var body = dialog.querySelector('.asset-tree-portal-sheet-body');
+        if (!body) return;
+        body.innerHTML = '';
+        var section = portalSection('Новая заявка');
+        var note = el('p', 'asset-tree-portal-request-note');
+        var assetLabel = ((card.objectKey ? card.objectKey + ' ' : '') + (card.name || '')).replace(/^\s+|\s+$/g, '');
+        note.textContent = 'Оборудование ' + assetLabel + ' будет добавлено в заявку.';
+        section.appendChild(note);
+        var types = form.types || [];
+        if (!types.length) {
+            section.appendChild(el('p', null, 'В этом проекте нет типов запросов.'));
+            body.appendChild(section);
+            body.appendChild(portalRequestBack(restore));
+            return;
+        }
+        var typeLabel = el('label', null, 'Тип запроса');
+        typeLabel.setAttribute('for', 'asset-request-type');
+        var typeSelect = el('select', 'asset-tree-portal-request-input');
+        typeSelect.id = 'asset-request-type';
+        types.forEach(function (type) {
+            var option = el('option', null, type.name || type.id);
+            option.value = String(type.id || '');
+            typeSelect.appendChild(option);
+        });
+        section.appendChild(typeLabel);
+        section.appendChild(typeSelect);
+        var help = el('p', 'asset-tree-portal-request-help');
+        section.appendChild(help);
+        var fieldsHost = el('div', 'asset-tree-portal-request-fields');
+        section.appendChild(fieldsHost);
+        var error = el('p', 'asset-tree-portal-request-error');
+        section.appendChild(error);
+        function currentType() {
+            for (var i = 0; i < types.length; i++) {
+                if (String(types[i].id) === String(typeSelect.value)) return types[i];
+            }
+            return types[0];
+        }
+        function paintFields() {
+            var type = currentType();
+            help.textContent = type && type.description ? type.description : '';
+            fieldsHost.innerHTML = '';
+            (type && type.fields || []).forEach(function (field) {
+                var inputId = 'asset-request-' + field.id;
+                var label = el('label', null, (field.name || field.id) + (field.required ? ' *' : ''));
+                label.setAttribute('for', inputId);
+                var input;
+                if (field.kind === 'textarea') {
+                    input = el('textarea', 'asset-tree-portal-request-input');
+                } else if (field.kind === 'select') {
+                    input = el('select', 'asset-tree-portal-request-input');
+                    if (!field.required) {
+                        var blank = el('option', null, '');
+                        blank.value = '';
+                        input.appendChild(blank);
+                    }
+                    (field.options || []).forEach(function (option) {
+                        var node = el('option', null, option.label || option.value || '');
+                        node.value = option.value || '';
+                        input.appendChild(node);
+                    });
+                } else {
+                    input = el('input', 'asset-tree-portal-request-input');
+                    input.type = 'text';
+                }
+                input.id = inputId;
+                input.setAttribute('data-field', field.id || '');
+                fieldsHost.appendChild(label);
+                fieldsHost.appendChild(input);
+            });
+        }
+        typeSelect.addEventListener('change', paintFields);
+        paintFields();
+        var row = el('div', 'asset-tree-portal-actions');
+        var back = portalRequestBack(restore);
+        var send = el('button', 'asset-tree-portal-send', 'Создать');
+        send.type = 'button';
+        send.addEventListener('click', function () {
+            var type = currentType();
+            if (!type) return;
+            var values = [];
+            var nodes = fieldsHost.querySelectorAll('[data-field]');
+            for (var i = 0; i < nodes.length; i++) {
+                values.push({ id: nodes[i].getAttribute('data-field'), value: nodes[i].value || '' });
+            }
+            error.textContent = '';
+            send.disabled = true;
+            sendJson('POST', '/portal/assets/' + card.id + '/requests', { requestTypeId: type.id, values: values }, function (status, payload) {
+                if (!dialog.parentNode) return;
+                send.disabled = false;
+                if (status !== 200 && status !== 201) {
+                    error.textContent = (payload && payload.message) || 'Не удалось создать заявку';
+                    return;
+                }
+                body.innerHTML = '';
+                var done = portalSection('Заявка создана');
+                var line = el('p', 'asset-tree-portal-request-note');
+                var key = payload && payload.key ? payload.key : '';
+                line.appendChild(document.createTextNode('Заявка '));
+                if (payload && payload.url && key) {
+                    var link = el('a', null, key);
+                    link.href = payload.url;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    line.appendChild(link);
+                } else {
+                    line.appendChild(document.createTextNode(key));
+                }
+                line.appendChild(document.createTextNode(' создана. Оборудование ' + (card.name || '') + ' добавлено в заявку.'));
+                done.appendChild(line);
+                body.appendChild(done);
+                body.appendChild(portalRequestBack(restore));
+            });
+        });
+        row.appendChild(back);
+        row.appendChild(send);
+        section.appendChild(row);
+        body.appendChild(section);
     }
 
     function paintPortalMine() {

@@ -9,6 +9,8 @@ import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.PortalCardDto;
 import com.assetstree.jira.dto.PortalMineDto;
+import com.assetstree.jira.dto.PortalRequestCreatedDto;
+import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.BulkResultDto;
 import com.assetstree.jira.dto.AssetListDto;
@@ -55,6 +57,7 @@ import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.FlowRuleDraft;
+import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.dto.ServicePlanDto;
 import com.assetstree.jira.model.LifecycleDraft;
@@ -231,6 +234,12 @@ public interface AssetService {
 
     /** Equipment the signed-in customer is responsible for, for the portal profile. */
     PortalMineDto portalMine(ApplicationUser user);
+
+    /** Request types the customer can raise for one piece of their equipment. */
+    PortalRequestFormDto portalRequestForm(ApplicationUser user, int assetId);
+
+    /** Creates a customer request and attaches the equipment that was open. */
+    PortalRequestCreatedDto createPortalRequest(ApplicationUser user, int assetId, PortalRequestDraft draft);
 
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 
