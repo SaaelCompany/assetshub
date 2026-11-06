@@ -311,6 +311,7 @@ public final class TniBook {
         String person = host.personName(userKey);
         String name = TniText.name(kindLabel, person, facts.address);
         String description = TniText.describe(facts, host.text("asset-tree.ui.tniIntro"),
+                host.text("asset-tree.ui.tniSeen"), host.text("asset-tree.ui.tniHost"),
                 host.text("asset-tree.ui.tniAddress"), host.text("asset-tree.ui.tniSystem"),
                 host.text("asset-tree.ui.tniBrowser"), host.text("asset-tree.ui.tniScreen"),
                 host.text("asset-tree.ui.tniCores"), host.text("asset-tree.ui.tniMemory"),

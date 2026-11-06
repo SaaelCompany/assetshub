@@ -4,6 +4,7 @@ import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.model.TniCookie;
 import com.assetstree.jira.model.TniHold;
+import com.assetstree.jira.model.TniPeer;
 import com.assetstree.jira.model.TniSightDraft;
 
 import javax.servlet.http.Cookie;
@@ -29,6 +30,7 @@ public final class TniIntake {
         if (draft == null) {
             return;
         }
+        draft.setSeen(TniPeer.address(request.getRemoteAddr()));
         try {
             ApplicationUser user = ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser();
             if (user != null && user.getKey() != null) {

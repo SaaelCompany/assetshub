@@ -60,11 +60,28 @@ public class TniRulesTest {
         String id = TniFacts.identity("STP", "ivanov", facts);
         assertEquals(id, TniFacts.identity("STP", "ivanov", TniFacts.parse(facts.summary())));
         assertFalse(id.equals(TniFacts.identity("STP", "petrova", facts)));
-        String card = TniText.describe(facts, "TNI. Collected from the portal.", "Address", "System",
+        String card = TniText.describe(facts, "TNI. Collected from the portal.", "Connection", "Name", "Address", "System",
                 "Browser", "Screen", "Cores", "Memory", "Video", "Request", "STP-12");
         assertTrue(card.startsWith("TNI"));
         assertTrue(card.contains("Address: 10.8.0.4"));
         assertTrue(card.contains("Request: STP-12"));
+        TniSightDraft seen = draft("Mozilla/5.0 (Windows NT 10.0) Chrome/120.0", "Win32", Boolean.FALSE);
+        seen.setSeen("::ffff:10.4.4.8");
+        seen.setHost("pc-12.corp.local.");
+        TniFacts peered = TniFacts.from(seen);
+        assertEquals("10.4.4.8", peered.seen);
+        assertEquals("10.4.4.8", peered.address);
+        assertEquals("pc-12.corp.local", peered.host);
+        assertEquals("pc-12.corp.local", TniFacts.parse(peered.summary()).host);
+        TniSightDraft gateway = draft("Mozilla/5.0 (Windows NT 10.0) Chrome/120.0", "Win32", Boolean.FALSE);
+        gateway.setSeen("203.0.113.9");
+        gateway.setHost("203.0.113.9");
+        TniFacts outside = TniFacts.from(gateway);
+        assertEquals("203.0.113.9", outside.seen);
+        assertEquals("", outside.address);
+        assertEquals("", outside.host);
+        assertEquals("", TniName.clean("192.168.0.1"));
+        assertEquals("", TniPeer.address("127.0.0.1"));
         assertEquals("Phone Ivanov", TniText.name("Phone", "Ivanov", "10.8.0.4"));
         assertTrue(TniText.owned(card));
         assertFalse(TniText.owned("A note written by a person"));

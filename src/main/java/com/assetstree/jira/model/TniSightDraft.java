@@ -18,6 +18,8 @@ public class TniSightDraft {
     private Integer touch;
     private Boolean battery;
     private List<String> addresses;
+    private String seen;
+    private String host;
 
     public String getProjectKey() { return projectKey; }
     public void setProjectKey(String projectKey) { this.projectKey = projectKey; }
@@ -41,4 +43,8 @@ public class TniSightDraft {
     public void setBattery(Boolean battery) { this.battery = battery; }
     public List<String> getAddresses() { return addresses; }
     public void setAddresses(List<String> addresses) { this.addresses = addresses; }
+    public String getSeen() { return seen; }
+    public void setSeen(String seen) { this.seen = seen; }
+    public String getHost() { return host; }
+    public void setHost(String host) { this.host = host; }
 }

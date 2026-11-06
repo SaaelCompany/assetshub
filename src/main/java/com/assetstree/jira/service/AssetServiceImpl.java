@@ -211,6 +211,8 @@ import com.assetstree.jira.model.PortalRules;
 import com.assetstree.jira.model.TniCookie;
 import com.assetstree.jira.model.TniFacts;
 import com.assetstree.jira.model.TniHold;
+import com.assetstree.jira.model.TniName;
+import com.assetstree.jira.model.TniPeer;
 import com.assetstree.jira.model.TniPlace;
 import com.assetstree.jira.model.TniPolicy;
 import com.assetstree.jira.model.TniSightDraft;
@@ -12000,14 +12002,38 @@ public class AssetServiceImpl implements AssetService {
         if (draft == null) {
             draft = TniCookie.read(requestValue(TniCookie.NAME, false));
         }
+        HttpServletRequest request = currentRequest();
+        String seen = TniPeer.address(request == null ? null : request.getRemoteAddr());
+        if (draft == null && !seen.isEmpty() && portalCreate(request)) {
+            draft = new TniSightDraft();
+        }
         if (draft == null || owner == null || projectKey == null || projectKey.trim().isEmpty()) {
             return;
         }
+        if (!seen.isEmpty()) {
+            draft.setSeen(seen);
+        }
+        draft.setHost(TniName.lookup(TniPeer.address(draft.getSeen())));
         try {
             new TniBook().remember(ao(), projectKey, owner, TniFacts.from(draft), System.currentTimeMillis());
         } catch (RuntimeException ex) {
             log.warn("TNI did not keep the browser report for {}", projectKey, ex);
         }
+    }
+
+    private HttpServletRequest currentRequest() {
+        try {
+            return ExecutingHttpRequest.get();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private boolean portalCreate(HttpServletRequest request) {
+        if (request == null || request.getRequestURI() == null) {
+            return false;
+        }
+        return request.getRequestURI().contains("/servicedesk/");
     }
 
     private String requestValue(String name, boolean header) {
