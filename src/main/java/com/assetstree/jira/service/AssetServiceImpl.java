@@ -12003,7 +12003,9 @@ public class AssetServiceImpl implements AssetService {
             draft = TniCookie.read(requestValue(TniCookie.NAME, false));
         }
         HttpServletRequest request = currentRequest();
-        String seen = TniPeer.address(request == null ? null : request.getRemoteAddr());
+        String seen = request == null ? "" : TniPeer.client(request.getRemoteAddr(),
+                request.getHeader("X-Forwarded-For"), request.getHeader("X-Real-IP"),
+                request.getHeader("Forwarded"));
         if (draft == null && !seen.isEmpty() && portalCreate(request)) {
             draft = new TniSightDraft();
         }

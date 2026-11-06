@@ -82,6 +82,17 @@ public class TniRulesTest {
         assertEquals("", outside.host);
         assertEquals("", TniName.clean("192.168.0.1"));
         assertEquals("", TniPeer.address("127.0.0.1"));
+        assertEquals("", TniPeer.address("172.17.0.1"));
+        assertEquals("", TniPeer.client("172.17.0.1", null, null, null));
+        assertEquals("10.1.1.5", TniPeer.client("172.17.0.1", "10.9.9.9, 10.1.1.5", "8.8.8.8", null));
+        assertEquals("192.168.0.15", TniPeer.client("172.18.0.1", "172.18.0.1", "192.168.0.15", null));
+        assertEquals("10.4.4.8", TniPeer.client("10.4.4.8", "8.8.8.8", null, null));
+        assertEquals("10.8.0.20", TniPeer.client("127.0.0.1", null, null, "for=10.8.0.20"));
+        TniSightDraft docker = draft("Mozilla/5.0 (Windows NT 10.0) Chrome/120.0", "Win32", Boolean.FALSE);
+        docker.setSeen("172.17.0.1");
+        TniFacts bridge = TniFacts.from(docker);
+        assertEquals("", bridge.seen);
+        assertEquals("", bridge.address);
         assertEquals("Phone Ivanov", TniText.name("Phone", "Ivanov", "10.8.0.4"));
         assertTrue(TniText.owned(card));
         assertFalse(TniText.owned("A note written by a person"));

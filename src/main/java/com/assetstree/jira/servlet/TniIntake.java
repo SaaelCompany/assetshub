@@ -30,7 +30,8 @@ public final class TniIntake {
         if (draft == null) {
             return;
         }
-        draft.setSeen(TniPeer.address(request.getRemoteAddr()));
+        draft.setSeen(TniPeer.client(request.getRemoteAddr(), request.getHeader("X-Forwarded-For"),
+                request.getHeader("X-Real-IP"), request.getHeader("Forwarded")));
         try {
             ApplicationUser user = ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser();
             if (user != null && user.getKey() != null) {

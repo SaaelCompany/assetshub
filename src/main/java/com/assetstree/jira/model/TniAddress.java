@@ -47,6 +47,21 @@ public final class TniAddress {
         return true;
     }
 
+    /** Docker bridge gateways. The computer that opened the portal is never this address. */
+    static boolean isGateway(String address) {
+        int[] octets = octets(address);
+        if (octets == null) {
+            return false;
+        }
+        return octets[0] == 172 && octets[1] >= 17 && octets[1] <= 31
+                && octets[2] == 0 && octets[3] == 1;
+    }
+
+    static boolean isLoopback(String address) {
+        int[] octets = octets(address);
+        return octets != null && octets[0] == 127;
+    }
+
     static boolean isPrivate(String address) {
         int[] octets = octets(address);
         if (octets == null) {
