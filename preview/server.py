@@ -13,6 +13,8 @@ import json
 import os
 import re
 import threading
+import urllib.error
+import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO, StringIO
@@ -500,6 +502,8 @@ STATE = {
     "cards": {}, "card_images": {},
     "assetKeys": {}, "ready": False, "views": {},
     "peers": [],
+    "relations": [],
+    "relation_seq": 1,
 }
 
 
@@ -838,11 +842,30 @@ def load_properties(path):
     return result
 
 
+def message_text(value):
+    """Same literals as Jira MessageFormat. Quotes hide braces; '' is one apostrophe."""
+    if not value:
+        return value or ""
+    out = []
+    index = 0
+    while index < len(value):
+        if value.startswith("''", index):
+            out.append("'")
+            index += 2
+            continue
+        if value[index] == "'":
+            index += 1
+            continue
+        out.append(value[index])
+        index += 1
+    return "".join(out)
+
+
 def messages(lang):
     english = load_properties(os.path.join(RES, "i18n", "asset-tree.properties"))
     if lang.startswith("ru"):
         english.update(load_properties(os.path.join(RES, "i18n", "asset-tree_ru_RU.properties")))
-    return english
+    return {key: message_text(value) for key, value in english.items()}
 
 
 def label_of(stored, text):
@@ -1494,8 +1517,16 @@ def save_project_view(project_key, body, text):
                 present.add(key)
         view["modules"] = [key for key in KNOWN_MODULES if key in present]
     if isinstance(body.get("setup"), dict):
-        view["setup"] = module_setup(body.get("setup"), migrate=False)
+        view["setup"] = merge_setup(view.get("setup") or {}, body.get("setup"))
     return 200, project_view(project_key)
+
+
+def merge_setup(current, patch):
+    base = dict(current or {})
+    for key, value in (patch or {}).items():
+        if value is not None:
+            base[key] = value
+    return module_setup(base, migrate=False)
 
 
 def save_asset_key(project_key, body, text):
@@ -1729,6 +1760,25 @@ def ensure_profile_demo():
         remember_file(laptop["id"], "паспорт.txt", "text/plain", "Паспорт оборудования\nНоутбук для выездов\nСерийный номер PF-12345".encode("utf-8"))
         remember_file(laptop["id"], "акт.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", tiny_docx("Акт приёма\nНоутбук Lenovo T14 передан в эксплуатацию."))
         remember_file(laptop["id"], "Заказ ключей VipNet client.pdf".encode("utf-8").decode("latin-1"), "application/pdf", tiny_pdf())
+    if "stp-ultrabook" not in STATE["types"]:
+        STATE["types"]["stp-ultrabook"] = {
+            "typeKey": "stp-ultrabook", "projectKey": "STP", "baseKey": "", "label": "Ультрабук",
+            "color": "#36B37E", "icon": "laptop", "systemType": False, "location": False,
+            "showInTree": True, "service": True, "sortOrder": 21, "parentTypeKey": "stp-laptop",
+            "fields": [{"fieldKey": "screen", "label": "Экран", "kind": "text", "required": False, "position": 0, "showOnIssue": True, "options": []}],
+        }
+    if laptop and not any(asset.get("objectKey") == "ASIT-2" for asset in STATE["assets"].values()):
+        thin_id = add_asset("STP", "stp-ultrabook", "Dell XPS", laptop.get("parentId"), "in_use", "ivanov", {"screen": "14"}, "ASIT-2")
+    else:
+        thin = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "ASIT-2"), None)
+        thin_id = thin["id"] if thin else None
+    if laptop and thin_id and not any(row.get("fromId") == laptop["id"] and row.get("toId") == thin_id for row in relation_rows()):
+        row_id = STATE.get("relation_seq") or 1
+        STATE["relation_seq"] = row_id + 1
+        relation_rows().append({
+            "id": row_id, "fromId": laptop["id"], "toId": thin_id, "type": "installed",
+            "inbound": "несёт", "attributes": [{"key": "port", "value": "3"}],
+        })
     printer = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "TEST-6"), None)
     if printer and not any(row.get("assetId") == printer["id"] and row.get("userKey") == "ivanov" for row in STATE["shares"].values()):
         remember_share(printer["id"], "ivanov")
@@ -1971,13 +2021,46 @@ def type_dto(row, text, rows):
         "showInTree": bool(row.get("location") or row.get("showInTree")),
         "parentTypeKey": (row.get("parentTypeKey") or ""),
         "service": bool(row.get("service")) and not row.get("location"), "assetCount": count,
-        "fields": [{
-            "fieldKey": field["fieldKey"], "label": label_of(field["label"], text), "kind": field["kind"],
-            "required": field["required"], "position": field["position"],
-            "showOnIssue": field["showOnIssue"] if "showOnIssue" in field else True,
-            "options": field.get("options") or [],
-        } for field in row["fields"]],
+        "fields": with_parent_fields(row, text),
     }
+
+
+def with_parent_fields(row, text):
+    own = [{
+        "fieldKey": field["fieldKey"], "label": label_of(field["label"], text), "kind": field["kind"],
+        "required": field["required"], "position": field["position"],
+        "showOnIssue": field["showOnIssue"] if "showOnIssue" in field else True,
+        "options": list(field.get("options") or []),
+        "inherited": False, "inheritedFrom": "",
+    } for field in (row.get("fields") or [])]
+    parent_key_name = (row.get("parentTypeKey") or "").strip()
+    parent = STATE["types"].get(parent_key_name) if parent_key_name else None
+    if not parent or parent is row:
+        return own
+    own_keys = {field["fieldKey"] for field in own}
+    parent_label = parent.get("label") or parent_key_name
+    if parent.get("systemType") and parent.get("baseKey"):
+        parent_label = text.get("asset-tree.type." + parent["baseKey"], parent_label)
+    merged = []
+    position = 0
+    for field in parent.get("fields") or []:
+        key = field.get("fieldKey")
+        if not key or key in own_keys:
+            continue
+        merged.append({
+            "fieldKey": key, "label": label_of(field.get("label"), text), "kind": field.get("kind"),
+            "required": bool(field.get("required")), "position": position,
+            "showOnIssue": field.get("showOnIssue", True) is not False,
+            "options": list(field.get("options") or []),
+            "inherited": True, "inheritedFrom": parent_label,
+        })
+        position += 1
+    for field in own:
+        field = dict(field)
+        field["position"] = position
+        position += 1
+        merged.append(field)
+    return merged
 
 
 def parent_key(row):
@@ -2217,6 +2300,7 @@ def asset_dto(asset, text, with_issues):
         dto["shares"] = share_dtos(asset["id"])
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
         dto["peers"] = peers_for(asset["id"], text)
+        dto["links"] = relations_for(asset["id"])
     return dto
 
 
@@ -3781,6 +3865,10 @@ def lines_for_bucket(lines, keys, query):
     return kept, True
 
 
+REPORT_PAGE = 300
+REPORT_EXPORT_MAX = 50000
+
+
 def report_line_page(lines, query, truncated):
     query = query or {}
     line_total = len(lines)
@@ -3792,11 +3880,13 @@ def report_line_page(lines, query, truncated):
     if start < 0:
         start = 0
     if all_lines:
-        return lines, line_total, bool(truncated)
+        export_limited = line_total > REPORT_EXPORT_MAX
+        page = lines[:REPORT_EXPORT_MAX] if export_limited else lines
+        return page, line_total, bool(truncated) or export_limited, export_limited
     if start > line_total:
         start = line_total
-    page = lines[start:start + 300]
-    return page, line_total, bool(truncated) or start + len(page) < line_total
+    page = lines[start:start + REPORT_PAGE]
+    return page, line_total, bool(truncated) or start + len(page) < line_total, False
 
 
 def empty_reason(report_key, group, money, text, any_purchase=False):
@@ -3856,7 +3946,7 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
     lines, filtered = lines_for_bucket(lines, keys, query)
     if filtered:
         truncated = False
-    page, line_total, capped = report_line_page(lines, query, truncated)
+    page, line_total, capped, export_limited = report_line_page(lines, query, truncated)
     chart = spec.get("chart") or "bar"
     if spec.get("standard"):
         chart = stored_report_chart(project_key, report_key, "bar")
@@ -3864,7 +3954,7 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCountedWorks", ""),
         "total": sum(row["count"] for row in rows),
         "sum": "", "standard": bool(spec.get("standard")), "groupBy": "kind", "chart": chart,
-        "capped": capped, "lineTotal": line_total, "reason": "", "rows": rows, "lines": page,
+        "capped": capped, "exportLimited": export_limited, "lineTotal": line_total, "reason": "", "rows": rows, "lines": page,
     }
 
 
@@ -4032,7 +4122,7 @@ def report_view(project_key, report_key, text, query=None):
     lines, filtered = lines_for_bucket(lines, keys, query)
     if filtered:
         capped = False
-    page, line_total, page_capped = report_line_page(lines, query, capped)
+    page, line_total, page_capped, export_limited = report_line_page(lines, query, capped)
     chart = spec.get("chart") or ("donut" if report_key == "status" else "bar")
     if spec.get("standard"):
         chart = stored_report_chart(project_key, report_key, chart)
@@ -4044,6 +4134,7 @@ def report_view(project_key, report_key, text, query=None):
         "groupBy": group,
         "chart": chart,
         "capped": page_capped,
+        "exportLimited": export_limited,
         "lineTotal": line_total,
         "reason": empty_reason(report_key, group, money, text, any_purchase) if not rows else "",
         "rows": rows,
@@ -4117,6 +4208,167 @@ def clock_span(raw):
             return ""
         return "@" + start + "-" + end
     return "@" + start
+
+
+def done_marks(raw):
+    marks = []
+    for part in str(raw or "").split(","):
+        piece = part.strip()
+        if piece.endswith(">done") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", piece[:-5]) and piece not in marks:
+            marks.append(piece)
+        if len(marks) >= 60:
+            break
+    return marks
+
+
+def keep_done(replacement, previous):
+    parts = [part for part in str(replacement or "").split(",") if part]
+    for mark in done_marks(previous):
+        if mark not in parts and len(parts) < 80:
+            parts.append(mark)
+    return ",".join(parts)
+
+
+def remember_done(moves, day):
+    text = str(day or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return moves or ""
+    return keep_done(moves, text + ">done")
+
+
+def relation_rows():
+    return STATE.setdefault("relations", [])
+
+
+def relations_for(asset_id):
+    rows = []
+    for row in relation_rows():
+        if row.get("fromId") == asset_id:
+            rows.append(relation_dto(row, STATE["assets"].get(row.get("toId")), "out"))
+        elif row.get("toId") == asset_id:
+            rows.append(relation_dto(row, STATE["assets"].get(row.get("fromId")), "in"))
+    rows.sort(key=lambda item: (item.get("type") or "", (item.get("name") or "").lower(), item["id"]))
+    return rows
+
+
+def relation_dto(row, target, direction="out"):
+    return {
+        "id": row["id"],
+        "fromId": row.get("fromId") or 0,
+        "toId": row.get("toId") or 0,
+        "type": row.get("type") or "",
+        "direction": direction,
+        "inbound": row.get("inbound") or "",
+        "objectKey": (target or {}).get("objectKey") or "",
+        "name": (target or {}).get("name") or "",
+        "projectKey": (target or {}).get("projectKey") or "",
+        "open": target is not None,
+        "attributes": [{"key": item.get("key") or "", "value": item.get("value") or ""} for item in (row.get("attributes") or [])],
+    }
+
+
+def link_type_key(raw):
+    value = str(raw or "").strip().lower()
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,31}", value):
+        return value
+    return ""
+
+
+def merge_link_attrs(stored, patch, skip_blank):
+    values = []
+    index = {}
+    for item in stored or []:
+        key = link_type_key(item.get("key"))
+        if not key or key in index:
+            continue
+        index[key] = len(values)
+        values.append({"key": key, "value": str(item.get("value") or "")[:200]})
+    if patch is None:
+        return values
+    for item in patch:
+        if not isinstance(item, dict):
+            continue
+        key = link_type_key(item.get("key"))
+        if not key:
+            continue
+        value = str(item.get("value") or "").replace("\n", " ").strip()[:200]
+        if not value:
+            if not skip_blank and key in index:
+                values.pop(index[key])
+                index = {row["key"]: at for at, row in enumerate(values)}
+            continue
+        if key in index:
+            values[index[key]]["value"] = value
+        elif len(values) < 12:
+            index[key] = len(values)
+            values.append({"key": key, "value": value})
+    return [row for row in values if row.get("value")]
+
+
+def add_relation(asset_id, body, text):
+    body = body or {}
+    source = STATE["assets"].get(asset_id)
+    if not source:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(asset_id):
+        return 400, {"message": text["asset-tree.error.peer.place"]}
+    try:
+        other_id = int(body.get("assetId") or 0)
+    except (TypeError, ValueError):
+        other_id = 0
+    if other_id <= 0:
+        return 400, {"message": text["asset-tree.error.peer.notFound"]}
+    if other_id == asset_id:
+        return 400, {"message": text["asset-tree.error.peer.self"]}
+    target = STATE["assets"].get(other_id)
+    if not target:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(other_id):
+        return 400, {"message": text["asset-tree.error.peer.place"]}
+    kind = link_type_key(body.get("type"))
+    if not kind:
+        return 400, {"message": text.get("asset-tree.error.link.type", "Type")}
+    if any(row.get("fromId") == asset_id and row.get("toId") == other_id and row.get("type") == kind for row in relation_rows()):
+        return 409, {"message": text.get("asset-tree.error.link.exists", "Exists")}
+    row_id = STATE.get("relation_seq") or 1
+    STATE["relation_seq"] = row_id + 1
+    row = {
+        "id": row_id, "fromId": asset_id, "toId": other_id, "type": kind,
+        "inbound": str(body.get("inbound") or "").replace("\n", " ").replace("\r", " ").strip()[:80],
+        "attributes": merge_link_attrs([], body.get("attributes") or [], True),
+    }
+    relation_rows().append(row)
+    return 201, relation_dto(row, target)
+
+
+def update_relation(asset_id, link_id, body, text):
+    body = body or {}
+    row = next((item for item in relation_rows() if item.get("id") == link_id and (item.get("fromId") == asset_id or item.get("toId") == asset_id)), None)
+    if not row or asset_id not in STATE["assets"]:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if "type" in body and body.get("type") is not None:
+        kind = link_type_key(body.get("type"))
+        if not kind:
+            return 400, {"message": text.get("asset-tree.error.link.type", "Type")}
+        if any(item.get("fromId") == row.get("fromId") and item.get("toId") == row.get("toId") and item.get("type") == kind and item.get("id") != link_id for item in relation_rows()):
+            return 409, {"message": text.get("asset-tree.error.link.exists", "Exists")}
+        row["type"] = kind
+    if body.get("inbound") is not None:
+        row["inbound"] = str(body.get("inbound") or "").replace("\n", " ").replace("\r", " ").strip()[:80]
+    if isinstance(body.get("attributes"), list):
+        skip = body.get("skipBlank") is not False
+        row["attributes"] = merge_link_attrs(row.get("attributes"), body.get("attributes"), skip)
+    outgoing = row.get("fromId") == asset_id
+    other_id = row.get("toId") if outgoing else row.get("fromId")
+    return 200, relation_dto(row, STATE["assets"].get(other_id), "out" if outgoing else "in")
+
+
+def delete_relation(asset_id, link_id, text):
+    before = list(relation_rows())
+    STATE["relations"] = [row for row in before if not (row.get("id") == link_id and (row.get("fromId") == asset_id or row.get("toId") == asset_id))]
+    if len(STATE["relations"]) == len(before):
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    return 204, None
 
 
 def clean_moves(raw):
@@ -4222,7 +4474,9 @@ def fill_plan(row, body, creating, project_key, text):
     if body.get("endTime") is not None or creating:
         row["endTime"] = (body.get("endTime") or "").strip()
     if body.get("moves") is not None or creating:
-        row["moves"] = clean_moves(body.get("moves"))
+        row["moves"] = keep_done(clean_moves(body.get("moves")), row.get("moves"))
+    if body.get("done") is True and row.get("everyUnit") != "once":
+        row["moves"] = remember_done(row.get("moves"), row.get("lastDone"))
     if not row.get("name") or not row.get("lastDone") or not row.get("everyUnit"):
         return text.get("asset-tree.error.service", "Schedule")
     return None
@@ -4865,8 +5119,11 @@ def report_sheet(view, text, used):
             minor = money_minor(detail)
             detail = book_decimal(minor) if minor is not None else detail
         lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
-    if view.get("capped"):
-        lines.append([text.get("asset-tree.ui.reportLinesCut", "The list stops at 5000 rows.")])
+    if view.get("exportLimited"):
+        note = text.get("asset-tree.ui.reportExportCut", "The file keeps the first {0} rows.")
+        lines.append([note.replace("{0}", str(REPORT_EXPORT_MAX))])
+    elif view.get("capped"):
+        lines.append([text.get("asset-tree.ui.reportLinesCut", "The list continues on the next page.")])
     return (sheet_title(view.get("title") or "Report", used), headers, lines)
 
 
@@ -5323,6 +5580,36 @@ def schema_route(project_key, schema_id, method, body, text):
         STATE["schemas"][project_key] = [item for item in rows if str(item.get("id")) != str(schema_id)]
         return 204, None
     return 404, {"message": text["asset-tree.error.notFound"]}
+
+
+def webhook_probe(project_key, body, text):
+    if project_key not in {item["key"] for item in PROJECTS}:
+        return 404, {"message": text["asset-tree.error.project.notFound"]}
+    url = ((body or {}).get("url") or "").strip()
+    if not (url.startswith("http://") or url.startswith("https://")) or len(url) > 500:
+        return 400, {"message": text.get("asset-tree.error.webhook", "Webhook")}
+    secret = ((body or {}).get("secret") or "").strip()[:80]
+    return 200, {"url": url, "secret": secret, "projectKey": project_key, "probe": True}
+
+
+def webhook_send(draft):
+    url = draft.get("url") or ""
+    secret = draft.get("secret") or ""
+    payload = json.dumps({"event": "webhook.test", "projectKey": draft.get("projectKey") or ""}).encode("utf-8")
+    request = urllib.request.Request(url, data=payload, method="POST")
+    request.add_header("Content-Type", "application/json; charset=UTF-8")
+    request.add_header("X-Asset-Tree-Event", "webhook.test")
+    if secret:
+        request.add_header("X-Asset-Tree-Token", secret)
+    status = 0
+    try:
+        with urllib.request.urlopen(request, timeout=4) as response:
+            status = getattr(response, "status", 200) or 200
+    except urllib.error.HTTPError as error:
+        status = error.code
+    except Exception:
+        status = 0
+    return 200, {"status": status, "ok": 200 <= status < 300}
 
 
 def webhook_route(project_key, webhook_id, method, body, text):
@@ -6831,6 +7118,8 @@ setTimeout(function () {
             with LOCK:
                 seed()
                 status, payload = self.api(method, path, query)
+            if isinstance(payload, dict) and payload.get("probe") and status == 200:
+                status, payload = webhook_send(payload)
             if status == 204:
                 self.send_response(204)
                 self.send_header("Content-Length", "0")
@@ -6959,6 +7248,9 @@ setTimeout(function () {
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemas(?:/(\d+))?", path)
         if match:
             return schema_route(match.group(1), match.group(2), method, self.read_json() if method == "POST" else None, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/webhooks/test", path)
+        if match and method == "POST":
+            return webhook_probe(match.group(1), self.read_json(), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/webhooks(?:/(\d+))?", path)
         if match:
             return webhook_route(match.group(1), match.group(2), method, self.read_json() if method == "POST" else None, text)
@@ -7360,6 +7652,14 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/move", path)
         if match and method == "POST":
             return self.move_asset(int(match.group(1)), self.read_json(), text)
+        match = re.fullmatch(r"/assets/(\d+)/links/(\d+)", path)
+        if match and method == "PUT":
+            return update_relation(int(match.group(1)), int(match.group(2)), self.read_json(), text)
+        if match and method == "DELETE":
+            return delete_relation(int(match.group(1)), int(match.group(2)), text)
+        match = re.fullmatch(r"/assets/(\d+)/links", path)
+        if match and method == "POST":
+            return add_relation(int(match.group(1)), self.read_json(), text)
         match = re.fullmatch(r"/assets/(\d+)/peers/search", path)
         if match and method == "GET":
             return search_peers(int(match.group(1)), (query.get("q") or [""])[0], text)

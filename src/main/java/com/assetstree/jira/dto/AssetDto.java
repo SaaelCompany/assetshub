@@ -35,6 +35,7 @@ public class AssetDto {
     private List<AttributeDto> attributes = new ArrayList<AttributeDto>();
     private List<IssueRefDto> issues;
     private List<AssetPeerDto> peers;
+    private List<AssetLinkDto> links;
     private List<CommentDto> comments;
     private List<FileDto> files;
     private List<UserProfileDto> shares;
@@ -257,6 +258,14 @@ public class AssetDto {
 
     public void setPeers(List<AssetPeerDto> peers) {
         this.peers = peers;
+    }
+
+    public List<AssetLinkDto> getLinks() {
+        return links;
+    }
+
+    public void setLinks(List<AssetLinkDto> links) {
+        this.links = links;
     }
 
     public List<CommentDto> getComments() {

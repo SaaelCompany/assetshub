@@ -1,0 +1,247 @@
+package com.assetstree.jira.model;
+
+import com.assetstree.jira.dto.AssetTypeDto;
+import com.assetstree.jira.dto.FieldDto;
+import com.assetstree.jira.dto.FlowGraphDto;
+import com.assetstree.jira.dto.FlowLinkDto;
+import com.assetstree.jira.dto.FlowNodeDto;
+import com.assetstree.jira.dto.ModuleSetupDto;
+
+import org.junit.Test;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+public class ProductRulesTest {
+    @Test
+    public void treeRejectsACycleAndCountsEquipmentUnderAPlace() {
+        assertNull(TreeLogic.normalizeParent(Integer.valueOf(0)));
+        assertTrue(TreeLogic.sameParent(Integer.valueOf(0), null));
+        Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+        parents.put(Integer.valueOf(5), Integer.valueOf(6));
+        parents.put(Integer.valueOf(6), Integer.valueOf(5));
+        assertTrue(TreeLogic.wouldCycle(parents, 5, Integer.valueOf(6)));
+        assertFalse(TreeLogic.wouldCycle(parents, 5, null));
+
+        Map<Integer, List<Integer>> children = new HashMap<Integer, List<Integer>>();
+        children.put(Integer.valueOf(1), Arrays.asList(Integer.valueOf(2), Integer.valueOf(3)));
+        children.put(Integer.valueOf(3), Collections.singletonList(Integer.valueOf(4)));
+        Set<Integer> places = new HashSet<Integer>();
+        places.add(Integer.valueOf(1));
+        places.add(Integer.valueOf(3));
+        Map<Integer, Integer> counts = TreeLogic.equipmentCounts(children, places);
+        assertEquals(Integer.valueOf(2), counts.get(Integer.valueOf(1)));
+        assertEquals(Integer.valueOf(1), counts.get(Integer.valueOf(3)));
+        assertEquals(Integer.valueOf(1), counts.get(Integer.valueOf(4)));
+        assertEquals("laptop", TreeLogic.slug("Laptop"));
+    }
+
+    @Test
+    public void reportsOnlyGrantDoesNotOpenTheTree() {
+        assertFalse(GrantCaps.has(GrantCaps.normalize("reports"), GrantCaps.VIEW));
+        assertTrue(GrantCaps.has(GrantCaps.normalize("view"), GrantCaps.MAP));
+        assertTrue(AccessScope.all().allowsType("printer", false));
+        AccessScope narrow = AccessScope.merge(
+                Collections.singletonList(new AccessScope.Slice("laptop", "", "serial:read")),
+                Collections.<String, Set<String>>emptyMap());
+        assertTrue(narrow.allowsType("laptop", false));
+        assertFalse(narrow.allowsType("printer", false));
+        assertEquals(AccessScope.READ, narrow.fieldMode("serial"));
+        assertEquals(AccessScope.HIDE, narrow.fieldMode("note"));
+    }
+
+    @Test
+    public void oneSetupKeyKeepsTheRestOfTheProjectRow() {
+        ModuleSetupDto stored = new ModuleSetupDto();
+        stored.setScheduleKinds("to|ТО,verify|Поверка");
+        stored.setMapWidth(Integer.valueOf(2400));
+        stored.setMapHeight(Integer.valueOf(1800));
+        stored.setFurniture("desk^\u0421\u0442\u043e\u043b^table,10,10,80,40");
+        stored.setStaffMarks("night|Ночь|4338ca|8,leave|Отпуск|d97706|0,trip|Командировка|0f766e|8");
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(stored));
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setMapWidth(Integer.valueOf(800));
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals(Integer.valueOf(800), merged.getMapWidth());
+        assertTrue(merged.getScheduleKinds().contains("to|"));
+        assertTrue(merged.getScheduleKinds().contains("verify|"));
+        assertTrue(merged.getFurniture().contains("desk"));
+        assertTrue(merged.getStaffMarks().contains("night|Ночь|4338ca|8|2"));
+        assertTrue(merged.getStaffMarks().contains("leave|Отпуск|d97706|0|0"));
+        assertTrue(merged.getStaffMarks().contains("trip|Командировка|0f766e|8|1"));
+        assertEquals(Integer.valueOf(1800), merged.getMapHeight());
+    }
+
+    @Test
+    public void timesheetDoublesNightAndSkipsLeave() {
+        assertEquals(2, TimesheetMath.factor("night", 8, null));
+        assertEquals(0, TimesheetMath.factor("leave", 0, null));
+        assertEquals(1, TimesheetMath.factor("trip", 8, null));
+        assertEquals(16, TimesheetMath.hours(8, 2));
+        assertEquals(0, TimesheetMath.hours(8, 0));
+        List<LocalDate[]> leave = new ArrayList<LocalDate[]>();
+        leave.add(new LocalDate[] { LocalDate.of(2026, 11, 2), LocalDate.of(2026, 11, 2) });
+        int[] tally = StaffCalendar.tally(31, 8, leave, 2026, 11);
+        assertEquals(20, tally[0]);
+        assertEquals(160, tally[1]);
+        assertEquals(1, tally[2]);
+    }
+
+    @Test
+    public void importWindowAndUnknownKeyStayPredictable() {
+        List<EquipmentSheet.Record> records = Arrays.asList(
+                new EquipmentSheet.Record(2, Collections.singletonList("a")),
+                new EquipmentSheet.Record(3, Collections.singletonList("b")));
+        EquipmentSheet.Sheet sheet = new EquipmentSheet.Sheet("Laptop", Collections.singletonList("Name"), records);
+        EquipmentExchange.Window window = EquipmentExchange.window(Collections.singletonList(sheet), 0, 1);
+        assertEquals(2, window.getTotal());
+        assertEquals(1, window.getNext());
+        assertFalse(window.isDone());
+        JsonImport.Item item = new JsonImport.Item(
+                "MISSING", "", "New", "laptop", "", "", "", "", null, false, Collections.<String, String>emptyMap());
+        JsonImport.Plan plan = JsonImport.plan(Collections.singletonList(item), Collections.<JsonImport.Existing>emptyList(),
+                Collections.<EquipmentExchange.Node>emptyList(), Collections.<EquipmentExchange.TypeRef>emptyList(),
+                Collections.<EquipmentExchange.Named>emptyList(), "in_use", true, blankPeople());
+        assertEquals("asset-tree.error.import.key", plan.getIssues().get(0).getMessageKey());
+    }
+
+    @Test
+    public void statusProcessFollowsADirectLineAndARequestStatus() {
+        FlowGraphDto direct = graph(
+                node("req1", FlowGraph.REQUEST, "100", "", ""),
+                node("sta1", FlowGraph.STATUS, "", "", "repair"),
+                link("req1", "sta1"));
+        assertEquals("repair", FlowGraph.equipmentStatus(direct, "100", "5", false));
+        assertNull(FlowGraph.equipmentStatus(direct, "100", "5", true));
+
+        FlowGraphDto chained = graph(
+                node("req1", FlowGraph.REQUEST, "100", "", ""),
+                node("iss1", FlowGraph.ISSUE, "", "5", ""),
+                node("sta1", FlowGraph.STATUS, "", "", "repair"),
+                link("req1", "iss1"),
+                link("iss1", "sta1"));
+        assertEquals("repair", FlowGraph.equipmentStatus(chained, "100", "5", true));
+        assertNull(FlowGraph.equipmentStatus(chained, "100", "5", false));
+        assertNull(FlowGraph.equipmentStatus(new FlowGraphDto(), "100", "5", false));
+    }
+
+    @Test
+    public void typedLinkKeepsAttributesAndFinishedDaysStayOnTheCalendar() {
+        assertEquals("part", LinkRules.typeKey("Part"));
+        assertEquals("", LinkRules.typeKey("входит"));
+        List<LinkRules.Attr> patch = Collections.singletonList(new LinkRules.Attr("slot", ""));
+        String kept = LinkRules.merge("slot=A1\nport=3", patch, true);
+        assertTrue(kept.contains("slot=A1"));
+        assertTrue(kept.contains("port=3"));
+        String cleared = LinkRules.merge(kept, patch, false);
+        assertFalse(cleared.contains("slot="));
+        assertTrue(cleared.contains("port=3"));
+        String moves = ServiceDue.rememberDone("2026-11-01>2026-11-02", "2026-11-01");
+        assertTrue(moves.contains("2026-11-01>done"));
+        assertTrue(moves.contains("2026-11-01>2026-11-02"));
+        String replaced = ServiceDue.keepDone("2026-11-08>2026-11-09", moves);
+        assertTrue(replaced.contains("2026-11-01>done"));
+        assertTrue(replaced.contains("2026-11-08>2026-11-09"));
+    }
+
+    private static EquipmentExchange.Directory blankPeople() {
+        return new EquipmentExchange.Directory() {
+            @Override
+            public EquipmentExchange.Person find(String raw) {
+                return EquipmentExchange.Person.blank();
+            }
+        };
+    }
+
+    private static FlowGraphDto graph(Object... parts) {
+        FlowGraphDto graph = new FlowGraphDto();
+        for (Object part : parts) {
+            if (part instanceof FlowNodeDto) {
+                graph.getNodes().add((FlowNodeDto) part);
+            } else if (part instanceof FlowLinkDto) {
+                graph.getLinks().add((FlowLinkDto) part);
+            }
+        }
+        return graph;
+    }
+
+    private static FlowNodeDto node(String id, String kind, String issueTypeId, String issueStatusId, String statusKey) {
+        FlowNodeDto node = new FlowNodeDto();
+        node.setId(id);
+        node.setKind(kind);
+        node.setIssueTypeId(issueTypeId);
+        node.setIssueStatusId(issueStatusId);
+        node.setStatusKey(statusKey);
+        return node;
+    }
+
+    @Test
+    public void subtypeKeepsParentFieldsUntilItsOwnKeyReplacesThem() {
+        AssetTypeDto parent = typeDto("laptop", "\u041d\u043e\u0443\u0442\u0431\u0443\u043a", "");
+        parent.setFields(Arrays.asList(fieldDto("serial", "\u0421\u0435\u0440\u0438\u0439\u043d\u044b\u0439"), fieldDto("model", "\u041c\u043e\u0434\u0435\u043b\u044c")));
+        AssetTypeDto child = typeDto("thin", "\u0423\u043b\u044c\u0442\u0440\u0430\u0431\u0443\u043a", "laptop");
+        child.setFields(new ArrayList<FieldDto>(Collections.singletonList(fieldDto("model", "\u0421\u0432\u043e\u044f"))));
+        FieldInheritance.apply(Arrays.asList(parent, child));
+        assertEquals(2, child.getFields().size());
+        assertTrue(child.getFields().get(0).isInherited());
+        assertEquals("serial", child.getFields().get(0).getFieldKey());
+        assertEquals("\u041d\u043e\u0443\u0442\u0431\u0443\u043a", child.getFields().get(0).getInheritedFrom());
+        assertFalse(child.getFields().get(1).isInherited());
+        assertEquals("\u0421\u0432\u043e\u044f", child.getFields().get(1).getLabel());
+        assertFalse(parent.getFields().get(0).isInherited());
+        FieldInheritance.apply(Arrays.asList(parent, child));
+        assertEquals(2, child.getFields().size());
+        assertTrue(child.getFields().get(0).isInherited());
+    }
+
+    @Test
+    public void exportKeepsFiftyThousandRows() {
+        assertFalse(ReportLines.cutsExport(50000));
+        assertTrue(ReportLines.cutsExport(50001));
+        assertEquals(300, ReportLines.PAGE);
+        assertEquals(50000, ReportLines.EXPORT_MAX);
+    }
+
+    @Test
+    public void inboundPhraseReplacesTheDefaultOnTheWayIn() {
+        assertEquals("linkIncludes", LinkRules.shownPhrase(LinkRules.PART, true, ""));
+        assertEquals("linkPart", LinkRules.shownPhrase(LinkRules.PART, false, "\u0432\u043a\u043b\u044e\u0447\u0430\u0435\u0442"));
+        assertEquals("\u043d\u0435\u0441\u0451\u0442", LinkRules.shownPhrase(LinkRules.INSTALLED, true, "\u043d\u0435\u0441\u0451\u0442"));
+        assertEquals(80, LinkRules.inbound(new String(new char[90]).replace('\0', 'a')).length());
+    }
+
+    private static AssetTypeDto typeDto(String key, String label, String parent) {
+        AssetTypeDto type = new AssetTypeDto();
+        type.setTypeKey(key);
+        type.setLabel(label);
+        type.setParentTypeKey(parent);
+        return type;
+    }
+
+    private static FieldDto fieldDto(String key, String label) {
+        FieldDto field = new FieldDto();
+        field.setFieldKey(key);
+        field.setLabel(label);
+        field.setKind("text");
+        return field;
+    }
+
+    private static FlowLinkDto link(String from, String to) {
+        FlowLinkDto link = new FlowLinkDto();
+        link.setFrom(from);
+        link.setTo(to);
+        return link;
+    }
+}

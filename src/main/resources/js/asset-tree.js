@@ -416,6 +416,7 @@
         focusSearch: String(app.getAttribute('data-view') || '').toLowerCase() === 'search',
         loading: true,
         error: null,
+        treeError: null,
         draggingId: null,
         busy: false,
         report: null,
@@ -3954,6 +3955,7 @@
             print: 'M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z',
             copy: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z',
             link: 'M3.9 12a5 5 0 0 1 5-5h4v2h-4a3 3 0 0 0 0 6h4v2h-4a5 5 0 0 1-5-5zm6.1-1h4v2h-4v-2zm5.1-4h4a5 5 0 0 1 0 10h-4v-2h4a3 3 0 0 0 0-6h-4V7z',
+            lock: 'M17 10h-1V8a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm-7-2a2 2 0 0 1 4 0v2h-4V8zm7 11H7v-7h10v7z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
             trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 7h12l-1 14H7L6 7z',
             cloud: 'M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 8.6 3.5 3.5 0 0 0 7 18z',
@@ -7858,6 +7860,7 @@
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
         aside.appendChild(peerBlock(asset));
+        aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
         form.appendChild(main);
@@ -8012,6 +8015,7 @@
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
         if (!placePage) aside.appendChild(peerBlock(asset));
+        if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
             ? state.types.map(function (type) { return { value: type.typeKey, label: type.label }; })
@@ -8276,6 +8280,235 @@
             });
         }
         return moduleBlock(t('peers'), body);
+    }
+
+    function linkPhrase(link) {
+        var type = link && link.type;
+        var incoming = !!(link && link.direction === 'in');
+        if (incoming && link.inbound) return link.inbound;
+        if (type === 'part') return incoming ? t('linkIncludes') : t('linkPart');
+        if (type === 'depends') return incoming ? t('linkNeeded') : t('linkDepends');
+        if (type === 'installed') return incoming ? t('linkCarries') : t('linkInstalled');
+        return type || '';
+    }
+
+    function linkOtherId(link) {
+        if (link && link.direction === 'in') return link.fromId;
+        return link ? link.toId : 0;
+    }
+
+    function linkRow(asset, link) {
+        var block = el('div', 'asset-tree-peer' + (link.open ? '' : ' is-locked'));
+        var line = el('div', 'asset-tree-peer-line');
+        line.appendChild(el('span', 'asset-tree-link-type', linkPhrase(link)));
+        var caption = (link.name || link.objectKey || '') + (link.objectKey ? ' · ' + link.objectKey : '');
+        var otherId = linkOtherId(link);
+        if (link.open && otherId) {
+            line.appendChild(button(caption, 'asset-tree-linkish', function () {
+                goToAsset(link.projectKey, otherId);
+            }));
+        } else {
+            line.appendChild(el('span', 'asset-tree-peer-name', caption));
+        }
+        if (mayEdit(asset)) {
+            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                ajax('DELETE', '/assets/' + asset.id + '/links/' + link.id, null, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            remove.setAttribute('aria-label', t('unlink'));
+            line.appendChild(remove);
+        }
+        block.appendChild(line);
+        var attrs = link.attributes || [];
+        if (attrs.length) {
+            var meta = el('p', 'asset-tree-hint');
+            meta.textContent = attrs.map(function (item) {
+                return (item.key || '') + ': ' + (item.value || '');
+            }).join(' · ');
+            block.appendChild(meta);
+        }
+        return block;
+    }
+
+    function linkForm(asset) {
+        var box = el('div', 'asset-tree-link-form');
+        var type = document.createElement('select');
+        type.className = 'asset-tree-filter';
+        [['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = t(pair[1]);
+            type.appendChild(option);
+        });
+        var custom = el('input');
+        custom.type = 'text';
+        custom.placeholder = t('linkTypeKey');
+        custom.hidden = true;
+        type.addEventListener('change', function () {
+            custom.hidden = type.value !== 'custom';
+        });
+        var attrKey = el('input');
+        attrKey.type = 'text';
+        attrKey.placeholder = t('linkAttr');
+        var attrValue = el('input');
+        attrValue.type = 'text';
+        attrValue.placeholder = t('linkAttrValue');
+        var inbound = el('input');
+        inbound.type = 'text';
+        inbound.placeholder = t('linkInbound');
+        inbound.title = t('linkInboundHint');
+        var search = el('input');
+        search.type = 'search';
+        search.placeholder = t('peerSearch');
+        var results = el('div', 'asset-tree-user-results');
+        var timer = null;
+        var seq = 0;
+        function chosenType() {
+            if (type.value !== 'custom') return type.value;
+            return (custom.value || '').trim().toLowerCase();
+        }
+        search.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var query = search.value.trim();
+                var token = ++seq;
+                results.innerHTML = '';
+                if (query.length < 2) return;
+                ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                    if (token !== seq || search.value.trim() !== query) return;
+                    results.innerHTML = '';
+                    if (status !== 200) {
+                        results.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
+                        return;
+                    }
+                    if (!payload || !payload.length) {
+                        results.appendChild(el('p', 'asset-tree-hint', t('noResults')));
+                        return;
+                    }
+                    payload.forEach(function (peer) {
+                        results.appendChild(button((peer.name || peer.objectKey || '') + (peer.objectKey ? ' · ' + peer.objectKey : ''), 'asset-tree-user-hit', function () {
+                            var body = { assetId: peer.id, type: chosenType(), inbound: (inbound.value || '').trim(), attributes: [] };
+                            var key = (attrKey.value || '').trim();
+                            var value = (attrValue.value || '').trim();
+                            if (key && value) body.attributes.push({ key: key, value: value });
+                            ajax('POST', '/assets/' + asset.id + '/links', body, function (st, answer) {
+                                if (st >= 200 && st < 300) {
+                                    notify(t('linkAdded'));
+                                    selectAsset(asset.id, true);
+                                } else {
+                                    setFormError((answer && answer.message) || t('errorTitle'));
+                                }
+                            });
+                        }));
+                    });
+                });
+            }, 220);
+        });
+        box.appendChild(type);
+        box.appendChild(custom);
+        box.appendChild(attrKey);
+        box.appendChild(attrValue);
+        box.appendChild(inbound);
+        box.appendChild(search);
+        box.appendChild(results);
+        return box;
+    }
+
+    function linkBlock(asset) {
+        var body = el('div');
+        body.appendChild(el('p', 'asset-tree-hint', t('linksHint')));
+        if (mayEdit(asset)) body.appendChild(linkForm(asset));
+        if (asset.links == null) {
+            body.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        } else if (!asset.links.length) {
+            body.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
+        } else {
+            var graph = linkGraph(asset);
+            if (graph) body.appendChild(graph);
+            asset.links.forEach(function (link) {
+                body.appendChild(linkRow(asset, link));
+            });
+        }
+        return moduleBlock(t('links'), body);
+    }
+
+    function linkGraph(asset) {
+        var links = asset.links || [];
+        if (!links.length) return null;
+        var box = el('div', 'asset-tree-link-graph');
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        var count = links.length;
+        var width = 230;
+        var row = 36;
+        var height = 8 + count * row;
+        svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+        svg.setAttribute('class', 'asset-tree-link-svg');
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', t('linkGraph'));
+        var hx = 86;
+        var hy = height / 2;
+        var selfName = asset.name || asset.objectKey || '';
+        if (selfName.length > 12) selfName = selfName.substring(0, 11) + '\u2026';
+        for (var i = 0; i < count; i++) {
+            var y = 8 + row / 2 + i * row;
+            var edge = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            edge.setAttribute('x1', String(hx + 8));
+            edge.setAttribute('y1', String(hy));
+            edge.setAttribute('x2', '128');
+            edge.setAttribute('y2', String(y));
+            edge.setAttribute('class', 'asset-tree-link-edge');
+            svg.appendChild(edge);
+            var phrase = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            phrase.setAttribute('x', '108');
+            phrase.setAttribute('y', String(y - 7));
+            phrase.setAttribute('class', 'asset-tree-link-edge-label');
+            phrase.textContent = linkPhrase(links[i]);
+            svg.appendChild(phrase);
+            var node = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', '136');
+            circle.setAttribute('cy', String(y));
+            circle.setAttribute('r', '5');
+            circle.setAttribute('class', 'asset-tree-link-node');
+            node.appendChild(circle);
+            var name = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            name.setAttribute('x', '148');
+            name.setAttribute('y', String(y + 4));
+            name.setAttribute('class', 'asset-tree-link-node-label');
+            var caption = links[i].name || links[i].objectKey || '';
+            if (caption.length > 14) caption = caption.substring(0, 13) + '\u2026';
+            name.textContent = caption;
+            node.appendChild(name);
+            var otherId = linkOtherId(links[i]);
+            if (links[i].open && otherId) {
+                node.style.cursor = 'pointer';
+                (function (projectKey, id) {
+                    node.addEventListener('click', function () {
+                        goToAsset(projectKey, id);
+                    });
+                })(links[i].projectKey, otherId);
+            }
+            svg.appendChild(node);
+        }
+        var hub = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        var hubCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        hubCircle.setAttribute('cx', String(hx));
+        hubCircle.setAttribute('cy', String(hy));
+        hubCircle.setAttribute('r', '6');
+        hubCircle.setAttribute('class', 'asset-tree-link-hub');
+        hub.appendChild(hubCircle);
+        var hubText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        hubText.setAttribute('x', '4');
+        hubText.setAttribute('y', String(hy + 4));
+        hubText.setAttribute('class', 'asset-tree-link-hub-label');
+        hubText.textContent = selfName;
+        hub.appendChild(hubText);
+        svg.appendChild(hub);
+        box.appendChild(svg);
+        return box;
     }
 
     function issueRow(assetId, issue) {
@@ -9625,11 +9858,11 @@
             pick.appendChild(typeTile(type, 'sm'));
             pick.appendChild(el('span', 'asset-tree-type-name', type.label || ''));
             if (parentType) {
-                var mark = el('span', 'asset-tree-key', parentType.label || '');
+                var mark = el('span', 'asset-tree-subtype-mark', parentType.label || '');
                 mark.title = t('subtypeOf', parentType.label || '');
                 pick.appendChild(mark);
             }
-            var count = el('span', 'asset-tree-key', String((type.fields || []).length));
+            var count = el('span', 'asset-tree-type-count', String((type.fields || []).length));
             count.title = t('schemaFieldCount', (type.fields || []).length);
             pick.appendChild(count);
             if (state.canConfigure) {
@@ -9667,10 +9900,11 @@
         var wrap = el('div', 'asset-tree-type-detail');
         var head = el('div', 'asset-tree-type-head');
         var title = el('div', 'asset-tree-type-title');
+        var parentType = parentKeyOf(type) ? typeByKey(parentKeyOf(type)) : null;
         title.appendChild(typeTile(type, 'lg'));
         title.appendChild(el('h3', null, type.label || ''));
+        if (parentType) title.appendChild(el('span', 'asset-tree-inherit-badge', t('subtypeOf', parentType.label || parentType.typeKey)));
         head.appendChild(title);
-        var parentType = parentKeyOf(type) ? typeByKey(parentKeyOf(type)) : null;
         var meta = type.systemType ? t('systemType') : t('schemaFieldCount', (type.fields || []).length);
         if (!type.systemType && type.assetCount) meta += ' · ' + type.assetCount;
         head.appendChild(el('span', 'asset-tree-key', meta));
@@ -9686,7 +9920,6 @@
             }));
         }
         wrap.appendChild(head);
-        if (parentType) wrap.appendChild(el('p', 'asset-tree-hint', t('subtypeOf', parentType.label || parentType.typeKey)));
         if (state.canConfigure) {
             var look = el('div', 'asset-tree-appearance');
             var saveLook = function (patch) {
@@ -9706,7 +9939,7 @@
             look.appendChild(field(t('icon'), icons, true));
             look.appendChild(el('p', 'asset-tree-hint', t('iconHint')));
             if (!type.location && !subtypesOf(type.typeKey).length) {
-                var parentSelect = el('select');
+                var parentSelect = el('select', 'asset-tree-text');
                 var none = el('option', null, t('parentTypeNone'));
                 none.value = '';
                 parentSelect.appendChild(none);
@@ -9795,7 +10028,9 @@
         }
         wrap.appendChild(fieldTools);
         var fields = el('div', 'asset-tree-schema-scroll asset-tree-field-list');
-        var fieldOrder = (type.fields || []).map(function (fieldDef) { return fieldDef.fieldKey; });
+        var fieldOrder = (type.fields || []).filter(function (fieldDef) {
+            return fieldDef && !fieldDef.inherited;
+        }).map(function (fieldDef) { return fieldDef.fieldKey; });
         function reorderFields(movingKey, targetKey, after) {
             if (!movingKey || movingKey === targetKey) return;
             var next = fieldOrder.filter(function (key) { return key !== movingKey; });
@@ -9818,10 +10053,11 @@
             return false;
         }
         (type.fields || []).forEach(function (fieldDef) {
-            var fieldRow = el('div', 'asset-tree-type-field' + (state.canConfigure ? ' is-editable' : ''));
+            var inherited = !!fieldDef.inherited;
+            var fieldRow = el('div', 'asset-tree-type-field' + (!inherited && state.canConfigure ? ' is-editable' : '') + (inherited ? ' is-inherited' : ''));
             fieldRow.setAttribute('data-name', fieldDef.label || '');
             fieldRow.setAttribute('data-field', fieldDef.fieldKey);
-            if (state.canConfigure) {
+            if (state.canConfigure && !inherited) {
                 fieldRow.draggable = true;
                 var grip = el('span', 'asset-tree-field-grip', '\u2807');
                 grip.title = t('fieldDragHint');
@@ -9876,20 +10112,30 @@
                     reorderFields(moving, fieldDef.fieldKey, after);
                 });
             }
+            if (inherited) {
+                var lock = el('span', 'asset-tree-field-grip is-locked');
+                lock.title = t('fieldInherited', fieldDef.inheritedFrom || '');
+                lock.appendChild(toolIcon('lock'));
+                fieldRow.appendChild(lock);
+            }
             fieldRow.appendChild(el('span', 'asset-tree-field-label', fieldDef.label));
-            fieldRow.appendChild(el('span', 'asset-tree-key', kindLabel(fieldDef.kind) + (fieldDef.required ? ' · ' + t('requiredMark') : '')));
-            if (state.canConfigure) {
+            var fieldKind = kindLabel(fieldDef.kind) + (fieldDef.required ? ' · ' + t('requiredMark') : '');
+            fieldRow.appendChild(el('span', 'asset-tree-key', fieldKind));
+            if (inherited) fieldRow.appendChild(el('span', 'asset-tree-inherit-badge', t('fieldInherited', fieldDef.inheritedFrom || '')));
+            if (state.canConfigure && !inherited) {
+                var actions = el('div', 'asset-tree-field-actions');
                 var editField = button(t('editField'), 'asset-tree-btn', function () {
                     openFieldModal(type, null, fieldDef);
                 });
                 editField.title = t('editFieldTitle');
-                fieldRow.appendChild(editField);
-                fieldRow.appendChild(button(t('deleteField'), 'asset-tree-btn', function () {
+                actions.appendChild(editField);
+                actions.appendChild(button(t('deleteField'), 'asset-tree-btn', function () {
                     ajax('DELETE', '/types/' + encodeURIComponent(type.typeKey) + '/fields/' + encodeURIComponent(fieldDef.fieldKey), null, function (status, payload) {
                         if (status >= 200 && status < 300) refreshSchema();
                         else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
+                fieldRow.appendChild(actions);
             }
             fields.appendChild(fieldRow);
             fieldRows.push(fieldRow);
@@ -9906,7 +10152,7 @@
     function typeCreateForm() {
         var form = el('form', 'asset-tree-type-create');
         form.appendChild(field(t('typeLabel'), input('type-label', '', false), true));
-        var parentSelect = el('select');
+        var parentSelect = el('select', 'asset-tree-text');
         parentSelect.id = 'type-parent';
         var noneParent = el('option', null, t('parentTypeNone'));
         noneParent.value = '';
@@ -10065,6 +10311,11 @@
         state.moduleDialog = '';
     }
 
+    function appendTreeError(panel) {
+        if (!panel || !state.treeError) return;
+        panel.appendChild(el('p', 'asset-tree-banner', state.treeError));
+    }
+
     function reloadTree(done) {
         var key = state.projectKey;
         var token = ++treeToken;
@@ -10075,10 +10326,21 @@
             if (status !== 200) {
                 state.treeReady = false;
                 state.loading = false;
-                state.error = (payload && payload.message) || t('errorTitle');
+                var message = (payload && payload.message) || t('errorTitle');
+                if (state.view === 'settings' || state.view === 'reports' || state.view === 'map' || state.view === 'schedules') {
+                    state.treeError = message;
+                    state.error = null;
+                    if (done) done();
+                    else renderFrame();
+                    return;
+                }
+                state.treeError = null;
+                state.error = message;
                 renderFrame();
                 return;
             }
+            state.treeError = null;
+            state.error = null;
             state.treeReady = true;
             state.assets = payload.assets || [];
             state.types = payload.types || [];
@@ -12982,6 +13244,7 @@
 
     function renderSettings() {
         var panel = el('section', 'asset-tree-report');
+        appendTreeError(panel);
         var project = currentProject();
         var name = project ? (project.name || project.key) : state.projectKey;
         panel.appendChild(el('h2', null, t('settingsProject', name)));
@@ -13301,7 +13564,37 @@
             cursor = planNextDate(isoDate(cursor), count, unit);
             seen++;
         }
-        return movedDates(plan, found, year, month);
+        return rememberCompleted(plan, movedDates(plan, found, year, month), year, month);
+    }
+
+    function doneSources(plan) {
+        var dates = [];
+        String(plan && plan.moves || '').split(',').forEach(function (part) {
+            var at = part.indexOf('>');
+            if (at < 1 || part.slice(at + 1) !== 'done') return;
+            var source = part.slice(0, at);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(source) && dates.indexOf(source) < 0) dates.push(source);
+        });
+        if (plan && plan.completedOn && plan.lastDone && plan.everyUnit && plan.everyUnit !== 'once' && dates.indexOf(plan.lastDone) < 0) {
+            dates.push(plan.lastDone);
+        }
+        return dates;
+    }
+
+    function rememberCompleted(plan, found, year, month) {
+        var dates = found || [];
+        doneSources(plan).forEach(function (source) {
+            var parsed = parseIsoDate(source);
+            if (!parsed || parsed.getFullYear() !== year || parsed.getMonth() + 1 !== month) return;
+            if (dates.indexOf(source) < 0) dates.push(source);
+        });
+        return dates;
+    }
+
+    function occurrenceDone(plan, iso) {
+        if (!plan || !iso) return false;
+        if (plan.completed) return true;
+        return doneSources(plan).indexOf(iso) >= 0;
     }
 
     function planMoveMap(plan) {
@@ -13580,6 +13873,14 @@
         });
     }
 
+    function scheduleHasOverdue() {
+        var rows = state.scheduleRows || [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i] && rows[i].due) return true;
+        }
+        return false;
+    }
+
     function scheduleVisible(plan) {
         if (state.scheduleKindFilter && plan.kind !== state.scheduleKindFilter) return false;
         if (state.schedulePersonFilter === '__none__') return !plan.assigneeKey;
@@ -13702,12 +14003,14 @@
         if (rosterOn() && !boards.roster) state.scheduleBoard = 'calendar';
         if (!rosterOn() && !boards.calendar) state.scheduleBoard = 'roster';
         var panel = el('section', 'asset-tree-sheet asset-tree-board');
+        appendTreeError(panel);
         if (state.scheduleRows == null) {
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadSchedules();
             return panel;
         }
         if (state.scheduleError) panel.appendChild(el('p', 'asset-tree-hint', state.scheduleError));
+        if (scheduleHasOverdue()) panel.appendChild(el('p', 'asset-tree-overdue', t('schedulesOverdue')));
         panel.appendChild(scheduleBoardHead());
         if (rosterOn()) {
             panel.appendChild(el('p', 'asset-tree-hint', t('staffHint')));
@@ -14339,7 +14642,7 @@
     function scheduleEventCard(plan, iso, onClock) {
         var focused = state.scheduleFocusAsset && plan.assetId === state.scheduleFocusAsset;
         var source = seriesSource(plan, iso);
-        var done = !!plan.completed;
+        var done = occurrenceDone(plan, iso);
         var due = occurrenceIsDue(plan, iso);
         var card = button('', 'asset-tree-event' + (done ? ' is-done' : '') + (due ? ' is-due' : '') + (focused ? ' is-focus' : ''), function () {
             if (state.scheduleSuppressClick) {
@@ -14355,6 +14658,7 @@
         var meta = kindName(plan.kind);
         var clock = occurrenceClock(plan, iso);
         if (clock.start) meta = clock.start + (clock.end ? '–' + clock.end : '') + ' · ' + meta;
+        if (done) meta += ' · ' + t('serviceMarked');
         if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
         if (plan.assetId) {
             var placeName = assetPlaceName(byId()[plan.assetId]);
@@ -18383,6 +18687,7 @@
                     full.lines = payload.lines || [];
                     full.lineTotal = payload.lineTotal || full.lines.length;
                     full.capped = !!payload.capped;
+                    full.exportLimited = !!payload.exportLimited;
                     full.linesComplete = true;
                     downloadReport(full);
                 } else notify((payload && payload.message) || t('errorTitle'));
@@ -18414,7 +18719,8 @@
         totalCells.push(csvCell(shareTotal ? '100 %' : '0 %'));
         rows.push(totalCells.join(';'));
         if (!(view.rows || []).length) rows.push(csvCell(view.reason || t('reportEmptyLines')));
-        if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
+        if (view.exportLimited) rows.push(csvCell(t('reportExportCut', '50000')));
+        else if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
         if (view.lines && view.lines.length) {
             rows.push('');
             var detailHead = money ? t('lifeBook') : detailWord(view.groupBy);
@@ -18912,6 +19218,7 @@
 
     function renderReports() {
         var panel = el('section', 'asset-tree-sheet');
+        appendTreeError(panel);
         panel.appendChild(el('p', 'asset-tree-hint', t('reportPageHint')));
         if (moduleOn('life')) panel.appendChild(forecastNote());
         paintReportTools();
@@ -20836,6 +21143,7 @@
 
     function renderMap() {
         var panel = el('section', 'asset-tree-floorplan');
+        appendTreeError(panel);
         if (state.floors == null) {
             panel.appendChild(mapTopBar([]));
             panel.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -25572,7 +25880,9 @@
     }
 
     function renderExchangeSettings(panel) {
-        var block = el('div', 'asset-tree-settings-block');
+        var stack = el('div', 'asset-tree-project-stack');
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('exchangeSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('exchangeHint')));
         var file = el('input', 'asset-tree-import-file');
         file.type = 'file';
@@ -25672,56 +25982,43 @@
                 block.appendChild(list);
             }
         }
-        panel.appendChild(block);
-        panel.appendChild(webhookSettings());
+        stack.appendChild(block);
+        stack.appendChild(webhookSettings());
+        panel.appendChild(stack);
+    }
+
+    function freshSecret() {
+        var alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        var value = '';
+        for (var i = 0; i < 24; i++) value += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+        return value;
+    }
+
+    function settingField(label, control) {
+        var field = el('label', 'asset-tree-key-field wide');
+        field.appendChild(el('span', null, label));
+        field.appendChild(control);
+        return field;
+    }
+
+    function textControl(placeholder) {
+        var node = el('input', 'asset-tree-text');
+        node.type = 'text';
+        node.autocomplete = 'off';
+        node.spellcheck = false;
+        node.placeholder = placeholder || '';
+        return node;
     }
 
     function webhookSettings() {
-        var block = el('div', 'asset-tree-settings-block');
-        block.appendChild(el('p', 'asset-tree-hint', t('webhookHint')));
-        if (state.webhooks === null) {
-            state.webhooks = [];
-            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', null, function (status, payload) {
-                state.webhooks = status === 200 ? (payload || []) : [];
-                if (state.view === 'settings') renderFrame();
-            });
-        }
-        (state.webhooks || []).forEach(function (hook) {
-            var line = el('div', 'asset-tree-grant');
-            line.appendChild(el('strong', null, hook.url || ''));
-            line.appendChild(el('span', null, hook.events || t('webhookEvents')));
-            line.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks/' + hook.id, null, function (status) {
-                    if (status >= 200 && status < 300) {
-                        state.webhooks = (state.webhooks || []).filter(function (item) { return item.id !== hook.id; });
-                        renderFrame();
-                    }
-                });
-            }));
-            block.appendChild(line);
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('webhookRecipeTitle')));
+        block.appendChild(el('p', 'asset-tree-hint', t('automationPlain')));
+        var steps = el('ol', 'asset-tree-automation-steps');
+        [t('automationLink'), t('automationComment'), t('automationTrigger'), t('automationStatus')].forEach(function (line) {
+            steps.appendChild(el('li', null, line));
         });
-        var url = document.createElement('input');
-        url.placeholder = t('webhookUrl');
-        var events = document.createElement('input');
-        events.placeholder = t('webhookEvents');
-        var secret = document.createElement('input');
-        secret.placeholder = 'token';
-        block.appendChild(url);
-        block.appendChild(events);
-        block.appendChild(secret);
-        block.appendChild(button(t('webhookSave'), 'asset-tree-btn primary', function () {
-            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/webhooks', {
-                url: url.value.trim(),
-                events: events.value.trim(),
-                secret: secret.value.trim(),
-                enabled: true
-            }, function (status, payload) {
-                if (status >= 200 && status < 300 && payload) {
-                    state.webhooks = (state.webhooks || []).concat([payload]);
-                    renderFrame();
-                } else notify((payload && payload.message) || t('errorTitle'));
-            });
-        }));
+        block.appendChild(steps);
         return block;
     }
 
@@ -26704,31 +27001,196 @@
         panel.appendChild(block);
     }
 
+    function equipmentTypes() {
+        return (state.types || []).filter(function (type) {
+            return type && !type.location;
+        });
+    }
+
+    function typeLabelOf(key) {
+        var type = typeByKey(key);
+        return type ? (type.label || key) : key;
+    }
+
+    function schemaByName(name) {
+        var found = null;
+        (state.schemas || []).forEach(function (schema) {
+            if (schema && schema.name === name) found = schema;
+        });
+        return found;
+    }
+
+    function typeTickList(chosen, onToggle) {
+        var list = el('div', 'asset-tree-type-ticks');
+        equipmentTypes().forEach(function (type) {
+            var label = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = !!chosen[type.typeKey];
+            box.addEventListener('change', function () {
+                onToggle(type.typeKey, box.checked);
+            });
+            label.appendChild(box);
+            label.appendChild(document.createTextNode(type.label || type.typeKey));
+            list.appendChild(label);
+        });
+        return list;
+    }
+
     function scopeEditor(grant, onSave) {
-        var box = el('div', 'asset-tree-scope');
-        var types = document.createElement('input');
-        types.value = (grant && grant.typeScope) || '';
-        types.placeholder = t('scopeTypes');
-        var schema = document.createElement('input');
-        schema.value = (grant && grant.schemaName) || '';
-        schema.placeholder = t('scopeSchema');
-        var fields = document.createElement('input');
-        fields.value = (grant && grant.fieldScope) || '';
-        fields.placeholder = t('scopeFields');
-        function read() {
-            return { typeScope: types.value.trim(), schemaName: schema.value.trim(), fieldScope: fields.value.trim() };
+        var box = el('div', 'asset-tree-scope-plain');
+        var followed = (grant && grant.schemaName) || '';
+        var chosen = {};
+        var allTypes = !followed && !((grant && grant.typeScope) || '').trim();
+        if (followed) {
+            var set = schemaByName(followed);
+            ((set && set.typeKeys) || []).forEach(function (key) { chosen[key] = true; });
+        } else if (!allTypes) {
+            String(grant.typeScope || '').split(',').forEach(function (key) {
+                var clean = key.replace(/^\s+|\s+$/g, '');
+                if (clean) chosen[clean] = true;
+            });
         }
-        types.addEventListener('change', function () { onSave(read()); });
-        schema.addEventListener('change', function () { onSave(read()); });
-        fields.addEventListener('change', function () { onSave(read()); });
-        box.appendChild(types);
-        box.appendChild(schema);
-        box.appendChild(fields);
+        var modes = {};
+        var allFields = !((grant && grant.fieldScope) || '').trim();
+        if (!allFields) {
+            String(grant.fieldScope).split(',').forEach(function (part) {
+                var clean = part.replace(/^\s+|\s+$/g, '');
+                var colon = clean.indexOf(':');
+                var key = colon < 0 ? clean : clean.slice(0, colon);
+                var mode = colon < 0 ? 'write' : clean.slice(colon + 1);
+                if (key) modes[key] = mode === 'read' ? 'read' : 'write';
+            });
+        }
+        function visibleFields() {
+            var seen = {};
+            var rows = [];
+            equipmentTypes().forEach(function (type) {
+                if (!allTypes && !chosen[type.typeKey]) return;
+                (type.fields || []).forEach(function (field) {
+                    if (!field || !field.fieldKey || seen[field.fieldKey]) return;
+                    seen[field.fieldKey] = true;
+                    rows.push(field);
+                });
+            });
+            return rows;
+        }
+        function payload() {
+            var typeKeys = [];
+            equipmentTypes().forEach(function (type) {
+                if (chosen[type.typeKey]) typeKeys.push(type.typeKey);
+            });
+            var fieldParts = [];
+            if (!allFields) {
+                visibleFields().forEach(function (field) {
+                    var mode = modes[field.fieldKey] || 'hide';
+                    if (mode === 'read' || mode === 'write') fieldParts.push(field.fieldKey + ':' + mode);
+                });
+            }
+            return {
+                typeScope: allTypes || followed ? '' : typeKeys.join(','),
+                schemaName: followed,
+                fieldScope: allFields ? '' : fieldParts.join(',')
+            };
+        }
+        function draw() {
+            box.innerHTML = '';
+            box.appendChild(el('p', 'asset-tree-field-label', t('scopeEquipment')));
+            box.appendChild(el('p', 'asset-tree-hint', t('scopeEquipmentHint')));
+            var sets = (state.schemas || []).filter(function (schema) { return schema && schema.name; });
+            if (sets.length) {
+                var presets = el('div', 'asset-tree-cap-presets');
+                sets.forEach(function (schema) {
+                    presets.appendChild(button(schema.name, 'asset-tree-btn' + (followed === schema.name ? ' primary' : ''), function () {
+                        followed = schema.name;
+                        allTypes = false;
+                        chosen = {};
+                        (schema.typeKeys || []).forEach(function (key) { chosen[key] = true; });
+                        onSave(payload());
+                        draw();
+                    }));
+                });
+                box.appendChild(presets);
+            }
+            if (followed) box.appendChild(el('p', 'asset-tree-hint', t('scopeFollowsSet', followed)));
+            var allTypeRow = el('label', 'asset-tree-check');
+            var allTypeBox = document.createElement('input');
+            allTypeBox.type = 'checkbox';
+            allTypeBox.checked = allTypes;
+            allTypeBox.addEventListener('change', function () {
+                allTypes = allTypeBox.checked;
+                if (allTypes) {
+                    followed = '';
+                    chosen = {};
+                }
+                onSave(payload());
+                draw();
+            });
+            allTypeRow.appendChild(allTypeBox);
+            allTypeRow.appendChild(document.createTextNode(t('scopeAllTypes')));
+            box.appendChild(allTypeRow);
+            if (!allTypes) {
+                box.appendChild(typeTickList(chosen, function (key, checked) {
+                    followed = '';
+                    chosen[key] = checked;
+                    var any = false;
+                    equipmentTypes().forEach(function (type) { if (chosen[type.typeKey]) any = true; });
+                    if (!any) {
+                        allTypes = true;
+                        chosen = {};
+                    }
+                    onSave(payload());
+                    draw();
+                }));
+            }
+            box.appendChild(el('p', 'asset-tree-field-label', t('scopeFieldsTitle')));
+            box.appendChild(el('p', 'asset-tree-hint', t('scopeFieldsHint')));
+            var allFieldRow = el('label', 'asset-tree-check');
+            var allFieldBox = document.createElement('input');
+            allFieldBox.type = 'checkbox';
+            allFieldBox.checked = allFields;
+            allFieldBox.addEventListener('change', function () {
+                allFields = allFieldBox.checked;
+                onSave(payload());
+                draw();
+            });
+            allFieldRow.appendChild(allFieldBox);
+            allFieldRow.appendChild(document.createTextNode(t('scopeAllFields')));
+            box.appendChild(allFieldRow);
+            if (!allFields) {
+                var rows = visibleFields();
+                if (!rows.length) {
+                    box.appendChild(el('p', 'asset-tree-hint', t('scopePickType')));
+                }
+                var fieldList = el('div', 'asset-tree-field-modes');
+                rows.forEach(function (field) {
+                    var line = el('div', 'asset-tree-field-mode');
+                    line.appendChild(el('span', null, field.label || field.fieldKey));
+                    var select = el('select', 'asset-tree-text');
+                    select.setAttribute('aria-label', field.label || field.fieldKey);
+                    [['hide', 'scopeHide'], ['read', 'scopeRead'], ['write', 'scopeWrite']].forEach(function (pair) {
+                        var option = el('option', null, t(pair[1]));
+                        option.value = pair[0];
+                        select.appendChild(option);
+                    });
+                    select.value = modes[field.fieldKey] || 'hide';
+                    select.addEventListener('change', function () {
+                        modes[field.fieldKey] = select.value;
+                        onSave(payload());
+                    });
+                    line.appendChild(select);
+                    fieldList.appendChild(line);
+                });
+                box.appendChild(fieldList);
+            }
+        }
+        draw();
         return box;
     }
 
     function schemaSettings() {
-        var block = el('div', 'asset-tree-settings-block');
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('schemaTitle')));
         block.appendChild(el('p', 'asset-tree-hint', t('accessScopeHint')));
         if (state.schemas === null) {
             state.schemas = [];
@@ -26737,29 +27199,44 @@
                 if (state.view === 'settings') renderFrame();
             });
         }
-        (state.schemas || []).forEach(function (schema) {
-            var line = el('div', 'asset-tree-grant');
-            var keys = (schema.typeKeys || []).join(', ');
-            line.appendChild(el('strong', null, schema.name || ''));
-            line.appendChild(el('span', null, keys));
-            line.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas/' + schema.id, null, function (status) {
-                    if (status >= 200 && status < 300) {
-                        state.schemas = (state.schemas || []).filter(function (item) { return item.id !== schema.id; });
-                        renderFrame();
-                    }
-                });
-            }));
-            block.appendChild(line);
-        });
-        var name = document.createElement('input');
-        name.placeholder = t('schemaName');
-        var types = document.createElement('input');
-        types.placeholder = t('scopeTypes');
-        block.appendChild(name);
-        block.appendChild(types);
-        block.appendChild(button(t('schemaSave'), 'asset-tree-btn primary', function () {
-            var keys = types.value.split(',').map(function (item) { return item.trim(); }).filter(function (item) { return item; });
+        var saved = state.schemas || [];
+        if (saved.length) {
+            var list = el('div', 'asset-tree-grant-list');
+            saved.forEach(function (schema) {
+                var line = el('div', 'asset-tree-grant');
+                var head = el('div', 'asset-tree-grant-head');
+                var title = el('span', 'asset-tree-grant-title');
+                title.appendChild(el('strong', null, schema.name || ''));
+                var names = (schema.typeKeys || []).map(typeLabelOf).join(', ');
+                if (names) title.appendChild(el('span', null, names));
+                head.appendChild(title);
+                head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas/' + schema.id, null, function (status) {
+                        if (status >= 200 && status < 300) {
+                            state.schemas = (state.schemas || []).filter(function (item) { return item.id !== schema.id; });
+                            renderFrame();
+                        }
+                    });
+                }));
+                line.appendChild(head);
+                list.appendChild(line);
+            });
+            block.appendChild(list);
+        }
+        var name = textControl(t('schemaName'));
+        name.setAttribute('aria-label', t('schemaName'));
+        var picked = {};
+        block.appendChild(settingField(t('schemaName'), name));
+        block.appendChild(el('p', 'asset-tree-field-label', t('schemaTypes')));
+        block.appendChild(typeTickList(picked, function (key, checked) {
+            picked[key] = checked;
+        }));
+        var actions = el('div', 'asset-tree-inline-actions');
+        actions.appendChild(button(t('schemaSave'), 'asset-tree-btn primary', function () {
+            var keys = [];
+            equipmentTypes().forEach(function (type) {
+                if (picked[type.typeKey]) keys.push(type.typeKey);
+            });
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/schemas', {
                 name: name.value.trim(),
                 typeKeys: keys
@@ -26770,6 +27247,7 @@
                 } else notify((payload && payload.message) || t('errorTitle'));
             });
         }));
+        block.appendChild(actions);
         return block;
     }
 

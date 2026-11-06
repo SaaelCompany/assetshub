@@ -3,6 +3,7 @@ package com.assetstree.jira.service;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.dto.AssetDto;
+import com.assetstree.jira.dto.AssetLinkDto;
 import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
@@ -20,6 +21,7 @@ import com.assetstree.jira.dto.ForecastRowDto;
 import com.assetstree.jira.dto.GrantDto;
 import com.assetstree.jira.dto.SchemaDto;
 import com.assetstree.jira.dto.WebhookDto;
+import com.assetstree.jira.dto.WebhookProbeDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.InventoryDto;
@@ -158,6 +160,12 @@ public interface AssetService {
     AssetPeerDto linkPeer(ApplicationUser user, int assetId, int otherId);
 
     void unlinkPeer(ApplicationUser user, int assetId, int otherId);
+
+    AssetLinkDto addLink(ApplicationUser user, int assetId, com.assetstree.jira.model.LinkDraft draft);
+
+    AssetLinkDto updateLink(ApplicationUser user, int assetId, int linkId, com.assetstree.jira.model.LinkDraft draft);
+
+    void deleteLink(ApplicationUser user, int assetId, int linkId);
 
     List<AssetPeerDto> searchPeers(ApplicationUser user, int assetId, String query);
 
@@ -304,6 +312,8 @@ public interface AssetService {
     List<WebhookDto> listWebhooks(ApplicationUser user, String projectKey);
 
     WebhookDto saveWebhook(ApplicationUser user, String projectKey, WebhookDto draft);
+
+    WebhookProbeDto probeWebhook(ApplicationUser user, String projectKey, WebhookDto draft);
 
     void deleteWebhook(ApplicationUser user, String projectKey, int webhookId);
 

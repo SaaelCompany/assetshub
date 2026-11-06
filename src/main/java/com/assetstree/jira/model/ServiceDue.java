@@ -73,4 +73,81 @@ public final class ServiceDue {
     public static boolean reached(LocalDate next, LocalDate today) {
         return next != null && today != null && !next.isAfter(today);
     }
+
+    /** Keeps a finished occurrence on the calendar as {@code yyyy-mm-dd>done} inside the move list. */
+    public static String rememberDone(String moves, String day) {
+        String iso = FieldDates.canonical(day);
+        if (iso == null || iso.isEmpty()) {
+            return moves == null ? "" : moves;
+        }
+        return keepDone(moves, mark(iso));
+    }
+
+    /** A replacement move list keeps the finished days that were already stored. */
+    public static String keepDone(String replacement, String previous) {
+        StringBuilder out = new StringBuilder();
+        appendMoves(out, replacement, false);
+        appendMoves(out, previous, true);
+        return out.toString();
+    }
+
+    private static String mark(String iso) {
+        return iso + ">done";
+    }
+
+    private static void appendMoves(StringBuilder out, String raw, boolean doneOnly) {
+        if (raw == null || raw.isEmpty()) {
+            return;
+        }
+        String[] parts = raw.split(",");
+        int done = countDone(out.toString());
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i] == null ? "" : parts[i].trim();
+            if (part.isEmpty() || containsPart(out, part)) {
+                continue;
+            }
+            boolean finished = part.endsWith(">done") && FieldDates.canonical(part.substring(0, part.length() - 5)) != null;
+            if (doneOnly && !finished) {
+                continue;
+            }
+            if (finished) {
+                if (done >= 60) {
+                    continue;
+                }
+                done++;
+            }
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(part);
+        }
+    }
+
+    private static int countDone(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        String[] parts = raw.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].endsWith(">done")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static boolean containsPart(StringBuilder stored, String part) {
+        String text = stored.toString();
+        if (text.isEmpty()) {
+            return false;
+        }
+        String[] parts = text.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            if (part.equals(parts[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

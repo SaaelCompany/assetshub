@@ -14,6 +14,8 @@ public class FieldDto {
     private boolean required;
     private boolean showOnIssue;
     private int position;
+    private boolean inherited;
+    private String inheritedFrom;
     private List<String> options = new ArrayList<String>();
 
     public String getFieldKey() {
@@ -62,6 +64,22 @@ public class FieldDto {
 
     public void setPosition(int position) {
         this.position = position;
+    }
+
+    public boolean isInherited() {
+        return inherited;
+    }
+
+    public void setInherited(boolean inherited) {
+        this.inherited = inherited;
+    }
+
+    public String getInheritedFrom() {
+        return inheritedFrom;
+    }
+
+    public void setInheritedFrom(String inheritedFrom) {
+        this.inheritedFrom = inheritedFrom == null ? "" : inheritedFrom;
     }
 
     public List<String> getOptions() {
