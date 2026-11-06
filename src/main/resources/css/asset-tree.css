@@ -3950,8 +3950,9 @@ a.asset-tree-url {
     min-width: 0;
 }
 
-.asset-tree-field-list .asset-tree-type-field.is-editable {
-    grid-template-columns: 16px minmax(0, 1fr) max-content auto auto;
+.asset-tree-field-list .asset-tree-type-field.is-editable,
+.asset-tree-field-list .asset-tree-type-field.is-inherited {
+    grid-template-columns: 16px minmax(0, 1fr) max-content 280px;
 }
 
 .asset-tree-grant-list .asset-tree-status-row strong {
@@ -3967,7 +3968,15 @@ a.asset-tree-url {
 }
 
 .asset-tree-field-list .asset-tree-type-field > .asset-tree-key {
+    justify-self: end;
     white-space: nowrap;
+}
+
+.asset-tree-field-list .asset-tree-field-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
 }
 
 #asset-tree-app .asset-tree-field-list .asset-tree-type-field > button.asset-tree-btn,
@@ -9663,8 +9672,72 @@ a.asset-tree-preview-icon:focus {
     flex: 1 1 140px;
 }
 
-#asset-tree-app .asset-tree-type-field.is-inherited {
+#asset-tree-app .asset-tree-type-field.is-inherited,
+.asset-tree-backdrop .asset-tree-type-field.is-inherited {
     background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-field-grip.is-locked,
+.asset-tree-backdrop .asset-tree-field-grip.is-locked {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6b778c;
+    cursor: default;
+}
+
+#asset-tree-app .asset-tree-field-grip.is-locked svg,
+.asset-tree-backdrop .asset-tree-field-grip.is-locked svg {
+    width: 14px;
+    height: 14px;
+}
+
+#asset-tree-app .asset-tree-inherit-badge,
+.asset-tree-backdrop .asset-tree-inherit-badge {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 0 6px;
+    border-radius: 3px;
+    background: #ebecf0;
+    color: #42526e;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#asset-tree-app .asset-tree-type-field.is-inherited > .asset-tree-inherit-badge,
+.asset-tree-backdrop .asset-tree-type-field.is-inherited > .asset-tree-inherit-badge {
+    grid-column: 4;
+    justify-self: end;
+}
+
+#asset-tree-app .asset-tree-subtype-mark,
+.asset-tree-backdrop .asset-tree-subtype-mark {
+    margin-left: auto;
+    max-width: 88px;
+    overflow: hidden;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+}
+
+#asset-tree-app .asset-tree-type-count,
+.asset-tree-backdrop .asset-tree-type-count {
+    margin-left: auto;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 500;
+    flex: 0 0 auto;
+}
+
+#asset-tree-app .asset-tree-subtype-mark + .asset-tree-type-count,
+.asset-tree-backdrop .asset-tree-subtype-mark + .asset-tree-type-count {
+    margin-left: 8px;
 }
 
 #asset-tree-app .asset-tree-link-graph {
@@ -9743,14 +9816,13 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-key-field.wide {
     width: 100%;
-    max-width: 640px;
+    max-width: none;
 }
 
 #asset-tree-app .asset-tree-webhook-secret {
     display: flex;
     align-items: flex-end;
     gap: 8px;
-    max-width: 640px;
     margin-bottom: 12px;
 }
 

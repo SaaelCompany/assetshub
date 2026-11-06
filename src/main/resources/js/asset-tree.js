@@ -3955,6 +3955,7 @@
             print: 'M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z',
             copy: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z',
             link: 'M3.9 12a5 5 0 0 1 5-5h4v2h-4a3 3 0 0 0 0 6h4v2h-4a5 5 0 0 1-5-5zm6.1-1h4v2h-4v-2zm5.1-4h4a5 5 0 0 1 0 10h-4v-2h4a3 3 0 0 0 0-6h-4V7z',
+            lock: 'M17 10h-1V8a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm-7-2a2 2 0 0 1 4 0v2h-4V8zm7 11H7v-7h10v7z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
             trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 7h12l-1 14H7L6 7z',
             cloud: 'M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 8.6 3.5 3.5 0 0 0 7 18z',
@@ -9857,11 +9858,11 @@
             pick.appendChild(typeTile(type, 'sm'));
             pick.appendChild(el('span', 'asset-tree-type-name', type.label || ''));
             if (parentType) {
-                var mark = el('span', 'asset-tree-key', parentType.label || '');
+                var mark = el('span', 'asset-tree-subtype-mark', parentType.label || '');
                 mark.title = t('subtypeOf', parentType.label || '');
                 pick.appendChild(mark);
             }
-            var count = el('span', 'asset-tree-key', String((type.fields || []).length));
+            var count = el('span', 'asset-tree-type-count', String((type.fields || []).length));
             count.title = t('schemaFieldCount', (type.fields || []).length);
             pick.appendChild(count);
             if (state.canConfigure) {
@@ -9899,10 +9900,11 @@
         var wrap = el('div', 'asset-tree-type-detail');
         var head = el('div', 'asset-tree-type-head');
         var title = el('div', 'asset-tree-type-title');
+        var parentType = parentKeyOf(type) ? typeByKey(parentKeyOf(type)) : null;
         title.appendChild(typeTile(type, 'lg'));
         title.appendChild(el('h3', null, type.label || ''));
+        if (parentType) title.appendChild(el('span', 'asset-tree-inherit-badge', t('subtypeOf', parentType.label || parentType.typeKey)));
         head.appendChild(title);
-        var parentType = parentKeyOf(type) ? typeByKey(parentKeyOf(type)) : null;
         var meta = type.systemType ? t('systemType') : t('schemaFieldCount', (type.fields || []).length);
         if (!type.systemType && type.assetCount) meta += ' · ' + type.assetCount;
         head.appendChild(el('span', 'asset-tree-key', meta));
@@ -9918,7 +9920,6 @@
             }));
         }
         wrap.appendChild(head);
-        if (parentType) wrap.appendChild(el('p', 'asset-tree-hint', t('subtypeOf', parentType.label || parentType.typeKey)));
         if (state.canConfigure) {
             var look = el('div', 'asset-tree-appearance');
             var saveLook = function (patch) {
@@ -9938,7 +9939,7 @@
             look.appendChild(field(t('icon'), icons, true));
             look.appendChild(el('p', 'asset-tree-hint', t('iconHint')));
             if (!type.location && !subtypesOf(type.typeKey).length) {
-                var parentSelect = el('select');
+                var parentSelect = el('select', 'asset-tree-text');
                 var none = el('option', null, t('parentTypeNone'));
                 none.value = '';
                 parentSelect.appendChild(none);
@@ -10111,22 +10112,30 @@
                     reorderFields(moving, fieldDef.fieldKey, after);
                 });
             }
+            if (inherited) {
+                var lock = el('span', 'asset-tree-field-grip is-locked');
+                lock.title = t('fieldInherited', fieldDef.inheritedFrom || '');
+                lock.appendChild(toolIcon('lock'));
+                fieldRow.appendChild(lock);
+            }
             fieldRow.appendChild(el('span', 'asset-tree-field-label', fieldDef.label));
             var fieldKind = kindLabel(fieldDef.kind) + (fieldDef.required ? ' · ' + t('requiredMark') : '');
-            if (inherited) fieldKind += ' · ' + t('fieldInherited', fieldDef.inheritedFrom || '');
             fieldRow.appendChild(el('span', 'asset-tree-key', fieldKind));
+            if (inherited) fieldRow.appendChild(el('span', 'asset-tree-inherit-badge', t('fieldInherited', fieldDef.inheritedFrom || '')));
             if (state.canConfigure && !inherited) {
+                var actions = el('div', 'asset-tree-field-actions');
                 var editField = button(t('editField'), 'asset-tree-btn', function () {
                     openFieldModal(type, null, fieldDef);
                 });
                 editField.title = t('editFieldTitle');
-                fieldRow.appendChild(editField);
-                fieldRow.appendChild(button(t('deleteField'), 'asset-tree-btn', function () {
+                actions.appendChild(editField);
+                actions.appendChild(button(t('deleteField'), 'asset-tree-btn', function () {
                     ajax('DELETE', '/types/' + encodeURIComponent(type.typeKey) + '/fields/' + encodeURIComponent(fieldDef.fieldKey), null, function (status, payload) {
                         if (status >= 200 && status < 300) refreshSchema();
                         else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
+                fieldRow.appendChild(actions);
             }
             fields.appendChild(fieldRow);
             fieldRows.push(fieldRow);
@@ -10143,7 +10152,7 @@
     function typeCreateForm() {
         var form = el('form', 'asset-tree-type-create');
         form.appendChild(field(t('typeLabel'), input('type-label', '', false), true));
-        var parentSelect = el('select');
+        var parentSelect = el('select', 'asset-tree-text');
         parentSelect.id = 'type-parent';
         var noneParent = el('option', null, t('parentTypeNone'));
         noneParent.value = '';
