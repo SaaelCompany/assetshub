@@ -1071,7 +1071,7 @@ def next_object_key(project):
 
 
 VIEW_BASE = ("key", "type", "status", "custodian", "issued", "location", "description", "created", "updated")
-KNOWN_MODULES = ("service", "map", "reports", "life", "portal", "card")
+KNOWN_MODULES = ("service", "map", "reports", "life", "portal", "card", "tni")
 
 
 def stored_modules(project_key):
@@ -1224,8 +1224,33 @@ def module_setup(stored, migrate=True):
         "furniture": pack_furniture(stored.get("furniture")),
         "portalMine": bool(stored.get("portalMine")),
         "portalColumns": normalize_portal_columns(stored.get("portalColumns")),
+        "tniKeep": tni_span(stored.get("tniKeep"), 90, 1, 3650),
+        "tniProbeDays": tni_span(stored.get("tniProbeDays"), 3, 1, 30),
+        "tniProbeTries": tni_span(stored.get("tniProbeTries"), 3, 1, 30),
+        "tniAction": "delete" if stored.get("tniAction") == "delete" else "trash",
+        "tniComputer": tni_type(stored.get("tniComputer")),
+        "tniLaptop": tni_type(stored.get("tniLaptop")),
+        "tniPhone": tni_type(stored.get("tniPhone")),
+        "tniTablet": tni_type(stored.get("tniTablet")),
         "scheduleKindVersion": 2,
     }
+
+
+def tni_span(value, fallback, low, high):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    if number < low or number > high:
+        return fallback
+    return number
+
+
+def tni_type(value):
+    text = str(value or "").strip().lower()
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,39}", text):
+        return text
+    return ""
 
 
 def plan_kind(kind):
@@ -1730,6 +1755,17 @@ def ensure_profile_demo():
                 {"fieldKey": "serial", "label": "Серийный номер", "kind": "text", "required": False, "position": 2},
             ],
         }
+    for type_key, label, icon, order in (
+        ("stp-pc", "Компьютер", "desktop", 22),
+        ("stp-phone", "Телефон", "phone", 23),
+        ("stp-tablet", "Планшет", "tablet", 24),
+    ):
+        if type_key not in STATE["types"]:
+            STATE["types"][type_key] = {
+                "typeKey": type_key, "projectKey": "STP", "baseKey": "", "label": label,
+                "color": "#0052CC", "icon": icon, "systemType": False, "location": False,
+                "showInTree": True, "service": False, "sortOrder": order, "fields": [],
+            }
     if "test-uzi" not in STATE["types"]:
         STATE["types"]["test-uzi"] = {
             "typeKey": "test-uzi", "projectKey": "TEST", "baseKey": "uzi", "label": "Аппарат УЗИ",

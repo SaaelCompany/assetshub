@@ -11579,3 +11579,22 @@ button.asset-tree-attach-remove {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.asset-tree-tni-types {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 16px;
+}
+
+.asset-tree-tni-action {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 8px 0 12px;
+}
+
+@media (max-width: 720px) {
+    .asset-tree-tni-types {
+        grid-template-columns: 1fr;
+    }
+}

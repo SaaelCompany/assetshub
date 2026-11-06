@@ -201,6 +201,10 @@ import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.Statuses;
+import com.assetstree.jira.model.TniFacts;
+import com.assetstree.jira.model.TniPolicy;
+import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.StatusSummary;
 import com.assetstree.jira.model.TreeLogic;
 import com.assetstree.jira.model.TypeDraft;
@@ -5425,6 +5429,9 @@ public class AssetServiceImpl implements AssetService {
 
     private AssetEntity requireAssetCap(ApplicationUser user, int id, String cap) {
         AssetEntity entity = requireAsset(id);
+        if (Boolean.TRUE.equals(SYSTEM_WRITE.get())) {
+            return entity;
+        }
         Project project = project(entity.getProjectKey());
         if (!hasCap(user, project, cap)) {
             if (!canOpen(user, project)) {
@@ -11157,6 +11164,9 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private static final ThreadLocal<Boolean> QUIET_NOTES = new ThreadLocal<Boolean>();
+    private static final ThreadLocal<Boolean> SYSTEM_WRITE = new ThreadLocal<Boolean>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> TNI_SEEN =
+            new java.util.concurrent.ConcurrentHashMap<String, Long>();
 
     private void quietNotes(boolean quiet) {
         if (quiet) {
@@ -11917,6 +11927,168 @@ public class AssetServiceImpl implements AssetService {
                 return list;
             }
         });
+    }
+
+    @Override
+    public void rememberTni(ApplicationUser user, TniSightDraft draft) {
+        requireUser(user);
+        if (draft == null) {
+            throw new AssetException(400, "asset-tree.error.tni");
+        }
+        String projectKey = tniProject(user, draft);
+        if (!moduleOn(projectKey, ProjectModules.TNI)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        TniFacts facts = TniFacts.from(draft);
+        if (!acceptTniSight(user.getKey(), !facts.address.isEmpty())) {
+            return;
+        }
+        new TniBook().remember(ao(), projectKey, user.getKey(), facts, System.currentTimeMillis());
+    }
+
+    @Override
+    public void attachTni(ApplicationUser user, Issue issue) {
+        if (issue == null || issue.getProjectObject() == null) {
+            return;
+        }
+        ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : user;
+        if (reporter == null || reporter.getKey() == null) {
+            return;
+        }
+        long issueId = issue.getId() == null ? 0L : issue.getId().longValue();
+        String issueKey = issue.getKey() == null ? "" : issue.getKey();
+        try {
+            new TniBook().attach(ao(), tniHost(), issue.getProjectObject().getKey(), reporter.getKey(),
+                    issueId, issueKey, System.currentTimeMillis());
+        } catch (RuntimeException ex) {
+            log.warn("TNI did not record a device for {}", issue.getKey(), ex);
+        }
+    }
+
+    @Override
+    public void applyTniRetention() {
+        try {
+            new TniBook().sweep(ao(), tniHost(), System.currentTimeMillis(), TniReach.LIVE);
+        } catch (RuntimeException ex) {
+            log.warn("TNI retention was not applied", ex);
+        }
+    }
+
+    private String tniProject(ApplicationUser user, TniSightDraft draft) {
+        int portalId = draft.getPortalId() == null ? 0 : draft.getPortalId().intValue();
+        if (portalId > 0) {
+            String resolved = PortalLookup.projectKeyForPortal(user, portalId);
+            if (resolved == null || resolved.trim().isEmpty()) {
+                throw new AssetException(403, "asset-tree.error.forbidden");
+            }
+            return resolved.trim();
+        }
+        String key = draft.getProjectKey() == null ? "" : draft.getProjectKey().trim();
+        Project project = project(key);
+        if (!canSee(user, project)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        return project.getKey();
+    }
+
+    private boolean acceptTniSight(String userKey, boolean withAddress) {
+        long now = System.currentTimeMillis();
+        Long previous = TNI_SEEN.get(userKey);
+        if (previous != null && now - previous.longValue() < 1500L && !withAddress) {
+            return false;
+        }
+        TNI_SEEN.put(userKey, Long.valueOf(now));
+        return true;
+    }
+
+    private TniHost tniHost() {
+        return new TniHost() {
+            @Override
+            public String nextKey(String projectKey) {
+                return AssetServiceImpl.this.nextKey(projectKey);
+            }
+
+            @Override
+            public int nextSort(String projectKey) {
+                return AssetServiceImpl.this.nextSort(null, projectKey);
+            }
+
+            @Override
+            public void ensureTrash(String projectKey) {
+                ensureStatuses(projectKey);
+                if (findStatus(projectKey, TniPolicy.TRASH) != null) {
+                    return;
+                }
+                String label = text("asset-tree.ui.tniTrashStatus");
+                if (label.isEmpty()) {
+                    label = "Trash";
+                }
+                ao().create(ProjectStatusEntity.class,
+                        new DBParam("PROJECT_KEY", projectKey),
+                        new DBParam("STATUS_KEY", TniPolicy.TRASH),
+                        new DBParam("LABEL", label),
+                        new DBParam("CATEGORY", "done"),
+                        new DBParam("SORT_ORDER", Integer.valueOf(projectStatuses(projectKey).length)),
+                        new DBParam("SUMMARY_MODE", Integer.valueOf(StatusSummary.HIDE)));
+            }
+
+            @Override
+            public String text(String key) {
+                return AssetServiceImpl.this.tniText(key);
+            }
+
+            @Override
+            public String personName(String userKey) {
+                return displayName(userKey);
+            }
+
+            @Override
+            public void mail(String userKey, String subject, String body) {
+                UserProfileDto person = profile(userKey);
+                if (person == null || person.getEmail() == null || person.getEmail().trim().isEmpty()) {
+                    return;
+                }
+                dispatchNotices(java.util.Collections.singletonList(
+                        new ServiceNotice(person.getEmail().trim(), subject, body)));
+            }
+
+            @Override
+            public void announce(String projectKey, String event, int id, String objectKey, String name) {
+                AssetDto dto = new AssetDto();
+                dto.setId(id);
+                dto.setObjectKey(objectKey);
+                dto.setName(name);
+                emitAsset(projectKey, event, dto);
+            }
+
+            @Override
+            public void discard(int assetId, String actorKey) {
+                ApplicationUser actor = actorKey == null || actorKey.trim().isEmpty()
+                        ? null : userManager().getUserByKey(actorKey);
+                SYSTEM_WRITE.set(Boolean.TRUE);
+                try {
+                    deleteAsset(actor, assetId, false);
+                } finally {
+                    SYSTEM_WRITE.remove();
+                }
+            }
+        };
+    }
+
+    private String tniText(String key) {
+        try {
+            I18nHelper labels = i18n();
+            if (labels == null || key == null) {
+                return "";
+            }
+            String value = labels.getText(key);
+            if (value == null || value.equals(key) || value.startsWith("asset-tree.")) {
+                return "";
+            }
+            return value;
+        } catch (RuntimeException ex) {
+            return "";
+        }
     }
 
     private static final class ServiceNotice {

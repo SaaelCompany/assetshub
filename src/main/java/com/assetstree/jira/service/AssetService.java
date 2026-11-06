@@ -64,6 +64,7 @@ import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
+import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.model.TypeDraft;
 
 import java.util.List;
@@ -326,4 +327,13 @@ public interface AssetService {
     String exportFileName(ApplicationUser user, String projectKey, String jobId);
 
     List<ForecastRowDto> forecast(ApplicationUser user, String projectKey, int within);
+
+    /** Stores a browser report from the portal create form. The asset is created when the request exists. */
+    void rememberTni(ApplicationUser user, TniSightDraft draft);
+
+    /** Links the reporter's latest portal device to a new request and creates the asset. */
+    void attachTni(ApplicationUser user, Issue issue);
+
+    /** Pings stored devices whose storage period has ended and retires the ones that stay silent. */
+    void applyTniRetention();
 }
