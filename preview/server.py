@@ -5131,9 +5131,11 @@ def plain_numeric(raw):
     return True
 
 
-def sheet_xml(headers, rows):
-    sheet = ["<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
-             "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>"]
+def sheet_xml(headers, rows, drawing=False):
+    root = "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\""
+    if drawing:
+        root += " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+    sheet = ["<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>", root + "><sheetData>"]
     table = [headers] + rows
     for number, cells in enumerate(table, start=1):
         sheet.append("<row r=\"%d\">" % number)
@@ -5146,8 +5148,157 @@ def sheet_xml(headers, rows):
                 sheet.append("<c r=\"%s%d\" t=\"inlineStr\"><is><t xml:space=\"preserve\">%s</t></is></c>"
                              % (column_name(index), number, xml_text(raw)))
         sheet.append("</row>")
-    sheet.append("</sheetData></worksheet>")
+    sheet.append("</sheetData>")
+    if drawing:
+        sheet.append("<drawing r:id=\"rId1\"/>")
+    sheet.append("</worksheet>")
     return "".join(sheet)
+
+
+def chart_usable(chart):
+    if not chart:
+        return False
+    labels = chart.get("labels")
+    if labels is not None:
+        values = chart.get("values") or []
+        bases = chart.get("bases")
+        return bool(labels) and len(values) == len(labels) and (bases is None or len(bases) == len(labels))
+    return chart.get("firstRow", 0) >= 2 and chart.get("lastRow", 0) >= chart.get("firstRow", 0)
+
+
+def formula_sheet(name):
+    return "'" + (name or "Sheet").replace("'", "''") + "'"
+
+
+def cell_range(sheet, column, first, last):
+    col = column_name(column)
+    return "%s!$%s$%d:$%s$%d" % (formula_sheet(sheet), col, first, col, last)
+
+
+def cell_text(rows, column, excel_row):
+    index = excel_row - 2
+    if rows is None or index < 0 or index >= len(rows) or column < 0:
+        return ""
+    row = rows[index] or []
+    if column >= len(row) or row[column] is None:
+        return ""
+    raw = str(row[column])
+    if len(raw) > 3 and raw[0] == "\u0001" and raw[2] == ":":
+        return raw[3:]
+    return raw
+
+
+def numeric_text(raw):
+    return raw if plain_numeric(raw) else "0"
+
+
+def point_list(points):
+    parts = ["<c:ptCount val=\"%d\"/>" % len(points)]
+    for index, point in enumerate(points):
+        parts.append("<c:pt idx=\"%d\"><c:v>%s</c:v></c:pt>" % (index, xml_text(point)))
+    return "".join(parts)
+
+
+def text_points(formula, points):
+    if formula is None:
+        return "<c:strLit>%s</c:strLit>" % point_list(points)
+    return "<c:strRef><c:f>%s</c:f><c:strCache>%s</c:strCache></c:strRef>" % (xml_text(formula), point_list(points))
+
+
+def number_points(formula, points):
+    if formula is None:
+        return "<c:numLit><c:formatCode>General</c:formatCode>%s</c:numLit>" % point_list(points)
+    return "<c:numRef><c:f>%s</c:f><c:numCache><c:formatCode>General</c:formatCode>%s</c:numCache></c:numRef>" % (xml_text(formula), point_list(points))
+
+
+def one_series(index, name, cat_formula, cats, val_formula, vals, marker, hidden):
+    body = ["<c:ser><c:idx val=\"%d\"/><c:order val=\"%d\"/><c:tx><c:v>%s</c:v></c:tx>" % (index, index, xml_text(name))]
+    if marker:
+        body.append("<c:marker><c:symbol val=\"circle\"/><c:size val=\"6\"/></c:marker>")
+    if hidden:
+        body.append("<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>")
+    body.append("<c:cat>%s</c:cat><c:val>%s</c:val></c:ser>" % (text_points(cat_formula, cats), number_points(val_formula, vals)))
+    return "".join(body)
+
+
+def sheet_series(chart, sheet, rows, marker):
+    if chart.get("labels") is not None:
+        if chart.get("stacked") and chart.get("bases") is not None:
+            return one_series(0, chart.get("baseSeries") or "", None, chart["labels"], None, chart["bases"], False, True) + one_series(1, chart.get("series") or "", None, chart["labels"], None, chart["values"], marker, False)
+        return one_series(0, chart.get("series") or "", None, chart["labels"], None, chart["values"], marker, False)
+    cats = []
+    vals = []
+    for row in range(chart["firstRow"], chart["lastRow"] + 1):
+        cats.append(cell_text(rows, chart.get("catColumn") or 0, row))
+        vals.append(numeric_text(cell_text(rows, chart.get("valueColumn") or 1, row)))
+    return one_series(0, chart.get("series") or "", cell_range(sheet, chart.get("catColumn") or 0, chart["firstRow"], chart["lastRow"]), cats, cell_range(sheet, chart.get("valueColumn") or 1, chart["firstRow"], chart["lastRow"]), vals, marker, False)
+
+
+def category_axes(horizontal):
+    cat_pos = "l" if horizontal else "b"
+    val_pos = "b" if horizontal else "l"
+    return ("<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"%s\"/>"
+            "<c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/><c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/></c:catAx>"
+            "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"%s\"/>"
+            "<c:majorGridlines/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"1\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"between\"/></c:valAx>") % (cat_pos, val_pos)
+
+
+def chart_plot(chart, sheet, rows):
+    plot = chart.get("plot") or "col"
+    percent = "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/><c:showLeaderLines val=\"1\"/></c:dLbls>"
+    if plot == "pie":
+        return "<c:pieChart><c:varyColors val=\"1\"/>%s%s</c:pieChart>" % (sheet_series(chart, sheet, rows, False), percent)
+    if plot == "doughnut":
+        return "<c:doughnutChart><c:varyColors val=\"1\"/>%s%s<c:holeSize val=\"60\"/></c:doughnutChart>" % (sheet_series(chart, sheet, rows, False), percent)
+    if plot == "line":
+        return "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>%s<c:marker val=\"1\"/><c:smooth val=\"0\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>%s" % (sheet_series(chart, sheet, rows, True), category_axes(False))
+    if plot == "area":
+        return "<c:areaChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:areaChart>%s" % (sheet_series(chart, sheet, rows, False), category_axes(False))
+    if plot == "radar":
+        return "<c:radarChart><c:radarStyle val=\"marker\"/><c:varyColors val=\"0\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:radarChart>%s" % (sheet_series(chart, sheet, rows, True), category_axes(False))
+    if plot == "scatter":
+        count = (chart["lastRow"] - chart["firstRow"] + 1) if chart.get("labels") is None else len(chart["labels"])
+        xs = []
+        ys = []
+        for offset in range(count):
+            row = chart["firstRow"] + offset
+            if chart.get("indexX"):
+                xs.append(str(offset + 1))
+            else:
+                xs.append(numeric_text(cell_text(rows, chart.get("xColumn") or 0, row)))
+            ys.append(numeric_text(cell_text(rows, chart.get("valueColumn") or 1, row)))
+        x_formula = None if chart.get("indexX") else cell_range(sheet, chart.get("xColumn") or 0, chart["firstRow"], chart["lastRow"])
+        y_formula = cell_range(sheet, chart.get("valueColumn") or 1, chart["firstRow"], chart["lastRow"])
+        series = "<c:ser><c:idx val=\"0\"/><c:order val=\"0\"/><c:tx><c:v>%s</c:v></c:tx><c:marker><c:symbol val=\"circle\"/><c:size val=\"7\"/></c:marker><c:xVal>%s</c:xVal><c:yVal>%s</c:yVal></c:ser>" % (xml_text(chart.get("series") or ""), number_points(x_formula, xs), number_points(y_formula, ys))
+        axes = ("<c:valAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"midCat\"/></c:valAx>"
+                "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"1\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"midCat\"/></c:valAx>")
+        return "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>%s" % (series, axes)
+    horizontal = plot == "bar"
+    gap = "0" if chart.get("histogram") else "80"
+    overlap = "<c:overlap val=\"100\"/>" if chart.get("stacked") else ""
+    grouping = "stacked" if chart.get("stacked") else "clustered"
+    return "<c:barChart><c:barDir val=\"%s\"/><c:grouping val=\"%s\"/><c:varyColors val=\"1\"/>%s<c:gapWidth val=\"%s\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>%s" % ("bar" if horizontal else "col", grouping, sheet_series(chart, sheet, rows, False), gap, overlap, category_axes(horizontal))
+
+
+def chart_xml(chart, sheet, rows):
+    title = chart.get("title") or chart.get("series") or ""
+    return ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">"
+            "<c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:rPr lang=\"ru-RU\" sz=\"1200\"/><a:t>%s</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title>"
+            "<c:plotArea><c:layout/>%s</c:plotArea><c:legend><c:legendPos val=\"b\"/><c:overlay val=\"0\"/></c:legend><c:plotVisOnly val=\"1\"/></c:chart>"
+            "<c:printSettings><c:headerFooter/><c:pageMargins b=\"0.75\" l=\"0.7\" r=\"0.7\" t=\"0.75\" header=\"0.3\" footer=\"0.3\"/><c:pageSetup/></c:printSettings></c:chartSpace>") % (xml_text(title), chart_plot(chart, sheet, rows))
+
+
+def drawing_xml(number, points):
+    rows = max(16, min(36, points + 4))
+    return ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+            "<xdr:twoCellAnchor><xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+            "<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart %d\"/><xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>"
+            "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">"
+            "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId1\"/>"
+            "</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>") % (rows, number)
 
 
 def equipment_pages(project_key, text, day_first):
@@ -5206,15 +5357,31 @@ def workbook_bytes(pages):
     relationships = []
     parts = {}
     for index, page in enumerate(pages, start=1):
-        name, headers, rows = page
+        name, headers, rows = page[0], page[1], page[2]
+        chart = page[3] if len(page) > 3 else None
+        if not chart_usable(chart):
+            chart = None
         overrides.append(
             "<Override PartName=\"/xl/worksheets/sheet%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" % index
         )
+        if chart:
+            overrides.append("<Override PartName=\"/xl/charts/chart%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>" % index)
+            overrides.append("<Override PartName=\"/xl/drawings/drawing%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>" % index)
         sheet_tags.append("<sheet name=\"%s\" sheetId=\"%d\" r:id=\"rId%d\"/>" % (xml_text(name).replace("\"", "&quot;"), index, index))
         relationships.append(
             "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet%d.xml\"/>" % (index, index)
         )
-        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows)
+        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows, chart is not None)
+        if chart:
+            points = len(chart["labels"]) if chart.get("labels") is not None else chart["lastRow"] - chart["firstRow"] + 1
+            parts["xl/worksheets/_rels/sheet%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing%d.xml\"/></Relationships>" % index)
+            parts["xl/drawings/drawing%d.xml" % index] = drawing_xml(index, points)
+            parts["xl/drawings/_rels/drawing%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart%d.xml\"/></Relationships>" % index)
+            parts["xl/charts/chart%d.xml" % index] = chart_xml(chart, name, rows)
     relationships.append(
         "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" % (len(pages) + 1)
     )
@@ -5316,6 +5483,109 @@ def share_labels(values, total):
     return labels
 
 
+def report_day(raw):
+    text = str(raw or "")[:10]
+    if len(text) < 10:
+        return None
+    try:
+        return datetime.date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def report_gantt_chart(view, title, start_label, span_label):
+    names = []
+    starts = []
+    ends = []
+    for line in view.get("lines") or []:
+        if len(names) >= 40:
+            break
+        start = report_day(line.get("from"))
+        if start is None:
+            continue
+        end = report_day(line.get("to")) or start
+        if end < start:
+            end = start
+        name = (line.get("name") or "").strip() or (line.get("objectKey") or "")
+        names.append(name)
+        starts.append(start)
+        ends.append(end)
+    if not names:
+        return None
+    origin = min(starts)
+    offsets = [str((start - origin).days) for start in starts]
+    spans = [str(max(1, (end - start).days + 1)) for start, end in zip(starts, ends)]
+    return {"plot": "bar", "title": title, "series": span_label, "baseSeries": start_label, "stacked": True, "labels": names, "values": spans, "bases": offsets}
+
+
+def report_venn_chart(view, title, series):
+    venn = view.get("venn") or {}
+    labels = venn.get("labels") or []
+    if not labels:
+        return None
+    only = venn.get("only") or []
+    pairs = venn.get("pairs") or []
+    size = min(3, len(labels))
+    names = []
+    values = []
+    for index in range(size):
+        names.append(labels[index] or "")
+        values.append(str(only[index] if index < len(only) and only[index] is not None else 0))
+    if size >= 2:
+        names.append("%s + %s" % (labels[0] or "", labels[1] or ""))
+        values.append(str(pairs[0] if pairs else 0))
+    if size >= 3:
+        names.append("%s + %s" % (labels[0] or "", labels[2] or ""))
+        values.append(str(pairs[1] if len(pairs) > 1 else 0))
+        names.append("%s + %s" % (labels[1] or "", labels[2] or ""))
+        values.append(str(pairs[2] if len(pairs) > 2 else 0))
+        names.append("%s + %s + %s" % (labels[0] or "", labels[1] or "", labels[2] or ""))
+        values.append(str(venn.get("all") or 0))
+    if not names:
+        return None
+    return {"plot": "col", "title": title, "series": series, "labels": names, "values": values}
+
+
+def report_chart(view, text):
+    kind = str(view.get("chart") or "").strip().lower()
+    if kind == "columns":
+        kind = "bar"
+    money = bool(view.get("sum"))
+    buckets = len(view.get("rows") or [])
+    title = view.get("title") or ""
+    series = text.get("asset-tree.ui.lifeBook", "Book value") if money else text.get("asset-tree.ui.reportCount", "Count")
+    if kind == "gantt":
+        picture = report_gantt_chart(view, title, text.get("asset-tree.ui.reportChartStart", "Start"), text.get("asset-tree.ui.reportChartSpan", "Length"))
+        if picture:
+            return picture
+    if kind == "venn":
+        picture = report_venn_chart(view, title, series)
+        if picture:
+            return picture
+    if buckets <= 0:
+        return None
+    last = 1 + min(buckets, 80)
+    if kind == "scatter":
+        if money:
+            return {"plot": "scatter", "title": title, "series": series, "xColumn": 1, "valueColumn": 2, "firstRow": 2, "lastRow": last}
+        return {"plot": "scatter", "title": title, "series": series, "valueColumn": 1, "firstRow": 2, "lastRow": last, "indexX": True}
+    plot = "col"
+    histogram = kind == "histogram"
+    if kind == "bars":
+        plot = "bar"
+    elif kind == "line":
+        plot = "line"
+    elif kind == "area":
+        plot = "area"
+    elif kind == "pie":
+        plot = "pie"
+    elif kind == "donut":
+        plot = "doughnut"
+    elif kind == "radar":
+        plot = "radar"
+    return {"plot": plot, "title": title, "series": series, "catColumn": 0, "valueColumn": 2 if money else 1, "firstRow": 2, "lastRow": last, "histogram": histogram}
+
+
 def report_sheet(view, text, used):
     money = bool(view.get("sum"))
     headers = [view.get("title") or "", text.get("asset-tree.ui.reportCount", "Count")]
@@ -5360,7 +5630,7 @@ def report_sheet(view, text, used):
         lines.append([note.replace("{0}", str(REPORT_EXPORT_MAX))])
     elif view.get("capped"):
         lines.append([text.get("asset-tree.ui.reportLinesCut", "The list continues on the next page.")])
-    return (sheet_title(view.get("title") or "Report", used), headers, lines)
+    return (sheet_title(view.get("title") or "Report", used), headers, lines, report_chart(view, text))
 
 
 def reports_xlsx(project_key, text):
@@ -6874,6 +7144,11 @@ class Handler(BaseHTTPRequestHandler):
                 status, view = report_view(one_book.group(1), one_book.group(2), self.text(), {"lines": ["all"]})
                 if status != 200:
                     return self.respond(status, json.dumps(view).encode("utf-8"), "application/json; charset=utf-8")
+                chosen = (query.get("chart") or [""])[0].strip().lower()
+                if chosen == "columns":
+                    chosen = "bar"
+                if chosen in REPORT_CHARTS:
+                    view["chart"] = chosen
                 body = workbook_bytes([report_sheet(view, self.text(), set())])
                 return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
                     "Content-Disposition": 'attachment; filename="report-%s.xlsx"' % one_book.group(2),
