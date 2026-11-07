@@ -1658,7 +1658,7 @@ def watch_dto(asset):
     suggestion = watch_local(key[4:]) if key.startswith("tni:") else ""
     return {
         "armed": bool(row.get("armed")),
-        "address": row.get("address") or "",
+        "address": asset.get("name") or "",
         "suggestion": suggestion,
         "up": int(row.get("up") or 0),
         "checkedAt": int(row.get("checkedAt") or 0),
@@ -1690,7 +1690,7 @@ def save_watch(asset_id, body, text):
         return blocked
     body = body or {}
     armed = bool(body.get("armed"))
-    address = watch_station(body.get("address"))
+    address = watch_station(asset.get("name") or "")
     if armed and not address:
         return 400, {"message": text.get("asset-tree.error.tni.watch", "Address")}
     checked = 0

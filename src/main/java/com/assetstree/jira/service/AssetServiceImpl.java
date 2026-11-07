@@ -13405,7 +13405,7 @@ public class AssetServiceImpl implements AssetService {
         AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.VIEW);
         requireModule(asset.getProjectKey(), ProjectModules.TNI);
         rejectTniPlace(asset);
-        return tniWatchDto(tniWatchRow(asset.getID()), tniSuggest(asset));
+        return tniWatchDto(tniWatchRow(asset.getID()), asset.getName());
     }
 
     @Override
@@ -13417,7 +13417,7 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.tni.watch");
         }
         final boolean armed = Boolean.TRUE.equals(draft.getArmed());
-        final String address = TniAddress.station(draft.getAddress());
+        final String address = TniAddress.station(asset.getName());
         if (armed && address.isEmpty()) {
             throw new AssetException(400, "asset-tree.error.tni.watch");
         }
@@ -13448,7 +13448,7 @@ public class AssetServiceImpl implements AssetService {
             }
         });
         if (!armed) {
-            return tniWatchDto(stored, tniSuggest(asset));
+            return tniWatchDto(stored, asset.getName());
         }
         boolean reached = false;
         try {
@@ -13470,7 +13470,7 @@ public class AssetServiceImpl implements AssetService {
                 return row;
             }
         });
-        return tniWatchDto(checked, tniSuggest(asset));
+        return tniWatchDto(checked, asset.getName());
     }
 
     @Override
@@ -13560,14 +13560,6 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private String tniSuggest(AssetEntity asset) {
-        String key = asset.getExternalKey();
-        if (key != null && key.startsWith("tni:") && key.length() > 4) {
-            return TniAddress.local(key.substring(4));
-        }
-        return "";
-    }
-
     private TniWatchEntity tniWatchRow(int assetId) {
         TniWatchEntity[] rows = ao().find(TniWatchEntity.class, Query.select().where("ASSET_ID = ?", Integer.valueOf(assetId)));
         if (rows == null) {
@@ -13581,18 +13573,17 @@ public class AssetServiceImpl implements AssetService {
         return null;
     }
 
-    private TniWatchDto tniWatchDto(TniWatchEntity row, String suggestion) {
+    private TniWatchDto tniWatchDto(TniWatchEntity row, String host) {
         TniWatchDto dto = new TniWatchDto();
-        dto.setSuggestion(suggestion == null ? "" : suggestion);
+        dto.setSuggestion("");
+        dto.setAddress(host == null ? "" : host);
         if (row == null) {
             dto.setArmed(Boolean.FALSE);
-            dto.setAddress("");
             dto.setUp(Integer.valueOf(0));
             dto.setCheckedAt(0L);
             return dto;
         }
         dto.setArmed(Boolean.valueOf(row.getArmed() != 0));
-        dto.setAddress(row.getAddress() == null ? "" : row.getAddress());
         dto.setUp(Integer.valueOf(row.getUp()));
         dto.setCheckedAt(row.getCheckedAt());
         return dto;

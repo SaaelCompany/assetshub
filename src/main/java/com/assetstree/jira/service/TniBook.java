@@ -223,6 +223,7 @@ public final class TniBook {
                 public Void doInTransaction() {
                     TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
                     if (row != null && row.getArmed() != 0) {
+                        row.setAddress(address);
                         row.setCheckedAt(now);
                         row.setUp(reached ? 1 : 2);
                         row.save();
@@ -246,7 +247,7 @@ public final class TniBook {
             ao.delete(row);
             return "";
         }
-        String address = TniAddress.station(row.getAddress());
+        String address = TniAddress.station(asset.getName());
         if (address.isEmpty()) {
             return "";
         }

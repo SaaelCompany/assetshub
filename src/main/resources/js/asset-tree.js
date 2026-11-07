@@ -28782,18 +28782,12 @@
         label.appendChild(armed);
         label.appendChild(document.createTextNode(t('tniWatchOn')));
         body.appendChild(label);
-        var address = document.createElement('input');
-        address.type = 'text';
-        address.value = row.address || '';
-        address.placeholder = row.suggestion || 'pc-01.corp.local';
-        address.disabled = !mayEdit(asset);
-        body.appendChild(planField(t('tniWatchAddress'), address));
+        body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + (asset.name || '')));
         body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
         if (mayEdit(asset)) {
             body.appendChild(button(t('tniWatchSave'), 'asset-tree-btn', function () {
                 ajax('PUT', '/assets/' + asset.id + '/watch', {
-                    armed: armed.checked,
-                    address: address.value
+                    armed: armed.checked
                 }, function (status, payload) {
                     if (status >= 200 && status < 300 && payload) {
                         state.tniWatch[asset.id] = payload;

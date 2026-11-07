@@ -12481,8 +12481,9 @@ button.asset-tree-attach-remove {
     gap: 16px;
 }
 
-.asset-tree-watch .asset-tree-plan-field {
+.asset-tree-watch-host {
     margin: 8px 0 0;
+    font-weight: 600;
 }
 
 .asset-tree-watch input[type="text"] {

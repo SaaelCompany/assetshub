@@ -21,7 +21,9 @@ public class TniAddressTest {
     @Test
     public void keepsAHostNameSoDhcpCanMove() {
         assertEquals("pc-01.corp.local", TniAddress.station(" pc-01.corp.local "));
+        assertEquals("KRUL-IT", TniAddress.station("KRUL-IT"));
         assertEquals("PC01", TniAddress.station("PC01"));
+        assertEquals("", TniAddress.station("Lenovo T14"));
         assertEquals("10.1.2.3", TniAddress.station("10.1.2.3"));
         assertEquals("", TniAddress.station("8.8.8.8"));
         assertEquals("", TniAddress.station("localhost"));
