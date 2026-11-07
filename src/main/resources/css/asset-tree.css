@@ -4179,9 +4179,9 @@ a.asset-tree-url {
 }
 
 .asset-tree-caps {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 8px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
 }
 
 .asset-tree-caps .asset-tree-check {
@@ -4191,18 +4191,25 @@ a.asset-tree-url {
     white-space: nowrap;
 }
 
+#asset-tree-app .asset-tree-project-card > .asset-tree-schema-search,
+#asset-tree-app .asset-tree-project-card .asset-tree-grant-add .asset-tree-field,
+#asset-tree-app .asset-tree-project-card .asset-tree-grant .asset-tree-field {
+    max-width: 360px;
+}
+
 #asset-tree-app .asset-tree-project-card .asset-tree-grant-add {
-    margin: 0 0 12px;
-    padding: 12px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fafbfc;
+    margin: 0 0 4px;
+    padding: 0 0 8px;
+    border: 0;
+    border-bottom: 1px solid #ebecf0;
+    border-radius: 0;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-project-card .asset-tree-grant-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
     margin: 0;
     border: 0;
     background: transparent;
@@ -4210,9 +4217,11 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-project-card .asset-tree-grant-list .asset-tree-grant {
     margin: 0;
-    padding: 12px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    padding: 8px 0;
+    border: 0;
+    border-bottom: 1px solid #ebecf0;
+    border-radius: 0;
+    background: transparent;
 }
 
 #asset-tree-app button.asset-tree-schema-tab,
@@ -4283,7 +4292,7 @@ a.asset-tree-url {
     }
 
     .asset-tree-caps {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 12px;
     }
 }
 
@@ -10088,20 +10097,20 @@ a.asset-tree-preview-icon:focus {
     margin: 0;
 }
 
+#asset-tree-app .asset-tree-key-field.wide.asset-tree-schema-name,
 #asset-tree-app .asset-tree-schema-name {
     width: 100%;
-    max-width: 360px;
+    max-width: 320px;
 }
 
 #asset-tree-app .asset-tree-type-ticks {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 16px;
-    margin: 0 0 12px;
-    padding: 8px 10px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fafbfc;
+    gap: 4px 16px;
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-type-ticks .asset-tree-check {
