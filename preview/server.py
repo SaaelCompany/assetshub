@@ -1223,6 +1223,7 @@ def module_setup(stored, migrate=True):
         "scheduleBoards": pack_boards(stored.get("scheduleBoards")),
         "scheduleOpen": pack_open(stored.get("scheduleOpen"), layer),
         "furniture": pack_furniture(stored.get("furniture")),
+        "glyphs": pack_glyphs(stored.get("glyphs")),
         "portalMine": bool(stored.get("portalMine")),
         "portalColumns": normalize_portal_columns(stored.get("portalColumns")),
         "tniKeep": tni_span(stored.get("tniKeep"), 90, 1, 3650),
@@ -1262,7 +1263,7 @@ def plan_kind(kind):
         "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text",
         "box", "ellipse", "diamond", "triangle", "note", "flow", "chart",
         "power", "scs", "comm", "vent", "water", "heat", "fire", "guard", "png",
-        "pen", "rack", "switch",
+        "pen", "rack", "switch", "glyph",
     }
     if value in allowed:
         return value
@@ -1292,6 +1293,11 @@ def save_mine_view(user_key, body):
     }
     STATE.setdefault("mine_views", {})[user_key] = stored
     return stored
+
+
+def pack_glyphs(raw):
+    text = str(raw or "").replace(";", "").replace("=", "").replace("\n", "").replace("\r", "").strip()
+    return text[:24000]
 
 
 def pack_furniture(raw):
@@ -3503,7 +3509,7 @@ def save_floor(project_key, floor_id, body, text):
             label = "Комната"
         if kind in ("room", "stair"):
             minimum = 16
-        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text", "png", "rack", "switch"):
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text", "png", "rack", "switch", "glyph"):
             minimum = 8
         else:
             minimum = 4

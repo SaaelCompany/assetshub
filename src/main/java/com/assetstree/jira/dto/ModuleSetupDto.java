@@ -32,6 +32,7 @@ public class ModuleSetupDto {
     private String scheduleBoards;
     private String scheduleOpen;
     private String furniture;
+    private String glyphs;
     private Boolean portalMine;
     private String portalColumns;
     private Integer tniKeep;
@@ -95,6 +96,8 @@ public class ModuleSetupDto {
     public void setScheduleOpen(String scheduleOpen) { this.scheduleOpen = scheduleOpen; }
     public String getFurniture() { return furniture; }
     public void setFurniture(String furniture) { this.furniture = furniture; }
+    public String getGlyphs() { return glyphs; }
+    public void setGlyphs(String glyphs) { this.glyphs = glyphs; }
     public Boolean getPortalMine() { return portalMine; }
     public void setPortalMine(Boolean portalMine) { this.portalMine = portalMine; }
     public String getPortalColumns() { return portalColumns; }

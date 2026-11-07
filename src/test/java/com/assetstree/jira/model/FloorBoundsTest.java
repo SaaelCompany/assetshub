@@ -19,5 +19,7 @@ public class FloorBoundsTest {
         assertEquals(8, FloorBounds.minSize("rack"));
         assertEquals(4, FloorBounds.minSize("flow"));
         assertEquals(4, FloorBounds.minSize("pen"));
+        assertEquals("glyph", FloorBounds.kind("glyph"));
+        assertEquals(8, FloorBounds.minSize("glyph"));
     }
 }
