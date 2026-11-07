@@ -53,6 +53,9 @@ public class PortalPageFilter implements Filter {
         }
         HttpServletRequest http = (HttpServletRequest) request;
         String uri = http.getRequestURI() == null ? "" : http.getRequestURI();
+        if (uri.indexOf("/servicedesk/customer/") >= 0) {
+            rememberPortalAsset(http);
+        }
         if (uri.indexOf("/servicedesk/customer/") >= 0
                 && "POST".equalsIgnoreCase(http.getMethod())
                 && uri.contains("/create")) {
@@ -92,6 +95,10 @@ public class PortalPageFilter implements Filter {
         HttpServletResponse raw = (HttpServletResponse) response;
         raw.setContentLength(output.length);
         raw.getOutputStream().write(output);
+    }
+
+    private static void rememberPortalAsset(HttpServletRequest request) {
+        PortalIntake.keep(request);
     }
 
     private static byte[] boot(HttpServletRequest request) {

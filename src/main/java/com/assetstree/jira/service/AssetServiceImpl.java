@@ -23,6 +23,8 @@ import com.atlassian.jira.issue.IssueInputParameters;
 import com.atlassian.jira.issue.IssueManager;
 import com.atlassian.jira.issue.customfields.option.Option;
 import com.atlassian.jira.issue.fields.CustomField;
+import com.atlassian.jira.issue.ModifiedValue;
+import com.atlassian.jira.issue.util.DefaultIssueChangeHolder;
 import com.atlassian.jira.issue.comments.Comment;
 import com.atlassian.jira.issue.comments.CommentManager;
 import com.atlassian.jira.issue.issuetype.IssueType;
@@ -99,6 +101,8 @@ import com.assetstree.jira.dto.PortalRequestCreatedDto;
 import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
+import com.assetstree.jira.model.PortalAssetHold;
+import com.assetstree.jira.model.PortalAssetMark;
 import com.assetstree.jira.model.ProjectModules;
 import com.assetstree.jira.model.ViewColumns;
 import com.assetstree.jira.dto.AssetListDto;
@@ -137,6 +141,7 @@ import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportHolderDto;
 import com.assetstree.jira.dto.ReportPlaceDto;
 import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
 import com.assetstree.jira.dto.PinDto;
 import com.assetstree.jira.dto.ReportLineDto;
@@ -1077,6 +1082,8 @@ public class AssetServiceImpl implements AssetService {
         dto.setComments(commentDtos(id, false));
         dto.setFiles(fileDtos(id, false));
         dto.setViewerKey(user.getKey());
+        dto.setProjectKey(projectKey);
+        dto.setPortalUrl(PortalDesk.customerPortal(user, project(projectKey)));
         return dto;
     }
 
@@ -1099,11 +1106,18 @@ public class AssetServiceImpl implements AssetService {
         }
         PortalDesk.Created created = PortalDesk.create(user, project, outcome.getTypeId(), outcome.getValues());
         if (created.getFailureKey() != null) {
+            Map<String, String> plain = withoutAssetFields(outcome.getValues());
+            if (plain.size() != outcome.getValues().size()) {
+                created = PortalDesk.create(user, project, outcome.getTypeId(), plain);
+            }
+        }
+        if (created.getFailureKey() != null) {
             throw requestFailure(created.getFailureKey(), created.getFailureArg());
         }
         if (created.getIssue() != null) {
-            attachPortalIssue(user, created.getIssue(), assetId);
+            attachPortalIssue(user, created.getIssue(), assetId, true);
             writeAssetField(user, created.getIssue(), assetId);
+            settlePortalAsset(user, assetId);
         }
         PortalRequestCreatedDto dto = new PortalRequestCreatedDto();
         dto.setKey(created.getKey());
@@ -1111,6 +1125,270 @@ public class AssetServiceImpl implements AssetService {
         dto.setAssetName(asset.getName() == null ? "" : asset.getName());
         dto.setObjectKey(asset.getObjectKey() == null ? "" : asset.getObjectKey());
         return dto;
+    }
+
+    @Override
+    public void portalLinkRequest(ApplicationUser user, int assetId, String issueKey) {
+        requirePortalAsset(user, assetId);
+        String normalized = AssetValidator.normalizeIssueKey(issueKey);
+        if (!AssetValidator.isIssueKey(normalized)) {
+            throw new AssetException(404, "asset-tree.error.issue.notFound");
+        }
+        Issue issue = issueManager().getIssueObject(normalized);
+        if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
+            throw new AssetException(404, "asset-tree.error.issue.notFound");
+        }
+        if (!raisedBy(user, issue) || !freshRequest(issue)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        AssetEntity asset = requireAsset(assetId);
+        if (asset.getProjectKey() != null && !ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+            log.info("Linking portal asset {} to {} in another project", Integer.valueOf(assetId), issue.getKey());
+        }
+        Integer chosen = chosenAssetId(issue);
+        int target = chosen == null ? assetId : chosen.intValue();
+        if (chosen == null) {
+            writeAssetField(user, issue, assetId);
+        }
+        if (attachPortalIssue(user, issue, target, true)) {
+            settlePortalAsset(user, assetId);
+            settlePortalAsset(issue.getReporter(), assetId);
+        }
+    }
+
+    @Override
+    public void rememberPortalAsset(ApplicationUser user, int assetId) {
+        requirePortalAsset(user, assetId);
+        keepPortal(user, assetId);
+        storePortalPending(user, assetId);
+    }
+
+    @Override
+    public boolean portalAssetSettled(ApplicationUser user, int assetId) {
+        if (user == null || assetId <= 0) {
+            return false;
+        }
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null || !set.exists(PortalAssetMark.DONE)) {
+                return false;
+            }
+            Integer done = PortalAssetMark.parseId(set.getString(PortalAssetMark.DONE));
+            return done != null && done.intValue() == assetId;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    @Override
+    public void attachPortalAsset(ApplicationUser user, Issue issue) {
+        if (issue == null || issue.getProjectObject() == null || issue.getId() == null || !freshRequest(issue)) {
+            return;
+        }
+        ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : issue.getCreator();
+        Integer carried = PortalAssetHold.requestAsset();
+        Integer pending = carried;
+        if (pending == null) {
+            pending = peekPortal(reporter);
+        }
+        if (pending == null) {
+            pending = peekPortal(user);
+        }
+        if (pending == null) {
+            pending = readPortalPending(reporter);
+        }
+        if (pending == null) {
+            pending = readPortalPending(user);
+        }
+        if (pending == null || pending.intValue() <= 0) {
+            return;
+        }
+        AssetEntity asset;
+        try {
+            asset = requireAsset(pending.intValue());
+        } catch (RuntimeException ex) {
+            log.warn("Portal asset {} was not linked to {}", pending, issue.getKey(), ex);
+            return;
+        }
+        if (isLocation(asset) || asset.getProjectKey() == null) {
+            settlePortalAsset(reporter, pending.intValue());
+            settlePortalAsset(user, pending.intValue());
+            return;
+        }
+        if (!moduleOn(asset.getProjectKey(), ProjectModules.PORTAL)) {
+            return;
+        }
+        boolean onThisRequest = carried != null && carried.intValue() == pending.intValue();
+        if (!onThisRequest && !portalCustomer(reporter, user, pending.intValue())) {
+            log.warn("Portal asset {} was not linked to {}: the customer is not on this asset", pending, issue.getKey());
+            settlePortalAsset(reporter, pending.intValue());
+            settlePortalAsset(user, pending.intValue());
+            return;
+        }
+        if (!ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+            log.info("Linking portal asset {} to {} in another project", pending, issue.getKey());
+        }
+        Integer chosen = chosenAssetId(issue);
+        int target = chosen == null ? pending.intValue() : chosen.intValue();
+        ApplicationUser actor = user != null ? user : reporter;
+        boolean linked = attachPortalIssue(actor, issue, target, true);
+        if (chosen == null) {
+            writeAssetField(actor, issue, target);
+        }
+        if (linked) {
+            settlePortalAsset(reporter, pending.intValue());
+            settlePortalAsset(user, pending.intValue());
+        }
+    }
+
+    private boolean portalCustomer(ApplicationUser reporter, ApplicationUser actor, int assetId) {
+        if (reporter != null && portalParticipant(reporter, assetId)) {
+            return true;
+        }
+        return actor != null && actor != reporter && portalParticipant(actor, assetId);
+    }
+
+    private boolean raisedBy(ApplicationUser user, Issue issue) {
+        if (user == null || user.getKey() == null || issue == null) {
+            return false;
+        }
+        ApplicationUser reporter = issue.getReporter();
+        if (reporter != null && user.getKey().equals(reporter.getKey())) {
+            return true;
+        }
+        ApplicationUser creator = issue.getCreator();
+        return creator != null && user.getKey().equals(creator.getKey());
+    }
+
+    private boolean freshRequest(Issue issue) {
+        if (issue == null) {
+            return false;
+        }
+        Long created = issue.getCreated() == null ? null : Long.valueOf(issue.getCreated().getTime());
+        return PortalAssetMark.fresh(created, System.currentTimeMillis());
+    }
+
+    private void keepPortal(ApplicationUser user, int assetId) {
+        if (user == null || assetId <= 0) {
+            return;
+        }
+        if (user.getKey() != null) {
+            PortalAssetHold.keep(user.getKey(), assetId);
+        }
+        if (user.getName() != null) {
+            PortalAssetHold.keep(user.getName(), assetId);
+        }
+    }
+
+    private Integer peekPortal(ApplicationUser user) {
+        if (user == null) {
+            return null;
+        }
+        Integer id = PortalAssetHold.peek(user.getKey());
+        if (id == null) {
+            id = PortalAssetHold.peek(user.getName());
+        }
+        return id;
+    }
+
+    private void takePortal(ApplicationUser user) {
+        if (user == null) {
+            return;
+        }
+        PortalAssetHold.take(user.getKey());
+        PortalAssetHold.take(user.getName());
+    }
+
+    private PropertySet portalProperties(ApplicationUser user) {
+        if (user == null) {
+            return null;
+        }
+        UserPropertyManager manager = userProperties();
+        if (manager == null) {
+            return null;
+        }
+        return manager.getPropertySet(user);
+    }
+
+    private void storePortalPending(ApplicationUser user, int assetId) {
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (set.exists(PortalAssetMark.PROPERTY)) {
+                Integer current = PortalAssetMark.pendingId(set.getString(PortalAssetMark.PROPERTY), now);
+                if (current != null && current.intValue() == assetId) {
+                    clearPortalDone(set);
+                    return;
+                }
+            }
+            set.setString(PortalAssetMark.PROPERTY, PortalAssetMark.pendingValue(assetId, now));
+            clearPortalDone(set);
+        } catch (RuntimeException ex) {
+            log.warn("Could not store the portal asset for {}", user == null ? "" : user.getKey(), ex);
+        }
+    }
+
+    private Integer readPortalPending(ApplicationUser user) {
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null || !set.exists(PortalAssetMark.PROPERTY)) {
+                return null;
+            }
+            return PortalAssetMark.pendingId(set.getString(PortalAssetMark.PROPERTY), System.currentTimeMillis());
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private void clearPortalDone(PropertySet set) {
+        if (set != null && set.exists(PortalAssetMark.DONE)) {
+            set.remove(PortalAssetMark.DONE);
+        }
+    }
+
+    private void settlePortalAsset(ApplicationUser user, int assetId) {
+        takePortal(user);
+        if (user == null || assetId <= 0) {
+            return;
+        }
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null) {
+                return;
+            }
+            if (set.exists(PortalAssetMark.PROPERTY)) {
+                set.remove(PortalAssetMark.PROPERTY);
+            }
+            set.setString(PortalAssetMark.DONE, String.valueOf(assetId));
+        } catch (RuntimeException ex) {
+            log.warn("Could not finish the portal asset for {}", user.getKey(), ex);
+        }
+    }
+
+    private Integer chosenAssetId(Issue issue) {
+        CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+        if (manager == null || issue == null) {
+            return null;
+        }
+        for (String id : PortalLookup.assetFieldIds()) {
+            CustomField field = manager.getCustomFieldObject(id);
+            if (field == null) {
+                continue;
+            }
+            Object raw = issue.getCustomFieldValue(field);
+            String text = raw == null ? "" : String.valueOf(raw).trim();
+            if (text.isEmpty() || "-1".equals(text)) {
+                continue;
+            }
+            Integer parsed = parseId(text);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return null;
     }
 
     private Project requirePortalProject(AssetEntity asset) {
@@ -1183,9 +1461,9 @@ public class AssetServiceImpl implements AssetService {
         return new AssetException(400, key, arg);
     }
 
-    private void attachPortalIssue(ApplicationUser user, Issue issue, final int assetId) {
+    private boolean attachPortalIssue(ApplicationUser user, Issue issue, final int assetId, final boolean portalIntent) {
         if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
-            return;
+            return false;
         }
         final long issueId = issue.getId().longValue();
         final String projectKey = issue.getProjectObject().getKey();
@@ -1194,7 +1472,7 @@ public class AssetServiceImpl implements AssetService {
                 @Override
                 public Boolean doInTransaction() {
                     AssetEntity asset = requireAsset(assetId);
-                    if (!ProjectKeys.same(asset.getProjectKey(), projectKey)) {
+                    if (!portalIntent && !ProjectKeys.same(asset.getProjectKey(), projectKey)) {
                         throw new AssetException(400, "asset-tree.error.project.mismatch");
                     }
                     AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
@@ -1212,13 +1490,15 @@ public class AssetServiceImpl implements AssetService {
             if (Boolean.TRUE.equals(created)) {
                 applyRequestFlow(user, assetId, issue);
             }
+            return created != null;
         } catch (AssetException ex) {
             if (ex.getStatus() != 409) {
-                log.warn("Could not attach asset {} to {}", assetId, issue.getKey());
+                log.warn("Could not attach asset {} to {}", assetId, issue.getKey(), ex);
             }
         } catch (RuntimeException ex) {
             log.warn("Could not attach asset {} to {}", assetId, issue.getKey(), ex);
         }
+        return false;
     }
 
     private void writeAssetField(ApplicationUser user, Issue issue, int assetId) {
@@ -1232,6 +1512,7 @@ public class AssetServiceImpl implements AssetService {
         try {
             IssueService issueService = ComponentAccessor.getComponent(IssueService.class);
             if (issueService == null) {
+                writeAssetFieldDirect(issue, assetId);
                 return;
             }
             IssueInputParameters params = issueService.newIssueInputParameters();
@@ -1243,10 +1524,51 @@ public class AssetServiceImpl implements AssetService {
             IssueService.UpdateValidationResult result = issueService.validateUpdate(user, issue.getId(), params);
             if (result != null && result.isValid()) {
                 issueService.update(user, result);
+                return;
             }
         } catch (RuntimeException ex) {
             log.warn("Could not write the asset field on {}", issue.getKey(), ex);
         }
+        writeAssetFieldDirect(issue, assetId);
+    }
+
+    private void writeAssetFieldDirect(Issue issue, int assetId) {
+        try {
+            CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+            if (manager == null || issue == null) {
+                return;
+            }
+            String value = String.valueOf(assetId);
+            for (String id : PortalLookup.assetFieldIds()) {
+                CustomField field = manager.getCustomFieldObject(id);
+                if (field == null) {
+                    continue;
+                }
+                Object current = issue.getCustomFieldValue(field);
+                String now = current == null ? "" : String.valueOf(current).trim();
+                if (value.equals(now)) {
+                    continue;
+                }
+                field.updateValue(null, issue, new ModifiedValue(current, value), new DefaultIssueChangeHolder());
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Could not store the asset field on {}", issue.getKey(), ex);
+        }
+    }
+
+    private Map<String, String> withoutAssetFields(Map<String, String> values) {
+        Map<String, String> plain = new LinkedHashMap<String, String>();
+        if (values == null) {
+            return plain;
+        }
+        List<String> assetFields = PortalLookup.assetFieldIds();
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            if (entry.getKey() != null && assetFields.contains(entry.getKey())) {
+                continue;
+            }
+            plain.put(entry.getKey(), entry.getValue());
+        }
+        return plain;
     }
 
     private AssetEntity requirePortalAsset(ApplicationUser user, int assetId) {
@@ -2411,6 +2733,7 @@ public class AssetServiceImpl implements AssetService {
             dto.setProjectKey(target.getProjectKey() == null ? "" : target.getProjectKey());
             Project owner = project(target.getProjectKey());
             dto.setOpen(canOpen(user, owner));
+            dto.setCard(peerDto(user, target));
         } else {
             dto.setObjectKey("");
             dto.setName("");
@@ -8775,6 +9098,67 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
+    @Override
+    public List<SchemeDocumentDto> schemes(ApplicationUser user, String projectKey) {
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.MAP);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<List<SchemeDocumentDto>>() {
+            @Override
+            public List<SchemeDocumentDto> doInTransaction() {
+                return SchemeDocuments.list(ao(), project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public SchemeDocumentDto scheme(ApplicationUser user, String projectKey, final int schemeId) {
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.MAP);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
+            @Override
+            public SchemeDocumentDto doInTransaction() {
+                return SchemeDocuments.one(ao(), project.getKey(), schemeId);
+            }
+        });
+    }
+
+    @Override
+    public SchemeDocumentDto createScheme(ApplicationUser user, String projectKey, final SchemeDocumentDto draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
+            @Override
+            public SchemeDocumentDto doInTransaction() {
+                return SchemeDocuments.create(ao(), project.getKey(), draft);
+            }
+        });
+    }
+
+    @Override
+    public SchemeDocumentDto saveScheme(ApplicationUser user, String projectKey, final int schemeId, final SchemeDocumentDto draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
+            @Override
+            public SchemeDocumentDto doInTransaction() {
+                return SchemeDocuments.save(ao(), project.getKey(), schemeId, draft);
+            }
+        });
+    }
+
+    @Override
+    public void deleteScheme(ApplicationUser user, String projectKey, final int schemeId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                SchemeDocuments.delete(ao(), project.getKey(), schemeId);
+                return null;
+            }
+        });
+    }
+
     private String roomName(String raw, String kind, String points) {
         String name = raw == null ? "" : raw.trim();
         if (name.isEmpty()) {
@@ -8957,16 +9341,30 @@ public class AssetServiceImpl implements AssetService {
                 SavedReportEntity row = ao().create(SavedReportEntity.class,
                         new DBParam("PROJECT_KEY", project.getKey()),
                         new DBParam("NAME", name),
-                        new DBParam("GROUP_BY", group));
+                        new DBParam("GROUP_BY", group),
+                        new DBParam("CHART", chartHead(chart.isEmpty() ? "bar" : chart)),
+                        new DBParam("CHART_TEXT", chart.isEmpty() ? "bar" : chart));
                 row.setFilterField(filter);
                 writeFilter(row, value);
-                row.setChart(chart.isEmpty() ? "bar" : chart);
+                writeChart(row, chart);
                 row.setMetric(metric);
                 row.setFieldKey(fieldKey);
                 row.setAttrKey(attrKey);
                 row.setAttrValue(attrValue);
                 row.save();
-                return savedReportDto(row);
+                SavedReportEntity stored = ao().get(SavedReportEntity.class, row.getID());
+                if (stored == null) {
+                    return savedReportDto(row);
+                }
+                stored.setFilterField(filter);
+                writeFilter(stored, value);
+                writeChart(stored, chart);
+                stored.setMetric(metric);
+                stored.setFieldKey(fieldKey);
+                stored.setAttrKey(attrKey);
+                stored.setAttrValue(attrValue);
+                stored.save();
+                return savedReportDto(stored);
             }
         });
     }
@@ -9003,7 +9401,7 @@ public class AssetServiceImpl implements AssetService {
                 row.setGroupBy(group);
                 row.setFilterField(filter);
                 writeFilter(row, value);
-                row.setChart(chart.isEmpty() ? "bar" : chart);
+                writeChart(row, chart);
                 row.setMetric("kind".equals(group) ? "count" : metric);
                 row.setFieldKey(fieldKey);
                 row.setAttrKey(attrKey);
@@ -9018,7 +9416,9 @@ public class AssetServiceImpl implements AssetService {
         if (name.isEmpty() || name.length() > 80 || group.isEmpty() || (filter.isEmpty() != value.isEmpty())) {
             throw new AssetException(400, "asset-tree.error.report");
         }
-        if (ReportCatalog.FIELD.equals(group) && (fieldKey == null || fieldKey.isEmpty())) {
+        boolean groupsField = ReportCatalog.FIELD.equals(group)
+                || (group != null && (group.startsWith(ReportCatalog.FIELD + "+") || group.contains("+" + ReportCatalog.FIELD)));
+        if (groupsField && (fieldKey == null || fieldKey.isEmpty())) {
             throw new AssetException(400, "asset-tree.error.report");
         }
         if ((attrKey == null || attrKey.isEmpty()) != (attrValue == null || attrValue.isEmpty()) || (attrValue != null && attrValue.length() > 80)) {
@@ -9030,6 +9430,33 @@ public class AssetServiceImpl implements AssetService {
         if ("mix".equals(filter) && !mixLooksValid(value)) {
             throw new AssetException(400, "asset-tree.error.report");
         }
+    }
+
+    /** The short chart column keeps a value that fits. The full list lives beside it. */
+    private String chartHead(String stored) {
+        if (stored == null || stored.isEmpty()) {
+            return "bar";
+        }
+        if (stored.length() <= 16) {
+            return stored;
+        }
+        int comma = stored.indexOf(',');
+        String head = comma > 0 ? stored.substring(0, comma) : "bar";
+        return head.length() > 16 ? "bar" : head;
+    }
+
+    private void writeChart(SavedReportEntity row, String chart) {
+        String stored = chart == null || chart.isEmpty() ? "bar" : chart;
+        row.setChart(chartHead(stored));
+        row.setChartText(stored);
+    }
+
+    private String storedChart(SavedReportEntity row) {
+        String chart = ReportCatalog.chart(row.getChartText());
+        if (chart.isEmpty()) {
+            chart = ReportCatalog.chart(row.getChart());
+        }
+        return chart.isEmpty() ? "bar" : chart;
     }
 
     private void writeFilter(SavedReportEntity row, String value) {
@@ -9086,7 +9513,7 @@ public class AssetServiceImpl implements AssetService {
                 if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
-                row.setChart(chart);
+                writeChart(row, chart);
                 row.save();
                 return savedReportDto(row);
             }
@@ -9156,10 +9583,7 @@ public class AssetServiceImpl implements AssetService {
             group = saved.getGroupBy();
             filter = saved.getFilterField() == null ? "" : saved.getFilterField();
             value = storedFilter(saved);
-            chart = ReportCatalog.chart(saved.getChart());
-            if (chart.isEmpty()) {
-                chart = "bar";
-            }
+            chart = storedChart(saved);
             metric = reportMetric(saved.getMetric());
             fieldKey = saved.getFieldKey() == null ? "" : saved.getFieldKey();
             attrKey = saved.getAttrKey() == null ? "" : saved.getAttrKey();
@@ -9169,7 +9593,7 @@ public class AssetServiceImpl implements AssetService {
         if ("kind".equals(group)) {
             metric = "count";
         }
-        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue);
+        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue, chart);
         view.setGroupBy(group);
         view.setFieldKey(fieldKey);
         view.setChart(chart);
@@ -9216,7 +9640,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setGroupBy(row.getGroupBy() == null ? "" : row.getGroupBy());
         dto.setFilterField(row.getFilterField() == null ? "" : row.getFilterField());
         dto.setFilterValue(storedFilter(row));
-        dto.setChart(ReportCatalog.chart(row.getChart()).isEmpty() ? "bar" : ReportCatalog.chart(row.getChart()));
+        dto.setChart(storedChart(row));
         dto.setMetric(reportMetric(row.getMetric()));
         dto.setFieldKey(row.getFieldKey() == null ? "" : row.getFieldKey());
         dto.setAttrKey(row.getAttrKey() == null ? "" : row.getAttrKey());
@@ -9239,6 +9663,12 @@ public class AssetServiceImpl implements AssetService {
         String[] parts = value.split(";");
         for (int i = 0; i < parts.length; i++) {
             String part = parts[i];
+            if (part.startsWith("f=")) {
+                if (!fieldRulesLookValid(part.substring(2))) {
+                    return false;
+                }
+                continue;
+            }
             if (!(part.startsWith("t=") || part.startsWith("s=") || part.startsWith("h=") || part.startsWith("p="))) {
                 return false;
             }
@@ -9323,7 +9753,7 @@ public class AssetServiceImpl implements AssetService {
 
     private ReportViewDto buildReport(Project project, String key, String title, boolean standard,
             String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket,
-            String fieldKey, String attrKey, String attrValue) {
+            String fieldKey, String attrKey, String attrValue, String chartList) {
         AssetEntity[] assets = assetsIn(project.getKey());
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), assets));
         Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
@@ -9338,15 +9768,17 @@ public class AssetServiceImpl implements AssetService {
         }
         boolean money = ReportCatalog.COST.equals(key) || "cost".equals(metric);
         boolean byField = ReportCatalog.FIELD.equals(group);
-        boolean needAttrs = byField || (attrKey != null && !attrKey.isEmpty());
+        boolean groupsField = group != null && (group.startsWith(ReportCatalog.FIELD + "+") || group.contains("+" + ReportCatalog.FIELD));
+        boolean needAttrs = byField || groupsField || (attrKey != null && !attrKey.isEmpty()) || mixHasFieldRules(filter, value);
         Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
                 ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         String valueKind = byField ? fieldKind(types, fieldKey) : "";
-        boolean works = ReportCatalog.WORK.equals(key) || ReportCatalog.SERVICE.equals(key) || "kind".equals(group);
+        boolean works = ReportCatalog.WORK.equals(key) || ReportCatalog.SERVICE.equals(key) || (group != null && group.contains("kind"));
         if (works) {
             return buildWorkReport(project, key, title, standard, group, filter, value, assets, types, index, statusNames, lineFrom, allLines, onlyBucket, attrKey, attrValue);
         }
-        boolean needsLife = reportNeedsLife(key, group, money);
+        boolean needsLife = reportNeedsLife(key, group, money)
+                || (chartList != null && chartList.indexOf("gantt") >= 0);
         List<Integer> lifeIds = new ArrayList<Integer>();
         if (needsLife) {
             for (AssetEntity asset : assets) {
@@ -9373,7 +9805,7 @@ public class AssetServiceImpl implements AssetService {
             if (!reportFilterMatches(asset, filter, value, types, index)) {
                 continue;
             }
-            if (!attributeMatches(attributes, asset, attrKey, attrValue)) {
+            if (!reportAttributesMatch(attributes, asset, filter, value, attrKey, attrValue)) {
                 continue;
             }
             LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
@@ -9394,18 +9826,47 @@ public class AssetServiceImpl implements AssetService {
         LocalDate today = businessToday();
         Map<String, String> kindNames = kindNames(project.getKey());
         int memberships = 0;
+        Map<String, String> compositeLabels = new HashMap<String, String>();
+        boolean composite = group != null && group.indexOf('+') >= 0;
         for (AssetEntity asset : chosen) {
             List<String> bucketKeys = new ArrayList<String>();
             if (byField) {
                 bucketKeys.addAll(fieldParts(attributeText(attributes, asset.getID(), fieldKey), valueKind));
+            } else if (composite) {
+                String[] parts = group.split("\\+");
+                StringBuilder keyBuf = new StringBuilder();
+                StringBuilder labelBuf = new StringBuilder();
+                for (int p = 0; p < parts.length; p++) {
+                    String part = parts[p];
+                    String piece;
+                    String pieceLabel;
+                    if (ReportCatalog.FIELD.equals(part)) {
+                        piece = attributeText(attributes, asset.getID(), fieldKey).trim();
+                        pieceLabel = piece.isEmpty() ? i18n().getText("asset-tree.ui.reportBlank") : piece;
+                    } else {
+                        piece = reportBucketKey(key, part, asset, types, index, lives, nextPlan, today);
+                        pieceLabel = reportBucketLabel(key, part, piece, asset, types, index, kindNames, statusNames);
+                    }
+                    if (p > 0) {
+                        keyBuf.append('\u001f');
+                        labelBuf.append(" · ");
+                    }
+                    keyBuf.append(piece == null ? "" : piece);
+                    labelBuf.append(pieceLabel == null ? "" : pieceLabel);
+                }
+                String compositeKey = keyBuf.toString();
+                bucketKeys.add(compositeKey);
+                compositeLabels.put(compositeKey, labelBuf.toString());
             } else {
                 bucketKeys.add(reportBucketKey(key, group, asset, types, index, lives, nextPlan, today));
             }
             String[] span = reportSpan(lives.get(Integer.valueOf(asset.getID())), today);
             for (String bucketKey : bucketKeys) {
-            String label = byField
+            String label = compositeLabels.containsKey(bucketKey)
+                    ? compositeLabels.get(bucketKey)
+                    : (byField
                     ? (bucketKey.isEmpty() ? i18n().getText("asset-tree.ui.reportBlank") : bucketKey)
-                    : reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames, statusNames);
+                    : reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames, statusNames));
             ReportBucketDto bucket = buckets.get(bucketKey);
             if (bucket == null) {
                 bucket = new ReportBucketDto(bucketKey, label, reportColor(key, group, bucketKey, types), 0);
@@ -9450,6 +9911,93 @@ public class AssetServiceImpl implements AssetService {
         view.setFieldKey(fieldKey == null ? "" : fieldKey);
         view.setFieldLabel(fieldLabel(types, fieldKey));
         return view;
+    }
+
+    private boolean reportAttributesMatch(Map<Integer, List<AssetAttributeEntity>> attributes, AssetEntity asset,
+            String filter, String value, String attrKey, String attrValue) {
+        if (!attributeMatches(attributes, asset, attrKey, attrValue)) {
+            return false;
+        }
+        if (!mixHasFieldRules(filter, value) || asset == null) {
+            return true;
+        }
+        String[] rules = mixPart(value, "f").split("\\|", -1);
+        for (int i = 0; i < rules.length; i++) {
+            String rule = rules[i];
+            int mark = rule.indexOf('~');
+            if (mark <= 0) {
+                continue;
+            }
+            String key = ReportCatalog.fieldKey(rule.substring(0, mark));
+            String wanted = unescapeFieldRule(rule.substring(mark + 1)).trim().toLowerCase(Locale.ROOT);
+            if (key.isEmpty() || wanted.isEmpty()) {
+                continue;
+            }
+            String raw = attributeText(attributes, asset.getID(), key).toLowerCase(Locale.ROOT);
+            if (!raw.contains(wanted)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean mixHasFieldRules(String filter, String value) {
+        return "mix".equals(filter) && !mixPart(value, "f").isEmpty();
+    }
+
+    private boolean fieldRulesLookValid(String packed) {
+        if (packed == null || packed.isEmpty()) {
+            return false;
+        }
+        String[] rules = packed.split("\\|", -1);
+        if (rules.length == 0 || rules.length > 8) {
+            return false;
+        }
+        for (int i = 0; i < rules.length; i++) {
+            String rule = rules[i];
+            int mark = rule.indexOf('~');
+            if (mark <= 0) {
+                return false;
+            }
+            if (ReportCatalog.fieldKey(rule.substring(0, mark)).isEmpty()) {
+                return false;
+            }
+            String text = unescapeFieldRule(rule.substring(mark + 1)).trim();
+            if (text.isEmpty() || text.length() > 80) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String unescapeFieldRule(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (ch == '~' && i + 1 < raw.length()) {
+                char next = raw.charAt(i + 1);
+                if (next == '~') {
+                    out.append('~');
+                    i++;
+                    continue;
+                }
+                if (next == 'p') {
+                    out.append('|');
+                    i++;
+                    continue;
+                }
+                if (next == 's') {
+                    out.append(';');
+                    i++;
+                    continue;
+                }
+            }
+            out.append(ch);
+        }
+        return out.toString();
     }
 
     private boolean attributeMatches(Map<Integer, List<AssetAttributeEntity>> attributes, AssetEntity asset, String attrKey, String attrValue) {
@@ -9662,7 +10210,8 @@ public class AssetServiceImpl implements AssetService {
             String filter, String value, AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
             Map<String, String> statusNames, int lineFrom, boolean allLines, String onlyBucket, String attrKey, String attrValue) {
         Map<String, String> kindNames = kindNames(project.getKey());
-        Map<Integer, List<AssetAttributeEntity>> attributes = attrKey != null && !attrKey.isEmpty()
+        boolean needAttrs = (attrKey != null && !attrKey.isEmpty()) || mixHasFieldRules(filter, value);
+        Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
                 ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         List<ServicePlanEntity> plans = new ArrayList<ServicePlanEntity>();
         boolean filtered = filter != null && !filter.isEmpty();
@@ -9672,7 +10221,8 @@ public class AssetServiceImpl implements AssetService {
             if (type != null && type.isLocation()) {
                 continue;
             }
-            if (!reportFilterMatches(asset, filter, value, types, index) || !attributeMatches(attributes, asset, attrKey, attrValue)) {
+            if (!reportFilterMatches(asset, filter, value, types, index)
+                    || !reportAttributesMatch(attributes, asset, filter, value, attrKey, attrValue)) {
                 continue;
             }
             wanted.add(Integer.valueOf(asset.getID()));
@@ -10316,12 +10866,25 @@ public class AssetServiceImpl implements AssetService {
             note.add(i18n().getText("asset-tree.ui.reportLinesCut"));
             lines.add(note);
         }
-        WorkbookSheet.Chart chart = ReportWorkbook.chart(view,
+        Map<String, String> captions = new HashMap<String, String>();
+        captions.put("bar", i18n().getText("asset-tree.ui.reportColumns"));
+        captions.put("histogram", i18n().getText("asset-tree.ui.reportHistogram"));
+        captions.put("bars", i18n().getText("asset-tree.ui.reportBars"));
+        captions.put("line", i18n().getText("asset-tree.ui.reportLine"));
+        captions.put("area", i18n().getText("asset-tree.ui.reportArea"));
+        captions.put("scatter", i18n().getText("asset-tree.ui.reportScatter"));
+        captions.put("donut", i18n().getText("asset-tree.ui.reportDonut"));
+        captions.put("pie", i18n().getText("asset-tree.ui.reportPie"));
+        captions.put("radar", i18n().getText("asset-tree.ui.reportRadar"));
+        captions.put("gantt", i18n().getText("asset-tree.ui.reportGantt"));
+        captions.put("venn", i18n().getText("asset-tree.ui.reportVenn"));
+        List<WorkbookSheet.Chart> charts = ReportWorkbook.charts(view,
                 i18n().getText("asset-tree.ui.reportCount"),
                 i18n().getText("asset-tree.ui.lifeBook"),
                 i18n().getText("asset-tree.ui.reportChartStart"),
-                i18n().getText("asset-tree.ui.reportChartSpan"));
-        return new WorkbookSheet.Page(view.getTitle(), headers, lines, chart);
+                i18n().getText("asset-tree.ui.reportChartSpan"),
+                captions);
+        return new WorkbookSheet.Page(view.getTitle(), headers, lines, charts);
     }
 
     private String bookCount(int count) {
@@ -10952,6 +11515,15 @@ public class AssetServiceImpl implements AssetService {
     private boolean reportNeedsLife(String key, String group, boolean money) {
         if (money) {
             return true;
+        }
+        if (group != null && group.indexOf('+') >= 0) {
+            String[] parts = group.split("\\+");
+            for (String part : parts) {
+                if (reportNeedsLife(key, part, false)) {
+                    return true;
+                }
+            }
+            return false;
         }
         if (ReportCatalog.WARRANTY.equals(key) || ReportCatalog.WARRANTY.equals(group)) {
             return true;

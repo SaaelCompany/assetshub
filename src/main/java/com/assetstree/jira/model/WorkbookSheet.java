@@ -38,16 +38,30 @@ public final class WorkbookSheet {
         private final List<String> headers;
         private final List<List<String>> rows;
         private final Chart chart;
+        private final List<Chart> charts;
 
         public Page(String name, List<String> headers, List<List<String>> rows) {
-            this(name, headers, rows, null);
+            this(name, headers, rows, (Chart) null);
         }
 
         public Page(String name, List<String> headers, List<List<String>> rows, Chart chart) {
+            this(name, headers, rows, chart == null ? null : java.util.Collections.singletonList(chart));
+        }
+
+        public Page(String name, List<String> headers, List<List<String>> rows, List<Chart> charts) {
             this.name = name;
             this.headers = headers;
             this.rows = rows;
-            this.chart = chart;
+            List<Chart> kept = new ArrayList<Chart>();
+            if (charts != null) {
+                for (Chart picture : charts) {
+                    if (picture != null && picture.usable()) {
+                        kept.add(picture);
+                    }
+                }
+            }
+            this.charts = kept;
+            this.chart = kept.isEmpty() ? null : kept.get(0);
         }
 
         public String getName() {
@@ -65,6 +79,16 @@ public final class WorkbookSheet {
         public Chart getChart() {
             return chart;
         }
+
+        public List<Chart> getCharts() {
+            return charts;
+        }
+    }
+
+    /** The pictures drawn on one worksheet, with the chart part numbers. */
+    private static final class SheetPicture {
+        private final List<Chart> charts = new ArrayList<Chart>();
+        private final List<Integer> files = new ArrayList<Integer>();
     }
 
     /**
@@ -209,12 +233,20 @@ public final class WorkbookSheet {
             for (Page page : book) {
                 names.add(uniqueTitle(page == null ? "" : page.getName(), used));
             }
-            List<Chart> charts = new ArrayList<Chart>();
+            List<SheetPicture> pictures = new ArrayList<SheetPicture>();
+            int chartFile = 1;
             for (Page page : book) {
-                Chart chart = page == null ? null : page.getChart();
-                charts.add(chart != null && chart.usable() ? chart : null);
+                SheetPicture picture = new SheetPicture();
+                if (page != null && page.getCharts() != null) {
+                    for (Chart chart : page.getCharts()) {
+                        picture.charts.add(chart);
+                        picture.files.add(Integer.valueOf(chartFile));
+                        chartFile++;
+                    }
+                }
+                pictures.add(picture.charts.isEmpty() ? null : picture);
             }
-            put(zip, "[Content_Types].xml", contentTypes(charts));
+            put(zip, "[Content_Types].xml", contentTypes(book.size(), pictures));
             put(zip, "_rels/.rels", rootRels());
             put(zip, "xl/workbook.xml", workbook(names));
             put(zip, "xl/_rels/workbook.xml.rels", workbookRels(book.size()));
@@ -223,16 +255,18 @@ public final class WorkbookSheet {
                 Page page = book.get(i);
                 List<String> headers = page == null ? null : page.getHeaders();
                 List<List<String>> rows = page == null ? null : page.getRows();
-                Chart chart = charts.get(i);
+                SheetPicture picture = pictures.get(i);
                 int number = i + 1;
-                put(zip, "xl/worksheets/sheet" + number + ".xml", sheet(headers, rows, chart != null));
-                if (chart == null) {
+                put(zip, "xl/worksheets/sheet" + number + ".xml", sheet(headers, rows, picture != null));
+                if (picture == null) {
                     continue;
                 }
                 put(zip, "xl/worksheets/_rels/sheet" + number + ".xml.rels", sheetRels(number));
-                put(zip, "xl/drawings/drawing" + number + ".xml", drawing(number, chart.pointCount()));
-                put(zip, "xl/drawings/_rels/drawing" + number + ".xml.rels", drawingRels(number));
-                put(zip, "xl/charts/chart" + number + ".xml", chartXml(chart, names.get(i), rows));
+                put(zip, "xl/drawings/drawing" + number + ".xml", drawing(picture.charts));
+                put(zip, "xl/drawings/_rels/drawing" + number + ".xml.rels", drawingRels(picture.files));
+                for (int c = 0; c < picture.charts.size(); c++) {
+                    put(zip, "xl/charts/chart" + picture.files.get(c) + ".xml", chartXml(picture.charts.get(c), names.get(i), rows));
+                }
             }
             zip.close();
             return bytes.toByteArray();
@@ -337,26 +371,29 @@ public final class WorkbookSheet {
         zip.closeEntry();
     }
 
-    private static String contentTypes(List<Chart> charts) {
+    private static String contentTypes(int sheets, List<SheetPicture> pictures) {
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
         xml.append("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
         xml.append("<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>");
         xml.append("<Default Extension=\"xml\" ContentType=\"application/xml\"/>");
         xml.append("<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>");
-        for (int i = 1; i <= charts.size(); i++) {
+        for (int i = 1; i <= sheets; i++) {
             xml.append("<Override PartName=\"/xl/worksheets/sheet").append(i);
             xml.append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>");
         }
-        for (int i = 0; i < charts.size(); i++) {
-            if (charts.get(i) == null) {
+        for (int i = 0; i < pictures.size(); i++) {
+            SheetPicture picture = pictures.get(i);
+            if (picture == null) {
                 continue;
             }
             int number = i + 1;
-            xml.append("<Override PartName=\"/xl/charts/chart").append(number);
-            xml.append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>");
             xml.append("<Override PartName=\"/xl/drawings/drawing").append(number);
             xml.append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>");
+            for (Integer file : picture.files) {
+                xml.append("<Override PartName=\"/xl/charts/chart").append(file);
+                xml.append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>");
+            }
         }
         xml.append("<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>");
         xml.append("</Types>");
@@ -525,29 +562,45 @@ public final class WorkbookSheet {
                 + "</Relationships>";
     }
 
-    private static String drawingRels(int number) {
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
-                + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart"
-                + number + ".xml\"/>"
-                + "</Relationships>";
+    private static String drawingRels(List<Integer> files) {
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        xml.append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+        for (int i = 0; i < files.size(); i++) {
+            xml.append("<Relationship Id=\"rId").append(i + 1);
+            xml.append("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart");
+            xml.append(files.get(i)).append(".xml\"/>");
+        }
+        xml.append("</Relationships>");
+        return xml.toString();
     }
 
-    private static String drawing(int number, int points) {
-        int rows = Math.max(16, Math.min(36, points + 4));
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-                + "<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
-                + "<xdr:twoCellAnchor>"
-                + "<xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
-                + "<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>" + rows + "</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
-                + "<xdr:graphicFrame macro=\"\">"
-                + "<xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart " + number + "\"/>"
-                + "<xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>"
-                + "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>"
-                + "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">"
-                + "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId1\"/>"
-                + "</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/>"
-                + "</xdr:twoCellAnchor></xdr:wsDr>";
+    private static String drawing(List<Chart> charts) {
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        xml.append("<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
+        int row = 0;
+        for (int i = 0; i < charts.size(); i++) {
+            int height = Math.max(16, Math.min(36, charts.get(i).pointCount() + 4));
+            xml.append("<xdr:twoCellAnchor>");
+            xml.append("<xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>").append(row);
+            xml.append("</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>");
+            xml.append("<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>").append(row + height);
+            xml.append("</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>");
+            xml.append("<xdr:graphicFrame macro=\"\">");
+            xml.append("<xdr:nvGraphicFramePr><xdr:cNvPr id=\"").append(i + 2);
+            xml.append("\" name=\"Chart ").append(i + 1).append("\"/>");
+            xml.append("<xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>");
+            xml.append("<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>");
+            xml.append("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">");
+            xml.append("<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId");
+            xml.append(i + 1).append("\"/>");
+            xml.append("</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/>");
+            xml.append("</xdr:twoCellAnchor>");
+            row += height + 1;
+        }
+        xml.append("</xdr:wsDr>");
+        return xml.toString();
     }
 
     private static String chartXml(Chart chart, String sheetName, List<List<String>> rows) {

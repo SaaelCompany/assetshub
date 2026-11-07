@@ -126,6 +126,34 @@ public class WorkbookChartTest {
     }
 
     @Test
+    public void everyMarkedChartIsDrawn() throws Exception {
+        ReportViewDto view = view("Types", "line,radar,gantt", false);
+        view.getRows().add(bucket("Laptop", 3));
+        view.getRows().add(bucket("Printer", 1));
+        view.getLines().add(line("AST-1", "Laptop", "2024-01-01", "2026-01-01"));
+        java.util.Map<String, String> captions = new java.util.HashMap<String, String>();
+        captions.put("line", "Line");
+        captions.put("radar", "Radar");
+        captions.put("gantt", "Gantt");
+        List<WorkbookSheet.Chart> charts = ReportWorkbook.charts(view, "Count", "Book value", "Start", "Length", captions);
+        assertEquals(3, charts.size());
+        assertEquals("line", charts.get(0).getPlot());
+        assertEquals("radar", charts.get(1).getPlot());
+        assertTrue(charts.get(2).isStacked());
+        assertEquals("line", ReportWorkbook.chart(view, "Count", "Book value", "Start", "Length").getPlot());
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(new WorkbookSheet.Page("Types", headers(), rows(), charts));
+        Map<String, String> parts = unzip(WorkbookSheet.write(pages));
+        assertTrue(parts.get("xl/charts/chart1.xml").contains("<c:lineChart>"));
+        assertTrue(parts.get("xl/charts/chart1.xml").contains(">Line<"));
+        assertTrue(parts.get("xl/charts/chart2.xml").contains("<c:radarChart>"));
+        assertTrue(parts.get("xl/charts/chart3.xml").contains("<c:grouping val=\"stacked\"/>"));
+        assertTrue(parts.get("xl/drawings/drawing1.xml").contains("r:id=\"rId3\""));
+        assertTrue(parts.get("xl/drawings/_rels/drawing1.xml.rels").contains("charts/chart3.xml"));
+        assertFalse(parts.containsKey("xl/charts/chart4.xml"));
+    }
+
+    @Test
     public void emptyReportHasNoPicture() {
         assertNull(ReportWorkbook.chart(view("Empty", "pie", false), "Count", "Book value", "Start", "Length"));
     }

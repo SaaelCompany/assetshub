@@ -187,7 +187,11 @@ public final class PortalDesk {
             fields.add(new PortalRequestForm.Field("summary", "Summary", true, "text", Collections.<PortalRequestForm.Option>emptyList()));
             fields.add(new PortalRequestForm.Field("description", "Description", false, "textarea", Collections.<PortalRequestForm.Option>emptyList()));
         }
-        return new PortalRequestForm.Type(String.valueOf(id), name, description, fields, attached);
+        List<String> stored = new ArrayList<String>();
+        if (assetFields != null) {
+            stored.addAll(assetFields);
+        }
+        return new PortalRequestForm.Type(String.valueOf(id), name, description, fields, stored);
     }
 
     private static void readField(Object field, List<String> assetFields, List<PortalRequestForm.Field> fields, List<String> attached) {
@@ -261,7 +265,41 @@ public final class PortalDesk {
         }
     }
 
+    /** Customer portal of this project, without a request type. Empty when Service Desk is absent. */
+    public static String customerPortal(ApplicationUser user, Project project) {
+        try {
+            Loaded loaded = load(user, project);
+            if (loaded.failure != null || loaded.deskId <= 0) {
+                return "";
+            }
+            int portalId = loaded.deskId;
+            Object portal = invokeQuiet(loaded.desk, "getPortalId");
+            if (portal instanceof Number && ((Number) portal).intValue() > 0) {
+                portalId = ((Number) portal).intValue();
+            }
+            return portalHome(portalId);
+        } catch (RuntimeException ex) {
+            return "";
+        } catch (ReflectiveOperationException ex) {
+            return "";
+        }
+    }
+
     private static String portalUrl(int portalId, String key) {
+        if (portalId <= 0) {
+            return jiraBase() + "/browse/" + key;
+        }
+        return portalHome(portalId) + "/" + key;
+    }
+
+    private static String portalHome(int portalId) {
+        if (portalId <= 0) {
+            return "";
+        }
+        return jiraBase() + "/servicedesk/customer/portal/" + portalId;
+    }
+
+    private static String jiraBase() {
         String base = "";
         try {
             base = ComponentAccessor.getApplicationProperties().getString(APKeys.JIRA_BASEURL);
@@ -274,10 +312,7 @@ public final class PortalDesk {
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
-        if (portalId <= 0) {
-            return base + "/browse/" + key;
-        }
-        return base + "/servicedesk/customer/portal/" + portalId + "/" + key;
+        return base;
     }
 
     private static int parseId(String typeId) {

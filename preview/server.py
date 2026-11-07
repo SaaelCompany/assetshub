@@ -2022,7 +2022,25 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
         "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
         "lines": summary["lines"],
+        "projectKey": project_key,
+        "portalUrl": "/servicedesk/customer/portal/7",
     }
+
+
+def portal_link_request(asset_id, issue_key, text):
+    detail = portal_detail(asset_id, text)
+    if not detail:
+        return 403, {"message": text["asset-tree.error.forbidden"]}
+    row = {
+        "assetId": asset_id,
+        "issueKey": issue_key,
+        "name": detail.get("name") or "",
+        "objectKey": detail.get("objectKey") or "",
+    }
+    links = STATE.setdefault("portal_request_links", [])
+    if not any(item.get("assetId") == asset_id and item.get("issueKey") == issue_key for item in links):
+        links.append(row)
+    return 204, None
 
 
 def portal_request_types():
@@ -3449,6 +3467,97 @@ def floor_dto(row):
     }
 
 
+def scheme_name(raw):
+    name = (raw or "").strip() or "Scheme"
+    return name[:80]
+
+
+def scheme_body(raw):
+    if not isinstance(raw, str):
+        return None
+    body = raw.strip()
+    if not body.startswith("{") or len(body) > 1500000:
+        return None
+    return body
+
+
+def scheme_place_id(row):
+    raw = row.get("body") or ""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return 0
+    try:
+        return int(data.get("placeId") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def scheme_summary(row):
+    return {"id": row["id"], "name": row["name"], "updatedAt": row["updatedAt"], "placeId": scheme_place_id(row)}
+
+
+def project_schemes(project_key):
+    rows = [row for row in STATE.setdefault("schemes", {}).values() if row.get("projectKey") == project_key]
+    rows.sort(key=lambda item: item["id"])
+    return [scheme_summary(row) for row in rows]
+
+
+def create_scheme(project_key, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None or len(project_schemes(project_key)) >= 40:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    scheme_id = STATE.setdefault("scheme_seq", 1)
+    STATE["scheme_seq"] = scheme_id + 1
+    row = {
+        "id": scheme_id,
+        "projectKey": project_key,
+        "name": scheme_name((body or {}).get("name")),
+        "body": stored,
+        "updatedAt": int(datetime.datetime.now().timestamp() * 1000),
+    }
+    STATE["schemes"][scheme_id] = row
+    return 201, scheme_summary(row)
+
+
+def read_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    payload = scheme_summary(row)
+    payload["body"] = row["body"]
+    return 200, payload
+
+
+def save_scheme(project_key, scheme_id, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    row["name"] = scheme_name((body or {}).get("name"))
+    row["body"] = stored
+    row["updatedAt"] = int(datetime.datetime.now().timestamp() * 1000)
+    return 200, scheme_summary(row)
+
+
+def delete_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    del STATE["schemes"][scheme_id]
+    return 204, None
+
+
 def project_floors(project_key):
     rows = [row for row in STATE.setdefault("floors", {}).values() if row.get("projectKey") == project_key]
     rows.sort(key=lambda item: (item.get("level") or 0, item["id"]))
@@ -3787,6 +3896,62 @@ def report_catalog(project_key, text):
     return items
 
 
+def unescape_field_rule(raw):
+    out = []
+    text = raw or ""
+    index = 0
+    while index < len(text):
+        if text[index] == "~" and index + 1 < len(text):
+            nxt = text[index + 1]
+            if nxt == "~":
+                out.append("~")
+                index += 2
+                continue
+            if nxt == "p":
+                out.append("|")
+                index += 2
+                continue
+            if nxt == "s":
+                out.append(";")
+                index += 2
+                continue
+        out.append(text[index])
+        index += 1
+    return "".join(out)
+
+
+def field_rules_ok(packed):
+    rules = (packed or "").split("|")
+    if not packed or not rules or len(rules) > 8:
+        return False
+    for rule in rules:
+        mark = rule.find("~")
+        if mark <= 0 or not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", rule[:mark]):
+            return False
+        text = unescape_field_rule(rule[mark + 1:]).strip()
+        if not text or len(text) > 80:
+            return False
+    return True
+
+
+def report_chart_list(raw):
+    value = (raw or "").strip().lower()
+    if value in REPORT_CHARTS:
+        return value
+    if "," not in value or len(value) > 120:
+        return ""
+    seen = []
+    for part in value.split(","):
+        item = part.strip()
+        if item not in REPORT_CHARTS or item in seen:
+            return ""
+        seen.append(item)
+    stored = ",".join(seen)
+    if len(stored) > 120 or len(seen) < 2:
+        return ""
+    return stored
+
+
 def create_saved_report(project_key, body, text):
     if not module_on(project_key, "reports"):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
@@ -3812,11 +3977,13 @@ def create_saved_report(project_key, body, text):
         return 400, {"message": text.get("asset-tree.error.report.filter", "The filter is longer than 4000 characters. Remove some conditions.")}
     if filt == "mix":
         for part in value.split(";"):
+            if part.startswith("f="):
+                if not field_rules_ok(part[2:]):
+                    return 400, {"message": text.get("asset-tree.error.report", "Report")}
+                continue
             if not part.startswith(("t=", "s=", "h=", "p=")):
                 return 400, {"message": text.get("asset-tree.error.report", "Report")}
-    chart = (body.get("chart") or "bar").strip().lower()
-    if chart not in REPORT_CHARTS:
-        chart = "bar"
+    chart = report_chart_list(body.get("chart")) or "bar"
     metric = (body.get("metric") or "count").strip().lower()
     if metric not in ("count", "cost"):
         metric = "count"
@@ -3874,8 +4041,8 @@ def update_report_chart(project_key, report_key, body, text):
             "fieldKey": saved.get("fieldKey") or "", "attrKey": saved.get("attrKey") or "", "attrValue": saved.get("attrValue") or "",
         })
         return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False, "fieldKey": row["fieldKey"], "attrKey": row["attrKey"], "attrValue": row["attrValue"]}
-    chart = (body.get("chart") or "").strip().lower()
-    if chart not in REPORT_CHARTS:
+    chart = report_chart_list(body.get("chart"))
+    if not chart:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if report_key in REPORT_STANDARD:
         view = STATE.setdefault("views", {}).setdefault(project_key, {})
@@ -4211,6 +4378,7 @@ def report_view(project_key, report_key, text, query=None):
         statuses = ""
         holders = ""
         places = ""
+        fields = ""
         for part in value.split(";"):
             if part.startswith("t="):
                 types = part[2:]
@@ -4220,6 +4388,8 @@ def report_view(project_key, report_key, text, query=None):
                 holders = part[2:]
             elif part.startswith("p="):
                 places = part[2:]
+            elif part.startswith("f="):
+                fields = part[2:]
 
         def place_hit(asset):
             if not places:
@@ -4227,7 +4397,21 @@ def report_view(project_key, report_key, text, query=None):
             wanted = [part for part in places.split(",") if part]
             return any(part in wanted for part in place_chain(asset["id"]))
 
-        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset)]
+        def fields_hit(asset):
+            if not fields:
+                return True
+            values = asset.get("values") or {}
+            for rule in fields.split("|"):
+                mark = rule.find("~")
+                if mark <= 0:
+                    continue
+                key = rule[:mark]
+                wanted = unescape_field_rule(rule[mark + 1:]).strip().lower()
+                if wanted and wanted not in str(values.get(key) or "").lower():
+                    return False
+            return True
+
+        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset) and fields_hit(asset)]
     metric = spec.get("metric") or ("cost" if report_key == "cost" else "count")
     if group == "kind":
         metric = "count"
@@ -4494,7 +4678,7 @@ def relations_for(asset_id):
     return rows
 
 
-def relation_dto(row, target, direction="out"):
+def relation_dto(row, target, direction="out", text=None):
     return {
         "id": row["id"],
         "fromId": row.get("fromId") or 0,
@@ -4507,6 +4691,7 @@ def relation_dto(row, target, direction="out"):
         "projectKey": (target or {}).get("projectKey") or "",
         "open": target is not None,
         "attributes": [{"key": item.get("key") or "", "value": item.get("value") or ""} for item in (row.get("attributes") or [])],
+        "card": peer_dto(target, text) if target else None,
     }
 
 
@@ -5296,16 +5481,24 @@ def chart_xml(chart, sheet, rows):
             "<c:printSettings><c:headerFooter/><c:pageMargins b=\"0.75\" l=\"0.7\" r=\"0.7\" t=\"0.75\" header=\"0.3\" footer=\"0.3\"/><c:pageSetup/></c:printSettings></c:chartSpace>") % (xml_text(title), chart_plot(chart, sheet, rows))
 
 
-def drawing_xml(number, points):
-    rows = max(16, min(36, points + 4))
+def drawing_xml(charts):
+    anchors = []
+    row = 0
+    for index, chart in enumerate(charts, start=1):
+        points = len(chart["labels"]) if chart.get("labels") is not None else chart["lastRow"] - chart["firstRow"] + 1
+        height = max(16, min(36, points + 4))
+        anchors.append(
+            "<xdr:twoCellAnchor><xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+            "<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"%d\" name=\"Chart %d\"/><xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>"
+            "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">"
+            "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId%d\"/>"
+            "</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>" % (row, row + height, index + 1, index, index)
+        )
+        row += height + 1
     return ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
             "<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
-            "<xdr:twoCellAnchor><xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
-            "<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
-            "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart %d\"/><xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>"
-            "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">"
-            "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId1\"/>"
-            "</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>") % (rows, number)
+            "%s</xdr:wsDr>") % "".join(anchors)
 
 
 def equipment_pages(project_key, text, day_first):
@@ -5363,32 +5556,43 @@ def workbook_bytes(pages):
     sheet_tags = []
     relationships = []
     parts = {}
+    chart_file = 1
     for index, page in enumerate(pages, start=1):
         name, headers, rows = page[0], page[1], page[2]
-        chart = page[3] if len(page) > 3 else None
-        if not chart_usable(chart):
-            chart = None
+        raw_chart = page[3] if len(page) > 3 else None
+        if isinstance(raw_chart, list):
+            charts = [chart for chart in raw_chart if chart_usable(chart)]
+        elif chart_usable(raw_chart):
+            charts = [raw_chart]
+        else:
+            charts = []
         overrides.append(
             "<Override PartName=\"/xl/worksheets/sheet%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" % index
         )
-        if chart:
-            overrides.append("<Override PartName=\"/xl/charts/chart%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>" % index)
+        files = []
+        if charts:
             overrides.append("<Override PartName=\"/xl/drawings/drawing%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>" % index)
+            for _chart in charts:
+                overrides.append("<Override PartName=\"/xl/charts/chart%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>" % chart_file)
+                files.append(chart_file)
+                chart_file += 1
         sheet_tags.append("<sheet name=\"%s\" sheetId=\"%d\" r:id=\"rId%d\"/>" % (xml_text(name).replace("\"", "&quot;"), index, index))
         relationships.append(
             "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet%d.xml\"/>" % (index, index)
         )
-        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows, chart is not None)
-        if chart:
-            points = len(chart["labels"]) if chart.get("labels") is not None else chart["lastRow"] - chart["firstRow"] + 1
+        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows, bool(charts))
+        if charts:
+            rels = []
+            for rid, file_no in enumerate(files, start=1):
+                rels.append("<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart%d.xml\"/>" % (rid, file_no))
             parts["xl/worksheets/_rels/sheet%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
                 "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
                 "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing%d.xml\"/></Relationships>" % index)
-            parts["xl/drawings/drawing%d.xml" % index] = drawing_xml(index, points)
+            parts["xl/drawings/drawing%d.xml" % index] = drawing_xml(charts)
             parts["xl/drawings/_rels/drawing%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
-                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart%d.xml\"/></Relationships>" % index)
-            parts["xl/charts/chart%d.xml" % index] = chart_xml(chart, name, rows)
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">%s</Relationships>" % "".join(rels))
+            for chart, file_no in zip(charts, files):
+                parts["xl/charts/chart%d.xml" % file_no] = chart_xml(chart, name, rows)
     relationships.append(
         "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" % (len(pages) + 1)
     )
@@ -5553,10 +5757,56 @@ def report_venn_chart(view, title, series):
     return {"plot": "col", "title": title, "series": series, "labels": names, "values": values}
 
 
+def report_charts(view, text):
+    raw = str(view.get("chart") or "bar").strip().lower()
+    kinds = []
+    for part in raw.split(","):
+        kind = part.strip()
+        if kind in ("columns", "bar"):
+            kind = "histogram"
+        if kind and kind not in kinds:
+            kinds.append(kind)
+    if not kinds:
+        kinds = ["histogram"]
+    captions = {
+        "bar": text.get("asset-tree.ui.reportColumns", "Column"),
+        "histogram": text.get("asset-tree.ui.reportHistogram", "Histogram"),
+        "bars": text.get("asset-tree.ui.reportBars", "Bars"),
+        "line": text.get("asset-tree.ui.reportLine", "Line"),
+        "area": text.get("asset-tree.ui.reportArea", "Area"),
+        "scatter": text.get("asset-tree.ui.reportScatter", "Scatter"),
+        "donut": text.get("asset-tree.ui.reportDonut", "Donut"),
+        "pie": text.get("asset-tree.ui.reportPie", "Pie"),
+        "radar": text.get("asset-tree.ui.reportRadar", "Radar"),
+        "gantt": text.get("asset-tree.ui.reportGantt", "Gantt"),
+        "venn": text.get("asset-tree.ui.reportVenn", "Venn"),
+    }
+    pictures = []
+    for kind in kinds:
+        cloned = dict(view)
+        cloned["chart"] = kind
+        if len(kinds) > 1:
+            cloned["title"] = captions.get(kind) or (view.get("title") or "")
+        picture = report_chart(cloned, text)
+        if chart_usable(picture):
+            pictures.append(picture)
+    if pictures:
+        return pictures
+    if kinds and kinds[0] in ("gantt", "venn"):
+        cloned = dict(view)
+        cloned["chart"] = "bar"
+        picture = report_chart(cloned, text)
+        if chart_usable(picture):
+            return [picture]
+    return []
+
+
 def report_chart(view, text):
     kind = str(view.get("chart") or "").strip().lower()
-    if kind == "columns":
-        kind = "bar"
+    if "," in kind:
+        kind = kind.split(",", 1)[0].strip()
+    if kind in ("columns", "bar"):
+        kind = "histogram"
     money = bool(view.get("sum"))
     buckets = len(view.get("rows") or [])
     title = view.get("title") or ""
@@ -5637,7 +5887,7 @@ def report_sheet(view, text, used):
         lines.append([note.replace("{0}", str(REPORT_EXPORT_MAX))])
     elif view.get("capped"):
         lines.append([text.get("asset-tree.ui.reportLinesCut", "The list continues on the next page.")])
-    return (sheet_title(view.get("title") or "Report", used), headers, lines, report_chart(view, text))
+    return (sheet_title(view.get("title") or "Report", used), headers, lines, report_charts(view, text))
 
 
 def reports_xlsx(project_key, text):
@@ -7124,6 +7374,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         query = parse_qs(parsed.query)
+        if path == "/preview/portal-links" and method == "GET":
+            return self.respond(200, json.dumps({"links": list(STATE.get("portal_request_links") or [])}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         if path == "/preview/mails" and method == "GET":
             return self.respond(200, json.dumps(STATE["mails"]).encode("utf-8"), "application/json; charset=utf-8")
         if path == "/preview/report-mail" and method == "POST":
@@ -7134,7 +7386,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/issue":
             return self.serve_issue(query)
         if path == "/portal" or re.fullmatch(r"/servicedesk/customer/portal/\d+/create/\d+", path):
-            return self.serve_portal(path)
+            return self.serve_portal(path, query)
+        if re.fullmatch(r"/servicedesk/customer/portal/\d+", path):
+            return self.serve_portal_home(query)
+        if re.fullmatch(r"/servicedesk/customer/portal/\d+/[A-Z][A-Z0-9_]*-\d+", path):
+            return self.serve_portal_request(path)
         if path in ("/servicedesk/customer/user/profile",) or re.fullmatch(r"/servicedesk/customer/portal/\d+/user/profile", path):
             return self.serve_profile()
         if path.startswith("/rest/servicedeskapi/portals/") or path.startswith("/rest/servicedeskapi/servicedesk/"):
@@ -7151,10 +7407,8 @@ class Handler(BaseHTTPRequestHandler):
                 status, view = report_view(one_book.group(1), one_book.group(2), self.text(), {"lines": ["all"]})
                 if status != 200:
                     return self.respond(status, json.dumps(view).encode("utf-8"), "application/json; charset=utf-8")
-                chosen = (query.get("chart") or [""])[0].strip().lower()
-                if chosen == "columns":
-                    chosen = "bar"
-                if chosen in REPORT_CHARTS:
+                chosen = report_chart_list((query.get("chart") or [""])[0])
+                if chosen:
                     view["chart"] = chosen
                 body = workbook_bytes([report_sheet(view, self.text(), set())])
                 return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
@@ -7215,6 +7469,7 @@ class Handler(BaseHTTPRequestHandler):
                 .replace("@@CSS@@", "/download/resources/asset-tree/asset-tree.css")
                 .replace("@@QR@@", "/download/resources/asset-tree/qr-code.js")
                 .replace("@@PLAN@@", "/download/resources/asset-tree/plan-exchange.js")
+                .replace("@@SCHEME@@", "/download/resources/asset-tree/schemes.js")
                 .replace("@@JS@@", "/download/resources/asset-tree/asset-tree.js")
                 .replace("@@REST@@", "/rest/asset-tree/1.0")
                 .replace("@@PROJECT@@", project)
@@ -7345,7 +7600,80 @@ dd { margin: 2px 0 0; }
 </body></html>"""
         self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
-    def serve_portal(self, path):
+    def serve_portal_home(self, query):
+        asset = ((query or {}).get("asset") or [""])[0]
+        project = ((query or {}).get("project") or [""])[0]
+        extra = ""
+        if asset.isdigit():
+            extra = "asset=" + asset
+        if project:
+            extra = (extra + "&" if extra else "") + "project=" + project
+        suffix = ("?" + extra) if extra else ""
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Портал</title>
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+main { max-width: 720px; margin: 32px auto; }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 500; }
+p { margin: 0 0 20px; color: #6b778c; }
+a.portal-type { display: block; margin: 0 0 12px; padding: 16px 18px; border-radius: 3px; background: #fff; color: #172b4d; text-decoration: none; box-shadow: 0 1px 1px rgba(9, 30, 66, 0.25); }
+a.portal-type strong { display: block; margin-bottom: 4px; color: #0052cc; font-weight: 600; }
+a.portal-type span { color: #6b778c; font-size: 13px; }
+</style></head>
+<body>
+<header>Центр поддержки</header>
+<main>
+<h1>Чем мы можем помочь?</h1>
+<p>Выберите тип запроса. Оборудование из карточки уже будет в поле актива.</p>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/5%s"><strong>Сообщить о проблеме</strong><span>Что случилось с этим оборудованием</span></a>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/12%s"><strong>Запрос на обслуживание</strong><span>Плановая работа или настройка</span></a>
+</main>
+</body></html>""" % (suffix, suffix)
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_portal_request(self, path):
+        key = path.rstrip("/").rsplit("/", 1)[-1]
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>%s</title>
+<link rel="stylesheet" href="/download/resources/asset-tree/asset-field.css">
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+main { max-width: 720px; margin: 32px auto; background: #fff; border-radius: 3px; padding: 24px; }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 500; }
+p { margin: 0; color: #6b778c; }
+#linked { margin-top: 16px; color: #172b4d; font-size: 16px; }
+</style></head>
+<body>
+<header>Центр поддержки</header>
+<main>
+<h1>%s</h1>
+<p>На этой форме нет поля актива.</p>
+<p id="linked">Оборудование ещё не привязано</p>
+</main>
+<script src="/download/resources/asset-tree/asset-field.js"></script>
+<script>
+setInterval(function () {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', '/preview/portal-links', true);
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4 || xhr.status !== 200) return;
+    var payload = JSON.parse(xhr.responseText || '{}');
+    var links = payload.links || [];
+    var line = document.getElementById('linked');
+    var found = null;
+    for (var i = 0; i < links.length; i++) if (links[i].issueKey === '%s') found = links[i];
+    if (!found || !line) return;
+    line.textContent = 'Оборудование привязано: ' + (found.objectKey ? found.objectKey + ' ' : '') + (found.name || '');
+  };
+  xhr.send(null);
+}, 400);
+</script>
+</body></html>""" % (key, key, key)
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_portal(self, path, query=None):
         ensure_portal_demo()
         # The script is in the head, before the form exists, and the asset input
         # appears later. Project key is not in the page: portal 7 answers only
@@ -7693,6 +8021,9 @@ setTimeout(function () {
             if not portal_detail(asset_id, text):
                 return 403, {"message": text["asset-tree.error.forbidden"]}
             return self.add_share(asset_id, (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/requests/([A-Z][A-Z0-9_]*-\d+)", path)
+        if match and method == "POST":
+            return portal_link_request(int(match.group(1)), match.group(2), text)
         match = re.fullmatch(r"/portal/assets/(\d+)/requests", path)
         if match and method == "GET":
             return portal_request_form(int(match.group(1)), text)
@@ -7845,6 +8176,29 @@ setTimeout(function () {
             if not module_on(project_key, "service"):
                 return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
             return delete_staff(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes", path)
+        if match:
+            project_key = match.group(1)
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if not module_on(project_key, "map"):
+                return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+            if method == "GET":
+                return 200, project_schemes(project_key)
+            if method == "POST":
+                return create_scheme(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes/(\d+)", path)
+        if match:
+            project_key = match.group(1)
+            scheme_id = int(match.group(2))
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if method == "GET":
+                return read_scheme(project_key, scheme_id, text)
+            if method == "PUT":
+                return save_scheme(project_key, scheme_id, self.read_json(), text)
+            if method == "DELETE":
+                return delete_scheme(project_key, scheme_id, text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/floors", path)
         if match:
             project_key = match.group(1)

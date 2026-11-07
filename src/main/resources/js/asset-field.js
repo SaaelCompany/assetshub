@@ -3,6 +3,86 @@
     if (window.__assetTreeFieldBoot) return;
     window.__assetTreeFieldBoot = true;
 
+    function cookieAssetId() {
+        var parts = (document.cookie || '').split(';');
+        var prefix = 'assethub-portal-asset=';
+        for (var i = 0; i < parts.length; i++) {
+            var piece = parts[i].replace(/^\s+/, '');
+            if (piece.indexOf(prefix) !== 0) continue;
+            var value = piece.substring(prefix.length);
+            try { value = decodeURIComponent(value); } catch (error) { value = ''; }
+            if (/^\d+$/.test(value)) return value;
+        }
+        return '';
+    }
+
+    function carriedAssetId() {
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) {
+                var stored = JSON.parse(raw);
+                if (stored && stored.id && /^\d+$/.test(String(stored.id))) return String(stored.id);
+            }
+        } catch (error) {}
+        return cookieAssetId();
+    }
+
+    function carryAssetHeader(url) {
+        var text = url == null ? '' : String(url);
+        if (!text || text.toLowerCase().indexOf('servicedesk') < 0) return '';
+        return carriedAssetId();
+    }
+
+    function installPortalCarry() {
+        if (installPortalCarry.done || !window.XMLHttpRequest) return;
+        installPortalCarry.done = true;
+        var nativeOpen = XMLHttpRequest.prototype.open;
+        var nativeSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            this._assetHubUrl = url;
+            return nativeOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function () {
+            try {
+                var id = carryAssetHeader(this._assetHubUrl);
+                if (id) this.setRequestHeader('X-AssetHub-Asset', id);
+            } catch (error) {}
+            return nativeSend.apply(this, arguments);
+        };
+        if (window.fetch && window.Headers) {
+            var nativeFetch = window.fetch;
+            window.fetch = function (input, init) {
+                var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+                var id = carryAssetHeader(url);
+                if (!id) return nativeFetch.apply(this, arguments);
+                try {
+                    var next = {};
+                    if (init) {
+                        for (var key in init) {
+                            if (Object.prototype.hasOwnProperty.call(init, key)) next[key] = init[key];
+                        }
+                    }
+                    var headers = new Headers(next.headers || (typeof input !== 'string' && input && input.headers));
+                    headers.set('X-AssetHub-Asset', id);
+                    next.headers = headers;
+                    return nativeFetch.call(this, input, next);
+                } catch (error) {
+                    return nativeFetch.apply(this, arguments);
+                }
+            };
+        }
+        if (window.history && history.pushState) {
+            var nativePush = history.pushState;
+            history.pushState = function () {
+                var result = nativePush.apply(this, arguments);
+                setTimeout(claimPortalRequest, 50);
+                return result;
+            };
+            window.addEventListener('popstate', function () { setTimeout(claimPortalRequest, 50); });
+        }
+    }
+    installPortalCarry();
+
     function contextPath() {
         if (window.AJS && typeof AJS.contextPath === 'function') return AJS.contextPath();
         var meta = document.querySelector('meta[name="ajs-context-path"]');
@@ -415,6 +495,8 @@
 
         function applyPortal(force) {
             if (!nodesReady || !rulesReady) return;
+            var pinned = presetAssetId();
+            if (pinned && byId[parseInt(pinned, 10)] && !hidden.value) hidden.value = pinned;
             var locked = rules.length > 0;
             var rule = locked ? chooseRule(rules, readAnswers(picker), byId) : null;
             var rootId = rule ? rule.assetId : null;
@@ -423,12 +505,12 @@
             appliedLock = locked;
             var value = hidden.value ? parseInt(hidden.value, 10) : null;
             if (locked || flat) {
-                if (locked && !rootId) {
+                if (locked && !rootId && !pinned) {
                     hidden.value = '';
                     drawList(null, true);
                     return;
                 }
-                if (rootId && value && !listedContains(rootId, value)) {
+                if (rootId && value && !listedContains(rootId, value) && String(value) !== pinned) {
                     hidden.value = '';
                 }
                 drawList(locked ? rootId : null, false);
@@ -814,6 +896,15 @@
                     if (chosen) option.selected = true;
                     select.appendChild(option);
                 });
+                if (hidden.value && !select.querySelector('option[value="' + hidden.value + '"]')) {
+                    var extra = byId[parseInt(hidden.value, 10)];
+                    if (extra && !extra.group) {
+                        var kept = el('option', null, optionText(extra));
+                        kept.value = String(extra.id);
+                        kept.selected = true;
+                        select.appendChild(kept);
+                    }
+                }
             }
             paintOptions();
             select.addEventListener('change', function () {
@@ -1090,6 +1181,8 @@
                     continue;
                 }
                 hideNative(input);
+                var pinned = presetAssetId();
+                if (pinned && !input.value) input.value = pinned;
                 var picker = el('div', 'asset-tree-picker');
                 picker.setAttribute('data-project', ctx.projectKey);
                 picker.setAttribute('data-wait', phrase('wait'));
@@ -1339,6 +1432,15 @@
             }
             titles.appendChild(meta);
             head.appendChild(titles);
+            var actions = el('div', 'asset-tree-portal-head-actions');
+            var ask = el('button', 'asset-tree-portal-send', portalText('create'));
+            ask.type = 'button';
+            var miss = el('p', 'asset-tree-portal-request-help', '');
+            miss.hidden = true;
+            ask.addEventListener('click', function () { openStandardPortal(card, actions); });
+            actions.appendChild(ask);
+            actions.appendChild(miss);
+            head.appendChild(actions);
             var closer = el('button', 'asset-tree-portal-close', '');
             closer.type = 'button';
             closer.setAttribute('aria-label', 'Закрыть');
@@ -1347,12 +1449,6 @@
             head.appendChild(closer);
             dialog.appendChild(head);
             var body = el('div', 'asset-tree-portal-sheet-body');
-            var actions = el('div', 'asset-tree-portal-actions');
-            var ask = el('button', 'asset-tree-portal-send', 'Создать заявку');
-            ask.type = 'button';
-            ask.addEventListener('click', function () { showPortalRequest(card, dialog, function () { paint(card); }); });
-            actions.appendChild(ask);
-            body.appendChild(actions);
             var details = portalSection('Детали');
             var grid = el('div', 'asset-tree-portal-fields');
             var described = false;
@@ -1430,6 +1526,12 @@
         var field = el('div', 'asset-tree-portal-person');
         if (label) field.appendChild(el('div', 'asset-tree-portal-person-label', label));
         var who = profile && profile.displayName ? profile.displayName : '';
+        if (!who) {
+            var empty = el('div', 'asset-tree-portal-person-empty', 'Не назначен');
+            if (extra) empty.appendChild(extra);
+            field.appendChild(empty);
+            return field;
+        }
         var row = el('div', 'asset-tree-portal-face');
         row.appendChild(portalAvatar(who ? profile : null));
         var text = el('div', 'asset-tree-portal-person-text');
@@ -1446,18 +1548,15 @@
         field.appendChild(el('div', 'asset-tree-portal-person-label', 'Общий доступ'));
         var shares = card.shares || [];
         var mine = !shares.some(function (person) { return person && person.userKey === card.viewerKey; });
-        if (!shares.length) {
-            var self = null;
-            if (card.viewerKey && mine) {
-                self = el('button', 'asset-tree-portal-textbtn', 'Добавить меня');
-                self.type = 'button';
-                self.addEventListener('click', function () {
-                    sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: card.viewerKey }, function (status) {
-                        if (status >= 200 && status < 300) openPortalCard(card.id);
-                    });
+        if (!shares.length && card.viewerKey && mine) {
+            var self = el('button', 'asset-tree-portal-textbtn', 'Добавить меня');
+            self.type = 'button';
+            self.addEventListener('click', function () {
+                sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: card.viewerKey }, function (status) {
+                    if (status >= 200 && status < 300) openPortalCard(card.id);
                 });
-            }
-            field.appendChild(portalPerson('', null, self).querySelector('.asset-tree-portal-face'));
+            });
+            field.appendChild(self);
         }
         shares.forEach(function (person) {
             var remove = el('button', 'asset-tree-portal-textbtn', 'Убрать');
@@ -1559,14 +1658,11 @@
             });
             bar.appendChild(node);
         }
-        var style = el('select', 'asset-tree-jira-style');
-        style.appendChild(el('option', null, 'Стиль'));
         tool('B', function () { command('bold'); });
         tool('I', function () { command('italic'); });
         tool('U', function () { command('underline'); });
         tool('•', function () { command('insertUnorderedList'); });
         tool('1.', function () { command('insertOrderedList'); });
-        bar.insertBefore(style, bar.firstChild);
         box.appendChild(bar);
         box.appendChild(visual);
         box.appendChild(source);
@@ -1757,21 +1853,21 @@
             note.appendChild(text);
             section.appendChild(note);
         });
-        var composer = portalComposer('Вставьте здесь комментарий...');
-        var submit = el('button', 'asset-tree-btn primary', 'Публичный комментарий');
+        var box = el('textarea', 'asset-tree-portal-comment-box');
+        box.placeholder = 'Комментарий';
+        var row = el('div', 'asset-tree-portal-comment-send');
+        var submit = el('button', 'asset-tree-portal-send', 'Отправить');
         submit.type = 'button';
         submit.addEventListener('click', function () {
-            var text = composer.read();
+            var text = String(box.value || '').replace(/^\s+|\s+$/g, '');
             if (!text) return;
             sendJson('POST', '/portal/assets/' + card.id + '/comments', { body: text }, function (status) {
                 if (status >= 200 && status < 300) openPortalCard(card.id);
             });
         });
-        var cancel = el('button', 'asset-tree-jira-quiet', 'Отмена');
-        cancel.type = 'button';
-        composer.actions.appendChild(submit);
-        composer.actions.appendChild(cancel);
-        section.appendChild(composer.root);
+        row.appendChild(submit);
+        section.appendChild(box);
+        section.appendChild(row);
         return section;
     }
 
@@ -1854,6 +1950,113 @@
         document.addEventListener('keydown', onKey);
         paint(index);
         document.body.appendChild(overlay);
+    }
+
+    function portalText(kind) {
+        var lang = (document.documentElement.getAttribute('lang') || '').toLowerCase();
+        var ru = lang.indexOf('ru') === 0;
+        if (kind === 'create') return ru ? 'Создать заявку' : 'Create request';
+        if (kind === 'noPortal') return ru ? 'Портал этого проекта не найден.' : 'This project has no portal.';
+        return ru
+            ? 'Заявка откроется на портале. Это оборудование уже выбрано и привяжется к заявке.'
+            : 'The request opens on the portal. This asset is already selected and will be linked.';
+    }
+
+    function openStandardPortal(card, actions) {
+        var id = card && card.id ? String(card.id) : '';
+        var url = card && card.portalUrl ? String(card.portalUrl) : '';
+        if (!id || !url) {
+            var note = actions ? actions.querySelector('.asset-tree-portal-request-help') : null;
+            if (note) {
+                note.hidden = false;
+                note.textContent = portalText('noPortal');
+            }
+            return;
+        }
+        try {
+            sessionStorage.setItem('asset-tree-portal-asset', JSON.stringify({
+                id: id,
+                projectKey: card.projectKey || '',
+                name: card.name || '',
+                objectKey: card.objectKey || ''
+            }));
+        } catch (error) {}
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200; SameSite=Lax';
+        try {
+            var hold = new XMLHttpRequest();
+            hold.open('POST', contextPath() + '/rest/asset-tree/1.0/portal/assets/' + encodeURIComponent(id) + '/intent', false);
+            hold.setRequestHeader('Accept', 'application/json');
+            hold.setRequestHeader('Content-Type', 'application/json');
+            hold.setRequestHeader('X-Atlassian-Token', 'no-check');
+            hold.send('{}');
+        } catch (error) {}
+        var glue = url.indexOf('?') >= 0 ? '&' : '?';
+        var next = url + glue + 'asset=' + encodeURIComponent(id);
+        if (card.projectKey) next += '&project=' + encodeURIComponent(card.projectKey);
+        window.location.assign(next);
+    }
+
+    function portalIssueKey() {
+        var path = location.pathname || '';
+        var match = /\/portal\/\d+\/(?:[A-Za-z0-9_.-]+\/)*([A-Z][A-Z0-9_]*-\d+)(?:\/|$)/.exec(path);
+        if (match) return match[1];
+        match = /(?:\?|&)(?:requestKey|issueKey|key)=([A-Z][A-Z0-9_]*-\d+)/.exec(location.search || '');
+        return match ? match[1] : '';
+    }
+
+    function claimPortalRequest() {
+        var key = portalIssueKey();
+        if (!key || claimPortalRequest.done || claimPortalRequest.busy) return;
+        var stored = null;
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) stored = JSON.parse(raw);
+        } catch (error) {
+            stored = null;
+        }
+        var id = stored && stored.id ? String(stored.id) : cookieAssetId();
+        if (!/^\d+$/.test(id)) return;
+        claimPortalRequest.busy = true;
+        sendJson('POST', '/portal/assets/' + id + '/requests/' + encodeURIComponent(key), {}, function (status) {
+            claimPortalRequest.busy = false;
+            if (status >= 200 && status < 300) {
+                claimPortalRequest.done = true;
+                try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) {}
+                document.cookie = 'assethub-portal-asset=; path=/; max-age=0';
+                return;
+            }
+            if (status === 0) return;
+            claimPortalRequest.tries = (claimPortalRequest.tries || 0) + 1;
+            if (claimPortalRequest.tries > 40) claimPortalRequest.done = true;
+        });
+    }
+
+    function rememberPortalAsset() {
+        var id = presetAssetId();
+        if (!id || rememberPortalAsset.sent === id) return;
+        rememberPortalAsset.sent = id;
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200; SameSite=Lax';
+        sendJson('POST', '/portal/assets/' + id + '/intent', {}, function (status) {
+            if (status === 0 || status >= 500) rememberPortalAsset.sent = '';
+        });
+    }
+
+    function presetAssetId() {
+        if (/\/portal\/\d+\/[A-Z][A-Z0-9_]*-\d+/.test(location.pathname || '')) return '';
+        var stored = null;
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) stored = JSON.parse(raw);
+        } catch (error) {
+            stored = null;
+        }
+        var urlMatch = /(?:\?|&)asset=(\d+)/.exec(location.search || '');
+        var urlId = urlMatch ? urlMatch[1] : '';
+        var id = urlId || (stored && stored.id ? String(stored.id) : '') || cookieAssetId();
+        if (!id || !/^\d+$/.test(id)) return '';
+        var project = projectFromPage();
+        if (!urlId && stored && stored.projectKey && project && stored.projectKey !== project) return '';
+        return id;
     }
 
     function portalRequestBack(restore, label) {
@@ -2035,7 +2238,27 @@
         existing.appendChild(renderMine(data));
     }
 
+    function stampPortalForms() {
+        var id = presetAssetId() || cookieAssetId();
+        if (!id) return;
+        var forms = document.getElementsByTagName('form');
+        for (var i = 0; i < forms.length; i++) {
+            var form = forms[i];
+            var field = form.querySelector('input[name="assethubAsset"]');
+            if (!field) {
+                field = document.createElement('input');
+                field.type = 'hidden';
+                field.name = 'assethubAsset';
+                form.appendChild(field);
+            }
+            field.value = id;
+        }
+    }
+
     function boot() {
+        rememberPortalAsset();
+        stampPortalForms();
+        claimPortalRequest();
         var pickers = document.querySelectorAll('.asset-tree-picker');
         for (var i = 0; i < pickers.length; i++) mount(pickers[i]);
         var inputs = document.querySelectorAll('input[name^="customfield_"], textarea[name^="customfield_"], input[id^="customfield_"], textarea[id^="customfield_"]');
@@ -2109,6 +2332,7 @@
         refresh();
     });
 
+    setInterval(claimPortalRequest, 500);
     if (window.AJS && AJS.toInit) AJS.toInit(watch);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
     else watch();

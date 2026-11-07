@@ -34,6 +34,7 @@ import com.assetstree.jira.dto.MetaDto;
 import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
 import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportViewDto;
@@ -241,6 +242,21 @@ public interface AssetService {
     /** Creates a customer request and attaches the equipment that was open. */
     PortalRequestCreatedDto createPortalRequest(ApplicationUser user, int assetId, PortalRequestDraft draft);
 
+    /**
+     * Attaches equipment to a request the customer just raised.
+     * Used when the portal form has no asset field to carry the id.
+     */
+    void portalLinkRequest(ApplicationUser user, int assetId, String issueKey);
+
+    /** Remembers the equipment chosen in the profile until the portal creates the request. */
+    void rememberPortalAsset(ApplicationUser user, int assetId);
+
+    /** True when this asset was already attached to the request opened from the profile. */
+    boolean portalAssetSettled(ApplicationUser user, int assetId);
+
+    /** Links that equipment to a request the same customer just raised, even when the request type has no asset field. */
+    void attachPortalAsset(ApplicationUser user, Issue issue);
+
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 
     /** Moves equipment already linked to this request when the request itself changes status. */
@@ -282,6 +298,16 @@ public interface AssetService {
     FloorDto saveFloor(ApplicationUser user, String projectKey, int floorId, FloorDto draft);
 
     void deleteFloor(ApplicationUser user, String projectKey, int floorId);
+
+    List<SchemeDocumentDto> schemes(ApplicationUser user, String projectKey);
+
+    SchemeDocumentDto scheme(ApplicationUser user, String projectKey, int schemeId);
+
+    SchemeDocumentDto createScheme(ApplicationUser user, String projectKey, SchemeDocumentDto draft);
+
+    SchemeDocumentDto saveScheme(ApplicationUser user, String projectKey, int schemeId, SchemeDocumentDto draft);
+
+    void deleteScheme(ApplicationUser user, String projectKey, int schemeId);
 
     List<SavedReportDto> reports(ApplicationUser user, String projectKey);
 

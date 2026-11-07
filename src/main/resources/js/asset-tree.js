@@ -443,6 +443,7 @@
         cardDrag: '',
         cardSuppressClick: false,
         cardSelected: '',
+        cardZoom: null,
         scheduleYear: 0,
         scheduleMonth: 0,
         scheduleSpan: 'month',
@@ -2479,10 +2480,12 @@
         }
         if (state.view === 'reports') {
             frame.appendChild(renderReports());
+            reportFitPlotLabels(frame);
+            window.setTimeout(function () { reportFitPlotLabels(frame); }, 0);
             return;
         }
         if (state.view === 'map') {
-            frame.appendChild(renderMap());
+            frame.appendChild(renderSchemes());
             return;
         }
         if (state.view === 'settings') {
@@ -4224,6 +4227,32 @@
         return box;
     }
 
+    function placeSchemesBlock(asset) {
+        var box = el('div');
+        box.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schemes', null, function (status, list) {
+            if (!box.parentNode) return;
+            box.innerHTML = '';
+            var rows = status === 200 && list && list.length ? list : [];
+            var matched = [];
+            var i;
+            for (i = 0; i < rows.length; i++) {
+                if (Number(rows[i].placeId) === Number(asset.id)) matched.push(rows[i]);
+            }
+            if (!matched.length) {
+                box.appendChild(el('p', 'asset-tree-hint', t('schemeNoSchemes')));
+                return;
+            }
+            matched.forEach(function (row) {
+                box.appendChild(linkLine(row.name || t('schemeDefaultName'), t('schemeOpen'), function () {
+                    window.__assetSchemeFocus = { project: state.projectKey, id: row.id };
+                    showView('map');
+                }));
+            });
+        });
+        return moduleBlock(t('menuMap'), box);
+    }
+
     function renderPlaceHome(asset) {
         var full = (state.detail && state.detail.id == asset.id) ? state.detail : asset;
         if (state.editing && mayEdit(asset)) {
@@ -4287,7 +4316,7 @@
         });
         main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
         main.appendChild(descriptionModule(full, true));
-        main.appendChild(fileBlock(full));
+        main.appendChild(placeSchemesBlock(asset));
 
         if (departments.length) {
             var places = el('div');
@@ -4339,6 +4368,7 @@
             });
         }
         main.appendChild(moduleBlock(t('placeTypes'), typeBlock));
+        main.appendChild(fileBlock(full));
         main.appendChild(activityBlock(full));
 
         var issues = el('div');
@@ -7837,7 +7867,6 @@
             main.appendChild(lifeBlock(asset));
         }
         main.appendChild(descriptionModule(asset, true));
-        main.appendChild(fileBlock(asset));
 
         var issues = el('div');
         if (mayEdit(asset)) {
@@ -7860,6 +7889,7 @@
             });
         }
         main.appendChild(moduleBlock(t('issues'), issues));
+        main.appendChild(fileBlock(asset));
         main.appendChild(activityBlock(asset));
 
         var error = el('div', 'asset-tree-form-error');
@@ -7873,7 +7903,6 @@
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
-        aside.appendChild(peerBlock(asset));
         aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
@@ -8028,7 +8057,6 @@
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
-        if (!placePage) aside.appendChild(peerBlock(asset));
         if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
@@ -8354,7 +8382,7 @@
         var box = el('div', 'asset-tree-link-form');
         var type = document.createElement('select');
         type.className = 'asset-tree-filter';
-        [['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
+        [['peer', 'linkRelated'], ['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
             var option = document.createElement('option');
             option.value = pair[0];
             option.textContent = t(pair[1]);
@@ -8366,6 +8394,8 @@
         custom.hidden = true;
         type.addEventListener('change', function () {
             custom.hidden = type.value !== 'custom';
+            more.hidden = type.value === 'peer';
+            if (type.value === 'peer') extra.hidden = true;
         });
         var attrKey = el('input');
         attrKey.type = 'text';
@@ -8386,6 +8416,7 @@
             extra.hidden = !extra.hidden;
             more.textContent = extra.hidden ? t('linkMore') : t('linkLess');
         });
+        more.hidden = type.value === 'peer';
         var search = el('input');
         search.type = 'search';
         search.placeholder = t('peerSearch');
@@ -8393,6 +8424,7 @@
         var timer = null;
         var seq = 0;
         function chosenType() {
+            if (type.value === 'peer') return 'peer';
             if (type.value !== 'custom') return type.value;
             return (custom.value || '').trim().toLowerCase();
         }
@@ -8416,6 +8448,17 @@
                     }
                     payload.forEach(function (peer) {
                         results.appendChild(button((peer.name || peer.objectKey || '') + (peer.objectKey ? ' · ' + peer.objectKey : ''), 'asset-tree-user-hit', function () {
+                            if (chosenType() === 'peer') {
+                                ajax('POST', '/assets/' + asset.id + '/peers', { assetId: peer.id }, function (st, answer) {
+                                    if (st >= 200 && st < 300) {
+                                        notify(t('peerAdded'));
+                                        selectAsset(asset.id, true);
+                                    } else {
+                                        setFormError((answer && answer.message) || t('errorTitle'));
+                                    }
+                                });
+                                return;
+                            }
                             var body = { assetId: peer.id, type: chosenType(), inbound: (inbound.value || '').trim(), attributes: [] };
                             var key = (attrKey.value || '').trim();
                             var value = (attrValue.value || '').trim();
@@ -8442,19 +8485,363 @@
         return box;
     }
 
-    function linkBlock(asset) {
-        var body = el('div');
-        body.appendChild(el('p', 'asset-tree-hint', t('linksHint')));
-        if (asset.links == null) {
-            body.appendChild(el('p', 'asset-tree-hint', t('loading')));
-        } else if (!asset.links.length && !mayEdit(asset)) {
-            body.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
+    function relationNodes(asset) {
+        var nodes = [];
+        var linked = {};
+        var peers = {};
+        (asset.peers || []).forEach(function (peer) {
+            if (peer && peer.id) peers[peer.id] = peer;
+        });
+        (asset.links || []).forEach(function (link) {
+            var id = linkOtherId(link);
+            if (id) linked[id] = true;
+            var meta = (link.attributes || []).map(function (item) {
+                return (item.key || '') + ': ' + (item.value || '');
+            }).join(' · ');
+            nodes.push({
+                id: id,
+                name: link.name || link.objectKey || '',
+                key: link.objectKey || '',
+                phrase: linkPhrase(link),
+                open: !!link.open,
+                projectKey: link.projectKey,
+                kind: 'link',
+                incoming: link.direction === 'in',
+                linkId: link.id,
+                typeKey: (id && byId()[id] && byId()[id].typeKey) || '',
+                meta: meta,
+                peer: link.card || peers[id] || null
+            });
+        });
+        (asset.peers || []).forEach(function (peer) {
+            if (!peer || !peer.id || linked[peer.id]) return;
+            nodes.push({
+                id: peer.id,
+                name: peer.name || peer.objectKey || '',
+                key: peer.objectKey || '',
+                phrase: t('linkRelated'),
+                open: !!peer.open,
+                projectKey: peer.projectKey,
+                kind: 'peer',
+                typeKey: (peer.id && byId()[peer.id] && byId()[peer.id].typeKey) || '',
+                peer: peer
+            });
+        });
+        return nodes;
+    }
+
+    function linkGraphNode(asset, node, self) {
+        var card = el('div', 'asset-tree-link-node asset-tree-graph-node' + (self ? ' is-self' : '') + (!self && node && !node.open ? ' is-locked' : ''));
+        var title = self ? (asset.name || asset.objectKey || '') : (node.name || node.key || '');
+        var objectKey = self ? (asset.objectKey || '') : (node.key || '');
+        var typeKey = self ? asset.typeKey : (node && node.typeKey);
+        var type = typeOf(typeKey);
+        var mark = typeTile(type, null, iconKeyOf(type), '#dfe1e6');
+        mark.className += ' asset-tree-graph-mark';
+        card.appendChild(mark);
+        var copy = el('div', 'asset-tree-graph-copy');
+        var caption = objectKey && objectKey !== title ? title + ' · ' + objectKey : title;
+        if (!self && node && node.phrase) caption = node.phrase + ' · ' + caption;
+        card.title = caption;
+        if (!self && node && node.open && node.id) {
+            copy.appendChild(button(title, 'asset-tree-linkish', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                goToAsset(node.projectKey, node.id);
+            }));
         } else {
-            asset.links.forEach(function (link) {
-                body.appendChild(linkRow(asset, link));
+            copy.appendChild(el('span', 'asset-tree-graph-name', title));
+        }
+        card.appendChild(copy);
+        if (!self && mayEdit(asset) && node && (node.kind === 'peer' ? node.id : node.linkId)) {
+            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                var path = node.kind === 'peer'
+                    ? '/assets/' + asset.id + '/peers/' + node.id
+                    : '/assets/' + asset.id + '/links/' + node.linkId;
+                ajax('DELETE', path, null, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            remove.setAttribute('aria-label', t('unlink'));
+            card.appendChild(remove);
+        }
+        return card;
+    }
+
+    function linkLayoutKey(asset) {
+        return 'asset-tree-graph:' + String(asset.projectKey || '') + ':' + String(asset.id || '');
+    }
+
+    function readLinkLayout(asset) {
+        try {
+            if (!window.localStorage) return null;
+            var raw = localStorage.getItem(linkLayoutKey(asset));
+            if (!raw) return null;
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeLinkLayout(asset, spots) {
+        try {
+            if (window.localStorage) localStorage.setItem(linkLayoutKey(asset), JSON.stringify(spots));
+        } catch (error) {}
+    }
+
+    function linkSpot(saved, key, fallback) {
+        var pair = saved ? saved[key] : null;
+        if (!pair || typeof pair.length !== 'number' || pair.length < 2) return fallback;
+        var x = Number(pair[0]);
+        var y = Number(pair[1]);
+        if (x !== x || y !== y) return fallback;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x > 480) x = 480;
+        if (y > 720) y = 720;
+        return { x: Math.round(x), y: Math.round(y) };
+    }
+
+    function linkNodeKey(node, self) {
+        if (self) return 'self';
+        if (node && node.kind === 'peer') return 'peer:' + node.id;
+        return 'link:' + (node ? node.linkId : '');
+    }
+
+    function linkGraph(asset, form) {
+        var nodes = relationNodes(asset);
+        var saved = readLinkLayout(asset);
+        var spots = {};
+        var stage = el('div', 'asset-tree-link-stage');
+        var box = el('div', 'asset-tree-link-graph is-placed' + (nodes.length ? '' : ' is-empty'));
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', t('linkGraph'));
+        if (mayEdit(asset)) {
+            var tools = el('div', 'asset-tree-graph-tools');
+            var pencil = button('', 'asset-tree-btn slim asset-tree-graph-pencil', function () {
+                var on = box.className.indexOf(' is-editing') < 0;
+                box.className = box.className.replace(' is-editing', '');
+                pencil.className = pencil.className.replace(' is-on', '');
+                if (on) {
+                    box.className += ' is-editing';
+                    pencil.className += ' is-on';
+                }
+                pencil.setAttribute('aria-pressed', on ? 'true' : 'false');
+                if (form) form.hidden = !on;
+            });
+            pencil.title = t('linkEdit');
+            pencil.setAttribute('aria-label', t('linkEdit'));
+            pencil.setAttribute('aria-pressed', 'false');
+            pencil.appendChild(toolIcon('edit'));
+            tools.appendChild(pencil);
+            stage.appendChild(tools);
+        }
+        var svg = svgEl('svg');
+        svg.setAttribute('class', 'asset-tree-link-canvas');
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('aria-hidden', 'true');
+        box.appendChild(svg);
+        function clearSelected() {
+            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var n;
+            for (n = 0; n < cards.length; n++) {
+                cards[n].className = cards[n].className.replace(' is-selected', '');
+            }
+        }
+        var panel = el('div', 'asset-tree-link-detail');
+        panel.hidden = true;
+        function showRelation(item, card) {
+            clearSelected();
+            card.className += ' is-selected';
+            panel.hidden = false;
+            panel.innerHTML = '';
+            var bits = [];
+            if (item.node.phrase) bits.push(item.node.phrase);
+            if (item.node.key) bits.push(item.node.key);
+            panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' · ')));
+            if (item.node.peer) panel.appendChild(peerCard(item.node.peer));
+            if (item.node.kind === 'link' && item.node.meta) panel.appendChild(el('p', 'asset-tree-hint', item.node.meta));
+        }
+        var selfCard = linkGraphNode(asset, null, true);
+        selfCard.addEventListener('click', function () {
+            clearSelected();
+            panel.hidden = true;
+            panel.innerHTML = '';
+        });
+        box.appendChild(selfCard);
+        var placed = [];
+        var firstCard = null;
+        nodes.forEach(function (node) {
+            var card = linkGraphNode(asset, node, false);
+            card.addEventListener('click', function () {
+                showRelation({ node: node }, card);
+            });
+            box.appendChild(card);
+            placed.push({ node: node, card: card });
+            if (!firstCard) firstCard = card;
+        });
+        function placeCard(card, key, index, self) {
+            var fallback = { x: self && nodes.length ? 28 : 0, y: index * 58 };
+            var spot = linkSpot(saved, key, fallback);
+            card.style.left = spot.x + 'px';
+            card.style.top = spot.y + 'px';
+            spots[key] = [spot.x, spot.y];
+            var mark = card.querySelector('.asset-tree-graph-mark');
+            if (!mark) return;
+            function begin(clientX, clientY, event) {
+                if (event && event.preventDefault) event.preventDefault();
+                if (event && event.stopPropagation) event.stopPropagation();
+                var originLeft = card.offsetLeft;
+                var originTop = card.offsetTop;
+                var moved = false;
+                if (mark.className.indexOf(' is-dragging') < 0) mark.className += ' is-dragging';
+                function point(ev) {
+                    if (ev.touches && ev.touches.length) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+                    return { x: ev.clientX, y: ev.clientY };
+                }
+                function move(ev) {
+                    var p = point(ev);
+                    var dx = p.x - clientX;
+                    var dy = p.y - clientY;
+                    if (dx * dx + dy * dy > 16) moved = true;
+                    var x = originLeft + dx;
+                    var y = originTop + dy;
+                    if (x < 0) x = 0;
+                    if (y < 0) y = 0;
+                    var limit = box.clientWidth - 40;
+                    if (limit < 0) limit = 0;
+                    if (x > limit) x = limit;
+                    card.style.left = Math.round(x) + 'px';
+                    card.style.top = Math.round(y) + 'px';
+                    fitGraph();
+                    paintWires();
+                    if (ev.preventDefault) ev.preventDefault();
+                }
+                function up() {
+                    document.removeEventListener('mousemove', move);
+                    document.removeEventListener('mouseup', up);
+                    document.removeEventListener('touchmove', move);
+                    document.removeEventListener('touchend', up);
+                    mark.className = mark.className.replace(' is-dragging', '');
+                    if (!moved) return;
+                    card.setAttribute('data-dragged', '1');
+                    spots[key] = [card.offsetLeft, card.offsetTop];
+                    writeLinkLayout(asset, spots);
+                    setTimeout(function () { card.removeAttribute('data-dragged'); }, 0);
+                }
+                document.addEventListener('mousemove', move);
+                document.addEventListener('mouseup', up);
+                document.addEventListener('touchmove', move);
+                document.addEventListener('touchend', up);
+            }
+            mark.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                begin(event.clientX, event.clientY, event);
+            });
+            mark.addEventListener('touchstart', function (event) {
+                if (!event.touches || !event.touches.length) return;
+                begin(event.touches[0].clientX, event.touches[0].clientY, event);
+            });
+            card.addEventListener('click', function (event) {
+                if (card.getAttribute('data-dragged') !== '1') return;
+                card.removeAttribute('data-dragged');
+                if (event.stopPropagation) event.stopPropagation();
+                if (event.preventDefault) event.preventDefault();
+            }, true);
+        }
+        placeCard(selfCard, 'self', 0, true);
+        placed.forEach(function (item, index) {
+            placeCard(item.card, linkNodeKey(item.node, false), index + 1, false);
+        });
+        var laidBottom = 36;
+        for (var spotKey in spots) {
+            if (!Object.prototype.hasOwnProperty.call(spots, spotKey) || !spots[spotKey]) continue;
+            var spotEdge = Number(spots[spotKey][1]) + 42;
+            if (spotEdge > laidBottom) laidBottom = spotEdge;
+        }
+        box.style.height = (laidBottom + 6) + 'px';
+        stage.appendChild(box);
+        if (!nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
+        stage.appendChild(panel);
+        if (firstCard) showRelation(placed[0], firstCard);
+        function iconCenter(card, origin) {
+            var mark = card.querySelector('.asset-tree-graph-mark') || card;
+            var rect = mark.getBoundingClientRect();
+            return {
+                x: rect.left + rect.width / 2 - origin.left,
+                y: rect.top + rect.height / 2 - origin.top,
+                w: rect.width / 2,
+                h: rect.height / 2
+            };
+        }
+        function along(x1, y1, x2, y2, half) {
+            var dx = x2 - x1;
+            var dy = y2 - y1;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var ux = dx / len;
+            var uy = dy / len;
+            var ax = Math.abs(ux) < 0.001 ? 0.001 : Math.abs(ux);
+            var ay = Math.abs(uy) < 0.001 ? 0.001 : Math.abs(uy);
+            var dist = Math.min(half.w / ax, half.h / ay) + 2;
+            if (dist > len * 0.46) dist = len * 0.46;
+            return { x: x1 + ux * dist, y: y1 + uy * dist };
+        }
+        function fitGraph() {
+            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var bottom = 36;
+            var i;
+            for (i = 0; i < cards.length; i++) {
+                var edge = cards[i].offsetTop + cards[i].offsetHeight;
+                if (edge > bottom) bottom = edge;
+            }
+            box.style.height = (bottom + 6) + 'px';
+        }
+        function paintWires() {
+            if (!box.parentNode) {
+                window.removeEventListener('resize', paintWires);
+                return;
+            }
+            fitGraph();
+            var origin = svg.getBoundingClientRect();
+            if (origin.width < 40 || origin.height < 20) return;
+            svg.setAttribute('viewBox', '0 0 ' + origin.width + ' ' + origin.height);
+            while (svg.firstChild) svg.removeChild(svg.firstChild);
+            var hub = iconCenter(selfCard, origin);
+            placed.forEach(function (item) {
+                var other = iconCenter(item.card, origin);
+                var from = along(hub.x, hub.y, other.x, other.y, hub);
+                var to = along(other.x, other.y, hub.x, hub.y, other);
+                var line = svgEl('line');
+                line.setAttribute('x1', String(Math.round(from.x)));
+                line.setAttribute('y1', String(Math.round(from.y)));
+                line.setAttribute('x2', String(Math.round(to.x)));
+                line.setAttribute('y2', String(Math.round(to.y)));
+                line.setAttribute('stroke', '#4C9AFF');
+                line.setAttribute('stroke-width', '1.5');
+                line.setAttribute('stroke-linecap', 'round');
+                svg.appendChild(line);
             });
         }
-        if (mayEdit(asset)) body.appendChild(linkForm(asset));
+        window.addEventListener('resize', paintWires);
+        setTimeout(paintWires, 0);
+        return stage;
+    }
+
+    function linkBlock(asset) {
+        var body = el('div');
+        if (asset.links == null && asset.peers == null) {
+            body.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        } else {
+            var form = null;
+            if (mayEdit(asset)) {
+                form = linkForm(asset);
+                form.hidden = true;
+            }
+            body.appendChild(linkGraph(asset, form));
+            if (form) body.appendChild(form);
+        }
         return moduleBlock(t('links'), body);
     }
 
@@ -12474,6 +12861,20 @@
             renderFrame();
         });
         measures.appendChild(field(t('cardGrid'), grid));
+        var zoomLabel = el('span', 'asset-tree-card-zoom-label', '100 %');
+        var zoomOut = button('\u2212', 'asset-tree-btn', function () { setCardZoom(cardZoom() - 0.1); });
+        zoomOut.title = t('cardZoomOut');
+        zoomOut.setAttribute('aria-label', t('cardZoomOut'));
+        var zoomIn = button('+', 'asset-tree-btn', function () { setCardZoom(cardZoom() + 0.1); });
+        zoomIn.title = t('cardZoomIn');
+        zoomIn.setAttribute('aria-label', t('cardZoomIn'));
+        var zoomFit = button(t('cardZoomFit'), 'asset-tree-btn', function () { fitCardZoom(); });
+        var zoomRow = el('div', 'asset-tree-card-zoom');
+        zoomRow.appendChild(zoomOut);
+        zoomRow.appendChild(zoomLabel);
+        zoomRow.appendChild(zoomIn);
+        zoomRow.appendChild(zoomFit);
+        measures.appendChild(zoomRow);
         stage.appendChild(measures);
         renderCardTools(stage);
 
@@ -12496,6 +12897,49 @@
         stage.appendChild(actions);
         block.appendChild(stage);
         panel.appendChild(block);
+        sheet.addEventListener('wheel', function (event) {
+            event.preventDefault();
+            setCardZoom(cardZoom() + ((event.deltaY || 0) > 0 ? -0.1 : 0.1));
+        }, { passive: false });
+        if (state.cardZoom == null) {
+            var natural = article.offsetWidth;
+            var room = stage.clientWidth - 32;
+            state.cardZoom = natural && room && natural > room ? Math.max(0.25, room / natural) : 1;
+        }
+        paintCardZoom();
+
+        function cardZoom() {
+            var zoom = Number(state.cardZoom);
+            if (!zoom || zoom < 0.25) return 1;
+            if (zoom > 3) return 3;
+            return zoom;
+        }
+
+        function paintCardZoom() {
+            var zoom = cardZoom();
+            article.style.transformOrigin = '0 0';
+            article.style.transform = zoom === 1 ? '' : ('scale(' + zoom + ')');
+            var width = article.offsetWidth * zoom;
+            var height = article.offsetHeight * zoom;
+            sheet.style.width = width ? (Math.round(width) + 'px') : '';
+            sheet.style.height = height ? (Math.round(height) + 'px') : '';
+            zoomLabel.textContent = Math.round(zoom * 100) + ' %';
+        }
+
+        function setCardZoom(next) {
+            var value = Math.round(Number(next) * 100) / 100;
+            if (value < 0.25) value = 0.25;
+            if (value > 3) value = 3;
+            state.cardZoom = value;
+            paintCardZoom();
+        }
+
+        function fitCardZoom() {
+            var natural = article.offsetWidth;
+            var room = stage.clientWidth - 32;
+            if (!natural || room < 80) return;
+            setCardZoom(room / natural);
+        }
     }
 
     function fitPortalPanel(panel) {
@@ -18782,7 +19226,9 @@
     function downloadReportFile(view) {
         if (!view || !view.id) return;
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(reportChartWire(reportChartKind(view))), true);
+        var chartQuery = String(view.chart || '');
+        if (chartQuery.indexOf(',') < 0) chartQuery = reportChartWire(reportChartKind(view));
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(chartQuery), true);
         xhr.responseType = 'blob';
         xhr.setRequestHeader('Accept', '*/*');
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
@@ -18862,7 +19308,8 @@
     function viewerChart(projectKey, id) {
         try {
             var raw = window.localStorage.getItem(viewerChartKey(projectKey, id));
-            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'columns' || raw === 'histogram' || raw === 'line' || raw === 'area' || raw === 'scatter' || raw === 'radar' || raw === 'gantt' || raw === 'venn') return raw;
+            if (raw === 'columns' || raw === 'bar') return 'histogram';
+            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'histogram' || raw === 'line' || raw === 'area' || raw === 'scatter' || raw === 'radar' || raw === 'gantt' || raw === 'venn') return raw;
         } catch (error) {
             return '';
         }
@@ -18875,6 +19322,29 @@
         } catch (error) {
             return;
         }
+    }
+
+    function reportChartCaption(kind) {
+        var map = {
+            columns: 'reportColumns', histogram: 'reportHistogram', bars: 'reportBars',
+            line: 'reportLine', area: 'reportArea', scatter: 'reportScatter',
+            donut: 'reportDonut', pie: 'reportPie', radar: 'reportRadar',
+            gantt: 'reportGantt', venn: 'reportVenn'
+        };
+        return t(map[kind] || 'reportHistogram');
+    }
+
+    function reportChartList(view) {
+        var raw = String((view && view.chart) || 'histogram');
+        var parts = raw.split(',');
+        if (parts.length < 2) return [reportChartKind(view)];
+        var out = [];
+        parts.forEach(function (part) {
+            var kind = reportChartSession(part.replace(/^\s+|\s+$/g, ''));
+            if (out.indexOf(kind) < 0) out.push(kind);
+        });
+        if (!out.length) out.push('histogram');
+        return out;
     }
 
     function reportChartKind(view) {
@@ -18891,7 +19361,7 @@
         var select = document.createElement('select');
         select.className = 'asset-tree-filter asset-tree-report-chart-pick';
         select.setAttribute('aria-label', t('reportChart'));
-        [['columns', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
+        [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
             var option = document.createElement('option');
             option.value = pair[0];
             option.textContent = t(pair[1]);
@@ -18908,14 +19378,15 @@
     }
 
     function reportChartWire(kind) {
-        if (kind === 'columns') return 'bar';
-        if (kind === 'donut' || kind === 'pie' || kind === 'bars' || kind === 'histogram' || kind === 'line' || kind === 'area' || kind === 'scatter' || kind === 'radar' || kind === 'gantt' || kind === 'venn' || kind === 'bar') return kind;
-        return 'bar';
+        if (kind === 'columns' || kind === 'bar') return 'histogram';
+        if (kind === 'donut' || kind === 'pie' || kind === 'bars' || kind === 'histogram' || kind === 'line' || kind === 'area' || kind === 'scatter' || kind === 'radar' || kind === 'gantt' || kind === 'venn') return kind;
+        return 'histogram';
     }
 
     function reportChartSession(wire) {
+        if (wire === 'bar' || wire === 'columns') return 'histogram';
         if (wire === 'donut' || wire === 'pie' || wire === 'bars' || wire === 'histogram' || wire === 'line' || wire === 'area' || wire === 'scatter' || wire === 'radar' || wire === 'gantt' || wire === 'venn') return wire;
-        return 'columns';
+        return 'histogram';
     }
 
     function rememberReportChart(view, kind) {
@@ -18946,7 +19417,7 @@
             return;
         }
         state.reportChartBusy = true;
-        var wire = job.kind === 'columns' ? 'bar' : job.kind;
+        var wire = job.kind === 'columns' || job.kind === 'bar' ? 'histogram' : job.kind;
         ajax('PUT', '/projects/' + encodeURIComponent(job.projectKey) + '/reports/' + encodeURIComponent(job.view.id), { chart: wire }, function (status, payload) {
             if (job.epoch !== state.reportChartEpoch || state.projectKey !== job.projectKey) {
                 return;
@@ -19119,15 +19590,60 @@
 
     function reportPlotLabels(points, width) {
         var labels = el('div', 'asset-tree-report-plot-labels');
-        if (points.length > 12) return labels;
+        if (!points.length || points.length > 12 || !width) return labels;
+        var minX = points[0].x;
+        var maxX = points[0].x;
+        var index;
+        for (index = 1; index < points.length; index++) {
+            if (points[index].x < minX) minX = points[index].x;
+            if (points[index].x > maxX) maxX = points[index].x;
+        }
         points.forEach(function (point) {
             var caption = point.row ? (point.row.label || '') : (point.label || '');
             var label = el('span', null, caption);
             label.title = caption;
-            label.style.left = (point.x / width * 100) + '%';
+            if (point.x === minX) {
+                label.style.left = '0';
+                label.style.right = 'auto';
+                label.style.transform = 'none';
+                label.setAttribute('data-edge', 'start');
+            } else if (point.x === maxX) {
+                label.style.left = 'auto';
+                label.style.right = '0';
+                label.style.transform = 'none';
+                label.setAttribute('data-edge', 'end');
+            } else {
+                label.style.left = (point.x / width * 100) + '%';
+            }
             labels.appendChild(label);
         });
         return labels;
+    }
+
+    function reportFitPlotLabels(root) {
+        if (!root || !root.querySelectorAll) return;
+        var groups = root.querySelectorAll('.asset-tree-report-plot-labels');
+        var groupIndex;
+        for (groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            var spans = groups[groupIndex].querySelectorAll('span');
+            if (spans.length < 3) continue;
+            var items = [];
+            var spanIndex;
+            for (spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+                var box = spans[spanIndex].getBoundingClientRect();
+                if (!box.width) return;
+                items.push({ node: spans[spanIndex], left: box.left, right: box.right, edge: spans[spanIndex].getAttribute('data-edge') });
+            }
+            items.sort(function (a, b) { return a.left - b.left; });
+            var end = items[items.length - 1];
+            var cursor = items[0].right;
+            for (spanIndex = 1; spanIndex < items.length - 1; spanIndex++) {
+                var item = items[spanIndex];
+                if (item.edge) continue;
+                if (item.left < cursor + 8 || item.right > end.left - 8) item.node.style.display = 'none';
+                else cursor = item.right;
+            }
+        }
     }
 
     function reportTrendChart(rows, max, area) {
@@ -19504,6 +20020,9 @@
     }
 
     function groupWord(group, view) {
+        if (group && String(group).indexOf('+') >= 0) {
+            return String(group).split('+').map(function (part) { return groupWord(part, view); }).join(' · ');
+        }
         if (group === 'field' && view && view.fieldLabel) return view.fieldLabel;
         var map = {
             status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
@@ -19514,6 +20033,9 @@
     }
 
     function groupPhrase(group, view) {
+        if (group && String(group).indexOf('+') >= 0) {
+            return String(group).split('+').map(function (part) { return groupPhrase(part, view); }).join(' · ');
+        }
         if (group === 'field') {
             return view && view.fieldLabel ? t('reportGroupField') + ': ' + view.fieldLabel : t('reportGroupField');
         }
@@ -19539,6 +20061,27 @@
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports?fresh=' + String(Date.now()), null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            if (state.reportSavedPayload && state.reportSavedPayload.id) {
+                var savedId = String(state.reportSavedPayload.id);
+                var seen = false;
+                var n;
+                for (n = 0; n < state.reportCatalog.length; n++) {
+                    if (String(state.reportCatalog[n].id) === savedId) seen = true;
+                }
+                if (!seen) state.reportCatalog.push(state.reportSavedPayload);
+                state.reportKey = savedId;
+                state.reportSavedPayload = null;
+                state.reportPendingName = '';
+            } else if (state.reportPendingName) {
+                var pendingName = state.reportPendingName;
+                var pendingMatch = null;
+                var p;
+                state.reportPendingName = '';
+                for (p = 0; p < state.reportCatalog.length; p++) {
+                    if (state.reportCatalog[p].name === pendingName) pendingMatch = state.reportCatalog[p];
+                }
+                if (pendingMatch && pendingMatch.id) state.reportKey = String(pendingMatch.id);
+            }
             state.reportEmptyNav = false;
             if (status !== 200) {
                 state.galleryLoading = false;
@@ -19547,7 +20090,7 @@
                 if (state.view === 'reports' && !paintReport()) renderFrame();
                 return;
             }
-            if (!reportVisible(state.reportKey)) {
+            if (!reportVisible(state.reportKey) && !state.reportWantedChart) {
                 state.reportKey = firstVisibleReport() || '';
             }
             if (!state.reportKey) {
@@ -19568,6 +20111,12 @@
             if (token !== state.galleryToken) return;
             state.galleryLoading = false;
             if (status === 200 && payload) {
+                var wanted = state.reportWantedChart || '';
+                state.reportWantedChart = '';
+                var got = String(payload.chart || '');
+                if (wanted && wanted !== got && ((wanted.indexOf(',') >= 0 && got.indexOf(',') < 0) || (wanted.indexOf(',') < 0 && (got === '' || got === 'bar') && wanted !== 'bar'))) {
+                    payload.chart = wanted;
+                }
                 state.reportView = payload;
                 state.reportError = '';
             } else {
@@ -19593,7 +20142,10 @@
         var current = document.querySelector('#asset-tree-app .asset-tree-report-main');
         if (!current || !current.parentNode || state.reportCatalog == null) return false;
         paintReportTools();
-        current.parentNode.replaceChild(reportCard(), current);
+        var card = reportCard();
+        current.parentNode.replaceChild(card, current);
+        reportFitPlotLabels(card);
+        window.setTimeout(function () { reportFitPlotLabels(card); }, 0);
         return true;
     }
 
@@ -19902,13 +20454,14 @@
         });
         if (!money) shareTotal = view.total || 0;
         var shares = shareLabels(shareValues);
-        var kind = reportChartKind(view);
+        var kinds = reportChartList(view);
+        var kind = kinds[0];
         var titleRow = el('div', 'asset-tree-report-title');
         var titles = el('div');
         titles.appendChild(el('h3', null, view.title || ''));
         titles.appendChild(el('p', null, groupPhrase(view.groupBy, view)));
         titleRow.appendChild(titles);
-        titleRow.appendChild(reportChartSwitch(view, kind));
+        if (kinds.length < 2) titleRow.appendChild(reportChartSwitch(view, kind));
         main.appendChild(titleRow);
         var facts = el('div', 'asset-tree-report-facts');
         facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
@@ -19917,9 +20470,38 @@
         if (!rows.length) {
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
             if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
+        } else if (kinds.length < 2) {
+            var onlyChart = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares, view);
+            if (onlyChart) main.appendChild(onlyChart);
         } else {
-            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares, view);
-            if (chartPanel) main.appendChild(chartPanel);
+            var board = el('div', 'asset-tree-report-charts');
+            var compactKinds = [];
+            var wideKinds = [];
+            kinds.forEach(function (chartKind) {
+                if (chartKind === 'gantt' || chartKind === 'bars') wideKinds.push(chartKind);
+                else compactKinds.push(chartKind);
+            });
+            var tiles = el('div', 'asset-tree-report-chart-row');
+            var placeChart = function (chartKind, wide) {
+                var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
+                if (!chartPanel) return null;
+                var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : ''));
+                named.appendChild(el('p', 'asset-tree-report-chart-name', reportChartCaption(chartKind)));
+                named.appendChild(chartPanel);
+                return named;
+            }
+            compactKinds.forEach(function (chartKind) {
+                var named = placeChart(chartKind, false);
+                if (named) tiles.appendChild(named);
+            });
+            if (tiles.childNodes.length) board.appendChild(tiles);
+            wideKinds.forEach(function (chartKind) {
+                var named = placeChart(chartKind, true);
+                if (named) board.appendChild(named);
+            });
+            main.appendChild(board);
+        }
+        if (rows.length) {
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
             header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy, view)));
@@ -20020,31 +20602,62 @@
         return list;
     }
 
-    function acceptSavedReport(payload) {
+    function mixRaw(value, name) {
+        var parts = String(value || '').split(';');
+        var i;
+        for (i = 0; i < parts.length; i++) {
+            if (parts[i].indexOf(name + '=') === 0) return parts[i].slice(name.length + 1);
+        }
+        return '';
+    }
+
+    function unescapeFieldRule(raw) {
+        return String(raw || '').split('~~').join('\u0000').split('~p').join('|').split('~s').join(';').split('\u0000').join('~');
+    }
+
+    function packFieldRules(rules) {
+        var parts = [];
+        (rules || []).forEach(function (rule) {
+            var key = rule && rule.key ? rule.key : '';
+            var value = rule && rule.value ? String(rule.value).replace(/^\s+|\s+$/g, '') : '';
+            if (!key || !value) return;
+            var escaped = value.split('~').join('~~').split('|').join('~p').split(';').join('~s');
+            parts.push(key + '~' + escaped);
+        });
+        return parts.join('|');
+    }
+
+    function unpackFieldRules(value, attrKey, attrValue) {
+        var rules = [];
+        var packed = mixRaw(value, 'f');
+        if (packed) {
+            packed.split('|').forEach(function (piece) {
+                var mark = piece.indexOf('~');
+                if (mark <= 0) return;
+                var key = piece.slice(0, mark);
+                var text = unescapeFieldRule(piece.slice(mark + 1));
+                if (key) rules.push({ key: key, value: text });
+            });
+        }
+        if (!rules.length && attrKey) rules.push({ key: attrKey, value: attrValue || '' });
+        if (!rules.length) rules.push({ key: '', value: '' });
+        return rules;
+    }
+
+    function acceptSavedReport(payload, requestedChart, requestedName) {
         var created = payload && (payload.id || payload.key || '');
         state.reportChart = '';
         state.reportChartFor = '';
-        if (created && state.reportCatalog) {
-            var items = state.reportCatalog.slice();
-            var index = -1;
-            var i;
-            for (i = 0; i < items.length; i++) {
-                if (String(items[i].id) === String(created)) index = i;
-            }
-            if (index >= 0) items[index] = payload;
-            else items.push(payload);
-            state.reportCatalog = items;
-            state.reportKey = String(created);
-            state.reportView = null;
-            state.galleryLoading = false;
-            var token = ++state.galleryToken;
-            renderFrame();
-            fetchGalleryView(token);
-            return;
-        }
+        state.reportChartPending = null;
+        state.reportChartBusy = false;
+        state.reportChartEpoch += 1;
+        state.reportWantedChart = payload && payload.chart ? String(payload.chart) : (requestedChart || '');
+        state.reportSavedPayload = created ? payload : null;
+        state.reportPendingName = created ? '' : (requestedName || '');
         if (created) state.reportKey = String(created);
         state.reportCatalog = null;
         state.reportView = null;
+        state.reportError = '';
         state.galleryLoading = false;
         renderFrame();
     }
@@ -20066,15 +20679,20 @@
                 option.textContent = t(pair[1]);
                 group.appendChild(option);
             });
-            group.value = editing && existing.groupBy ? existing.groupBy : 'type';
-            var chart = document.createElement('select');
-            [['bar', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
-                var option = document.createElement('option');
-                option.value = pair[0];
-                option.textContent = t(pair[1]);
-                chart.appendChild(option);
+            var storedGroup = editing && existing.groupBy ? String(existing.groupBy) : 'type';
+            var groupBits = storedGroup.split('+');
+            group.value = groupBits[0];
+            var extraOn = {};
+            groupBits.forEach(function (part, index) {
+                if (index) extraOn[part] = true;
             });
-            chart.value = editing && existing.chart ? existing.chart : 'bar';
+            var chartOrder = [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']];
+            var chartOn = {};
+            String(editing && existing.chart ? existing.chart : 'histogram').split(',').forEach(function (part) {
+                var key = part.replace(/^\s+|\s+$/g, '');
+                if (key === 'bar' || key === 'columns') key = 'histogram';
+                if (key) chartOn[key] = true;
+            });
             if (editing && existing.name) name.value = existing.name;
             var metric = document.createElement('select');
             [['count', 'reportCount'], ['cost', 'lifeBook']].forEach(function (pair) {
@@ -20100,7 +20718,6 @@
             syncMetric();
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
-            row.appendChild(planField(t('reportChart'), chart));
             row.appendChild(planField(t('reportMetric'), metric));
             var field = document.createElement('select');
             field.appendChild(new Option('\u2014', ''));
@@ -20108,16 +20725,6 @@
                 field.appendChild(new Option(item.label, item.key));
             });
             if (editing && existing.fieldKey) field.value = existing.fieldKey;
-            var fieldValue = document.createElement('input');
-            fieldValue.placeholder = t('reportFieldValue');
-            fieldValue.setAttribute('aria-label', t('reportFieldValue'));
-            if (editing && existing.attrValue) fieldValue.value = existing.attrValue;
-            var fieldFilter = document.createElement('select');
-            fieldFilter.appendChild(new Option(t('reportFieldAny'), ''));
-            reportFieldOptions().forEach(function (item) {
-                fieldFilter.appendChild(new Option(item.label, item.key));
-            });
-            if (editing && existing.attrKey) fieldFilter.value = existing.attrKey;
             var fieldRow = el('div', 'asset-tree-report-picks');
             fieldRow.appendChild(planField(t('reportField'), field));
             fieldRow.hidden = group.value !== 'field';
@@ -20125,14 +20732,102 @@
                 fieldRow.hidden = group.value !== 'field';
                 syncMetric();
             });
-            var attrRow = el('div', 'asset-tree-report-picks');
-            attrRow.appendChild(planField(t('reportField'), fieldFilter));
-            attrRow.appendChild(planField(t('reportFieldValue'), fieldValue));
+            var fieldRules = unpackFieldRules(editing ? existing.filterValue : '', editing ? existing.attrKey : '', editing ? existing.attrValue : '');
+            var fieldHost = el('div', 'asset-tree-report-fields');
+            function paintFieldRules() {
+                fieldHost.innerHTML = '';
+                fieldRules.forEach(function (rule, index) {
+                    var line = el('div', 'asset-tree-report-field-row');
+                    var select = document.createElement('select');
+                    select.className = 'asset-tree-filter';
+                    select.appendChild(new Option(t('reportFieldAny'), ''));
+                    reportFieldOptions().forEach(function (item) {
+                        select.appendChild(new Option(item.label, item.key));
+                    });
+                    select.value = rule.key || '';
+                    select.addEventListener('change', function () { rule.key = select.value; });
+                    var value = document.createElement('input');
+                    value.type = 'text';
+                    value.maxLength = 80;
+                    value.placeholder = t('reportFieldValue');
+                    value.setAttribute('aria-label', t('reportFieldValue'));
+                    value.value = rule.value || '';
+                    value.addEventListener('input', function () { rule.value = value.value; });
+                    line.appendChild(select);
+                    line.appendChild(value);
+                    if (fieldRules.length > 1) {
+                        var remove = button('\u00d7', 'asset-tree-peer-remove', function () {
+                            fieldRules.splice(index, 1);
+                            paintFieldRules();
+                        });
+                        remove.setAttribute('aria-label', t('unlink'));
+                        line.appendChild(remove);
+                    }
+                    fieldHost.appendChild(line);
+                });
+                if (fieldRules.length < 8) {
+                    fieldHost.appendChild(button(t('addField'), 'asset-tree-btn', function () {
+                        fieldRules.push({ key: '', value: '' });
+                        paintFieldRules();
+                    }));
+                }
+            }
+            paintFieldRules();
             dialog.appendChild(planField(t('reportName'), name));
             dialog.appendChild(row);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportAlso')));
+            var extraList = el('div', 'asset-tree-check-list');
+            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']].forEach(function (pair) {
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = !!extraOn[pair[0]] && pair[0] !== group.value;
+                box.addEventListener('change', function () {
+                    if (box.checked) {
+                        var next = group.value;
+                        var key;
+                        for (key in extraOn) {
+                            if (extraOn[key] && key !== group.value) next += '+' + key;
+                        }
+                        next += '+' + pair[0];
+                        if (pair[0] === group.value || next.length > 16) {
+                            box.checked = false;
+                            notify(t('reportAlso'));
+                            return;
+                        }
+                        extraOn[pair[0]] = true;
+                    } else delete extraOn[pair[0]];
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(t(pair[1])));
+                extraList.appendChild(label);
+            });
+            dialog.appendChild(extraList);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportCharts')));
+            var chartList = el('div', 'asset-tree-check-list');
+            chartOrder.forEach(function (pair) {
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = !!chartOn[pair[0]];
+                box.addEventListener('change', function () {
+                    if (box.checked) chartOn[pair[0]] = true;
+                    else delete chartOn[pair[0]];
+                    var chosen = [];
+                    chartOrder.forEach(function (item) { if (chartOn[item[0]]) chosen.push(item[0]); });
+                    if (!chosen.length) {
+                        chartOn[pair[0]] = true;
+                        box.checked = true;
+                    }
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(t(pair[1])));
+                chartList.appendChild(label);
+            });
+            dialog.appendChild(chartList);
             dialog.appendChild(fieldRow);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyField')));
-            dialog.appendChild(attrRow);
+            dialog.appendChild(fieldHost);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyTypes')));
             var types = el('div', 'asset-tree-check-list');
             (state.types || []).forEach(function (type) {
@@ -20227,30 +20922,52 @@
                     field.focus();
                     return;
                 }
-                if ((fieldFilter.value && !fieldValue.value.trim()) || (!fieldFilter.value && fieldValue.value.trim())) {
+                var completeRules = [];
+                var brokenRule = false;
+                fieldRules.forEach(function (rule) {
+                    var key = rule.key || '';
+                    var text = (rule.value || '').replace(/^\s+|\s+$/g, '');
+                    if (!key && !text) return;
+                    if (!key || !text || text.length > 80) brokenRule = true;
+                    else completeRules.push({ key: key, value: text });
+                });
+                if (brokenRule) {
                     save.disabled = false;
                     notify(t('reportFieldValue'));
-                    fieldValue.focus();
                     return;
                 }
+                var extras = [];
+                ['type', 'status', 'place', 'holder', 'issued'].forEach(function (key) {
+                    if (extraOn[key] && key !== group.value) extras.push(key);
+                });
+                var groupValue = group.value;
+                extras.forEach(function (extra) {
+                    var next = groupValue + '+' + extra;
+                    if (next.length <= 16) groupValue = next;
+                });
+                var charts = [];
+                chartOrder.forEach(function (item) { if (chartOn[item[0]]) charts.push(item[0]); });
+                if (!charts.length) charts.push('histogram');
                 var body = {
                     name: name.value.trim(),
-                    groupBy: group.value,
-                    chart: chart.value,
+                    groupBy: groupValue,
+                    chart: charts.join(','),
                     metric: metric.value,
                     filterField: '',
                     filterValue: '',
                     fieldKey: group.value === 'field' ? field.value : '',
-                    attrKey: fieldFilter.value,
-                    attrValue: fieldValue.value.trim()
+                    attrKey: '',
+                    attrValue: ''
                 };
-                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length) {
+                var packedFields = packFieldRules(completeRules);
+                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length || packedFields) {
                     body.filterField = 'mix';
                     var parts = [];
                     if (typeKeys.length) parts.push('t=' + typeKeys.join(','));
                     if (statusKeys.length) parts.push('s=' + statusKeys.join(','));
                     if (holderKeys.length) parts.push('h=' + holderKeys.join(','));
                     if (placeKeys.length) parts.push('p=' + placeKeys.join(','));
+                    if (packedFields) parts.push('f=' + packedFields);
                     body.filterValue = parts.join(';');
                 }
                 if (body.filterValue && body.filterValue.length > 4000) {
@@ -20262,7 +20979,22 @@
                 ajax(editing ? 'PUT' : 'POST', path, body, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal(hold);
-                        acceptSavedReport(payload);
+                        acceptSavedReport(payload, body.chart, body.name);
+                    } else if (status >= 500) {
+                        closeModal(hold);
+                        notify((payload && payload.message) || t('errorTitle'));
+                        state.reportChart = '';
+                        state.reportChartFor = '';
+                        state.reportChartPending = null;
+                        state.reportChartBusy = false;
+                        state.reportChartEpoch += 1;
+                        state.reportWantedChart = body.chart || '';
+                        state.reportPendingName = body.name || '';
+                        state.reportSavedPayload = null;
+                        state.reportCatalog = null;
+                        state.reportView = null;
+                        state.reportError = '';
+                        renderFrame();
                     } else {
                         save.disabled = false;
                         notify((payload && payload.message) || t('errorTitle'));
@@ -21683,6 +22415,57 @@
         if (state.mapResize) window.removeEventListener('resize', state.mapResize);
         state.mapResize = apply;
         window.addEventListener('resize', apply);
+    }
+
+    function renderSchemes() {
+        var host = el('div', 'asset-tree-schemes');
+        if (!window.AssetTreeSchemes) {
+            host.appendChild(el('p', null, t('schemeMissing')));
+            return host;
+        }
+        var assets = equipmentAssets().map(function (asset) {
+            var attributes = {};
+            var list = asset.attributes || [];
+            var i;
+            for (i = 0; i < list.length && i < 2; i++) {
+                if (list[i] && list[i].name) attributes[list[i].name] = list[i].value || '';
+            }
+            var type = typeOf(asset.typeKey);
+            var shape = iconShape(iconKeyOf(type));
+            return {
+                id: asset.id,
+                name: asset.name || '',
+                key: asset.objectKey || asset.key || '',
+                attributes: attributes,
+                icon: shape ? shape.d : '',
+                iconColor: (type && type.color) || '#5D6B82',
+                typeName: (type && type.label) || ''
+            };
+        });
+        var places = placeAssets().map(function (asset) {
+            var path = placePath(asset);
+            var name = asset.name || '';
+            return {
+                id: asset.id,
+                name: path ? path + ' / ' + name : name,
+                key: asset.objectKey || asset.key || ''
+            };
+        });
+        var focusId = 0;
+        if (window.__assetSchemeFocus && window.__assetSchemeFocus.project === state.projectKey) {
+            focusId = window.__assetSchemeFocus.id || 0;
+            window.__assetSchemeFocus = null;
+        }
+        window.AssetTreeSchemes.mount(host, {
+            t: t,
+            ajax: ajax,
+            projectKey: state.projectKey,
+            canEdit: !!state.canEdit,
+            assets: assets,
+            places: places,
+            focusId: focusId
+        });
+        return host;
     }
 
     function renderMap() {
@@ -27929,7 +28712,6 @@
             }
         }
         stack.appendChild(block);
-        stack.appendChild(webhookSettings());
         panel.appendChild(stack);
     }
 
@@ -27954,18 +28736,6 @@
         node.spellcheck = false;
         node.placeholder = placeholder || '';
         return node;
-    }
-
-    function webhookSettings() {
-        var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('webhookRecipeTitle')));
-        block.appendChild(el('p', 'asset-tree-hint', t('automationPlain')));
-        var steps = el('ol', 'asset-tree-automation-steps');
-        [t('automationLink'), t('automationComment'), t('automationTrigger'), t('automationStatus')].forEach(function (line) {
-            steps.appendChild(el('li', null, line));
-        });
-        block.appendChild(steps);
-        return block;
     }
 
     function bytesToBase64(bytes) {
@@ -29134,6 +29904,13 @@
         return box;
     }
 
+    function scopeDisclosure(grant, onSave) {
+        var more = el('details', 'asset-tree-grant-more');
+        more.appendChild(el('summary', null, t('accessScope')));
+        more.appendChild(scopeEditor(grant, onSave));
+        return more;
+    }
+
     function schemaSettings() {
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('schemaTitle')));
@@ -29172,7 +29949,9 @@
         var name = textControl(t('schemaName'));
         name.setAttribute('aria-label', t('schemaName'));
         var picked = {};
-        block.appendChild(settingField(t('schemaName'), name));
+        var nameField = settingField(t('schemaName'), name);
+        nameField.classList.add('asset-tree-schema-name');
+        block.appendChild(nameField);
         block.appendChild(el('p', 'asset-tree-field-label', t('schemaTypes')));
         block.appendChild(typeTickList(picked, function (key, checked) {
             picked[key] = checked;
@@ -29198,13 +29977,16 @@
     }
 
     function renderAccessSettings(panel) {
-        var block = el('div', 'asset-tree-settings-block');
+        var stack = el('div', 'asset-tree-settings-block asset-tree-project-stack asset-tree-access-stack');
+        panel.appendChild(stack);
+        stack.appendChild(schemaSettings());
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
-        panel.appendChild(schemaSettings());
         if (state.grants === null) {
             state.grants = [];
             block.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            panel.appendChild(block);
+            stack.appendChild(block);
             var projectKey = state.projectKey;
             ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/grants', null, function (status, payload) {
                 if (state.view !== 'settings' || state.projectKey !== projectKey) return;
@@ -29218,7 +30000,7 @@
             return;
         }
         var grantRows = [];
-        var grantList = el('div', 'asset-tree-schema-scroll asset-tree-grant-list');
+        var grantList = el('div', 'asset-tree-grant-list');
         var grantEmpty = el('p', 'asset-tree-schema-empty', t('schemaNoMatch'));
         grantEmpty.hidden = true;
         var grantSearch = schemaSearchInput(state.grantQuery, function () {
@@ -29268,7 +30050,7 @@
                 }
                 postGrant(grant, caps, null);
             }));
-            row.appendChild(scopeEditor(grant, function (scope) {
+            row.appendChild(scopeDisclosure(grant, function (scope) {
                 postGrant(grant, capsJoined(grantCaps(grant)), null, scope);
             }));
             grantList.appendChild(row);
@@ -29318,7 +30100,7 @@
         });
         form.appendChild(grid);
         var scopeDraft = { typeScope: '', fieldScope: '', schemaName: '' };
-        form.appendChild(scopeEditor(scopeDraft, function (scope) {
+        form.appendChild(scopeDisclosure(scopeDraft, function (scope) {
             scopeDraft.typeScope = scope.typeScope;
             scopeDraft.fieldScope = scope.fieldScope;
             scopeDraft.schemaName = scope.schemaName;
@@ -29422,7 +30204,7 @@
         });
         block.appendChild(form);
         if (state.grants.length) block.appendChild(grantList);
-        panel.appendChild(block);
+        stack.appendChild(block);
     }
 
     function renderReport() {

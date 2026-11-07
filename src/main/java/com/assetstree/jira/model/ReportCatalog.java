@@ -1,5 +1,6 @@
 package com.assetstree.jira.model;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -25,6 +26,8 @@ public final class ReportCatalog {
             STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
             STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", FIELD));
+    /** Long enough for every chart name joined once. The short column stays separate. */
+    private static final int CHART_LIMIT = 120;
     private static final List<String> CHARTS = Collections.unmodifiableList(Arrays.asList(
             "donut", "pie", "bar", "bars", "line", "area", "histogram", "scatter", "radar", "gantt", "venn"));
 
@@ -44,7 +47,29 @@ public final class ReportCatalog {
             return "";
         }
         String value = raw.trim().toLowerCase(Locale.ROOT);
-        return GROUPS.contains(value) ? value : "";
+        if (GROUPS.contains(value)) {
+            return value;
+        }
+        if (value.indexOf('+') < 0 || value.length() > 16) {
+            return "";
+        }
+        String[] parts = value.split("\\+");
+        if (parts.length < 2) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        List<String> seen = new ArrayList<String>();
+        for (String part : parts) {
+            if (!GROUPS.contains(part) || seen.contains(part)) {
+                return "";
+            }
+            seen.add(part);
+            if (out.length() > 0) {
+                out.append('+');
+            }
+            out.append(part);
+        }
+        return out.length() > 16 ? "" : out.toString();
     }
 
     public static String savedKey(int id) {
@@ -68,7 +93,30 @@ public final class ReportCatalog {
             return "";
         }
         String value = raw.trim().toLowerCase(Locale.ROOT);
-        return CHARTS.contains(value) ? value : "";
+        if (CHARTS.contains(value)) {
+            return value;
+        }
+        if (value.indexOf(',') < 0 || value.length() > CHART_LIMIT) {
+            return "";
+        }
+        String[] parts = value.split(",");
+        if (parts.length < 2) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        List<String> seen = new ArrayList<String>();
+        for (String part : parts) {
+            String item = part.trim();
+            if (!CHARTS.contains(item) || seen.contains(item)) {
+                return "";
+            }
+            seen.add(item);
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(item);
+        }
+        return out.length() > CHART_LIMIT ? "" : out.toString();
     }
 
     /** Type-field key used when a saved report groups or filters by a field. */

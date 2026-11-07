@@ -18,6 +18,7 @@ import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.GrantDraft;
 import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.SchemaDto;
 import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.model.ExportDraft;
@@ -654,6 +655,62 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/schemes")
+    public Response schemes(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.schemes(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/schemes")
+    public Response createScheme(@PathParam("projectKey") final String projectKey, final SchemeDocumentDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createScheme(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/schemes/{schemeId}")
+    public Response scheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.scheme(user(), projectKey, schemeId)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/schemes/{schemeId}")
+    public Response saveScheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId, final SchemeDocumentDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveScheme(user(), projectKey, schemeId, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/schemes/{schemeId}")
+    public Response deleteScheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteScheme(user(), projectKey, schemeId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/reports")
     public Response reports(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
@@ -1217,6 +1274,30 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.portalRequestForm(user(), id)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/intent")
+    public Response rememberPortalAsset(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.rememberPortalAsset(user(), id);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/requests/{issueKey}")
+    public Response portalLinkRequest(@PathParam("id") final int id, @PathParam("issueKey") final String issueKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalLinkRequest(user(), id, issueKey);
+                return Response.noContent().build();
             }
         });
     }
