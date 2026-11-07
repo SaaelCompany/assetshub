@@ -7242,7 +7242,7 @@ a.asset-tree-preview-icon:focus {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    margin: 4px 0 16px;
+    margin: 8px 24px 16px;
 }
 
 #asset-tree-app .asset-tree-report-chart-row {
