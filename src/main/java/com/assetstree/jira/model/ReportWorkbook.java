@@ -10,6 +10,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /** Chooses the picture that belongs on a report sheet. */
 public final class ReportWorkbook {
@@ -20,32 +21,45 @@ public final class ReportWorkbook {
     }
 
     public static WorkbookSheet.Chart chart(ReportViewDto view, String countLabel, String moneyLabel, String startLabel, String spanLabel) {
+        List<WorkbookSheet.Chart> pictures = charts(view, countLabel, moneyLabel, startLabel, spanLabel, null);
+        if (!pictures.isEmpty()) {
+            return pictures.get(0);
+        }
+        List<String> kinds = kindsOf(view);
+        if (!kinds.isEmpty() && ("gantt".equals(kinds.get(0)) || "venn".equals(kinds.get(0)))) {
+            return chartKind(view, "bar", countLabel, moneyLabel, startLabel, spanLabel, titleOf(view));
+        }
+        return null;
+    }
+
+    /** One picture for every chart marked on the report. */
+    public static List<WorkbookSheet.Chart> charts(ReportViewDto view, String countLabel, String moneyLabel, String startLabel, String spanLabel, Map<String, String> captions) {
+        List<WorkbookSheet.Chart> pictures = new ArrayList<WorkbookSheet.Chart>();
         if (view == null) {
-            return null;
+            return pictures;
         }
-        String kind = view.getChart() == null ? "" : view.getChart().trim().toLowerCase(Locale.ROOT);
-        int comma = kind.indexOf(',');
-        if (comma > 0) {
-            kind = kind.substring(0, comma);
+        List<String> kinds = kindsOf(view);
+        String reportTitle = titleOf(view);
+        for (String kind : kinds) {
+            String caption = captions == null ? null : captions.get(kind);
+            String title = kinds.size() > 1 && caption != null && !caption.isEmpty() ? caption : reportTitle;
+            WorkbookSheet.Chart picture = chartKind(view, kind, countLabel, moneyLabel, startLabel, spanLabel, title);
+            if (picture != null && picture.usable()) {
+                pictures.add(picture);
+            }
         }
-        if ("columns".equals(kind)) {
-            kind = "bar";
-        }
+        return pictures;
+    }
+
+    private static WorkbookSheet.Chart chartKind(ReportViewDto view, String kind, String countLabel, String moneyLabel, String startLabel, String spanLabel, String title) {
         boolean money = view.getSum() != null && !view.getSum().isEmpty();
         int buckets = view.getRows() == null ? 0 : view.getRows().size();
-        String title = view.getTitle() == null ? "" : view.getTitle();
         String series = money ? text(moneyLabel) : text(countLabel);
         if ("gantt".equals(kind)) {
-            WorkbookSheet.Chart gantt = gantt(view, title, text(startLabel), text(spanLabel));
-            if (gantt != null) {
-                return gantt;
-            }
+            return gantt(view, title, text(startLabel), text(spanLabel));
         }
         if ("venn".equals(kind)) {
-            WorkbookSheet.Chart venn = venn(view, title, text(countLabel));
-            if (venn != null) {
-                return venn;
-            }
+            return venn(view, title, text(countLabel));
         }
         if (buckets <= 0) {
             return null;
@@ -73,6 +87,32 @@ public final class ReportWorkbook {
             plot = "radar";
         }
         return WorkbookSheet.Chart.categories(plot, title, series, 0, money ? 2 : 1, 2, last, histogram);
+    }
+
+    private static List<String> kindsOf(ReportViewDto view) {
+        List<String> kinds = new ArrayList<String>();
+        String raw = view == null || view.getChart() == null ? "" : view.getChart().trim().toLowerCase(Locale.ROOT);
+        if (raw.isEmpty()) {
+            raw = "bar";
+        }
+        String[] parts = raw.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            String kind = parts[i].trim();
+            if ("columns".equals(kind)) {
+                kind = "bar";
+            }
+            if (!kind.isEmpty() && !kinds.contains(kind)) {
+                kinds.add(kind);
+            }
+        }
+        if (kinds.isEmpty()) {
+            kinds.add("bar");
+        }
+        return kinds;
+    }
+
+    private static String titleOf(ReportViewDto view) {
+        return view == null || view.getTitle() == null ? "" : view.getTitle();
     }
 
     private static WorkbookSheet.Chart gantt(ReportViewDto view, String title, String startLabel, String spanLabel) {

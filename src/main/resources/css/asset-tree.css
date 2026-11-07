@@ -7240,25 +7240,29 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-report-charts {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 12px;
+    margin: 4px 0 16px;
+}
+
+#asset-tree-app .asset-tree-report-chart-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 12px;
     align-items: stretch;
-    margin: 4px 0 16px;
 }
 
 #asset-tree-app .asset-tree-report-chart-block {
     box-sizing: border-box;
-    flex: 1 1 420px;
-    min-width: 280px;
-    max-width: 100%;
+    min-width: 0;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     background: #fff;
     overflow: hidden;
 }
 
-#asset-tree-app .asset-tree-report-chart-block.is-wide {
-    flex-basis: 100%;
+#asset-tree-app .asset-tree-report-chart-row .asset-tree-report-chart-block:only-child {
+    max-width: 480px;
 }
 
 #asset-tree-app .asset-tree-report-chart-name {
@@ -7273,20 +7277,60 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-report-charts .asset-tree-report-chart.is-round {
-    flex-wrap: wrap;
-    justify-content: center;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
     align-items: center;
-    gap: 16px 28px;
+    gap: 8px;
 }
 
 #asset-tree-app .asset-tree-report-charts .asset-tree-report-plot {
     max-width: none;
 }
 
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-columns {
+    min-height: 150px;
+}
+
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-shaft {
+    height: 120px;
+}
+
 #asset-tree-app .asset-tree-report-charts .asset-tree-report-chart svg.asset-tree-report-svg {
-    height: 200px !important;
-    min-height: 200px !important;
-    max-height: 200px !important;
+    height: 168px !important;
+    min-height: 0 !important;
+    max-height: 168px !important;
+}
+
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-chart.is-round svg.asset-tree-report-svg,
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-chart.is-radar svg.asset-tree-report-svg {
+    width: 100% !important;
+    max-width: 220px !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 220px !important;
+    margin: 0 auto;
+}
+
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-ring,
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-chart svg.asset-tree-donut {
+    width: 168px !important;
+    height: 168px !important;
+    min-width: 0 !important;
+    max-width: 168px !important;
+    min-height: 0 !important;
+    max-height: 168px !important;
+    flex: 0 0 168px !important;
+}
+
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-ring-value {
+    width: 168px;
+    height: 168px;
+    font-size: 28px !important;
+}
+
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-plot-labels span {
+    max-width: 64px;
 }
 
 #asset-tree-app .asset-tree-report-chart {

@@ -10866,12 +10866,25 @@ public class AssetServiceImpl implements AssetService {
             note.add(i18n().getText("asset-tree.ui.reportLinesCut"));
             lines.add(note);
         }
-        WorkbookSheet.Chart chart = ReportWorkbook.chart(view,
+        Map<String, String> captions = new HashMap<String, String>();
+        captions.put("bar", i18n().getText("asset-tree.ui.reportColumns"));
+        captions.put("histogram", i18n().getText("asset-tree.ui.reportHistogram"));
+        captions.put("bars", i18n().getText("asset-tree.ui.reportBars"));
+        captions.put("line", i18n().getText("asset-tree.ui.reportLine"));
+        captions.put("area", i18n().getText("asset-tree.ui.reportArea"));
+        captions.put("scatter", i18n().getText("asset-tree.ui.reportScatter"));
+        captions.put("donut", i18n().getText("asset-tree.ui.reportDonut"));
+        captions.put("pie", i18n().getText("asset-tree.ui.reportPie"));
+        captions.put("radar", i18n().getText("asset-tree.ui.reportRadar"));
+        captions.put("gantt", i18n().getText("asset-tree.ui.reportGantt"));
+        captions.put("venn", i18n().getText("asset-tree.ui.reportVenn"));
+        List<WorkbookSheet.Chart> charts = ReportWorkbook.charts(view,
                 i18n().getText("asset-tree.ui.reportCount"),
                 i18n().getText("asset-tree.ui.lifeBook"),
                 i18n().getText("asset-tree.ui.reportChartStart"),
-                i18n().getText("asset-tree.ui.reportChartSpan"));
-        return new WorkbookSheet.Page(view.getTitle(), headers, lines, chart);
+                i18n().getText("asset-tree.ui.reportChartSpan"),
+                captions);
+        return new WorkbookSheet.Page(view.getTitle(), headers, lines, charts);
     }
 
     private String bookCount(int count) {

@@ -5481,16 +5481,24 @@ def chart_xml(chart, sheet, rows):
             "<c:printSettings><c:headerFooter/><c:pageMargins b=\"0.75\" l=\"0.7\" r=\"0.7\" t=\"0.75\" header=\"0.3\" footer=\"0.3\"/><c:pageSetup/></c:printSettings></c:chartSpace>") % (xml_text(title), chart_plot(chart, sheet, rows))
 
 
-def drawing_xml(number, points):
-    rows = max(16, min(36, points + 4))
+def drawing_xml(charts):
+    anchors = []
+    row = 0
+    for index, chart in enumerate(charts, start=1):
+        points = len(chart["labels"]) if chart.get("labels") is not None else chart["lastRow"] - chart["firstRow"] + 1
+        height = max(16, min(36, points + 4))
+        anchors.append(
+            "<xdr:twoCellAnchor><xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+            "<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"%d\" name=\"Chart %d\"/><xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>"
+            "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">"
+            "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId%d\"/>"
+            "</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>" % (row, row + height, index + 1, index, index)
+        )
+        row += height + 1
     return ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
             "<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
-            "<xdr:twoCellAnchor><xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
-            "<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
-            "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart %d\"/><xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>"
-            "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">"
-            "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId1\"/>"
-            "</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>") % (rows, number)
+            "%s</xdr:wsDr>") % "".join(anchors)
 
 
 def equipment_pages(project_key, text, day_first):
@@ -5548,32 +5556,43 @@ def workbook_bytes(pages):
     sheet_tags = []
     relationships = []
     parts = {}
+    chart_file = 1
     for index, page in enumerate(pages, start=1):
         name, headers, rows = page[0], page[1], page[2]
-        chart = page[3] if len(page) > 3 else None
-        if not chart_usable(chart):
-            chart = None
+        raw_chart = page[3] if len(page) > 3 else None
+        if isinstance(raw_chart, list):
+            charts = [chart for chart in raw_chart if chart_usable(chart)]
+        elif chart_usable(raw_chart):
+            charts = [raw_chart]
+        else:
+            charts = []
         overrides.append(
             "<Override PartName=\"/xl/worksheets/sheet%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" % index
         )
-        if chart:
-            overrides.append("<Override PartName=\"/xl/charts/chart%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>" % index)
+        files = []
+        if charts:
             overrides.append("<Override PartName=\"/xl/drawings/drawing%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>" % index)
+            for _chart in charts:
+                overrides.append("<Override PartName=\"/xl/charts/chart%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>" % chart_file)
+                files.append(chart_file)
+                chart_file += 1
         sheet_tags.append("<sheet name=\"%s\" sheetId=\"%d\" r:id=\"rId%d\"/>" % (xml_text(name).replace("\"", "&quot;"), index, index))
         relationships.append(
             "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet%d.xml\"/>" % (index, index)
         )
-        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows, chart is not None)
-        if chart:
-            points = len(chart["labels"]) if chart.get("labels") is not None else chart["lastRow"] - chart["firstRow"] + 1
+        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows, bool(charts))
+        if charts:
+            rels = []
+            for rid, file_no in enumerate(files, start=1):
+                rels.append("<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart%d.xml\"/>" % (rid, file_no))
             parts["xl/worksheets/_rels/sheet%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
                 "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
                 "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing%d.xml\"/></Relationships>" % index)
-            parts["xl/drawings/drawing%d.xml" % index] = drawing_xml(index, points)
+            parts["xl/drawings/drawing%d.xml" % index] = drawing_xml(charts)
             parts["xl/drawings/_rels/drawing%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
-                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart%d.xml\"/></Relationships>" % index)
-            parts["xl/charts/chart%d.xml" % index] = chart_xml(chart, name, rows)
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">%s</Relationships>" % "".join(rels))
+            for chart, file_no in zip(charts, files):
+                parts["xl/charts/chart%d.xml" % file_no] = chart_xml(chart, name, rows)
     relationships.append(
         "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" % (len(pages) + 1)
     )
@@ -5738,8 +5757,54 @@ def report_venn_chart(view, title, series):
     return {"plot": "col", "title": title, "series": series, "labels": names, "values": values}
 
 
+def report_charts(view, text):
+    raw = str(view.get("chart") or "bar").strip().lower()
+    kinds = []
+    for part in raw.split(","):
+        kind = part.strip()
+        if kind == "columns":
+            kind = "bar"
+        if kind and kind not in kinds:
+            kinds.append(kind)
+    if not kinds:
+        kinds = ["bar"]
+    captions = {
+        "bar": text.get("asset-tree.ui.reportColumns", "Column"),
+        "histogram": text.get("asset-tree.ui.reportHistogram", "Histogram"),
+        "bars": text.get("asset-tree.ui.reportBars", "Bars"),
+        "line": text.get("asset-tree.ui.reportLine", "Line"),
+        "area": text.get("asset-tree.ui.reportArea", "Area"),
+        "scatter": text.get("asset-tree.ui.reportScatter", "Scatter"),
+        "donut": text.get("asset-tree.ui.reportDonut", "Donut"),
+        "pie": text.get("asset-tree.ui.reportPie", "Pie"),
+        "radar": text.get("asset-tree.ui.reportRadar", "Radar"),
+        "gantt": text.get("asset-tree.ui.reportGantt", "Gantt"),
+        "venn": text.get("asset-tree.ui.reportVenn", "Venn"),
+    }
+    pictures = []
+    for kind in kinds:
+        cloned = dict(view)
+        cloned["chart"] = kind
+        if len(kinds) > 1:
+            cloned["title"] = captions.get(kind) or (view.get("title") or "")
+        picture = report_chart(cloned, text)
+        if chart_usable(picture):
+            pictures.append(picture)
+    if pictures:
+        return pictures
+    if kinds and kinds[0] in ("gantt", "venn"):
+        cloned = dict(view)
+        cloned["chart"] = "bar"
+        picture = report_chart(cloned, text)
+        if chart_usable(picture):
+            return [picture]
+    return []
+
+
 def report_chart(view, text):
     kind = str(view.get("chart") or "").strip().lower()
+    if "," in kind:
+        kind = kind.split(",", 1)[0].strip()
     if kind == "columns":
         kind = "bar"
     money = bool(view.get("sum"))
@@ -5822,7 +5887,7 @@ def report_sheet(view, text, used):
         lines.append([note.replace("{0}", str(REPORT_EXPORT_MAX))])
     elif view.get("capped"):
         lines.append([text.get("asset-tree.ui.reportLinesCut", "The list continues on the next page.")])
-    return (sheet_title(view.get("title") or "Report", used), headers, lines, report_chart(view, text))
+    return (sheet_title(view.get("title") or "Report", used), headers, lines, report_charts(view, text))
 
 
 def reports_xlsx(project_key, text):
@@ -7342,10 +7407,8 @@ class Handler(BaseHTTPRequestHandler):
                 status, view = report_view(one_book.group(1), one_book.group(2), self.text(), {"lines": ["all"]})
                 if status != 200:
                     return self.respond(status, json.dumps(view).encode("utf-8"), "application/json; charset=utf-8")
-                chosen = (query.get("chart") or [""])[0].strip().lower()
-                if chosen == "columns":
-                    chosen = "bar"
-                if chosen in REPORT_CHARTS:
+                chosen = report_chart_list((query.get("chart") or [""])[0])
+                if chosen:
                     view["chart"] = chosen
                 body = workbook_bytes([report_sheet(view, self.text(), set())])
                 return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {

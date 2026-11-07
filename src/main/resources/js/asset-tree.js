@@ -19224,7 +19224,9 @@
     function downloadReportFile(view) {
         if (!view || !view.id) return;
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(reportChartWire(reportChartKind(view))), true);
+        var chartQuery = String(view.chart || '');
+        if (chartQuery.indexOf(',') < 0) chartQuery = reportChartWire(reportChartKind(view));
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(chartQuery), true);
         xhr.responseType = 'blob';
         xhr.setRequestHeader('Accept', '*/*');
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
@@ -19600,7 +19602,7 @@
         var wrap = el('div', 'asset-tree-report-plot');
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', '0 0 ' + plot.width + ' ' + plot.height);
-        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('preserveAspectRatio', 'none');
         svg.setAttribute('class', 'asset-tree-report-svg');
         reportGrid(svg, plot);
         var coords = plot.points.map(function (point) { return point.x + ',' + point.y; }).join(' ');
@@ -19640,7 +19642,7 @@
         var width = 720;
         var height = 240;
         svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('preserveAspectRatio', 'none');
         svg.setAttribute('class', 'asset-tree-report-svg');
         var axis = svgEl('line');
         axis.setAttribute('x1', '48');
@@ -20424,17 +20426,26 @@
             var compactKinds = [];
             var wideKinds = [];
             kinds.forEach(function (chartKind) {
-                if (chartKind === 'gantt' || chartKind === 'bars' || chartKind === 'line' || chartKind === 'area' || chartKind === 'scatter') wideKinds.push(chartKind);
+                if (chartKind === 'gantt' || chartKind === 'bars') wideKinds.push(chartKind);
                 else compactKinds.push(chartKind);
             });
-            compactKinds.concat(wideKinds).forEach(function (chartKind) {
+            var tiles = el('div', 'asset-tree-report-chart-row');
+            var placeChart = function (chartKind, wide) {
                 var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
-                if (!chartPanel) return;
-                var wide = wideKinds.indexOf(chartKind) >= 0;
+                if (!chartPanel) return null;
                 var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : ''));
                 named.appendChild(el('p', 'asset-tree-report-chart-name', reportChartCaption(chartKind)));
                 named.appendChild(chartPanel);
-                board.appendChild(named);
+                return named;
+            }
+            compactKinds.forEach(function (chartKind) {
+                var named = placeChart(chartKind, false);
+                if (named) tiles.appendChild(named);
+            });
+            if (tiles.childNodes.length) board.appendChild(tiles);
+            wideKinds.forEach(function (chartKind) {
+                var named = placeChart(chartKind, true);
+                if (named) board.appendChild(named);
             });
             main.appendChild(board);
         }
