@@ -10183,55 +10183,140 @@ a.asset-tree-preview-icon:focus {
     }
 }
 
-#asset-tree-app .asset-tree-link-graph {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
+#asset-tree-app .asset-tree-link-stage {
     margin: 0 0 12px;
 }
 
-#asset-tree-app .asset-tree-link-node {
+#asset-tree-app .asset-tree-link-graph {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background-color: #fafbfc;
+    background-image: radial-gradient(circle, #dfe1e6 1px, transparent 1px);
+    background-size: 16px 16px;
+}
+
+#asset-tree-app .asset-tree-link-graph.is-empty {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    height: 120px;
+}
+
+#asset-tree-app .asset-tree-link-canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-link-node {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 150px;
+    max-width: 30%;
     min-width: 0;
-    padding: 8px 10px;
+    margin: 0;
+    padding: 8px 22px 8px 10px;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     background: #fff;
-}
-
-#asset-tree-app .asset-tree-link-node.is-self {
-    border-color: #b3d4ff;
-    background: #deebff;
-}
-
-#asset-tree-app .asset-tree-link-node > strong,
-#asset-tree-app .asset-tree-link-node > button.asset-tree-linkish {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.12);
     text-align: left;
 }
 
-#asset-tree-app .asset-tree-link-edge {
-    display: flex;
-    align-items: center;
-    min-height: 28px;
-    margin-left: 16px;
-    padding: 2px 0 2px 12px;
-    border-left: 2px solid #b3d4ff;
-    color: #0747a6;
-    font-size: 12px;
-    font-weight: 600;
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node {
+    position: absolute;
+    z-index: 2;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
 }
 
-#asset-tree-app .asset-tree-link-branch .asset-tree-peer-card,
-#asset-tree-app .asset-tree-link-branch .asset-tree-link-meta {
-    margin: 6px 0 0;
+#asset-tree-app .asset-tree-link-graph.is-empty .asset-tree-link-node {
+    position: static;
+    width: auto;
+    max-width: 280px;
+    transform: none;
+    cursor: default;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-link-node.is-self {
+    z-index: 3;
+    border-color: #4c9aff;
+    background: #deebff;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-link-node.is-selected {
+    border-color: #0052cc;
+    box-shadow: 0 0 0 2px rgba(0, 82, 204, 0.25);
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-link-node.is-locked {
+    opacity: 0.72;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-link-node > strong,
+#asset-tree-app .asset-tree-link-graph .asset-tree-link-node > button.asset-tree-linkish {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-link-key {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-peer-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+}
+
+#asset-tree-app .asset-tree-graph-label {
+    position: absolute;
+    z-index: 1;
+    max-width: 140px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #fff;
+    color: #0747a6;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-link-detail {
+    max-width: 480px;
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-link-detail[hidden] {
+    display: none;
+}
+
+#asset-tree-app .asset-tree-request-main .asset-tree-link-form {
+    max-width: 420px;
 }
 
 #asset-tree-app .asset-tree-report-fields,

@@ -7865,6 +7865,7 @@
             main.appendChild(lifeBlock(asset));
         }
         main.appendChild(descriptionModule(asset, true));
+        main.appendChild(linkBlock(asset));
 
         var issues = el('div');
         if (mayEdit(asset)) {
@@ -7901,7 +7902,6 @@
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
-        aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
         form.appendChild(main);
@@ -8019,6 +8019,7 @@
         paintAssetFields(attrList, asset.typeKey, asset.attributes || []);
         attributes.appendChild(attrList);
         main.appendChild(attributes);
+        if (!placePage) main.appendChild(linkBlock(asset));
 
         var issues = el('div', 'asset-tree-request-block');
         issues.appendChild(el('h3', null, t('issues')));
@@ -8055,7 +8056,6 @@
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
-        if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
             ? state.types.map(function (type) { return { value: type.typeKey, label: type.label }; })
@@ -8500,6 +8500,7 @@
                 open: !!link.open,
                 projectKey: link.projectKey,
                 kind: 'link',
+                incoming: link.direction === 'in',
                 linkId: link.id,
                 meta: meta
             });
@@ -8524,8 +8525,10 @@
         var card = el('div', 'asset-tree-link-node' + (self ? ' is-self' : '') + (!self && node && !node.open ? ' is-locked' : ''));
         var title = self ? (asset.name || asset.objectKey || '') : (node.name || node.key || '');
         var objectKey = self ? (asset.objectKey || '') : (node.key || '');
+        card.title = objectKey && objectKey !== title ? title + ' · ' + objectKey : title;
         if (!self && node && node.open && node.id) {
-            card.appendChild(button(title, 'asset-tree-linkish', function () {
+            card.appendChild(button(title, 'asset-tree-linkish', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
                 goToAsset(node.projectKey, node.id);
             }));
         } else {
@@ -8550,25 +8553,170 @@
     }
 
     function linkGraph(asset) {
-        var box = el('div', 'asset-tree-link-graph');
-        box.setAttribute('aria-label', t('linkGraph'));
-        box.appendChild(linkGraphNode(asset, null, true));
         var nodes = relationNodes(asset);
+        var stage = el('div', 'asset-tree-link-stage');
+        var box = el('div', 'asset-tree-link-graph');
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', t('linkGraph'));
         if (!nodes.length) {
-            box.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
-            return box;
+            box.className += ' is-empty';
+            box.appendChild(linkGraphNode(asset, null, true));
+            stage.appendChild(box);
+            stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
+            return stage;
         }
-        nodes.forEach(function (node) {
-            var edge = el('div', 'asset-tree-link-edge');
-            edge.appendChild(el('span', null, node.phrase || ''));
-            box.appendChild(edge);
-            var branch = el('div', 'asset-tree-link-branch');
-            branch.appendChild(linkGraphNode(asset, node, false));
-            if (node.peer) branch.appendChild(peerCard(node.peer));
-            else if (node.meta) branch.appendChild(el('p', 'asset-tree-link-meta', node.meta));
-            box.appendChild(branch);
+        var count = nodes.length;
+        var width = 720;
+        var height = 240;
+        if (count >= 3) height = 360;
+        if (count >= 5) height = 440;
+        if (count >= 8) height = 520;
+        box.style.height = height + 'px';
+        var cx = width / 2;
+        var cy = height / 2;
+        var placed = [];
+        var i;
+        if (count === 1) {
+            cx = width * 0.30;
+            placed.push({ node: nodes[0], x: width * 0.74, y: cy });
+        } else if (count === 2) {
+            placed.push({ node: nodes[0], x: width * 0.16, y: cy });
+            placed.push({ node: nodes[1], x: width * 0.84, y: cy });
+        } else {
+            var rx = width / 2 - 130;
+            var ry = height / 2 - 78;
+            if (rx < 90) rx = 90;
+            if (ry < 70) ry = 70;
+            for (i = 0; i < count; i++) {
+                var angle = (-Math.PI / 2) + (i * 2 * Math.PI / count);
+                placed.push({
+                    node: nodes[i],
+                    x: cx + Math.cos(angle) * rx,
+                    y: cy + Math.sin(angle) * ry
+                });
+            }
+        }
+        var svg = svgEl('svg');
+        svg.setAttribute('class', 'asset-tree-link-canvas');
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('aria-hidden', 'true');
+        box.appendChild(svg);
+        function pin(card, x, y) {
+            card.style.left = (x / width * 100) + '%';
+            card.style.top = (y / height * 100) + '%';
+        }
+        function clearSelected() {
+            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var n;
+            for (n = 0; n < cards.length; n++) {
+                cards[n].className = cards[n].className.replace(' is-selected', '');
+            }
+        }
+        var panel = el('div', 'asset-tree-link-detail');
+        panel.hidden = true;
+        function showRelation(item, card) {
+            clearSelected();
+            card.className += ' is-selected';
+            panel.hidden = false;
+            panel.innerHTML = '';
+            var bits = [];
+            if (item.node.phrase) bits.push(item.node.phrase);
+            if (item.node.key) bits.push(item.node.key);
+            panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' · ')));
+            if (item.node.peer) panel.appendChild(peerCard(item.node.peer));
+            else if (item.node.meta) panel.appendChild(el('p', 'asset-tree-hint', item.node.meta));
+        }
+        var selfCard = linkGraphNode(asset, null, true);
+        selfCard.className += ' asset-tree-graph-node';
+        pin(selfCard, cx, cy);
+        selfCard.addEventListener('click', function () {
+            clearSelected();
+            panel.hidden = true;
+            panel.innerHTML = '';
         });
-        return box;
+        box.appendChild(selfCard);
+        var firstCard = null;
+        placed.forEach(function (item) {
+            var card = linkGraphNode(asset, item.node, false);
+            card.className += ' asset-tree-graph-node';
+            pin(card, item.x, item.y);
+            card.addEventListener('click', function () {
+                showRelation(item, card);
+            });
+            item.card = card;
+            box.appendChild(card);
+            if (!firstCard) firstCard = card;
+            var label = el('span', 'asset-tree-graph-label', item.node.phrase || '');
+            if (item.node.phrase) label.title = item.node.phrase;
+            label.style.left = ((cx + item.x) / 2 / width * 100) + '%';
+            label.style.top = ((cy + item.y) / 2 / height * 100) + '%';
+            box.appendChild(label);
+        });
+        stage.appendChild(box);
+        stage.appendChild(panel);
+        if (firstCard) showRelation(placed[0], firstCard);
+        function along(x1, y1, x2, y2, half) {
+            var dx = x2 - x1;
+            var dy = y2 - y1;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var ux = dx / len;
+            var uy = dy / len;
+            var ax = Math.abs(ux) < 0.001 ? 0.001 : Math.abs(ux);
+            var ay = Math.abs(uy) < 0.001 ? 0.001 : Math.abs(uy);
+            var dist = Math.min(half.w / ax, half.h / ay) + 6;
+            if (dist > len * 0.46) dist = len * 0.46;
+            return { x: x1 + ux * dist, y: y1 + uy * dist };
+        }
+        function paintWires() {
+            if (!box.parentNode) {
+                window.removeEventListener('resize', paintWires);
+                return;
+            }
+            var origin = svg.getBoundingClientRect();
+            if (origin.width < 40 || origin.height < 40) return;
+            svg.setAttribute('viewBox', '0 0 ' + origin.width + ' ' + origin.height);
+            while (svg.firstChild) svg.removeChild(svg.firstChild);
+            var hub = {
+                x: selfCard.getBoundingClientRect().left + selfCard.offsetWidth / 2 - origin.left,
+                y: selfCard.getBoundingClientRect().top + selfCard.offsetHeight / 2 - origin.top,
+                w: selfCard.offsetWidth / 2,
+                h: selfCard.offsetHeight / 2
+            };
+            placed.forEach(function (item) {
+                var rect = item.card.getBoundingClientRect();
+                var other = {
+                    x: rect.left + rect.width / 2 - origin.left,
+                    y: rect.top + rect.height / 2 - origin.top,
+                    w: rect.width / 2,
+                    h: rect.height / 2
+                };
+                var incoming = item.node.kind === 'link' && item.node.incoming;
+                var directed = item.node.kind === 'link';
+                var from = incoming ? along(other.x, other.y, hub.x, hub.y, other) : along(hub.x, hub.y, other.x, other.y, hub);
+                var to = incoming ? along(hub.x, hub.y, other.x, other.y, hub) : along(other.x, other.y, hub.x, hub.y, other);
+                var line = svgEl('line');
+                line.setAttribute('x1', String(Math.round(from.x)));
+                line.setAttribute('y1', String(Math.round(from.y)));
+                line.setAttribute('x2', String(Math.round(to.x)));
+                line.setAttribute('y2', String(Math.round(to.y)));
+                line.setAttribute('stroke', directed ? '#4C9AFF' : '#97A0AF');
+                line.setAttribute('stroke-width', '2');
+                line.setAttribute('stroke-linecap', 'round');
+                if (!directed) line.setAttribute('stroke-dasharray', '5 4');
+                svg.appendChild(line);
+                if (directed) {
+                    var dot = svgEl('circle');
+                    dot.setAttribute('cx', String(Math.round(to.x)));
+                    dot.setAttribute('cy', String(Math.round(to.y)));
+                    dot.setAttribute('r', '4.5');
+                    dot.setAttribute('fill', '#4C9AFF');
+                    svg.appendChild(dot);
+                }
+            });
+        }
+        window.addEventListener('resize', paintWires);
+        setTimeout(paintWires, 0);
+        return stage;
     }
 
     function linkBlock(asset) {
