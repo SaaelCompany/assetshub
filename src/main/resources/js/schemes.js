@@ -839,6 +839,16 @@
 
         function placeSymbol(pt) {
             var def = symbolDef(session.symbolId);
+            if (session.assetId && placedAssetObject(session.assetId)) {
+                remember();
+                movePlacedAsset(session.assetId, pt);
+                session.assetId = 0;
+                markTools();
+                renderProps();
+                refreshSide();
+                paint();
+                return;
+            }
             remember();
             var obj = baseObject('symbol');
             obj.symbolId = def.id;
@@ -851,6 +861,7 @@
             if (session.assetId) {
                 var boundAsset = assetById(session.assetId);
                 if (boundAsset) obj.assetBinding = bindingOf(boundAsset);
+                session.assetId = 0;
             }
             obj.layerId = layerOr('equipment');
             activeFloor().objects.push(obj);
@@ -1326,19 +1337,21 @@
             ctx.strokeStyle = wall.color || '#172b4d';
             ctx.lineWidth = 1.2;
             ctx.fillStyle = '#eef2f6';
+            var closed = !!wall.closed && points.length > 2;
+            var leftEdge = offsetPoints(points, closed, half);
+            var rightEdge = offsetPoints(points, closed, -half);
             var i;
-            for (i = 1; i < points.length; i++) drawWallSegment(ctx, wall, points[i - 1], points[i], i - 1, openings);
-            if (wall.closed) drawWallSegment(ctx, wall, points[points.length - 1], points[0], points.length - 1, openings);
-            for (i = 0; i < points.length; i++) {
-                ctx.beginPath();
-                ctx.arc(points[i].x, points[i].y, half, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
+            for (i = 1; i < points.length; i++) {
+                drawWallSegment(ctx, wall, points[i - 1], points[i], leftEdge[i - 1], leftEdge[i], rightEdge[i - 1], rightEdge[i], i - 1, openings);
+            }
+            if (closed) {
+                var last = points.length - 1;
+                drawWallSegment(ctx, wall, points[last], points[0], leftEdge[last], leftEdge[0], rightEdge[last], rightEdge[0], last, openings);
             }
             ctx.restore();
         }
 
-        function drawWallSegment(ctx, wall, a, b, index, openings) {
+        function drawWallSegment(ctx, wall, a, b, la, lb, ra, rb, index, openings) {
             var gaps = [];
             var i;
             for (i = 0; i < openings.length; i++) {
@@ -1352,27 +1365,24 @@
             var dx = b.x - a.x;
             var dy = b.y - a.y;
             function at(t) { return { x: a.x + dx * t, y: a.y + dy * t }; }
+            function along(p, q, t) { return { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }; }
+            function band(t0, t1) {
+                quad(ctx, [along(la, lb, t0), along(la, lb, t1), along(ra, rb, t1), along(ra, rb, t0)], wall);
+            }
             for (i = 0; i < gaps.length; i++) {
                 var gap = gaps[i];
                 var from = Math.max(0, gap.from);
                 var to = Math.min(1, gap.to);
-                if (from > cursor) quad(ctx, at(cursor), at(from), wall);
+                if (from > cursor) band(cursor, from);
                 drawOpening(ctx, at(from), at(to), gap.opening);
                 cursor = to;
             }
-            if (cursor < 1) quad(ctx, at(cursor), at(1), wall);
+            if (cursor < 1) band(cursor, 1);
         }
 
-        function quad(ctx, a, b, wall) {
-            if (dist(a.x, a.y, b.x, b.y) < 0.5) return;
-            var half = (wall.thickness || 15) / 2;
-            var n = leftNorm(a, b);
-            var poly = [
-                { x: a.x + n.x * half, y: a.y + n.y * half },
-                { x: b.x + n.x * half, y: b.y + n.y * half },
-                { x: b.x - n.x * half, y: b.y - n.y * half },
-                { x: a.x - n.x * half, y: a.y - n.y * half }
-            ];
+        function quad(ctx, poly, wall) {
+            if (!poly || poly.length < 4) return;
+            if (dist(poly[0].x, poly[0].y, poly[1].x, poly[1].y) < 0.5 && dist(poly[0].x, poly[0].y, poly[3].x, poly[3].y) < 0.5) return;
             pathOf(ctx, poly, true);
             ctx.fill();
             if (wall.hatch !== 'none') hatch(ctx, poly, wall.hatch || 'diagonal', wall.color || '#97a0af');
@@ -1462,6 +1472,42 @@
             ctx.restore();
         }
 
+        function drawAssetMark(ctx, obj) {
+            var s = 36;
+            var x = obj.x;
+            var y = obj.y;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = obj.color || '#0052cc';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.rect(0, 0, s, s);
+            ctx.fill();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.strokeRect(8, 8, 20, 13);
+            ctx.beginPath();
+            ctx.moveTo(14, 21);
+            ctx.lineTo(22, 21);
+            ctx.moveTo(18, 21);
+            ctx.lineTo(18, 26);
+            ctx.moveTo(13, 26);
+            ctx.lineTo(23, 26);
+            ctx.stroke();
+            ctx.restore();
+            var name = obj.text || (obj.assetBinding && obj.assetBinding.objectLabel) || '';
+            if (name) {
+                ctx.save();
+                ctx.fillStyle = '#172b4d';
+                ctx.font = (12 / session.cam.z) + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.fillText(name, x + s / 2, y + s + 4);
+                ctx.restore();
+            }
+        }
+
         function drawObject(ctx, obj, floor) {
             if (!layerVisible(obj.layerId)) return;
             ctx.save();
@@ -1514,13 +1560,7 @@
             } else if (obj.type === 'dimension') {
                 drawDimension(ctx, obj);
             } else if (obj.type === 'asset') {
-                ctx.beginPath();
-                ctx.rect(obj.x, obj.y, obj.w || 80, obj.h || 22);
-                ctx.fillStyle = obj.fill || '#deebff';
-                ctx.fill();
-                ctx.strokeStyle = obj.color || '#0052cc';
-                ctx.stroke();
-                drawShapeText(ctx, obj.text || (obj.assetBinding && obj.assetBinding.objectLabel) || '', obj.x + (obj.w || 80) / 2, obj.y + (obj.h || 22) / 2, obj.color || '#0052cc');
+                drawAssetMark(ctx, obj);
             } else if (obj.type === 'symbol') {
                 drawParts(ctx, symbolDef(obj.symbolId), obj.x, obj.y, obj.w, obj.h);
                 if (obj.assetBinding) {
@@ -2112,7 +2152,7 @@
             };
         }
 
-        function assetPlaced(id) {
+        function placedAssetObject(id) {
             var floors = (session.doc && session.doc.floors) || [];
             var i;
             var k;
@@ -2120,10 +2160,29 @@
                 var objects = floors[i].objects || [];
                 for (k = 0; k < objects.length; k++) {
                     var binding = objects[k].assetBinding;
-                    if (binding && String(binding.objectId) === String(id)) return true;
+                    if (binding && String(binding.objectId) === String(id)) return objects[k];
                 }
             }
-            return false;
+            return null;
+        }
+
+        function assetPlaced(id) {
+            return !!placedAssetObject(id);
+        }
+
+        function movePlacedAsset(id, pt) {
+            var obj = placedAssetObject(id);
+            if (!obj) return;
+            var w = obj.type === 'asset' ? 36 : (obj.w || 36);
+            var h = obj.type === 'asset' ? 36 : (obj.h || 36);
+            if (obj.type === 'asset') {
+                obj.w = 36;
+                obj.h = 36;
+                obj.fill = '';
+            }
+            obj.x = roundCm(pt.x - w / 2);
+            obj.y = roundCm(pt.y - h / 2);
+            session.selection = [obj.id];
         }
 
         function removePlacedAsset(id) {
@@ -2144,19 +2203,25 @@
             var asset = assetById(session.assetId);
             if (!asset || !api.canEdit) return;
             remember();
-            var obj = baseObject('asset');
-            obj.text = asset.name || asset.key || '';
-            obj.w = Math.max(48, Math.min(180, obj.text.length * 8 + 20));
-            obj.h = 22;
-            obj.x = roundCm(pt.x - obj.w / 2);
-            obj.y = roundCm(pt.y - obj.h / 2);
-            obj.fill = '#deebff';
-            obj.color = '#0052cc';
-            obj.angle = 0;
-            obj.assetBinding = bindingOf(asset);
-            obj.layerId = layerOr('equipment');
-            activeFloor().objects.push(obj);
-            session.selection = [obj.id];
+            if (placedAssetObject(asset.id)) movePlacedAsset(asset.id, pt);
+            else {
+                var obj = baseObject('asset');
+                obj.text = asset.name || asset.key || '';
+                obj.w = 36;
+                obj.h = 36;
+                obj.x = roundCm(pt.x - 18);
+                obj.y = roundCm(pt.y - 18);
+                obj.fill = '';
+                obj.color = '#0052cc';
+                obj.angle = 0;
+                obj.assetBinding = bindingOf(asset);
+                obj.layerId = layerOr('equipment');
+                activeFloor().objects.push(obj);
+                session.selection = [obj.id];
+            }
+            session.assetId = 0;
+            session.tool = 'select';
+            markTools();
             renderProps();
             refreshSide();
             paint();
@@ -2173,35 +2238,42 @@
                 var query = String(search.value || '').toLowerCase();
                 var count = 0;
                 (api.assets || []).forEach(function (asset) {
-                    var label = (asset.key ? asset.key + '  ' : '') + (asset.name || '');
-                    if (query && label.toLowerCase().indexOf(query) < 0) return;
+                    var name = asset.name || asset.key || '';
+                    var key = asset.key || '';
+                    var hay = (key + ' ' + name).toLowerCase();
+                    if (query && hay.indexOf(query) < 0) return;
                     count++;
-                    var row = el('div', 'asset-tree-scheme-symbol-row');
+                    var placed = assetPlaced(asset.id);
                     var armed = String(session.assetId) === String(asset.id);
-                    var card = el('button', 'asset-tree-scheme-symbol' + (armed ? ' is-on' : ''), label);
-                    card.type = 'button';
-                    card.title = armed ? api.t('schemeTemplateOff') : api.t('schemeAssets');
-                    card.disabled = !api.canEdit || session.mode !== 'edit';
-                    card.addEventListener('click', function () {
+                    var row = el('div', 'asset-tree-scheme-asset' + (armed ? ' is-on' : ''));
+                    var main = el('button', 'asset-tree-scheme-asset-main');
+                    main.type = 'button';
+                    main.disabled = !api.canEdit || session.mode !== 'edit';
+                    main.title = armed ? api.t('schemeTemplateOff') : name;
+                    main.appendChild(el('strong', null, name));
+                    var meta = key;
+                    if (placed) meta = meta ? (meta + ' · ' + api.t('schemeOnScheme')) : api.t('schemeOnScheme');
+                    if (meta) main.appendChild(el('span', null, meta));
+                    main.addEventListener('click', function () {
                         if (armed) session.assetId = 0;
                         else {
                             session.assetId = asset.id;
-                            if (session.symbolId) session.tool = 'symbol';
-                            else session.tool = 'select';
+                            session.symbolId = '';
+                            session.tool = 'select';
                         }
-                        if (!session.assetId && session.tool === 'symbol' && !session.symbolId) session.tool = 'select';
                         markTools();
                         refreshSide();
                     });
-                    row.appendChild(card);
-                    if (assetPlaced(asset.id)) {
-                        var mark = el('span', 'asset-tree-scheme-muted', api.t('schemeOnScheme'));
-                        row.appendChild(mark);
-                        var drop = el('button', 'asset-tree-scheme-mini', '×');
+                    row.appendChild(main);
+                    if (placed) {
+                        var drop = el('button', 'asset-tree-scheme-icon', '×');
                         drop.type = 'button';
                         drop.title = api.t('schemeAssetRemove');
                         drop.disabled = !api.canEdit || session.mode !== 'edit';
-                        drop.addEventListener('click', function () { removePlacedAsset(asset.id); });
+                        drop.addEventListener('click', function (event) {
+                            event.stopPropagation();
+                            removePlacedAsset(asset.id);
+                        });
                         row.appendChild(drop);
                     }
                     list.appendChild(row);
@@ -2828,6 +2900,14 @@
             if (!doc.symbols) doc.symbols = {};
             if (!doc.activeFloorId) doc.activeFloorId = doc.floors[0].id;
             if (!doc.placeId) doc.placeId = 0;
+            (doc.floors || []).forEach(function (floor) {
+                (floor.objects || []).forEach(function (obj) {
+                    if (obj.type !== 'asset') return;
+                    obj.w = 36;
+                    obj.h = 36;
+                    obj.fill = '';
+                });
+            });
             session.doc = doc;
             session.id = id || 0;
             session.past = [];
@@ -2937,6 +3017,7 @@
                 }
                 upsertCatalog({ id: payload.id, name: session.doc.name, placeId: session.doc.placeId || 0 });
                 session.mode = session.pendingMode || 'view';
+                session.needFit = session.mode !== 'edit';
                 if (session.repaint) session.repaint();
             });
         }
@@ -2992,10 +3073,35 @@
                     openScheme(focus, 'view');
                     return;
                 }
+                if (session.catalog.length) {
+                    openScheme(session.catalog[0].id, 'view');
+                    return;
+                }
                 session.mode = 'browse';
                 if (session.repaint) session.repaint();
                 else showMode();
             });
+        }
+
+        function fitScheme() {
+            if (!stage.clientWidth || !stage.clientHeight || !session.doc) return false;
+            var box = floorBounds(activeFloor());
+            if (!box) return false;
+            var width = Math.max(80, stage.clientWidth - 22);
+            var height = Math.max(80, stage.clientHeight - 22);
+            var pad = 48;
+            var zoom = Math.min((width - pad * 2) / box.w, (height - pad * 2) / box.h);
+            if (!isFinite(zoom) || zoom <= 0) zoom = 0.5;
+            if (zoom > 4) zoom = 4;
+            if (zoom < 0.02) zoom = 0.02;
+            var viewW = width / zoom;
+            var viewH = height / zoom;
+            session.cam = {
+                x: box.x - (viewW - box.w) / 2,
+                y: box.y - (viewH - box.h) / 2,
+                z: zoom
+            };
+            return true;
         }
 
         function placeName(id) {
@@ -3049,13 +3155,8 @@
             }
             var cards = el('div', 'asset-tree-scheme-cards');
             session.catalog.forEach(function (row) {
-                var card = el('div', 'asset-tree-scheme-card' + (session.catalog.length === 1 ? ' is-hero' : ''));
-                var thumb = el('canvas', 'asset-tree-scheme-thumb');
-                thumb.width = 800;
-                thumb.height = 400;
-                thumb.addEventListener('click', function () { openScheme(row.id, 'view'); });
-                card.appendChild(thumb);
-                if (row.doc) paintThumb(thumb, row.doc);
+                var card = el('div', 'asset-tree-scheme-card');
+                card.addEventListener('click', function () { openScheme(row.id, 'view'); });
                 var body = el('div', 'asset-tree-scheme-card-body');
                 body.appendChild(el('div', 'asset-tree-scheme-card-name', schemeLabel(row)));
                 var bound = placeName(row.placeId || (row.doc && row.doc.placeId));
@@ -3965,6 +4066,12 @@
                 return;
             }
             var leave = function () {
+                if (session.id) {
+                    session.mode = 'view';
+                    session.needFit = true;
+                    if (session.repaint) session.repaint();
+                    return;
+                }
                 session.mode = 'browse';
                 showMode();
             };
@@ -4009,6 +4116,12 @@
             renderProps();
             showMode();
             paint();
+            if (session.needFit) {
+                session.needFit = false;
+                global.setTimeout(function () {
+                    if (fitScheme()) paint();
+                }, 40);
+            }
         };
         session.statusNode = status;
         markTools();

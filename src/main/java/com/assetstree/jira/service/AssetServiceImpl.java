@@ -1078,6 +1078,8 @@ public class AssetServiceImpl implements AssetService {
         dto.setComments(commentDtos(id, false));
         dto.setFiles(fileDtos(id, false));
         dto.setViewerKey(user.getKey());
+        dto.setProjectKey(projectKey);
+        dto.setPortalUrl(PortalDesk.customerPortal(user, project(projectKey)));
         return dto;
     }
 

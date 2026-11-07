@@ -2022,6 +2022,8 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
         "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
         "lines": summary["lines"],
+        "projectKey": project_key,
+        "portalUrl": "/servicedesk/customer/portal/7",
     }
 
 
@@ -7225,7 +7227,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/issue":
             return self.serve_issue(query)
         if path == "/portal" or re.fullmatch(r"/servicedesk/customer/portal/\d+/create/\d+", path):
-            return self.serve_portal(path)
+            return self.serve_portal(path, query)
+        if re.fullmatch(r"/servicedesk/customer/portal/\d+", path):
+            return self.serve_portal_home(query)
         if path in ("/servicedesk/customer/user/profile",) or re.fullmatch(r"/servicedesk/customer/portal/\d+/user/profile", path):
             return self.serve_profile()
         if path.startswith("/rest/servicedeskapi/portals/") or path.startswith("/rest/servicedeskapi/servicedesk/"):
@@ -7437,7 +7441,39 @@ dd { margin: 2px 0 0; }
 </body></html>"""
         self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
-    def serve_portal(self, path):
+    def serve_portal_home(self, query):
+        asset = ((query or {}).get("asset") or [""])[0]
+        project = ((query or {}).get("project") or [""])[0]
+        extra = ""
+        if asset.isdigit():
+            extra = "asset=" + asset
+        if project:
+            extra = (extra + "&" if extra else "") + "project=" + project
+        suffix = ("?" + extra) if extra else ""
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Портал</title>
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+main { max-width: 720px; margin: 32px auto; }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 500; }
+p { margin: 0 0 20px; color: #6b778c; }
+a.portal-type { display: block; margin: 0 0 12px; padding: 16px 18px; border-radius: 3px; background: #fff; color: #172b4d; text-decoration: none; box-shadow: 0 1px 1px rgba(9, 30, 66, 0.25); }
+a.portal-type strong { display: block; margin-bottom: 4px; color: #0052cc; font-weight: 600; }
+a.portal-type span { color: #6b778c; font-size: 13px; }
+</style></head>
+<body>
+<header>Центр поддержки</header>
+<main>
+<h1>Чем мы можем помочь?</h1>
+<p>Выберите тип запроса. Оборудование из карточки уже будет в поле актива.</p>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/5%s"><strong>Сообщить о проблеме</strong><span>Что случилось с этим оборудованием</span></a>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/12%s"><strong>Запрос на обслуживание</strong><span>Плановая работа или настройка</span></a>
+</main>
+</body></html>""" % (suffix, suffix)
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_portal(self, path, query=None):
         ensure_portal_demo()
         # The script is in the head, before the form exists, and the asset input
         # appears later. Project key is not in the page: portal 7 answers only

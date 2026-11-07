@@ -1367,8 +1367,19 @@ a.asset-tree-url {
 }
 
 .asset-tree-dialog.is-module {
-    width: min(1120px, calc(100vw - 48px));
-    max-height: min(860px, calc(100vh - 48px));
+    display: flex;
+    flex-direction: column;
+    width: min(1480px, calc(100vw - 24px));
+    height: min(920px, calc(100vh - 24px));
+    max-height: calc(100vh - 24px);
+    overflow: hidden;
+}
+
+.asset-tree-dialog.is-module > #asset-tree-module-dialog {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .asset-tree-dialog.is-schema {
@@ -3555,7 +3566,49 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-card-sheet {
     position: relative;
     display: inline-block;
-    max-width: 100%;
+    max-width: none;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-dialog.is-module .asset-tree-settings-block.asset-tree-card-builder,
+.asset-tree-backdrop .asset-tree-dialog.is-module .asset-tree-settings-block.asset-tree-card-builder {
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: stretch;
+    max-width: none;
+    min-height: 0;
+    height: auto;
+}
+
+#asset-tree-app .asset-tree-dialog.is-module .asset-tree-card-palette,
+#asset-tree-app .asset-tree-dialog.is-module .asset-tree-card-stage,
+.asset-tree-backdrop .asset-tree-dialog.is-module .asset-tree-card-palette,
+.asset-tree-backdrop .asset-tree-dialog.is-module .asset-tree-card-stage {
+    min-height: 0;
+    overflow: auto;
+}
+
+#asset-tree-app .asset-tree-card-zoom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-card-zoom-label {
+    min-width: 48px;
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+}
+
+#asset-tree-app .asset-tree-card-zoom button.asset-tree-btn {
+    width: auto !important;
+    min-width: 32px;
+    height: 32px;
+    padding: 0 8px !important;
 }
 
 #asset-tree-app .asset-tree-card-preview .asset-tree-card {
@@ -4127,21 +4180,39 @@ a.asset-tree-url {
 
 .asset-tree-caps {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 2px 12px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px 16px;
 }
 
 .asset-tree-caps .asset-tree-check {
     margin: 0;
     font-size: 13px;
     min-width: 0;
+    white-space: nowrap;
 }
 
-.asset-tree-grant-list .asset-tree-grant {
+#asset-tree-app .asset-tree-project-card .asset-tree-grant-add {
+    margin: 0 0 12px;
+    padding: 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-project-card .asset-tree-grant-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     margin: 0;
     border: 0;
-    border-bottom: 1px solid #f4f5f7;
-    border-radius: 0;
+    background: transparent;
+}
+
+#asset-tree-app .asset-tree-project-card .asset-tree-grant-list .asset-tree-grant {
+    margin: 0;
+    padding: 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
 }
 
 #asset-tree-app button.asset-tree-schema-tab,
@@ -10017,10 +10088,24 @@ a.asset-tree-preview-icon:focus {
     margin: 0;
 }
 
+#asset-tree-app .asset-tree-schema-name {
+    width: 100%;
+    max-width: 360px;
+}
+
 #asset-tree-app .asset-tree-type-ticks {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 16px;
+    gap: 8px 16px;
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-type-ticks .asset-tree-check {
+    white-space: nowrap;
 }
 
 #asset-tree-app .asset-tree-field-modes {
@@ -10034,16 +10119,6 @@ a.asset-tree-preview-icon:focus {
     grid-template-columns: minmax(0, 1fr) 180px;
     gap: 8px;
     align-items: center;
-}
-
-#asset-tree-app .asset-tree-automation-steps {
-    margin: 0;
-    padding-left: 18px;
-    color: #172b4d;
-}
-
-#asset-tree-app .asset-tree-automation-steps li {
-    margin: 0 0 6px;
 }
 
 #asset-tree-app .asset-tree-scope {
@@ -12592,7 +12667,64 @@ button.asset-tree-attach-remove {
 .asset-tree-scheme-asset-list {
     max-height: 280px;
     overflow: auto;
-    margin: 8px 0;
+    margin: 4px 0 8px;
+}
+
+#asset-tree-app .asset-tree-scheme-asset {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0 0 2px;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-scheme-asset.is-on {
+    background: #deebff;
+}
+
+#asset-tree-app button.asset-tree-scheme-asset-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    min-width: 0;
+    height: auto;
+    margin: 0;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    box-shadow: none;
+    color: #172b4d;
+    text-align: left;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-scheme-asset-main strong {
+    max-width: 100%;
+    overflow: hidden;
+    color: #172b4d;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app button.asset-tree-scheme-asset-main span {
+    max-width: 100%;
+    overflow: hidden;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-scheme-asset.is-on button.asset-tree-scheme-asset-main strong {
+    color: #0052cc;
 }
 
 .asset-tree-scheme-symbol-row {
