@@ -209,7 +209,8 @@
                 gridOn: true,
                 space: false,
                 stamp: '',
-                symbolId: 'rack',
+                symbolId: '',
+                assetId: 0,
                 catalog: [],
                 dirty: false,
                 past: [],
@@ -271,6 +272,12 @@
             unit.appendChild(option);
         });
         unit.value = session.doc.settings.unit || 'cm';
+        var measureWrap = el('label', 'asset-tree-scheme-check asset-tree-scheme-measures');
+        var measureBox = el('input');
+        measureBox.type = 'checkbox';
+        measureBox.checked = !session.doc.settings || session.doc.settings.showMeasures !== false;
+        measureWrap.appendChild(measureBox);
+        measureWrap.appendChild(document.createTextNode(api.t('schemeMeasures')));
         var saveBtn = el('button', 'asset-tree-scheme-save', api.t('save'));
         saveBtn.type = 'button';
         saveBtn.disabled = !api.canEdit;
@@ -292,6 +299,7 @@
         head.appendChild(labeled(api.t('name'), nameInput));
         head.appendChild(labeled(api.t('schemePlace'), placePick));
         head.appendChild(unit);
+        head.appendChild(measureWrap);
         head.appendChild(newBtn);
         head.appendChild(editBtn);
         head.appendChild(backBtn);
@@ -694,10 +702,13 @@
         }
 
         function hitsObject(obj, wx, wy, tol) {
+            var local = unrotate(obj, wx, wy);
+            wx = local.x;
+            wy = local.y;
             if (obj.type === 'line' || obj.type === 'dimension') {
                 return projectSeg(obj.x1, obj.y1, obj.x2, obj.y2, wx, wy).dist <= tol;
             }
-            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'symbol' || obj.type === 'text') {
+            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'symbol' || obj.type === 'asset' || obj.type === 'text') {
                 var w = obj.w || 40;
                 var h = obj.h || 20;
                 return wx >= obj.x - tol && wy >= obj.y - tol && wx <= obj.x + w + tol && wy <= obj.y + h + tol;
@@ -734,10 +745,16 @@
                     { x: obj.x + obj.w, y: obj.y + obj.h, index: 2 },
                     { x: obj.x, y: obj.y + obj.h, index: 3 }
                 ];
+                if (obj.type === 'symbol' || obj.type === 'asset') {
+                    var knob = knobOf(obj);
+                    var knobScreen = screenFrom(knob.x, knob.y);
+                    if (dist(knobScreen.x, knobScreen.y, sx, sy) <= 10) return { id: obj.id, index: -1 };
+                }
             }
             var k;
             for (k = 0; k < points.length; k++) {
-                var screen = screenFrom(points[k].x, points[k].y);
+                var worldPoint = rotatePoint(obj, points[k].x, points[k].y);
+                var screen = screenFrom(worldPoint.x, worldPoint.y);
                 if (dist(screen.x, screen.y, sx, sy) <= 8) return { id: obj.id, index: points[k].index };
             }
             return null;
@@ -831,12 +848,16 @@
             obj.h = def.h;
             obj.angle = 0;
             obj.assetBinding = null;
-            obj.layerId = 'equipment';
+            if (session.assetId) {
+                var boundAsset = assetById(session.assetId);
+                if (boundAsset) obj.assetBinding = bindingOf(boundAsset);
+            }
+            obj.layerId = layerOr('equipment');
             activeFloor().objects.push(obj);
             session.selection = [obj.id];
-            session.tool = 'select';
             markTools();
             renderProps();
+            refreshSide();
             paint();
         }
 
@@ -1003,10 +1024,15 @@
             if (!objects.length || !api.canEdit) return;
             remember();
             var ids = [];
+            var groupMap = {};
             objects.forEach(function (obj) {
                 if (String(obj.id).indexOf('room') === 0 && obj.points && !obj.type) return;
                 var copy = clone(obj);
                 copy.id = nid(obj.type || 'obj');
+                if (copy.group) {
+                    if (!groupMap[copy.group]) groupMap[copy.group] = nid('grp');
+                    copy.group = groupMap[copy.group];
+                }
                 translateObj(copy, 20, 20);
                 if (copy.type) activeFloor().objects.push(copy);
                 ids.push(copy.id);
@@ -1187,8 +1213,66 @@
             ctx.restore();
         }
 
+        function measuresOn() {
+            return !session.doc || !session.doc.settings || session.doc.settings.showMeasures !== false;
+        }
+
+        function rotateObj(ctx, obj) {
+            if (!obj.angle || obj.x == null || obj.w == null) return;
+            var cx = obj.x + obj.w / 2;
+            var cy = obj.y + (obj.h || 0) / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate(obj.angle * Math.PI / 180);
+            ctx.translate(-cx, -cy);
+        }
+
+        function unrotate(obj, wx, wy) {
+            if (!obj || !obj.angle || obj.x == null || obj.w == null) return { x: wx, y: wy };
+            var cx = obj.x + obj.w / 2;
+            var cy = obj.y + (obj.h || 0) / 2;
+            var rad = -obj.angle * Math.PI / 180;
+            var dx = wx - cx;
+            var dy = wy - cy;
+            return {
+                x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+                y: cy + dx * Math.sin(rad) + dy * Math.cos(rad)
+            };
+        }
+
+        function knobOf(obj) {
+            var cx = obj.x + obj.w / 2;
+            var cy = obj.y + (obj.h || 0) / 2;
+            var rad = (obj.angle || 0) * Math.PI / 180;
+            var ly = -((obj.h || 0) / 2 + 18 / session.cam.z);
+            return { x: cx - ly * Math.sin(rad), y: cy + ly * Math.cos(rad) };
+        }
+
+        function rotatePoint(obj, x, y) {
+            if (!obj || !obj.angle || obj.x == null || obj.w == null) return { x: x, y: y };
+            var cx = obj.x + obj.w / 2;
+            var cy = obj.y + (obj.h || 0) / 2;
+            var rad = obj.angle * Math.PI / 180;
+            var dx = x - cx;
+            var dy = y - cy;
+            return {
+                x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+                y: cy + dx * Math.sin(rad) + dy * Math.cos(rad)
+            };
+        }
+
+        function layerOr(id) {
+            var layers = (session.doc && session.doc.layers) || [];
+            var i;
+            for (i = 0; i < layers.length; i++) {
+                if (layers[i].id === id) return id;
+            }
+            if (session.doc && session.doc.activeLayerId) return session.doc.activeLayerId;
+            return layers.length ? layers[0].id : id;
+        }
+
         function drawMeasures(ctx, obj) {
-            if (!obj || obj.type === 'text' || obj.type === 'symbol' || obj.type === 'dimension' || obj.type === 'opening') return;
+            if (!measuresOn()) return;
+            if (!obj || obj.type === 'text' || obj.type === 'symbol' || obj.type === 'asset' || obj.type === 'dimension' || obj.type === 'opening') return;
             ctx.save();
             ctx.fillStyle = '#5e6c84';
             ctx.font = (11 / session.cam.z) + 'px sans-serif';
@@ -1385,6 +1469,7 @@
             ctx.strokeStyle = obj.color || '#172b4d';
             ctx.fillStyle = obj.color || '#172b4d';
             ctx.lineWidth = obj.thickness || 1;
+            if (obj.angle && obj.x != null && obj.w != null) rotateObj(ctx, obj);
             if (obj.type === 'line') {
                 ctx.beginPath();
                 ctx.moveTo(obj.x1, obj.y1);
@@ -1428,6 +1513,14 @@
                 ctx.fillText(obj.text || '', obj.x, obj.y + (obj.h || 18));
             } else if (obj.type === 'dimension') {
                 drawDimension(ctx, obj);
+            } else if (obj.type === 'asset') {
+                ctx.beginPath();
+                ctx.rect(obj.x, obj.y, obj.w || 80, obj.h || 22);
+                ctx.fillStyle = obj.fill || '#deebff';
+                ctx.fill();
+                ctx.strokeStyle = obj.color || '#0052cc';
+                ctx.stroke();
+                drawShapeText(ctx, obj.text || (obj.assetBinding && obj.assetBinding.objectLabel) || '', obj.x + (obj.w || 80) / 2, obj.y + (obj.h || 22) / 2, obj.color || '#0052cc');
             } else if (obj.type === 'symbol') {
                 drawParts(ctx, symbolDef(obj.symbolId), obj.x, obj.y, obj.w, obj.h);
                 if (obj.assetBinding) {
@@ -1577,6 +1670,8 @@
                 ctx.lineWidth = 1 / session.cam.z;
                 ctx.setLineDash([6 / session.cam.z, 4 / session.cam.z]);
                 objects.forEach(function (obj) {
+                    ctx.save();
+                    if (obj.angle && obj.x != null && obj.w != null) rotateObj(ctx, obj);
                     if (obj.type === 'polyline') pathCurve(ctx, obj.points, !!obj.closed);
                     else if (obj.points) pathOf(ctx, obj.points, !!obj.closed);
                     else if (obj.x1 != null) {
@@ -1585,8 +1680,22 @@
                         ctx.lineTo(obj.x2, obj.y2);
                     } else if (obj.w != null) ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
                     ctx.stroke();
+                    ctx.restore();
                 });
                 ctx.setLineDash([]);
+                if (session.mode === 'edit' && objects.length === 1 && (objects[0].type === 'symbol' || objects[0].type === 'asset') && objects[0].w != null) {
+                    var knob = knobOf(objects[0]);
+                    var hubX = objects[0].x + objects[0].w / 2;
+                    var hubY = objects[0].y + (objects[0].h || 0) / 2;
+                    ctx.beginPath();
+                    ctx.moveTo(hubX, hubY);
+                    ctx.lineTo(knob.x, knob.y);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.fillStyle = '#0052cc';
+                    ctx.arc(knob.x, knob.y, 4 / session.cam.z, 0, Math.PI * 2);
+                    ctx.fill();
+                }
                 if (session.draft && session.draft.points) {
                     if (session.draft.tool === 'wall') {
                         drawWall(ctx, {
@@ -1633,7 +1742,7 @@
                 }
             });
             drawRulers(over, width, height);
-            var live = liveLength();
+            var live = measuresOn() ? liveLength() : null;
             if (live) badge(over, live.x, live.y, live.text);
             status.textContent = api.t('schemeReadout') + '  ' + (session.hover ? (roundCm(session.hover.x) + ', ' + roundCm(session.hover.y) + ' ' + (session.doc.settings.unit || 'cm')) : '') +
                 '   ' + api.t('schemeGrid') + ' ' + formatLen(gridStep()) +
@@ -1872,6 +1981,14 @@
                 row.appendChild(eye);
                 row.appendChild(name);
                 row.appendChild(lock);
+                if ((session.doc.layers || []).length > 1) {
+                    var dropLayer = el('button', 'asset-tree-scheme-icon', '×');
+                    dropLayer.type = 'button';
+                    dropLayer.title = api.t('schemeLayerDelete');
+                    dropLayer.disabled = !api.canEdit;
+                    dropLayer.addEventListener('click', function () { deleteLayer(layer); });
+                    row.appendChild(dropLayer);
+                }
                 side.appendChild(row);
             });
             var addLayer = el('button', 'asset-tree-scheme-add', api.t('schemeLayerNew'));
@@ -1922,11 +2039,19 @@
                 var row = el('div', 'asset-tree-scheme-symbol-row');
                 var card = el('button', 'asset-tree-scheme-symbol' + (session.symbolId === current.id ? ' is-on' : ''), current.name);
                 card.type = 'button';
+                card.title = session.symbolId === def.id ? api.t('schemeTemplateOff') : current.name;
                 card.addEventListener('click', function () {
-                    session.symbolId = def.id;
-                    session.tool = 'symbol';
+                    if (!api.canEdit || session.mode !== 'edit') return;
+                    if (session.symbolId === def.id) {
+                        session.symbolId = '';
+                        session.tool = 'select';
+                    } else {
+                        session.symbolId = def.id;
+                        session.tool = 'symbol';
+                    }
                     markTools();
                     refreshSide();
+                    paint();
                 });
                 var editCard = el('button', 'asset-tree-scheme-mini', api.t('schemeTemplateEdit'));
                 editCard.type = 'button';
@@ -1938,6 +2063,158 @@
                 row.appendChild(editCard);
                 side.appendChild(row);
             });
+            renderAssetList();
+        }
+
+        function deleteLayer(layer) {
+            if (!api.canEdit || !session.doc.layers || session.doc.layers.length <= 1) return;
+            askBox({
+                title: api.t('schemeLayerDelete'),
+                text: layer.name || '',
+                okLabel: api.t('delete'),
+                danger: true,
+                onOk: function () {
+                    remember();
+                    var rest = session.doc.layers.filter(function (item) { return item.id !== layer.id; });
+                    var fallback = rest[0].id;
+                    (session.doc.floors || []).forEach(function (floor) {
+                        (floor.objects || []).forEach(function (obj) {
+                            if (obj.layerId === layer.id) obj.layerId = fallback;
+                        });
+                    });
+                    session.doc.layers = rest;
+                    if (session.doc.activeLayerId === layer.id) session.doc.activeLayerId = fallback;
+                    refreshSide();
+                    paint();
+                }
+            });
+        }
+
+        function assetById(id) {
+            var list = api.assets || [];
+            var i;
+            for (i = 0; i < list.length; i++) {
+                if (String(list[i].id) === String(id)) return list[i];
+            }
+            return null;
+        }
+
+        function bindingOf(asset) {
+            return {
+                workspaceId: api.projectKey,
+                objectSchemaId: '',
+                objectTypeId: '',
+                objectId: String(asset.id),
+                objectKey: asset.key || String(asset.id),
+                objectLabel: asset.name || '',
+                attributes: asset.attributes || {},
+                boundAt: Date.now()
+            };
+        }
+
+        function assetPlaced(id) {
+            var floors = (session.doc && session.doc.floors) || [];
+            var i;
+            var k;
+            for (i = 0; i < floors.length; i++) {
+                var objects = floors[i].objects || [];
+                for (k = 0; k < objects.length; k++) {
+                    var binding = objects[k].assetBinding;
+                    if (binding && String(binding.objectId) === String(id)) return true;
+                }
+            }
+            return false;
+        }
+
+        function removePlacedAsset(id) {
+            if (!api.canEdit || session.mode !== 'edit') return;
+            remember();
+            (session.doc.floors || []).forEach(function (floor) {
+                floor.objects = (floor.objects || []).filter(function (obj) {
+                    return !(obj.assetBinding && String(obj.assetBinding.objectId) === String(id));
+                });
+            });
+            session.selection = [];
+            refreshSide();
+            renderProps();
+            paint();
+        }
+
+        function placeAsset(pt) {
+            var asset = assetById(session.assetId);
+            if (!asset || !api.canEdit) return;
+            remember();
+            var obj = baseObject('asset');
+            obj.text = asset.name || asset.key || '';
+            obj.w = Math.max(48, Math.min(180, obj.text.length * 8 + 20));
+            obj.h = 22;
+            obj.x = roundCm(pt.x - obj.w / 2);
+            obj.y = roundCm(pt.y - obj.h / 2);
+            obj.fill = '#deebff';
+            obj.color = '#0052cc';
+            obj.angle = 0;
+            obj.assetBinding = bindingOf(asset);
+            obj.layerId = layerOr('equipment');
+            activeFloor().objects.push(obj);
+            session.selection = [obj.id];
+            renderProps();
+            refreshSide();
+            paint();
+        }
+
+        function renderAssetList() {
+            side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeAssets')));
+            var search = el('input', 'asset-tree-scheme-name');
+            search.placeholder = api.t('schemeSearch');
+            search.value = session.assetQuery || '';
+            var list = el('div', 'asset-tree-scheme-asset-list');
+            var paintAssets = function () {
+                list.innerHTML = '';
+                var query = String(search.value || '').toLowerCase();
+                var count = 0;
+                (api.assets || []).forEach(function (asset) {
+                    var label = (asset.key ? asset.key + '  ' : '') + (asset.name || '');
+                    if (query && label.toLowerCase().indexOf(query) < 0) return;
+                    count++;
+                    var row = el('div', 'asset-tree-scheme-symbol-row');
+                    var armed = String(session.assetId) === String(asset.id);
+                    var card = el('button', 'asset-tree-scheme-symbol' + (armed ? ' is-on' : ''), label);
+                    card.type = 'button';
+                    card.title = armed ? api.t('schemeTemplateOff') : api.t('schemeAssets');
+                    card.disabled = !api.canEdit || session.mode !== 'edit';
+                    card.addEventListener('click', function () {
+                        if (armed) session.assetId = 0;
+                        else {
+                            session.assetId = asset.id;
+                            if (session.symbolId) session.tool = 'symbol';
+                            else session.tool = 'select';
+                        }
+                        if (!session.assetId && session.tool === 'symbol' && !session.symbolId) session.tool = 'select';
+                        markTools();
+                        refreshSide();
+                    });
+                    row.appendChild(card);
+                    if (assetPlaced(asset.id)) {
+                        var mark = el('span', 'asset-tree-scheme-muted', api.t('schemeOnScheme'));
+                        row.appendChild(mark);
+                        var drop = el('button', 'asset-tree-scheme-mini', '×');
+                        drop.type = 'button';
+                        drop.title = api.t('schemeAssetRemove');
+                        drop.disabled = !api.canEdit || session.mode !== 'edit';
+                        drop.addEventListener('click', function () { removePlacedAsset(asset.id); });
+                        row.appendChild(drop);
+                    }
+                    list.appendChild(row);
+                });
+                if (!count) list.appendChild(el('p', 'asset-tree-scheme-muted', api.t('noResults')));
+            };
+            search.addEventListener('input', function () {
+                session.assetQuery = search.value;
+                paintAssets();
+            });
+            side.appendChild(search);
+            side.appendChild(list);
+            paintAssets();
         }
 
         function renameRoom(room) {
@@ -1955,12 +2232,83 @@
             });
         }
 
+        function withGroup(ids) {
+            var groups = {};
+            var objects = (activeFloor() && activeFloor().objects) || [];
+            var next = ids.slice();
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                if (next.indexOf(objects[i].id) >= 0 && objects[i].group) groups[objects[i].group] = true;
+            }
+            for (i = 0; i < objects.length; i++) {
+                if (objects[i].group && groups[objects[i].group] && next.indexOf(objects[i].id) < 0) next.push(objects[i].id);
+            }
+            return next;
+        }
+
+        function restack(where) {
+            if (!api.canEdit || session.mode !== 'edit' || !session.selection.length) return;
+            remember();
+            var floor = activeFloor();
+            var objects = (floor.objects || []).slice();
+            var chosen = {};
+            var i;
+            for (i = 0; i < session.selection.length; i++) chosen[session.selection[i]] = true;
+            var picked = [];
+            var rest = [];
+            for (i = 0; i < objects.length; i++) {
+                if (chosen[objects[i].id]) picked.push(objects[i]);
+                else rest.push(objects[i]);
+            }
+            floor.objects = where === 'back' ? picked.concat(rest) : rest.concat(picked);
+            paint();
+        }
+
+        function groupSelection() {
+            var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
+            if (objects.length < 2 || !api.canEdit || session.mode !== 'edit') return;
+            remember();
+            var id = nid('grp');
+            objects.forEach(function (obj) { obj.group = id; });
+            session.selection = withGroup(session.selection);
+            renderProps();
+            paint();
+        }
+
+        function ungroupSelection() {
+            if (!api.canEdit || session.mode !== 'edit') return;
+            remember();
+            selectedObjects().forEach(function (obj) { obj.group = ''; });
+            renderProps();
+            paint();
+        }
+
+        function arrangeBar() {
+            if (!session.selection.length || session.mode !== 'edit') return;
+            var row = el('div', 'asset-tree-scheme-arrange');
+            function act(label, run) {
+                var button = el('button', 'asset-tree-scheme-mini', label);
+                button.type = 'button';
+                button.disabled = !api.canEdit;
+                button.addEventListener('click', run);
+                row.appendChild(button);
+            }
+            act(api.t('schemeToFront'), function () { restack('front'); });
+            act(api.t('schemeToBack'), function () { restack('back'); });
+            if (session.selection.length > 1) act(api.t('schemeGroup'), groupSelection);
+            var grouped = false;
+            selectedObjects().forEach(function (obj) { if (obj.group) grouped = true; });
+            if (grouped) act(api.t('schemeUngroup'), ungroupSelection);
+            props.appendChild(row);
+        }
+
         function renderProps() {
             props.innerHTML = '';
             props.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeProps')));
+            arrangeBar();
             var objects = selectedObjects();
             if (objects.length !== 1) {
-                props.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeHint')));
+                if (!objects.length) props.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeHint')));
                 return;
             }
             var obj = objects[0];
@@ -1984,6 +2332,7 @@
             if (obj.w != null) field('W', obj.w, function (value) { obj.w = Math.max(1, roundCm(Number(value) || 1)); });
             if (obj.h != null && obj.type !== 'text') field('H', obj.h, function (value) { obj.h = Math.max(1, roundCm(Number(value) || 1)); });
             if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || 15, function (value) { obj.thickness = Math.max(1, roundCm(Number(value) || 15)); });
+            if (obj.type === 'symbol' || obj.type === 'asset') field(api.t('schemeAngle'), obj.angle || 0, function (value) { obj.angle = Math.round(Number(value) || 0); });
             if (obj.type === 'line' || obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'text' || obj.type === 'dimension') {
                 var colorWrap = el('label', 'asset-tree-scheme-field', api.t('schemeColor'));
                 var color = el('input');
@@ -2053,7 +2402,7 @@
             if (obj.name && obj.points && !obj.type) {
                 field(api.t('name'), obj.name, function (value) { obj.name = value.slice(0, 80); });
             }
-            if (obj.type === 'symbol' || (obj.points && !obj.type)) {
+            if (obj.type === 'symbol' || obj.type === 'asset' || (obj.points && !obj.type)) {
                 props.appendChild(assetCard(obj));
             }
         }
@@ -2659,6 +3008,12 @@
         }
 
         function showMode() {
+            if (session.mode === 'browse' && session.id && session.doc) {
+                var stamp;
+                for (stamp = 0; stamp < (session.catalog || []).length; stamp++) {
+                    if (session.catalog[stamp].id === session.id) session.catalog[stamp].doc = clone(session.doc);
+                }
+            }
             var browse = session.mode === 'browse' && !session.templateId;
             var editing = session.mode === 'edit' || !!session.templateId;
             bar.style.display = browse ? 'none' : '';
@@ -2694,10 +3049,17 @@
             }
             var cards = el('div', 'asset-tree-scheme-cards');
             session.catalog.forEach(function (row) {
-                var card = el('div', 'asset-tree-scheme-card');
-                card.appendChild(el('div', 'asset-tree-scheme-card-name', schemeLabel(row)));
-                var bound = placeName(row.placeId);
-                card.appendChild(el('div', 'asset-tree-scheme-muted', bound ? (api.t('schemePlace') + ': ' + bound) : api.t('schemePlaceNone')));
+                var card = el('div', 'asset-tree-scheme-card' + (session.catalog.length === 1 ? ' is-hero' : ''));
+                var thumb = el('canvas', 'asset-tree-scheme-thumb');
+                thumb.width = 800;
+                thumb.height = 400;
+                thumb.addEventListener('click', function () { openScheme(row.id, 'view'); });
+                card.appendChild(thumb);
+                if (row.doc) paintThumb(thumb, row.doc);
+                var body = el('div', 'asset-tree-scheme-card-body');
+                body.appendChild(el('div', 'asset-tree-scheme-card-name', schemeLabel(row)));
+                var bound = placeName(row.placeId || (row.doc && row.doc.placeId));
+                body.appendChild(el('div', 'asset-tree-scheme-muted', bound ? (api.t('schemePlace') + ': ' + bound) : api.t('schemePlaceNone')));
                 var actions = el('div', 'asset-tree-scheme-card-actions');
                 var open = el('button', 'asset-tree-scheme-new', api.t('schemeOpen'));
                 open.type = 'button';
@@ -2708,10 +3070,96 @@
                 edit.addEventListener('click', function () { openScheme(row.id, 'edit'); });
                 actions.appendChild(open);
                 actions.appendChild(edit);
-                card.appendChild(actions);
+                body.appendChild(actions);
+                card.appendChild(body);
                 cards.appendChild(card);
             });
             gallery.appendChild(cards);
+            loadThumbs();
+        }
+
+        function floorBounds(floor) {
+            var box = null;
+            function add(one) {
+                if (!one || one.w == null) return;
+                if (!box) box = { x: one.x, y: one.y, r: one.x + one.w, b: one.y + one.h };
+                else {
+                    box.x = Math.min(box.x, one.x);
+                    box.y = Math.min(box.y, one.y);
+                    box.r = Math.max(box.r, one.x + one.w);
+                    box.b = Math.max(box.b, one.y + one.h);
+                }
+            }
+            ((floor && floor.rooms) || []).forEach(function (room) { add(bounds(room)); });
+            ((floor && floor.objects) || []).forEach(function (obj) {
+                if (obj.type === 'opening') return;
+                add(bounds(obj));
+            });
+            if (!box) return null;
+            return { x: box.x, y: box.y, w: Math.max(1, box.r - box.x), h: Math.max(1, box.b - box.y) };
+        }
+
+        function paintThumb(canvas, doc) {
+            var ctx = canvas.getContext('2d');
+            var width = canvas.width;
+            var height = canvas.height;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#f7f8f9';
+            ctx.fillRect(0, 0, width, height);
+            if (!doc || !doc.floors || !doc.floors.length) return;
+            var savedDoc = session.doc;
+            var savedCam = session.cam;
+            session.doc = doc;
+            if (!session.doc.settings) session.doc.settings = { showOtherFloors: false, unit: 'cm', showMeasures: false };
+            var previousMeasures = session.doc.settings.showMeasures;
+            var previousOther = session.doc.settings.showOtherFloors;
+            session.doc.settings.showMeasures = false;
+            session.doc.settings.showOtherFloors = false;
+            try {
+                var floor = activeFloor();
+                var box = floorBounds(floor);
+                if (box) {
+                    var pad = 28;
+                    var zoom = Math.min((width - pad * 2) / box.w, (height - pad * 2) / box.h);
+                    if (!isFinite(zoom) || zoom <= 0) zoom = 0.2;
+                    session.cam = {
+                        x: box.x - ((width / zoom) - box.w) / 2,
+                        y: box.y - ((height / zoom) - box.h) / 2,
+                        z: zoom
+                    };
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(0, 0, width, height);
+                    ctx.clip();
+                    ctx.scale(zoom, zoom);
+                    ctx.translate(-session.cam.x, -session.cam.y);
+                    drawFloor(ctx, floor, false);
+                    ctx.restore();
+                }
+            } finally {
+                if (session.doc && session.doc.settings) {
+                    session.doc.settings.showMeasures = previousMeasures;
+                    session.doc.settings.showOtherFloors = previousOther;
+                }
+                session.doc = savedDoc;
+                session.cam = savedCam;
+            }
+        }
+
+        function loadThumbs() {
+            (session.catalog || []).forEach(function (row) {
+                if (row.doc || row.thumbLoading || row.thumbFailed) return;
+                row.thumbLoading = true;
+                api.ajax('GET', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + row.id, null, function (code, payload) {
+                    row.thumbLoading = false;
+                    if (code === 200 && payload && payload.body) {
+                        try { row.doc = JSON.parse(payload.body); } catch (error) { row.thumbFailed = true; }
+                        if (row.doc && row.doc.placeId) row.placeId = row.doc.placeId;
+                    } else row.thumbFailed = true;
+                    if (session.mode === 'browse' && session.repaint) session.repaint();
+                });
+            });
         }
 
         function startFresh() {
@@ -2870,7 +3318,7 @@
             var pt = pointer(event);
             if (session.mode !== 'edit') {
                 var viewId = hit(pt.x, pt.y);
-                session.selection = viewId ? [viewId] : [];
+                session.selection = viewId ? withGroup([viewId]) : [];
                 renderProps();
                 refreshSide();
                 paint();
@@ -2889,11 +3337,15 @@
                         var at = session.selection.indexOf(id);
                         if (at >= 0) session.selection.splice(at, 1);
                         else session.selection.push(id);
-                    } else if (session.selection.indexOf(id) < 0) session.selection = [id];
+                    } else if (session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
+                    else session.selection = withGroup(session.selection);
                     if (api.canEdit) {
                         remember();
                         drag = { mode: 'move', x: pt.x, y: pt.y, lastX: pt.x, lastY: pt.y, moved: false };
                     }
+                } else if (session.assetId && api.canEdit) {
+                    placeAsset(pt);
+                    return;
                 } else {
                     if (!event.shiftKey) session.selection = [];
                     drag = { mode: 'marquee', x: pt.x, y: pt.y };
@@ -2919,7 +3371,7 @@
                         text.h = 18;
                         text.w = Math.max(40, value.length * 8);
                         text.text = value.slice(0, 200);
-                        text.layerId = 'notes';
+                        text.layerId = layerOr('notes');
                         activeFloor().objects.push(text);
                         session.selection = [text.id];
                         renderProps();
@@ -3037,6 +3489,13 @@
                 for (i = 0; i < all.length; i++) {
                     if (all[i].id === drag.handle.id || ('room:' + all[i].id) === drag.handle.id) target = all[i];
                 }
+                if (drag.handle.index === -1 && target && target.w != null) {
+                    var centerX = target.x + target.w / 2;
+                    var centerY = target.y + (target.h || 0) / 2;
+                    target.angle = Math.round(Math.atan2(pt.y - centerY, pt.x - centerX) * 180 / Math.PI + 90);
+                    paint();
+                    return;
+                }
                 if (target && target.points && target.points[drag.handle.index]) {
                     var point = target.points[drag.handle.index];
                     var nextX = roundCm(pt.x);
@@ -3052,14 +3511,15 @@
                     if (drag.handle.index === 0) { target.x1 = roundCm(pt.x); target.y1 = roundCm(pt.y); }
                     else { target.x2 = roundCm(pt.x); target.y2 = roundCm(pt.y); }
                 } else if (target && target.w != null) {
+                    var local = unrotate(target, pt.x, pt.y);
                     var x = target.x;
                     var y = target.y;
                     var r = target.x + target.w;
                     var b = target.y + target.h;
-                    if (drag.handle.index === 0) { x = pt.x; y = pt.y; }
-                    if (drag.handle.index === 1) { r = pt.x; y = pt.y; }
-                    if (drag.handle.index === 2) { r = pt.x; b = pt.y; }
-                    if (drag.handle.index === 3) { x = pt.x; b = pt.y; }
+                    if (drag.handle.index === 0) { x = local.x; y = local.y; }
+                    if (drag.handle.index === 1) { r = local.x; y = local.y; }
+                    if (drag.handle.index === 2) { r = local.x; b = local.y; }
+                    if (drag.handle.index === 3) { x = local.x; b = local.y; }
                     target.x = roundCm(Math.min(x, r));
                     target.y = roundCm(Math.min(y, b));
                     target.w = roundCm(Math.max(1, Math.abs(r - x)));
@@ -3101,7 +3561,7 @@
             if (drag.mode === 'rmb') {
                 var pt = pointer(event);
                 var id = hit(pt.x, pt.y);
-                if (id && session.selection.indexOf(id) < 0) session.selection = [id];
+                if (id && session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
                 drag = null;
                 renderProps();
                 paint();
@@ -3116,7 +3576,7 @@
                     if (!boxObj) return;
                     if (boxObj.x < box.x + box.w && boxObj.x + boxObj.w > box.x && boxObj.y < box.y + box.h && boxObj.y + boxObj.h > box.y) ids.push(obj.id);
                 });
-                session.selection = ids;
+                session.selection = withGroup(ids);
                 session.marquee = null;
                 renderProps();
             }
@@ -3400,6 +3860,11 @@
                 session.draft = null;
                 session.selection = [];
                 session.typed = '';
+                session.symbolId = '';
+                session.assetId = 0;
+                if (session.tool === 'symbol') session.tool = 'select';
+                markTools();
+                refreshSide();
                 renderProps();
                 paint();
                 return;
@@ -3460,6 +3925,12 @@
         });
         unit.addEventListener('change', function () {
             session.doc.settings.unit = unit.value;
+            session.dirty = true;
+            paint();
+        });
+        measureBox.addEventListener('change', function () {
+            if (!session.doc.settings) session.doc.settings = { showOtherFloors: true, unit: unit.value || 'cm' };
+            session.doc.settings.showMeasures = measureBox.checked;
             session.dirty = true;
             paint();
         });
@@ -3530,6 +4001,7 @@
             if (!host.parentNode) return;
             nameInput.value = session.doc.name || '';
             if (unit.value !== (session.doc.settings.unit || 'cm')) unit.value = session.doc.settings.unit || 'cm';
+            measureBox.checked = measuresOn();
             fillSchemePick();
             fillPlacePick();
             markTools();
