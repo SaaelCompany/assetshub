@@ -19075,11 +19075,11 @@
 
     function reportPlot(rows, max) {
         var width = 720;
-        var height = 280;
+        var height = 240;
         var left = 36;
         var right = 16;
         var top = 16;
-        var bottom = 48;
+        var bottom = 24;
         var innerW = width - left - right;
         var innerH = height - top - bottom;
         var points = [];
@@ -19099,11 +19099,41 @@
         node.addEventListener('click', function () { row.activate(); });
     }
 
+    function reportGrid(svg, plot) {
+        var step;
+        for (step = 0; step <= 4; step++) {
+            var line = svgEl('line');
+            var y = plot.top + plot.innerH * step / 4;
+            line.setAttribute('x1', String(plot.left));
+            line.setAttribute('x2', String(plot.width - 16));
+            line.setAttribute('y1', String(y));
+            line.setAttribute('y2', String(y));
+            line.setAttribute('class', 'asset-tree-report-radar-grid');
+            svg.appendChild(line);
+        }
+    }
+
+    function reportPlotLabels(points, width) {
+        var labels = el('div', 'asset-tree-report-plot-labels');
+        if (points.length > 12) return labels;
+        points.forEach(function (point) {
+            var caption = point.row ? (point.row.label || '') : (point.label || '');
+            var label = el('span', null, caption);
+            label.title = caption;
+            label.style.left = (point.x / width * 100) + '%';
+            labels.appendChild(label);
+        });
+        return labels;
+    }
+
     function reportTrendChart(rows, max, area) {
         var plot = reportPlot(rows, max);
+        var wrap = el('div', 'asset-tree-report-plot');
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', '0 0 ' + plot.width + ' ' + plot.height);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.setAttribute('class', 'asset-tree-report-svg');
+        reportGrid(svg, plot);
         var coords = plot.points.map(function (point) { return point.x + ',' + point.y; }).join(' ');
         if (area && plot.points.length) {
             var shape = svgEl('polygon');
@@ -19129,90 +19159,114 @@
             dot.appendChild(title);
             reportMark(dot, point.row);
             svg.appendChild(dot);
-            if (plot.points.length <= 10) {
-                var label = svgEl('text');
-                label.setAttribute('x', String(point.x));
-                label.setAttribute('y', String(plot.height - 16));
-                label.setAttribute('class', 'asset-tree-report-svg-label');
-                var caption = point.row.label || '';
-                if (caption.length > 12) caption = caption.substring(0, 11) + '\u2026';
-                label.textContent = caption;
-                svg.appendChild(label);
-            }
         });
-        return svg;
+        wrap.appendChild(svg);
+        wrap.appendChild(reportPlotLabels(plot.points, plot.width));
+        return wrap;
     }
 
     function reportScatterChart(rows, money) {
+        var wrap = el('div', 'asset-tree-report-plot');
         var svg = svgEl('svg');
-        svg.setAttribute('viewBox', '0 0 720 280');
+        var width = 720;
+        var height = 240;
+        svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.setAttribute('class', 'asset-tree-report-svg');
+        var axis = svgEl('line');
+        axis.setAttribute('x1', '48');
+        axis.setAttribute('x2', '688');
+        axis.setAttribute('y1', '208');
+        axis.setAttribute('y2', '208');
+        axis.setAttribute('class', 'asset-tree-report-radar-grid');
+        svg.appendChild(axis);
+        var upright = svgEl('line');
+        upright.setAttribute('x1', '48');
+        upright.setAttribute('x2', '48');
+        upright.setAttribute('y1', '16');
+        upright.setAttribute('y2', '208');
+        upright.setAttribute('class', 'asset-tree-report-radar-grid');
+        svg.appendChild(upright);
         var maxX = 1;
         var maxY = 1;
+        var spots = [];
         rows.forEach(function (row, index) {
             var x = money ? (row.count || 0) : index + 1;
             var y = money ? (Number(row.amount) || 0) : (row.count || 0);
             if (x > maxX) maxX = x;
             if (y > maxY) maxY = y;
+            spots.push({ row: row, x: x, y: y });
         });
-        rows.forEach(function (row, index) {
-            var x = 48 + ((money ? (row.count || 0) : index + 1) / maxX) * 640;
-            var y = 240 - ((money ? (Number(row.amount) || 0) : (row.count || 0)) / maxY) * 200;
+        spots.forEach(function (spot) {
+            var x = 48 + (spot.x / maxX) * 620;
+            var y = 208 - (spot.y / maxY) * 180;
             var dot = svgEl('circle');
             dot.setAttribute('cx', String(x));
             dot.setAttribute('cy', String(y));
             dot.setAttribute('r', '7');
-            dot.setAttribute('fill', row.color || '#0052CC');
+            dot.setAttribute('fill', spot.row.color || '#0052CC');
             var title = svgEl('title');
-            title.textContent = (row.label || '') + ' · ' + (money ? reportMoneyLabel(Number(row.amount) || 0) : String(row.count || 0));
+            title.textContent = (spot.row.label || '') + ' · ' + (money ? reportMoneyLabel(Number(spot.row.amount) || 0) : String(spot.row.count || 0));
             dot.appendChild(title);
-            reportMark(dot, row);
+            reportMark(dot, spot.row);
             svg.appendChild(dot);
+            spot.x = x;
+            spot.y = y;
         });
-        return svg;
+        wrap.appendChild(svg);
+        wrap.appendChild(reportPlotLabels(spots, width));
+        return wrap;
     }
 
     function reportRadarChart(rows, max) {
         var svg = svgEl('svg');
-        svg.setAttribute('viewBox', '0 0 420 320');
+        svg.setAttribute('viewBox', '0 0 320 280');
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.setAttribute('class', 'asset-tree-report-svg');
-        var cx = 210;
-        var cy = 150;
-        var radius = 110;
-        var count = rows.length;
+        var cx = 160;
+        var cy = 140;
+        var radius = 96;
+        var count = rows.length || 1;
         function at(index, scale) {
-            var angle = -Math.PI / 2 + (Math.PI * 2 * index / count);
+            var start = count === 2 ? 0 : -Math.PI / 2;
+            var angle = start + (Math.PI * 2 * index / count);
             return [cx + Math.cos(angle) * radius * scale, cy + Math.sin(angle) * radius * scale];
         }
         [0.25, 0.5, 0.75, 1].forEach(function (scale) {
-            var ring = svgEl('polygon');
-            var points = [];
-            for (var i = 0; i < count; i++) {
-                var spot = at(i, scale);
-                points.push(spot[0] + ',' + spot[1]);
-            }
-            ring.setAttribute('points', points.join(' '));
+            var ring = svgEl('circle');
+            ring.setAttribute('cx', String(cx));
+            ring.setAttribute('cy', String(cy));
+            ring.setAttribute('r', String(radius * scale));
             ring.setAttribute('class', 'asset-tree-report-radar-grid');
             svg.appendChild(ring);
         });
+        rows.forEach(function (row, index) {
+            var edge = at(index, 1);
+            var spoke = svgEl('line');
+            spoke.setAttribute('x1', String(cx));
+            spoke.setAttribute('y1', String(cy));
+            spoke.setAttribute('x2', String(edge[0]));
+            spoke.setAttribute('y2', String(edge[1]));
+            spoke.setAttribute('class', 'asset-tree-report-radar-grid');
+            svg.appendChild(spoke);
+        });
         var shape = svgEl('polygon');
         var points = [];
+        var dots = [];
         rows.forEach(function (row, index) {
             var spot = at(index, max ? (row.count || 0) / max : 0);
             points.push(spot[0] + ',' + spot[1]);
-            var label = svgEl('text');
-            var place = at(index, 1.18);
-            label.setAttribute('x', String(place[0]));
-            label.setAttribute('y', String(place[1]));
-            label.setAttribute('class', 'asset-tree-report-svg-label');
-            var caption = row.label || '';
-            if (caption.length > 16) caption = caption.substring(0, 15) + '\u2026';
-            label.textContent = caption;
-            svg.appendChild(label);
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(spot[0]));
+            dot.setAttribute('cy', String(spot[1]));
+            dot.setAttribute('r', '4');
+            dot.setAttribute('fill', row.color || '#0052CC');
+            dots.push(dot);
         });
         shape.setAttribute('points', points.join(' '));
         shape.setAttribute('class', 'asset-tree-report-radar');
         svg.appendChild(shape);
+        dots.forEach(function (dot) { svg.appendChild(dot); });
         return svg;
     }
 
@@ -19278,6 +19332,7 @@
         }
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', '0 0 360 240');
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.setAttribute('class', 'asset-tree-report-svg');
         var spots = keys.length === 1 ? [[180, 120]] : keys.length === 2 ? [[140, 120], [220, 120]] : [[130, 100], [230, 100], [180, 160]];
         var colors = ['#0052CC', '#00875A', '#FF8B00'];
@@ -19375,7 +19430,7 @@
         }
         if (kind === 'radar') {
             if (!drawn.length) return null;
-            var radar = el('div', 'asset-tree-report-chart is-round');
+            var radar = el('div', 'asset-tree-report-chart is-round is-radar');
             radar.appendChild(reportRadarChart(drawn, max));
             radar.appendChild(reportLegend(money ? rows : measured, money ? maxShare(rows) : total, money, shares));
             return radar;
@@ -19477,7 +19532,7 @@
         if (state.galleryLoading) return;
         state.galleryLoading = true;
         var token = ++state.galleryToken;
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports?fresh=' + String(Date.now()), null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
             state.reportEmptyNav = false;
@@ -19567,11 +19622,8 @@
         var tools = el('div', 'asset-tree-inline-actions asset-tree-report-tools');
         tools.id = 'asset-tree-report-tools';
         if (state.canEdit) tools.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
-        tools.appendChild(button(t('reportBook'), 'asset-tree-btn', downloadReportBook));
         if (state.reportView) {
-            tools.appendChild(button(t('reportPrint'), 'asset-tree-btn', function () { printReport(state.reportView); }));
             tools.appendChild(button(t('reportXlsx'), 'asset-tree-btn', function () { downloadReportFile(state.reportView); }));
-            tools.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
         }
         return tools;
     }
@@ -19964,6 +20016,35 @@
         return list;
     }
 
+    function acceptSavedReport(payload) {
+        var created = payload && (payload.id || payload.key || '');
+        state.reportChart = '';
+        state.reportChartFor = '';
+        if (created && state.reportCatalog) {
+            var items = state.reportCatalog.slice();
+            var index = -1;
+            var i;
+            for (i = 0; i < items.length; i++) {
+                if (String(items[i].id) === String(created)) index = i;
+            }
+            if (index >= 0) items[index] = payload;
+            else items.push(payload);
+            state.reportCatalog = items;
+            state.reportKey = String(created);
+            state.reportView = null;
+            state.galleryLoading = false;
+            var token = ++state.galleryToken;
+            renderFrame();
+            fetchGalleryView(token);
+            return;
+        }
+        if (created) state.reportKey = String(created);
+        state.reportCatalog = null;
+        state.reportView = null;
+        state.galleryLoading = false;
+        renderFrame();
+    }
+
     function openReportDialog(existing) {
         var editing = !!(existing && existing.id);
         var pickedTypes = {};
@@ -20177,14 +20258,7 @@
                 ajax(editing ? 'PUT' : 'POST', path, body, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal(hold);
-                        var created = payload && (payload.id || payload.key || '');
-                        state.reportChart = '';
-                        state.reportChartFor = '';
-                        if (created) state.reportKey = created;
-                        state.reportCatalog = null;
-                        state.reportView = null;
-                        state.galleryLoading = false;
-                        renderFrame();
+                        acceptSavedReport(payload);
                     } else {
                         save.disabled = false;
                         notify((payload && payload.message) || t('errorTitle'));
