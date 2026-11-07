@@ -23,6 +23,8 @@ import com.atlassian.jira.issue.IssueInputParameters;
 import com.atlassian.jira.issue.IssueManager;
 import com.atlassian.jira.issue.customfields.option.Option;
 import com.atlassian.jira.issue.fields.CustomField;
+import com.atlassian.jira.issue.ModifiedValue;
+import com.atlassian.jira.issue.util.DefaultIssueChangeHolder;
 import com.atlassian.jira.issue.comments.Comment;
 import com.atlassian.jira.issue.comments.CommentManager;
 import com.atlassian.jira.issue.issuetype.IssueType;
@@ -1102,6 +1104,12 @@ public class AssetServiceImpl implements AssetService {
         }
         PortalDesk.Created created = PortalDesk.create(user, project, outcome.getTypeId(), outcome.getValues());
         if (created.getFailureKey() != null) {
+            Map<String, String> plain = withoutAssetFields(outcome.getValues());
+            if (plain.size() != outcome.getValues().size()) {
+                created = PortalDesk.create(user, project, outcome.getTypeId(), plain);
+            }
+        }
+        if (created.getFailureKey() != null) {
             throw requestFailure(created.getFailureKey(), created.getFailureArg());
         }
         if (created.getIssue() != null) {
@@ -1304,6 +1312,7 @@ public class AssetServiceImpl implements AssetService {
         try {
             IssueService issueService = ComponentAccessor.getComponent(IssueService.class);
             if (issueService == null) {
+                writeAssetFieldDirect(issue, assetId);
                 return;
             }
             IssueInputParameters params = issueService.newIssueInputParameters();
@@ -1315,10 +1324,51 @@ public class AssetServiceImpl implements AssetService {
             IssueService.UpdateValidationResult result = issueService.validateUpdate(user, issue.getId(), params);
             if (result != null && result.isValid()) {
                 issueService.update(user, result);
+                return;
             }
         } catch (RuntimeException ex) {
             log.warn("Could not write the asset field on {}", issue.getKey(), ex);
         }
+        writeAssetFieldDirect(issue, assetId);
+    }
+
+    private void writeAssetFieldDirect(Issue issue, int assetId) {
+        try {
+            CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+            if (manager == null || issue == null) {
+                return;
+            }
+            String value = String.valueOf(assetId);
+            for (String id : PortalLookup.assetFieldIds()) {
+                CustomField field = manager.getCustomFieldObject(id);
+                if (field == null) {
+                    continue;
+                }
+                Object current = issue.getCustomFieldValue(field);
+                String now = current == null ? "" : String.valueOf(current).trim();
+                if (value.equals(now)) {
+                    continue;
+                }
+                field.updateValue(null, issue, new ModifiedValue(current, value), new DefaultIssueChangeHolder());
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Could not store the asset field on {}", issue.getKey(), ex);
+        }
+    }
+
+    private Map<String, String> withoutAssetFields(Map<String, String> values) {
+        Map<String, String> plain = new LinkedHashMap<String, String>();
+        if (values == null) {
+            return plain;
+        }
+        List<String> assetFields = PortalLookup.assetFieldIds();
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            if (entry.getKey() != null && assetFields.contains(entry.getKey())) {
+                continue;
+            }
+            plain.put(entry.getKey(), entry.getValue());
+        }
+        return plain;
     }
 
     private AssetEntity requirePortalAsset(ApplicationUser user, int assetId) {
@@ -9151,7 +9201,9 @@ public class AssetServiceImpl implements AssetService {
         if (name.isEmpty() || name.length() > 80 || group.isEmpty() || (filter.isEmpty() != value.isEmpty())) {
             throw new AssetException(400, "asset-tree.error.report");
         }
-        if (ReportCatalog.FIELD.equals(group) && (fieldKey == null || fieldKey.isEmpty())) {
+        boolean groupsField = ReportCatalog.FIELD.equals(group)
+                || (group != null && (group.startsWith(ReportCatalog.FIELD + "+") || group.contains("+" + ReportCatalog.FIELD)));
+        if (groupsField && (fieldKey == null || fieldKey.isEmpty())) {
             throw new AssetException(400, "asset-tree.error.report");
         }
         if ((attrKey == null || attrKey.isEmpty()) != (attrValue == null || attrValue.isEmpty()) || (attrValue != null && attrValue.length() > 80)) {
@@ -9471,11 +9523,12 @@ public class AssetServiceImpl implements AssetService {
         }
         boolean money = ReportCatalog.COST.equals(key) || "cost".equals(metric);
         boolean byField = ReportCatalog.FIELD.equals(group);
-        boolean needAttrs = byField || (attrKey != null && !attrKey.isEmpty());
+        boolean groupsField = group != null && (group.startsWith(ReportCatalog.FIELD + "+") || group.contains("+" + ReportCatalog.FIELD));
+        boolean needAttrs = byField || groupsField || (attrKey != null && !attrKey.isEmpty());
         Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
                 ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         String valueKind = byField ? fieldKind(types, fieldKey) : "";
-        boolean works = ReportCatalog.WORK.equals(key) || ReportCatalog.SERVICE.equals(key) || "kind".equals(group);
+        boolean works = ReportCatalog.WORK.equals(key) || ReportCatalog.SERVICE.equals(key) || (group != null && group.contains("kind"));
         if (works) {
             return buildWorkReport(project, key, title, standard, group, filter, value, assets, types, index, statusNames, lineFrom, allLines, onlyBucket, attrKey, attrValue);
         }
@@ -9527,18 +9580,47 @@ public class AssetServiceImpl implements AssetService {
         LocalDate today = businessToday();
         Map<String, String> kindNames = kindNames(project.getKey());
         int memberships = 0;
+        Map<String, String> compositeLabels = new HashMap<String, String>();
+        boolean composite = group != null && group.indexOf('+') >= 0;
         for (AssetEntity asset : chosen) {
             List<String> bucketKeys = new ArrayList<String>();
             if (byField) {
                 bucketKeys.addAll(fieldParts(attributeText(attributes, asset.getID(), fieldKey), valueKind));
+            } else if (composite) {
+                String[] parts = group.split("\\+");
+                StringBuilder keyBuf = new StringBuilder();
+                StringBuilder labelBuf = new StringBuilder();
+                for (int p = 0; p < parts.length; p++) {
+                    String part = parts[p];
+                    String piece;
+                    String pieceLabel;
+                    if (ReportCatalog.FIELD.equals(part)) {
+                        piece = attributeText(attributes, asset.getID(), fieldKey).trim();
+                        pieceLabel = piece.isEmpty() ? i18n().getText("asset-tree.ui.reportBlank") : piece;
+                    } else {
+                        piece = reportBucketKey(key, part, asset, types, index, lives, nextPlan, today);
+                        pieceLabel = reportBucketLabel(key, part, piece, asset, types, index, kindNames, statusNames);
+                    }
+                    if (p > 0) {
+                        keyBuf.append('\u001f');
+                        labelBuf.append(" · ");
+                    }
+                    keyBuf.append(piece == null ? "" : piece);
+                    labelBuf.append(pieceLabel == null ? "" : pieceLabel);
+                }
+                String compositeKey = keyBuf.toString();
+                bucketKeys.add(compositeKey);
+                compositeLabels.put(compositeKey, labelBuf.toString());
             } else {
                 bucketKeys.add(reportBucketKey(key, group, asset, types, index, lives, nextPlan, today));
             }
             String[] span = reportSpan(lives.get(Integer.valueOf(asset.getID())), today);
             for (String bucketKey : bucketKeys) {
-            String label = byField
+            String label = compositeLabels.containsKey(bucketKey)
+                    ? compositeLabels.get(bucketKey)
+                    : (byField
                     ? (bucketKey.isEmpty() ? i18n().getText("asset-tree.ui.reportBlank") : bucketKey)
-                    : reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames, statusNames);
+                    : reportBucketLabel(key, group, bucketKey, asset, types, index, kindNames, statusNames));
             ReportBucketDto bucket = buckets.get(bucketKey);
             if (bucket == null) {
                 bucket = new ReportBucketDto(bucketKey, label, reportColor(key, group, bucketKey, types), 0);
@@ -11085,6 +11167,15 @@ public class AssetServiceImpl implements AssetService {
     private boolean reportNeedsLife(String key, String group, boolean money) {
         if (money) {
             return true;
+        }
+        if (group != null && group.indexOf('+') >= 0) {
+            String[] parts = group.split("\\+");
+            for (String part : parts) {
+                if (reportNeedsLife(key, part, false)) {
+                    return true;
+                }
+            }
+            return false;
         }
         if (ReportCatalog.WARRANTY.equals(key) || ReportCatalog.WARRANTY.equals(group)) {
             return true;

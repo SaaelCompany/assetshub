@@ -24,6 +24,10 @@ public final class ReportWorkbook {
             return null;
         }
         String kind = view.getChart() == null ? "" : view.getChart().trim().toLowerCase(Locale.ROOT);
+        int comma = kind.indexOf(',');
+        if (comma > 0) {
+            kind = kind.substring(0, comma);
+        }
         if ("columns".equals(kind)) {
             kind = "bar";
         }

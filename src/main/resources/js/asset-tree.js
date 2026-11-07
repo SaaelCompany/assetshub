@@ -18962,6 +18962,19 @@
         }
     }
 
+    function reportChartList(view) {
+        var raw = String((view && view.chart) || 'bar');
+        var parts = raw.split(',');
+        if (parts.length < 2) return [reportChartKind(view)];
+        var out = [];
+        parts.forEach(function (part) {
+            var kind = reportChartSession(part.replace(/^\s+|\s+$/g, ''));
+            if (out.indexOf(kind) < 0) out.push(kind);
+        });
+        if (!out.length) out.push('columns');
+        return out;
+    }
+
     function reportChartKind(view) {
         var stored = reportChartSession(view.chart);
         if (state.reportChartFor === String(view.id || '') && state.reportChart) return state.reportChart;
@@ -19589,6 +19602,9 @@
     }
 
     function groupWord(group, view) {
+        if (group && String(group).indexOf('+') >= 0) {
+            return String(group).split('+').map(function (part) { return groupWord(part, view); }).join(' · ');
+        }
         if (group === 'field' && view && view.fieldLabel) return view.fieldLabel;
         var map = {
             status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
@@ -19599,6 +19615,9 @@
     }
 
     function groupPhrase(group, view) {
+        if (group && String(group).indexOf('+') >= 0) {
+            return String(group).split('+').map(function (part) { return groupPhrase(part, view); }).join(' · ');
+        }
         if (group === 'field') {
             return view && view.fieldLabel ? t('reportGroupField') + ': ' + view.fieldLabel : t('reportGroupField');
         }
@@ -19987,13 +20006,14 @@
         });
         if (!money) shareTotal = view.total || 0;
         var shares = shareLabels(shareValues);
-        var kind = reportChartKind(view);
+        var kinds = reportChartList(view);
+        var kind = kinds[0];
         var titleRow = el('div', 'asset-tree-report-title');
         var titles = el('div');
         titles.appendChild(el('h3', null, view.title || ''));
         titles.appendChild(el('p', null, groupPhrase(view.groupBy, view)));
         titleRow.appendChild(titles);
-        titleRow.appendChild(reportChartSwitch(view, kind));
+        if (kinds.length < 2) titleRow.appendChild(reportChartSwitch(view, kind));
         main.appendChild(titleRow);
         var facts = el('div', 'asset-tree-report-facts');
         facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
@@ -20003,8 +20023,10 @@
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
             if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
         } else {
-            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares, view);
-            if (chartPanel) main.appendChild(chartPanel);
+            kinds.forEach(function (chartKind) {
+                var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
+                if (chartPanel) main.appendChild(chartPanel);
+            });
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
             header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy, view)));
@@ -20151,15 +20173,18 @@
                 option.textContent = t(pair[1]);
                 group.appendChild(option);
             });
-            group.value = editing && existing.groupBy ? existing.groupBy : 'type';
-            var chart = document.createElement('select');
-            [['bar', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
-                var option = document.createElement('option');
-                option.value = pair[0];
-                option.textContent = t(pair[1]);
-                chart.appendChild(option);
+            var storedGroup = editing && existing.groupBy ? String(existing.groupBy) : 'type';
+            var groupBits = storedGroup.split('+');
+            group.value = groupBits[0];
+            var extraOn = {};
+            groupBits.forEach(function (part, index) {
+                if (index) extraOn[part] = true;
             });
-            chart.value = editing && existing.chart ? existing.chart : 'bar';
+            var chartOrder = [['bar', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']];
+            var chartOn = {};
+            String(editing && existing.chart ? existing.chart : 'bar').split(',').forEach(function (part) {
+                chartOn[part.replace(/^\s+|\s+$/g, '')] = true;
+            });
             if (editing && existing.name) name.value = existing.name;
             var metric = document.createElement('select');
             [['count', 'reportCount'], ['cost', 'lifeBook']].forEach(function (pair) {
@@ -20185,7 +20210,6 @@
             syncMetric();
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
-            row.appendChild(planField(t('reportChart'), chart));
             row.appendChild(planField(t('reportMetric'), metric));
             var field = document.createElement('select');
             field.appendChild(new Option('\u2014', ''));
@@ -20215,6 +20239,62 @@
             attrRow.appendChild(planField(t('reportFieldValue'), fieldValue));
             dialog.appendChild(planField(t('reportName'), name));
             dialog.appendChild(row);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportAlso')));
+            var extraList = el('div', 'asset-tree-check-list');
+            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']].forEach(function (pair) {
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = !!extraOn[pair[0]] && pair[0] !== group.value;
+                box.addEventListener('change', function () {
+                    if (box.checked) {
+                        var next = group.value;
+                        var key;
+                        for (key in extraOn) {
+                            if (extraOn[key] && key !== group.value) next += '+' + key;
+                        }
+                        next += '+' + pair[0];
+                        if (pair[0] === group.value || next.length > 16) {
+                            box.checked = false;
+                            notify(t('reportAlso'));
+                            return;
+                        }
+                        extraOn[pair[0]] = true;
+                    } else delete extraOn[pair[0]];
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(t(pair[1])));
+                extraList.appendChild(label);
+            });
+            dialog.appendChild(extraList);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportCharts')));
+            var chartList = el('div', 'asset-tree-check-list');
+            chartOrder.forEach(function (pair) {
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = !!chartOn[pair[0]];
+                box.addEventListener('change', function () {
+                    if (box.checked) chartOn[pair[0]] = true;
+                    else delete chartOn[pair[0]];
+                    var chosen = [];
+                    chartOrder.forEach(function (item) { if (chartOn[item[0]]) chosen.push(item[0]); });
+                    if (!chosen.length) {
+                        chartOn[pair[0]] = true;
+                        box.checked = true;
+                        return;
+                    }
+                    if (chosen.join(',').length > 16) {
+                        delete chartOn[pair[0]];
+                        box.checked = false;
+                        notify(t('reportCharts'));
+                    }
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(t(pair[1])));
+                chartList.appendChild(label);
+            });
+            dialog.appendChild(chartList);
             dialog.appendChild(fieldRow);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyField')));
             dialog.appendChild(attrRow);
@@ -20318,10 +20398,23 @@
                     fieldValue.focus();
                     return;
                 }
+                var extras = [];
+                ['type', 'status', 'place', 'holder', 'issued'].forEach(function (key) {
+                    if (extraOn[key] && key !== group.value) extras.push(key);
+                });
+                var groupValue = group.value;
+                extras.forEach(function (extra) {
+                    var next = groupValue + '+' + extra;
+                    if (next.length <= 16) groupValue = next;
+                });
+                var charts = [];
+                chartOrder.forEach(function (item) { if (chartOn[item[0]]) charts.push(item[0]); });
+                while (charts.join(',').length > 16 && charts.length > 1) charts.pop();
+                if (!charts.length) charts.push('bar');
                 var body = {
                     name: name.value.trim(),
-                    groupBy: group.value,
-                    chart: chart.value,
+                    groupBy: groupValue,
+                    chart: charts.join(','),
                     metric: metric.value,
                     filterField: '',
                     filterValue: '',
@@ -21783,11 +21876,16 @@
             for (i = 0; i < list.length && i < 2; i++) {
                 if (list[i] && list[i].name) attributes[list[i].name] = list[i].value || '';
             }
+            var type = typeOf(asset.typeKey);
+            var shape = iconShape(iconKeyOf(type));
             return {
                 id: asset.id,
                 name: asset.name || '',
                 key: asset.objectKey || asset.key || '',
-                attributes: attributes
+                attributes: attributes,
+                icon: shape ? shape.d : '',
+                iconColor: (type && type.color) || '#5D6B82',
+                typeName: (type && type.label) || ''
             };
         });
         var places = placeAssets().map(function (asset) {
@@ -29252,6 +29350,13 @@
         return box;
     }
 
+    function scopeDisclosure(grant, onSave) {
+        var more = el('details', 'asset-tree-grant-more');
+        more.appendChild(el('summary', null, t('accessScope')));
+        more.appendChild(scopeEditor(grant, onSave));
+        return more;
+    }
+
     function schemaSettings() {
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('schemaTitle')));
@@ -29389,7 +29494,7 @@
                 }
                 postGrant(grant, caps, null);
             }));
-            row.appendChild(scopeEditor(grant, function (scope) {
+            row.appendChild(scopeDisclosure(grant, function (scope) {
                 postGrant(grant, capsJoined(grantCaps(grant)), null, scope);
             }));
             grantList.appendChild(row);
@@ -29439,7 +29544,7 @@
         });
         form.appendChild(grid);
         var scopeDraft = { typeScope: '', fieldScope: '', schemaName: '' };
-        form.appendChild(scopeEditor(scopeDraft, function (scope) {
+        form.appendChild(scopeDisclosure(scopeDraft, function (scope) {
             scopeDraft.typeScope = scope.typeScope;
             scopeDraft.fieldScope = scope.fieldScope;
             scopeDraft.schemaName = scope.schemaName;

@@ -187,7 +187,11 @@ public final class PortalDesk {
             fields.add(new PortalRequestForm.Field("summary", "Summary", true, "text", Collections.<PortalRequestForm.Option>emptyList()));
             fields.add(new PortalRequestForm.Field("description", "Description", false, "textarea", Collections.<PortalRequestForm.Option>emptyList()));
         }
-        return new PortalRequestForm.Type(String.valueOf(id), name, description, fields, attached);
+        List<String> stored = new ArrayList<String>();
+        if (assetFields != null) {
+            stored.addAll(assetFields);
+        }
+        return new PortalRequestForm.Type(String.valueOf(id), name, description, fields, stored);
     }
 
     private static void readField(Object field, List<String> assetFields, List<PortalRequestForm.Field> fields, List<String> attached) {

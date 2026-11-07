@@ -4224,6 +4224,22 @@ a.asset-tree-url {
     background: transparent;
 }
 
+#asset-tree-app .asset-tree-grant-more {
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-grant-more > summary {
+    width: auto;
+    color: #0052cc;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-grant-more .asset-tree-scope-plain {
+    margin-top: 8px;
+}
+
 #asset-tree-app button.asset-tree-schema-tab,
 .asset-tree-backdrop button.asset-tree-schema-tab {
     display: inline-flex !important;
@@ -12674,13 +12690,17 @@ button.asset-tree-attach-remove {
 }
 
 .asset-tree-scheme-asset-list {
-    max-height: 220px;
+    max-height: 140px;
     overflow: auto;
     margin: 4px 0 8px;
 }
 
 .asset-tree-scheme-template-list {
-    max-height: 168px;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 4px;
+    max-height: 112px;
 }
 
 .asset-tree-scheme-list-head {
@@ -12824,6 +12844,65 @@ button.asset-tree-attach-remove {
     font-size: 13px;
     text-align: left;
     cursor: pointer;
+}
+
+.asset-tree-scheme-template-list .asset-tree-scheme-asset {
+    width: auto;
+    max-width: 100%;
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-scheme-template-list button.asset-tree-scheme-asset-main {
+    padding: 3px 8px;
+}
+
+#asset-tree-app .asset-tree-scheme-template-list button.asset-tree-scheme-asset-main strong {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#asset-tree-app .asset-tree-scheme-type-icon {
+    display: inline-flex;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-scheme-type-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+#asset-tree-app .asset-tree-scheme-info {
+    position: absolute;
+    z-index: 8;
+    min-width: 180px;
+    max-width: 280px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 8px 16px rgba(9, 30, 66, 0.18);
+    color: #172b4d;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-scheme-info-title {
+    display: block;
+    margin-bottom: 6px;
+}
+
+#asset-tree-app .asset-tree-scheme-info-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 3px;
+}
+
+#asset-tree-app .asset-tree-scheme-info-row span {
+    color: #6b778c;
 }
 
 .asset-tree-scheme-menu-item:hover {

@@ -906,7 +906,10 @@
             opening.wallId = best.wall.id;
             opening.index = best.index;
             opening.t = best.t;
-            opening.width = kind === 'window' ? 120 : 90;
+            var remembered = session.openingSize && session.openingSize[kind];
+            opening.width = remembered ? remembered.width : (kind === 'window' ? 120 : 90);
+            opening.height = remembered ? remembered.height : (kind === 'window' ? 140 : 210);
+            opening.custom = remembered ? !!remembered.custom : false;
             opening.swing = 'left';
             opening.layerId = best.wall.layerId;
             floor.objects.push(opening);
@@ -1138,11 +1141,38 @@
             return Math.round(deg);
         }
 
+        function materialsOf() {
+            if (!session.doc.materials) session.doc.materials = [];
+            return session.doc.materials;
+        }
+
+        function materialById(id) {
+            var list = (session.doc && session.doc.materials) || [];
+            var i;
+            for (i = 0; i < list.length; i++) {
+                if (list[i].id === id) return list[i];
+            }
+            return null;
+        }
+
         function materialHatch(material) {
             if (material === 'brick') return 'brick';
             if (material === 'concrete') return 'concrete';
             if (material === 'wood' || material === 'metal') return 'diagonal';
+            var custom = materialById(material);
+            if (custom) return custom.hatch || 'diagonal';
             return 'none';
+        }
+
+        function materialName(id) {
+            if (!id) return api.t('schemeMaterialNone');
+            if (id === 'brick') return api.t('schemeMatBrick');
+            if (id === 'concrete') return api.t('schemeMatConcrete');
+            if (id === 'wood') return api.t('schemeMatWood');
+            if (id === 'glass') return api.t('schemeMatGlass');
+            if (id === 'metal') return api.t('schemeMatMetal');
+            var custom = materialById(id);
+            return custom ? custom.name : id;
         }
 
         function paintFill(ctx, obj) {
@@ -1474,29 +1504,54 @@
             ctx.restore();
         }
 
+        function assetGlyph(obj) {
+            if (obj.icon) return { d: obj.icon, color: obj.iconColor || '#5D6B82' };
+            var binding = obj.assetBinding;
+            if (!binding) return null;
+            var asset = assetById(binding.objectId);
+            if (!asset || !asset.icon) return null;
+            return { d: asset.icon, color: asset.iconColor || '#5D6B82' };
+        }
+
         function drawAssetMark(ctx, obj) {
             var s = 36;
             var x = obj.x;
             var y = obj.y;
+            var glyph = assetGlyph(obj);
             ctx.save();
             ctx.translate(x, y);
-            ctx.fillStyle = '#ffffff';
-            ctx.strokeStyle = obj.color || '#0052cc';
+            ctx.fillStyle = glyph ? glyph.color : '#ffffff';
+            ctx.strokeStyle = glyph ? glyph.color : (obj.color || '#0052cc');
             ctx.lineWidth = 1.2;
             ctx.beginPath();
             ctx.rect(0, 0, s, s);
             ctx.fill();
             ctx.stroke();
-            ctx.beginPath();
-            ctx.strokeRect(8, 8, 20, 13);
-            ctx.beginPath();
-            ctx.moveTo(14, 21);
-            ctx.lineTo(22, 21);
-            ctx.moveTo(18, 21);
-            ctx.lineTo(18, 26);
-            ctx.moveTo(13, 26);
-            ctx.lineTo(23, 26);
-            ctx.stroke();
+            if (glyph) {
+                try {
+                    ctx.save();
+                    ctx.translate(6, 6);
+                    ctx.scale((s - 12) / 24, (s - 12) / 24);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fill(new Path2D(glyph.d), 'evenodd');
+                    ctx.restore();
+                } catch (error) {
+                    glyph = null;
+                }
+            }
+            if (!glyph) {
+                ctx.strokeStyle = obj.color || '#0052cc';
+                ctx.beginPath();
+                ctx.strokeRect(8, 8, 20, 13);
+                ctx.beginPath();
+                ctx.moveTo(14, 21);
+                ctx.lineTo(22, 21);
+                ctx.moveTo(18, 21);
+                ctx.lineTo(18, 26);
+                ctx.moveTo(13, 26);
+                ctx.lineTo(23, 26);
+                ctx.stroke();
+            }
             ctx.restore();
             var name = obj.text || (obj.assetBinding && obj.assetBinding.objectLabel) || '';
             if (name) {
@@ -2102,26 +2157,12 @@
                         refreshSide();
                         paint();
                     });
-                    var editCard = el('button', 'asset-tree-scheme-icon');
-                    editCard.type = 'button';
-                    editCard.title = api.t('schemeTemplateEdit');
-                    editCard.disabled = !api.canEdit || !!session.templateId;
-                    editCard.innerHTML = toolIcon('pencil');
-                    editCard.addEventListener('click', function (event) {
+                    card.addEventListener('contextmenu', function (event) {
+                        event.preventDefault();
                         event.stopPropagation();
-                        editTemplate(current);
-                    });
-                    var dropCard = el('button', 'asset-tree-scheme-icon', '×');
-                    dropCard.type = 'button';
-                    dropCard.title = api.t('schemeTemplateDelete');
-                    dropCard.disabled = !api.canEdit || !!session.templateId;
-                    dropCard.addEventListener('click', function (event) {
-                        event.stopPropagation();
-                        deleteTemplate(current);
+                        showLibraryMenu(event.clientX, event.clientY, current);
                     });
                     row.appendChild(card);
-                    row.appendChild(editCard);
-                    row.appendChild(dropCard);
                     symbolList.appendChild(row);
                 });
                 if (!count) symbolList.appendChild(el('p', 'asset-tree-scheme-muted', api.t('noResults')));
@@ -2221,6 +2262,7 @@
                 objectKey: asset.key || String(asset.id),
                 objectLabel: asset.name || '',
                 attributes: asset.attributes || {},
+                typeName: asset.typeName || '',
                 boundAt: Date.now()
             };
         }
@@ -2285,7 +2327,10 @@
                 obj.x = roundCm(pt.x - 18);
                 obj.y = roundCm(pt.y - 18);
                 obj.fill = '';
-                obj.color = '#0052cc';
+                obj.color = asset.iconColor || '#0052cc';
+                obj.icon = asset.icon || '';
+                obj.iconColor = asset.iconColor || '#5D6B82';
+                obj.typeName = asset.typeName || '';
                 obj.angle = 0;
                 obj.assetBinding = bindingOf(asset);
                 obj.layerId = layerOr('equipment');
@@ -2298,6 +2343,22 @@
             renderProps();
             refreshSide();
             paint();
+        }
+
+        function typeMark(asset) {
+            if (!asset || !asset.icon) return null;
+            var tile = el('span', 'asset-tree-scheme-type-icon');
+            tile.style.background = asset.iconColor || '#5D6B82';
+            var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.setAttribute('aria-hidden', 'true');
+            var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', asset.icon);
+            path.setAttribute('fill', '#ffffff');
+            path.setAttribute('fill-rule', 'evenodd');
+            svg.appendChild(path);
+            tile.appendChild(svg);
+            return tile;
         }
 
         function renderAssetList() {
@@ -2333,6 +2394,8 @@
                     main.type = 'button';
                     main.disabled = !api.canEdit || session.mode !== 'edit';
                     main.title = armed ? api.t('schemeTemplateOff') : name;
+                    var mark = typeMark(asset);
+                    if (mark) main.appendChild(mark);
                     main.appendChild(el('strong', null, name));
                     var meta = key;
                     if (placed) meta = meta ? (meta + ' · ' + api.t('schemeOnScheme')) : api.t('schemeOnScheme');
@@ -2448,12 +2511,11 @@
                 button.addEventListener('click', run);
                 row.appendChild(button);
             }
-            act(api.t('schemeToFront'), function () { restack('front'); });
-            act(api.t('schemeToBack'), function () { restack('back'); });
             if (session.selection.length > 1) act(api.t('schemeGroup'), groupSelection);
             var grouped = false;
             selectedObjects().forEach(function (obj) { if (obj.group) grouped = true; });
             if (grouped) act(api.t('schemeUngroup'), ungroupSelection);
+            if (!row.childNodes.length) return;
             props.appendChild(row);
         }
 
@@ -2487,6 +2549,32 @@
             if (obj.w != null) field('W', obj.w, function (value) { obj.w = Math.max(1, roundCm(Number(value) || 1)); });
             if (obj.h != null && obj.type !== 'text') field('H', obj.h, function (value) { obj.h = Math.max(1, roundCm(Number(value) || 1)); });
             if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || 15, function (value) { obj.thickness = Math.max(1, roundCm(Number(value) || 15)); });
+            if (obj.type === 'opening') {
+                var openingMax = obj.custom ? 2000 : 600;
+                field(api.t('schemeLength'), obj.width || 90, function (value) {
+                    obj.width = Math.max(20, Math.min(openingMax, roundCm(Number(value) || 90)));
+                    rememberOpening(obj);
+                });
+                field(api.t('schemeOpeningHeight'), obj.height || (obj.kind === 'window' ? 140 : 210), function (value) {
+                    obj.height = Math.max(20, Math.min(openingMax, roundCm(Number(value) || 210)));
+                    rememberOpening(obj);
+                });
+                var orderWrap = el('label', 'asset-tree-scheme-field', api.t('schemeMadeToOrder'));
+                var order = el('input');
+                order.type = 'checkbox';
+                order.checked = !!obj.custom;
+                order.disabled = !api.canEdit || session.mode !== 'edit';
+                order.addEventListener('change', function () {
+                    if (!api.canEdit || session.mode !== 'edit') return;
+                    remember();
+                    obj.custom = order.checked;
+                    rememberOpening(obj);
+                    renderProps();
+                    paint();
+                });
+                orderWrap.appendChild(order);
+                props.appendChild(orderWrap);
+            }
             if (obj.type === 'symbol' || obj.type === 'asset') field(api.t('schemeAngle'), obj.angle || 0, function (value) { obj.angle = Math.round(Number(value) || 0); });
             if (obj.type === 'line' || obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'text' || obj.type === 'dimension') {
                 var colorWrap = el('label', 'asset-tree-scheme-field', api.t('schemeColor'));
@@ -2543,16 +2631,66 @@
                     option.value = item[0];
                     mat.appendChild(option);
                 });
+                ((session.doc && session.doc.materials) || []).forEach(function (item) {
+                    var option = el('option', null, item.name || '');
+                    option.value = item.id;
+                    mat.appendChild(option);
+                });
                 mat.value = obj.material || '';
                 mat.addEventListener('change', function () {
                     if (!api.canEdit || session.mode !== 'edit') return;
                     remember();
                     obj.material = mat.value;
                     if (obj.type === 'wall') obj.hatch = obj.material ? materialHatch(obj.material) : 'diagonal';
+                    renderProps();
                     paint();
                 });
                 matWrap.appendChild(mat);
                 props.appendChild(matWrap);
+                var customMat = materialById(obj.material);
+                if (customMat) {
+                    var hatchWrap = el('label', 'asset-tree-scheme-field', api.t('schemeHatch'));
+                    var hatchPick = el('select');
+                    hatchPick.disabled = !api.canEdit || session.mode !== 'edit';
+                    [['diagonal', 'schemeHatchDiagonal'], ['brick', 'schemeMatBrick'], ['concrete', 'schemeMatConcrete'], ['none', 'schemeMaterialNone']].forEach(function (item) {
+                        var option = el('option', null, api.t(item[1]));
+                        option.value = item[0];
+                        hatchPick.appendChild(option);
+                    });
+                    hatchPick.value = customMat.hatch || 'diagonal';
+                    hatchPick.addEventListener('change', function () {
+                        if (!api.canEdit || session.mode !== 'edit') return;
+                        remember();
+                        customMat.hatch = hatchPick.value;
+                        if (obj.type === 'wall') obj.hatch = hatchPick.value;
+                        paint();
+                    });
+                    hatchWrap.appendChild(hatchPick);
+                    props.appendChild(hatchWrap);
+                }
+                if (api.canEdit && session.mode === 'edit') {
+                    var addMat = el('button', 'asset-tree-scheme-mini', api.t('schemeMaterialCustom'));
+                    addMat.type = 'button';
+                    addMat.addEventListener('click', function () {
+                        askBox({
+                            title: api.t('schemeMaterialCustom'),
+                            input: true,
+                            value: '',
+                            onOk: function (next) {
+                                var name = String(next || '').replace(/^\s+|\s+$/g, '').slice(0, 40);
+                                if (!name) return;
+                                remember();
+                                var item = { id: nid('mat'), name: name, hatch: 'diagonal' };
+                                materialsOf().push(item);
+                                obj.material = item.id;
+                                if (obj.type === 'wall') obj.hatch = 'diagonal';
+                                renderProps();
+                                paint();
+                            }
+                        });
+                    });
+                    props.appendChild(addMat);
+                }
             }
             if (obj.name && obj.points && !obj.type) {
                 field(api.t('name'), obj.name, function (value) { obj.name = value.slice(0, 80); });
@@ -2605,8 +2743,14 @@
                 objectKey: asset.key || String(asset.id),
                 objectLabel: asset.name || '',
                 attributes: asset.attributes || {},
+                typeName: asset.typeName || '',
                 boundAt: Date.now()
             };
+            if (obj.type === 'asset') {
+                obj.icon = asset.icon || '';
+                obj.iconColor = asset.iconColor || '#5D6B82';
+                obj.typeName = asset.typeName || '';
+            }
             if (obj.name && !obj.type) obj.name = asset.name || obj.name;
             renderProps();
             refreshSide();
@@ -3510,11 +3654,14 @@
             if (session.mode !== 'edit') {
                 var viewId = hit(pt.x, pt.y);
                 session.selection = viewId ? withGroup([viewId]) : [];
+                if (viewId) showSchemeInfo(event.clientX, event.clientY, viewId);
+                else hideSchemeInfo();
                 renderProps();
                 refreshSide();
                 paint();
                 return;
             }
+            hideSchemeInfo();
             if (session.tool === 'select') {
                 var handle = handleAt(sx, sy);
                 if (handle && api.canEdit) {
@@ -3913,48 +4060,203 @@
             status.textContent = api.t('schemeTemplateSaved');
         }
 
-        function showTemplateMenu(clientX, clientY) {
-            hideTemplateMenu();
-            if (!api.canEdit || session.mode !== 'edit' || session.templateId) return;
-            var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
-            if (!objects.length) return;
-            var menu = el('div', 'asset-tree-scheme-menu');
-            var suggested = objects.length === 1 && objects[0].type === 'symbol' ? (symbolDef(objects[0].symbolId).name || '') : api.t('schemeTemplateNew');
-            var field = el('input', 'asset-tree-scheme-name');
-            field.value = suggested;
-            field.placeholder = api.t('name');
-            var item = el('button', 'asset-tree-scheme-menu-item', api.t('schemeMakeTemplate'));
-            item.type = 'button';
-            function commit() {
-                var value = field.value;
-                hideTemplateMenu();
-                makeTemplateFromSelection(value);
-            }
-            item.addEventListener('click', function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                commit();
-            });
-            field.addEventListener('keydown', function (event) {
-                event.stopPropagation();
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                    commit();
-                }
-            });
-            menu.addEventListener('mousedown', function (event) { event.stopPropagation(); });
-            menu.appendChild(field);
-            menu.appendChild(item);
+        function placeMenu(menu, clientX, clientY) {
             host.appendChild(menu);
             var hostRect = host.getBoundingClientRect();
             var left = clientX - hostRect.left;
             var top = clientY - hostRect.top;
-            if (left + 200 > host.clientWidth) left = Math.max(8, host.clientWidth - 200);
-            if (top + 88 > host.clientHeight) top = Math.max(8, host.clientHeight - 88);
+            if (left + 220 > host.clientWidth) left = Math.max(8, host.clientWidth - 220);
+            if (top + menu.offsetHeight + 8 > host.clientHeight) top = Math.max(8, host.clientHeight - menu.offsetHeight - 8);
             menu.style.left = left + 'px';
             menu.style.top = top + 'px';
-            field.focus();
-            field.select();
+        }
+
+        function menuAction(menu, label, run, disabled) {
+            var button = el('button', 'asset-tree-scheme-menu-item', label);
+            button.type = 'button';
+            button.disabled = !!disabled;
+            button.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                hideTemplateMenu();
+                if (!button.disabled) run();
+            });
+            menu.appendChild(button);
+        }
+
+        function showLibraryMenu(clientX, clientY, symbol) {
+            hideTemplateMenu();
+            if (!api.canEdit || session.templateId) return;
+            var menu = el('div', 'asset-tree-scheme-menu');
+            menu.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            menuAction(menu, api.t('schemeTemplateEdit'), function () { editTemplate(symbol); });
+            menuAction(menu, api.t('schemeTemplateDelete'), function () { deleteTemplate(symbol); });
+            placeMenu(menu, clientX, clientY);
+        }
+
+        function rememberOpening(obj) {
+            if (!obj || obj.type !== 'opening') return;
+            if (!session.openingSize) session.openingSize = {};
+            session.openingSize[obj.kind || 'door'] = {
+                width: obj.width,
+                height: obj.height,
+                custom: !!obj.custom
+            };
+        }
+
+        function showTemplateMenu(clientX, clientY) {
+            hideTemplateMenu();
+            if (!api.canEdit || session.mode !== 'edit' || session.templateId) return;
+            var menu = el('div', 'asset-tree-scheme-menu');
+            menu.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            menuAction(menu, api.t('schemeUndo'), undo, !session.past.length);
+            menuAction(menu, api.t('schemeRedo'), redo, !session.future.length);
+            if (session.selection.length) {
+                menuAction(menu, api.t('schemeToFront'), function () { restack('front'); });
+                menuAction(menu, api.t('schemeToBack'), function () { restack('back'); });
+            }
+            var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
+            var field = null;
+            if (objects.length) {
+                var suggested = objects.length === 1 && objects[0].type === 'symbol' ? (symbolDef(objects[0].symbolId).name || '') : api.t('schemeTemplateNew');
+                field = el('input', 'asset-tree-scheme-name');
+                field.value = suggested;
+                field.placeholder = api.t('name');
+                var item = el('button', 'asset-tree-scheme-menu-item', api.t('schemeMakeTemplate'));
+                item.type = 'button';
+                function commit() {
+                    var value = field.value;
+                    hideTemplateMenu();
+                    makeTemplateFromSelection(value);
+                }
+                item.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    commit();
+                });
+                field.addEventListener('keydown', function (event) {
+                    event.stopPropagation();
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        commit();
+                    }
+                });
+                menu.appendChild(field);
+                menu.appendChild(item);
+            }
+            placeMenu(menu, clientX, clientY);
+            if (field) {
+                field.focus();
+                field.select();
+            }
+        }
+
+        function findDrawn(id) {
+            var floor = activeFloor();
+            if (!floor || !id) return null;
+            var i;
+            if (String(id).indexOf('room:') === 0) {
+                var wanted = String(id).slice(5);
+                var rooms = floor.rooms || [];
+                for (i = 0; i < rooms.length; i++) {
+                    if (String(rooms[i].id) === wanted) return rooms[i];
+                }
+                return null;
+            }
+            var objects = floor.objects || [];
+            for (i = 0; i < objects.length; i++) {
+                if (objects[i].id === id) return objects[i];
+            }
+            return null;
+        }
+
+        function cmText(value) {
+            return String(Math.round(Number(value) || 0)) + ' cm';
+        }
+
+        function chainLength(points, closed) {
+            if (!points || points.length < 2) return 0;
+            var total = 0;
+            var i;
+            for (i = 1; i < points.length; i++) total += dist(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+            if (closed && points.length > 2) total += dist(points[points.length - 1].x, points[points.length - 1].y, points[0].x, points[0].y);
+            return Math.round(total);
+        }
+
+        function infoTitle(obj) {
+            if (!obj.type && obj.name) return obj.name;
+            if (obj.type === 'opening') return api.t(obj.kind === 'window' ? 'schemeToolWindow' : 'schemeToolDoor');
+            if (obj.type === 'symbol') {
+                var def = symbolDef(obj.symbolId);
+                return (def && def.name) || api.t('schemeSymbols');
+            }
+            if (obj.type === 'asset') return obj.text || (obj.assetBinding && obj.assetBinding.objectLabel) || api.t('schemeAssets');
+            var names = {
+                wall: 'schemeToolWall',
+                line: 'schemeToolLine',
+                rect: 'schemeToolRect',
+                ellipse: 'schemeToolEllipse',
+                polyline: 'schemeToolPen',
+                text: 'schemeToolText',
+                dimension: 'schemeToolDim'
+            };
+            return api.t(names[obj.type] || 'schemeProps');
+        }
+
+        function infoRows(obj) {
+            var rows = [];
+            var binding = obj.assetBinding;
+            var live = binding ? assetById(binding.objectId) : null;
+            if (obj.type === 'wall' || obj.type === 'polyline' || obj.type === 'line' || obj.type === 'dimension') {
+                rows.push([api.t('schemeLength'), cmText(chainLength(obj.points, obj.closed))]);
+            }
+            if (obj.type === 'wall') rows.push([api.t('schemeThickness'), cmText(obj.thickness || 15)]);
+            if (obj.w != null && obj.type !== 'text' && obj.type !== 'asset') rows.push(['W', cmText(obj.w)]);
+            if (obj.h != null && obj.type !== 'text' && obj.type !== 'asset' && obj.type !== 'opening') rows.push(['H', cmText(obj.h)]);
+            if (obj.type === 'opening') {
+                rows.push([api.t('schemeLength'), cmText(obj.width || 90)]);
+                rows.push([api.t('schemeOpeningHeight'), cmText(obj.height || (obj.kind === 'window' ? 140 : 210))]);
+                if (obj.custom) rows.push([api.t('schemeMadeToOrder'), '✓']);
+            }
+            if (obj.material) rows.push([api.t('schemeMaterial'), materialName(obj.material)]);
+            if (obj.type === 'symbol' || obj.type === 'asset') rows.push([api.t('schemeAngle'), String(obj.angle || 0) + '°']);
+            if (obj.text && obj.type !== 'asset') rows.push([api.t('schemeText'), obj.text]);
+            if (!obj.type && obj.area) rows.push([api.t('schemeRoom'), ((obj.area || 0) / 10000).toFixed(2) + ' m2']);
+            if (binding || live) {
+                var label = (live && live.name) || (binding && binding.objectLabel) || '';
+                var key = (live && live.key) || (binding && binding.objectKey) || '';
+                var typeName = (live && live.typeName) || (binding && binding.typeName) || obj.typeName || '';
+                if (label) rows.push([api.t('name'), label]);
+                if (key) rows.push([api.t('schemeAssetTitle'), key]);
+                if (typeName) rows.push([api.t('type'), typeName]);
+                var attrs = (binding && binding.attributes) || (live && live.attributes) || {};
+                var attr;
+                for (attr in attrs) {
+                    if (attrs[attr] !== '') rows.push([attr, String(attrs[attr])]);
+                }
+            }
+            return rows;
+        }
+
+        function hideSchemeInfo() {
+            var old = host.querySelector('.asset-tree-scheme-info');
+            if (old && old.parentNode) old.parentNode.removeChild(old);
+        }
+
+        function showSchemeInfo(clientX, clientY, id) {
+            hideSchemeInfo();
+            var obj = findDrawn(id);
+            if (!obj) return;
+            var card = el('div', 'asset-tree-scheme-info');
+            card.appendChild(el('strong', 'asset-tree-scheme-info-title', infoTitle(obj)));
+            infoRows(obj).forEach(function (row) {
+                var line = el('div', 'asset-tree-scheme-info-row');
+                line.appendChild(el('span', null, row[0]));
+                line.appendChild(el('b', null, row[1]));
+                card.appendChild(line);
+            });
+            card.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            placeMenu(card, clientX, clientY);
         }
 
         stage.addEventListener('wheel', function (event) {
