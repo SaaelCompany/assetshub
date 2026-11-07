@@ -10219,11 +10219,11 @@ a.asset-tree-preview-icon:focus {
     flex-direction: column;
     align-items: flex-start;
     gap: 2px;
-    width: 150px;
-    max-width: 30%;
+    width: 46%;
+    max-width: 120px;
     min-width: 0;
     margin: 0;
-    padding: 8px 22px 8px 10px;
+    padding: 6px 20px 6px 8px;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     background: #fff;
@@ -10238,10 +10238,16 @@ a.asset-tree-preview-icon:focus {
     cursor: pointer;
 }
 
+#asset-tree-app .asset-tree-link-graph.is-empty .asset-tree-link-node,
+#asset-tree-app .asset-tree-link-graph.is-pair .asset-tree-link-node {
+    width: calc(100% - 16px);
+    max-width: 220px;
+}
+
 #asset-tree-app .asset-tree-link-graph.is-empty .asset-tree-link-node {
     position: static;
     width: auto;
-    max-width: 280px;
+    max-width: 220px;
     transform: none;
     cursor: default;
 }
@@ -10291,7 +10297,7 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-graph-label {
     position: absolute;
     z-index: 1;
-    max-width: 140px;
+    max-width: calc(100% - 24px);
     padding: 1px 6px;
     border-radius: 3px;
     background: #fff;
@@ -10313,10 +10319,6 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-link-detail[hidden] {
     display: none;
-}
-
-#asset-tree-app .asset-tree-request-main .asset-tree-link-form {
-    max-width: 420px;
 }
 
 #asset-tree-app .asset-tree-report-fields,

@@ -7865,7 +7865,6 @@
             main.appendChild(lifeBlock(asset));
         }
         main.appendChild(descriptionModule(asset, true));
-        main.appendChild(linkBlock(asset));
 
         var issues = el('div');
         if (mayEdit(asset)) {
@@ -7902,6 +7901,7 @@
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
+        aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
         form.appendChild(main);
@@ -8019,7 +8019,6 @@
         paintAssetFields(attrList, asset.typeKey, asset.attributes || []);
         attributes.appendChild(attrList);
         main.appendChild(attributes);
-        if (!placePage) main.appendChild(linkBlock(asset));
 
         var issues = el('div', 'asset-tree-request-block');
         issues.appendChild(el('h3', null, t('issues')));
@@ -8056,6 +8055,7 @@
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
+        if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
             ? state.types.map(function (type) { return { value: type.typeKey, label: type.label }; })
@@ -8566,34 +8566,33 @@
             return stage;
         }
         var count = nodes.length;
-        var width = 720;
-        var height = 240;
-        if (count >= 3) height = 360;
-        if (count >= 5) height = 440;
-        if (count >= 8) height = 520;
+        var rows = [];
+        var hubAt = Math.floor(count / 2);
+        var hubPlaced = false;
+        var i;
+        for (i = 0; i < count; i++) {
+            if (i === hubAt) {
+                rows.push(null);
+                hubPlaced = true;
+            }
+            rows.push(nodes[i]);
+        }
+        if (!hubPlaced) rows.push(null);
+        if (count === 1) box.className += ' is-pair';
+        var rowCount = rows.length;
+        var width = 240;
+        var height = rowCount * 86 + 8;
         box.style.height = height + 'px';
         var cx = width / 2;
         var cy = height / 2;
         var placed = [];
-        var i;
-        if (count === 1) {
-            cx = width * 0.30;
-            placed.push({ node: nodes[0], x: width * 0.74, y: cy });
-        } else if (count === 2) {
-            placed.push({ node: nodes[0], x: width * 0.16, y: cy });
-            placed.push({ node: nodes[1], x: width * 0.84, y: cy });
-        } else {
-            var rx = width / 2 - 130;
-            var ry = height / 2 - 78;
-            if (rx < 90) rx = 90;
-            if (ry < 70) ry = 70;
-            for (i = 0; i < count; i++) {
-                var angle = (-Math.PI / 2) + (i * 2 * Math.PI / count);
-                placed.push({
-                    node: nodes[i],
-                    x: cx + Math.cos(angle) * rx,
-                    y: cy + Math.sin(angle) * ry
-                });
+        for (i = 0; i < rowCount; i++) {
+            var y = ((i + 0.5) / rowCount) * height;
+            if (rows[i] == null) {
+                cy = y;
+            } else {
+                var side = count === 1 ? 0.5 : (placed.length % 2 === 0 ? 0.28 : 0.72);
+                placed.push({ node: rows[i], x: width * side, y: y });
             }
         }
         var svg = svgEl('svg');
