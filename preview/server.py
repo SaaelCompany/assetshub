@@ -3896,6 +3896,44 @@ def report_catalog(project_key, text):
     return items
 
 
+def unescape_field_rule(raw):
+    out = []
+    text = raw or ""
+    index = 0
+    while index < len(text):
+        if text[index] == "~" and index + 1 < len(text):
+            nxt = text[index + 1]
+            if nxt == "~":
+                out.append("~")
+                index += 2
+                continue
+            if nxt == "p":
+                out.append("|")
+                index += 2
+                continue
+            if nxt == "s":
+                out.append(";")
+                index += 2
+                continue
+        out.append(text[index])
+        index += 1
+    return "".join(out)
+
+
+def field_rules_ok(packed):
+    rules = (packed or "").split("|")
+    if not packed or not rules or len(rules) > 8:
+        return False
+    for rule in rules:
+        mark = rule.find("~")
+        if mark <= 0 or not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", rule[:mark]):
+            return False
+        text = unescape_field_rule(rule[mark + 1:]).strip()
+        if not text or len(text) > 80:
+            return False
+    return True
+
+
 def create_saved_report(project_key, body, text):
     if not module_on(project_key, "reports"):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
@@ -3921,6 +3959,10 @@ def create_saved_report(project_key, body, text):
         return 400, {"message": text.get("asset-tree.error.report.filter", "The filter is longer than 4000 characters. Remove some conditions.")}
     if filt == "mix":
         for part in value.split(";"):
+            if part.startswith("f="):
+                if not field_rules_ok(part[2:]):
+                    return 400, {"message": text.get("asset-tree.error.report", "Report")}
+                continue
             if not part.startswith(("t=", "s=", "h=", "p=")):
                 return 400, {"message": text.get("asset-tree.error.report", "Report")}
     chart = (body.get("chart") or "bar").strip().lower()
@@ -4320,6 +4362,7 @@ def report_view(project_key, report_key, text, query=None):
         statuses = ""
         holders = ""
         places = ""
+        fields = ""
         for part in value.split(";"):
             if part.startswith("t="):
                 types = part[2:]
@@ -4329,6 +4372,8 @@ def report_view(project_key, report_key, text, query=None):
                 holders = part[2:]
             elif part.startswith("p="):
                 places = part[2:]
+            elif part.startswith("f="):
+                fields = part[2:]
 
         def place_hit(asset):
             if not places:
@@ -4336,7 +4381,21 @@ def report_view(project_key, report_key, text, query=None):
             wanted = [part for part in places.split(",") if part]
             return any(part in wanted for part in place_chain(asset["id"]))
 
-        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset)]
+        def fields_hit(asset):
+            if not fields:
+                return True
+            values = asset.get("values") or {}
+            for rule in fields.split("|"):
+                mark = rule.find("~")
+                if mark <= 0:
+                    continue
+                key = rule[:mark]
+                wanted = unescape_field_rule(rule[mark + 1:]).strip().lower()
+                if wanted and wanted not in str(values.get(key) or "").lower():
+                    return False
+            return True
+
+        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset) and fields_hit(asset)]
     metric = spec.get("metric") or ("cost" if report_key == "cost" else "count")
     if group == "kind":
         metric = "count"

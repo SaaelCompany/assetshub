@@ -101,6 +101,7 @@ import com.assetstree.jira.dto.PortalRequestCreatedDto;
 import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
+import com.assetstree.jira.model.PortalAssetHold;
 import com.assetstree.jira.model.ProjectModules;
 import com.assetstree.jira.model.ViewColumns;
 import com.assetstree.jira.dto.AssetListDto;
@@ -1150,6 +1151,67 @@ public class AssetServiceImpl implements AssetService {
         attachPortalIssue(user, issue, target);
     }
 
+    @Override
+    public void rememberPortalAsset(ApplicationUser user, int assetId) {
+        requirePortalAsset(user, assetId);
+        if (user.getKey() == null) {
+            return;
+        }
+        PortalAssetHold.keep(user.getKey(), assetId);
+    }
+
+    @Override
+    public void attachPortalAsset(ApplicationUser user, Issue issue) {
+        if (issue == null || issue.getProjectObject() == null || issue.getId() == null || !freshRequest(issue)) {
+            return;
+        }
+        ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : issue.getCreator();
+        String owner = reporter != null && reporter.getKey() != null
+                ? reporter.getKey()
+                : (user == null ? null : user.getKey());
+        if (owner == null) {
+            return;
+        }
+        Integer pending = PortalAssetHold.peek(owner);
+        if (pending == null && user != null && user.getKey() != null && !user.getKey().equals(owner)) {
+            pending = PortalAssetHold.peek(user.getKey());
+            if (pending != null) {
+                owner = user.getKey();
+            }
+        }
+        if (pending == null || pending.intValue() <= 0) {
+            return;
+        }
+        AssetEntity asset;
+        try {
+            asset = requireAsset(pending.intValue());
+        } catch (RuntimeException ex) {
+            PortalAssetHold.take(owner);
+            return;
+        }
+        if (isLocation(asset) || asset.getProjectKey() == null) {
+            PortalAssetHold.take(owner);
+            return;
+        }
+        if (!moduleOn(asset.getProjectKey(), ProjectModules.PORTAL)) {
+            return;
+        }
+        if (!ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+            log.debug("Portal asset {} stays unlinked: request {} is in another project", pending, issue.getKey());
+            return;
+        }
+        Integer chosen = chosenAssetId(issue);
+        int target = chosen == null ? pending.intValue() : chosen.intValue();
+        ApplicationUser actor = user != null ? user : reporter;
+        boolean linked = attachPortalIssue(actor, issue, target);
+        if (chosen == null) {
+            writeAssetField(actor, issue, target);
+        }
+        if (linked) {
+            PortalAssetHold.take(owner);
+        }
+    }
+
     private boolean raisedBy(ApplicationUser user, Issue issue) {
         if (user == null || user.getKey() == null || issue == null) {
             return false;
@@ -1263,9 +1325,9 @@ public class AssetServiceImpl implements AssetService {
         return new AssetException(400, key, arg);
     }
 
-    private void attachPortalIssue(ApplicationUser user, Issue issue, final int assetId) {
+    private boolean attachPortalIssue(ApplicationUser user, Issue issue, final int assetId) {
         if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
-            return;
+            return false;
         }
         final long issueId = issue.getId().longValue();
         final String projectKey = issue.getProjectObject().getKey();
@@ -1292,6 +1354,7 @@ public class AssetServiceImpl implements AssetService {
             if (Boolean.TRUE.equals(created)) {
                 applyRequestFlow(user, assetId, issue);
             }
+            return created != null;
         } catch (AssetException ex) {
             if (ex.getStatus() != 409) {
                 log.warn("Could not attach asset {} to {}", assetId, issue.getKey());
@@ -1299,6 +1362,7 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             log.warn("Could not attach asset {} to {}", assetId, issue.getKey(), ex);
         }
+        return false;
     }
 
     private void writeAssetField(ApplicationUser user, Issue issue, int assetId) {
@@ -9424,6 +9488,12 @@ public class AssetServiceImpl implements AssetService {
         String[] parts = value.split(";");
         for (int i = 0; i < parts.length; i++) {
             String part = parts[i];
+            if (part.startsWith("f=")) {
+                if (!fieldRulesLookValid(part.substring(2))) {
+                    return false;
+                }
+                continue;
+            }
             if (!(part.startsWith("t=") || part.startsWith("s=") || part.startsWith("h=") || part.startsWith("p="))) {
                 return false;
             }
@@ -9524,7 +9594,7 @@ public class AssetServiceImpl implements AssetService {
         boolean money = ReportCatalog.COST.equals(key) || "cost".equals(metric);
         boolean byField = ReportCatalog.FIELD.equals(group);
         boolean groupsField = group != null && (group.startsWith(ReportCatalog.FIELD + "+") || group.contains("+" + ReportCatalog.FIELD));
-        boolean needAttrs = byField || groupsField || (attrKey != null && !attrKey.isEmpty());
+        boolean needAttrs = byField || groupsField || (attrKey != null && !attrKey.isEmpty()) || mixHasFieldRules(filter, value);
         Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
                 ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         String valueKind = byField ? fieldKind(types, fieldKey) : "";
@@ -9559,7 +9629,7 @@ public class AssetServiceImpl implements AssetService {
             if (!reportFilterMatches(asset, filter, value, types, index)) {
                 continue;
             }
-            if (!attributeMatches(attributes, asset, attrKey, attrValue)) {
+            if (!reportAttributesMatch(attributes, asset, filter, value, attrKey, attrValue)) {
                 continue;
             }
             LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
@@ -9665,6 +9735,93 @@ public class AssetServiceImpl implements AssetService {
         view.setFieldKey(fieldKey == null ? "" : fieldKey);
         view.setFieldLabel(fieldLabel(types, fieldKey));
         return view;
+    }
+
+    private boolean reportAttributesMatch(Map<Integer, List<AssetAttributeEntity>> attributes, AssetEntity asset,
+            String filter, String value, String attrKey, String attrValue) {
+        if (!attributeMatches(attributes, asset, attrKey, attrValue)) {
+            return false;
+        }
+        if (!mixHasFieldRules(filter, value) || asset == null) {
+            return true;
+        }
+        String[] rules = mixPart(value, "f").split("\\|", -1);
+        for (int i = 0; i < rules.length; i++) {
+            String rule = rules[i];
+            int mark = rule.indexOf('~');
+            if (mark <= 0) {
+                continue;
+            }
+            String key = ReportCatalog.fieldKey(rule.substring(0, mark));
+            String wanted = unescapeFieldRule(rule.substring(mark + 1)).trim().toLowerCase(Locale.ROOT);
+            if (key.isEmpty() || wanted.isEmpty()) {
+                continue;
+            }
+            String raw = attributeText(attributes, asset.getID(), key).toLowerCase(Locale.ROOT);
+            if (!raw.contains(wanted)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean mixHasFieldRules(String filter, String value) {
+        return "mix".equals(filter) && !mixPart(value, "f").isEmpty();
+    }
+
+    private boolean fieldRulesLookValid(String packed) {
+        if (packed == null || packed.isEmpty()) {
+            return false;
+        }
+        String[] rules = packed.split("\\|", -1);
+        if (rules.length == 0 || rules.length > 8) {
+            return false;
+        }
+        for (int i = 0; i < rules.length; i++) {
+            String rule = rules[i];
+            int mark = rule.indexOf('~');
+            if (mark <= 0) {
+                return false;
+            }
+            if (ReportCatalog.fieldKey(rule.substring(0, mark)).isEmpty()) {
+                return false;
+            }
+            String text = unescapeFieldRule(rule.substring(mark + 1)).trim();
+            if (text.isEmpty() || text.length() > 80) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String unescapeFieldRule(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (ch == '~' && i + 1 < raw.length()) {
+                char next = raw.charAt(i + 1);
+                if (next == '~') {
+                    out.append('~');
+                    i++;
+                    continue;
+                }
+                if (next == 'p') {
+                    out.append('|');
+                    i++;
+                    continue;
+                }
+                if (next == 's') {
+                    out.append(';');
+                    i++;
+                    continue;
+                }
+            }
+            out.append(ch);
+        }
+        return out.toString();
     }
 
     private boolean attributeMatches(Map<Integer, List<AssetAttributeEntity>> attributes, AssetEntity asset, String attrKey, String attrValue) {
@@ -9877,7 +10034,8 @@ public class AssetServiceImpl implements AssetService {
             String filter, String value, AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
             Map<String, String> statusNames, int lineFrom, boolean allLines, String onlyBucket, String attrKey, String attrValue) {
         Map<String, String> kindNames = kindNames(project.getKey());
-        Map<Integer, List<AssetAttributeEntity>> attributes = attrKey != null && !attrKey.isEmpty()
+        boolean needAttrs = (attrKey != null && !attrKey.isEmpty()) || mixHasFieldRules(filter, value);
+        Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
                 ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         List<ServicePlanEntity> plans = new ArrayList<ServicePlanEntity>();
         boolean filtered = filter != null && !filter.isEmpty();
@@ -9887,7 +10045,8 @@ public class AssetServiceImpl implements AssetService {
             if (type != null && type.isLocation()) {
                 continue;
             }
-            if (!reportFilterMatches(asset, filter, value, types, index) || !attributeMatches(attributes, asset, attrKey, attrValue)) {
+            if (!reportFilterMatches(asset, filter, value, types, index)
+                    || !reportAttributesMatch(attributes, asset, filter, value, attrKey, attrValue)) {
                 continue;
             }
             wanted.add(Integer.valueOf(asset.getID()));

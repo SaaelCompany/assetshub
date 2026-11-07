@@ -248,6 +248,12 @@ public interface AssetService {
      */
     void portalLinkRequest(ApplicationUser user, int assetId, String issueKey);
 
+    /** Remembers the equipment chosen in the profile until the portal creates the request. */
+    void rememberPortalAsset(ApplicationUser user, int assetId);
+
+    /** Links that equipment to a request the same customer just raised, even when the request type has no asset field. */
+    void attachPortalAsset(ApplicationUser user, Issue issue);
+
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 
     /** Moves equipment already linked to this request when the request itself changes status. */

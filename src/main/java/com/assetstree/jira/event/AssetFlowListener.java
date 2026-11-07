@@ -33,6 +33,11 @@ public class AssetFlowListener extends AbstractIssueEventListener {
         } catch (RuntimeException ex) {
             log.warn("TNI did not record a device for {}", event.getIssue().getKey(), ex);
         }
+        try {
+            service.attachPortalAsset(event.getUser(), event.getIssue());
+        } catch (RuntimeException ex) {
+            log.warn("Portal asset was not linked to {}", event.getIssue().getKey(), ex);
+        }
     }
 
     /**

@@ -1901,15 +1901,32 @@
                 objectKey: card.objectKey || ''
             }));
         } catch (error) {}
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200';
+        try {
+            var hold = new XMLHttpRequest();
+            hold.open('POST', contextPath() + '/rest/asset-tree/1.0/portal/assets/' + encodeURIComponent(id) + '/intent', false);
+            hold.setRequestHeader('Accept', 'application/json');
+            hold.setRequestHeader('Content-Type', 'application/json');
+            hold.setRequestHeader('X-Atlassian-Token', 'no-check');
+            hold.send('{}');
+        } catch (error) {}
         var glue = url.indexOf('?') >= 0 ? '&' : '?';
         var next = url + glue + 'asset=' + encodeURIComponent(id);
         if (card.projectKey) next += '&project=' + encodeURIComponent(card.projectKey);
         window.location.assign(next);
     }
 
+    function portalIssueKey() {
+        var path = location.pathname || '';
+        var match = /\/portal\/\d+\/(?:[A-Za-z0-9_.-]+\/)*([A-Z][A-Z0-9_]*-\d+)(?:\/|$)/.exec(path);
+        if (match) return match[1];
+        match = /(?:\?|&)(?:requestKey|issueKey|key)=([A-Z][A-Z0-9_]*-\d+)/.exec(location.search || '');
+        return match ? match[1] : '';
+    }
+
     function claimPortalRequest() {
-        var match = /\/portal\/\d+\/([A-Z][A-Z0-9_]*-\d+)/.exec(location.pathname || '');
-        if (!match || claimPortalRequest.done) return;
+        var key = portalIssueKey();
+        if (!key || claimPortalRequest.done || claimPortalRequest.busy) return;
         var stored = null;
         try {
             var raw = sessionStorage.getItem('asset-tree-portal-asset');
@@ -1919,13 +1936,28 @@
         }
         var id = stored && stored.id ? String(stored.id) : '';
         if (!/^\d+$/.test(id)) return;
-        claimPortalRequest.done = true;
-        sendJson('POST', '/portal/assets/' + id + '/requests/' + encodeURIComponent(match[1]), {}, function (status) {
-            if (status === 0) {
-                claimPortalRequest.done = false;
+        claimPortalRequest.busy = true;
+        sendJson('POST', '/portal/assets/' + id + '/requests/' + encodeURIComponent(key), {}, function (status) {
+            claimPortalRequest.busy = false;
+            if (status >= 200 && status < 300) {
+                claimPortalRequest.done = true;
+                try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) {}
+                document.cookie = 'assethub-portal-asset=; path=/; max-age=0';
                 return;
             }
-            try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) {}
+            if (status === 0) return;
+            claimPortalRequest.tries = (claimPortalRequest.tries || 0) + 1;
+            if (claimPortalRequest.tries > 8) claimPortalRequest.done = true;
+        });
+    }
+
+    function rememberPortalAsset() {
+        var id = presetAssetId();
+        if (!id || rememberPortalAsset.sent === id) return;
+        rememberPortalAsset.sent = id;
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200';
+        sendJson('POST', '/portal/assets/' + id + '/intent', {}, function (status) {
+            if (status === 0 || status >= 500) rememberPortalAsset.sent = '';
         });
     }
 
@@ -2127,6 +2159,7 @@
     }
 
     function boot() {
+        rememberPortalAsset();
         claimPortalRequest();
         var pickers = document.querySelectorAll('.asset-tree-picker');
         for (var i = 0; i < pickers.length; i++) mount(pickers[i]);

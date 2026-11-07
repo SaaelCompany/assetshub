@@ -7901,7 +7901,6 @@
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
-        aside.appendChild(peerBlock(asset));
         aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
@@ -8056,7 +8055,6 @@
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
-        if (!placePage) aside.appendChild(peerBlock(asset));
         if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
@@ -8382,7 +8380,7 @@
         var box = el('div', 'asset-tree-link-form');
         var type = document.createElement('select');
         type.className = 'asset-tree-filter';
-        [['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
+        [['peer', 'linkRelated'], ['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
             var option = document.createElement('option');
             option.value = pair[0];
             option.textContent = t(pair[1]);
@@ -8394,6 +8392,8 @@
         custom.hidden = true;
         type.addEventListener('change', function () {
             custom.hidden = type.value !== 'custom';
+            more.hidden = type.value === 'peer';
+            if (type.value === 'peer') extra.hidden = true;
         });
         var attrKey = el('input');
         attrKey.type = 'text';
@@ -8414,6 +8414,7 @@
             extra.hidden = !extra.hidden;
             more.textContent = extra.hidden ? t('linkMore') : t('linkLess');
         });
+        more.hidden = type.value === 'peer';
         var search = el('input');
         search.type = 'search';
         search.placeholder = t('peerSearch');
@@ -8421,6 +8422,7 @@
         var timer = null;
         var seq = 0;
         function chosenType() {
+            if (type.value === 'peer') return 'peer';
             if (type.value !== 'custom') return type.value;
             return (custom.value || '').trim().toLowerCase();
         }
@@ -8444,6 +8446,17 @@
                     }
                     payload.forEach(function (peer) {
                         results.appendChild(button((peer.name || peer.objectKey || '') + (peer.objectKey ? ' · ' + peer.objectKey : ''), 'asset-tree-user-hit', function () {
+                            if (chosenType() === 'peer') {
+                                ajax('POST', '/assets/' + asset.id + '/peers', { assetId: peer.id }, function (st, answer) {
+                                    if (st >= 200 && st < 300) {
+                                        notify(t('peerAdded'));
+                                        selectAsset(asset.id, true);
+                                    } else {
+                                        setFormError((answer && answer.message) || t('errorTitle'));
+                                    }
+                                });
+                                return;
+                            }
                             var body = { assetId: peer.id, type: chosenType(), inbound: (inbound.value || '').trim(), attributes: [] };
                             var key = (attrKey.value || '').trim();
                             var value = (attrValue.value || '').trim();
@@ -8470,17 +8483,100 @@
         return box;
     }
 
+    function relationNodes(asset) {
+        var nodes = [];
+        var linked = {};
+        (asset.links || []).forEach(function (link) {
+            var id = linkOtherId(link);
+            if (id) linked[id] = true;
+            var meta = (link.attributes || []).map(function (item) {
+                return (item.key || '') + ': ' + (item.value || '');
+            }).join(' · ');
+            nodes.push({
+                id: id,
+                name: link.name || link.objectKey || '',
+                key: link.objectKey || '',
+                phrase: linkPhrase(link),
+                open: !!link.open,
+                projectKey: link.projectKey,
+                kind: 'link',
+                linkId: link.id,
+                meta: meta
+            });
+        });
+        (asset.peers || []).forEach(function (peer) {
+            if (!peer || !peer.id || linked[peer.id]) return;
+            nodes.push({
+                id: peer.id,
+                name: peer.name || peer.objectKey || '',
+                key: peer.objectKey || '',
+                phrase: t('linkRelated'),
+                open: !!peer.open,
+                projectKey: peer.projectKey,
+                kind: 'peer',
+                peer: peer
+            });
+        });
+        return nodes;
+    }
+
+    function linkGraphNode(asset, node, self) {
+        var card = el('div', 'asset-tree-link-node' + (self ? ' is-self' : '') + (!self && node && !node.open ? ' is-locked' : ''));
+        var title = self ? (asset.name || asset.objectKey || '') : (node.name || node.key || '');
+        var objectKey = self ? (asset.objectKey || '') : (node.key || '');
+        if (!self && node && node.open && node.id) {
+            card.appendChild(button(title, 'asset-tree-linkish', function () {
+                goToAsset(node.projectKey, node.id);
+            }));
+        } else {
+            card.appendChild(el('strong', null, title));
+        }
+        if (objectKey && objectKey !== title) card.appendChild(el('span', 'asset-tree-link-key', objectKey));
+        if (!self && mayEdit(asset) && node && (node.kind === 'peer' ? node.id : node.linkId)) {
+            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                var path = node.kind === 'peer'
+                    ? '/assets/' + asset.id + '/peers/' + node.id
+                    : '/assets/' + asset.id + '/links/' + node.linkId;
+                ajax('DELETE', path, null, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            remove.setAttribute('aria-label', t('unlink'));
+            card.appendChild(remove);
+        }
+        return card;
+    }
+
+    function linkGraph(asset) {
+        var box = el('div', 'asset-tree-link-graph');
+        box.setAttribute('aria-label', t('linkGraph'));
+        box.appendChild(linkGraphNode(asset, null, true));
+        var nodes = relationNodes(asset);
+        if (!nodes.length) {
+            box.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
+            return box;
+        }
+        nodes.forEach(function (node) {
+            var edge = el('div', 'asset-tree-link-edge');
+            edge.appendChild(el('span', null, node.phrase || ''));
+            box.appendChild(edge);
+            var branch = el('div', 'asset-tree-link-branch');
+            branch.appendChild(linkGraphNode(asset, node, false));
+            if (node.peer) branch.appendChild(peerCard(node.peer));
+            else if (node.meta) branch.appendChild(el('p', 'asset-tree-link-meta', node.meta));
+            box.appendChild(branch);
+        });
+        return box;
+    }
+
     function linkBlock(asset) {
         var body = el('div');
-        body.appendChild(el('p', 'asset-tree-hint', t('linksHint')));
-        if (asset.links == null) {
+        if (asset.links == null && asset.peers == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
-        } else if (!asset.links.length && !mayEdit(asset)) {
-            body.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         } else {
-            asset.links.forEach(function (link) {
-                body.appendChild(linkRow(asset, link));
-            });
+            body.appendChild(linkGraph(asset));
         }
         if (mayEdit(asset)) body.appendChild(linkForm(asset));
         return moduleBlock(t('links'), body);
@@ -20127,6 +20223,48 @@
         return list;
     }
 
+    function mixRaw(value, name) {
+        var parts = String(value || '').split(';');
+        var i;
+        for (i = 0; i < parts.length; i++) {
+            if (parts[i].indexOf(name + '=') === 0) return parts[i].slice(name.length + 1);
+        }
+        return '';
+    }
+
+    function unescapeFieldRule(raw) {
+        return String(raw || '').split('~~').join('\u0000').split('~p').join('|').split('~s').join(';').split('\u0000').join('~');
+    }
+
+    function packFieldRules(rules) {
+        var parts = [];
+        (rules || []).forEach(function (rule) {
+            var key = rule && rule.key ? rule.key : '';
+            var value = rule && rule.value ? String(rule.value).replace(/^\s+|\s+$/g, '') : '';
+            if (!key || !value) return;
+            var escaped = value.split('~').join('~~').split('|').join('~p').split(';').join('~s');
+            parts.push(key + '~' + escaped);
+        });
+        return parts.join('|');
+    }
+
+    function unpackFieldRules(value, attrKey, attrValue) {
+        var rules = [];
+        var packed = mixRaw(value, 'f');
+        if (packed) {
+            packed.split('|').forEach(function (piece) {
+                var mark = piece.indexOf('~');
+                if (mark <= 0) return;
+                var key = piece.slice(0, mark);
+                var text = unescapeFieldRule(piece.slice(mark + 1));
+                if (key) rules.push({ key: key, value: text });
+            });
+        }
+        if (!rules.length && attrKey) rules.push({ key: attrKey, value: attrValue || '' });
+        if (!rules.length) rules.push({ key: '', value: '' });
+        return rules;
+    }
+
     function acceptSavedReport(payload) {
         var created = payload && (payload.id || payload.key || '');
         state.reportChart = '';
@@ -20217,16 +20355,6 @@
                 field.appendChild(new Option(item.label, item.key));
             });
             if (editing && existing.fieldKey) field.value = existing.fieldKey;
-            var fieldValue = document.createElement('input');
-            fieldValue.placeholder = t('reportFieldValue');
-            fieldValue.setAttribute('aria-label', t('reportFieldValue'));
-            if (editing && existing.attrValue) fieldValue.value = existing.attrValue;
-            var fieldFilter = document.createElement('select');
-            fieldFilter.appendChild(new Option(t('reportFieldAny'), ''));
-            reportFieldOptions().forEach(function (item) {
-                fieldFilter.appendChild(new Option(item.label, item.key));
-            });
-            if (editing && existing.attrKey) fieldFilter.value = existing.attrKey;
             var fieldRow = el('div', 'asset-tree-report-picks');
             fieldRow.appendChild(planField(t('reportField'), field));
             fieldRow.hidden = group.value !== 'field';
@@ -20234,9 +20362,47 @@
                 fieldRow.hidden = group.value !== 'field';
                 syncMetric();
             });
-            var attrRow = el('div', 'asset-tree-report-picks');
-            attrRow.appendChild(planField(t('reportField'), fieldFilter));
-            attrRow.appendChild(planField(t('reportFieldValue'), fieldValue));
+            var fieldRules = unpackFieldRules(editing ? existing.filterValue : '', editing ? existing.attrKey : '', editing ? existing.attrValue : '');
+            var fieldHost = el('div', 'asset-tree-report-fields');
+            function paintFieldRules() {
+                fieldHost.innerHTML = '';
+                fieldRules.forEach(function (rule, index) {
+                    var line = el('div', 'asset-tree-report-field-row');
+                    var select = document.createElement('select');
+                    select.className = 'asset-tree-filter';
+                    select.appendChild(new Option(t('reportFieldAny'), ''));
+                    reportFieldOptions().forEach(function (item) {
+                        select.appendChild(new Option(item.label, item.key));
+                    });
+                    select.value = rule.key || '';
+                    select.addEventListener('change', function () { rule.key = select.value; });
+                    var value = document.createElement('input');
+                    value.type = 'text';
+                    value.maxLength = 80;
+                    value.placeholder = t('reportFieldValue');
+                    value.setAttribute('aria-label', t('reportFieldValue'));
+                    value.value = rule.value || '';
+                    value.addEventListener('input', function () { rule.value = value.value; });
+                    line.appendChild(select);
+                    line.appendChild(value);
+                    if (fieldRules.length > 1) {
+                        var remove = button('\u00d7', 'asset-tree-peer-remove', function () {
+                            fieldRules.splice(index, 1);
+                            paintFieldRules();
+                        });
+                        remove.setAttribute('aria-label', t('unlink'));
+                        line.appendChild(remove);
+                    }
+                    fieldHost.appendChild(line);
+                });
+                if (fieldRules.length < 8) {
+                    fieldHost.appendChild(button(t('addField'), 'asset-tree-btn', function () {
+                        fieldRules.push({ key: '', value: '' });
+                        paintFieldRules();
+                    }));
+                }
+            }
+            paintFieldRules();
             dialog.appendChild(planField(t('reportName'), name));
             dialog.appendChild(row);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportAlso')));
@@ -20297,7 +20463,7 @@
             dialog.appendChild(chartList);
             dialog.appendChild(fieldRow);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyField')));
-            dialog.appendChild(attrRow);
+            dialog.appendChild(fieldHost);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyTypes')));
             var types = el('div', 'asset-tree-check-list');
             (state.types || []).forEach(function (type) {
@@ -20392,10 +20558,18 @@
                     field.focus();
                     return;
                 }
-                if ((fieldFilter.value && !fieldValue.value.trim()) || (!fieldFilter.value && fieldValue.value.trim())) {
+                var completeRules = [];
+                var brokenRule = false;
+                fieldRules.forEach(function (rule) {
+                    var key = rule.key || '';
+                    var text = (rule.value || '').replace(/^\s+|\s+$/g, '');
+                    if (!key && !text) return;
+                    if (!key || !text || text.length > 80) brokenRule = true;
+                    else completeRules.push({ key: key, value: text });
+                });
+                if (brokenRule) {
                     save.disabled = false;
                     notify(t('reportFieldValue'));
-                    fieldValue.focus();
                     return;
                 }
                 var extras = [];
@@ -20419,16 +20593,18 @@
                     filterField: '',
                     filterValue: '',
                     fieldKey: group.value === 'field' ? field.value : '',
-                    attrKey: fieldFilter.value,
-                    attrValue: fieldValue.value.trim()
+                    attrKey: '',
+                    attrValue: ''
                 };
-                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length) {
+                var packedFields = packFieldRules(completeRules);
+                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length || packedFields) {
                     body.filterField = 'mix';
                     var parts = [];
                     if (typeKeys.length) parts.push('t=' + typeKeys.join(','));
                     if (statusKeys.length) parts.push('s=' + statusKeys.join(','));
                     if (holderKeys.length) parts.push('h=' + holderKeys.join(','));
                     if (placeKeys.length) parts.push('p=' + placeKeys.join(','));
+                    if (packedFields) parts.push('f=' + packedFields);
                     body.filterValue = parts.join(';');
                 }
                 if (body.filterValue && body.filterValue.length > 4000) {
@@ -29423,14 +29599,16 @@
     }
 
     function renderAccessSettings(panel) {
-        panel.appendChild(schemaSettings());
+        var stack = el('div', 'asset-tree-settings-block asset-tree-project-stack asset-tree-access-stack');
+        panel.appendChild(stack);
+        stack.appendChild(schemaSettings());
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
         if (state.grants === null) {
             state.grants = [];
             block.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            panel.appendChild(block);
+            stack.appendChild(block);
             var projectKey = state.projectKey;
             ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/grants', null, function (status, payload) {
                 if (state.view !== 'settings' || state.projectKey !== projectKey) return;
@@ -29648,7 +29826,7 @@
         });
         block.appendChild(form);
         if (state.grants.length) block.appendChild(grantList);
-        panel.appendChild(block);
+        stack.appendChild(block);
     }
 
     function renderReport() {

@@ -6584,6 +6584,17 @@ a.asset-tree-preview-icon:focus {
     margin-top: 16px;
 }
 
+#asset-tree-app .asset-tree-access-stack {
+    max-width: 720px;
+}
+
+#asset-tree-app .asset-tree-access-stack .asset-tree-schema-search,
+#asset-tree-app .asset-tree-access-stack .asset-tree-key-field,
+#asset-tree-app .asset-tree-access-stack .asset-tree-key-field.wide,
+#asset-tree-app .asset-tree-access-stack .asset-tree-text {
+    max-width: 360px;
+}
+
 #asset-tree-app .asset-tree-project-card {
     padding: 16px 16px 18px;
     border: 1px solid #dfe1e6;
@@ -10170,6 +10181,82 @@ a.asset-tree-preview-icon:focus {
         flex-direction: column;
         align-items: stretch;
     }
+}
+
+#asset-tree-app .asset-tree-link-graph {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-link-node {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-link-node.is-self {
+    border-color: #b3d4ff;
+    background: #deebff;
+}
+
+#asset-tree-app .asset-tree-link-node > strong,
+#asset-tree-app .asset-tree-link-node > button.asset-tree-linkish {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+#asset-tree-app .asset-tree-link-edge {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    margin-left: 16px;
+    padding: 2px 0 2px 12px;
+    border-left: 2px solid #b3d4ff;
+    color: #0747a6;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-link-branch .asset-tree-peer-card,
+#asset-tree-app .asset-tree-link-branch .asset-tree-link-meta {
+    margin: 6px 0 0;
+}
+
+#asset-tree-app .asset-tree-report-fields,
+.asset-tree-backdrop .asset-tree-report-fields {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-report-field-row,
+.asset-tree-backdrop .asset-tree-report-field-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-report-field-row select,
+#asset-tree-app .asset-tree-report-field-row input,
+.asset-tree-backdrop .asset-tree-report-field-row select,
+.asset-tree-backdrop .asset-tree-report-field-row input {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
 }
 
 #asset-tree-app .asset-tree-link-type {
