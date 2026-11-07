@@ -443,6 +443,7 @@
         cardDrag: '',
         cardSuppressClick: false,
         cardSelected: '',
+        cardZoom: null,
         scheduleYear: 0,
         scheduleMonth: 0,
         scheduleSpan: 'month',
@@ -2482,7 +2483,7 @@
             return;
         }
         if (state.view === 'map') {
-            frame.appendChild(renderMap());
+            frame.appendChild(renderSchemes());
             return;
         }
         if (state.view === 'settings') {
@@ -4224,6 +4225,32 @@
         return box;
     }
 
+    function placeSchemesBlock(asset) {
+        var box = el('div');
+        box.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schemes', null, function (status, list) {
+            if (!box.parentNode) return;
+            box.innerHTML = '';
+            var rows = status === 200 && list && list.length ? list : [];
+            var matched = [];
+            var i;
+            for (i = 0; i < rows.length; i++) {
+                if (Number(rows[i].placeId) === Number(asset.id)) matched.push(rows[i]);
+            }
+            if (!matched.length) {
+                box.appendChild(el('p', 'asset-tree-hint', t('schemeNoSchemes')));
+                return;
+            }
+            matched.forEach(function (row) {
+                box.appendChild(linkLine(row.name || t('schemeDefaultName'), t('schemeOpen'), function () {
+                    window.__assetSchemeFocus = { project: state.projectKey, id: row.id };
+                    showView('map');
+                }));
+            });
+        });
+        return moduleBlock(t('menuMap'), box);
+    }
+
     function renderPlaceHome(asset) {
         var full = (state.detail && state.detail.id == asset.id) ? state.detail : asset;
         if (state.editing && mayEdit(asset)) {
@@ -4287,7 +4314,7 @@
         });
         main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
         main.appendChild(descriptionModule(full, true));
-        main.appendChild(fileBlock(full));
+        main.appendChild(placeSchemesBlock(asset));
 
         if (departments.length) {
             var places = el('div');
@@ -4339,6 +4366,7 @@
             });
         }
         main.appendChild(moduleBlock(t('placeTypes'), typeBlock));
+        main.appendChild(fileBlock(full));
         main.appendChild(activityBlock(full));
 
         var issues = el('div');
@@ -7837,7 +7865,6 @@
             main.appendChild(lifeBlock(asset));
         }
         main.appendChild(descriptionModule(asset, true));
-        main.appendChild(fileBlock(asset));
 
         var issues = el('div');
         if (mayEdit(asset)) {
@@ -7860,6 +7887,7 @@
             });
         }
         main.appendChild(moduleBlock(t('issues'), issues));
+        main.appendChild(fileBlock(asset));
         main.appendChild(activityBlock(asset));
 
         var error = el('div', 'asset-tree-form-error');
@@ -12474,6 +12502,20 @@
             renderFrame();
         });
         measures.appendChild(field(t('cardGrid'), grid));
+        var zoomLabel = el('span', 'asset-tree-card-zoom-label', '100 %');
+        var zoomOut = button('\u2212', 'asset-tree-btn', function () { setCardZoom(cardZoom() - 0.1); });
+        zoomOut.title = t('cardZoomOut');
+        zoomOut.setAttribute('aria-label', t('cardZoomOut'));
+        var zoomIn = button('+', 'asset-tree-btn', function () { setCardZoom(cardZoom() + 0.1); });
+        zoomIn.title = t('cardZoomIn');
+        zoomIn.setAttribute('aria-label', t('cardZoomIn'));
+        var zoomFit = button(t('cardZoomFit'), 'asset-tree-btn', function () { fitCardZoom(); });
+        var zoomRow = el('div', 'asset-tree-card-zoom');
+        zoomRow.appendChild(zoomOut);
+        zoomRow.appendChild(zoomLabel);
+        zoomRow.appendChild(zoomIn);
+        zoomRow.appendChild(zoomFit);
+        measures.appendChild(zoomRow);
         stage.appendChild(measures);
         renderCardTools(stage);
 
@@ -12496,6 +12538,49 @@
         stage.appendChild(actions);
         block.appendChild(stage);
         panel.appendChild(block);
+        sheet.addEventListener('wheel', function (event) {
+            event.preventDefault();
+            setCardZoom(cardZoom() + ((event.deltaY || 0) > 0 ? -0.1 : 0.1));
+        }, { passive: false });
+        if (state.cardZoom == null) {
+            var natural = article.offsetWidth;
+            var room = stage.clientWidth - 32;
+            state.cardZoom = natural && room && natural > room ? Math.max(0.25, room / natural) : 1;
+        }
+        paintCardZoom();
+
+        function cardZoom() {
+            var zoom = Number(state.cardZoom);
+            if (!zoom || zoom < 0.25) return 1;
+            if (zoom > 3) return 3;
+            return zoom;
+        }
+
+        function paintCardZoom() {
+            var zoom = cardZoom();
+            article.style.transformOrigin = '0 0';
+            article.style.transform = zoom === 1 ? '' : ('scale(' + zoom + ')');
+            var width = article.offsetWidth * zoom;
+            var height = article.offsetHeight * zoom;
+            sheet.style.width = width ? (Math.round(width) + 'px') : '';
+            sheet.style.height = height ? (Math.round(height) + 'px') : '';
+            zoomLabel.textContent = Math.round(zoom * 100) + ' %';
+        }
+
+        function setCardZoom(next) {
+            var value = Math.round(Number(next) * 100) / 100;
+            if (value < 0.25) value = 0.25;
+            if (value > 3) value = 3;
+            state.cardZoom = value;
+            paintCardZoom();
+        }
+
+        function fitCardZoom() {
+            var natural = article.offsetWidth;
+            var room = stage.clientWidth - 32;
+            if (!natural || room < 80) return;
+            setCardZoom(room / natural);
+        }
     }
 
     function fitPortalPanel(panel) {
@@ -21685,6 +21770,52 @@
         window.addEventListener('resize', apply);
     }
 
+    function renderSchemes() {
+        var host = el('div', 'asset-tree-schemes');
+        if (!window.AssetTreeSchemes) {
+            host.appendChild(el('p', null, t('schemeMissing')));
+            return host;
+        }
+        var assets = equipmentAssets().map(function (asset) {
+            var attributes = {};
+            var list = asset.attributes || [];
+            var i;
+            for (i = 0; i < list.length && i < 2; i++) {
+                if (list[i] && list[i].name) attributes[list[i].name] = list[i].value || '';
+            }
+            return {
+                id: asset.id,
+                name: asset.name || '',
+                key: asset.objectKey || asset.key || '',
+                attributes: attributes
+            };
+        });
+        var places = placeAssets().map(function (asset) {
+            var path = placePath(asset);
+            var name = asset.name || '';
+            return {
+                id: asset.id,
+                name: path ? path + ' / ' + name : name,
+                key: asset.objectKey || asset.key || ''
+            };
+        });
+        var focusId = 0;
+        if (window.__assetSchemeFocus && window.__assetSchemeFocus.project === state.projectKey) {
+            focusId = window.__assetSchemeFocus.id || 0;
+            window.__assetSchemeFocus = null;
+        }
+        window.AssetTreeSchemes.mount(host, {
+            t: t,
+            ajax: ajax,
+            projectKey: state.projectKey,
+            canEdit: !!state.canEdit,
+            assets: assets,
+            places: places,
+            focusId: focusId
+        });
+        return host;
+    }
+
     function renderMap() {
         var panel = el('section', 'asset-tree-floorplan');
         appendTreeError(panel);
@@ -27929,7 +28060,6 @@
             }
         }
         stack.appendChild(block);
-        stack.appendChild(webhookSettings());
         panel.appendChild(stack);
     }
 
@@ -27954,18 +28084,6 @@
         node.spellcheck = false;
         node.placeholder = placeholder || '';
         return node;
-    }
-
-    function webhookSettings() {
-        var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('webhookRecipeTitle')));
-        block.appendChild(el('p', 'asset-tree-hint', t('automationPlain')));
-        var steps = el('ol', 'asset-tree-automation-steps');
-        [t('automationLink'), t('automationComment'), t('automationTrigger'), t('automationStatus')].forEach(function (line) {
-            steps.appendChild(el('li', null, line));
-        });
-        block.appendChild(steps);
-        return block;
     }
 
     function bytesToBase64(bytes) {
@@ -29172,7 +29290,9 @@
         var name = textControl(t('schemaName'));
         name.setAttribute('aria-label', t('schemaName'));
         var picked = {};
-        block.appendChild(settingField(t('schemaName'), name));
+        var nameField = settingField(t('schemaName'), name);
+        nameField.classList.add('asset-tree-schema-name');
+        block.appendChild(nameField);
         block.appendChild(el('p', 'asset-tree-field-label', t('schemaTypes')));
         block.appendChild(typeTickList(picked, function (key, checked) {
             picked[key] = checked;
@@ -29198,9 +29318,10 @@
     }
 
     function renderAccessSettings(panel) {
-        var block = el('div', 'asset-tree-settings-block');
-        block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
         panel.appendChild(schemaSettings());
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
+        block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
         if (state.grants === null) {
             state.grants = [];
             block.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -29218,7 +29339,7 @@
             return;
         }
         var grantRows = [];
-        var grantList = el('div', 'asset-tree-schema-scroll asset-tree-grant-list');
+        var grantList = el('div', 'asset-tree-grant-list');
         var grantEmpty = el('p', 'asset-tree-schema-empty', t('schemaNoMatch'));
         grantEmpty.hidden = true;
         var grantSearch = schemaSearchInput(state.grantQuery, function () {

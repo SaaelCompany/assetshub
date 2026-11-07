@@ -21,6 +21,8 @@ public class PortalCardDto {
     private String color = "";
     private String icon = "";
     private String viewerKey = "";
+    private String projectKey = "";
+    private String portalUrl = "";
     private UserProfileDto custodian;
     private UserProfileDto issued;
     private String createdBy = "";
@@ -124,6 +126,22 @@ public class PortalCardDto {
 
     public void setViewerKey(String viewerKey) {
         this.viewerKey = viewerKey == null ? "" : viewerKey;
+    }
+
+    public String getProjectKey() {
+        return projectKey;
+    }
+
+    public void setProjectKey(String projectKey) {
+        this.projectKey = projectKey == null ? "" : projectKey;
+    }
+
+    public String getPortalUrl() {
+        return portalUrl;
+    }
+
+    public void setPortalUrl(String portalUrl) {
+        this.portalUrl = portalUrl == null ? "" : portalUrl;
     }
 
     public UserProfileDto getCustodian() {

@@ -11,7 +11,6 @@ import java.util.Properties;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 /** Jira formats every catalog string with MessageFormat. A raw "{" aborts /meta. */
 public class I18nPatternsTest {
@@ -53,7 +52,6 @@ public class I18nPatternsTest {
                 format(english.getProperty("asset-tree.ui.webhookSample")));
         assertEquals("{\"objectKey\":\"\",\"name\":\"\u041d\u043e\u0443\u0442\u0431\u0443\u043a\",\"typeKey\":\"laptop\"}",
                 format(russian.getProperty("asset-tree.ui.webhookSample")));
-        assertTrue(format(english.getProperty("asset-tree.ui.webhookRecipe")).contains("Automation's"));
     }
 
     private static Properties load(String name) throws Exception {

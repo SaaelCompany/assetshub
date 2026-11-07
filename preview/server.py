@@ -2022,6 +2022,8 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
         "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
         "lines": summary["lines"],
+        "projectKey": project_key,
+        "portalUrl": "/servicedesk/customer/portal/7",
     }
 
 
@@ -3447,6 +3449,97 @@ def floor_dto(row):
         "planH": plan_limit(row.get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H),
         "rooms": rooms, "pins": pins,
     }
+
+
+def scheme_name(raw):
+    name = (raw or "").strip() or "Scheme"
+    return name[:80]
+
+
+def scheme_body(raw):
+    if not isinstance(raw, str):
+        return None
+    body = raw.strip()
+    if not body.startswith("{") or len(body) > 1500000:
+        return None
+    return body
+
+
+def scheme_place_id(row):
+    raw = row.get("body") or ""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return 0
+    try:
+        return int(data.get("placeId") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def scheme_summary(row):
+    return {"id": row["id"], "name": row["name"], "updatedAt": row["updatedAt"], "placeId": scheme_place_id(row)}
+
+
+def project_schemes(project_key):
+    rows = [row for row in STATE.setdefault("schemes", {}).values() if row.get("projectKey") == project_key]
+    rows.sort(key=lambda item: item["id"])
+    return [scheme_summary(row) for row in rows]
+
+
+def create_scheme(project_key, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None or len(project_schemes(project_key)) >= 40:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    scheme_id = STATE.setdefault("scheme_seq", 1)
+    STATE["scheme_seq"] = scheme_id + 1
+    row = {
+        "id": scheme_id,
+        "projectKey": project_key,
+        "name": scheme_name((body or {}).get("name")),
+        "body": stored,
+        "updatedAt": int(datetime.datetime.now().timestamp() * 1000),
+    }
+    STATE["schemes"][scheme_id] = row
+    return 201, scheme_summary(row)
+
+
+def read_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    payload = scheme_summary(row)
+    payload["body"] = row["body"]
+    return 200, payload
+
+
+def save_scheme(project_key, scheme_id, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    row["name"] = scheme_name((body or {}).get("name"))
+    row["body"] = stored
+    row["updatedAt"] = int(datetime.datetime.now().timestamp() * 1000)
+    return 200, scheme_summary(row)
+
+
+def delete_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    del STATE["schemes"][scheme_id]
+    return 204, None
 
 
 def project_floors(project_key):
@@ -7134,7 +7227,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/issue":
             return self.serve_issue(query)
         if path == "/portal" or re.fullmatch(r"/servicedesk/customer/portal/\d+/create/\d+", path):
-            return self.serve_portal(path)
+            return self.serve_portal(path, query)
+        if re.fullmatch(r"/servicedesk/customer/portal/\d+", path):
+            return self.serve_portal_home(query)
         if path in ("/servicedesk/customer/user/profile",) or re.fullmatch(r"/servicedesk/customer/portal/\d+/user/profile", path):
             return self.serve_profile()
         if path.startswith("/rest/servicedeskapi/portals/") or path.startswith("/rest/servicedeskapi/servicedesk/"):
@@ -7215,6 +7310,7 @@ class Handler(BaseHTTPRequestHandler):
                 .replace("@@CSS@@", "/download/resources/asset-tree/asset-tree.css")
                 .replace("@@QR@@", "/download/resources/asset-tree/qr-code.js")
                 .replace("@@PLAN@@", "/download/resources/asset-tree/plan-exchange.js")
+                .replace("@@SCHEME@@", "/download/resources/asset-tree/schemes.js")
                 .replace("@@JS@@", "/download/resources/asset-tree/asset-tree.js")
                 .replace("@@REST@@", "/rest/asset-tree/1.0")
                 .replace("@@PROJECT@@", project)
@@ -7345,7 +7441,39 @@ dd { margin: 2px 0 0; }
 </body></html>"""
         self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
-    def serve_portal(self, path):
+    def serve_portal_home(self, query):
+        asset = ((query or {}).get("asset") or [""])[0]
+        project = ((query or {}).get("project") or [""])[0]
+        extra = ""
+        if asset.isdigit():
+            extra = "asset=" + asset
+        if project:
+            extra = (extra + "&" if extra else "") + "project=" + project
+        suffix = ("?" + extra) if extra else ""
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Портал</title>
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+main { max-width: 720px; margin: 32px auto; }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 500; }
+p { margin: 0 0 20px; color: #6b778c; }
+a.portal-type { display: block; margin: 0 0 12px; padding: 16px 18px; border-radius: 3px; background: #fff; color: #172b4d; text-decoration: none; box-shadow: 0 1px 1px rgba(9, 30, 66, 0.25); }
+a.portal-type strong { display: block; margin-bottom: 4px; color: #0052cc; font-weight: 600; }
+a.portal-type span { color: #6b778c; font-size: 13px; }
+</style></head>
+<body>
+<header>Центр поддержки</header>
+<main>
+<h1>Чем мы можем помочь?</h1>
+<p>Выберите тип запроса. Оборудование из карточки уже будет в поле актива.</p>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/5%s"><strong>Сообщить о проблеме</strong><span>Что случилось с этим оборудованием</span></a>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/12%s"><strong>Запрос на обслуживание</strong><span>Плановая работа или настройка</span></a>
+</main>
+</body></html>""" % (suffix, suffix)
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_portal(self, path, query=None):
         ensure_portal_demo()
         # The script is in the head, before the form exists, and the asset input
         # appears later. Project key is not in the page: portal 7 answers only
@@ -7845,6 +7973,29 @@ setTimeout(function () {
             if not module_on(project_key, "service"):
                 return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
             return delete_staff(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes", path)
+        if match:
+            project_key = match.group(1)
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if not module_on(project_key, "map"):
+                return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+            if method == "GET":
+                return 200, project_schemes(project_key)
+            if method == "POST":
+                return create_scheme(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes/(\d+)", path)
+        if match:
+            project_key = match.group(1)
+            scheme_id = int(match.group(2))
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if method == "GET":
+                return read_scheme(project_key, scheme_id, text)
+            if method == "PUT":
+                return save_scheme(project_key, scheme_id, self.read_json(), text)
+            if method == "DELETE":
+                return delete_scheme(project_key, scheme_id, text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/floors", path)
         if match:
             project_key = match.group(1)
