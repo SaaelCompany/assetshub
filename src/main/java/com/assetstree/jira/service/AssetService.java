@@ -405,5 +405,7 @@ public interface AssetService {
 
     TniWatchDto saveTniWatch(ApplicationUser user, int assetId, TniWatchDraft draft);
 
+    TniWatchDto pingTni(ApplicationUser user, int assetId);
+
     ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
 }

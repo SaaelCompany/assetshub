@@ -17,6 +17,7 @@ public class AssetTypeDto {
     private boolean location;
     private boolean showInTree;
     private boolean service;
+    private boolean reach;
     private String placeCaption;
     private String parentTypeKey;
     private int assetCount;
@@ -100,6 +101,14 @@ public class AssetTypeDto {
 
     public void setService(boolean service) {
         this.service = service;
+    }
+
+    public boolean isReach() {
+        return reach;
+    }
+
+    public void setReach(boolean reach) {
+        this.reach = reach;
     }
 
     public String getPlaceCaption() {

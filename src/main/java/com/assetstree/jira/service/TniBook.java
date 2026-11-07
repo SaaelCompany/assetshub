@@ -164,7 +164,7 @@ public final class TniBook {
             });
             after(ao, host, outcome);
         }
-        sweepWatches(ao, now);
+        sweepTyped(ao, host, now);
     }
 
     public static boolean watchDue(long checkedAt, long now) {
@@ -227,6 +227,273 @@ public final class TniBook {
                         row.setCheckedAt(now);
                         row.setUp(reached ? 1 : 2);
                         row.save();
+                    }
+                    return null;
+                }
+            });
+        }
+    }
+
+    private void sweepTyped(ActiveObjects ao, TniHost host, final long now) {
+        List<Integer> due = ao.executeInTransaction(new TransactionCallback<List<Integer>>() {
+            @Override
+            public List<Integer> doInTransaction() {
+                return enrollTyped(ao, now);
+            }
+        });
+        int pings = 0;
+        for (int i = 0; i < due.size(); i++) {
+            if (pings >= PING_BUDGET) {
+                break;
+            }
+            final int rowId = due.get(i).intValue();
+            Glance look = ao.executeInTransaction(new TransactionCallback<Glance>() {
+                @Override
+                public Glance doInTransaction() {
+                    return glanceTyped(ao, rowId, now);
+                }
+            });
+            if (look == null || look.action != TniClock.Action.PING) {
+                if (look != null && look.action == TniClock.Action.DROP) {
+                    Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
+                        @Override
+                        public Outcome doInTransaction() {
+                            return retireTyped(ao, host, rowId, now);
+                        }
+                    });
+                    afterTyped(ao, host, outcome);
+                }
+                continue;
+            }
+            pings++;
+            boolean up = false;
+            try {
+                up = TniReach.station(look.address);
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not reach {}", look.address, ex);
+            }
+            final boolean reached = up;
+            final int assetId = look.assetId;
+            final String hostName = look.address;
+            Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
+                @Override
+                public Outcome doInTransaction() {
+                    return finishTyped(ao, host, rowId, reached, now);
+                }
+            });
+            try {
+                host.note(assetId, "", "ping", hostName, reached ? "up" : "down");
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not record a ping for {}", Integer.valueOf(assetId), ex);
+            }
+            afterTyped(ao, host, outcome);
+        }
+    }
+
+    private List<Integer> enrollTyped(ActiveObjects ao, long now) {
+        List<Integer> due = new ArrayList<Integer>();
+        AssetTypeEntity[] types = ao.find(AssetTypeEntity.class);
+        if (types == null) {
+            return due;
+        }
+        for (int t = 0; t < types.length; t++) {
+            AssetTypeEntity type = types[t];
+            if (type == null || type.isLocation() || !type.isReach() || !moduleOn(ao, type.getProjectKey())) {
+                continue;
+            }
+            AssetEntity[] assets = ao.find(AssetEntity.class, Query.select().where("TYPE_KEY = ?", type.getTypeKey()));
+            if (assets == null) {
+                continue;
+            }
+            for (int i = 0; i < assets.length; i++) {
+                AssetEntity asset = assets[i];
+                if (asset == null || TniPolicy.TRASH.equals(asset.getStatus()) || portalOwns(ao, asset.getID())) {
+                    continue;
+                }
+                TniWatchEntity row = watchByAsset(ao, asset.getID());
+                if (row == null) {
+                    ao.create(TniWatchEntity.class,
+                            new DBParam("ASSET_ID", Integer.valueOf(asset.getID())),
+                            new DBParam("PROJECT_KEY", asset.getProjectKey()),
+                            new DBParam("ADDRESS", ""),
+                            new DBParam("ARMED", Integer.valueOf(0)),
+                            new DBParam("CHECKED_AT", Long.valueOf(0L)),
+                            new DBParam("UP", Integer.valueOf(0)),
+                            new DBParam("EXEMPT", Integer.valueOf(0)),
+                            new DBParam("SEEN_AT", Long.valueOf(now)),
+                            new DBParam("PROBE_FROM", Long.valueOf(0L)),
+                            new DBParam("PROBE_FAILS", Integer.valueOf(0)),
+                            new DBParam("LAST_PROBE", Long.valueOf(0L)));
+                    continue;
+                }
+                if (row.getExempt() != 0) {
+                    continue;
+                }
+                if (row.getSeenAt() <= 0L) {
+                    row.setSeenAt(now);
+                    row.save();
+                    continue;
+                }
+                due.add(Integer.valueOf(row.getID()));
+            }
+        }
+        return due;
+    }
+
+    private boolean portalOwns(ActiveObjects ao, int assetId) {
+        TniDeviceEntity[] rows = ao.find(TniDeviceEntity.class, Query.select().where("ASSET_ID = ?", Integer.valueOf(assetId)));
+        if (rows == null) {
+            return false;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null && rows[i].getRetired() == 0 && rows[i].getAssetId() == assetId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private TniWatchEntity watchByAsset(ActiveObjects ao, int assetId) {
+        TniWatchEntity[] rows = ao.find(TniWatchEntity.class, Query.select().where("ASSET_ID = ?", Integer.valueOf(assetId)));
+        if (rows == null) {
+            return null;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null) {
+                return rows[i];
+            }
+        }
+        return null;
+    }
+
+    private Glance glanceTyped(ActiveObjects ao, int rowId, long now) {
+        TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
+        if (row == null || row.getExempt() != 0 || row.getSeenAt() <= 0L) {
+            return null;
+        }
+        if (!moduleOn(ao, row.getProjectKey())) {
+            return null;
+        }
+        AssetEntity asset = ao.get(AssetEntity.class, row.getAssetId());
+        if (asset == null) {
+            ao.delete(row);
+            return null;
+        }
+        if (TniPolicy.TRASH.equals(asset.getStatus())) {
+            return null;
+        }
+        ModuleSetupDto setup = setup(ao, row.getProjectKey());
+        String hostName = TniAddress.station(asset.getName());
+        TniClock.Mark mark = TniClock.look(row.getSeenAt(), row.getProbeFrom(), row.getProbeFails(), row.getLastProbe(),
+                TniPolicy.keepDays(days(setup.getTniKeep())), TniPolicy.probeDays(days(setup.getTniProbeDays())),
+                TniPolicy.probeTries(days(setup.getTniProbeTries())), !hostName.isEmpty(), now);
+        if (mark.action == TniClock.Action.PING && mark.probeFrom != row.getProbeFrom()) {
+            row.setProbeFrom(mark.probeFrom);
+            row.save();
+        }
+        Glance glance = new Glance();
+        glance.action = mark.action;
+        glance.address = hostName;
+        glance.assetId = asset.getID();
+        return glance;
+    }
+
+    private Outcome finishTyped(ActiveObjects ao, TniHost host, int rowId, boolean up, long now) {
+        TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
+        if (row == null || row.getExempt() != 0) {
+            return null;
+        }
+        row.setCheckedAt(now);
+        row.setUp(up ? 1 : 2);
+        row.setLastProbe(now);
+        if (up) {
+            row.setSeenAt(now);
+            row.setProbeFrom(0L);
+            row.setProbeFails(0);
+            row.save();
+            return null;
+        }
+        int fails = row.getProbeFails() + 1;
+        row.setProbeFails(fails);
+        if (row.getProbeFrom() == 0L) {
+            row.setProbeFrom(now);
+        }
+        row.save();
+        int tries = TniPolicy.probeTries(days(setup(ao, row.getProjectKey()).getTniProbeTries()));
+        if (fails >= tries) {
+            return retireTyped(ao, host, rowId, now);
+        }
+        return null;
+    }
+
+    private Outcome retireTyped(ActiveObjects ao, TniHost host, int rowId, long now) {
+        TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
+        if (row == null) {
+            return null;
+        }
+        AssetEntity asset = ao.get(AssetEntity.class, row.getAssetId());
+        if (asset == null) {
+            ao.delete(row);
+            return null;
+        }
+        ModuleSetupDto setup = setup(ao, row.getProjectKey());
+        boolean delete = TniPolicy.DELETE.equals(TniPolicy.action(setup.getTniAction()));
+        Outcome outcome = new Outcome();
+        outcome.projectKey = row.getProjectKey();
+        outcome.assetId = asset.getID();
+        outcome.objectKey = asset.getObjectKey() == null ? "" : asset.getObjectKey();
+        outcome.name = asset.getName() == null ? "" : asset.getName();
+        outcome.userKey = asset.getCustodianKey() == null ? "" : asset.getCustodianKey();
+        outcome.probeDays = TniPolicy.probeDays(days(setup.getTniProbeDays()));
+        outcome.mail = true;
+        outcome.delete = delete;
+        outcome.rowId = row.getID();
+        if (delete) {
+            return outcome;
+        }
+        try {
+            host.ensureTrash(row.getProjectKey());
+        } catch (RuntimeException ex) {
+            log.warn("TNI could not add the Trash status in {}", row.getProjectKey(), ex);
+        }
+        asset.setStatus(TniPolicy.TRASH);
+        asset.setUpdated(new Date(now));
+        asset.save();
+        ao.delete(row);
+        outcome.event = "asset.updated";
+        return outcome;
+    }
+
+    private void afterTyped(ActiveObjects ao, TniHost host, Outcome outcome) {
+        if (outcome == null || host == null) {
+            return;
+        }
+        if (outcome.mail) {
+            String pattern = outcome.delete ? host.text("asset-tree.ui.tniMailDelete") : host.text("asset-tree.ui.tniMailTrash");
+            String subject = AutomationNote.text(host.text("asset-tree.ui.tniMailSubject"), outcome.name, "", "");
+            String body = AutomationNote.text(pattern, outcome.name, outcome.objectKey, String.valueOf(outcome.probeDays));
+            if (!subject.isEmpty() && !body.isEmpty()) {
+                host.mail(outcome.userKey, subject, body);
+            }
+        }
+        if (outcome.delete) {
+            try {
+                host.discard(outcome.assetId, outcome.userKey);
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not remove asset {}", Integer.valueOf(outcome.assetId), ex);
+                return;
+            }
+        } else if (!blank(outcome.event)) {
+            host.announce(outcome.projectKey, outcome.event, outcome.assetId, outcome.objectKey, outcome.name);
+        }
+        final int rowId = outcome.rowId;
+        if (ao != null && rowId > 0 && outcome.delete) {
+            ao.executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
+                    if (row != null) {
+                        ao.delete(row);
                     }
                     return null;
                 }
@@ -629,6 +896,7 @@ public final class TniBook {
     private static final class Glance {
         private TniClock.Action action = TniClock.Action.WAIT;
         private String address = "";
+        private int assetId;
     }
 
     private static final class Outcome {

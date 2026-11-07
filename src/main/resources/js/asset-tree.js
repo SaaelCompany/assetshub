@@ -4175,10 +4175,15 @@
             menu.hidden = !menu.hidden;
         });
         items.forEach(function (item) {
-            menu.appendChild(button(item.label, 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''), function () {
+            var entry = el('button', 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''));
+            entry.type = 'button';
+            if (item.mark) entry.appendChild(pingDot(item.mark));
+            entry.appendChild(document.createTextNode(item.label));
+            entry.addEventListener('click', function () {
                 menu.hidden = true;
                 item.onClick();
-            }));
+            });
+            menu.appendChild(entry);
         });
         wrap.appendChild(toggle);
         wrap.appendChild(menu);
@@ -6460,6 +6465,7 @@
         if (item.action === 'service_done') return t('actServiceDone');
         if (item.action === 'peer_add') return t('actPeerAdd');
         if (item.action === 'peer_remove') return t('actPeerRemove');
+        if (item.action === 'ping') return t('actPing');
         return t('actUpdated');
     }
 
@@ -6490,6 +6496,13 @@
         }
         row.appendChild(head);
         if (item.action === 'created' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
+        if (item.action === 'ping') {
+            var pingChange = el('div', 'asset-tree-history-change');
+            var pingWord = item.newValue === 'up' ? t('tniWatchUp') : t('tniWatchDown');
+            pingChange.appendChild(el('span', null, item.field ? (item.field + ' · ' + pingWord) : pingWord));
+            row.appendChild(pingChange);
+            return row;
+        }
         if (placeKind(item.action) || item.action === 'peer_add' || item.action === 'peer_remove') {
             var placeChange = el('div', 'asset-tree-history-change');
             var placeLabel = item.newValue || item.oldValue || '';
@@ -7843,6 +7856,13 @@
                 extra.push({ label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
             }
         }
+        if (!isFolder(asset) && moduleOn('tni')) {
+            extra.unshift({
+                label: t('tniPing'),
+                mark: pingMark(asset),
+                onClick: function () { pingAsset(asset); }
+            });
+        }
         if (mayEdit(asset)) extra.push({ label: t('delete'), danger: true, onClick: function () { openDelete(asset); } });
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
@@ -7858,11 +7878,10 @@
                 }
             });
         }
+        if (!isFolder(asset) && moduleOn('tni') && pingMark(asset)) ops.appendChild(pingDot(pingMark(asset)));
         if (extra.length) ops.appendChild(moreMenu(extra));
         main.appendChild(ops);
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
-        var watch = watchBlock(asset);
-        if (watch) main.appendChild(watch);
 
         var items = [detailItem(t('type'), typeBadge(typeFor(asset), asset.typeLabel || typeOf(asset.typeKey).label || ''))];
         items.push(detailItem(t('status'), statusPicker(asset)));
@@ -8010,6 +8029,17 @@
         descriptionBox.className = 'asset-tree-description';
         description.appendChild(descriptionBox);
         main.appendChild(description);
+        if (!placePage && moduleOn('tni') && typeOf(asset.typeKey).reach) {
+            var exemptRow = el('label', 'asset-tree-check');
+            var exemptBox = el('input');
+            exemptBox.type = 'checkbox';
+            exemptBox.id = 'asset-field-ping-exempt';
+            exemptBox.checked = !!asset.pingExempt;
+            exemptRow.appendChild(exemptBox);
+            exemptRow.appendChild(el('span', null, t('tniPingExempt')));
+            main.appendChild(exemptRow);
+            main.appendChild(el('p', 'asset-tree-hint', t('tniPingExemptHint')));
+        }
 
         var attributes = el('div', 'asset-tree-request-block');
         var fieldHead = el('div', 'asset-tree-block-head');
@@ -8948,7 +8978,7 @@
                 return;
             }
             if (!parentChanged) {
-                finishSave(id, t('saved'), typeMoved);
+                savePingExempt(id, function () { finishSave(id, t('saved'), typeMoved); });
                 return;
             }
             ajax('POST', '/assets/' + id + '/move', { parentId: parentId, index: null }, function (moveStatus, movePayload) {
@@ -8962,8 +8992,46 @@
                     state.expanded[parentId] = true;
                     rememberExpanded();
                 }
-                finishSave(id, t('moved'), typeMoved);
+                savePingExempt(id, function () { finishSave(id, t('moved'), typeMoved); });
             });
+        });
+    }
+
+    function savePingExempt(id, done) {
+        var box = document.getElementById('asset-field-ping-exempt');
+        if (!box) {
+            done();
+            return;
+        }
+        ajax('PUT', '/assets/' + id + '/watch', { exempt: !!box.checked }, function () {
+            done();
+        });
+    }
+
+    function pingMark(asset) {
+        if (!asset) return 0;
+        if (state.ping && state.ping[asset.id]) return state.ping[asset.id];
+        var full = state.detail && state.detail.id === asset.id ? state.detail : asset;
+        return full && full.pingUp ? full.pingUp : 0;
+    }
+
+    function pingDot(mark) {
+        var dot = el('span', 'asset-tree-ping-dot ' + (mark === 1 ? 'is-up' : 'is-down'));
+        dot.title = mark === 1 ? t('tniWatchUp') : t('tniWatchDown');
+        return dot;
+    }
+
+    function pingAsset(asset) {
+        setBusy(true);
+        ajax('POST', '/assets/' + asset.id + '/ping', {}, function (status, payload) {
+            setBusy(false);
+            if (status < 200 || status >= 300 || !payload) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            if (!state.ping) state.ping = {};
+            state.ping[asset.id] = payload.up || 2;
+            selectAsset(asset.id, true);
         });
     }
 
@@ -10355,6 +10423,30 @@
                 serviceRow.appendChild(el('p', 'asset-tree-hint', t('serviceTypeHint')));
                 wrap.appendChild(serviceRow);
             }
+            if (moduleOn('tni')) {
+                var reachToggle = el('label', 'asset-tree-check');
+                reachToggle.title = t('tniReachTypeHint');
+                var reachBox = el('input');
+                reachBox.type = 'checkbox';
+                reachBox.checked = !!type.reach;
+                reachBox.disabled = !state.canConfigure;
+                if (!state.canConfigure) reachBox.setAttribute('data-disabled', '1');
+                reachBox.addEventListener('change', function () {
+                    ajax('PUT', '/types/' + encodeURIComponent(type.typeKey), { reach: reachBox.checked }, function (status, payload) {
+                        if (status >= 200 && status < 300) refreshSchema();
+                        else {
+                            reachBox.checked = !reachBox.checked;
+                            notify((payload && payload.message) || t('errorTitle'));
+                        }
+                    });
+                });
+                reachToggle.appendChild(reachBox);
+                reachToggle.appendChild(el('span', null, t('tniReachType')));
+                var reachRow = el('div', 'asset-tree-service-type');
+                reachRow.appendChild(reachToggle);
+                reachRow.appendChild(el('p', 'asset-tree-hint', t('tniReachTypeHint')));
+                wrap.appendChild(reachRow);
+            }
         }
         var fieldTools = el('div', 'asset-tree-schema-tools');
         var fieldRows = [];
@@ -10546,6 +10638,19 @@
             form.appendChild(serviceToggle);
             form.appendChild(el('p', 'asset-tree-hint asset-tree-service-type-hint', t('serviceTypeHint')));
         }
+        var reachToggle = null;
+        var reachInput = null;
+        if (moduleOn('tni')) {
+            reachToggle = el('label', 'asset-tree-check');
+            reachInput = el('input');
+            reachInput.type = 'checkbox';
+            reachInput.id = 'type-reach';
+            reachToggle.appendChild(reachInput);
+            reachToggle.appendChild(el('span', null, t('tniReachType')));
+            reachToggle.title = t('tniReachTypeHint');
+            form.appendChild(reachToggle);
+            form.appendChild(el('p', 'asset-tree-hint asset-tree-reach-type-hint', t('tniReachTypeHint')));
+        }
         locationInput.addEventListener('change', function () {
             treeInput.disabled = locationInput.checked;
             if (locationInput.checked) treeInput.checked = false;
@@ -10555,6 +10660,13 @@
                 serviceToggle.hidden = locationInput.checked;
                 var serviceHint = form.querySelector('.asset-tree-service-type-hint');
                 if (serviceHint) serviceHint.hidden = locationInput.checked;
+            }
+            if (reachInput) {
+                reachInput.disabled = locationInput.checked;
+                if (locationInput.checked) reachInput.checked = false;
+                reachToggle.hidden = locationInput.checked;
+                var reachHint = form.querySelector('.asset-tree-reach-type-hint');
+                if (reachHint) reachHint.hidden = locationInput.checked;
             }
             captionField.hidden = !locationInput.checked;
             captionHint.hidden = !locationInput.checked;
@@ -10600,6 +10712,7 @@
                 location: place,
                 showInTree: place || treeInput.checked,
                 service: !!(serviceInput && !place && serviceInput.checked),
+                reach: !!(reachInput && !place && reachInput.checked),
                 placeCaption: place ? captionInput.value.trim() : '',
                 parentTypeKey: place ? '' : parentSelect.value
             }, function (status, payload) {

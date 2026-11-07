@@ -1689,23 +1689,27 @@ def save_watch(asset_id, body, text):
     if blocked:
         return blocked
     body = body or {}
-    armed = bool(body.get("armed"))
-    address = watch_station(asset.get("name") or "")
-    if armed and not address:
-        return 400, {"message": text.get("asset-tree.error.tni.watch", "Address")}
-    checked = 0
-    up = 0
-    if armed:
-        checked = int(datetime.datetime.utcnow().timestamp() * 1000)
-        if any(("a" <= ch <= "z") or ("A" <= ch <= "Z") for ch in address):
-            up = 1
-        else:
-            last = int(address.split(".")[-1])
-            up = 1 if last in (1, 10, 20) else 2
-    STATE.setdefault("watch", {})[asset_id] = {
-        "armed": armed, "address": address if address else "", "up": up, "checkedAt": checked,
-    }
+    row = STATE.setdefault("watch", {}).setdefault(asset_id, {})
+    row["exempt"] = bool(body.get("exempt"))
+    row.setdefault("up", 0)
+    row["address"] = asset.get("name") or ""
     return 200, watch_dto(asset)
+
+
+def ping_asset(asset_id, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    host = watch_station(asset.get("name") or "")
+    up = 1 if host else 2
+    row = STATE.setdefault("watch", {}).setdefault(asset_id, {})
+    row["up"] = up
+    row["address"] = asset.get("name") or ""
+    row.setdefault("exempt", False)
+    record_activity(asset_id, "ping", asset.get("name") or "", "", "up" if up == 1 else "down")
+    dto = asset_dto(asset, text, True)
+    dto["up"] = up
+    return 200, dto
 
 
 def sheet_computers(csv):
@@ -2730,7 +2734,8 @@ def type_dto(row, text, rows):
         "placeCaption": (row.get("placeCaption") or "") if row.get("location") else "",
         "showInTree": bool(row.get("location") or row.get("showInTree")),
         "parentTypeKey": (row.get("parentTypeKey") or ""),
-        "service": bool(row.get("service")) and not row.get("location"), "assetCount": count,
+        "service": bool(row.get("service")) and not row.get("location"),
+        "reach": bool(row.get("reach")) and not row.get("location"), "assetCount": count,
         "fields": with_parent_fields(row, text),
     }
 
@@ -3009,6 +3014,9 @@ def asset_dto(asset, text, with_issues):
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
         dto["shares"] = share_dtos(asset["id"])
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
+        watch = (STATE.get("watch") or {}).get(asset["id"]) or {}
+        dto["pingUp"] = int(watch.get("up") or 0)
+        dto["pingExempt"] = bool(watch.get("exempt"))
         dto["peers"] = peers_for(asset["id"], text)
         dto["links"] = relations_for(asset["id"])
     return dto
@@ -9113,6 +9121,9 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/copy", path)
         if match and method == "POST":
             return self.copy_asset(int(match.group(1)), text)
+        match = re.fullmatch(r"/assets/(\d+)/ping", path)
+        if match and method == "POST":
+            return ping_asset(int(match.group(1)), text)
         match = re.fullmatch(r"/assets/(\d+)/watch", path)
         if match and method == "GET":
             return get_watch(int(match.group(1)), text)
@@ -9875,6 +9886,7 @@ setTimeout(function () {
             "systemType": False, "location": location, "placeCaption": caption,
             "showInTree": location or bool((body or {}).get("showInTree")),
             "service": (not location) and bool((body or {}).get("service")),
+            "reach": (not location) and bool((body or {}).get("reach")),
             "parentTypeKey": parent,
             "sortOrder": order, "fields": [],
         }
@@ -9889,6 +9901,8 @@ setTimeout(function () {
             row["showInTree"] = bool(row.get("location")) or bool(body.get("showInTree"))
         if body.get("service") is not None and not row.get("location"):
             row["service"] = bool(body.get("service"))
+        if body.get("reach") is not None and not row.get("location"):
+            row["reach"] = bool(body.get("reach"))
         if body.get("icon") is not None:
             icon = resolve_icon(body.get("icon"), bool(row.get("location")))
             if icon is None:

@@ -4689,6 +4689,24 @@ a.asset-tree-url {
     position: relative;
 }
 
+#asset-tree-app .asset-tree-ping-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+    vertical-align: middle;
+    flex: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-ping-dot.is-up {
+    background: #36b37e;
+}
+
+#asset-tree-app .asset-tree-ping-dot.is-down {
+    background: #de350b;
+}
+
 #asset-tree-app .asset-tree-more-menu {
     position: absolute;
     top: 100%;
@@ -4704,7 +4722,8 @@ a.asset-tree-url {
 }
 
 #asset-tree-app button.asset-tree-more-item {
-    display: block !important;
+    display: flex !important;
+    align-items: center;
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;

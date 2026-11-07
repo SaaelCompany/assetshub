@@ -1936,6 +1936,7 @@ public class AssetServiceImpl implements AssetService {
                         new DBParam("LOCATION", Boolean.valueOf(draft.isLocation())),
                         new DBParam("SHOW_IN_TREE", Boolean.valueOf(draft.isLocation() || Boolean.TRUE.equals(draft.getShowInTree()))),
                         new DBParam("SERVICE", Boolean.valueOf(!draft.isLocation() && Boolean.TRUE.equals(draft.getService()))),
+                        new DBParam("REACH", Boolean.valueOf(!draft.isLocation() && Boolean.TRUE.equals(draft.getReach()))),
                         new DBParam("PLACE_CAPTION", chosenCaption),
                         new DBParam("PARENT_TYPE_KEY", parentKey));
                 return toTypeDto(created, i18n(), 0);
@@ -1961,6 +1962,9 @@ public class AssetServiceImpl implements AssetService {
                 }
                 if (draft.getService() != null && !type.isLocation()) {
                     type.setService(draft.getService().booleanValue());
+                }
+                if (draft.getReach() != null && !type.isLocation()) {
+                    type.setReach(draft.getReach().booleanValue());
                 }
                 if (draft.getIcon() != null) {
                     type.setIcon(resolveIcon(draft.getIcon(), type.isLocation()));
@@ -6376,6 +6380,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setLocation(type.isLocation());
         dto.setShowInTree(type.isLocation() || type.isShowInTree());
         dto.setService(!type.isLocation() && type.isService());
+        dto.setReach(!type.isLocation() && type.isReach());
         dto.setPlaceCaption(type.getPlaceCaption() == null ? "" : type.getPlaceCaption());
         dto.setParentTypeKey(type.getParentTypeKey() == null ? "" : type.getParentTypeKey());
         dto.setAssetCount(assetCount);
@@ -6896,6 +6901,9 @@ public class AssetServiceImpl implements AssetService {
             dto.setActivities(activityDtos(entity.getID()));
             dto.setPlans(planDtos(plans, businessToday()));
             dto.setLinks(linksFor(entity.getID()));
+            TniWatchEntity watch = tniWatchRow(entity.getID());
+            dto.setPingUp(watch == null ? 0 : watch.getUp());
+            dto.setPingExempt(watch != null && watch.getExempt() != 0);
         }
         return dto;
     }
@@ -13413,16 +13421,64 @@ public class AssetServiceImpl implements AssetService {
         final AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.OBJECT);
         requireModule(asset.getProjectKey(), ProjectModules.TNI);
         rejectTniPlace(asset);
-        if (draft == null) {
+        if (draft == null || draft.getExempt() == null) {
             throw new AssetException(400, "asset-tree.error.tni.watch");
         }
-        final boolean armed = Boolean.TRUE.equals(draft.getArmed());
-        final String address = TniAddress.station(asset.getName());
-        if (armed && address.isEmpty()) {
-            throw new AssetException(400, "asset-tree.error.tni.watch");
-        }
+        final boolean exempt = Boolean.TRUE.equals(draft.getExempt());
         final int id = asset.getID();
         final String projectKey = asset.getProjectKey();
+        final long now = System.currentTimeMillis();
+        TniWatchEntity stored = ao().executeInTransaction(new TransactionCallback<TniWatchEntity>() {
+            @Override
+            public TniWatchEntity doInTransaction() {
+                TniWatchEntity row = tniWatchRow(id);
+                if (row == null) {
+                    return ao().create(TniWatchEntity.class,
+                            new DBParam("ASSET_ID", Integer.valueOf(id)),
+                            new DBParam("PROJECT_KEY", projectKey),
+                            new DBParam("ADDRESS", ""),
+                            new DBParam("ARMED", Integer.valueOf(0)),
+                            new DBParam("CHECKED_AT", Long.valueOf(0L)),
+                            new DBParam("UP", Integer.valueOf(0)),
+                            new DBParam("EXEMPT", Integer.valueOf(exempt ? 1 : 0)),
+                            new DBParam("SEEN_AT", Long.valueOf(now)),
+                            new DBParam("PROBE_FROM", Long.valueOf(0L)),
+                            new DBParam("PROBE_FAILS", Integer.valueOf(0)),
+                            new DBParam("LAST_PROBE", Long.valueOf(0L)));
+                }
+                row.setExempt(exempt ? 1 : 0);
+                if (!exempt) {
+                    row.setSeenAt(now);
+                    row.setProbeFrom(0L);
+                    row.setProbeFails(0);
+                }
+                row.save();
+                return row;
+            }
+        });
+        return tniWatchDto(stored, asset.getName());
+    }
+
+    @Override
+    public TniWatchDto pingTni(ApplicationUser user, int assetId) {
+        final AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.OBJECT);
+        requireModule(asset.getProjectKey(), ProjectModules.TNI);
+        rejectTniPlace(asset);
+        final String host = TniAddress.station(asset.getName());
+        boolean reached = false;
+        if (!host.isEmpty()) {
+            try {
+                reached = TniReach.station(host);
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not reach {}", host, ex);
+            }
+        }
+        final boolean up = reached;
+        final int id = asset.getID();
+        final String projectKey = asset.getProjectKey();
+        final long now = System.currentTimeMillis();
+        final AssetTypeEntity type = findType(asset.getTypeKey());
+        final boolean follows = type != null && type.isReach();
         TniWatchEntity stored = ao().executeInTransaction(new TransactionCallback<TniWatchEntity>() {
             @Override
             public TniWatchEntity doInTransaction() {
@@ -13431,46 +13487,32 @@ public class AssetServiceImpl implements AssetService {
                     row = ao().create(TniWatchEntity.class,
                             new DBParam("ASSET_ID", Integer.valueOf(id)),
                             new DBParam("PROJECT_KEY", projectKey),
-                            new DBParam("ADDRESS", address),
-                            new DBParam("ARMED", Integer.valueOf(armed ? 1 : 0)),
-                            new DBParam("CHECKED_AT", Long.valueOf(0L)),
-                            new DBParam("UP", Integer.valueOf(0)));
+                            new DBParam("ADDRESS", host),
+                            new DBParam("ARMED", Integer.valueOf(0)),
+                            new DBParam("CHECKED_AT", Long.valueOf(now)),
+                            new DBParam("UP", Integer.valueOf(up ? 1 : 2)),
+                            new DBParam("EXEMPT", Integer.valueOf(0)),
+                            new DBParam("SEEN_AT", Long.valueOf(follows && up ? now : 0L)),
+                            new DBParam("PROBE_FROM", Long.valueOf(0L)),
+                            new DBParam("PROBE_FAILS", Integer.valueOf(0)),
+                            new DBParam("LAST_PROBE", Long.valueOf(now)));
                     return row;
                 }
-                row.setAddress(address);
-                row.setArmed(armed ? 1 : 0);
-                if (!armed) {
-                    row.setUp(0);
-                    row.setCheckedAt(0L);
+                row.setAddress(host);
+                row.setCheckedAt(now);
+                row.setUp(up ? 1 : 2);
+                row.setLastProbe(now);
+                if (up && follows && row.getExempt() == 0) {
+                    row.setSeenAt(now);
+                    row.setProbeFrom(0L);
+                    row.setProbeFails(0);
                 }
                 row.save();
                 return row;
             }
         });
-        if (!armed) {
-            return tniWatchDto(stored, asset.getName());
-        }
-        boolean reached = false;
-        try {
-            reached = TniReach.station(address);
-        } catch (RuntimeException ex) {
-            log.warn("TNI could not reach {}", address, ex);
-        }
-        final boolean up = reached;
-        final long now = System.currentTimeMillis();
-        TniWatchEntity checked = ao().executeInTransaction(new TransactionCallback<TniWatchEntity>() {
-            @Override
-            public TniWatchEntity doInTransaction() {
-                TniWatchEntity row = tniWatchRow(id);
-                if (row != null && row.getArmed() != 0) {
-                    row.setCheckedAt(now);
-                    row.setUp(up ? 1 : 2);
-                    row.save();
-                }
-                return row;
-            }
-        });
-        return tniWatchDto(checked, asset.getName());
+        recordActivity(id, user.getKey(), "ping", host.isEmpty() ? asset.getName() : host, "", up ? "up" : "down");
+        return tniWatchDto(stored, asset.getName());
     }
 
     @Override
@@ -14004,6 +14046,11 @@ public class AssetServiceImpl implements AssetService {
                 dto.setObjectKey(objectKey);
                 dto.setName(name);
                 emitAsset(projectKey, event, dto);
+            }
+
+            @Override
+            public void note(int assetId, String actorKey, String kind, String field, String value) {
+                recordActivity(assetId, actorKey, kind, field, "", value);
             }
 
             @Override

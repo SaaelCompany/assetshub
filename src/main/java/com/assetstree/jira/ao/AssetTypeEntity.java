@@ -66,6 +66,11 @@ public interface AssetTypeEntity extends Entity {
 
     void setService(boolean service);
 
+    /** Reachability follows the TNI storage rule. Off until a type opts in. */
+    boolean isReach();
+
+    void setReach(boolean reach);
+
     /** Label shown on a child card instead of the generic parent caption. Empty uses the type name. */
     @StringLength(80)
     String getPlaceCaption();

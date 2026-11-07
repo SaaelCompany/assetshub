@@ -1649,6 +1649,17 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("assets/{id}/ping")
+    public Response pingTni(@PathParam("id") final int assetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.pingTni(user(), assetId)).build();
+            }
+        });
+    }
+
     @PUT
     @Path("assets/{id}/watch")
     public Response saveTniWatch(@PathParam("id") final int assetId, final TniWatchDraft draft) {
