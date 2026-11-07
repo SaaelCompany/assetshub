@@ -10204,10 +10204,10 @@ a.asset-tree-preview-icon:focus {
     height: 32px !important;
     min-height: 32px !important;
     padding: 0 !important;
-    border: 1px solid #c1c7d0 !important;
-    border-radius: 3px;
-    background: #f4f5f7 !important;
-    color: #172b4d !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    color: #0052cc !important;
     box-shadow: none;
 }
 
@@ -10217,22 +10217,18 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil svg path {
-    fill: #172b4d;
-}
-
-#asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil:hover {
-    background: #ebecf0 !important;
-    border-color: #a5adba !important;
-}
-
-#asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil.is-on {
-    background: #deebff !important;
-    border-color: #4c9aff !important;
-    color: #0052cc !important;
-}
-
-#asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil.is-on svg path {
     fill: #0052cc;
+}
+
+#asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil:hover,
+#asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil.is-on {
+    background: transparent !important;
+    color: #0747a6 !important;
+}
+
+#asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil:hover svg path,
+#asset-tree-app button.asset-tree-btn.slim.asset-tree-graph-pencil.is-on svg path {
+    fill: #0747a6;
 }
 
 #asset-tree-app .asset-tree-link-form[hidden] {
