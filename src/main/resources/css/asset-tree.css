@@ -11307,6 +11307,94 @@ a.asset-tree-preview-icon:focus {
     stroke: none;
 }
 
+#asset-tree-app .asset-tree-floor-ghost {
+    opacity: 0.35;
+}
+
+#asset-tree-app .asset-tree-floor-ghost line,
+#asset-tree-app .asset-tree-floor-ghost polyline,
+#asset-tree-app .asset-tree-floor-ghost polygon {
+    fill: none;
+    stroke: #5e6c84;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+
+#asset-tree-app .asset-tree-pen {
+    fill: none;
+    stroke: #172b4d;
+    stroke-width: 2px;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+}
+
+#asset-tree-app .asset-tree-pen.is-closed {
+    fill: rgba(90, 150, 220, 0.12);
+}
+
+#asset-tree-app .asset-tree-pen.is-selected {
+    stroke: #0052cc;
+}
+
+#asset-tree-app .asset-tree-pen.is-preview {
+    stroke: #0052cc;
+    stroke-dasharray: 6 4;
+}
+
+#asset-tree-app .asset-tree-pen-hit {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 14px;
+    vector-effect: non-scaling-stroke;
+    cursor: move;
+}
+
+#asset-tree-app .asset-tree-pen-hit.is-closed {
+    fill: rgba(90, 150, 220, 0.12);
+}
+
+#asset-tree-app .asset-tree-pen-vertex {
+    fill: #ffffff;
+    stroke: #0052cc;
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+}
+
+#asset-tree-app button.asset-tree-ghost-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: auto !important;
+    min-width: 0;
+    height: 32px;
+    margin: 0 0 0 4px;
+    padding: 0 8px !important;
+    border: 0 !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #42526e !important;
+    font-size: 12px !important;
+    font-weight: 600;
+    line-height: 32px !important;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-ghost-btn.is-on {
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-plan-xy {
+    margin-left: 6px;
+    padding-right: 6px;
+    color: #5e6c84;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 #asset-tree-app .asset-tree-rubber {
     fill: none;
     stroke: #0052cc;
