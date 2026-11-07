@@ -12481,6 +12481,15 @@ button.asset-tree-attach-remove {
     gap: 16px;
 }
 
+.asset-tree-watch .asset-tree-plan-field {
+    margin: 8px 0 0;
+}
+
+.asset-tree-watch input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .asset-tree-dialog .asset-tree-tni-block {
     display: flex;
     flex-direction: column;

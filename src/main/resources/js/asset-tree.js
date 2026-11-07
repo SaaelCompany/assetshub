@@ -530,7 +530,10 @@
         tniError: '',
         tniTimer: null,
         tniDir: null,
-        tniSccm: null
+        tniSccm: null,
+        tniWatch: {},
+        tniWatchLoading: {},
+        tniWatchToken: {}
     };
     var idIndex = null;
     var childIndex = null;
@@ -7909,6 +7912,8 @@
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
+        var watch = watchBlock(asset);
+        if (watch) aside.appendChild(watch);
         aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
@@ -10804,6 +10809,9 @@
         state.tniError = '';
         state.tniDir = null;
         state.tniSccm = null;
+        state.tniWatch = {};
+        state.tniWatchLoading = {};
+        state.tniWatchToken = {};
         if (state.tniTimer) {
             clearInterval(state.tniTimer);
             state.tniTimer = null;
@@ -28744,6 +28752,87 @@
             title.appendChild(stageMark('beta'));
         }
         return block;
+    }
+
+    function watchBlock(asset) {
+        if (!moduleOn('tni') || isFolder(asset)) return null;
+        var row = state.tniWatch[asset.id];
+        if (!row) {
+            if (!mayEdit(asset)) {
+                loadTniWatch(asset.id);
+                return null;
+            }
+            var waiting = el('div');
+            waiting.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadTniWatch(asset.id);
+            return moduleBlock(t('tniWatch'), waiting);
+        }
+        if (row.missing || (!row.armed && !mayEdit(asset))) return null;
+        return moduleBlock(t('tniWatch'), watchBody(asset, row));
+    }
+
+    function watchBody(asset, row) {
+        var body = el('div', 'asset-tree-watch');
+        body.appendChild(el('p', 'asset-tree-hint', t('tniWatchHint')));
+        var armed = document.createElement('input');
+        armed.type = 'checkbox';
+        armed.checked = !!row.armed;
+        armed.disabled = !mayEdit(asset);
+        var label = el('label', 'asset-tree-tni-ssl');
+        label.appendChild(armed);
+        label.appendChild(document.createTextNode(t('tniWatchOn')));
+        body.appendChild(label);
+        var address = document.createElement('input');
+        address.type = 'text';
+        address.value = row.address || '';
+        address.placeholder = row.suggestion || '192.168.1.10';
+        address.disabled = !mayEdit(asset);
+        body.appendChild(planField(t('tniWatchAddress'), address));
+        body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
+        if (mayEdit(asset)) {
+            body.appendChild(button(t('tniWatchSave'), 'asset-tree-btn', function () {
+                ajax('PUT', '/assets/' + asset.id + '/watch', {
+                    armed: armed.checked,
+                    address: address.value
+                }, function (status, payload) {
+                    if (status >= 200 && status < 300 && payload) {
+                        state.tniWatch[asset.id] = payload;
+                        if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
+                    } else {
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
+                });
+            }));
+        }
+        return body;
+    }
+
+    function watchStatus(row) {
+        if (!row || !row.checkedAt) return t('tniWatchNone');
+        var word = row.up === 1 ? t('tniWatchUp') : (row.up === 2 ? t('tniWatchDown') : t('tniWatchNone'));
+        var when = '';
+        try {
+            when = stamp(new Date(row.checkedAt).toISOString());
+        } catch (ignore) {
+            when = '';
+        }
+        return word + (when ? ' · ' + t('tniWatchChecked', when) : '');
+    }
+
+    function loadTniWatch(assetId) {
+        if (state.tniWatchLoading[assetId]) return;
+        state.tniWatchLoading[assetId] = true;
+        var token = (state.tniWatchToken[assetId] || 0) + 1;
+        state.tniWatchToken[assetId] = token;
+        ajax('GET', '/assets/' + assetId + '/watch', null, function (status, payload) {
+            if (state.tniWatchToken[assetId] !== token) return;
+            state.tniWatchLoading[assetId] = false;
+            if (status === 200 && payload) state.tniWatch[assetId] = payload;
+            else state.tniWatch[assetId] = { armed: false, missing: true };
+            if (state.detail && state.detail.id === assetId && document.getElementById('asset-tree-detail')) {
+                showDetail(state.detail, false);
+            }
+        });
     }
 
     function lifeBlock(asset) {

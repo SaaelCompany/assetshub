@@ -32,6 +32,15 @@ public final class TniAddress {
         return publicAddress;
     }
 
+    /** A private IPv4 address an administrator chose for one asset, or an empty string. */
+    public static String local(String raw) {
+        String address = literal(raw);
+        if (address.isEmpty() || !allowed(address) || !isPrivate(address)) {
+            return "";
+        }
+        return address;
+    }
+
     public static boolean allowed(String address) {
         int[] octets = octets(address);
         if (octets == null) {

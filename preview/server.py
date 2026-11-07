@@ -1611,6 +1611,77 @@ def load_sccm(project_key, body, text):
     return directory_apply(project_key, computers, text)
 
 
+def watch_local(address):
+    parts = str(address or "").strip().split(".")
+    if len(parts) != 4:
+        return ""
+    try:
+        octets = [int(part) for part in parts]
+    except ValueError:
+        return ""
+    if any(part < 0 or part > 255 for part in octets):
+        return ""
+    private = octets[0] == 10 or (octets[0] == 192 and octets[1] == 168) or (
+        octets[0] == 172 and 16 <= octets[1] <= 31
+    )
+    if not private:
+        return ""
+    return ".".join(str(part) for part in octets)
+
+
+def watch_dto(asset):
+    row = (STATE.get("watch") or {}).get(asset["id"]) or {}
+    key = str(asset.get("externalKey") or "")
+    suggestion = watch_local(key[4:]) if key.startswith("tni:") else ""
+    return {
+        "armed": bool(row.get("armed")),
+        "address": row.get("address") or "",
+        "suggestion": suggestion,
+        "up": int(row.get("up") or 0),
+        "checkedAt": int(row.get("checkedAt") or 0),
+    }
+
+
+def watch_asset(asset_id, text):
+    asset = STATE["assets"].get(asset_id)
+    if not asset:
+        return None, (404, {"message": text.get("asset-tree.error.notFound", "Missing")})
+    blocked = reject_module(asset["projectKey"], "tni", text)
+    if blocked:
+        return None, blocked
+    if (STATE["types"].get(asset.get("typeKey")) or {}).get("location"):
+        return None, (400, {"message": text.get("asset-tree.error.tni.watch", "Address")})
+    return asset, None
+
+
+def get_watch(asset_id, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    return 200, watch_dto(asset)
+
+
+def save_watch(asset_id, body, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    body = body or {}
+    armed = bool(body.get("armed"))
+    address = watch_local(body.get("address"))
+    if armed and not address:
+        return 400, {"message": text.get("asset-tree.error.tni.watch", "Address")}
+    checked = 0
+    up = 0
+    if armed:
+        checked = int(datetime.datetime.utcnow().timestamp() * 1000)
+        last = int(address.split(".")[-1])
+        up = 1 if last in (1, 10, 20) else 2
+    STATE.setdefault("watch", {})[asset_id] = {
+        "armed": armed, "address": address if address else "", "up": up, "checkedAt": checked,
+    }
+    return 200, watch_dto(asset)
+
+
 def sheet_computers(csv):
     text = str(csv or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     if not text.strip():
@@ -9016,6 +9087,11 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/copy", path)
         if match and method == "POST":
             return self.copy_asset(int(match.group(1)), text)
+        match = re.fullmatch(r"/assets/(\d+)/watch", path)
+        if match and method == "GET":
+            return get_watch(int(match.group(1)), text)
+        if match and method == "PUT":
+            return save_watch(int(match.group(1)), self.read_json(), text)
         match = re.fullmatch(r"/assets/(\d+)", path)
         if match and method == "GET":
             asset = STATE["assets"].get(int(match.group(1)))

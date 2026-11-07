@@ -48,6 +48,7 @@
         <entity>com.assetstree.jira.ao.TniDeviceEntity</entity>
         <entity>com.assetstree.jira.ao.TniSubnetEntity</entity>
         <entity>com.assetstree.jira.ao.TniSourceEntity</entity>
+        <entity>com.assetstree.jira.ao.TniWatchEntity</entity>
     </ao>
 
     <customfield-type key="asset-cf" name="Project asset" i18n-name-key="asset-tree.field.cf.name" class="com.assetstree.jira.field.AssetCustomField">

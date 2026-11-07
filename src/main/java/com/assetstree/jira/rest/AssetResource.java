@@ -47,6 +47,7 @@ import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.TypeDraft;
 import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.model.TniSourceDraft;
+import com.assetstree.jira.dto.TniWatchDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
@@ -1633,6 +1634,28 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.status(Response.Status.ACCEPTED).entity(assetService.scanTniSubnet(user(), projectKey, subnetId)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("assets/{id}/watch")
+    public Response tniWatch(@PathParam("id") final int assetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniWatch(user(), assetId)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("assets/{id}/watch")
+    public Response saveTniWatch(@PathParam("id") final int assetId, final TniWatchDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniWatch(user(), assetId, draft)).build();
             }
         });
     }

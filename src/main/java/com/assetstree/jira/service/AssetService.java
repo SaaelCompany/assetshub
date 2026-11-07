@@ -69,10 +69,12 @@ import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.dto.TniSourceDto;
+import com.assetstree.jira.dto.TniWatchDto;
 import com.assetstree.jira.dto.TniSubnetDto;
 import com.assetstree.jira.model.TniSheetDraft;
 import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.model.TniSourceDraft;
+import com.assetstree.jira.dto.TniWatchDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.TypeDraft;
 
@@ -398,6 +400,10 @@ public interface AssetService {
     TniSourceDto saveTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
 
     ImportResultDto loadTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    TniWatchDto tniWatch(ApplicationUser user, int assetId);
+
+    TniWatchDto saveTniWatch(ApplicationUser user, int assetId, TniWatchDraft draft);
 
     ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
 }

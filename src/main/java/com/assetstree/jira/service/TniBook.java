@@ -7,11 +7,13 @@ import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetTypeEntity;
 import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.ao.TniDeviceEntity;
+import com.assetstree.jira.ao.TniWatchEntity;
 import com.assetstree.jira.dto.ModuleSetupDto;
 import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.ProjectKeys;
 import com.assetstree.jira.model.ProjectModules;
 import com.assetstree.jira.model.Statuses;
+import com.assetstree.jira.model.TniAddress;
 import com.assetstree.jira.model.TniClock;
 import com.assetstree.jira.model.TniFacts;
 import com.assetstree.jira.model.TniPolicy;
@@ -22,6 +24,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 
@@ -160,6 +164,93 @@ public final class TniBook {
             });
             after(ao, host, outcome);
         }
+        sweepWatches(ao, now, check);
+    }
+
+    public static boolean watchDue(long checkedAt, long now) {
+        return checkedAt <= 0L || now - checkedAt >= TniClock.MIN_GAP;
+    }
+
+    private void sweepWatches(ActiveObjects ao, final long now, TniReach.Probe check) {
+        List<long[]> due = ao.executeInTransaction(new TransactionCallback<List<long[]>>() {
+            @Override
+            public List<long[]> doInTransaction() {
+                List<long[]> found = new ArrayList<long[]>();
+                TniWatchEntity[] rows = ao.find(TniWatchEntity.class);
+                if (rows == null) {
+                    return found;
+                }
+                for (int i = 0; i < rows.length; i++) {
+                    TniWatchEntity row = rows[i];
+                    if (row != null && row.getArmed() != 0 && watchDue(row.getCheckedAt(), now)) {
+                        found.add(new long[]{row.getID(), row.getCheckedAt()});
+                    }
+                }
+                Collections.sort(found, new Comparator<long[]>() {
+                    @Override
+                    public int compare(long[] left, long[] right) {
+                        return Long.compare(left[1], right[1]);
+                    }
+                });
+                return found;
+            }
+        });
+        int pings = 0;
+        for (int i = 0; i < due.size(); i++) {
+            if (pings >= PING_BUDGET) {
+                break;
+            }
+            final int rowId = (int) due.get(i)[0];
+            String address = ao.executeInTransaction(new TransactionCallback<String>() {
+                @Override
+                public String doInTransaction() {
+                    return watchAddress(ao, rowId);
+                }
+            });
+            if (address == null || address.isEmpty()) {
+                continue;
+            }
+            pings++;
+            boolean up = false;
+            try {
+                up = check.up(address);
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not reach {}", address, ex);
+            }
+            final boolean reached = up;
+            ao.executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
+                    if (row != null && row.getArmed() != 0) {
+                        row.setCheckedAt(now);
+                        row.setUp(reached ? 1 : 2);
+                        row.save();
+                    }
+                    return null;
+                }
+            });
+        }
+    }
+
+    private String watchAddress(ActiveObjects ao, int rowId) {
+        TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
+        if (row == null || row.getArmed() == 0) {
+            return "";
+        }
+        if (!moduleOn(ao, row.getProjectKey())) {
+            return "";
+        }
+        AssetEntity asset = ao.get(AssetEntity.class, row.getAssetId());
+        if (asset == null) {
+            ao.delete(row);
+            return "";
+        }
+        String address = TniAddress.local(row.getAddress());
+        if (address.isEmpty()) {
+            return "";
+        }
+        return address;
     }
 
     private void after(ActiveObjects ao, TniHost host, Outcome outcome) {

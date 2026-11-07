@@ -86,6 +86,7 @@ import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.RoomEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
 import com.assetstree.jira.ao.TniSourceEntity;
+import com.assetstree.jira.ao.TniWatchEntity;
 import com.assetstree.jira.ao.TniSubnetEntity;
 import com.assetstree.jira.ao.ServicePlanEntity;
 import com.assetstree.jira.ao.StaffDutyEntity;
@@ -152,6 +153,7 @@ import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
 import com.assetstree.jira.dto.SavedReportDto;
 import com.assetstree.jira.dto.TniSourceDto;
+import com.assetstree.jira.dto.TniWatchDto;
 import com.assetstree.jira.dto.TniSubnetDto;
 import com.assetstree.jira.dto.ScheduleRowDto;
 import com.assetstree.jira.dto.StaffDutyDto;
@@ -231,10 +233,12 @@ import com.assetstree.jira.model.TniPeer;
 import com.assetstree.jira.model.TniPlace;
 import com.assetstree.jira.model.TniPolicy;
 import com.assetstree.jira.model.TniComputer;
+import com.assetstree.jira.model.TniAddress;
 import com.assetstree.jira.model.TniDirectory;
 import com.assetstree.jira.model.TniRange;
 import com.assetstree.jira.model.TniSheetDraft;
 import com.assetstree.jira.model.TniSourceDraft;
+import com.assetstree.jira.dto.TniWatchDraft;
 import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.PortalRequestDraft;
@@ -13397,6 +13401,79 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public TniWatchDto tniWatch(ApplicationUser user, int assetId) {
+        AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.VIEW);
+        requireModule(asset.getProjectKey(), ProjectModules.TNI);
+        rejectTniPlace(asset);
+        return tniWatchDto(tniWatchRow(asset.getID()), tniSuggest(asset));
+    }
+
+    @Override
+    public TniWatchDto saveTniWatch(ApplicationUser user, int assetId, TniWatchDraft draft) {
+        final AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.OBJECT);
+        requireModule(asset.getProjectKey(), ProjectModules.TNI);
+        rejectTniPlace(asset);
+        if (draft == null) {
+            throw new AssetException(400, "asset-tree.error.tni.watch");
+        }
+        final boolean armed = Boolean.TRUE.equals(draft.getArmed());
+        final String address = TniAddress.local(draft.getAddress());
+        if (armed && address.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.tni.watch");
+        }
+        final int id = asset.getID();
+        final String projectKey = asset.getProjectKey();
+        TniWatchEntity stored = ao().executeInTransaction(new TransactionCallback<TniWatchEntity>() {
+            @Override
+            public TniWatchEntity doInTransaction() {
+                TniWatchEntity row = tniWatchRow(id);
+                if (row == null) {
+                    row = ao().create(TniWatchEntity.class,
+                            new DBParam("ASSET_ID", Integer.valueOf(id)),
+                            new DBParam("PROJECT_KEY", projectKey),
+                            new DBParam("ADDRESS", address),
+                            new DBParam("ARMED", Integer.valueOf(armed ? 1 : 0)),
+                            new DBParam("CHECKED_AT", Long.valueOf(0L)),
+                            new DBParam("UP", Integer.valueOf(0)));
+                    return row;
+                }
+                row.setAddress(address);
+                row.setArmed(armed ? 1 : 0);
+                if (!armed) {
+                    row.setUp(0);
+                    row.setCheckedAt(0L);
+                }
+                row.save();
+                return row;
+            }
+        });
+        if (!armed) {
+            return tniWatchDto(stored, tniSuggest(asset));
+        }
+        boolean reached = false;
+        try {
+            reached = TniReach.LIVE.up(address);
+        } catch (RuntimeException ex) {
+            log.warn("TNI could not reach {}", address, ex);
+        }
+        final boolean up = reached;
+        final long now = System.currentTimeMillis();
+        TniWatchEntity checked = ao().executeInTransaction(new TransactionCallback<TniWatchEntity>() {
+            @Override
+            public TniWatchEntity doInTransaction() {
+                TniWatchEntity row = tniWatchRow(id);
+                if (row != null && row.getArmed() != 0) {
+                    row.setCheckedAt(now);
+                    row.setUp(up ? 1 : 2);
+                    row.save();
+                }
+                return row;
+            }
+        });
+        return tniWatchDto(checked, tniSuggest(asset));
+    }
+
+    @Override
     public ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft) {
         Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
@@ -13474,6 +13551,51 @@ public class AssetServiceImpl implements AssetService {
         result.setDone(true);
         result.setTotalRows(computers.size());
         return result;
+    }
+
+    private void rejectTniPlace(AssetEntity asset) {
+        AssetTypeEntity type = findType(asset.getTypeKey());
+        if (type != null && type.isLocation()) {
+            throw new AssetException(400, "asset-tree.error.tni.watch");
+        }
+    }
+
+    private String tniSuggest(AssetEntity asset) {
+        String key = asset.getExternalKey();
+        if (key != null && key.startsWith("tni:") && key.length() > 4) {
+            return TniAddress.local(key.substring(4));
+        }
+        return "";
+    }
+
+    private TniWatchEntity tniWatchRow(int assetId) {
+        TniWatchEntity[] rows = ao().find(TniWatchEntity.class, Query.select().where("ASSET_ID = ?", Integer.valueOf(assetId)));
+        if (rows == null) {
+            return null;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null) {
+                return rows[i];
+            }
+        }
+        return null;
+    }
+
+    private TniWatchDto tniWatchDto(TniWatchEntity row, String suggestion) {
+        TniWatchDto dto = new TniWatchDto();
+        dto.setSuggestion(suggestion == null ? "" : suggestion);
+        if (row == null) {
+            dto.setArmed(Boolean.FALSE);
+            dto.setAddress("");
+            dto.setUp(Integer.valueOf(0));
+            dto.setCheckedAt(0L);
+            return dto;
+        }
+        dto.setArmed(Boolean.valueOf(row.getArmed() != 0));
+        dto.setAddress(row.getAddress() == null ? "" : row.getAddress());
+        dto.setUp(Integer.valueOf(row.getUp()));
+        dto.setCheckedAt(row.getCheckedAt());
+        return dto;
     }
 
     private void forgetStoredTniSecret(final String projectKey, final String kind) {
