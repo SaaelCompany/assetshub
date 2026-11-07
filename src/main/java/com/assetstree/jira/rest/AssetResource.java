@@ -46,6 +46,8 @@ import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.TypeDraft;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSheetDraft;
+import com.assetstree.jira.model.TniSourceDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
@@ -1632,6 +1634,50 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.status(Response.Status.ACCEPTED).entity(assetService.scanTniSubnet(user(), projectKey, subnetId)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/directory")
+    public Response tniDirectory(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniDirectory(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/directory")
+    public Response saveTniDirectory(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniDirectory(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/directory/load")
+    public Response loadTniDirectory(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.loadTniDirectory(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/directory/sheet")
+    public Response importTniSheet(@PathParam("projectKey") final String projectKey, final TniSheetDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.importTniSheet(user(), projectKey, draft)).build();
             }
         });
     }

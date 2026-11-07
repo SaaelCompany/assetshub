@@ -68,8 +68,11 @@ import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
+import com.assetstree.jira.dto.TniSourceDto;
 import com.assetstree.jira.dto.TniSubnetDto;
+import com.assetstree.jira.model.TniSheetDraft;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSourceDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.TypeDraft;
 
@@ -383,4 +386,12 @@ public interface AssetService {
     void deleteTniSubnet(ApplicationUser user, String projectKey, int subnetId);
 
     TniSubnetDto scanTniSubnet(ApplicationUser user, String projectKey, int subnetId);
+
+    TniSourceDto tniDirectory(ApplicationUser user, String projectKey);
+
+    TniSourceDto saveTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey);
+
+    ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
 }

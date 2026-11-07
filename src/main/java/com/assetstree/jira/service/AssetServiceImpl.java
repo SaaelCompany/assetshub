@@ -85,6 +85,7 @@ import com.assetstree.jira.ao.WebhookEntity;
 import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.RoomEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
+import com.assetstree.jira.ao.TniSourceEntity;
 import com.assetstree.jira.ao.TniSubnetEntity;
 import com.assetstree.jira.ao.ServicePlanEntity;
 import com.assetstree.jira.ao.StaffDutyEntity;
@@ -150,6 +151,7 @@ import com.assetstree.jira.dto.ReportVennDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
 import com.assetstree.jira.dto.SavedReportDto;
+import com.assetstree.jira.dto.TniSourceDto;
 import com.assetstree.jira.dto.TniSubnetDto;
 import com.assetstree.jira.dto.ScheduleRowDto;
 import com.assetstree.jira.dto.StaffDutyDto;
@@ -228,7 +230,11 @@ import com.assetstree.jira.model.TniName;
 import com.assetstree.jira.model.TniPeer;
 import com.assetstree.jira.model.TniPlace;
 import com.assetstree.jira.model.TniPolicy;
+import com.assetstree.jira.model.TniComputer;
+import com.assetstree.jira.model.TniDirectory;
 import com.assetstree.jira.model.TniRange;
+import com.assetstree.jira.model.TniSheetDraft;
+import com.assetstree.jira.model.TniSourceDraft;
 import com.assetstree.jira.model.TniSightDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.PortalRequestDraft;
@@ -13227,6 +13233,197 @@ public class AssetServiceImpl implements AssetService {
         worker.setDaemon(true);
         worker.start();
         return started;
+    }
+
+    @Override
+    public TniSourceDto tniDirectory(ApplicationUser user, String projectKey) {
+        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        return tniSourceDto(tniSourceRow(project.getKey()));
+    }
+
+    @Override
+    public TniSourceDto saveTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        if (draft == null) {
+            throw new AssetException(400, TniDirectory.ACCOUNT);
+        }
+        final String host = TniDirectory.host(draft.getHost());
+        final boolean ssl = Boolean.TRUE.equals(draft.getSsl());
+        final int port = TniDirectory.port(draft.getPort(), ssl);
+        final String base = TniDirectory.base(draft.getBase());
+        final String account = TniDirectory.account(draft.getAccount());
+        final String password = TniDirectory.password(draft.getPassword());
+        return ao().executeInTransaction(new TransactionCallback<TniSourceDto>() {
+            @Override
+            public TniSourceDto doInTransaction() {
+                TniSourceEntity row = tniSourceRow(project.getKey());
+                if (row == null) {
+                    if (password.isEmpty()) {
+                        throw new AssetException(400, TniDirectory.ACCOUNT);
+                    }
+                    row = ao().create(TniSourceEntity.class,
+                            new DBParam("PROJECT_KEY", project.getKey()),
+                            new DBParam("KIND", "ad"),
+                            new DBParam("HOST", host),
+                            new DBParam("PORT", Integer.valueOf(port)),
+                            new DBParam("SSL", Boolean.valueOf(ssl)),
+                            new DBParam("BASE", base),
+                            new DBParam("ACCOUNT", account),
+                            new DBParam("SECRET", password),
+                            new DBParam("NOTE", ""),
+                            new DBParam("FINISHED", Long.valueOf(0L)));
+                    return tniSourceDto(row);
+                }
+                row.setHost(host);
+                row.setPort(port);
+                row.setSsl(ssl);
+                row.setBase(base);
+                row.setAccount(account);
+                if (!password.isEmpty()) {
+                    row.setSecret(password);
+                } else if (row.getSecret() == null || row.getSecret().isEmpty()) {
+                    throw new AssetException(400, TniDirectory.ACCOUNT);
+                }
+                row.save();
+                return tniSourceDto(row);
+            }
+        });
+    }
+
+    @Override
+    public ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey) {
+        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        String typeKey = tniComputerType(project.getKey());
+        TniSourceEntity row = tniSourceRow(project.getKey());
+        if (row == null || row.getSecret() == null || row.getSecret().isEmpty()) {
+            throw new AssetException(400, TniDirectory.ACCOUNT);
+        }
+        List<TniComputer> computers = TniLdap.read(row.getHost(), row.getPort(), row.getSsl(),
+                row.getBase(), row.getAccount(), row.getSecret());
+        if (computers.isEmpty()) {
+            throw new AssetException(400, TniDirectory.SHEET);
+        }
+        return tniApplyComputers(user, project.getKey(), typeKey, computers);
+    }
+
+    @Override
+    public ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft) {
+        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        String typeKey = tniComputerType(project.getKey());
+        List<TniComputer> computers = TniDirectory.parseSheet(draft == null ? null : draft.getCsv());
+        return tniApplyComputers(user, project.getKey(), typeKey, computers);
+    }
+
+    private ImportResultDto tniApplyComputers(ApplicationUser user, final String projectKey, String typeKey,
+                                               List<TniComputer> computers) {
+        String off = "";
+        try {
+            String text = i18n().getText("asset-tree.ui.tniDirOff");
+            if (text != null && !text.equals("asset-tree.ui.tniDirOff")) {
+                off = text;
+            }
+        } catch (RuntimeException ignored) {
+            off = "";
+        }
+        final String disabledWord = off;
+        Map<String, AssetEntity> known = new HashMap<String, AssetEntity>();
+        AssetEntity[] rows = assetsIn(projectKey);
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                AssetEntity row = rows[i];
+                if (row != null && row.getExternalKey() != null && !row.getExternalKey().isEmpty()) {
+                    known.put(row.getExternalKey(), row);
+                }
+            }
+        }
+        int created = 0;
+        int updated = 0;
+        for (int i = 0; i < computers.size(); i++) {
+            final TniComputer computer = computers.get(i);
+            if (computer == null) {
+                continue;
+            }
+            String detail = computer.getDetail() == null ? "" : computer.getDetail();
+            if (computer.isDisabled() && !disabledWord.isEmpty()) {
+                detail = detail.isEmpty() ? disabledWord : detail + " · " + disabledWord;
+            }
+            final String description = detail;
+            AssetEntity existing = known.get(computer.externalKey());
+            if (existing != null) {
+                final int id = existing.getID();
+                ao().executeInTransaction(new TransactionCallback<Void>() {
+                    @Override
+                    public Void doInTransaction() {
+                        AssetEntity row = ao().get(AssetEntity.class, id);
+                        if (row == null || !ProjectKeys.same(row.getProjectKey(), projectKey)) {
+                            return null;
+                        }
+                        row.setName(computer.getName());
+                        row.setDescription(description);
+                        row.save();
+                        return null;
+                    }
+                });
+                updated++;
+                continue;
+            }
+            AssetDraft draft = new AssetDraft();
+            draft.setProjectKey(projectKey);
+            draft.setTypeKey(typeKey);
+            draft.setStatus(Statuses.IN_USE);
+            draft.setExternalId(computer.externalKey());
+            draft.setName(computer.getName());
+            draft.setDescription(description);
+            createAsset(user, draft);
+            created++;
+        }
+        ImportResultDto result = new ImportResultDto();
+        result.setCreated(created);
+        result.setUpdated(updated);
+        result.setDone(true);
+        result.setTotalRows(computers.size());
+        return result;
+    }
+
+    private TniSourceEntity tniSourceRow(String projectKey) {
+        TniSourceEntity[] rows = ao().find(TniSourceEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return null;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null && "ad".equals(rows[i].getKind())) {
+                return rows[i];
+            }
+        }
+        return rows.length == 0 ? null : rows[0];
+    }
+
+    private TniSourceDto tniSourceDto(TniSourceEntity row) {
+        TniSourceDto dto = new TniSourceDto();
+        if (row == null) {
+            dto.setHost("");
+            dto.setPort(389);
+            dto.setSsl(Boolean.FALSE);
+            dto.setBase("");
+            dto.setAccount("");
+            dto.setPasswordSet(Boolean.FALSE);
+            dto.setNote("");
+            dto.setFinished(0L);
+            return dto;
+        }
+        dto.setHost(row.getHost() == null ? "" : row.getHost());
+        dto.setPort(row.getPort() == 0 ? 389 : row.getPort());
+        dto.setSsl(Boolean.valueOf(row.getSsl()));
+        dto.setBase(row.getBase() == null ? "" : row.getBase());
+        dto.setAccount(row.getAccount() == null ? "" : row.getAccount());
+        dto.setPasswordSet(Boolean.valueOf(row.getSecret() != null && !row.getSecret().isEmpty()));
+        dto.setNote(row.getNote() == null ? "" : row.getNote());
+        dto.setFinished(row.getFinished());
+        return dto;
     }
 
     private String tniComputerType(String projectKey) {

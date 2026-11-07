@@ -12481,6 +12481,40 @@ button.asset-tree-attach-remove {
     gap: 16px;
 }
 
+#asset-tree-app .asset-tree-tni-dir {
+    margin: 0 0 20px;
+}
+
+#asset-tree-app .asset-tree-tni-dir-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) 120px minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+#asset-tree-app .asset-tree-tni-dir-fields input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#asset-tree-app .asset-tree-tni-dir-fields .asset-tree-tni-base {
+    grid-column: 1 / span 2;
+}
+
+#asset-tree-app .asset-tree-tni-dir-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#asset-tree-app .asset-tree-tni-ssl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 #asset-tree-app .asset-tree-tni-add {
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr) auto;
@@ -12518,8 +12552,13 @@ button.asset-tree-attach-remove {
 }
 
 @media (max-width: 860px) {
-    #asset-tree-app .asset-tree-tni-add {
+    #asset-tree-app .asset-tree-tni-add,
+    #asset-tree-app .asset-tree-tni-dir-fields {
         grid-template-columns: 1fr;
+    }
+
+    #asset-tree-app .asset-tree-tni-dir-fields .asset-tree-tni-base {
+        grid-column: auto;
     }
 }
 

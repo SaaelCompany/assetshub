@@ -1467,6 +1467,172 @@ def scan_subnet(project_key, subnet_id, text):
     return 202, tni_dto(row)
 
 
+def directory_row(project_key):
+    return STATE.setdefault("directory", {}).get(project_key)
+
+
+def directory_dto(project_key):
+    row = directory_row(project_key) or {}
+    return {
+        "host": row.get("host") or "",
+        "port": row.get("port") or 389,
+        "ssl": bool(row.get("ssl")),
+        "base": row.get("base") or "",
+        "account": row.get("account") or "",
+        "passwordSet": bool(row.get("secret")),
+        "note": "",
+        "finished": 0,
+    }
+
+
+def directory_type(project_key, text):
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    type_key = module_setup(view.get("setup") or {}).get("tniComputer") or ""
+    if not type_key or type_key not in STATE["types"] or STATE["types"][type_key].get("location"):
+        return None
+    return type_key
+
+
+def directory_apply(project_key, computers, text):
+    type_key = directory_type(project_key, text)
+    if not type_key:
+        return 400, {"message": tni_message(text, "type")}
+    created = 0
+    updated = 0
+    for computer in computers:
+        found = None
+        for asset in STATE["assets"].values():
+            if asset.get("projectKey") == project_key and asset.get("externalKey") == computer["key"]:
+                found = asset
+                break
+        if found:
+            found["name"] = computer["name"]
+            found["description"] = computer["detail"]
+            updated += 1
+            continue
+        asset_id = add_asset(project_key, type_key, computer["name"], None, "in_use", None, {})
+        if not asset_id:
+            continue
+        STATE["assets"][asset_id]["externalKey"] = computer["key"]
+        STATE["assets"][asset_id]["description"] = computer["detail"]
+        created += 1
+    return 200, {"created": created, "updated": updated, "done": True, "totalRows": len(computers), "errors": []}
+
+
+def save_directory(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    base = str(body.get("base") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or any(ch in host for ch in " /\\"):
+        return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
+    if "=" not in base or len(base) < 3:
+        return 400, {"message": text.get("asset-tree.error.tni.base", "Base")}
+    row = directory_row(project_key) or {}
+    if not account or (not password and not row.get("secret")):
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    port = int(body.get("port") or 0)
+    ssl = bool(body.get("ssl"))
+    if port <= 0:
+        port = 636 if ssl else 389
+    saved = {
+        "host": host, "port": port, "ssl": ssl, "base": base, "account": account,
+        "secret": password or row.get("secret") or "",
+    }
+    STATE.setdefault("directory", {})[project_key] = saved
+    return 200, directory_dto(project_key)
+
+
+def load_directory(project_key, text):
+    row = directory_row(project_key) or {}
+    if not row.get("secret"):
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    host = row.get("host") or "dc"
+    computers = [
+        {"key": "ad:preview-1", "name": host.split(".")[0] + "-1", "detail": "Windows 10 · " + host},
+        {"key": "ad:preview-2", "name": host.split(".")[0] + "-2", "detail": "Windows 11 · " + host},
+    ]
+    return directory_apply(project_key, computers, text)
+
+
+def sheet_computers(csv):
+    text = str(csv or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        return []
+    header_line = ""
+    for line in text.split("\n"):
+        if line.startswith("#") or not line.strip():
+            continue
+        header_line = line
+        break
+    delim = ";" if header_line.count(";") > header_line.count(",") else ","
+    rows = []
+    for line in text.split("\n"):
+        if not line.strip():
+            continue
+        rows.append([cell.strip() for cell in line.split(delim)])
+    header_at = -1
+    cols = {}
+    aliases = {
+        "name": "name", "computername": "name", "имя": "name", "имякомпьютера": "name",
+        "dnshostname": "dns", "resourceid": "resource", "идресурса": "resource",
+        "operatingsystem": "os", "операционнаясистема": "os",
+        "username": "user", "пользователь": "user",
+    }
+    for index, row in enumerate(rows):
+        mapped = {}
+        for cell_at, cell in enumerate(row):
+            key = "".join(ch for ch in cell.lower() if ch not in " _-.")
+            name = aliases.get(key)
+            if name and name not in mapped:
+                mapped[name] = cell_at
+        if mapped.get("name") is not None or mapped.get("dns") is not None or mapped.get("resource") is not None:
+            header_at = index
+            cols = mapped
+            break
+    if header_at < 0:
+        return None
+    computers = []
+    seen = set()
+    for row in rows[header_at + 1:]:
+        def cell(key):
+            at = cols.get(key)
+            if at is None or at >= len(row):
+                return ""
+            return row[at].strip().strip('"')
+        name = cell("name") or cell("dns")
+        resource = cell("resource")
+        if resource.endswith(".0") and resource[:-2].isdigit():
+            resource = resource[:-2]
+        dns = cell("dns")
+        if resource:
+            key = "sccm:" + resource
+        elif dns:
+            key = "ad:" + dns.lower()
+        elif name:
+            key = "ad:" + name.lower()
+        else:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        detail = " · ".join(part for part in (cell("os"), cell("user")) if part)
+        computers.append({"key": key, "name": name or resource, "detail": detail})
+        if len(computers) > 2000:
+            return "rows"
+    return computers
+
+
+def import_sheet(project_key, body, text):
+    parsed = sheet_computers((body or {}).get("csv"))
+    if parsed == "rows":
+        return 400, {"message": text.get("asset-tree.error.tni.rows", "Rows")}
+    if not parsed:
+        return 400, {"message": text.get("asset-tree.error.tni.sheet", "Sheet")}
+    return directory_apply(project_key, parsed, text)
+
+
 def plan_kind(kind):
     value = str(kind or "room").strip().lower()
     allowed = {
@@ -8464,6 +8630,30 @@ setTimeout(function () {
             if blocked:
                 return blocked
             return scan_subnet(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/load", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return load_directory(project_key, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/sheet", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return import_sheet(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, directory_dto(project_key)
+            if method == "POST":
+                return save_directory(project_key, self.read_json(), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports", path)
         if match:
             project_key = match.group(1)

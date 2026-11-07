@@ -528,7 +528,8 @@
         lifeEditing: {},
         tniList: null,
         tniError: '',
-        tniTimer: null
+        tniTimer: null,
+        tniDir: null
     };
     var idIndex = null;
     var childIndex = null;
@@ -10808,6 +10809,7 @@
         state.floorId = 0;
         state.tniList = null;
         state.tniError = '';
+        state.tniDir = null;
         if (state.tniTimer) {
             clearInterval(state.tniTimer);
             state.tniTimer = null;
@@ -20234,6 +20236,7 @@
         if (!setup || !setup.tniComputer) {
             panel.appendChild(el('p', 'asset-tree-banner', t('tniScanNeedType')));
         }
+        if (state.canEdit) panel.appendChild(renderTniDirectory());
         if (state.canEdit) {
             var form = el('div', 'asset-tree-tni-add');
             var name = document.createElement('input');
@@ -20392,6 +20395,140 @@
             box.appendChild(el('span', null, text));
         });
         return box;
+    }
+
+    function renderTniDirectory() {
+        var box = el('div', 'asset-tree-tni-dir');
+        box.appendChild(el('p', 'asset-tree-nav-label', t('tniDirTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('tniDirHint')));
+        var fields = el('div', 'asset-tree-tni-dir-fields');
+        var host = tniInput('asset-tree-tni-host', t('tniDirHost'));
+        var port = tniInput('asset-tree-tni-port', t('tniDirPort'));
+        port.type = 'number';
+        port.min = '1';
+        port.max = '65535';
+        var account = tniInput('asset-tree-tni-account', t('tniDirAccount'));
+        var base = tniInput('asset-tree-tni-base', t('tniDirBase'));
+        base.className = 'asset-tree-tni-base';
+        var password = tniInput('asset-tree-tni-password', t('tniDirPassword'));
+        password.type = 'password';
+        password.autocomplete = 'new-password';
+        fields.appendChild(host);
+        fields.appendChild(port);
+        fields.appendChild(account);
+        fields.appendChild(base);
+        fields.appendChild(password);
+        box.appendChild(fields);
+        var actions = el('div', 'asset-tree-tni-dir-actions');
+        var sslLabel = el('label', 'asset-tree-tni-ssl');
+        var ssl = document.createElement('input');
+        ssl.type = 'checkbox';
+        ssl.id = 'asset-tree-tni-ssl';
+        sslLabel.appendChild(ssl);
+        sslLabel.appendChild(document.createTextNode(t('tniDirSsl')));
+        actions.appendChild(sslLabel);
+        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn slim', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: ssl.checked,
+                base: base.value,
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    state.tniDir = payload;
+                    if (payload && payload.passwordSet) password.placeholder = t('tniDirPasswordSet');
+                    tniDirNote(t('tniScanDone'));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        actions.appendChild(button(t('tniDirLoad'), 'asset-tree-btn primary', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory/load', {}, function (status, payload) {
+                if (status >= 200 && status < 300) tniDirNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        box.appendChild(actions);
+        var note = el('p', 'asset-tree-hint');
+        note.id = 'asset-tree-tni-dir-note';
+        box.appendChild(note);
+        box.appendChild(el('p', 'asset-tree-nav-label', t('tniSheetTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('tniSheetHint')));
+        var fileRow = el('div', 'asset-tree-tni-dir-actions');
+        var file = document.createElement('input');
+        file.type = 'file';
+        file.accept = '.csv,text/csv';
+        file.id = 'asset-tree-tni-sheet';
+        fileRow.appendChild(file);
+        fileRow.appendChild(button(t('tniSheetLoad'), 'asset-tree-btn slim', function () {
+            var chosen = file.files && file.files[0];
+            if (!chosen) {
+                notify(t('tniSheetPick'));
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () {
+                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory/sheet', {
+                    csv: String(reader.result || '')
+                }, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        file.value = '';
+                        tniDirNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                    } else {
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
+                });
+            };
+            reader.readAsText(chosen);
+        }));
+        box.appendChild(fileRow);
+        if (state.tniDir) fillTniDirectory(state.tniDir);
+        else loadTniDirectory();
+        return box;
+    }
+
+    function tniInput(id, label) {
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.id = id;
+        input.placeholder = label;
+        input.setAttribute('aria-label', label);
+        return input;
+    }
+
+    function tniDirNote(text) {
+        var note = document.getElementById('asset-tree-tni-dir-note');
+        if (note) note.textContent = text || '';
+    }
+
+    function fillTniDirectory(row) {
+        var host = document.getElementById('asset-tree-tni-host');
+        if (!host || host.getAttribute('data-ready') === '1') return;
+        host.value = row.host || '';
+        var port = document.getElementById('asset-tree-tni-port');
+        if (port) port.value = row.port || 389;
+        var account = document.getElementById('asset-tree-tni-account');
+        if (account) account.value = row.account || '';
+        var base = document.getElementById('asset-tree-tni-base');
+        if (base) base.value = row.base || '';
+        var ssl = document.getElementById('asset-tree-tni-ssl');
+        if (ssl) ssl.checked = !!row.ssl;
+        var password = document.getElementById('asset-tree-tni-password');
+        if (password && row.passwordSet) password.placeholder = t('tniDirPasswordSet');
+        host.setAttribute('data-ready', '1');
+    }
+
+    function loadTniDirectory() {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/directory', null, function (status, payload) {
+            if (key !== state.projectKey || state.view !== 'tni' || status !== 200 || !payload) return;
+            state.tniDir = payload;
+            fillTniDirectory(payload);
+        });
     }
 
     function renderReports() {
