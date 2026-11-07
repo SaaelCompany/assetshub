@@ -51,6 +51,7 @@ public final class ModuleSetup {
         setup.setScheduleBoards(boards(values.get("boards")));
         setup.setScheduleOpen(openBoard(values.get("open"), values.get("layer")));
         setup.setFurniture(furniture(values.get("furn")));
+        setup.setGlyphs(glyphs(values.get("syms")));
         setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
         setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
         setup.setTniKeep(Integer.valueOf(TniPolicy.keepDays(number(values.get("tkeep")))));
@@ -96,6 +97,7 @@ public final class ModuleSetup {
         append(stored, "boards", boards(value.getScheduleBoards()));
         append(stored, "open", openBoard(value.getScheduleOpen(), value.getScheduleLayer()));
         append(stored, "furn", furniture(value.getFurniture()));
+        append(stored, "syms", glyphs(value.getGlyphs()));
         append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
         append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
         append(stored, "tkeep", String.valueOf(TniPolicy.keepDays(value.getTniKeep() == null ? 0 : value.getTniKeep().intValue())));
@@ -327,6 +329,7 @@ public final class ModuleSetup {
         merged.setScheduleBoards(incoming.getScheduleBoards() != null ? incoming.getScheduleBoards() : base.getScheduleBoards());
         merged.setScheduleOpen(incoming.getScheduleOpen() != null ? incoming.getScheduleOpen() : base.getScheduleOpen());
         merged.setFurniture(incoming.getFurniture() != null ? incoming.getFurniture() : base.getFurniture());
+        merged.setGlyphs(incoming.getGlyphs() != null ? incoming.getGlyphs() : base.getGlyphs());
         merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
         merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
         merged.setTniKeep(incoming.getTniKeep() != null ? incoming.getTniKeep() : base.getTniKeep());
@@ -632,6 +635,18 @@ public final class ModuleSetup {
             return 0;
         }
         return value > 600 ? 600 : value;
+    }
+
+    /** Symbol library. Delimiters that would break the option row are removed. */
+    private static String glyphs(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        String value = raw.replace(";", "").replace("=", "").replace("\n", "").replace("\r", "").trim();
+        if (value.length() > 24000) {
+            value = value.substring(0, 24000);
+        }
+        return value;
     }
 
     /** id^name^kind,x,y,w,h,color,label,angle!shape|next . Colors are stored without a hash. Angle is optional. */

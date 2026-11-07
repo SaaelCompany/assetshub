@@ -490,6 +490,8 @@
         mapSelection: null,
         mapGroup: [],
         mapStamp: '',
+        mapGlyph: '',
+        mapRoomName: -1,
         mapNaming: false,
         mapEditing: false,
         mapDirty: false,
@@ -20338,6 +20340,7 @@
                 return layer === 'roster' || layer === 'staff' ? 'roster' : 'calendar';
             })(),
             furniture: setup.furniture || '',
+            glyphs: setup.glyphs || '',
             portalMine: !!setup.portalMine,
             tniKeep: clampNum(setup.tniKeep || 90, 1, 3650),
             tniProbeDays: clampNum(setup.tniProbeDays || 3, 1, 30),
@@ -21335,7 +21338,7 @@
     }
 
     function isFurnKind(kind) {
-        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug' || kind === 'png' || kind === 'rack' || kind === 'switch';
+        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug' || kind === 'png' || kind === 'rack' || kind === 'switch' || kind === 'glyph';
     }
 
     function isFigureKind(kind) {
@@ -21936,7 +21939,7 @@
     }
 
     function mapHint() {
-        if (state.mapArmId || state.mapStamp) return t('mapPlaceHint');
+        if (state.mapArmId || state.mapStamp || state.mapGlyph) return t('mapPlaceHint');
         if (state.mapTool === 'pen') return t('mapPenHint');
         if (state.mapTool === 'flow') return state.mapAnchor ? t('mapFlowNext') : t('mapFlowHint');
         if (isFigureKind(state.mapTool)) return t('mapFigureHint');
@@ -22128,6 +22131,7 @@
             rows.push({
                 index: index,
                 name: room.name || t('mapRoom'),
+                color: room.color || '#dbeafe',
                 area: (Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq')
             });
         });
@@ -22136,14 +22140,64 @@
             return block;
         }
         rows.forEach(function (row) {
+            if (state.mapEditing && state.mapRoomName === row.index) {
+                var naming = el('div', 'asset-tree-explic-row is-on');
+                var swatch = el('span', 'asset-tree-room-swatch');
+                swatch.style.background = row.color;
+                naming.appendChild(swatch);
+                var input = document.createElement('input');
+                input.className = 'asset-tree-explic-name';
+                input.value = (rooms[row.index] && rooms[row.index].name) || '';
+                input.setAttribute('aria-label', t('name'));
+                input.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter') input.blur();
+                    if (event.key === 'Escape') {
+                        state.mapRoomName = -1;
+                        renderFrame();
+                    }
+                });
+                input.addEventListener('blur', function () {
+                    if (state.mapRoomName !== row.index || !rooms[row.index]) return;
+                    rememberMap();
+                    rooms[row.index].name = input.value;
+                    state.mapDirty = true;
+                    state.mapRoomName = -1;
+                    renderFrame();
+                });
+                naming.appendChild(input);
+                naming.appendChild(el('span', null, row.area));
+                block.appendChild(naming);
+                setTimeout(function () { if (input.parentNode) { input.focus(); input.select(); } }, 0);
+                return;
+            }
             var line = button('', 'asset-tree-explic-row' + (state.mapSelection === row.index ? ' is-on' : ''), function () {
-                state.mapTool = 'select';
-                state.mapStamp = '';
-                state.mapSelection = row.index;
-                state.mapGroup = [];
-                renderFrame();
+                if (state.mapExplicWait) {
+                    clearTimeout(state.mapExplicWait);
+                    state.mapExplicWait = 0;
+                    if (!state.mapEditing) return;
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    state.mapGlyph = '';
+                    state.mapSelection = row.index;
+                    state.mapGroup = [];
+                    state.mapRoomName = row.index;
+                    renderFrame();
+                    return;
+                }
+                state.mapExplicWait = setTimeout(function () {
+                    state.mapExplicWait = 0;
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    state.mapGlyph = '';
+                    state.mapSelection = row.index;
+                    state.mapGroup = [];
+                    renderFrame();
+                }, 400);
             });
-            line.appendChild(el('span', null, row.name));
+            var dot = el('span', 'asset-tree-room-swatch');
+            dot.style.background = row.color;
+            line.appendChild(dot);
+            line.appendChild(el('span', 'asset-tree-explic-label', row.name));
             line.appendChild(el('span', null, row.area));
             block.appendChild(line);
         });
@@ -22350,13 +22404,691 @@
         return row;
     }
 
-    function planSymbolRow() {
-        var row = el('div', 'asset-tree-thumb-grid is-plan-symbols');
-        ['rack', 'sw', 'desk', 'chair', 'sofa'].forEach(function (id) {
-            var tpl = furnitureById(id);
-            if (tpl) row.appendChild(thumbCard(tpl));
+    function glyphColor(raw, fallback) {
+        var value = String(raw || '').replace('#', '').toLowerCase();
+        if (value === 'none') return 'none';
+        return /^[0-9a-f]{6}$/.test(value) ? '#' + value : (fallback || 'none');
+    }
+
+    function glyphHex(raw, fallback) {
+        var value = String(raw || '').replace('#', '').toLowerCase();
+        return /^[0-9a-f]{6}$/.test(value) ? value : fallback;
+    }
+
+    function glyphText(raw) {
+        return String(raw || '').replace(/[,!^|;=\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24);
+    }
+
+    function glyphNum(raw) {
+        var value = Math.round(Number(raw) || 0);
+        if (value < -4000) return -4000;
+        if (value > 4000) return 4000;
+        return value;
+    }
+
+    function builtinGlyphs() {
+        function box(x, y, w, h, fill, stroke, sw) {
+            return { t: 'r', x: x, y: y, w: w, h: h, fill: fill, stroke: stroke, sw: sw || 1 };
+        }
+        function line(x1, y1, x2, y2, stroke, sw) {
+            return { t: 'l', x1: x1, y1: y1, x2: x2, y2: y2, stroke: stroke, sw: sw || 1 };
+        }
+        function text(x, y, label, fs, fill) {
+            return { t: 't', x: x, y: y, text: label, fs: fs || 8, fill: fill };
+        }
+        var rack = [];
+        rack.push(box(0, 0, 80, 200, 'eef2f7', '2b3440', 2));
+        rack.push(line(8, 4, 8, 196, 'b7c3d0', 1));
+        rack.push(line(72, 4, 72, 196, 'b7c3d0', 1));
+        var unit;
+        for (unit = 1; unit < 20; unit++) rack.push(line(4, unit * 10, 76, unit * 10, 'd3dbe4', 1));
+        function bay(y, ports, fill) {
+            rack.push(box(12, y, 56, 14, '33475e', '1d2a38', 1));
+            var port;
+            for (port = 0; port < ports; port++) rack.push(box(15 + port * 6, y + 4, 4, 7, fill, '1d2a38', 1));
+        }
+        bay(16, 8, '7fd0a0');
+        bay(46, 8, '7fd0a0');
+        bay(76, 8, '7fb2e5');
+        rack.push(box(12, 108, 56, 26, '4b5d72', '22303f', 1));
+        rack.push(box(12, 148, 56, 26, '4b5d72', '22303f', 1));
+        rack.push(box(12, 180, 56, 14, '6b5a3e', '3f3423', 1));
+        rack.push(text(18, 190, 'UPS', 8, 'f0e2c0'));
+        var sw = [box(0, 0, 120, 26, '33475e', '1d2a38', 2)];
+        var port;
+        for (port = 0; port < 16; port++) sw.push(box(5 + port * 7, 8, 4, 10, '7fd0a0', '1d2a38', 1));
+        sw.push(text(6, 6, 'SWITCH', 5, 'cfdae6'));
+        var door = [];
+        var step;
+        for (step = 0; step <= 8; step++) {
+            var angle = Math.PI / 2 * step / 8;
+            door.push({ x: Math.round(90 * (1 - Math.cos(angle))), y: Math.round(90 * (1 - Math.sin(angle))) });
+        }
+        return [
+            { id: 'rack', name: t('mapRack'), w: 80, h: 200, objects: rack },
+            { id: 'switch', name: t('mapSwitch'), w: 120, h: 26, objects: sw },
+            { id: 'desk', name: t('mapTable'), w: 140, h: 70, objects: [
+                box(0, 0, 140, 70, 'e6d9c3', '8a7451', 2),
+                box(10, 12, 46, 46, 'cfd8e0', '5b6b7b', 1),
+                box(92, 26, 36, 18, 'b8c4d0', '5b6b7b', 1)
+            ] },
+            { id: 'chair', name: t('mapChair'), w: 45, h: 45, objects: [
+                box(4, 10, 37, 31, 'dfe7ef', '5b6b7b', 2),
+                box(4, 0, 37, 8, 'b8c4d0', '5b6b7b', 1)
+            ] },
+            { id: 'sofa', name: t('mapSofa'), w: 170, h: 75, objects: [
+                box(0, 0, 170, 75, 'cfe0d8', '4e6b60', 2),
+                box(8, 12, 154, 55, 'bcd6cb', '4e6b60', 1),
+                line(85, 12, 85, 67, '4e6b60', 1)
+            ] },
+            { id: 'door', name: t('mapDoor'), w: 90, h: 90, objects: [
+                { t: 'p', closed: 0, stroke: '8a97a4', sw: 1, points: door },
+                line(0, 0, 0, 90, '2b3440', 3)
+            ] }
+        ];
+    }
+
+    function packGlyphPart(obj) {
+        if (!obj) return '';
+        if (obj.t === 'l') {
+            return ['l', glyphNum(obj.x1), glyphNum(obj.y1), glyphNum(obj.x2), glyphNum(obj.y2), glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1)].join(',');
+        }
+        if (obj.t === 'e') {
+            return ['e', glyphNum(obj.cx), glyphNum(obj.cy), glyphNum(obj.rx), glyphNum(obj.ry), glyphHex(obj.fill, 'none'), glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1)].join(',');
+        }
+        if (obj.t === 't') {
+            var label = glyphText(obj.text);
+            if (!label) return '';
+            return ['t', glyphNum(obj.x), glyphNum(obj.y), glyphNum(obj.fs || 8), glyphHex(obj.fill, '172b4d'), label].join(',');
+        }
+        if (obj.t === 'p') {
+            var pts = (obj.points || []).map(function (point) {
+                return glyphNum(point.x) + 'x' + glyphNum(point.y);
+            }).join('.');
+            if (!pts) return '';
+            return ['p', obj.closed ? 1 : 0, glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1), pts].join(',');
+        }
+        return ['r', glyphNum(obj.x), glyphNum(obj.y), Math.max(1, glyphNum(obj.w)), Math.max(1, glyphNum(obj.h)), glyphHex(obj.fill, 'none'), glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1)].join(',');
+    }
+
+    function parseGlyphPart(raw) {
+        var bits = String(raw || '').split(',');
+        if (bits[0] === 'l' && bits.length >= 7) {
+            return { t: 'l', x1: glyphNum(bits[1]), y1: glyphNum(bits[2]), x2: glyphNum(bits[3]), y2: glyphNum(bits[4]), stroke: glyphColor(bits[5], '#2b3440'), sw: glyphNum(bits[6]) || 1 };
+        }
+        if (bits[0] === 'e' && bits.length >= 8) {
+            return { t: 'e', cx: glyphNum(bits[1]), cy: glyphNum(bits[2]), rx: Math.max(1, glyphNum(bits[3])), ry: Math.max(1, glyphNum(bits[4])), fill: glyphColor(bits[5], 'none'), stroke: glyphColor(bits[6], '#2b3440'), sw: glyphNum(bits[7]) || 1 };
+        }
+        if (bits[0] === 't' && bits.length >= 6) {
+            return { t: 't', x: glyphNum(bits[1]), y: glyphNum(bits[2]), fs: Math.max(4, glyphNum(bits[3])), fill: glyphColor(bits[4], '#172b4d'), text: glyphText(bits.slice(5).join(',')) };
+        }
+        if (bits[0] === 'p' && bits.length >= 5) {
+            var points = [];
+            String(bits.slice(4).join(',')).split('.').forEach(function (pair) {
+                var xy = pair.split('x');
+                if (xy.length < 2) return;
+                points.push({ x: glyphNum(xy[0]), y: glyphNum(xy[1]) });
+            });
+            if (points.length < 2) return null;
+            return { t: 'p', closed: bits[1] === '1' ? 1 : 0, stroke: glyphColor(bits[2], '#2b3440'), sw: glyphNum(bits[3]) || 1, points: points };
+        }
+        if (bits[0] === 'r' && bits.length >= 8) {
+            return { t: 'r', x: glyphNum(bits[1]), y: glyphNum(bits[2]), w: Math.max(1, glyphNum(bits[3])), h: Math.max(1, glyphNum(bits[4])), fill: glyphColor(bits[5], 'none'), stroke: glyphColor(bits[6], '#2b3440'), sw: glyphNum(bits[7]) || 1 };
+        }
+        return null;
+    }
+
+    function parseGlyphs(raw) {
+        var list = [];
+        String(raw || '').split('|').forEach(function (chunk) {
+            if (list.length >= 16 || !chunk) return;
+            var head = chunk.split('^');
+            if (head.length < 5) return;
+            var id = String(head[0] || '').toLowerCase();
+            if (!/^[a-z][a-z0-9]{0,11}$/.test(id)) return;
+            var objects = [];
+            String(head[4] || '').split('!').forEach(function (part) {
+                if (objects.length >= 48) return;
+                var obj = parseGlyphPart(part);
+                if (obj) objects.push(obj);
+            });
+            list.push({
+                id: id,
+                name: glyphText(head[1]) || id,
+                w: Math.max(8, Math.min(800, glyphNum(head[2]) || 100)),
+                h: Math.max(8, Math.min(800, glyphNum(head[3]) || 100)),
+                objects: objects
+            });
         });
-        return row;
+        return list;
+    }
+
+    function packGlyphs(list) {
+        var rows = [];
+        (list || []).forEach(function (glyph) {
+            if (rows.length >= 16 || !glyph) return;
+            var id = String(glyph.id || '').toLowerCase();
+            if (!/^[a-z][a-z0-9]{0,11}$/.test(id)) return;
+            var parts = [];
+            (glyph.objects || []).forEach(function (obj) {
+                if (parts.length >= 48) return;
+                var packed = packGlyphPart(obj);
+                if (packed) parts.push(packed);
+            });
+            rows.push([id, glyphText(glyph.name) || id, Math.max(8, glyphNum(glyph.w) || 100), Math.max(8, glyphNum(glyph.h) || 100), parts.join('!')].join('^'));
+        });
+        var packed = rows.join('|');
+        return packed.length > 24000 ? packed.slice(0, 24000) : packed;
+    }
+
+    function storedGlyphs() {
+        return parseGlyphs(moduleSetup().glyphs);
+    }
+
+    function glyphById(id) {
+        var found = null;
+        storedGlyphs().forEach(function (glyph) { if (glyph.id === id) found = glyph; });
+        if (found) return found;
+        builtinGlyphs().forEach(function (glyph) { if (glyph.id === id) found = glyph; });
+        return found;
+    }
+
+    function glyphLibrary() {
+        var custom = storedGlyphs();
+        var seen = {};
+        var list = [];
+        builtinGlyphs().forEach(function (glyph) {
+            var over = null;
+            custom.forEach(function (item) { if (item.id === glyph.id) over = item; });
+            var chosen = over || glyph;
+            seen[chosen.id] = true;
+            list.push(chosen);
+        });
+        custom.forEach(function (glyph) {
+            if (!seen[glyph.id]) list.push(glyph);
+        });
+        return list;
+    }
+
+    function glyphBuiltinId(id) {
+        var found = false;
+        builtinGlyphs().forEach(function (glyph) { if (glyph.id === id) found = true; });
+        return found;
+    }
+
+    function glyphNode(obj) {
+        var node = svgEl('g');
+        if (!obj) return node;
+        if (obj.t === 'l') {
+            node = svgEl('line');
+            node.setAttribute('x1', String(obj.x1));
+            node.setAttribute('y1', String(obj.y1));
+            node.setAttribute('x2', String(obj.x2));
+            node.setAttribute('y2', String(obj.y2));
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        } else if (obj.t === 'e') {
+            node = svgEl('ellipse');
+            node.setAttribute('cx', String(obj.cx));
+            node.setAttribute('cy', String(obj.cy));
+            node.setAttribute('rx', String(Math.max(1, obj.rx || 1)));
+            node.setAttribute('ry', String(Math.max(1, obj.ry || 1)));
+            node.setAttribute('fill', glyphColor(obj.fill, 'none'));
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        } else if (obj.t === 't') {
+            node = svgEl('text');
+            node.setAttribute('x', String(obj.x));
+            node.setAttribute('y', String(obj.y));
+            node.setAttribute('font-size', String(obj.fs || 8));
+            node.setAttribute('fill', glyphColor(obj.fill, '#172b4d'));
+            node.textContent = obj.text || '';
+        } else if (obj.t === 'p') {
+            node = svgEl(obj.closed ? 'polygon' : 'polyline');
+            node.setAttribute('points', (obj.points || []).map(function (point) {
+                return point.x + ' ' + point.y;
+            }).join(' '));
+            node.setAttribute('fill', obj.closed ? 'rgba(90,150,220,0.12)' : 'none');
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        } else {
+            node = svgEl('rect');
+            node.setAttribute('x', String(obj.x || 0));
+            node.setAttribute('y', String(obj.y || 0));
+            node.setAttribute('width', String(Math.max(1, obj.w || 1)));
+            node.setAttribute('height', String(Math.max(1, obj.h || 1)));
+            node.setAttribute('fill', glyphColor(obj.fill, 'none'));
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        }
+        node.setAttribute('pointer-events', 'none');
+        return node;
+    }
+
+    function paintGlyph(parent, glyph, bw, bh) {
+        if (!glyph) return;
+        var host = svgEl('g');
+        host.setAttribute('transform', 'scale(' + ((bw || glyph.w || 1) / (glyph.w || 1)) + ' ' + ((bh || glyph.h || 1) / (glyph.h || 1)) + ')');
+        (glyph.objects || []).forEach(function (obj) { host.appendChild(glyphNode(obj)); });
+        parent.appendChild(host);
+    }
+
+    function glyphThumb(glyph) {
+        var svg = svgEl('svg');
+        svg.setAttribute('class', 'asset-tree-thumb');
+        svg.setAttribute('viewBox', '-4 -4 ' + ((glyph.w || 40) + 8) + ' ' + ((glyph.h || 40) + 8));
+        svg.appendChild(glyphNode({ t: 'r', x: 0, y: 0, w: glyph.w || 40, h: glyph.h || 40, fill: 'ffffff', stroke: 'dfe1e6', sw: 1 }));
+        paintGlyph(svg, glyph, glyph.w, glyph.h);
+        return svg;
+    }
+
+    function persistGlyphs(list) {
+        var packed = packGlyphs(list);
+        var next = moduleSetup();
+        next.glyphs = packed;
+        var project = currentProject();
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.glyphs = packed;
+        }
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                if (project && payload && payload.setup) {
+                    project.setup = payload.setup;
+                    if (project.setup.glyphs == null) project.setup.glyphs = packed;
+                }
+                notify(t('mapTemplateSaved'));
+            } else notify((payload && payload.message) || t('errorTitle'));
+            if (state.view === 'map') renderFrame();
+        });
+    }
+
+    function nextGlyphId() {
+        var used = {};
+        storedGlyphs().forEach(function (glyph) { used[glyph.id] = true; });
+        var number = 1;
+        while (used['g' + number]) number++;
+        return 'g' + number;
+    }
+
+    function cloneGlyphObjects(objects) {
+        return JSON.parse(JSON.stringify(objects || []));
+    }
+
+    function glyphBBox(obj) {
+        if (!obj) return { x: 0, y: 0, w: 1, h: 1 };
+        if (obj.t === 'l') {
+            var x = Math.min(obj.x1, obj.x2);
+            var y = Math.min(obj.y1, obj.y2);
+            return { x: x, y: y, w: Math.max(1, Math.abs(obj.x2 - obj.x1)), h: Math.max(1, Math.abs(obj.y2 - obj.y1)) };
+        }
+        if (obj.t === 'e') return { x: obj.cx - obj.rx, y: obj.cy - obj.ry, w: obj.rx * 2, h: obj.ry * 2 };
+        if (obj.t === 't') return { x: obj.x, y: obj.y - (obj.fs || 8), w: Math.max(8, String(obj.text || '').length * (obj.fs || 8) * 0.6), h: obj.fs || 8 };
+        if (obj.t === 'p') {
+            var points = obj.points || [];
+            if (!points.length) return { x: 0, y: 0, w: 1, h: 1 };
+            var minX = points[0].x;
+            var minY = points[0].y;
+            var maxX = minX;
+            var maxY = minY;
+            points.forEach(function (point) {
+                minX = Math.min(minX, point.x);
+                minY = Math.min(minY, point.y);
+                maxX = Math.max(maxX, point.x);
+                maxY = Math.max(maxY, point.y);
+            });
+            return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+        }
+        return { x: obj.x || 0, y: obj.y || 0, w: Math.max(1, obj.w || 1), h: Math.max(1, obj.h || 1) };
+    }
+
+    function glyphHit(edit, point) {
+        var objects = edit.objects || [];
+        var i;
+        for (i = objects.length - 1; i >= 0; i--) {
+            var box = glyphBBox(objects[i]);
+            if (point.x >= box.x - 3 && point.x <= box.x + box.w + 3 && point.y >= box.y - 3 && point.y <= box.y + box.h + 3) return i;
+        }
+        return -1;
+    }
+
+    function glyphSnapPoint(svg, event) {
+        var pt = svg.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        var ctm = svg.getScreenCTM();
+        if (!ctm) return { x: 0, y: 0 };
+        var world = pt.matrixTransform(ctm.inverse());
+        return { x: Math.round(world.x / 5) * 5, y: Math.round(world.y / 5) * 5 };
+    }
+
+    function glyphPushUndo() {
+        var edit = state.glyphEdit;
+        if (!edit) return;
+        edit.undo.push(JSON.stringify(edit.objects || []));
+        if (edit.undo.length > 40) edit.undo.shift();
+        edit.redo = [];
+    }
+
+    function closeGlyphEditor() {
+        state.glyphEdit = null;
+        var node = document.getElementById('asset-tree-glyph-editor');
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+    }
+
+    function saveGlyphEditor() {
+        var edit = state.glyphEdit;
+        if (!edit) return;
+        var name = glyphText(edit.name) || t('mapGlyphNew');
+        var list = storedGlyphs().filter(function (glyph) { return glyph.id !== edit.id; });
+        list.push({
+            id: edit.id,
+            name: name,
+            w: Math.max(8, glyphNum(edit.w) || 100),
+            h: Math.max(8, glyphNum(edit.h) || 100),
+            objects: edit.objects || []
+        });
+        closeGlyphEditor();
+        persistGlyphs(list);
+    }
+
+    function openGlyphEditor(glyph) {
+        var source = glyph || { id: nextGlyphId(), name: t('mapGlyphNew'), w: 100, h: 100, objects: [] };
+        state.glyphEdit = {
+            id: source.id,
+            name: source.name || t('mapGlyphNew'),
+            w: source.w || 100,
+            h: source.h || 100,
+            objects: cloneGlyphObjects(source.objects),
+            tool: 'select',
+            sel: -1,
+            pen: null,
+            undo: [],
+            redo: [],
+            clickAt: 0
+        };
+        renderGlyphEditor();
+    }
+
+    function renderGlyphEditor() {
+        var old = document.getElementById('asset-tree-glyph-editor');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+        var edit = state.glyphEdit;
+        if (!edit) return;
+        var back = el('div', 'asset-tree-backdrop');
+        back.id = 'asset-tree-glyph-editor';
+        var box = el('div', 'asset-tree-dialog asset-tree-glyph-dialog');
+        var head = el('div', 'asset-tree-glyph-head');
+        var name = document.createElement('input');
+        name.value = edit.name || '';
+        name.maxLength = 24;
+        name.setAttribute('aria-label', t('name'));
+        name.addEventListener('input', function () { edit.name = name.value; });
+        head.appendChild(name);
+        head.appendChild(button(t('save'), 'asset-tree-btn primary', saveGlyphEditor));
+        head.appendChild(button(t('cancel'), 'asset-tree-btn', closeGlyphEditor));
+        box.appendChild(head);
+        var tools = el('div', 'asset-tree-glyph-tools');
+        [['select', 'mapSelect'], ['pen', 'mapPen'], ['rect', 'mapBox'], ['line', 'mapLine'], ['ellipse', 'mapEllipse'], ['text', 'mapText']].forEach(function (pair) {
+            var on = edit.tool === pair[0];
+            var tool = button(t(pair[1]), 'asset-tree-btn slim' + (on ? ' is-on' : ''), function () {
+                edit.tool = pair[0];
+                if (pair[0] !== 'pen') edit.pen = null;
+                renderGlyphEditor();
+            });
+            tools.appendChild(tool);
+        });
+        tools.appendChild(button(t('mapUndo'), 'asset-tree-btn slim', function () {
+            if (!edit.undo.length) return;
+            edit.redo.push(JSON.stringify(edit.objects || []));
+            edit.objects = JSON.parse(edit.undo.pop());
+            edit.sel = -1;
+            edit.pen = null;
+            renderGlyphEditor();
+        }));
+        function sizeInput(key, label) {
+            var field = el('label', 'asset-tree-glyph-size', label);
+            var input = document.createElement('input');
+            input.type = 'number';
+            input.min = '8';
+            input.max = '800';
+            input.value = String(edit[key] || 100);
+            input.addEventListener('change', function () {
+                edit[key] = Math.max(8, Math.min(800, glyphNum(input.value) || 100));
+                renderGlyphEditor();
+            });
+            field.appendChild(input);
+            tools.appendChild(field);
+        }
+        sizeInput('w', t('mapGlyphW'));
+        sizeInput('h', t('mapGlyphH'));
+        box.appendChild(tools);
+        var frame = el('div', 'asset-tree-glyph-frame');
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '-12 -12 ' + ((edit.w || 100) + 24) + ' ' + ((edit.h || 100) + 24));
+        svg.setAttribute('class', 'asset-tree-glyph-svg');
+        var paper = svgEl('rect');
+        paper.setAttribute('x', '0');
+        paper.setAttribute('y', '0');
+        paper.setAttribute('width', String(edit.w || 100));
+        paper.setAttribute('height', String(edit.h || 100));
+        paper.setAttribute('class', 'asset-tree-glyph-paper');
+        svg.appendChild(paper);
+        (edit.objects || []).forEach(function (obj, index) {
+            svg.appendChild(glyphNode(obj));
+            if (index === edit.sel) {
+                var boxHit = glyphBBox(obj);
+                var mark = svgEl('rect');
+                mark.setAttribute('x', String(boxHit.x - 2));
+                mark.setAttribute('y', String(boxHit.y - 2));
+                mark.setAttribute('width', String(boxHit.w + 4));
+                mark.setAttribute('height', String(boxHit.h + 4));
+                mark.setAttribute('class', 'asset-tree-glyph-select');
+                svg.appendChild(mark);
+            }
+        });
+        if (edit.pen && edit.pen.length) {
+            var preview = svgEl('polyline');
+            preview.setAttribute('points', edit.pen.map(function (point) { return point.x + ' ' + point.y; }).join(' '));
+            preview.setAttribute('class', 'asset-tree-pen is-preview');
+            svg.appendChild(preview);
+        }
+        svg.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            var point = glyphSnapPoint(svg, event);
+            if (edit.tool === 'select') {
+                var hit = glyphHit(edit, point);
+                edit.sel = hit;
+                if (hit < 0) {
+                    renderGlyphEditor();
+                    return;
+                }
+                var origin = cloneGlyphObjects(edit.objects);
+                var start = point;
+                function move(ev) {
+                    var next = glyphSnapPoint(svg, ev);
+                    var dx = next.x - start.x;
+                    var dy = next.y - start.y;
+                    edit.objects = cloneGlyphObjects(origin);
+                    var obj = edit.objects[hit];
+                    if (!obj) return;
+                    if (obj.t === 'l') { obj.x1 += dx; obj.y1 += dy; obj.x2 += dx; obj.y2 += dy; }
+                    else if (obj.t === 'e') { obj.cx += dx; obj.cy += dy; }
+                    else if (obj.t === 't' || obj.t === 'r') { obj.x += dx; obj.y += dy; }
+                    else if (obj.t === 'p') obj.points.forEach(function (p) { p.x += dx; p.y += dy; });
+                    var host = svg.querySelector('.asset-tree-glyph-live');
+                    if (host) host.parentNode.removeChild(host);
+                    var live = glyphNode(obj);
+                    live.setAttribute('class', 'asset-tree-glyph-live');
+                    svg.appendChild(live);
+                }
+                function up() {
+                    window.removeEventListener('mousemove', move);
+                    window.removeEventListener('mouseup', up);
+                    if (JSON.stringify(edit.objects) !== JSON.stringify(origin)) {
+                        edit.undo.push(JSON.stringify(origin));
+                        edit.redo = [];
+                    }
+                    renderGlyphEditor();
+                }
+                window.addEventListener('mousemove', move);
+                window.addEventListener('mouseup', up);
+                return;
+            }
+            if (edit.tool === 'text') {
+                glyphPushUndo();
+                edit.objects.push({ t: 't', x: point.x, y: point.y, text: t('mapTextSample'), fs: 10, fill: '#172b4d' });
+                edit.sel = edit.objects.length - 1;
+                renderGlyphEditor();
+                return;
+            }
+            if (edit.tool === 'pen') {
+                var chain = (edit.pen || []).slice();
+                if (chain.length >= 3 && Math.abs(point.x - chain[0].x) <= 5 && Math.abs(point.y - chain[0].y) <= 5) {
+                    finishGlyphPen(true);
+                    return;
+                }
+                if (chain.length >= 2 && edit.clickAt && (Date.now() - edit.clickAt) < 400) {
+                    finishGlyphPen(false);
+                    return;
+                }
+                chain.push(point);
+                edit.pen = chain;
+                edit.clickAt = Date.now();
+                renderGlyphEditor();
+                return;
+            }
+            var down = point;
+            var live = null;
+            function drag(ev) {
+                var next = glyphSnapPoint(svg, ev);
+                if (live && live.parentNode) live.parentNode.removeChild(live);
+                live = glyphNode(glyphDraft(edit.tool, down, next));
+                svg.appendChild(live);
+            }
+            function done(ev) {
+                window.removeEventListener('mousemove', drag);
+                window.removeEventListener('mouseup', done);
+                var next = glyphSnapPoint(svg, ev);
+                var made = glyphDraft(edit.tool, down, next);
+                if (((made.w || 0) < 4 && (made.h || 0) < 4 && made.t !== 'l') || (made.t === 'l' && made.x1 === made.x2 && made.y1 === made.y2)) {
+                    if (live && live.parentNode) live.parentNode.removeChild(live);
+                    return;
+                }
+                glyphPushUndo();
+                edit.objects.push(made);
+                edit.sel = edit.objects.length - 1;
+                renderGlyphEditor();
+            }
+            window.addEventListener('mousemove', drag);
+            window.addEventListener('mouseup', done);
+        });
+        frame.appendChild(svg);
+        box.appendChild(frame);
+        box.appendChild(el('p', 'asset-tree-catalog-hint', t('mapGlyphHint')));
+        if (edit.sel >= 0 && edit.objects[edit.sel]) {
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('delete'), 'asset-tree-btn', function () {
+                glyphPushUndo();
+                edit.objects.splice(edit.sel, 1);
+                edit.sel = -1;
+                renderGlyphEditor();
+            }));
+            box.appendChild(actions);
+        }
+        back.appendChild(box);
+        back.addEventListener('mousedown', function (event) {
+            if (event.target === back) closeGlyphEditor();
+        });
+        var host = document.getElementById('asset-tree-app');
+        (host || document.body).appendChild(back);
+    }
+
+    function glyphDraft(tool, a, b) {
+        var x = Math.min(a.x, b.x);
+        var y = Math.min(a.y, b.y);
+        var w = Math.abs(b.x - a.x);
+        var h = Math.abs(b.y - a.y);
+        if (tool === 'line') return { t: 'l', x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#2b3440', sw: 2 };
+        if (tool === 'ellipse') return { t: 'e', cx: x + w / 2, cy: y + h / 2, rx: Math.max(1, w / 2), ry: Math.max(1, h / 2), fill: '#5a96dc', stroke: '#2b3440', sw: 2 };
+        return { t: 'r', x: x, y: y, w: Math.max(1, w), h: Math.max(1, h), fill: '#5a96dc', stroke: '#2b3440', sw: 2 };
+    }
+
+    function finishGlyphPen(closed) {
+        var edit = state.glyphEdit;
+        if (!edit || !edit.pen || edit.pen.length < 2) {
+            if (edit) edit.pen = null;
+            renderGlyphEditor();
+            return;
+        }
+        glyphPushUndo();
+        edit.objects.push({ t: 'p', closed: closed ? 1 : 0, stroke: '#2b3440', sw: 2, points: edit.pen.slice() });
+        edit.sel = edit.objects.length - 1;
+        edit.pen = null;
+        renderGlyphEditor();
+    }
+
+    function placeGlyph(floor, x, y) {
+        var glyph = glyphById(state.mapGlyph);
+        if (!glyph) return;
+        var w = glyph.w || 40;
+        var h = glyph.h || 40;
+        if (pushShape(floor, clampRoom({
+            kind: 'glyph',
+            name: glyph.id,
+            angle: 0,
+            x: snapCoord(x) - w / 2,
+            y: snapCoord(y) - h / 2,
+            w: w,
+            h: h
+        }))) state.mapSelection = floor.rooms.length - 1;
+        renderFrame();
+    }
+
+    function planSymbolRow() {
+        var block = el('div', 'asset-tree-glyph-library');
+        block.appendChild(el('h3', null, t('mapGlyphLibrary')));
+        block.appendChild(button(t('mapGlyphNew'), 'asset-tree-btn', function () { openGlyphEditor(null); }));
+        var row = el('div', 'asset-tree-thumb-grid is-plan-symbols');
+        glyphLibrary().forEach(function (glyph) {
+            var on = state.mapGlyph === glyph.id;
+            var card = el('div', 'asset-tree-glyph-card' + (on ? ' is-on' : ''));
+            card.addEventListener('click', function () {
+                if (state.mapGlyph === glyph.id) {
+                    state.mapGlyph = '';
+                    state.mapTool = 'select';
+                } else {
+                    state.mapGlyph = glyph.id;
+                    state.mapTool = 'glyph';
+                    state.mapStamp = '';
+                    state.mapPen = null;
+                    state.mapAnchor = null;
+                }
+                renderFrame();
+            });
+            card.appendChild(glyphThumb(glyph));
+            card.appendChild(el('span', 'asset-tree-thumb-name', glyph.name || glyph.id));
+            var edit = button('\u270e', 'asset-tree-glyph-edit', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                openGlyphEditor(glyphById(glyph.id) || glyph);
+            });
+            edit.title = t('mapGlyphEdit');
+            card.appendChild(edit);
+            if (!glyphBuiltinId(glyph.id) || storedGlyphs().some(function (item) { return item.id === glyph.id; })) {
+                var remove = button('\u00d7', 'asset-tree-glyph-edit is-drop', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    persistGlyphs(storedGlyphs().filter(function (item) { return item.id !== glyph.id; }));
+                });
+                remove.title = t('delete');
+                card.appendChild(remove);
+            }
+            row.appendChild(card);
+        });
+        block.appendChild(row);
+        return block;
     }
 
     function mapCatalog() {
@@ -22742,6 +23474,7 @@
                 state.mapTool = wire ? 'route' : pair[0];
                 state.mapWire = wire;
                 state.mapStamp = '';
+                state.mapGlyph = '';
                 state.mapArmId = 0;
                 if (state.mapTool !== 'pen') state.mapPen = null;
                 state.mapAnchor = null;
@@ -22843,6 +23576,7 @@
             } else {
                 state.mapStamp = tpl.id;
                 state.mapTool = 'stamp';
+                state.mapGlyph = '';
                 state.mapPen = null;
                 state.mapAssetId = 0;
                 state.mapArmId = 0;
@@ -24040,6 +24774,18 @@
         return !!room && (room.kind || 'room') === 'room' && roomPoints(room).length >= 3;
     }
 
+    function polygonPerimeter(points) {
+        var length = 0;
+        var i;
+        for (i = 0; i < points.length; i++) {
+            var next = points[(i + 1) % points.length];
+            var dx = next.x - points[i].x;
+            var dy = next.y - points[i].y;
+            length += Math.sqrt(dx * dx + dy * dy);
+        }
+        return length;
+    }
+
     function polygonArea(points) {
         var area = 0;
         var i;
@@ -24906,6 +25652,12 @@
                     placeStamp(floor, stamped.x, stamped.y);
                     return;
                 }
+                if (state.mapTool === 'glyph' && state.mapGlyph) {
+                    event.preventDefault();
+                    var markedGlyph = svgPoint(svg, event);
+                    placeGlyph(floor, markedGlyph.x, markedGlyph.y);
+                    return;
+                }
                 if (state.mapTool === 'pen') {
                     event.preventDefault();
                     event.stopPropagation();
@@ -25271,8 +26023,8 @@
         if (kindName === 'sofa' || kindName === 'seat' || kindName === 'chair' || kindName === 'bath' || kindName === 'toilet' || kindName === 'bed') {
             rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
         }
-        if (kindName === 'png' || isFigureKind(kindName) || kindName === 'pen') rect.setAttribute('fill', 'transparent');
-        if (isFigureKind(kindName) || kindName === 'pen') rect.setAttribute('stroke', 'transparent');
+        if (kindName === 'png' || isFigureKind(kindName) || kindName === 'pen' || kindName === 'glyph') rect.setAttribute('fill', 'transparent');
+        if (isFigureKind(kindName) || kindName === 'pen' || kindName === 'glyph') rect.setAttribute('stroke', 'transparent');
         if (kindName === 'pen') rect.setAttribute('pointer-events', 'none');
         if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
         if (kindName === 'table' && Math.abs(room.w - room.h) <= Math.max(room.w, room.h) * 0.2) {
@@ -25280,6 +26032,7 @@
         }
         group.appendChild(rect);
         if (kindName === 'pen') penHit = appendPen(group, room, options);
+        if (kindName === 'glyph') paintGlyph(group, glyphById(room.name), room.w, room.h);
         if (isRouteKind(kindName)) {
             var routeEnds = segmentLocalEnds(room);
             if (options && options.selected) {
@@ -25570,7 +26323,7 @@
 
     function decorateRoom(parent, room) {
         var kind = room.kind || 'room';
-        if (kind === 'pen') return;
+        if (kind === 'pen' || kind === 'glyph') return;
         if (kind === 'flow') {
             drawFlow(parent, room);
             return;
@@ -25875,6 +26628,10 @@
         if (room && room.kind === 'png') {
             var stamp = furnitureById(room.name);
             return stamp && stamp.name ? stamp.name : '';
+        }
+        if (room && room.kind === 'glyph') {
+            var glyph = glyphById(room.name);
+            return glyph && glyph.name ? glyph.name : (room.name || '');
         }
         return room && room.name ? room.name : '';
     }
@@ -26239,9 +26996,14 @@
         var block = el('div', 'asset-tree-plan-inspector');
         block.appendChild(el('strong', null, mapSelectionLabel()));
         if (room.kind === 'pen') block.appendChild(el('span', 'asset-tree-plan-label', penLengthText(room)));
+        if (room.kind === 'glyph') {
+            block.appendChild(button(t('mapGlyphEdit'), 'asset-tree-btn slim', function () {
+                openGlyphEditor(glyphById(room.name));
+            }));
+        }
         var name = document.createElement('input');
-        name.value = room.kind === 'png' ? furnitureCaption(room) : (room.name || '');
-        if (room.kind === 'png') name.disabled = true;
+        name.value = (room.kind === 'png' || room.kind === 'glyph') ? furnitureCaption(room) : (room.name || '');
+        if (room.kind === 'png' || room.kind === 'glyph') name.disabled = true;
         name.setAttribute('aria-label', t('name'));
         name.addEventListener('change', function () {
             if ((room.name || '') === name.value) return;
@@ -26355,7 +27117,9 @@
             }
         }
         if (isPolygonRoom(room)) {
-            block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(roomPoints(room))));
+            var face = roomPoints(room);
+            block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(face)));
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapPerimeter') + ' ' + (Math.round(polygonPerimeter(face) / 10) / 10).toFixed(1) + ' ' + t('mapMeter')));
         }
         if (isPolygonRoom(room) || isFigureKind(room.kind)) {
             block.appendChild(el('span', 'asset-tree-plan-label', t('mapPlace')));
@@ -26568,6 +27332,7 @@
         if (kind === 'dim') return t('mapDim');
         if (kind === 'text') return room.name || t('mapText');
         if (kind === 'pen') return room.name || t('mapPen');
+        if (kind === 'glyph') return furnitureCaption(room) || t('mapGlyphLibrary');
         if (kind === 'rack') return room.name || t('mapRack');
         if (kind === 'switch') return room.name || t('mapSwitch');
         return room.name || t('mapRoom');
@@ -29031,6 +29796,48 @@
                 saveDetail();
             }
         }
+        if (state.glyphEdit) {
+            var glyphTag = event.target && event.target.tagName;
+            var glyphField = glyphTag === 'INPUT' || glyphTag === 'TEXTAREA' || glyphTag === 'SELECT';
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                if (state.glyphEdit.pen) {
+                    state.glyphEdit.pen = null;
+                    renderGlyphEditor();
+                } else closeGlyphEditor();
+                return;
+            }
+            if (!glyphField && (event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z')) {
+                event.preventDefault();
+                if (state.glyphEdit.undo.length) {
+                    state.glyphEdit.redo.push(JSON.stringify(state.glyphEdit.objects || []));
+                    state.glyphEdit.objects = JSON.parse(state.glyphEdit.undo.pop());
+                    state.glyphEdit.sel = -1;
+                    renderGlyphEditor();
+                }
+                return;
+            }
+            if (!glyphField && event.key === 'Enter' && state.glyphEdit.pen && state.glyphEdit.pen.length >= 2) {
+                event.preventDefault();
+                finishGlyphPen(false);
+                return;
+            }
+            if (!glyphField && event.key === 'Backspace' && state.glyphEdit.pen && state.glyphEdit.pen.length) {
+                event.preventDefault();
+                state.glyphEdit.pen.pop();
+                if (!state.glyphEdit.pen.length) state.glyphEdit.pen = null;
+                renderGlyphEditor();
+                return;
+            }
+            if (!glyphField && (event.key === 'Delete' || event.key === 'Backspace') && state.glyphEdit.sel >= 0) {
+                event.preventDefault();
+                glyphPushUndo();
+                state.glyphEdit.objects.splice(state.glyphEdit.sel, 1);
+                state.glyphEdit.sel = -1;
+                renderGlyphEditor();
+                return;
+            }
+        }
         if (event.key === 'Escape') {
             closeMapMenu();
             closeColorMenu();
@@ -29072,6 +29879,15 @@
                     state.mapStamp = '';
                     renderFrame();
                     return;
+                }
+                if (event.key === 'F2' && state.mapSelection != null) {
+                    var named = state.mapDraft.rooms && state.mapDraft.rooms[state.mapSelection];
+                    if (named && isPolygonRoom(named)) {
+                        event.preventDefault();
+                        state.mapRoomName = state.mapSelection;
+                        renderFrame();
+                        return;
+                    }
                 }
                 if (state.mapPen && state.mapPen.length && event.key === 'Backspace') {
                     event.preventDefault();
