@@ -5,8 +5,6 @@ import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.model.ProjectModules;
-import com.assetstree.jira.service.AssetBridge;
-import com.assetstree.jira.service.AssetService;
 import com.assetstree.jira.service.JiraServices;
 import com.assetstree.jira.web.PortalLookup;
 import net.java.ao.Query;
@@ -21,7 +19,6 @@ import javax.servlet.ServletOutputStream;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 import javax.servlet.WriteListener;
-import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpServletResponseWrapper;
@@ -101,59 +98,7 @@ public class PortalPageFilter implements Filter {
     }
 
     private static void rememberPortalAsset(HttpServletRequest request) {
-        Integer id = portalAssetId(request);
-        if (id == null) {
-            return;
-        }
-        try {
-            ApplicationUser user = ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser();
-            AssetService service = AssetBridge.service();
-            if (user == null || service == null) {
-                return;
-            }
-            service.rememberPortalAsset(user, id.intValue());
-        } catch (RuntimeException ex) {
-            log.debug("Portal asset was not remembered", ex);
-        }
-    }
-
-    private static Integer portalAssetId(HttpServletRequest request) {
-        String query = request.getQueryString();
-        if (query != null) {
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(?:^|&)asset=(\\d{1,9})").matcher(query);
-            if (matcher.find()) {
-                return positiveId(matcher.group(1));
-            }
-        }
-        Cookie[] cookies = request.getCookies();
-        if (cookies == null) {
-            return null;
-        }
-        for (int i = 0; i < cookies.length; i++) {
-            Cookie cookie = cookies[i];
-            if (cookie != null && "assethub-portal-asset".equals(cookie.getName())) {
-                return positiveId(cookie.getValue());
-            }
-        }
-        return null;
-    }
-
-    private static Integer positiveId(String raw) {
-        if (raw == null || raw.isEmpty() || raw.length() > 9) {
-            return null;
-        }
-        for (int i = 0; i < raw.length(); i++) {
-            char ch = raw.charAt(i);
-            if (ch < '0' || ch > '9') {
-                return null;
-            }
-        }
-        try {
-            int id = Integer.parseInt(raw);
-            return id > 0 ? Integer.valueOf(id) : null;
-        } catch (NumberFormatException ex) {
-            return null;
-        }
+        PortalIntake.keep(request);
     }
 
     private static byte[] boot(HttpServletRequest request) {

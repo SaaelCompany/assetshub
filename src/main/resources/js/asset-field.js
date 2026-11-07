@@ -3,6 +3,86 @@
     if (window.__assetTreeFieldBoot) return;
     window.__assetTreeFieldBoot = true;
 
+    function cookieAssetId() {
+        var parts = (document.cookie || '').split(';');
+        var prefix = 'assethub-portal-asset=';
+        for (var i = 0; i < parts.length; i++) {
+            var piece = parts[i].replace(/^\s+/, '');
+            if (piece.indexOf(prefix) !== 0) continue;
+            var value = piece.substring(prefix.length);
+            try { value = decodeURIComponent(value); } catch (error) { value = ''; }
+            if (/^\d+$/.test(value)) return value;
+        }
+        return '';
+    }
+
+    function carriedAssetId() {
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) {
+                var stored = JSON.parse(raw);
+                if (stored && stored.id && /^\d+$/.test(String(stored.id))) return String(stored.id);
+            }
+        } catch (error) {}
+        return cookieAssetId();
+    }
+
+    function carryAssetHeader(url) {
+        var text = url == null ? '' : String(url);
+        if (!text || text.toLowerCase().indexOf('servicedesk') < 0) return '';
+        return carriedAssetId();
+    }
+
+    function installPortalCarry() {
+        if (installPortalCarry.done || !window.XMLHttpRequest) return;
+        installPortalCarry.done = true;
+        var nativeOpen = XMLHttpRequest.prototype.open;
+        var nativeSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            this._assetHubUrl = url;
+            return nativeOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function () {
+            try {
+                var id = carryAssetHeader(this._assetHubUrl);
+                if (id) this.setRequestHeader('X-AssetHub-Asset', id);
+            } catch (error) {}
+            return nativeSend.apply(this, arguments);
+        };
+        if (window.fetch && window.Headers) {
+            var nativeFetch = window.fetch;
+            window.fetch = function (input, init) {
+                var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+                var id = carryAssetHeader(url);
+                if (!id) return nativeFetch.apply(this, arguments);
+                try {
+                    var next = {};
+                    if (init) {
+                        for (var key in init) {
+                            if (Object.prototype.hasOwnProperty.call(init, key)) next[key] = init[key];
+                        }
+                    }
+                    var headers = new Headers(next.headers || (typeof input !== 'string' && input && input.headers));
+                    headers.set('X-AssetHub-Asset', id);
+                    next.headers = headers;
+                    return nativeFetch.call(this, input, next);
+                } catch (error) {
+                    return nativeFetch.apply(this, arguments);
+                }
+            };
+        }
+        if (window.history && history.pushState) {
+            var nativePush = history.pushState;
+            history.pushState = function () {
+                var result = nativePush.apply(this, arguments);
+                setTimeout(claimPortalRequest, 50);
+                return result;
+            };
+            window.addEventListener('popstate', function () { setTimeout(claimPortalRequest, 50); });
+        }
+    }
+    installPortalCarry();
+
     function contextPath() {
         if (window.AJS && typeof AJS.contextPath === 'function') return AJS.contextPath();
         var meta = document.querySelector('meta[name="ajs-context-path"]');
@@ -1901,7 +1981,7 @@
                 objectKey: card.objectKey || ''
             }));
         } catch (error) {}
-        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200';
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200; SameSite=Lax';
         try {
             var hold = new XMLHttpRequest();
             hold.open('POST', contextPath() + '/rest/asset-tree/1.0/portal/assets/' + encodeURIComponent(id) + '/intent', false);
@@ -1934,7 +2014,7 @@
         } catch (error) {
             stored = null;
         }
-        var id = stored && stored.id ? String(stored.id) : '';
+        var id = stored && stored.id ? String(stored.id) : cookieAssetId();
         if (!/^\d+$/.test(id)) return;
         claimPortalRequest.busy = true;
         sendJson('POST', '/portal/assets/' + id + '/requests/' + encodeURIComponent(key), {}, function (status) {
@@ -1947,7 +2027,7 @@
             }
             if (status === 0) return;
             claimPortalRequest.tries = (claimPortalRequest.tries || 0) + 1;
-            if (claimPortalRequest.tries > 8) claimPortalRequest.done = true;
+            if (claimPortalRequest.tries > 40) claimPortalRequest.done = true;
         });
     }
 
@@ -1955,7 +2035,7 @@
         var id = presetAssetId();
         if (!id || rememberPortalAsset.sent === id) return;
         rememberPortalAsset.sent = id;
-        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200';
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200; SameSite=Lax';
         sendJson('POST', '/portal/assets/' + id + '/intent', {}, function (status) {
             if (status === 0 || status >= 500) rememberPortalAsset.sent = '';
         });
@@ -1972,7 +2052,7 @@
         }
         var urlMatch = /(?:\?|&)asset=(\d+)/.exec(location.search || '');
         var urlId = urlMatch ? urlMatch[1] : '';
-        var id = urlId || (stored && stored.id ? String(stored.id) : '');
+        var id = urlId || (stored && stored.id ? String(stored.id) : '') || cookieAssetId();
         if (!id || !/^\d+$/.test(id)) return '';
         var project = projectFromPage();
         if (!urlId && stored && stored.projectKey && project && stored.projectKey !== project) return '';
@@ -2158,8 +2238,26 @@
         existing.appendChild(renderMine(data));
     }
 
+    function stampPortalForms() {
+        var id = presetAssetId() || cookieAssetId();
+        if (!id) return;
+        var forms = document.getElementsByTagName('form');
+        for (var i = 0; i < forms.length; i++) {
+            var form = forms[i];
+            var field = form.querySelector('input[name="assethubAsset"]');
+            if (!field) {
+                field = document.createElement('input');
+                field.type = 'hidden';
+                field.name = 'assethubAsset';
+                form.appendChild(field);
+            }
+            field.value = id;
+        }
+    }
+
     function boot() {
         rememberPortalAsset();
+        stampPortalForms();
         claimPortalRequest();
         var pickers = document.querySelectorAll('.asset-tree-picker');
         for (var i = 0; i < pickers.length; i++) mount(pickers[i]);

@@ -1,5 +1,7 @@
 package com.assetstree.jira.servlet;
 
+import com.assetstree.jira.model.PortalAssetHold;
+
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -25,9 +27,16 @@ public class TniSightFilter implements Filter {
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
-        if (request instanceof HttpServletRequest) {
-            TniIntake.keep((HttpServletRequest) request);
+        PortalAssetHold.enter();
+        try {
+            if (request instanceof HttpServletRequest) {
+                HttpServletRequest http = (HttpServletRequest) request;
+                TniIntake.keep(http);
+                PortalIntake.keep(http);
+            }
+            chain.doFilter(request, response);
+        } finally {
+            PortalAssetHold.leave();
         }
-        chain.doFilter(request, response);
     }
 }

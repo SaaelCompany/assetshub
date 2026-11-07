@@ -102,6 +102,7 @@ import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.model.PortalAssetHold;
+import com.assetstree.jira.model.PortalAssetMark;
 import com.assetstree.jira.model.ProjectModules;
 import com.assetstree.jira.model.ViewColumns;
 import com.assetstree.jira.dto.AssetListDto;
@@ -1114,8 +1115,9 @@ public class AssetServiceImpl implements AssetService {
             throw requestFailure(created.getFailureKey(), created.getFailureArg());
         }
         if (created.getIssue() != null) {
-            attachPortalIssue(user, created.getIssue(), assetId);
+            attachPortalIssue(user, created.getIssue(), assetId, true);
             writeAssetField(user, created.getIssue(), assetId);
+            settlePortalAsset(user, assetId);
         }
         PortalRequestCreatedDto dto = new PortalRequestCreatedDto();
         dto.setKey(created.getKey());
@@ -1140,24 +1142,42 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
         AssetEntity asset = requireAsset(assetId);
-        if (!ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
-            throw new AssetException(400, "asset-tree.error.project.mismatch");
+        if (asset.getProjectKey() != null && !ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+            log.info("Linking portal asset {} to {} in another project", Integer.valueOf(assetId), issue.getKey());
         }
         Integer chosen = chosenAssetId(issue);
         int target = chosen == null ? assetId : chosen.intValue();
         if (chosen == null) {
             writeAssetField(user, issue, assetId);
         }
-        attachPortalIssue(user, issue, target);
+        if (attachPortalIssue(user, issue, target, true)) {
+            settlePortalAsset(user, assetId);
+            settlePortalAsset(issue.getReporter(), assetId);
+        }
     }
 
     @Override
     public void rememberPortalAsset(ApplicationUser user, int assetId) {
         requirePortalAsset(user, assetId);
-        if (user.getKey() == null) {
-            return;
+        keepPortal(user, assetId);
+        storePortalPending(user, assetId);
+    }
+
+    @Override
+    public boolean portalAssetSettled(ApplicationUser user, int assetId) {
+        if (user == null || assetId <= 0) {
+            return false;
         }
-        PortalAssetHold.keep(user.getKey(), assetId);
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null || !set.exists(PortalAssetMark.DONE)) {
+                return false;
+            }
+            Integer done = PortalAssetMark.parseId(set.getString(PortalAssetMark.DONE));
+            return done != null && done.intValue() == assetId;
+        } catch (RuntimeException ex) {
+            return false;
+        }
     }
 
     @Override
@@ -1166,18 +1186,19 @@ public class AssetServiceImpl implements AssetService {
             return;
         }
         ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : issue.getCreator();
-        String owner = reporter != null && reporter.getKey() != null
-                ? reporter.getKey()
-                : (user == null ? null : user.getKey());
-        if (owner == null) {
-            return;
+        Integer carried = PortalAssetHold.requestAsset();
+        Integer pending = carried;
+        if (pending == null) {
+            pending = peekPortal(reporter);
         }
-        Integer pending = PortalAssetHold.peek(owner);
-        if (pending == null && user != null && user.getKey() != null && !user.getKey().equals(owner)) {
-            pending = PortalAssetHold.peek(user.getKey());
-            if (pending != null) {
-                owner = user.getKey();
-            }
+        if (pending == null) {
+            pending = peekPortal(user);
+        }
+        if (pending == null) {
+            pending = readPortalPending(reporter);
+        }
+        if (pending == null) {
+            pending = readPortalPending(user);
         }
         if (pending == null || pending.intValue() <= 0) {
             return;
@@ -1186,30 +1207,45 @@ public class AssetServiceImpl implements AssetService {
         try {
             asset = requireAsset(pending.intValue());
         } catch (RuntimeException ex) {
-            PortalAssetHold.take(owner);
+            log.warn("Portal asset {} was not linked to {}", pending, issue.getKey(), ex);
             return;
         }
         if (isLocation(asset) || asset.getProjectKey() == null) {
-            PortalAssetHold.take(owner);
+            settlePortalAsset(reporter, pending.intValue());
+            settlePortalAsset(user, pending.intValue());
             return;
         }
         if (!moduleOn(asset.getProjectKey(), ProjectModules.PORTAL)) {
             return;
         }
-        if (!ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
-            log.debug("Portal asset {} stays unlinked: request {} is in another project", pending, issue.getKey());
+        boolean onThisRequest = carried != null && carried.intValue() == pending.intValue();
+        if (!onThisRequest && !portalCustomer(reporter, user, pending.intValue())) {
+            log.warn("Portal asset {} was not linked to {}: the customer is not on this asset", pending, issue.getKey());
+            settlePortalAsset(reporter, pending.intValue());
+            settlePortalAsset(user, pending.intValue());
             return;
+        }
+        if (!ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+            log.info("Linking portal asset {} to {} in another project", pending, issue.getKey());
         }
         Integer chosen = chosenAssetId(issue);
         int target = chosen == null ? pending.intValue() : chosen.intValue();
         ApplicationUser actor = user != null ? user : reporter;
-        boolean linked = attachPortalIssue(actor, issue, target);
+        boolean linked = attachPortalIssue(actor, issue, target, true);
         if (chosen == null) {
             writeAssetField(actor, issue, target);
         }
         if (linked) {
-            PortalAssetHold.take(owner);
+            settlePortalAsset(reporter, pending.intValue());
+            settlePortalAsset(user, pending.intValue());
         }
+    }
+
+    private boolean portalCustomer(ApplicationUser reporter, ApplicationUser actor, int assetId) {
+        if (reporter != null && portalParticipant(reporter, assetId)) {
+            return true;
+        }
+        return actor != null && actor != reporter && portalParticipant(actor, assetId);
     }
 
     private boolean raisedBy(ApplicationUser user, Issue issue) {
@@ -1225,11 +1261,111 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private boolean freshRequest(Issue issue) {
-        if (issue == null || issue.getCreated() == null) {
+        if (issue == null) {
             return false;
         }
-        long age = System.currentTimeMillis() - issue.getCreated().getTime();
-        return age >= 0 && age <= 2L * 60L * 60L * 1000L;
+        Long created = issue.getCreated() == null ? null : Long.valueOf(issue.getCreated().getTime());
+        return PortalAssetMark.fresh(created, System.currentTimeMillis());
+    }
+
+    private void keepPortal(ApplicationUser user, int assetId) {
+        if (user == null || assetId <= 0) {
+            return;
+        }
+        if (user.getKey() != null) {
+            PortalAssetHold.keep(user.getKey(), assetId);
+        }
+        if (user.getName() != null) {
+            PortalAssetHold.keep(user.getName(), assetId);
+        }
+    }
+
+    private Integer peekPortal(ApplicationUser user) {
+        if (user == null) {
+            return null;
+        }
+        Integer id = PortalAssetHold.peek(user.getKey());
+        if (id == null) {
+            id = PortalAssetHold.peek(user.getName());
+        }
+        return id;
+    }
+
+    private void takePortal(ApplicationUser user) {
+        if (user == null) {
+            return;
+        }
+        PortalAssetHold.take(user.getKey());
+        PortalAssetHold.take(user.getName());
+    }
+
+    private PropertySet portalProperties(ApplicationUser user) {
+        if (user == null) {
+            return null;
+        }
+        UserPropertyManager manager = userProperties();
+        if (manager == null) {
+            return null;
+        }
+        return manager.getPropertySet(user);
+    }
+
+    private void storePortalPending(ApplicationUser user, int assetId) {
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (set.exists(PortalAssetMark.PROPERTY)) {
+                Integer current = PortalAssetMark.pendingId(set.getString(PortalAssetMark.PROPERTY), now);
+                if (current != null && current.intValue() == assetId) {
+                    clearPortalDone(set);
+                    return;
+                }
+            }
+            set.setString(PortalAssetMark.PROPERTY, PortalAssetMark.pendingValue(assetId, now));
+            clearPortalDone(set);
+        } catch (RuntimeException ex) {
+            log.warn("Could not store the portal asset for {}", user == null ? "" : user.getKey(), ex);
+        }
+    }
+
+    private Integer readPortalPending(ApplicationUser user) {
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null || !set.exists(PortalAssetMark.PROPERTY)) {
+                return null;
+            }
+            return PortalAssetMark.pendingId(set.getString(PortalAssetMark.PROPERTY), System.currentTimeMillis());
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private void clearPortalDone(PropertySet set) {
+        if (set != null && set.exists(PortalAssetMark.DONE)) {
+            set.remove(PortalAssetMark.DONE);
+        }
+    }
+
+    private void settlePortalAsset(ApplicationUser user, int assetId) {
+        takePortal(user);
+        if (user == null || assetId <= 0) {
+            return;
+        }
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null) {
+                return;
+            }
+            if (set.exists(PortalAssetMark.PROPERTY)) {
+                set.remove(PortalAssetMark.PROPERTY);
+            }
+            set.setString(PortalAssetMark.DONE, String.valueOf(assetId));
+        } catch (RuntimeException ex) {
+            log.warn("Could not finish the portal asset for {}", user.getKey(), ex);
+        }
     }
 
     private Integer chosenAssetId(Issue issue) {
@@ -1325,7 +1461,7 @@ public class AssetServiceImpl implements AssetService {
         return new AssetException(400, key, arg);
     }
 
-    private boolean attachPortalIssue(ApplicationUser user, Issue issue, final int assetId) {
+    private boolean attachPortalIssue(ApplicationUser user, Issue issue, final int assetId, final boolean portalIntent) {
         if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
             return false;
         }
@@ -1336,7 +1472,7 @@ public class AssetServiceImpl implements AssetService {
                 @Override
                 public Boolean doInTransaction() {
                     AssetEntity asset = requireAsset(assetId);
-                    if (!ProjectKeys.same(asset.getProjectKey(), projectKey)) {
+                    if (!portalIntent && !ProjectKeys.same(asset.getProjectKey(), projectKey)) {
                         throw new AssetException(400, "asset-tree.error.project.mismatch");
                     }
                     AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
@@ -1357,7 +1493,7 @@ public class AssetServiceImpl implements AssetService {
             return created != null;
         } catch (AssetException ex) {
             if (ex.getStatus() != 409) {
-                log.warn("Could not attach asset {} to {}", assetId, issue.getKey());
+                log.warn("Could not attach asset {} to {}", assetId, issue.getKey(), ex);
             }
         } catch (RuntimeException ex) {
             log.warn("Could not attach asset {} to {}", assetId, issue.getKey(), ex);

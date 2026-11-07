@@ -10,8 +10,36 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class PortalAssetHold {
     private static final long KEPT_MS = 2L * 60L * 60L * 1000L;
     private static final ConcurrentHashMap<String, Held> RECENT = new ConcurrentHashMap<String, Held>();
+    private static final ThreadLocal<Integer> DEPTH = new ThreadLocal<Integer>();
+    private static final ThreadLocal<Integer> REQUEST = new ThreadLocal<Integer>();
 
     private PortalAssetHold() {
+    }
+
+    /** One request can be forwarded. The asset stays until the outer filter returns. */
+    public static void enter() {
+        Integer depth = DEPTH.get();
+        DEPTH.set(depth == null ? Integer.valueOf(1) : Integer.valueOf(depth.intValue() + 1));
+    }
+
+    public static void leave() {
+        Integer depth = DEPTH.get();
+        if (depth == null || depth.intValue() <= 1) {
+            DEPTH.remove();
+            REQUEST.remove();
+            return;
+        }
+        DEPTH.set(Integer.valueOf(depth.intValue() - 1));
+    }
+
+    public static void bindRequest(int assetId) {
+        if (assetId > 0) {
+            REQUEST.set(Integer.valueOf(assetId));
+        }
+    }
+
+    public static Integer requestAsset() {
+        return REQUEST.get();
     }
 
     public static void keep(String userKey, int assetId) {

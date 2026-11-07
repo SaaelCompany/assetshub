@@ -251,6 +251,9 @@ public interface AssetService {
     /** Remembers the equipment chosen in the profile until the portal creates the request. */
     void rememberPortalAsset(ApplicationUser user, int assetId);
 
+    /** True when this asset was already attached to the request opened from the profile. */
+    boolean portalAssetSettled(ApplicationUser user, int assetId);
+
     /** Links that equipment to a request the same customer just raised, even when the request type has no asset field. */
     void attachPortalAsset(ApplicationUser user, Issue issue);
 
