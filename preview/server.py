@@ -1479,7 +1479,7 @@ def directory_dto(project_key):
         "ssl": bool(row.get("ssl")),
         "base": row.get("base") or "",
         "account": row.get("account") or "",
-        "passwordSet": bool(row.get("secret")),
+        "passwordSet": False,
         "note": "",
         "finished": 0,
     }
@@ -1524,31 +1524,33 @@ def save_directory(project_key, body, text):
     host = str(body.get("host") or "").strip()
     base = str(body.get("base") or "").strip()
     account = str(body.get("account") or "").strip()
-    password = str(body.get("password") or "")
     if not host or any(ch in host for ch in " /\\"):
         return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
     if "=" not in base or len(base) < 3:
         return 400, {"message": text.get("asset-tree.error.tni.base", "Base")}
-    row = directory_row(project_key) or {}
-    if not account or (not password and not row.get("secret")):
+    if not account:
         return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
     port = int(body.get("port") or 0)
     ssl = bool(body.get("ssl"))
     if port <= 0:
         port = 636 if ssl else 389
     saved = {
-        "host": host, "port": port, "ssl": ssl, "base": base, "account": account,
-        "secret": password or row.get("secret") or "",
+        "host": host, "port": port, "ssl": ssl, "base": base, "account": account, "secret": "",
     }
     STATE.setdefault("directory", {})[project_key] = saved
     return 200, directory_dto(project_key)
 
 
-def load_directory(project_key, text):
-    row = directory_row(project_key) or {}
-    if not row.get("secret"):
+def load_directory(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or not account or not password:
         return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
-    host = row.get("host") or "dc"
+    row = directory_row(project_key)
+    if row is not None:
+        row["secret"] = ""
     computers = [
         {"key": "ad:preview-1", "name": host.split(".")[0] + "-1", "detail": "Windows 10 · " + host},
         {"key": "ad:preview-2", "name": host.split(".")[0] + "-2", "detail": "Windows 11 · " + host},
@@ -1568,7 +1570,7 @@ def sccm_dto(project_key):
         "ssl": bool(row.get("ssl")),
         "base": "",
         "account": row.get("account") or "",
-        "passwordSet": bool(row.get("secret")),
+        "passwordSet": False,
         "note": "",
         "finished": 0,
     }
@@ -1578,28 +1580,30 @@ def save_sccm(project_key, body, text):
     body = body or {}
     host = str(body.get("host") or "").strip()
     account = str(body.get("account") or "").strip()
-    password = str(body.get("password") or "")
     if not host or any(ch in host for ch in " /\\"):
         return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
-    row = sccm_row(project_key) or {}
-    if not account or (not password and not row.get("secret")):
+    if not account:
         return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
     port = int(body.get("port") or 0)
     if port <= 0:
         port = 443
     saved = {
-        "host": host, "port": port, "ssl": bool(body.get("ssl")), "account": account,
-        "secret": password or row.get("secret") or "",
+        "host": host, "port": port, "ssl": bool(body.get("ssl")), "account": account, "secret": "",
     }
     STATE.setdefault("sccm", {})[project_key] = saved
     return 200, sccm_dto(project_key)
 
 
-def load_sccm(project_key, text):
-    row = sccm_row(project_key) or {}
-    if not row.get("secret"):
+def load_sccm(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or not account or not password:
         return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
-    host = row.get("host") or "sccm"
+    row = sccm_row(project_key)
+    if row is not None:
+        row["secret"] = ""
     computers = [
         {"key": "sccm:501", "name": host.split(".")[0] + "-501", "detail": "Windows 10 · " + host},
         {"key": "sccm:502", "name": host.split(".")[0] + "-502", "detail": "Windows 11 · " + host},
@@ -8687,7 +8691,7 @@ setTimeout(function () {
             blocked = reject_module(project_key, "tni", text)
             if blocked:
                 return blocked
-            return load_sccm(project_key, text)
+            return load_sccm(project_key, self.read_json(), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/sccm", path)
         if match:
             project_key = match.group(1)
@@ -8704,7 +8708,7 @@ setTimeout(function () {
             blocked = reject_module(project_key, "tni", text)
             if blocked:
                 return blocked
-            return load_directory(project_key, text)
+            return load_directory(project_key, self.read_json(), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/sheet", path)
         if match and method == "POST":
             project_key = match.group(1)

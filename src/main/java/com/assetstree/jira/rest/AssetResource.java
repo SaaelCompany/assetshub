@@ -1661,11 +1661,11 @@ public class AssetResource {
 
     @POST
     @Path("projects/{projectKey}/directory/load")
-    public Response loadTniDirectory(@PathParam("projectKey") final String projectKey) {
+    public Response loadTniDirectory(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.loadTniDirectory(user(), projectKey)).build();
+                return Response.ok(assetService.loadTniDirectory(user(), projectKey, draft)).build();
             }
         });
     }
@@ -1694,11 +1694,11 @@ public class AssetResource {
 
     @POST
     @Path("projects/{projectKey}/sccm/load")
-    public Response loadTniSccm(@PathParam("projectKey") final String projectKey) {
+    public Response loadTniSccm(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.loadTniSccm(user(), projectKey)).build();
+                return Response.ok(assetService.loadTniSccm(user(), projectKey, draft)).build();
             }
         });
     }

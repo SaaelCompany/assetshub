@@ -6,7 +6,7 @@ import net.java.ao.schema.NotNull;
 import net.java.ao.schema.StringLength;
 import net.java.ao.schema.Table;
 
-/** A saved Active Directory connection. The password is write-only. */
+/** A saved directory connection. The password column stays empty: a load carries the password and does not keep it. */
 @Table("AST_TNI_SRC")
 public interface TniSourceEntity extends Entity {
     @NotNull

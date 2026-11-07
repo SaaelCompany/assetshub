@@ -20435,12 +20435,10 @@
                 ssl: ssl.checked,
                 base: base.value,
                 account: account.value,
-                password: password.value
+                password: ''
             }, function (status, payload) {
                 if (status >= 200 && status < 300) {
-                    password.value = '';
                     state.tniDir = payload;
-                    if (payload && payload.passwordSet) password.placeholder = t('tniDirPasswordSet');
                     tniDirNote(t('tniScanDone'));
                 } else {
                     notify((payload && payload.message) || t('errorTitle'));
@@ -20448,9 +20446,20 @@
             });
         }));
         actions.appendChild(button(t('tniDirLoad'), 'asset-tree-btn primary', function () {
-            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory/load', {}, function (status, payload) {
-                if (status >= 200 && status < 300) tniDirNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
-                else notify((payload && payload.message) || t('errorTitle'));
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory/load', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: ssl.checked,
+                base: base.value,
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    tniDirNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
             });
         }));
         box.appendChild(actions);
@@ -20479,8 +20488,6 @@
         if (base) base.value = row.base || '';
         var ssl = document.getElementById('asset-tree-tni-ssl');
         if (ssl) ssl.checked = !!row.ssl;
-        var password = document.getElementById('asset-tree-tni-password');
-        if (password && row.passwordSet) password.placeholder = t('tniDirPasswordSet');
         host.setAttribute('data-ready', '1');
     }
 
@@ -20536,12 +20543,10 @@
                 ssl: trust.checked,
                 base: '',
                 account: account.value,
-                password: password.value
+                password: ''
             }, function (status, payload) {
                 if (status >= 200 && status < 300) {
-                    password.value = '';
                     state.tniSccm = payload;
-                    if (payload && payload.passwordSet) password.placeholder = t('tniDirPasswordSet');
                     tniSccmNote(t('tniScanDone'));
                 } else {
                     notify((payload && payload.message) || t('errorTitle'));
@@ -20549,9 +20554,20 @@
             });
         }));
         actions.appendChild(button(t('tniSccmLoad'), 'asset-tree-btn primary', function () {
-            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm/load', {}, function (status, payload) {
-                if (status >= 200 && status < 300) tniSccmNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
-                else notify((payload && payload.message) || t('errorTitle'));
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm/load', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: trust.checked,
+                base: '',
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    tniSccmNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
             });
         }));
         box.appendChild(actions);
@@ -20578,8 +20594,6 @@
         if (account) account.value = row.account || '';
         var trust = document.getElementById('asset-tree-tni-sccm-trust');
         if (trust) trust.checked = !!row.ssl;
-        var password = document.getElementById('asset-tree-tni-sccm-password');
-        if (password && row.passwordSet) password.placeholder = t('tniDirPasswordSet');
         host.setAttribute('data-ready', '1');
     }
 

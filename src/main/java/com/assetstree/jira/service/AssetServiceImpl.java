@@ -13239,7 +13239,14 @@ public class AssetServiceImpl implements AssetService {
     public TniSourceDto tniDirectory(ApplicationUser user, String projectKey) {
         Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
-        return tniSourceDto(tniSourceRow(project.getKey(), "ad"), 389);
+        return ao().executeInTransaction(new TransactionCallback<TniSourceDto>() {
+            @Override
+            public TniSourceDto doInTransaction() {
+                TniSourceEntity row = tniSourceRow(project.getKey(), "ad");
+                forgetTniSecret(row);
+                return tniSourceDto(row, 389);
+            }
+        });
     }
 
     @Override
@@ -13254,15 +13261,11 @@ public class AssetServiceImpl implements AssetService {
         final int port = TniDirectory.port(draft.getPort(), ssl);
         final String base = TniDirectory.base(draft.getBase());
         final String account = TniDirectory.account(draft.getAccount());
-        final String password = TniDirectory.password(draft.getPassword());
         return ao().executeInTransaction(new TransactionCallback<TniSourceDto>() {
             @Override
             public TniSourceDto doInTransaction() {
                 TniSourceEntity row = tniSourceRow(project.getKey(), "ad");
                 if (row == null) {
-                    if (password.isEmpty()) {
-                        throw new AssetException(400, TniDirectory.ACCOUNT);
-                    }
                     row = ao().create(TniSourceEntity.class,
                             new DBParam("PROJECT_KEY", project.getKey()),
                             new DBParam("KIND", "ad"),
@@ -13271,7 +13274,7 @@ public class AssetServiceImpl implements AssetService {
                             new DBParam("SSL", Boolean.valueOf(ssl)),
                             new DBParam("BASE", base),
                             new DBParam("ACCOUNT", account),
-                            new DBParam("SECRET", password),
+                            new DBParam("SECRET", ""),
                             new DBParam("NOTE", ""),
                             new DBParam("FINISHED", Long.valueOf(0L)));
                     return tniSourceDto(row, 389);
@@ -13281,11 +13284,7 @@ public class AssetServiceImpl implements AssetService {
                 row.setSsl(ssl);
                 row.setBase(base);
                 row.setAccount(account);
-                if (!password.isEmpty()) {
-                    row.setSecret(password);
-                } else if (row.getSecret() == null || row.getSecret().isEmpty()) {
-                    throw new AssetException(400, TniDirectory.ACCOUNT);
-                }
+                row.setSecret("");
                 row.save();
                 return tniSourceDto(row, 389);
             }
@@ -13293,16 +13292,24 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey) {
+    public ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft) {
         Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         String typeKey = tniComputerType(project.getKey());
-        TniSourceEntity row = tniSourceRow(project.getKey(), "ad");
-        if (row == null || row.getSecret() == null || row.getSecret().isEmpty()) {
+        if (draft == null) {
             throw new AssetException(400, TniDirectory.ACCOUNT);
         }
-        List<TniComputer> computers = TniLdap.read(row.getHost(), row.getPort(), row.getSsl(),
-                row.getBase(), row.getAccount(), row.getSecret());
+        String host = TniDirectory.host(draft.getHost());
+        boolean ssl = Boolean.TRUE.equals(draft.getSsl());
+        int port = TniDirectory.port(draft.getPort(), ssl);
+        String base = TniDirectory.base(draft.getBase());
+        String account = TniDirectory.account(draft.getAccount());
+        String password = TniDirectory.password(draft.getPassword());
+        if (password.isEmpty()) {
+            throw new AssetException(400, TniDirectory.ACCOUNT);
+        }
+        forgetStoredTniSecret(project.getKey(), "ad");
+        List<TniComputer> computers = TniLdap.read(host, port, ssl, base, account, password);
         if (computers.isEmpty()) {
             throw new AssetException(400, TniDirectory.SHEET);
         }
@@ -13313,7 +13320,14 @@ public class AssetServiceImpl implements AssetService {
     public TniSourceDto tniSccm(ApplicationUser user, String projectKey) {
         Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
-        return tniSourceDto(tniSourceRow(project.getKey(), "sccm"), 443);
+        return ao().executeInTransaction(new TransactionCallback<TniSourceDto>() {
+            @Override
+            public TniSourceDto doInTransaction() {
+                TniSourceEntity row = tniSourceRow(project.getKey(), "sccm");
+                forgetTniSecret(row);
+                return tniSourceDto(row, 443);
+            }
+        });
     }
 
     @Override
@@ -13328,15 +13342,11 @@ public class AssetServiceImpl implements AssetService {
                 ? 443 : TniDirectory.port(draft.getPort(), false);
         final boolean trust = Boolean.TRUE.equals(draft.getSsl());
         final String account = TniDirectory.account(draft.getAccount());
-        final String password = TniDirectory.password(draft.getPassword());
         return ao().executeInTransaction(new TransactionCallback<TniSourceDto>() {
             @Override
             public TniSourceDto doInTransaction() {
                 TniSourceEntity row = tniSourceRow(project.getKey(), "sccm");
                 if (row == null) {
-                    if (password.isEmpty()) {
-                        throw new AssetException(400, TniDirectory.ACCOUNT);
-                    }
                     row = ao().create(TniSourceEntity.class,
                             new DBParam("PROJECT_KEY", project.getKey()),
                             new DBParam("KIND", "sccm"),
@@ -13345,7 +13355,7 @@ public class AssetServiceImpl implements AssetService {
                             new DBParam("SSL", Boolean.valueOf(trust)),
                             new DBParam("BASE", ""),
                             new DBParam("ACCOUNT", account),
-                            new DBParam("SECRET", password),
+                            new DBParam("SECRET", ""),
                             new DBParam("NOTE", ""),
                             new DBParam("FINISHED", Long.valueOf(0L)));
                     return tniSourceDto(row, 443);
@@ -13354,11 +13364,7 @@ public class AssetServiceImpl implements AssetService {
                 row.setPort(port);
                 row.setSsl(trust);
                 row.setAccount(account);
-                if (!password.isEmpty()) {
-                    row.setSecret(password);
-                } else if (row.getSecret() == null || row.getSecret().isEmpty()) {
-                    throw new AssetException(400, TniDirectory.ACCOUNT);
-                }
+                row.setSecret("");
                 row.save();
                 return tniSourceDto(row, 443);
             }
@@ -13366,16 +13372,24 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public ImportResultDto loadTniSccm(ApplicationUser user, String projectKey) {
+    public ImportResultDto loadTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft) {
         Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         String typeKey = tniComputerType(project.getKey());
-        TniSourceEntity row = tniSourceRow(project.getKey(), "sccm");
-        if (row == null || row.getSecret() == null || row.getSecret().isEmpty()) {
+        if (draft == null) {
             throw new AssetException(400, TniDirectory.ACCOUNT);
         }
-        List<TniComputer> computers = TniSccm.read(row.getHost(), row.getPort() == 0 ? 443 : row.getPort(),
-                row.getSsl(), row.getAccount(), row.getSecret());
+        String host = TniDirectory.host(draft.getHost());
+        int port = draft.getPort() == null || draft.getPort().intValue() == 0
+                ? 443 : TniDirectory.port(draft.getPort(), false);
+        boolean trust = Boolean.TRUE.equals(draft.getSsl());
+        String account = TniDirectory.account(draft.getAccount());
+        String password = TniDirectory.password(draft.getPassword());
+        if (password.isEmpty()) {
+            throw new AssetException(400, TniDirectory.ACCOUNT);
+        }
+        forgetStoredTniSecret(project.getKey(), "sccm");
+        List<TniComputer> computers = TniSccm.read(host, port, trust, account, password);
         if (computers.isEmpty()) {
             throw new AssetException(400, TniSccm.EMPTY);
         }
@@ -13462,6 +13476,23 @@ public class AssetServiceImpl implements AssetService {
         return result;
     }
 
+    private void forgetStoredTniSecret(final String projectKey, final String kind) {
+        ao().executeInTransaction(new TransactionCallback<Object>() {
+            @Override
+            public Object doInTransaction() {
+                forgetTniSecret(tniSourceRow(projectKey, kind));
+                return null;
+            }
+        });
+    }
+
+    private void forgetTniSecret(TniSourceEntity row) {
+        if (row != null && row.getSecret() != null && !row.getSecret().isEmpty()) {
+            row.setSecret("");
+            row.save();
+        }
+    }
+
     private TniSourceEntity tniSourceRow(String projectKey, String kind) {
         TniSourceEntity[] rows = ao().find(TniSourceEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
         if (rows == null) {
@@ -13493,7 +13524,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setSsl(Boolean.valueOf(row.getSsl()));
         dto.setBase(row.getBase() == null ? "" : row.getBase());
         dto.setAccount(row.getAccount() == null ? "" : row.getAccount());
-        dto.setPasswordSet(Boolean.valueOf(row.getSecret() != null && !row.getSecret().isEmpty()));
+        dto.setPasswordSet(Boolean.FALSE);
         dto.setNote(row.getNote() == null ? "" : row.getNote());
         dto.setFinished(row.getFinished());
         return dto;

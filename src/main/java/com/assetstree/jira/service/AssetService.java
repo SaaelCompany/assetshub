@@ -391,13 +391,13 @@ public interface AssetService {
 
     TniSourceDto saveTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft);
 
-    ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey);
+    ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft);
 
     TniSourceDto tniSccm(ApplicationUser user, String projectKey);
 
     TniSourceDto saveTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
 
-    ImportResultDto loadTniSccm(ApplicationUser user, String projectKey);
+    ImportResultDto loadTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
 
     ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
 }
