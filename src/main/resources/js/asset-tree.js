@@ -2480,6 +2480,8 @@
         }
         if (state.view === 'reports') {
             frame.appendChild(renderReports());
+            reportFitPlotLabels(frame);
+            window.setTimeout(function () { reportFitPlotLabels(frame); }, 0);
             return;
         }
         if (state.view === 'map') {
@@ -19588,15 +19590,60 @@
 
     function reportPlotLabels(points, width) {
         var labels = el('div', 'asset-tree-report-plot-labels');
-        if (points.length > 12) return labels;
+        if (!points.length || points.length > 12 || !width) return labels;
+        var minX = points[0].x;
+        var maxX = points[0].x;
+        var index;
+        for (index = 1; index < points.length; index++) {
+            if (points[index].x < minX) minX = points[index].x;
+            if (points[index].x > maxX) maxX = points[index].x;
+        }
         points.forEach(function (point) {
             var caption = point.row ? (point.row.label || '') : (point.label || '');
             var label = el('span', null, caption);
             label.title = caption;
-            label.style.left = (point.x / width * 100) + '%';
+            if (point.x === minX) {
+                label.style.left = '0';
+                label.style.right = 'auto';
+                label.style.transform = 'none';
+                label.setAttribute('data-edge', 'start');
+            } else if (point.x === maxX) {
+                label.style.left = 'auto';
+                label.style.right = '0';
+                label.style.transform = 'none';
+                label.setAttribute('data-edge', 'end');
+            } else {
+                label.style.left = (point.x / width * 100) + '%';
+            }
             labels.appendChild(label);
         });
         return labels;
+    }
+
+    function reportFitPlotLabels(root) {
+        if (!root || !root.querySelectorAll) return;
+        var groups = root.querySelectorAll('.asset-tree-report-plot-labels');
+        var groupIndex;
+        for (groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            var spans = groups[groupIndex].querySelectorAll('span');
+            if (spans.length < 3) continue;
+            var items = [];
+            var spanIndex;
+            for (spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+                var box = spans[spanIndex].getBoundingClientRect();
+                if (!box.width) return;
+                items.push({ node: spans[spanIndex], left: box.left, right: box.right, edge: spans[spanIndex].getAttribute('data-edge') });
+            }
+            items.sort(function (a, b) { return a.left - b.left; });
+            var end = items[items.length - 1];
+            var cursor = items[0].right;
+            for (spanIndex = 1; spanIndex < items.length - 1; spanIndex++) {
+                var item = items[spanIndex];
+                if (item.edge) continue;
+                if (item.left < cursor + 8 || item.right > end.left - 8) item.node.style.display = 'none';
+                else cursor = item.right;
+            }
+        }
     }
 
     function reportTrendChart(rows, max, area) {
@@ -20095,7 +20142,10 @@
         var current = document.querySelector('#asset-tree-app .asset-tree-report-main');
         if (!current || !current.parentNode || state.reportCatalog == null) return false;
         paintReportTools();
-        current.parentNode.replaceChild(reportCard(), current);
+        var card = reportCard();
+        current.parentNode.replaceChild(card, current);
+        reportFitPlotLabels(card);
+        window.setTimeout(function () { reportFitPlotLabels(card); }, 0);
         return true;
     }
 
@@ -20435,8 +20485,7 @@
             var placeChart = function (chartKind, wide) {
                 var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
                 if (!chartPanel) return null;
-                var plot = chartKind === 'line' || chartKind === 'area' || chartKind === 'scatter';
-                var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : plot ? ' is-plot' : ''));
+                var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : ''));
                 named.appendChild(el('p', 'asset-tree-report-chart-name', reportChartCaption(chartKind)));
                 named.appendChild(chartPanel);
                 return named;

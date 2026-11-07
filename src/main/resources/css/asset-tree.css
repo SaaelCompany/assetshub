@@ -7249,7 +7249,7 @@ a.asset-tree-preview-icon:focus {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 12px;
-    align-items: stretch;
+    align-items: start;
 }
 
 #asset-tree-app .asset-tree-report-chart-block {
@@ -7263,10 +7263,6 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-report-chart-row .asset-tree-report-chart-block:only-child {
     max-width: 480px;
-}
-
-#asset-tree-app .asset-tree-report-chart-block.is-plot {
-    grid-column: span 2;
 }
 
 #asset-tree-app .asset-tree-report-chart-name {
@@ -7308,10 +7304,9 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-report-charts .asset-tree-report-plot svg.asset-tree-report-svg {
     width: 100% !important;
-    height: auto !important;
-    min-height: 200px !important;
-    max-height: none !important;
-    aspect-ratio: 3 / 1;
+    height: 180px !important;
+    min-height: 180px !important;
+    max-height: 180px !important;
 }
 
 #asset-tree-app .asset-tree-report-charts .asset-tree-report-chart.is-round svg.asset-tree-report-svg,
@@ -7341,9 +7336,6 @@ a.asset-tree-preview-icon:focus {
     font-size: 28px !important;
 }
 
-#asset-tree-app .asset-tree-report-charts .asset-tree-report-plot-labels span {
-    max-width: 64px;
-}
 
 #asset-tree-app .asset-tree-report-chart {
     box-sizing: border-box;
@@ -7553,12 +7545,13 @@ a.asset-tree-preview-icon:focus {
     position: relative;
     height: 22px;
     margin: 6px 0 0;
+    overflow: hidden;
 }
 
 #asset-tree-app .asset-tree-report-plot-labels span {
     position: absolute;
     top: 0;
-    max-width: 140px;
+    max-width: 46%;
     overflow: hidden;
     color: #42526e;
     font-size: 12px;
