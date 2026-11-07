@@ -48,6 +48,7 @@ public final class UiCatalog {
             "linkInbound",
             "linkInboundHint",
             "linkGraph",
+            "linkEdit",
             "linkRelated",
             "linkMore",
             "linkLess",

@@ -8562,18 +8562,74 @@
         return card;
     }
 
-    function linkGraph(asset) {
+    function linkLayoutKey(asset) {
+        return 'asset-tree-graph:' + String(asset.projectKey || '') + ':' + String(asset.id || '');
+    }
+
+    function readLinkLayout(asset) {
+        try {
+            if (!window.localStorage) return null;
+            var raw = localStorage.getItem(linkLayoutKey(asset));
+            if (!raw) return null;
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeLinkLayout(asset, spots) {
+        try {
+            if (window.localStorage) localStorage.setItem(linkLayoutKey(asset), JSON.stringify(spots));
+        } catch (error) {}
+    }
+
+    function linkSpot(saved, key, fallback) {
+        var pair = saved ? saved[key] : null;
+        if (!pair || typeof pair.length !== 'number' || pair.length < 2) return fallback;
+        var x = Number(pair[0]);
+        var y = Number(pair[1]);
+        if (x !== x || y !== y) return fallback;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x > 480) x = 480;
+        if (y > 720) y = 720;
+        return { x: Math.round(x), y: Math.round(y) };
+    }
+
+    function linkNodeKey(node, self) {
+        if (self) return 'self';
+        if (node && node.kind === 'peer') return 'peer:' + node.id;
+        return 'link:' + (node ? node.linkId : '');
+    }
+
+    function linkGraph(asset, form) {
         var nodes = relationNodes(asset);
+        var saved = readLinkLayout(asset);
+        var spots = {};
         var stage = el('div', 'asset-tree-link-stage');
-        var box = el('div', 'asset-tree-link-graph');
+        var box = el('div', 'asset-tree-link-graph is-placed' + (nodes.length ? '' : ' is-empty'));
         box.setAttribute('role', 'group');
         box.setAttribute('aria-label', t('linkGraph'));
-        if (!nodes.length) {
-            box.className += ' is-empty';
-            box.appendChild(linkGraphNode(asset, null, true));
-            stage.appendChild(box);
-            stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
-            return stage;
+        if (mayEdit(asset)) {
+            var tools = el('div', 'asset-tree-graph-tools');
+            var pencil = button('', 'asset-tree-btn slim asset-tree-graph-pencil', function () {
+                var on = box.className.indexOf(' is-editing') < 0;
+                box.className = box.className.replace(' is-editing', '');
+                pencil.className = pencil.className.replace(' is-on', '');
+                if (on) {
+                    box.className += ' is-editing';
+                    pencil.className += ' is-on';
+                }
+                pencil.setAttribute('aria-pressed', on ? 'true' : 'false');
+                if (form) form.hidden = !on;
+            });
+            pencil.title = t('linkEdit');
+            pencil.setAttribute('aria-label', t('linkEdit'));
+            pencil.setAttribute('aria-pressed', 'false');
+            pencil.appendChild(toolIcon('edit'));
+            tools.appendChild(pencil);
+            stage.appendChild(tools);
         }
         var svg = svgEl('svg');
         svg.setAttribute('class', 'asset-tree-link-canvas');
@@ -8619,7 +8675,88 @@
             placed.push({ node: node, card: card });
             if (!firstCard) firstCard = card;
         });
+        function placeCard(card, key, index, self) {
+            var fallback = { x: self && nodes.length ? 28 : 0, y: index * 58 };
+            var spot = linkSpot(saved, key, fallback);
+            card.style.left = spot.x + 'px';
+            card.style.top = spot.y + 'px';
+            spots[key] = [spot.x, spot.y];
+            var mark = card.querySelector('.asset-tree-graph-mark');
+            if (!mark) return;
+            function begin(clientX, clientY, event) {
+                if (event && event.preventDefault) event.preventDefault();
+                if (event && event.stopPropagation) event.stopPropagation();
+                var originLeft = card.offsetLeft;
+                var originTop = card.offsetTop;
+                var moved = false;
+                if (mark.className.indexOf(' is-dragging') < 0) mark.className += ' is-dragging';
+                function point(ev) {
+                    if (ev.touches && ev.touches.length) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+                    return { x: ev.clientX, y: ev.clientY };
+                }
+                function move(ev) {
+                    var p = point(ev);
+                    var dx = p.x - clientX;
+                    var dy = p.y - clientY;
+                    if (dx * dx + dy * dy > 16) moved = true;
+                    var x = originLeft + dx;
+                    var y = originTop + dy;
+                    if (x < 0) x = 0;
+                    if (y < 0) y = 0;
+                    var limit = box.clientWidth - 40;
+                    if (limit < 0) limit = 0;
+                    if (x > limit) x = limit;
+                    card.style.left = Math.round(x) + 'px';
+                    card.style.top = Math.round(y) + 'px';
+                    fitGraph();
+                    paintWires();
+                    if (ev.preventDefault) ev.preventDefault();
+                }
+                function up() {
+                    document.removeEventListener('mousemove', move);
+                    document.removeEventListener('mouseup', up);
+                    document.removeEventListener('touchmove', move);
+                    document.removeEventListener('touchend', up);
+                    mark.className = mark.className.replace(' is-dragging', '');
+                    if (!moved) return;
+                    card.setAttribute('data-dragged', '1');
+                    spots[key] = [card.offsetLeft, card.offsetTop];
+                    writeLinkLayout(asset, spots);
+                    setTimeout(function () { card.removeAttribute('data-dragged'); }, 0);
+                }
+                document.addEventListener('mousemove', move);
+                document.addEventListener('mouseup', up);
+                document.addEventListener('touchmove', move);
+                document.addEventListener('touchend', up);
+            }
+            mark.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                begin(event.clientX, event.clientY, event);
+            });
+            mark.addEventListener('touchstart', function (event) {
+                if (!event.touches || !event.touches.length) return;
+                begin(event.touches[0].clientX, event.touches[0].clientY, event);
+            });
+            card.addEventListener('click', function (event) {
+                if (card.getAttribute('data-dragged') !== '1') return;
+                card.removeAttribute('data-dragged');
+                if (event.stopPropagation) event.stopPropagation();
+                if (event.preventDefault) event.preventDefault();
+            }, true);
+        }
+        placeCard(selfCard, 'self', 0, true);
+        placed.forEach(function (item, index) {
+            placeCard(item.card, linkNodeKey(item.node, false), index + 1, false);
+        });
+        var laidBottom = 36;
+        for (var spotKey in spots) {
+            if (!Object.prototype.hasOwnProperty.call(spots, spotKey) || !spots[spotKey]) continue;
+            var spotEdge = Number(spots[spotKey][1]) + 42;
+            if (spotEdge > laidBottom) laidBottom = spotEdge;
+        }
+        box.style.height = (laidBottom + 6) + 'px';
         stage.appendChild(box);
+        if (!nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         stage.appendChild(panel);
         if (firstCard) showRelation(placed[0], firstCard);
         function iconCenter(card, origin) {
@@ -8644,11 +8781,22 @@
             if (dist > len * 0.46) dist = len * 0.46;
             return { x: x1 + ux * dist, y: y1 + uy * dist };
         }
+        function fitGraph() {
+            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var bottom = 36;
+            var i;
+            for (i = 0; i < cards.length; i++) {
+                var edge = cards[i].offsetTop + cards[i].offsetHeight;
+                if (edge > bottom) bottom = edge;
+            }
+            box.style.height = (bottom + 6) + 'px';
+        }
         function paintWires() {
             if (!box.parentNode) {
                 window.removeEventListener('resize', paintWires);
                 return;
             }
+            fitGraph();
             var origin = svg.getBoundingClientRect();
             if (origin.width < 40 || origin.height < 20) return;
             svg.setAttribute('viewBox', '0 0 ' + origin.width + ' ' + origin.height);
@@ -8679,9 +8827,14 @@
         if (asset.links == null && asset.peers == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
         } else {
-            body.appendChild(linkGraph(asset));
+            var form = null;
+            if (mayEdit(asset)) {
+                form = linkForm(asset);
+                form.hidden = true;
+            }
+            body.appendChild(linkGraph(asset, form));
+            if (form) body.appendChild(form);
         }
-        if (mayEdit(asset)) body.appendChild(linkForm(asset));
         return moduleBlock(t('links'), body);
     }
 

@@ -10187,6 +10187,34 @@ a.asset-tree-preview-icon:focus {
     margin: 0 0 12px;
 }
 
+#asset-tree-app .asset-tree-graph-tools {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 0 4px;
+}
+
+#asset-tree-app button.asset-tree-graph-pencil {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+}
+
+#asset-tree-app button.asset-tree-graph-pencil svg {
+    width: 16px;
+    height: 16px;
+}
+
+#asset-tree-app button.asset-tree-graph-pencil.is-on {
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-link-form[hidden] {
+    display: none !important;
+}
+
 #asset-tree-app .asset-tree-link-graph {
     position: relative;
     width: 100%;
@@ -10234,6 +10262,17 @@ a.asset-tree-preview-icon:focus {
     border: 0;
 }
 
+#asset-tree-app .asset-tree-link-graph.is-placed {
+    min-height: 36px;
+}
+
+#asset-tree-app .asset-tree-link-graph.is-placed .asset-tree-graph-node,
+#asset-tree-app .asset-tree-link-graph.is-placed .asset-tree-graph-node.is-self {
+    position: absolute;
+    margin: 0;
+    max-width: 92%;
+}
+
 #asset-tree-app .asset-tree-link-graph.is-empty .asset-tree-graph-node.is-self {
     margin-left: 0;
     cursor: default;
@@ -10246,6 +10285,12 @@ a.asset-tree-preview-icon:focus {
     min-height: 36px !important;
     border-radius: 4px;
     background: #dfe1e6 !important;
+    cursor: grab;
+    touch-action: none;
+}
+
+#asset-tree-app .asset-tree-graph-mark.is-dragging {
+    cursor: grabbing;
 }
 
 #asset-tree-app .asset-tree-graph-mark svg path {
@@ -10287,13 +10332,17 @@ a.asset-tree-preview-icon:focus {
     opacity: 0.72;
 }
 
-#asset-tree-app .asset-tree-link-graph .asset-tree-peer-remove {
+#asset-tree-app .asset-tree-link-graph:not(.is-editing) .asset-tree-peer-remove {
+    display: none;
+}
+
+#asset-tree-app .asset-tree-link-graph.is-editing .asset-tree-peer-remove {
     position: static;
     flex: 0 0 auto;
     opacity: 0;
 }
 
-#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node:hover .asset-tree-peer-remove {
+#asset-tree-app .asset-tree-link-graph.is-editing .asset-tree-graph-node:hover .asset-tree-peer-remove {
     opacity: 1;
 }
 
