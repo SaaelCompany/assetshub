@@ -1262,6 +1262,7 @@ def plan_kind(kind):
         "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text",
         "box", "ellipse", "diamond", "triangle", "note", "flow", "chart",
         "power", "scs", "comm", "vent", "water", "heat", "fire", "guard", "png",
+        "pen", "rack", "switch",
     }
     if value in allowed:
         return value
@@ -3502,7 +3503,7 @@ def save_floor(project_key, floor_id, body, text):
             label = "Комната"
         if kind in ("room", "stair"):
             minimum = 16
-        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text", "png"):
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text", "png", "rack", "switch"):
             minimum = 8
         else:
             minimum = 4

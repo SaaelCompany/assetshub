@@ -12,7 +12,12 @@ public class FloorBoundsTest {
         assertEquals("flow", FloorBounds.kind("flow"));
         assertEquals("chart", FloorBounds.kind("chart"));
         assertEquals("room", FloorBounds.kind("waffle"));
+        assertEquals("pen", FloorBounds.kind("pen"));
+        assertEquals("rack", FloorBounds.kind("rack"));
+        assertEquals("switch", FloorBounds.kind("switch"));
         assertEquals(8, FloorBounds.minSize("diamond"));
+        assertEquals(8, FloorBounds.minSize("rack"));
         assertEquals(4, FloorBounds.minSize("flow"));
+        assertEquals(4, FloorBounds.minSize("pen"));
     }
 }

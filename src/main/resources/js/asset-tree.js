@@ -471,7 +471,9 @@
         floors: null,
         floorId: 0,
         mapPlaceId: 0,
-        mapStep: 8,
+        mapStep: 10,
+        mapPen: null,
+        mapGhost: true,
         mapTool: 'select',
         mapWire: '',
         mapAssetId: 0,
@@ -20422,7 +20424,7 @@
 
     function roomMin(kind) {
         if (kind === 'room' || kind === 'stair') return 16;
-        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || kind === 'flow' || isRouteKind(kind)) return 4;
+        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || kind === 'flow' || kind === 'pen' || isRouteKind(kind)) return 4;
         return 8;
     }
 
@@ -20463,6 +20465,7 @@
         state.mapGroup = [];
         state.mapCam = null;
         state.mapAnchor = null;
+        state.mapPen = null;
         state.mapClickAt = 0;
         state.mapArmId = 0;
         state.mapAssetId = 0;
@@ -20480,8 +20483,8 @@
     }
 
     function snapCoord(value) {
-        var step = state.mapStep || 8;
-        if (step < 1) step = 8;
+        var step = state.mapStep || 10;
+        if (step < 1) step = 10;
         return Math.round(value / step) * step;
     }
 
@@ -20811,7 +20814,7 @@
     function beginDrag(svg, drag, onMove, onUp) {
         clearMapDrag();
         var before = null;
-        if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'end' || drag.kind === 'pin') {
+        if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'end' || drag.kind === 'pin' || drag.kind === 'vertex') {
             before = mapSnapshot();
         }
         state.mapDrag = drag;
@@ -20892,6 +20895,8 @@
             piece('sofa', 'mapSofa', 'sofa', 148, 52),
             piece('table', 'mapTable', 'table', 96, 56),
             piece('chair', 'mapChair', 'chair', 36, 36),
+            piece('rack', 'mapRack', 'rack', 60, 90),
+            piece('sw', 'mapSwitch', 'switch', 48, 18),
             piece('rug', 'mapRug', 'rug', 160, 110),
             piece('plant', 'mapPlant', 'plant', 40, 40),
             piece('bath', 'mapBath', 'bath', 68, 148),
@@ -21101,12 +21106,12 @@
         var copies = selectedShapeList();
         if (!copies.length) return;
         rememberMap();
-        var step = state.mapStep || 8;
+        var step = state.mapStep || 10;
         var box = planSize(state.mapDraft);
         var first = state.mapDraft.rooms.length;
         var groups = freshGroupIds(copies);
         copies.forEach(function (source) {
-            var shifted = roomPoints(source).map(function (point) {
+            var shifted = source.kind === 'pen' ? roomPoints(source) : roomPoints(source).map(function (point) {
                 return { x: point.x + step, y: point.y + step };
             });
             state.mapDraft.rooms.push(clampRoom({
@@ -21162,14 +21167,14 @@
             minX = Math.min(minX, shape.x);
             minY = Math.min(minY, shape.y);
         });
-        var originX = x == null ? minX + (state.mapStep || 8) : snapCoord(x);
-        var originY = y == null ? minY + (state.mapStep || 8) : snapCoord(y);
+        var originX = x == null ? minX + (state.mapStep || 10) : snapCoord(x);
+        var originY = y == null ? minY + (state.mapStep || 10) : snapCoord(y);
         var box = planSize(state.mapDraft);
         state.mapDraft.rooms = state.mapDraft.rooms || [];
         var first = state.mapDraft.rooms.length;
         var groups = freshGroupIds(copies);
         copies.forEach(function (source) {
-            var shifted = roomPoints(source).map(function (point) {
+            var shifted = source.kind === 'pen' ? roomPoints(source) : roomPoints(source).map(function (point) {
                 return { x: point.x - minX + originX, y: point.y - minY + originY };
             });
             state.mapDraft.rooms.push(clampRoom({
@@ -21330,7 +21335,7 @@
     }
 
     function isFurnKind(kind) {
-        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug' || kind === 'png';
+        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug' || kind === 'png' || kind === 'rack' || kind === 'switch';
     }
 
     function isFigureKind(kind) {
@@ -21731,6 +21736,7 @@
         state.mapGroup = [];
         state.mapSelection = null;
         state.mapAnchor = null;
+        state.mapPen = null;
         state.mapArc = null;
         state.mapClickAt = 0;
         var floor = currentFloor();
@@ -21817,6 +21823,7 @@
                 state.mapGroup = [];
                 state.mapCam = null;
                 state.mapAnchor = null;
+                state.mapPen = null;
                 state.mapClickAt = 0;
                 state.mapArmId = 0;
                 state.mapAssetId = 0;
@@ -21880,6 +21887,7 @@
         state.mapStamp = '';
         state.mapArmId = 0;
         state.mapAnchor = null;
+        state.mapPen = null;
         state.mapArc = null;
         state.mapClickAt = 0;
         state.mapWire = '';
@@ -21914,7 +21922,7 @@
 
     function mapModeTools() {
         var mode = state.mapMode || 'plan';
-        if (mode === 'plan') return [['select', 'mapSelect'], ['wall', 'mapWall'], ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['dim', 'mapDim'], ['arc', 'mapArc'], ['text', 'mapText']];
+        if (mode === 'plan') return [['select', 'mapSelect'], ['pen', 'mapPen'], ['wall', 'mapWall'], ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['dim', 'mapDim'], ['arc', 'mapArc'], ['text', 'mapText']];
         if (mode === 'demo') return [['select', 'mapSelect'], ['wall', 'mapWall'], ['dim', 'mapDim']];
         if (mode === 'partition') return [['select', 'mapSelect'], ['partition', 'mapPartition'], ['door', 'mapDoor'], ['window', 'mapWindow']];
         if (mode === 'rooms') return [['select', 'mapSelect'], ['room', 'mapRoom'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['text', 'mapText']];
@@ -21929,6 +21937,7 @@
 
     function mapHint() {
         if (state.mapArmId || state.mapStamp) return t('mapPlaceHint');
+        if (state.mapTool === 'pen') return t('mapPenHint');
         if (state.mapTool === 'flow') return state.mapAnchor ? t('mapFlowNext') : t('mapFlowHint');
         if (isFigureKind(state.mapTool)) return t('mapFigureHint');
         if (state.mapTool === 'route') return state.mapAnchor ? t('mapRouteHint') : t('mapRouteIdle');
@@ -22170,7 +22179,8 @@
             kitchen: 'kitchen', stove: 'kitchen', fridge: 'kitchen',
             bath: 'bath', toilet: 'bath', sink: 'bath',
             store: 'storage', wardrobe: 'storage', shelf: 'storage', locker: 'storage', safe: 'storage',
-            cabinet: 'storage', pedestal: 'storage', cooler: 'storage'
+            cabinet: 'storage', pedestal: 'storage', cooler: 'storage',
+            rack: 'office', sw: 'office'
         };
         return cats[id] || 'living';
     }
@@ -22328,6 +22338,7 @@
                 state.mapBoard = pair[0];
                 state.mapStamp = '';
                 state.mapArmId = 0;
+                if (pair[0] !== 'plan') state.mapPen = null;
                 if (pair[0] === 'figures' && !isFigureKind(state.mapTool) && state.mapTool !== 'select' && state.mapTool !== 'text') {
                     state.mapTool = 'select';
                 }
@@ -22335,6 +22346,15 @@
             });
             tab.setAttribute('aria-pressed', on ? 'true' : 'false');
             row.appendChild(tab);
+        });
+        return row;
+    }
+
+    function planSymbolRow() {
+        var row = el('div', 'asset-tree-thumb-grid is-plan-symbols');
+        ['rack', 'sw', 'desk', 'chair', 'sofa'].forEach(function (id) {
+            var tpl = furnitureById(id);
+            if (tpl) row.appendChild(thumbCard(tpl));
         });
         return row;
     }
@@ -22348,7 +22368,10 @@
         else if (board === 'plan') {
             side.appendChild(mapModeBar());
             if ((state.mapMode || 'plan') === 'furniture') side.appendChild(furnitureCatalog());
-            else side.appendChild(mapToolGrid(mapModeTools()));
+            else {
+                side.appendChild(mapToolGrid(mapModeTools()));
+                if ((state.mapMode || 'plan') === 'plan') side.appendChild(planSymbolRow());
+            }
         } else side.appendChild(mapToolGrid(figureTools()));
         side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
         side.appendChild(mapPlanActions());
@@ -22720,6 +22743,7 @@
                 state.mapWire = wire;
                 state.mapStamp = '';
                 state.mapArmId = 0;
+                if (state.mapTool !== 'pen') state.mapPen = null;
                 state.mapAnchor = null;
                 state.mapArc = null;
                 state.mapClickAt = 0;
@@ -22819,6 +22843,7 @@
             } else {
                 state.mapStamp = tpl.id;
                 state.mapTool = 'stamp';
+                state.mapPen = null;
                 state.mapAssetId = 0;
                 state.mapArmId = 0;
                 state.mapAnchor = null;
@@ -22963,6 +22988,15 @@
         dock.appendChild(el('span', 'asset-tree-zoom-readout', zoomPercent() + '%'));
         dock.appendChild(zoomIn);
         dock.appendChild(fit);
+        var ghostOn = state.mapGhost !== false;
+        var ghost = button(t('mapGhost'), 'asset-tree-ghost-btn' + (ghostOn ? ' is-on' : ''), function () {
+            state.mapGhost = state.mapGhost === false;
+            renderFrame();
+        });
+        ghost.title = t('mapGhost');
+        ghost.setAttribute('aria-pressed', ghostOn ? 'true' : 'false');
+        dock.appendChild(ghost);
+        dock.appendChild(el('span', 'asset-tree-plan-xy', t('mapReadout')));
         return dock;
     }
 
@@ -23064,12 +23098,12 @@
         bar.appendChild(undo);
         bar.appendChild(redo);
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapSnap')));
-        [4, 8, 16, 24].forEach(function (step) {
-            var snap = button(String(step), 'asset-tree-btn slim' + ((state.mapStep || 8) === step ? ' is-on' : ''), function () {
+        [1, 5, 10, 25, 50, 100].forEach(function (step) {
+            var snap = button(String(step), 'asset-tree-btn slim' + ((state.mapStep || 10) === step ? ' is-on' : ''), function () {
                 state.mapStep = step;
                 renderFrame();
             });
-            snap.title = t('mapSnap') + ' ' + step;
+            snap.title = t('mapSnap') + ' ' + step + ' ' + t('mapCm');
             bar.appendChild(snap);
         });
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapPlanSize')));
@@ -24384,7 +24418,8 @@
         var bottom = Math.min(size.h, cam.y + cam.h + margin);
         var viewW = Math.max(20, right - left);
         var viewH = Math.max(20, bottom - top);
-        var step = 20;
+        var step = state.mapStep || 10;
+        if (step < 1) step = 10;
         var rough = Math.sqrt((viewW * viewH) / 4500);
         while (step < rough) step *= 2;
         var radius = Math.max(1.2, Math.round(step * 0.045 * 10) / 10);
@@ -24405,6 +24440,273 @@
         path.setAttribute('class', 'asset-tree-grid-dots');
         path.setAttribute('pointer-events', 'none');
         return path;
+    }
+
+    function penLocal(room) {
+        var points = roomPoints(room);
+        if (points.length >= 2) return points;
+        return [{ x: 0, y: 0 }, { x: room.w || 4, y: room.h || 4 }];
+    }
+
+    function penLength(points) {
+        var total = 0;
+        var i;
+        for (i = 1; i < points.length; i++) {
+            var dx = points[i].x - points[i - 1].x;
+            var dy = points[i].y - points[i - 1].y;
+            total += Math.sqrt(dx * dx + dy * dy);
+        }
+        return Math.round(total);
+    }
+
+    function penLengthText(room) {
+        return penLength(penLocal(room)) + ' ' + t('mapCm');
+    }
+
+    function pointSegDist(px, py, ax, ay, bx, by) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var len = dx * dx + dy * dy;
+        if (len < 1) return Math.sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+        var t = ((px - ax) * dx + (py - ay) * dy) / len;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        var qx = ax + dx * t;
+        var qy = ay + dy * t;
+        return Math.sqrt((px - qx) * (px - qx) + (py - qy) * (py - qy));
+    }
+
+    function normalizePen(room) {
+        var local = roomPoints(room);
+        if (local.length < 2) return;
+        var world = local.map(function (point) {
+            return { x: room.x + point.x, y: room.y + point.y };
+        });
+        var minX = world[0].x;
+        var minY = world[0].y;
+        var maxX = minX;
+        var maxY = minY;
+        world.forEach(function (point) {
+            minX = Math.min(minX, point.x);
+            minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x);
+            maxY = Math.max(maxY, point.y);
+        });
+        room.x = Math.round(minX);
+        room.y = Math.round(minY);
+        room.w = Math.max(4, Math.round(maxX - minX));
+        room.h = Math.max(4, Math.round(maxY - minY));
+        room.points = world.map(function (point) {
+            return { x: Math.round(point.x - room.x), y: Math.round(point.y - room.y) };
+        });
+    }
+
+    function orthoPoint(prev, point, shift) {
+        if (!shift || !prev) return point;
+        if (Math.abs(point.x - prev.x) >= Math.abs(point.y - prev.y)) return { x: point.x, y: prev.y };
+        return { x: prev.x, y: point.y };
+    }
+
+    function penNear(svg, point, other) {
+        var metrics = viewMetrics(svg);
+        var dx = (point.x - other.x) * metrics.scale;
+        var dy = (point.y - other.y) * metrics.scale;
+        return dx * dx + dy * dy <= 144;
+    }
+
+    function finishPen(floor, close) {
+        var points = (state.mapPen || []).slice();
+        state.mapPen = null;
+        state.mapClickAt = 0;
+        if (!floor || points.length < 2) {
+            renderFrame();
+            return;
+        }
+        var minX = points[0].x;
+        var minY = points[0].y;
+        var maxX = minX;
+        var maxY = minY;
+        points.forEach(function (point) {
+            minX = Math.min(minX, point.x);
+            minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x);
+            maxY = Math.max(maxY, point.y);
+        });
+        var shape = clampRoom({
+            kind: 'pen',
+            name: '',
+            color: '',
+            swing: close && points.length >= 3 ? 1 : 0,
+            angle: 0,
+            x: minX,
+            y: minY,
+            w: Math.max(4, maxX - minX),
+            h: Math.max(4, maxY - minY),
+            points: points.map(function (point) {
+                return { x: point.x - minX, y: point.y - minY };
+            })
+        });
+        if (pushShape(floor, shape)) state.mapSelection = floor.rooms.length - 1;
+        state.mapTool = 'select';
+        renderFrame();
+    }
+
+    function paintPlanReadout(svg, event) {
+        var read = document.querySelector('#asset-tree-app .asset-tree-plan-xy');
+        if (!read) return;
+        var at = svgPoint(svg, event);
+        var snapped = { x: snapCoord(at.x), y: snapCoord(at.y) };
+        var chain = state.mapPen || [];
+        if (chain.length) snapped = orthoPoint(chain[chain.length - 1], snapped, event.shiftKey);
+        var text = 'X ' + snapped.x + ' \u00b7 Y ' + snapped.y + ' ' + t('mapCm');
+        if (chain.length) {
+            var last = chain[chain.length - 1];
+            var dx = snapped.x - last.x;
+            var dy = snapped.y - last.y;
+            text += ' \u00b7 ' + Math.round(Math.sqrt(dx * dx + dy * dy)) + ' ' + t('mapCm');
+        }
+        read.textContent = text;
+    }
+
+    function paintPenCursor(svg, event) {
+        var node = svg.querySelector('#asset-tree-pen-preview');
+        if (!node || !state.mapPen || !state.mapPen.length) return;
+        var at = svgPoint(svg, event);
+        var snapped = orthoPoint(state.mapPen[state.mapPen.length - 1], { x: snapCoord(at.x), y: snapCoord(at.y) }, event.shiftKey);
+        var points = state.mapPen.concat([snapped]);
+        node.setAttribute('points', points.map(function (point) {
+            return point.x + ' ' + point.y;
+        }).join(' '));
+    }
+
+    function appendGhostFloors(svg, floor) {
+        if (state.mapGhost === false || !floor) return;
+        var others = floorsForBuilding(floor.placeId || state.mapPlaceId);
+        if (!others || others.length < 2) return;
+        var layer = svgEl('g');
+        layer.setAttribute('class', 'asset-tree-floor-ghost');
+        layer.setAttribute('pointer-events', 'none');
+        others.forEach(function (other) {
+            if (!other || other.id === floor.id) return;
+            (other.rooms || []).forEach(function (room) {
+                var kind = room.kind || 'room';
+                if (kind === 'wall' || kind === 'partition') {
+                    var ends = segmentEnds(room);
+                    var line = svgEl('line');
+                    line.setAttribute('x1', String(Math.round(ends[0].x)));
+                    line.setAttribute('y1', String(Math.round(ends[0].y)));
+                    line.setAttribute('x2', String(Math.round(ends[1].x)));
+                    line.setAttribute('y2', String(Math.round(ends[1].y)));
+                    line.setAttribute('stroke-width', kind === 'partition' ? '6' : '14');
+                    layer.appendChild(line);
+                } else if (kind === 'pen' || (kind === 'room' && roomPoints(room).length >= 3)) {
+                    var pts = roomPoints(room);
+                    if (pts.length < 2) return;
+                    var closed = kind === 'room' || parseInt(room.swing, 10) === 1;
+                    var node = svgEl(closed ? 'polygon' : 'polyline');
+                    node.setAttribute('points', pts.map(function (point) {
+                        var x = kind === 'pen' ? room.x + point.x : point.x;
+                        var y = kind === 'pen' ? room.y + point.y : point.y;
+                        return Math.round(x) + ' ' + Math.round(y);
+                    }).join(' '));
+                    layer.appendChild(node);
+                }
+            });
+        });
+        if (layer.childNodes.length) svg.appendChild(layer);
+    }
+
+    function appendPen(group, room, options) {
+        var points = penLocal(room);
+        var closed = parseInt(room.swing, 10) === 1 && points.length >= 3;
+        var text = points.map(function (point) {
+            return Math.round(point.x) + ' ' + Math.round(point.y);
+        }).join(' ');
+        var hit = svgEl(closed ? 'polygon' : 'polyline');
+        hit.setAttribute('points', text);
+        hit.setAttribute('class', 'asset-tree-pen-hit' + (closed ? ' is-closed' : ''));
+        group.appendChild(hit);
+        var line = svgEl(closed ? 'polygon' : 'polyline');
+        line.setAttribute('points', text);
+        line.setAttribute('class', 'asset-tree-pen' + (closed ? ' is-closed' : '') + (options && options.selected ? ' is-selected' : ''));
+        if (room.color) line.setAttribute('stroke', room.color);
+        line.setAttribute('pointer-events', 'none');
+        group.appendChild(line);
+        if (options && options.editing && options.svg) {
+            hit.addEventListener('dblclick', function (event) {
+                if (state.mapTool !== 'select') return;
+                event.preventDefault();
+                event.stopPropagation();
+                var at = svgPoint(options.svg, event);
+                var local = penLocal(room);
+                var best = 0;
+                var bestDist = Infinity;
+                var i;
+                var limit = local.length - (closed ? 0 : 1);
+                for (i = 0; i < limit; i++) {
+                    var next = local[(i + 1) % local.length];
+                    var dist = pointSegDist(at.x, at.y, room.x + local[i].x, room.y + local[i].y, room.x + next.x, room.y + next.y);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = i;
+                    }
+                }
+                rememberMap();
+                local.splice(best + 1, 0, { x: snapCoord(at.x) - room.x, y: snapCoord(at.y) - room.y });
+                room.points = local;
+                normalizePen(room);
+                state.mapDirty = true;
+                renderFrame();
+            });
+        }
+        return hit;
+    }
+
+    function drawPenVertices(group, room, options) {
+        penLocal(room).forEach(function (point, index) {
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(point.x));
+            dot.setAttribute('cy', String(point.y));
+            dot.setAttribute('r', '5');
+            dot.setAttribute('class', 'asset-tree-pen-vertex');
+            dot.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                beginDrag(options.svg, { kind: 'vertex', index: options.index, at: index }, function (move) {
+                    var next = svgPoint(options.svg, move);
+                    var local = penLocal(room);
+                    local[index] = { x: snapCoord(next.x) - room.x, y: snapCoord(next.y) - room.y };
+                    room.points = local;
+                    var drawn = local.map(function (item) {
+                        return Math.round(item.x) + ' ' + Math.round(item.y);
+                    }).join(' ');
+                    var nodes = group.querySelectorAll('.asset-tree-pen, .asset-tree-pen-hit');
+                    var n;
+                    for (n = 0; n < nodes.length; n++) nodes[n].setAttribute('points', drawn);
+                    dot.setAttribute('cx', String(local[index].x));
+                    dot.setAttribute('cy', String(local[index].y));
+                    state.mapDirty = true;
+                }, function () {
+                    normalizePen(room);
+                    renderFrame();
+                });
+            });
+            dot.addEventListener('contextmenu', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var local = penLocal(room);
+                if (local.length <= 2) return;
+                rememberMap();
+                local.splice(index, 1);
+                room.points = local;
+                if (parseInt(room.swing, 10) === 1 && local.length < 3) room.swing = 0;
+                normalizePen(room);
+                state.mapDirty = true;
+                renderFrame();
+            });
+            group.appendChild(dot);
+        });
     }
 
     function floorCanvas(floor, editing) {
@@ -24428,6 +24730,7 @@
         paper.setAttribute('class', 'asset-tree-paper');
         paper.setAttribute('fill', '#ffffff');
         svg.appendChild(paper);
+        appendGhostFloors(svg, floor);
         var gridPaper = gridDotPath(size);
         var shapeOptions = function (room, index) {
             return {
@@ -24542,6 +24845,25 @@
             anchorDot.setAttribute('class', 'asset-tree-anchor');
             svg.appendChild(anchorDot);
         }
+        if (editing && state.mapPen && state.mapPen.length) {
+            var penPreview = svgEl('polyline');
+            penPreview.id = 'asset-tree-pen-preview';
+            penPreview.setAttribute('class', 'asset-tree-pen is-preview');
+            penPreview.setAttribute('points', state.mapPen.map(function (point) {
+                return point.x + ' ' + point.y;
+            }).join(' '));
+            penPreview.setAttribute('pointer-events', 'none');
+            svg.appendChild(penPreview);
+            state.mapPen.forEach(function (point) {
+                var penDot = svgEl('circle');
+                penDot.setAttribute('cx', String(point.x));
+                penDot.setAttribute('cy', String(point.y));
+                penDot.setAttribute('r', '4');
+                penDot.setAttribute('class', 'asset-tree-pen-vertex');
+                penDot.setAttribute('pointer-events', 'none');
+                svg.appendChild(penDot);
+            });
+        }
         if (editing) {
             svg.addEventListener('contextmenu', function (event) {
                 event.preventDefault();
@@ -24582,6 +24904,37 @@
                     event.preventDefault();
                     var stamped = svgPoint(svg, event);
                     placeStamp(floor, stamped.x, stamped.y);
+                    return;
+                }
+                if (state.mapTool === 'pen') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var rawPen = svgPoint(svg, event);
+                    var chain = (state.mapPen || []).slice();
+                    var prevPen = chain.length ? chain[chain.length - 1] : null;
+                    var penPoint = orthoPoint(prevPen, { x: snapCoord(rawPen.x), y: snapCoord(rawPen.y) }, event.shiftKey);
+                    if (chain.length >= 3 && penNear(svg, penPoint, chain[0])) {
+                        finishPen(floor, true);
+                        return;
+                    }
+                    if (chain.length >= 2 && state.mapClickAt && (Date.now() - state.mapClickAt) < 400
+                        && Math.abs(event.clientX - state.mapClickX) < 8
+                        && Math.abs(event.clientY - state.mapClickY) < 8) {
+                        finishPen(floor, false);
+                        return;
+                    }
+                    if (prevPen && prevPen.x === penPoint.x && prevPen.y === penPoint.y) {
+                        state.mapClickAt = Date.now();
+                        state.mapClickX = event.clientX;
+                        state.mapClickY = event.clientY;
+                        return;
+                    }
+                    chain.push(penPoint);
+                    state.mapPen = chain;
+                    state.mapClickAt = Date.now();
+                    state.mapClickX = event.clientX;
+                    state.mapClickY = event.clientY;
+                    renderFrame();
                     return;
                 }
                 if (state.mapTool === 'select') {
@@ -24750,6 +25103,8 @@
                 });
             });
             svg.addEventListener('mousemove', function (event) {
+                paintPlanReadout(svg, event);
+                paintPenCursor(svg, event);
                 var ghost = svg.querySelector('#asset-tree-pin-ghost');
                 if (ghost && state.mapArmId && !state.mapDrag) {
                     var hover = svgPoint(svg, event);
@@ -24764,6 +25119,10 @@
                 paintPreviewBox(svg, shapeFromDrag(previewKind, state.mapAnchor.x, state.mapAnchor.y, end.x, end.y, true));
             });
         }
+        svg.addEventListener('mousemove', function (event) {
+            paintPlanReadout(svg, event);
+            if (editing) paintPenCursor(svg, event);
+        });
         svg.addEventListener('wheel', function (event) {
             if (state.mapDrag) return;
             event.preventDefault();
@@ -24894,6 +25253,7 @@
         group.setAttribute('transform', shapeTransform(room));
         var rect = svgEl('rect');
         applyWallCap(rect, room);
+        var penHit = null;
         var kindName = room.kind || 'room';
         var mark = routeMarkKind(kindName);
         if (mark) {
@@ -24911,13 +25271,15 @@
         if (kindName === 'sofa' || kindName === 'seat' || kindName === 'chair' || kindName === 'bath' || kindName === 'toilet' || kindName === 'bed') {
             rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
         }
-        if (kindName === 'png' || isFigureKind(kindName)) rect.setAttribute('fill', 'transparent');
-        if (isFigureKind(kindName)) rect.setAttribute('stroke', 'transparent');
+        if (kindName === 'png' || isFigureKind(kindName) || kindName === 'pen') rect.setAttribute('fill', 'transparent');
+        if (isFigureKind(kindName) || kindName === 'pen') rect.setAttribute('stroke', 'transparent');
+        if (kindName === 'pen') rect.setAttribute('pointer-events', 'none');
         if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
         if (kindName === 'table' && Math.abs(room.w - room.h) <= Math.max(room.w, room.h) * 0.2) {
             rect.setAttribute('fill', 'transparent');
         }
         group.appendChild(rect);
+        if (kindName === 'pen') penHit = appendPen(group, room, options);
         if (isRouteKind(kindName)) {
             var routeEnds = segmentLocalEnds(room);
             if (options && options.selected) {
@@ -24963,7 +25325,7 @@
         appendLabel(group, room);
         }
         if (options && options.editing) {
-            rect.addEventListener('mousedown', function (event) {
+            (penHit || rect).addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
                 if (state.mapTool !== 'select') return;
                 event.preventDefault();
@@ -25053,7 +25415,10 @@
                     renderFrame();
                 });
             });
-            if (options.primary && state.mapTool === 'select' && !state.mapStamp) drawRoomHandles(group, rect, room, options);
+            if (options.primary && state.mapTool === 'select' && !state.mapStamp) {
+                if (kindName === 'pen') drawPenVertices(group, room, options);
+                else drawRoomHandles(group, rect, room, options);
+            }
         } else if (room.assetId || room.placeId) {
             group.style.cursor = 'pointer';
             group.addEventListener('click', function () {
@@ -25205,6 +25570,7 @@
 
     function decorateRoom(parent, room) {
         var kind = room.kind || 'room';
+        if (kind === 'pen') return;
         if (kind === 'flow') {
             drawFlow(parent, room);
             return;
@@ -25325,6 +25691,29 @@
             node.setAttribute('d', d);
             node.setAttribute('class', 'asset-tree-plan-mark');
             parent.appendChild(node);
+        }
+        if (kind === 'rack') {
+            markBox(x + 1, y + 1, w - 2, h - 2);
+            var units = 19;
+            var top = y + 4;
+            var inner = Math.max(units, h - 8);
+            var unit;
+            for (unit = 1; unit < units; unit++) {
+                var unitY = top + inner * unit / units;
+                markLine('M ' + (x + 4) + ' ' + unitY + ' L ' + (x + w - 4) + ' ' + unitY);
+            }
+            markLine('M ' + (x + 6) + ' ' + (y + 4) + ' L ' + (x + 6) + ' ' + (y + h - 4));
+            markLine('M ' + (x + w - 6) + ' ' + (y + 4) + ' L ' + (x + w - 6) + ' ' + (y + h - 4));
+            return;
+        }
+        if (kind === 'switch') {
+            markBox(x + 1, y + 1, w - 2, h - 2);
+            var ports = Math.max(4, Math.floor((w - 8) / 6));
+            var port;
+            for (port = 0; port < ports; port++) {
+                markBox(x + 4 + port * 6, y + Math.max(2, h * 0.28), 4, Math.max(3, h * 0.44));
+            }
+            return;
         }
         if (kind === 'table' && Math.abs(w - h) <= Math.max(w, h) * 0.2) {
             markOval(x + w / 2, y + h / 2, Math.max(4, w / 2 - 1), Math.max(4, h / 2 - 1), 'wood');
@@ -25817,6 +26206,7 @@
             return svg;
         }
         if (kind === 'select') add('M8 4.5l.2 12.2 2.6-2.8 2.4 4.6 2.2-1.2-2.4-4.6H17z', 'currentColor');
+        else if (kind === 'pen') add('M5 18l4-9 4 3 6-8');
         else if (kind === 'room') add('M5 5h14v14H5z');
         else if (kind === 'wall') add('M4 9h16v6H4z', 'currentColor');
         else if (kind === 'partition') add('M5 7h14M5 12h14M5 17h14');
@@ -25848,6 +26238,7 @@
         if (!room) return el('div');
         var block = el('div', 'asset-tree-plan-inspector');
         block.appendChild(el('strong', null, mapSelectionLabel()));
+        if (room.kind === 'pen') block.appendChild(el('span', 'asset-tree-plan-label', penLengthText(room)));
         var name = document.createElement('input');
         name.value = room.kind === 'png' ? furnitureCaption(room) : (room.name || '');
         if (room.kind === 'png') name.disabled = true;
@@ -26176,6 +26567,9 @@
         if (kind === 'arc') return t('mapArc');
         if (kind === 'dim') return t('mapDim');
         if (kind === 'text') return room.name || t('mapText');
+        if (kind === 'pen') return room.name || t('mapPen');
+        if (kind === 'rack') return room.name || t('mapRack');
+        if (kind === 'switch') return room.name || t('mapSwitch');
         return room.name || t('mapRoom');
     }
 
@@ -28679,9 +29073,22 @@
                     renderFrame();
                     return;
                 }
-                if (event.key === 'Escape' && (state.mapAnchor || state.mapArmId || state.mapAssetId || state.mapArc)) {
+                if (state.mapPen && state.mapPen.length && event.key === 'Backspace') {
+                    event.preventDefault();
+                    state.mapPen.pop();
+                    if (!state.mapPen.length) state.mapPen = null;
+                    renderFrame();
+                    return;
+                }
+                if (state.mapPen && state.mapPen.length >= 2 && event.key === 'Enter') {
+                    event.preventDefault();
+                    finishPen(state.mapDraft, false);
+                    return;
+                }
+                if (event.key === 'Escape' && (state.mapAnchor || state.mapPen || state.mapArmId || state.mapAssetId || state.mapArc)) {
                     event.preventDefault();
                     state.mapAnchor = null;
+                    state.mapPen = null;
                     state.mapArmId = 0;
                     state.mapAssetId = 0;
                     state.mapArc = null;
@@ -28692,7 +29099,7 @@
                 }
                 var rooms = state.mapDraft.rooms || [];
                 var room = state.mapSelection != null ? rooms[state.mapSelection] : null;
-                var step = state.mapStep || 8;
+                var step = state.mapStep || 10;
                 if (room && (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
                     event.preventDefault();
                     rememberMap();
