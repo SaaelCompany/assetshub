@@ -104,6 +104,9 @@ public class AssetPageServlet extends HttpServlet {
         if ("dashboard".equals(value)) {
             return "all";
         }
+        if ("tni".equals(value)) {
+            return "settings";
+        }
         if ("mine".equals(value) || "search".equals(value) || "settings".equals(value)
                 || "schedules".equals(value) || "reports".equals(value) || "map".equals(value)) {
             return value;

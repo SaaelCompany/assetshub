@@ -68,7 +68,14 @@ import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
+import com.assetstree.jira.dto.TniSourceDto;
+import com.assetstree.jira.dto.TniWatchDto;
+import com.assetstree.jira.dto.TniSubnetDto;
+import com.assetstree.jira.model.TniSheetDraft;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSourceDraft;
+import com.assetstree.jira.dto.TniWatchDraft;
+import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.TypeDraft;
 
 import java.util.List;
@@ -373,4 +380,32 @@ public interface AssetService {
 
     /** Pings stored devices whose storage period has ended and retires the ones that stay silent. */
     void applyTniRetention();
+
+    List<TniSubnetDto> tniSubnets(ApplicationUser user, String projectKey);
+
+    TniSubnetDto createTniSubnet(ApplicationUser user, String projectKey, TniSubnetDraft draft);
+
+    void deleteTniSubnet(ApplicationUser user, String projectKey, int subnetId);
+
+    TniSubnetDto scanTniSubnet(ApplicationUser user, String projectKey, int subnetId);
+
+    TniSourceDto tniDirectory(ApplicationUser user, String projectKey);
+
+    TniSourceDto saveTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    TniSourceDto tniSccm(ApplicationUser user, String projectKey);
+
+    TniSourceDto saveTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    ImportResultDto loadTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    TniWatchDto tniWatch(ApplicationUser user, int assetId);
+
+    TniWatchDto saveTniWatch(ApplicationUser user, int assetId, TniWatchDraft draft);
+
+    TniWatchDto pingTni(ApplicationUser user, int assetId);
+
+    ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
 }

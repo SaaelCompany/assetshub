@@ -1255,6 +1255,540 @@ def tni_type(value):
     return ""
 
 
+def tni_ip(token):
+    parts = str(token or "").strip().split(".")
+    if len(parts) != 4:
+        return None
+    nums = []
+    for part in parts:
+        if not part.isdigit() or (len(part) > 1 and part.startswith("0")) or int(part) > 255:
+            return None
+        nums.append(int(part))
+    return nums
+
+
+def tni_private(nums):
+    if nums[0] in (0, 127) or nums[0] >= 224:
+        return False
+    if nums[0] == 169 and nums[1] == 254:
+        return False
+    if nums[0] == 10:
+        return True
+    if nums[0] == 192 and nums[1] == 168:
+        return True
+    return nums[0] == 172 and 16 <= nums[1] <= 31
+
+
+def tni_one(token):
+    nums = tni_ip(token)
+    if not nums or nums[0] in (0, 127) or nums[0] >= 224 or (nums[0] == 169 and nums[1] == 254):
+        return None, "scan"
+    if not tni_private(nums):
+        return None, "public"
+    return "%d.%d.%d.%d" % tuple(nums), ""
+
+
+def tni_expand(raw):
+    text = str(raw or "").strip()
+    if not text or len(text) > 2000:
+        return None, "scan"
+    hosts = []
+    seen = set()
+
+    def add(address):
+        _kept, kind = tni_one(address)
+        if kind:
+            return kind
+        if address in seen:
+            return ""
+        seen.add(address)
+        hosts.append(address)
+        return "large" if len(hosts) > 1024 else ""
+
+    def add_span(start, end):
+        if end < start:
+            return "scan"
+        if end - start + 1 > 1024:
+            return "large"
+        for value in range(start, end + 1):
+            nums = [(value >> 24) & 255, (value >> 16) & 255, (value >> 8) & 255, value & 255]
+            kind = add("%d.%d.%d.%d" % tuple(nums))
+            if kind:
+                return kind
+        return ""
+
+    def add_cidr(token):
+        if token.count("/") != 1:
+            return "scan"
+        left, prefix_text = token.split("/", 1)
+        address, kind = tni_one(left)
+        if kind:
+            return kind
+        if not prefix_text.isdigit() or len(prefix_text) > 2:
+            return "scan"
+        prefix = int(prefix_text)
+        if prefix < 0 or prefix > 32:
+            return "scan"
+        host_bits = 32 - prefix
+        if host_bits > 10:
+            return "large"
+        parts = [int(part) for part in address.split(".")]
+        base = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+        mask = 0 if prefix == 0 else ((0xffffffff << host_bits) & 0xffffffff)
+        network = base & mask
+        count = 1 << host_bits
+        start = network
+        end = network + count - 1
+        if prefix <= 30:
+            start += 1
+            end -= 1
+        return add_span(start, end)
+
+    def add_range(token):
+        left, right = token.split("-", 1)
+        start, kind = tni_one(left)
+        if kind:
+            return kind
+        finish, kind = tni_one(right)
+        if kind:
+            return kind
+        def as_long(address):
+            parts = [int(part) for part in address.split(".")]
+            return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+        return add_span(as_long(start), as_long(finish))
+
+    for chunk in re.split(r"[,;\r\n]+", text):
+        piece = chunk.strip()
+        if not piece:
+            continue
+        if piece.count("-") == 1 and "/" not in piece:
+            kind = add_range(piece)
+        elif "/" in piece and " " not in piece:
+            kind = add_cidr(piece)
+        else:
+            kind = ""
+            for word in piece.split():
+                if "/" in word:
+                    kind = add_cidr(word)
+                elif word.count("-") == 1:
+                    kind = add_range(word)
+                else:
+                    address, kind = tni_one(word)
+                    if not kind:
+                        kind = add(address)
+                if kind:
+                    break
+        if kind:
+            return None, kind
+    if not hosts:
+        return None, "scan"
+    return hosts, ""
+
+
+def tni_message(text, kind):
+    keys = {
+        "scan": "asset-tree.error.tni.scan",
+        "public": "asset-tree.error.tni.public",
+        "large": "asset-tree.error.tni.large",
+        "name": "asset-tree.error.tni.name",
+        "type": "asset-tree.error.tni.type",
+        "busy": "asset-tree.error.tni.busy",
+        "many": "asset-tree.error.tni.many",
+    }
+    return text.get(keys.get(kind, "asset-tree.error.tni.scan"), kind)
+
+
+def tni_rows(project_key):
+    return [row for row in STATE.setdefault("subnets", {}).values() if row.get("projectKey") == project_key]
+
+
+def tni_dto(row):
+    return {
+        "id": row["id"], "name": row["name"], "target": row["target"], "hosts": row["hosts"],
+        "state": row.get("state") or "idle", "scanned": row.get("scanned") or 0,
+        "online": row.get("online") or 0, "added": row.get("added") or 0,
+        "note": row.get("note") or "", "log": row.get("log") or "",
+        "started": row.get("started") or 0, "finished": row.get("finished") or 0,
+    }
+
+
+def create_subnet(project_key, body, text):
+    name = str((body or {}).get("name") or "").strip()
+    target = str((body or {}).get("target") or "").strip()
+    if not name or len(name) > 80:
+        return 400, {"message": tni_message(text, "name")}
+    hosts, kind = tni_expand(target)
+    if kind:
+        return 400, {"message": tni_message(text, kind)}
+    if len(tni_rows(project_key)) >= 40:
+        return 400, {"message": tni_message(text, "many")}
+    subnet_id = STATE.setdefault("subnet_seq", 1)
+    STATE["subnet_seq"] = subnet_id + 1
+    row = {
+        "id": subnet_id, "projectKey": project_key, "name": name, "target": target, "hosts": len(hosts),
+        "state": "idle", "scanned": 0, "online": 0, "added": 0, "note": "", "log": "", "started": 0, "finished": 0,
+    }
+    STATE.setdefault("subnets", {})[subnet_id] = row
+    return 201, tni_dto(row)
+
+
+def scan_subnet(project_key, subnet_id, text):
+    row = STATE.setdefault("subnets", {}).get(subnet_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text.get("asset-tree.error.notFound", "Missing")}
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    type_key = module_setup(view.get("setup") or {}).get("tniComputer") or ""
+    if not type_key or type_key not in STATE["types"] or STATE["types"][type_key].get("location"):
+        return 400, {"message": tni_message(text, "type")}
+    hosts, kind = tni_expand(row["target"])
+    if kind:
+        return 400, {"message": tni_message(text, kind)}
+    added = 0
+    online = []
+    for address in hosts:
+        if int(address.rsplit(".", 1)[-1]) not in (1, 10, 20):
+            continue
+        external = "tni:" + address
+        known = any(asset.get("externalKey") == external and asset.get("projectKey") == project_key for asset in STATE["assets"].values())
+        if not known:
+            asset_id = add_asset(project_key, type_key, address, None, "in_use", None, {})
+            if not asset_id:
+                continue
+            STATE["assets"][asset_id]["externalKey"] = external
+            STATE["assets"][asset_id]["description"] = text.get("asset-tree.ui.tniFound", address).replace("{0}", address)
+            added += 1
+            online.append(address + "\t\tnew")
+        else:
+            online.append(address + "\t\tknown")
+    row.update({
+        "hosts": len(hosts), "state": "done", "scanned": len(hosts), "online": len(online),
+        "added": added, "note": "", "log": "\n".join(online), "finished": 1,
+    })
+    return 202, tni_dto(row)
+
+
+def directory_row(project_key):
+    return STATE.setdefault("directory", {}).get(project_key)
+
+
+def directory_dto(project_key):
+    row = directory_row(project_key) or {}
+    return {
+        "host": row.get("host") or "",
+        "port": row.get("port") or 389,
+        "ssl": bool(row.get("ssl")),
+        "base": row.get("base") or "",
+        "account": row.get("account") or "",
+        "passwordSet": False,
+        "note": "",
+        "finished": 0,
+    }
+
+
+def directory_type(project_key, text):
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    type_key = module_setup(view.get("setup") or {}).get("tniComputer") or ""
+    if not type_key or type_key not in STATE["types"] or STATE["types"][type_key].get("location"):
+        return None
+    return type_key
+
+
+def directory_apply(project_key, computers, text):
+    type_key = directory_type(project_key, text)
+    if not type_key:
+        return 400, {"message": tni_message(text, "type")}
+    created = 0
+    updated = 0
+    for computer in computers:
+        found = None
+        for asset in STATE["assets"].values():
+            if asset.get("projectKey") == project_key and asset.get("externalKey") == computer["key"]:
+                found = asset
+                break
+        if found:
+            found["name"] = computer["name"]
+            found["description"] = computer["detail"]
+            updated += 1
+            continue
+        asset_id = add_asset(project_key, type_key, computer["name"], None, "in_use", None, {})
+        if not asset_id:
+            continue
+        STATE["assets"][asset_id]["externalKey"] = computer["key"]
+        STATE["assets"][asset_id]["description"] = computer["detail"]
+        created += 1
+    return 200, {"created": created, "updated": updated, "done": True, "totalRows": len(computers), "errors": []}
+
+
+def save_directory(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    base = str(body.get("base") or "").strip()
+    account = str(body.get("account") or "").strip()
+    if not host or any(ch in host for ch in " /\\"):
+        return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
+    if "=" not in base or len(base) < 3:
+        return 400, {"message": text.get("asset-tree.error.tni.base", "Base")}
+    if not account:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    port = int(body.get("port") or 0)
+    ssl = bool(body.get("ssl"))
+    if port <= 0:
+        port = 636 if ssl else 389
+    saved = {
+        "host": host, "port": port, "ssl": ssl, "base": base, "account": account, "secret": "",
+    }
+    STATE.setdefault("directory", {})[project_key] = saved
+    return 200, directory_dto(project_key)
+
+
+def load_directory(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or not account or not password:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    row = directory_row(project_key)
+    if row is not None:
+        row["secret"] = ""
+    computers = [
+        {"key": "ad:preview-1", "name": host.split(".")[0] + "-1", "detail": "Windows 10 · " + host},
+        {"key": "ad:preview-2", "name": host.split(".")[0] + "-2", "detail": "Windows 11 · " + host},
+    ]
+    return directory_apply(project_key, computers, text)
+
+
+def sccm_row(project_key):
+    return (STATE.get("sccm") or {}).get(project_key)
+
+
+def sccm_dto(project_key):
+    row = sccm_row(project_key) or {}
+    return {
+        "host": row.get("host") or "",
+        "port": row.get("port") or 443,
+        "ssl": bool(row.get("ssl")),
+        "base": "",
+        "account": row.get("account") or "",
+        "passwordSet": False,
+        "note": "",
+        "finished": 0,
+    }
+
+
+def save_sccm(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    if not host or any(ch in host for ch in " /\\"):
+        return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
+    if not account:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    port = int(body.get("port") or 0)
+    if port <= 0:
+        port = 443
+    saved = {
+        "host": host, "port": port, "ssl": bool(body.get("ssl")), "account": account, "secret": "",
+    }
+    STATE.setdefault("sccm", {})[project_key] = saved
+    return 200, sccm_dto(project_key)
+
+
+def load_sccm(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or not account or not password:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    row = sccm_row(project_key)
+    if row is not None:
+        row["secret"] = ""
+    computers = [
+        {"key": "sccm:501", "name": host.split(".")[0] + "-501", "detail": "Windows 10 · " + host},
+        {"key": "sccm:502", "name": host.split(".")[0] + "-502", "detail": "Windows 11 · " + host},
+    ]
+    return directory_apply(project_key, computers, text)
+
+
+def watch_station(raw):
+    text = str(raw or "").strip()
+    local = watch_local(text)
+    if local:
+        return local
+    if not text or len(text) > 253 or text[0] in ".-" or text[-1] in ".-" or ".." in text:
+        return ""
+    if text.lower() == "localhost":
+        return ""
+    letter = False
+    for label in text.split("."):
+        if not label or len(label) > 63 or label[0] == "-" or label[-1] == "-":
+            return ""
+        for ch in label:
+            digit = "0" <= ch <= "9"
+            alpha = ("a" <= ch <= "z") or ("A" <= ch <= "Z")
+            if not (digit or alpha or ch == "-"):
+                return ""
+            if alpha:
+                letter = True
+    return text if letter else ""
+
+
+def watch_local(address):
+    parts = str(address or "").strip().split(".")
+    if len(parts) != 4:
+        return ""
+    try:
+        octets = [int(part) for part in parts]
+    except ValueError:
+        return ""
+    if any(part < 0 or part > 255 for part in octets):
+        return ""
+    private = octets[0] == 10 or (octets[0] == 192 and octets[1] == 168) or (
+        octets[0] == 172 and 16 <= octets[1] <= 31
+    )
+    if not private:
+        return ""
+    return ".".join(str(part) for part in octets)
+
+
+def watch_dto(asset):
+    row = (STATE.get("watch") or {}).get(asset["id"]) or {}
+    key = str(asset.get("externalKey") or "")
+    suggestion = watch_local(key[4:]) if key.startswith("tni:") else ""
+    return {
+        "armed": bool(row.get("armed")),
+        "address": asset.get("name") or "",
+        "suggestion": suggestion,
+        "up": int(row.get("up") or 0),
+        "checkedAt": int(row.get("checkedAt") or 0),
+    }
+
+
+def watch_asset(asset_id, text):
+    asset = STATE["assets"].get(asset_id)
+    if not asset:
+        return None, (404, {"message": text.get("asset-tree.error.notFound", "Missing")})
+    blocked = reject_module(asset["projectKey"], "tni", text)
+    if blocked:
+        return None, blocked
+    if (STATE["types"].get(asset.get("typeKey")) or {}).get("location"):
+        return None, (400, {"message": text.get("asset-tree.error.tni.watch", "Address")})
+    return asset, None
+
+
+def get_watch(asset_id, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    return 200, watch_dto(asset)
+
+
+def save_watch(asset_id, body, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    body = body or {}
+    row = STATE.setdefault("watch", {}).setdefault(asset_id, {})
+    row["exempt"] = bool(body.get("exempt"))
+    row.setdefault("up", 0)
+    row["address"] = asset.get("name") or ""
+    return 200, watch_dto(asset)
+
+
+def ping_asset(asset_id, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    host = watch_station(asset.get("name") or "")
+    up = 1 if host else 2
+    row = STATE.setdefault("watch", {}).setdefault(asset_id, {})
+    row["up"] = up
+    row["address"] = asset.get("name") or ""
+    row.setdefault("exempt", False)
+    record_activity(asset_id, "ping", asset.get("name") or "", "", "up" if up == 1 else "down")
+    dto = asset_dto(asset, text, True)
+    dto["up"] = up
+    return 200, dto
+
+
+def sheet_computers(csv):
+    text = str(csv or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        return []
+    header_line = ""
+    for line in text.split("\n"):
+        if line.startswith("#") or not line.strip():
+            continue
+        header_line = line
+        break
+    delim = ";" if header_line.count(";") > header_line.count(",") else ","
+    rows = []
+    for line in text.split("\n"):
+        if not line.strip():
+            continue
+        rows.append([cell.strip() for cell in line.split(delim)])
+    header_at = -1
+    cols = {}
+    aliases = {
+        "name": "name", "computername": "name", "имя": "name", "имякомпьютера": "name",
+        "dnshostname": "dns", "resourceid": "resource", "идресурса": "resource",
+        "operatingsystem": "os", "операционнаясистема": "os",
+        "username": "user", "пользователь": "user",
+    }
+    for index, row in enumerate(rows):
+        mapped = {}
+        for cell_at, cell in enumerate(row):
+            key = "".join(ch for ch in cell.lower() if ch not in " _-.")
+            name = aliases.get(key)
+            if name and name not in mapped:
+                mapped[name] = cell_at
+        if mapped.get("name") is not None or mapped.get("dns") is not None or mapped.get("resource") is not None:
+            header_at = index
+            cols = mapped
+            break
+    if header_at < 0:
+        return None
+    computers = []
+    seen = set()
+    for row in rows[header_at + 1:]:
+        def cell(key):
+            at = cols.get(key)
+            if at is None or at >= len(row):
+                return ""
+            return row[at].strip().strip('"')
+        name = cell("name") or cell("dns")
+        resource = cell("resource")
+        if resource.endswith(".0") and resource[:-2].isdigit():
+            resource = resource[:-2]
+        dns = cell("dns")
+        if resource:
+            key = "sccm:" + resource
+        elif dns:
+            key = "ad:" + dns.lower()
+        elif name:
+            key = "ad:" + name.lower()
+        else:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        detail = " · ".join(part for part in (cell("os"), cell("user")) if part)
+        computers.append({"key": key, "name": name or resource, "detail": detail})
+        if len(computers) > 2000:
+            return "rows"
+    return computers
+
+
+def import_sheet(project_key, body, text):
+    parsed = sheet_computers((body or {}).get("csv"))
+    if parsed == "rows":
+        return 400, {"message": text.get("asset-tree.error.tni.rows", "Rows")}
+    if not parsed:
+        return 400, {"message": text.get("asset-tree.error.tni.sheet", "Sheet")}
+    return directory_apply(project_key, parsed, text)
+
+
 def plan_kind(kind):
     value = str(kind or "room").strip().lower()
     allowed = {
@@ -1750,12 +2284,14 @@ def ensure_profile_demo():
         view = STATE.setdefault("views", {}).setdefault(project, {})
         modules = [item for item in (view.get("modules") or []) if item != "portal"]
         modules.append("portal")
-        for extra in ("reports", "life", "service", "map"):
+        for extra in ("reports", "life", "service", "map", "tni"):
             if extra not in modules:
                 modules.append(extra)
         view["modules"] = modules
         setup = view.setdefault("setup", {})
         setup["portalMine"] = True
+        if project == "STP" and not setup.get("tniComputer"):
+            setup["tniComputer"] = "stp-pc"
     if "stp-laptop" not in STATE["types"]:
         STATE["types"]["stp-laptop"] = {
             "typeKey": "stp-laptop", "projectKey": "STP", "baseKey": "laptop", "label": "Ноутбук",
@@ -2198,7 +2734,8 @@ def type_dto(row, text, rows):
         "placeCaption": (row.get("placeCaption") or "") if row.get("location") else "",
         "showInTree": bool(row.get("location") or row.get("showInTree")),
         "parentTypeKey": (row.get("parentTypeKey") or ""),
-        "service": bool(row.get("service")) and not row.get("location"), "assetCount": count,
+        "service": bool(row.get("service")) and not row.get("location"),
+        "reach": bool(row.get("reach")) and not row.get("location"), "assetCount": count,
         "fields": with_parent_fields(row, text),
     }
 
@@ -2477,6 +3014,9 @@ def asset_dto(asset, text, with_issues):
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
         dto["shares"] = share_dtos(asset["id"])
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
+        watch = (STATE.get("watch") or {}).get(asset["id"]) or {}
+        dto["pingUp"] = int(watch.get("up") or 0)
+        dto["pingExempt"] = bool(watch.get("exempt"))
         dto["peers"] = peers_for(asset["id"], text)
         dto["links"] = relations_for(asset["id"])
     return dto
@@ -7461,7 +8001,7 @@ class Handler(BaseHTTPRequestHandler):
         view = (query.get("view") or ["all"])[0]
         if view == "dashboard":
             view = "all"
-        if view not in ("all", "mine", "search", "settings", "schedules", "reports", "map"):
+        if view not in ("all", "mine", "search", "settings", "schedules", "reports", "map", "tni"):
             view = "all"
         html = (template
                 .replace("@@LANG@@", "ru" if self.lang() == "ru" else "en")
@@ -8220,6 +8760,77 @@ setTimeout(function () {
                 return save_floor(project_key, floor_id, self.read_json(), text)
             if method == "DELETE":
                 return delete_floor(project_key, floor_id, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, [tni_dto(row) for row in tni_rows(project_key)]
+            if method == "POST":
+                return create_subnet(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets/(\d+)", path)
+        if match:
+            project_key = match.group(1)
+            subnet_id = int(match.group(2))
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "DELETE":
+                row = STATE.setdefault("subnets", {}).get(subnet_id)
+                if not row or row.get("projectKey") != project_key:
+                    return 404, {"message": text.get("asset-tree.error.notFound", "Missing")}
+                STATE["subnets"].pop(subnet_id, None)
+                return 204, None
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets/(\d+)/scan", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return scan_subnet(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/sccm/load", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return load_sccm(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/sccm", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, sccm_dto(project_key)
+            if method == "POST":
+                return save_sccm(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/load", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return load_directory(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/sheet", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return import_sheet(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, directory_dto(project_key)
+            if method == "POST":
+                return save_directory(project_key, self.read_json(), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports", path)
         if match:
             project_key = match.group(1)
@@ -8510,6 +9121,14 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/copy", path)
         if match and method == "POST":
             return self.copy_asset(int(match.group(1)), text)
+        match = re.fullmatch(r"/assets/(\d+)/ping", path)
+        if match and method == "POST":
+            return ping_asset(int(match.group(1)), text)
+        match = re.fullmatch(r"/assets/(\d+)/watch", path)
+        if match and method == "GET":
+            return get_watch(int(match.group(1)), text)
+        if match and method == "PUT":
+            return save_watch(int(match.group(1)), self.read_json(), text)
         match = re.fullmatch(r"/assets/(\d+)", path)
         if match and method == "GET":
             asset = STATE["assets"].get(int(match.group(1)))
@@ -9267,6 +9886,7 @@ setTimeout(function () {
             "systemType": False, "location": location, "placeCaption": caption,
             "showInTree": location or bool((body or {}).get("showInTree")),
             "service": (not location) and bool((body or {}).get("service")),
+            "reach": (not location) and bool((body or {}).get("reach")),
             "parentTypeKey": parent,
             "sortOrder": order, "fields": [],
         }
@@ -9281,6 +9901,8 @@ setTimeout(function () {
             row["showInTree"] = bool(row.get("location")) or bool(body.get("showInTree"))
         if body.get("service") is not None and not row.get("location"):
             row["service"] = bool(body.get("service"))
+        if body.get("reach") is not None and not row.get("location"):
+            row["reach"] = bool(body.get("reach"))
         if body.get("icon") is not None:
             icon = resolve_icon(body.get("icon"), bool(row.get("location")))
             if icon is None:

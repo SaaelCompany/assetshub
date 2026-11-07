@@ -17,4 +17,6 @@ public interface TniHost {
     void announce(String projectKey, String event, int id, String objectKey, String name);
 
     void discard(int assetId, String actorKey);
+
+    void note(int assetId, String actorKey, String kind, String field, String value);
 }

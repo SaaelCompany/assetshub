@@ -46,6 +46,9 @@ import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.TypeDraft;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSourceDraft;
+import com.assetstree.jira.dto.TniWatchDraft;
+import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
 import org.slf4j.Logger;
@@ -1586,6 +1589,150 @@ public class AssetResource {
             public Response call() {
                 assetService.rememberTni(user(), draft);
                 return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/subnets")
+    public Response tniSubnets(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniSubnets(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/subnets")
+    public Response createTniSubnet(@PathParam("projectKey") final String projectKey, final TniSubnetDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createTniSubnet(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/subnets/{subnetId}")
+    public Response deleteTniSubnet(@PathParam("projectKey") final String projectKey, @PathParam("subnetId") final int subnetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteTniSubnet(user(), projectKey, subnetId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/subnets/{subnetId}/scan")
+    public Response scanTniSubnet(@PathParam("projectKey") final String projectKey, @PathParam("subnetId") final int subnetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.ACCEPTED).entity(assetService.scanTniSubnet(user(), projectKey, subnetId)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("assets/{id}/watch")
+    public Response tniWatch(@PathParam("id") final int assetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniWatch(user(), assetId)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/ping")
+    public Response pingTni(@PathParam("id") final int assetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.pingTni(user(), assetId)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("assets/{id}/watch")
+    public Response saveTniWatch(@PathParam("id") final int assetId, final TniWatchDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniWatch(user(), assetId, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/directory")
+    public Response tniDirectory(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniDirectory(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/directory")
+    public Response saveTniDirectory(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniDirectory(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/directory/load")
+    public Response loadTniDirectory(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.loadTniDirectory(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/sccm")
+    public Response tniSccm(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniSccm(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/sccm")
+    public Response saveTniSccm(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniSccm(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/sccm/load")
+    public Response loadTniSccm(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.loadTniSccm(user(), projectKey, draft)).build();
             }
         });
     }

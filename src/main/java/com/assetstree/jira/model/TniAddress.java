@@ -32,6 +32,62 @@ public final class TniAddress {
         return publicAddress;
     }
 
+    /**
+     * A host name or a private IPv4 address chosen for one asset.
+     * The name is stored as typed. Each check resolves it again, so a DHCP lease can move.
+     */
+    public static String station(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String text = raw.trim();
+        String local = local(text);
+        if (!local.isEmpty()) {
+            return local;
+        }
+        if (text.isEmpty() || text.length() > 253 || text.charAt(0) == '.' || text.charAt(text.length() - 1) == '.') {
+            return "";
+        }
+        if (text.indexOf("..") >= 0 || "localhost".equalsIgnoreCase(text)) {
+            return "";
+        }
+        boolean letter = false;
+        int start = 0;
+        for (int i = 0; i <= text.length(); i++) {
+            if (i < text.length() && text.charAt(i) != '.') {
+                char c = text.charAt(i);
+                boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
+                if (!ok) {
+                    return "";
+                }
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                    letter = true;
+                }
+                continue;
+            }
+            int length = i - start;
+            if (length < 1 || length > 63) {
+                return "";
+            }
+            char first = text.charAt(start);
+            char last = text.charAt(i - 1);
+            if (first == '-' || last == '-') {
+                return "";
+            }
+            start = i + 1;
+        }
+        return letter ? text : "";
+    }
+
+    /** A private IPv4 address an administrator chose for one asset, or an empty string. */
+    public static String local(String raw) {
+        String address = literal(raw);
+        if (address.isEmpty() || !allowed(address) || !isPrivate(address)) {
+            return "";
+        }
+        return address;
+    }
+
     public static boolean allowed(String address) {
         int[] octets = octets(address);
         if (octets == null) {

@@ -525,7 +525,15 @@
         lifeLoading: {},
         lifeFailed: {},
         lifeToken: {},
-        lifeEditing: {}
+        lifeEditing: {},
+        tniList: null,
+        tniError: '',
+        tniTimer: null,
+        tniDir: null,
+        tniSccm: null,
+        tniWatch: {},
+        tniWatchLoading: {},
+        tniWatchToken: {}
     };
     var idIndex = null;
     var childIndex = null;
@@ -536,6 +544,7 @@
 
     function normalizeView(raw) {
         var value = String(raw || '').toLowerCase();
+        if (value === 'tni') return 'settings';
         if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
             return value;
         }
@@ -4166,10 +4175,15 @@
             menu.hidden = !menu.hidden;
         });
         items.forEach(function (item) {
-            menu.appendChild(button(item.label, 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''), function () {
+            var entry = el('button', 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''));
+            entry.type = 'button';
+            if (item.mark) entry.appendChild(pingDot(item.mark));
+            entry.appendChild(document.createTextNode(item.label));
+            entry.addEventListener('click', function () {
                 menu.hidden = true;
                 item.onClick();
-            }));
+            });
+            menu.appendChild(entry);
         });
         wrap.appendChild(toggle);
         wrap.appendChild(menu);
@@ -6451,6 +6465,7 @@
         if (item.action === 'service_done') return t('actServiceDone');
         if (item.action === 'peer_add') return t('actPeerAdd');
         if (item.action === 'peer_remove') return t('actPeerRemove');
+        if (item.action === 'ping') return t('actPing');
         return t('actUpdated');
     }
 
@@ -6481,6 +6496,13 @@
         }
         row.appendChild(head);
         if (item.action === 'created' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
+        if (item.action === 'ping') {
+            var pingChange = el('div', 'asset-tree-history-change');
+            var pingWord = item.newValue === 'up' ? t('tniWatchUp') : t('tniWatchDown');
+            pingChange.appendChild(el('span', null, item.field ? (item.field + ' · ' + pingWord) : pingWord));
+            row.appendChild(pingChange);
+            return row;
+        }
         if (placeKind(item.action) || item.action === 'peer_add' || item.action === 'peer_remove') {
             var placeChange = el('div', 'asset-tree-history-change');
             var placeLabel = item.newValue || item.oldValue || '';
@@ -7834,6 +7856,13 @@
                 extra.push({ label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
             }
         }
+        if (!isFolder(asset) && moduleOn('tni')) {
+            extra.unshift({
+                label: t('tniPing'),
+                mark: pingMark(asset),
+                onClick: function () { pingAsset(asset); }
+            });
+        }
         if (mayEdit(asset)) extra.push({ label: t('delete'), danger: true, onClick: function () { openDelete(asset); } });
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
@@ -7849,6 +7878,7 @@
                 }
             });
         }
+        if (!isFolder(asset) && moduleOn('tni') && pingMark(asset)) ops.appendChild(pingDot(pingMark(asset)));
         if (extra.length) ops.appendChild(moreMenu(extra));
         main.appendChild(ops);
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
@@ -7999,6 +8029,17 @@
         descriptionBox.className = 'asset-tree-description';
         description.appendChild(descriptionBox);
         main.appendChild(description);
+        if (!placePage && moduleOn('tni') && typeOf(asset.typeKey).reach) {
+            var exemptRow = el('label', 'asset-tree-check');
+            var exemptBox = el('input');
+            exemptBox.type = 'checkbox';
+            exemptBox.id = 'asset-field-ping-exempt';
+            exemptBox.checked = !!asset.pingExempt;
+            exemptRow.appendChild(exemptBox);
+            exemptRow.appendChild(el('span', null, t('tniPingExempt')));
+            main.appendChild(exemptRow);
+            main.appendChild(el('p', 'asset-tree-hint', t('tniPingExemptHint')));
+        }
 
         var attributes = el('div', 'asset-tree-request-block');
         var fieldHead = el('div', 'asset-tree-block-head');
@@ -8937,7 +8978,7 @@
                 return;
             }
             if (!parentChanged) {
-                finishSave(id, t('saved'), typeMoved);
+                savePingExempt(id, function () { finishSave(id, t('saved'), typeMoved); });
                 return;
             }
             ajax('POST', '/assets/' + id + '/move', { parentId: parentId, index: null }, function (moveStatus, movePayload) {
@@ -8951,8 +8992,46 @@
                     state.expanded[parentId] = true;
                     rememberExpanded();
                 }
-                finishSave(id, t('moved'), typeMoved);
+                savePingExempt(id, function () { finishSave(id, t('moved'), typeMoved); });
             });
+        });
+    }
+
+    function savePingExempt(id, done) {
+        var box = document.getElementById('asset-field-ping-exempt');
+        if (!box) {
+            done();
+            return;
+        }
+        ajax('PUT', '/assets/' + id + '/watch', { exempt: !!box.checked }, function () {
+            done();
+        });
+    }
+
+    function pingMark(asset) {
+        if (!asset) return 0;
+        if (state.ping && state.ping[asset.id]) return state.ping[asset.id];
+        var full = state.detail && state.detail.id === asset.id ? state.detail : asset;
+        return full && full.pingUp ? full.pingUp : 0;
+    }
+
+    function pingDot(mark) {
+        var dot = el('span', 'asset-tree-ping-dot ' + (mark === 1 ? 'is-up' : 'is-down'));
+        dot.title = mark === 1 ? t('tniWatchUp') : t('tniWatchDown');
+        return dot;
+    }
+
+    function pingAsset(asset) {
+        setBusy(true);
+        ajax('POST', '/assets/' + asset.id + '/ping', {}, function (status, payload) {
+            setBusy(false);
+            if (status < 200 || status >= 300 || !payload) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            if (!state.ping) state.ping = {};
+            state.ping[asset.id] = payload.up || 2;
+            selectAsset(asset.id, true);
         });
     }
 
@@ -10344,6 +10423,30 @@
                 serviceRow.appendChild(el('p', 'asset-tree-hint', t('serviceTypeHint')));
                 wrap.appendChild(serviceRow);
             }
+            if (moduleOn('tni')) {
+                var reachToggle = el('label', 'asset-tree-check');
+                reachToggle.title = t('tniReachTypeHint');
+                var reachBox = el('input');
+                reachBox.type = 'checkbox';
+                reachBox.checked = !!type.reach;
+                reachBox.disabled = !state.canConfigure;
+                if (!state.canConfigure) reachBox.setAttribute('data-disabled', '1');
+                reachBox.addEventListener('change', function () {
+                    ajax('PUT', '/types/' + encodeURIComponent(type.typeKey), { reach: reachBox.checked }, function (status, payload) {
+                        if (status >= 200 && status < 300) refreshSchema();
+                        else {
+                            reachBox.checked = !reachBox.checked;
+                            notify((payload && payload.message) || t('errorTitle'));
+                        }
+                    });
+                });
+                reachToggle.appendChild(reachBox);
+                reachToggle.appendChild(el('span', null, t('tniReachType')));
+                var reachRow = el('div', 'asset-tree-service-type');
+                reachRow.appendChild(reachToggle);
+                reachRow.appendChild(el('p', 'asset-tree-hint', t('tniReachTypeHint')));
+                wrap.appendChild(reachRow);
+            }
         }
         var fieldTools = el('div', 'asset-tree-schema-tools');
         var fieldRows = [];
@@ -10535,6 +10638,19 @@
             form.appendChild(serviceToggle);
             form.appendChild(el('p', 'asset-tree-hint asset-tree-service-type-hint', t('serviceTypeHint')));
         }
+        var reachToggle = null;
+        var reachInput = null;
+        if (moduleOn('tni')) {
+            reachToggle = el('label', 'asset-tree-check');
+            reachInput = el('input');
+            reachInput.type = 'checkbox';
+            reachInput.id = 'type-reach';
+            reachToggle.appendChild(reachInput);
+            reachToggle.appendChild(el('span', null, t('tniReachType')));
+            reachToggle.title = t('tniReachTypeHint');
+            form.appendChild(reachToggle);
+            form.appendChild(el('p', 'asset-tree-hint asset-tree-reach-type-hint', t('tniReachTypeHint')));
+        }
         locationInput.addEventListener('change', function () {
             treeInput.disabled = locationInput.checked;
             if (locationInput.checked) treeInput.checked = false;
@@ -10544,6 +10660,13 @@
                 serviceToggle.hidden = locationInput.checked;
                 var serviceHint = form.querySelector('.asset-tree-service-type-hint');
                 if (serviceHint) serviceHint.hidden = locationInput.checked;
+            }
+            if (reachInput) {
+                reachInput.disabled = locationInput.checked;
+                if (locationInput.checked) reachInput.checked = false;
+                reachToggle.hidden = locationInput.checked;
+                var reachHint = form.querySelector('.asset-tree-reach-type-hint');
+                if (reachHint) reachHint.hidden = locationInput.checked;
             }
             captionField.hidden = !locationInput.checked;
             captionHint.hidden = !locationInput.checked;
@@ -10589,6 +10712,7 @@
                 location: place,
                 showInTree: place || treeInput.checked,
                 service: !!(serviceInput && !place && serviceInput.checked),
+                reach: !!(reachInput && !place && reachInput.checked),
                 placeCaption: place ? captionInput.value.trim() : '',
                 parentTypeKey: place ? '' : parentSelect.value
             }, function (status, payload) {
@@ -10794,6 +10918,17 @@
         state.staffError = '';
         state.floors = null;
         state.floorId = 0;
+        state.tniList = null;
+        state.tniError = '';
+        state.tniDir = null;
+        state.tniSccm = null;
+        state.tniWatch = {};
+        state.tniWatchLoading = {};
+        state.tniWatchToken = {};
+        if (state.tniTimer) {
+            clearInterval(state.tniTimer);
+            state.tniTimer = null;
+        }
         state.mapPlaceId = 0;
         state.mapDraft = null;
         state.mapGroup = [];
@@ -13683,6 +13818,7 @@
             var phone = typeSelect(setup.tniPhone || '', t('tniKindPhone'));
             var tablet = typeSelect(setup.tniTablet || '', t('tniKindTablet'));
             panel.appendChild(types);
+            if (state.canAdmin) appendTniTools(panel);
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
                 next.tniKeep = clampNum(keep.value, 1, 3650);
@@ -13878,6 +14014,7 @@
             ['card', 'moduleCard', 'moduleCardHint', '', 'beta'],
             ['tni', 'moduleTni', 'moduleTniHint', '', 'beta']
         ].forEach(function (item) {
+            if (item[0] === 'tni' && !state.canAdmin) return;
             var option = el('div', 'asset-tree-module-option');
             var label = el('label');
             var box = el('input');
@@ -20206,6 +20343,388 @@
             return (row.objectKey || row.name || '') + ' ' + (row.replaceOn || '');
         }).join(', ');
         return el('p', 'asset-tree-hint', t('lifeForecast') + ': ' + names);
+    }
+
+    function appendTniTools(panel) {
+        var scan = el('div', 'asset-tree-tni-block');
+        scan.appendChild(el('h4', null, t('tniNetTitle')));
+        scan.appendChild(el('p', 'asset-tree-hint', t('tniScanHint')));
+        var setup = currentProject() && currentProject().setup;
+        if (!setup || !setup.tniComputer) {
+            scan.appendChild(el('p', 'asset-tree-banner', t('tniScanNeedType')));
+        }
+        var name = document.createElement('input');
+        name.type = 'text';
+        name.maxLength = 80;
+        var target = document.createElement('textarea');
+        target.rows = 2;
+        target.placeholder = t('tniScanPlaceholder');
+        scan.appendChild(planField(t('tniScanName'), name));
+        scan.appendChild(planField(t('tniScanTarget'), target));
+        var addRow = el('div', 'asset-tree-tni-actions');
+        addRow.appendChild(button(t('tniScanAdd'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets', {
+                name: name.value,
+                target: target.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    name.value = '';
+                    target.value = '';
+                    state.tniError = '';
+                    loadTni(true);
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        scan.appendChild(addRow);
+        var board = el('div', 'asset-tree-tni-board');
+        board.id = 'asset-tree-tni-board';
+        if (state.tniList == null) {
+            board.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadTni(true);
+        } else {
+            board.appendChild(tniBoard());
+        }
+        scan.appendChild(board);
+        panel.appendChild(scan);
+        panel.appendChild(renderTniDirectory());
+        panel.appendChild(renderTniSccm());
+    }
+
+    function loadTni(quiet) {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/subnets', null, function (status, payload) {
+            if (key !== state.projectKey || state.moduleDialog !== 'tni') return;
+            if (status !== 200) {
+                state.tniError = (payload && payload.message) || t('errorTitle');
+                state.tniList = [];
+            } else {
+                state.tniError = '';
+                state.tniList = payload || [];
+            }
+            var running = false;
+            var i;
+            for (i = 0; i < state.tniList.length; i++) {
+                if (state.tniList[i].state === 'running') running = true;
+            }
+            if (running) armTniWatch();
+            else if (state.tniTimer) {
+                clearInterval(state.tniTimer);
+                state.tniTimer = null;
+            }
+            var board = document.getElementById('asset-tree-tni-board');
+            if (board) {
+                board.innerHTML = '';
+                board.appendChild(tniBoard());
+            } else if (!quiet) {
+                renderFrame();
+            }
+        });
+    }
+
+    function armTniWatch() {
+        if (state.tniTimer) return;
+        state.tniTimer = setInterval(function () {
+            if (state.moduleDialog !== 'tni') {
+                clearInterval(state.tniTimer);
+                state.tniTimer = null;
+                return;
+            }
+            loadTni(true);
+        }, 1000);
+    }
+
+    function tniBoard() {
+        var wrap = el('div');
+        if (state.tniError) wrap.appendChild(el('p', 'asset-tree-banner', state.tniError));
+        var rows = state.tniList || [];
+        if (!rows.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', t('tniScanEmpty')));
+            return wrap;
+        }
+        var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
+        var header = el('tr');
+        [t('tniScanName'), t('tniScanHosts'), t('tniScanState'), t('tniScanOnline'), t('tniScanAdded'), ''].forEach(function (label) {
+            header.appendChild(el('th', null, label));
+        });
+        table.appendChild(header);
+        var shown = null;
+        rows.forEach(function (row) {
+            if (row.state === 'running' || (row.log && !shown)) shown = row;
+            var line = el('tr');
+            var title = el('td', null, row.name || '');
+            title.title = row.target || '';
+            line.appendChild(title);
+            line.appendChild(el('td', 'is-num', String(row.hosts || 0)));
+            line.appendChild(el('td', null, tniStateText(row)));
+            line.appendChild(el('td', 'is-num', String(row.online || 0)));
+            line.appendChild(el('td', 'is-num', String(row.added || 0)));
+            var actions = el('td');
+            if (state.canAdmin) {
+                var scan = button(t('tniScanRun'), 'asset-tree-btn slim', function () {
+                    ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets/' + encodeURIComponent(row.id) + '/scan', {}, function (status, payload) {
+                        if (status >= 200 && status < 300) loadTni(true);
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+                if (row.state === 'running') scan.disabled = true;
+                actions.appendChild(scan);
+                actions.appendChild(button(t('tniScanDelete'), 'asset-tree-btn slim', function () {
+                    if (!window.confirm(t('tniScanDeleteConfirm', row.name || ''))) return;
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets/' + encodeURIComponent(row.id), null, function (status, payload) {
+                        if (status >= 200 && status < 300) loadTni(true);
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }));
+            }
+            line.appendChild(actions);
+            table.appendChild(line);
+        });
+        wrap.appendChild(table);
+        if (shown && shown.log) wrap.appendChild(tniLog(shown));
+        return wrap;
+    }
+
+    function tniStateText(row) {
+        if (!row || row.state === 'idle') return t('tniScanIdle');
+        if (row.state === 'running') return t('tniScanRunning') + ' ' + (row.scanned || 0) + ' / ' + (row.hosts || 0);
+        if (row.state === 'failed') return row.note || t('tniScanFailed');
+        return t('tniScanDone');
+    }
+
+    function tniLog(row) {
+        var box = el('div', 'asset-tree-tni-log');
+        box.appendChild(el('p', null, t('tniScanLog')));
+        String(row.log || '').split('\n').forEach(function (line) {
+            if (!line) return;
+            var parts = line.split('\t');
+            var mark = parts[2] === 'new' ? t('tniScanNew') : t('tniScanKnown');
+            var text = (parts[1] ? parts[1] + ' · ' : '') + (parts[0] || '') + ' · ' + mark;
+            box.appendChild(el('span', null, text));
+        });
+        return box;
+    }
+
+    function renderTniDirectory() {
+        var box = el('div', 'asset-tree-tni-block');
+        box.appendChild(el('h4', null, t('tniDirTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('tniDirHint')));
+        var host = document.createElement('input');
+        host.type = 'text';
+        host.id = 'asset-tree-tni-host';
+        host.placeholder = 'dc.corp.local';
+        var port = document.createElement('input');
+        port.type = 'number';
+        port.id = 'asset-tree-tni-port';
+        port.min = '1';
+        port.max = '65535';
+        port.value = '389';
+        var account = document.createElement('input');
+        account.type = 'text';
+        account.id = 'asset-tree-tni-account';
+        account.placeholder = 'CORP\\user';
+        var password = document.createElement('input');
+        password.type = 'password';
+        password.id = 'asset-tree-tni-password';
+        password.autocomplete = 'new-password';
+        var base = document.createElement('input');
+        base.type = 'text';
+        base.id = 'asset-tree-tni-base';
+        base.placeholder = 'DC=corp,DC=local';
+        var grid = el('div', 'asset-tree-tni-grid');
+        grid.appendChild(planField(t('tniDirHost'), host));
+        grid.appendChild(planField(t('tniDirPort'), port));
+        grid.appendChild(planField(t('tniDirAccount'), account));
+        grid.appendChild(planField(t('tniDirPassword'), password));
+        var baseField = planField(t('tniDirBase'), base);
+        baseField.className += ' is-full';
+        grid.appendChild(baseField);
+        box.appendChild(grid);
+        var actions = el('div', 'asset-tree-tni-actions');
+        var sslLabel = el('label', 'asset-tree-tni-ssl');
+        var ssl = document.createElement('input');
+        ssl.type = 'checkbox';
+        ssl.id = 'asset-tree-tni-ssl';
+        sslLabel.appendChild(ssl);
+        sslLabel.appendChild(document.createTextNode(t('tniDirSsl')));
+        actions.appendChild(sslLabel);
+        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: ssl.checked,
+                base: base.value,
+                account: account.value,
+                password: ''
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    state.tniDir = payload;
+                    tniDirNote(t('tniScanDone'));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        actions.appendChild(button(t('tniDirLoad'), 'asset-tree-btn primary', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory/load', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: ssl.checked,
+                base: base.value,
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    tniDirNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        box.appendChild(actions);
+        var note = el('p', 'asset-tree-hint');
+        note.id = 'asset-tree-tni-dir-note';
+        box.appendChild(note);
+        if (state.tniDir) fillTniDirectory(state.tniDir);
+        else loadTniDirectory();
+        return box;
+    }
+
+    function tniDirNote(text) {
+        var note = document.getElementById('asset-tree-tni-dir-note');
+        if (note) note.textContent = text || '';
+    }
+
+    function fillTniDirectory(row) {
+        var host = document.getElementById('asset-tree-tni-host');
+        if (!host || host.getAttribute('data-ready') === '1') return;
+        host.value = row.host || '';
+        var port = document.getElementById('asset-tree-tni-port');
+        if (port) port.value = row.port || 389;
+        var account = document.getElementById('asset-tree-tni-account');
+        if (account) account.value = row.account || '';
+        var base = document.getElementById('asset-tree-tni-base');
+        if (base) base.value = row.base || '';
+        var ssl = document.getElementById('asset-tree-tni-ssl');
+        if (ssl) ssl.checked = !!row.ssl;
+        host.setAttribute('data-ready', '1');
+    }
+
+    function loadTniDirectory() {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/directory', null, function (status, payload) {
+            if (key !== state.projectKey || state.moduleDialog !== 'tni' || status !== 200 || !payload) return;
+            state.tniDir = payload;
+            fillTniDirectory(payload);
+        });
+    }
+
+    function renderTniSccm() {
+        var box = el('div', 'asset-tree-tni-block');
+        box.appendChild(el('h4', null, t('tniSccmTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('tniSccmHint')));
+        var host = document.createElement('input');
+        host.type = 'text';
+        host.id = 'asset-tree-tni-sccm-host';
+        host.placeholder = 'sccm.corp.local';
+        var port = document.createElement('input');
+        port.type = 'number';
+        port.id = 'asset-tree-tni-sccm-port';
+        port.min = '1';
+        port.max = '65535';
+        port.value = '443';
+        var account = document.createElement('input');
+        account.type = 'text';
+        account.id = 'asset-tree-tni-sccm-account';
+        account.placeholder = 'CORP\\user';
+        var password = document.createElement('input');
+        password.type = 'password';
+        password.id = 'asset-tree-tni-sccm-password';
+        password.autocomplete = 'new-password';
+        var grid = el('div', 'asset-tree-tni-grid');
+        grid.appendChild(planField(t('tniSccmHost'), host));
+        grid.appendChild(planField(t('tniSccmPort'), port));
+        grid.appendChild(planField(t('tniDirAccount'), account));
+        grid.appendChild(planField(t('tniDirPassword'), password));
+        box.appendChild(grid);
+        var actions = el('div', 'asset-tree-tni-actions');
+        var trustLabel = el('label', 'asset-tree-tni-ssl');
+        var trust = document.createElement('input');
+        trust.type = 'checkbox';
+        trust.id = 'asset-tree-tni-sccm-trust';
+        trustLabel.appendChild(trust);
+        trustLabel.appendChild(document.createTextNode(t('tniSccmTrust')));
+        actions.appendChild(trustLabel);
+        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: trust.checked,
+                base: '',
+                account: account.value,
+                password: ''
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    state.tniSccm = payload;
+                    tniSccmNote(t('tniScanDone'));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        actions.appendChild(button(t('tniSccmLoad'), 'asset-tree-btn primary', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm/load', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: trust.checked,
+                base: '',
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    tniSccmNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        box.appendChild(actions);
+        var note = el('p', 'asset-tree-hint');
+        note.id = 'asset-tree-tni-sccm-note';
+        box.appendChild(note);
+        if (state.tniSccm) fillTniSccm(state.tniSccm);
+        else loadTniSccm();
+        return box;
+    }
+
+    function tniSccmNote(text) {
+        var note = document.getElementById('asset-tree-tni-sccm-note');
+        if (note) note.textContent = text || '';
+    }
+
+    function fillTniSccm(row) {
+        var host = document.getElementById('asset-tree-tni-sccm-host');
+        if (!host || host.getAttribute('data-ready') === '1') return;
+        host.value = row.host || '';
+        var port = document.getElementById('asset-tree-tni-sccm-port');
+        if (port) port.value = row.port || 443;
+        var account = document.getElementById('asset-tree-tni-sccm-account');
+        if (account) account.value = row.account || '';
+        var trust = document.getElementById('asset-tree-tni-sccm-trust');
+        if (trust) trust.checked = !!row.ssl;
+        host.setAttribute('data-ready', '1');
+    }
+
+    function loadTniSccm() {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/sccm', null, function (status, payload) {
+            if (key !== state.projectKey || state.moduleDialog !== 'tni' || status !== 200 || !payload) return;
+            state.tniSccm = payload;
+            fillTniSccm(payload);
+        });
     }
 
     function renderReports() {
@@ -28346,6 +28865,92 @@
             title.appendChild(stageMark('beta'));
         }
         return block;
+    }
+
+    function watchBlock(asset) {
+        if (!moduleOn('tni') || isFolder(asset)) return null;
+        var row = state.tniWatch[asset.id];
+        if (!row) {
+            if (!mayEdit(asset)) {
+                loadTniWatch(asset.id);
+                return null;
+            }
+            var waiting = el('div');
+            waiting.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadTniWatch(asset.id);
+            return moduleBlock(t('tniWatch'), waiting);
+        }
+        if (!row.armed && !mayEdit(asset)) return null;
+        if (row.missing) {
+            var failed = el('div');
+            failed.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
+            failed.appendChild(button(t('retry'), 'asset-tree-btn', function () {
+                delete state.tniWatch[asset.id];
+                state.tniWatchLoading[asset.id] = false;
+                loadTniWatch(asset.id);
+                showDetail(state.detail || asset, false);
+            }));
+            return moduleBlock(t('tniWatch'), failed);
+        }
+        return moduleBlock(t('tniWatch'), watchBody(asset, row));
+    }
+
+    function watchBody(asset, row) {
+        var body = el('div', 'asset-tree-watch');
+        body.appendChild(el('p', 'asset-tree-hint', t('tniWatchHint')));
+        var armed = document.createElement('input');
+        armed.type = 'checkbox';
+        armed.checked = !!row.armed;
+        armed.disabled = !mayEdit(asset);
+        var label = el('label', 'asset-tree-tni-ssl');
+        label.appendChild(armed);
+        label.appendChild(document.createTextNode(t('tniWatchOn')));
+        body.appendChild(label);
+        body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + (asset.name || '')));
+        body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
+        if (mayEdit(asset)) {
+            body.appendChild(button(t('tniWatchSave'), 'asset-tree-btn', function () {
+                ajax('PUT', '/assets/' + asset.id + '/watch', {
+                    armed: armed.checked
+                }, function (status, payload) {
+                    if (status >= 200 && status < 300 && payload) {
+                        state.tniWatch[asset.id] = payload;
+                        if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
+                    } else {
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
+                });
+            }));
+        }
+        return body;
+    }
+
+    function watchStatus(row) {
+        if (!row || !row.checkedAt) return t('tniWatchNone');
+        var word = row.up === 1 ? t('tniWatchUp') : (row.up === 2 ? t('tniWatchDown') : t('tniWatchNone'));
+        var when = '';
+        try {
+            when = stamp(new Date(row.checkedAt).toISOString());
+        } catch (ignore) {
+            when = '';
+        }
+        return word + (when ? ' · ' + t('tniWatchChecked', when) : '');
+    }
+
+    function loadTniWatch(assetId) {
+        if (state.tniWatchLoading[assetId]) return;
+        state.tniWatchLoading[assetId] = true;
+        var token = (state.tniWatchToken[assetId] || 0) + 1;
+        state.tniWatchToken[assetId] = token;
+        ajax('GET', '/assets/' + assetId + '/watch', null, function (status, payload) {
+            if (state.tniWatchToken[assetId] !== token) return;
+            state.tniWatchLoading[assetId] = false;
+            if (status === 200 && payload) state.tniWatch[assetId] = payload;
+            else state.tniWatch[assetId] = { armed: false, missing: true };
+            if (state.detail && state.detail.id === assetId && document.getElementById('asset-tree-detail')) {
+                showDetail(state.detail, false);
+            }
+        });
     }
 
     function lifeBlock(asset) {
