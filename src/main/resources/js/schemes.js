@@ -273,6 +273,9 @@
         var newBtn = el('button', 'asset-tree-scheme-new', api.t('schemeNew'));
         newBtn.type = 'button';
         newBtn.disabled = !api.canEdit;
+        var deleteBtn = el('button', 'asset-tree-scheme-danger', api.t('schemeDelete'));
+        deleteBtn.type = 'button';
+        deleteBtn.disabled = !api.canEdit;
         var status = el('div', 'asset-tree-scheme-status', '');
         head.appendChild(labeled(api.t('schemeList'), schemePick));
         head.appendChild(labeled(api.t('name'), nameInput));
@@ -280,6 +283,7 @@
         head.appendChild(unit);
         head.appendChild(newBtn);
         head.appendChild(saveBtn);
+        head.appendChild(deleteBtn);
         bar.appendChild(head);
         bar.appendChild(tools);
         var body = el('div', 'asset-tree-scheme-body');
@@ -325,9 +329,66 @@
                 text: '<path d="M6 7h12M12 7v11"/>',
                 dimension: '<path d="M4 12h16M6 9L4 12l2 3M18 9l2 3-2 3"/>',
                 door: '<path d="M8 19V6h5a7 7 0 0 1 0 13"/>',
-                window: '<rect x="5" y="6" width="14" height="12"/><path d="M12 6v12M5 12h14"/>'
+                window: '<rect x="5" y="6" width="14" height="12"/><path d="M12 6v12M5 12h14"/>',
+                eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/>',
+                eyeOff: '<path d="M4 5l16 14M9.5 9.7A4 4 0 0 0 14.3 14.5M6.1 6.8C3.7 8.4 2 12 2 12s3.5 6 10 6c1.7 0 3.2-.4 4.5-1.1M10.1 6.2C10.7 6.1 11.3 6 12 6c6.5 0 10 6 10 6a18 18 0 0 1-2.4 3"/>',
+                lock: '<rect x="6" y="11" width="12" height="8" rx="1"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+                unlock: '<rect x="6" y="11" width="12" height="8" rx="1"/><path d="M16 11V8a4 4 0 0 0-7.5-2"/>'
             };
             return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (body[name] || '') + '</svg>';
+        }
+
+        function askBox(options) {
+            var back = el('div', 'asset-tree-scheme-modal');
+            var dialog = el('div', 'asset-tree-scheme-dialog asset-tree-scheme-ask');
+            dialog.appendChild(el('div', 'asset-tree-scheme-label', options.title || ''));
+            if (options.text) dialog.appendChild(el('p', 'asset-tree-scheme-ask-text', options.text));
+            var input = null;
+            if (options.input) {
+                input = el('input', 'asset-tree-scheme-name');
+                input.value = options.value || '';
+            }
+            var actions = el('div', 'asset-tree-scheme-head');
+            var ok = el('button', options.danger ? 'asset-tree-scheme-danger' : 'asset-tree-scheme-save', options.okLabel || api.t('save'));
+            var cancel = el('button', 'asset-tree-scheme-new', api.t('cancel'));
+            ok.type = 'button';
+            cancel.type = 'button';
+            function close() {
+                if (back.parentNode) back.parentNode.removeChild(back);
+            }
+            function commit() {
+                var next = input ? String(input.value || '').replace(/^\s+|\s+$/g, '') : true;
+                if (options.input && !next) return;
+                close();
+                if (options.onOk) options.onOk(next);
+            }
+            ok.addEventListener('click', commit);
+            cancel.addEventListener('click', close);
+            dialog.addEventListener('keydown', function (event) {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commit();
+                }
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    close();
+                }
+            });
+            if (input) dialog.appendChild(input);
+            actions.appendChild(ok);
+            actions.appendChild(cancel);
+            dialog.appendChild(actions);
+            back.addEventListener('mousedown', function (event) {
+                if (event.target === back) close();
+            });
+            back.appendChild(dialog);
+            host.appendChild(back);
+            dialog.tabIndex = 0;
+            if (input) {
+                input.focus();
+                input.select();
+            } else dialog.focus();
         }
 
         function activeFloor() {
@@ -1514,15 +1575,20 @@
                 });
                 row.addEventListener('dblclick', function () {
                     if (!api.canEdit) return;
-                    var next = global.prompt(api.t('name'), floor.name);
-                    if (!next) return;
-                    remember();
-                    floor.name = next.slice(0, 80);
-                    refreshSide();
+                    askBox({
+                        title: api.t('name'),
+                        input: true,
+                        value: floor.name,
+                        onOk: function (next) {
+                            remember();
+                            floor.name = next.slice(0, 80);
+                            refreshSide();
+                        }
+                    });
                 });
                 side.appendChild(row);
             });
-            var addFloor = el('button', 'asset-tree-scheme-mini', api.t('schemeFloorNew'));
+            var addFloor = el('button', 'asset-tree-scheme-add', api.t('schemeFloorNew'));
             addFloor.type = 'button';
             addFloor.disabled = !api.canEdit;
             addFloor.addEventListener('click', function () {
@@ -1549,11 +1615,16 @@
 
             side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeLayers')));
             (session.doc.layers || []).forEach(function (layer) {
+                var hidden = layer.visible === false;
                 var row = el('div', 'asset-tree-scheme-layer' + (layer.id === session.doc.activeLayerId ? ' is-on' : ''));
-                var eye = el('button', 'asset-tree-scheme-mini', layer.visible === false ? '·' : '●');
+                var eye = el('button', 'asset-tree-scheme-icon');
                 eye.type = 'button';
+                eye.title = hidden ? api.t('schemeShow') : api.t('schemeHide');
+                eye.innerHTML = toolIcon(hidden ? 'eyeOff' : 'eye');
                 eye.addEventListener('click', function () {
-                    layer.visible = layer.visible === false;
+                    layer.visible = hidden;
+                    session.dirty = true;
+                    refreshSide();
                     paint();
                 });
                 var name = el('button', 'asset-tree-scheme-layer-name', layer.name);
@@ -1564,16 +1635,25 @@
                 });
                 name.addEventListener('dblclick', function () {
                     if (!api.canEdit) return;
-                    var next = global.prompt(api.t('name'), layer.name);
-                    if (!next) return;
-                    remember();
-                    layer.name = next.slice(0, 40);
-                    refreshSide();
+                    askBox({
+                        title: api.t('name'),
+                        input: true,
+                        value: layer.name,
+                        onOk: function (next) {
+                            remember();
+                            layer.name = next.slice(0, 40);
+                            refreshSide();
+                        }
+                    });
                 });
-                var lock = el('button', 'asset-tree-scheme-mini', layer.locked ? 'L' : '');
+                var lock = el('button', 'asset-tree-scheme-icon' + (layer.locked ? ' is-locked' : ''));
                 lock.type = 'button';
+                lock.title = layer.locked ? api.t('schemeUnlock') : api.t('schemeLock');
+                lock.innerHTML = toolIcon(layer.locked ? 'lock' : 'unlock');
+                lock.disabled = !api.canEdit;
                 lock.addEventListener('click', function () {
                     layer.locked = !layer.locked;
+                    session.dirty = true;
                     refreshSide();
                     paint();
                 });
@@ -1582,17 +1662,22 @@
                 row.appendChild(lock);
                 side.appendChild(row);
             });
-            var addLayer = el('button', 'asset-tree-scheme-mini', api.t('schemeLayerNew'));
+            var addLayer = el('button', 'asset-tree-scheme-add', api.t('schemeLayerNew'));
             addLayer.type = 'button';
             addLayer.disabled = !api.canEdit;
             addLayer.addEventListener('click', function () {
-                var next = global.prompt(api.t('schemeLayerNew'), '');
-                if (!next) return;
-                remember();
-                var id = nid('layer');
-                session.doc.layers.push({ id: id, name: next.slice(0, 40), visible: true, locked: false, color: '#172b4d' });
-                session.doc.activeLayerId = id;
-                refreshSide();
+                askBox({
+                    title: api.t('schemeLayerNew'),
+                    input: true,
+                    value: '',
+                    onOk: function (next) {
+                        remember();
+                        var id = nid('layer');
+                        session.doc.layers.push({ id: id, name: next.slice(0, 40), visible: true, locked: false, color: '#172b4d' });
+                        session.doc.activeLayerId = id;
+                        refreshSide();
+                    }
+                });
             });
             side.appendChild(addLayer);
 
@@ -1645,12 +1730,17 @@
 
         function renameRoom(room) {
             if (!api.canEdit) return;
-            var next = global.prompt(api.t('name'), room.name);
-            if (!next) return;
-            remember();
-            room.name = next.slice(0, 80);
-            refreshSide();
-            paint();
+            askBox({
+                title: api.t('name'),
+                input: true,
+                value: room.name,
+                onOk: function (next) {
+                    remember();
+                    room.name = next.slice(0, 80);
+                    refreshSide();
+                    paint();
+                }
+            });
         }
 
         function renderProps() {
@@ -1991,11 +2081,17 @@
                     return;
                 }
                 if (editor.tool === 'text') {
-                    var value = global.prompt(api.t('schemeText'), '');
-                    if (!value) return;
-                    edit.parts.push({ t: 't', x: pt.x, y: pt.y, w: Math.max(20, value.length * 6), h: 12, text: value.slice(0, 80), c: '#172b4d', s: 1 });
-                    editor.sel = edit.parts.length - 1;
-                    paintSymbol();
+                    var at = pt;
+                    askBox({
+                        title: api.t('schemeText'),
+                        input: true,
+                        value: '',
+                        onOk: function (value) {
+                            edit.parts.push({ t: 't', x: at.x, y: at.y, w: Math.max(20, value.length * 6), h: 12, text: value.slice(0, 80), c: '#172b4d', s: 1 });
+                            editor.sel = edit.parts.length - 1;
+                            paintSymbol();
+                        }
+                    });
                     return;
                 }
                 if (editor.tool === 'pen') {
@@ -2183,6 +2279,31 @@
             if (placePick.value !== value) placePick.value = '0';
         }
 
+        function dropScheme(id) {
+            session.catalog = (session.catalog || []).filter(function (row) { return row.id !== id; });
+            session.dirty = false;
+            if (session.catalog.length) {
+                openScheme(session.catalog[0].id);
+                return;
+            }
+            var fresh = blankDoc(api.t);
+            fresh.activeFloorId = fresh.floors[0].id;
+            acceptDoc(fresh, 0);
+            if (session.repaint) session.repaint();
+        }
+
+        function removeCurrentScheme() {
+            var id = session.id;
+            if (!id) {
+                dropScheme(0);
+                return;
+            }
+            api.ajax('DELETE', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + id, null, function (code, payload) {
+                if (code === 204 || code === 200) dropScheme(id);
+                else status.textContent = (payload && payload.message) || api.t('schemeSaveFailed');
+            });
+        }
+
         function openScheme(id) {
             api.ajax('GET', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + id, null, function (code, payload) {
                 if (code !== 200 || !payload || !payload.body) {
@@ -2291,20 +2412,26 @@
             }
             if (!api.canEdit) return;
             if (session.tool === 'text') {
-                var value = global.prompt(api.t('schemeText'), '');
-                if (!value) return;
-                remember();
-                var text = baseObject('text');
-                text.x = pt.x;
-                text.y = pt.y;
-                text.h = 18;
-                text.w = Math.max(40, value.length * 8);
-                text.text = value.slice(0, 200);
-                text.layerId = 'notes';
-                activeFloor().objects.push(text);
-                session.selection = [text.id];
-                renderProps();
-                paint();
+                var at = pt;
+                askBox({
+                    title: api.t('schemeText'),
+                    input: true,
+                    value: '',
+                    onOk: function (value) {
+                        remember();
+                        var text = baseObject('text');
+                        text.x = at.x;
+                        text.y = at.y;
+                        text.h = 18;
+                        text.w = Math.max(40, value.length * 8);
+                        text.text = value.slice(0, 200);
+                        text.layerId = 'notes';
+                        activeFloor().objects.push(text);
+                        session.selection = [text.id];
+                        renderProps();
+                        paint();
+                    }
+                });
                 return;
             }
             if (session.tool === 'symbol') {
@@ -2748,6 +2875,16 @@
             else openScheme(target);
         });
         saveBtn.addEventListener('click', function () { save(); });
+        deleteBtn.addEventListener('click', function () {
+            if (!api.canEdit) return;
+            askBox({
+                title: api.t('schemeDelete'),
+                text: session.doc.name || api.t('schemeDefaultName'),
+                okLabel: api.t('delete'),
+                danger: true,
+                onOk: removeCurrentScheme
+            });
+        });
         newBtn.addEventListener('click', function () {
             var startFresh = function () {
                 var fresh = blankDoc(api.t);

@@ -12136,26 +12136,35 @@ button.asset-tree-attach-remove {
     cursor: pointer;
 }
 
-.asset-tree-scheme-tool {
+#asset-tree-app .asset-tree-scheme-tool {
     display: inline-flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    justify-content: center;
-    gap: 2px;
-    width: 92px;
-    height: 58px;
-    padding: 4px 2px;
-    border: 1px solid #dfe1e6;
+    justify-content: flex-start;
+    gap: 6px;
+    width: auto;
+    height: 32px;
+    margin: 0;
+    padding: 0 10px;
+    border: 1px solid transparent;
     border-radius: 3px;
-    background: #fff;
-    color: #172b4d;
+    background: transparent;
+    color: #42526e;
     font: inherit;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
+    box-shadow: none;
 }
 
-.asset-tree-scheme-tool svg {
-    width: 18px;
-    height: 18px;
+#asset-tree-app .asset-tree-scheme-tool:hover {
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-scheme-tool svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.8;
@@ -12163,18 +12172,24 @@ button.asset-tree-attach-remove {
     stroke-linejoin: round;
 }
 
-.asset-tree-scheme-tool span {
-    max-width: 88px;
-    font-size: 10px;
-    line-height: 1.15;
-    text-align: center;
+#asset-tree-app .asset-tree-scheme-tool span {
+    max-width: none;
+    font-size: 13px;
+    line-height: 1;
+    text-align: left;
+    white-space: nowrap;
 }
 
-.asset-tree-scheme-tool.is-on,
+#asset-tree-app .asset-tree-scheme-tool.is-on {
+    border-color: transparent;
+    color: #0052cc;
+    background: #deebff;
+}
+
 .asset-tree-scheme-row.is-on,
 .asset-tree-scheme-symbol.is-on,
 .asset-tree-scheme-layer.is-on {
-    border-color: #0052cc;
+    border-color: transparent;
     color: #0052cc;
     background: #deebff;
 }
@@ -12232,14 +12247,105 @@ button.asset-tree-attach-remove {
 
 .asset-tree-scheme-layer {
     display: flex;
-    gap: 4px;
-    margin-bottom: 4px;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 2px;
+    border-radius: 3px;
 }
 
-.asset-tree-scheme-layer-name {
+#asset-tree-app .asset-tree-scheme-layer-name {
     flex: 1;
+    height: 28px;
+    margin: 0;
+    padding: 0 6px;
+    border: 0;
+    background: transparent;
     text-align: left;
-    padding: 0 8px;
+    box-shadow: none;
+}
+
+#asset-tree-app .asset-tree-scheme-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: #6b778c;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+#asset-tree-app .asset-tree-scheme-icon:hover,
+#asset-tree-app .asset-tree-scheme-icon.is-locked {
+    background: #ebecf0;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-scheme-icon svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+#asset-tree-app .asset-tree-scheme-add {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    width: auto;
+    margin: 2px 0 8px;
+    padding: 0 4px;
+    border: 0;
+    background: transparent;
+    color: #0052cc;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+#asset-tree-app .asset-tree-scheme-add:hover {
+    text-decoration: underline;
+}
+
+#asset-tree-app .asset-tree-scheme-save,
+#asset-tree-app .asset-tree-scheme-new,
+#asset-tree-app .asset-tree-scheme-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    height: 32px;
+    margin: 0;
+    padding: 0 12px;
+    border-radius: 3px;
+    border: 1px solid #dfe1e6;
+    background: #f4f5f7;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+}
+
+#asset-tree-app .asset-tree-scheme-save {
+    background: #0052cc;
+    border-color: #0052cc;
+    color: #fff;
+}
+
+#asset-tree-app .asset-tree-scheme-danger {
+    background: #fff;
+    border-color: #de350b;
+    color: #de350b;
 }
 
 .asset-tree-scheme-status {
@@ -12304,7 +12410,7 @@ button.asset-tree-attach-remove {
 
 .asset-tree-scheme-editor {
     display: grid;
-    grid-template-columns: 100px minmax(0, 1fr) 190px;
+    grid-template-columns: 168px minmax(0, 1fr) 190px;
     gap: 8px;
     align-items: start;
     margin-top: 8px;
@@ -12315,8 +12421,24 @@ button.asset-tree-attach-remove {
     align-items: stretch;
 }
 
-.asset-tree-scheme-editor .asset-tree-scheme-tool {
+#asset-tree-app .asset-tree-scheme-editor .asset-tree-scheme-tool {
     width: 100%;
+}
+
+.asset-tree-scheme-ask {
+    width: 360px;
+}
+
+.asset-tree-scheme-ask .asset-tree-scheme-name {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 8px 0 12px;
+}
+
+.asset-tree-scheme-ask-text {
+    margin: 4px 0 12px;
+    color: #172b4d;
+    font-size: 14px;
 }
 
 .asset-tree-scheme-editor-props {
