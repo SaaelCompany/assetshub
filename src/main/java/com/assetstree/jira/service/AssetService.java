@@ -393,5 +393,11 @@ public interface AssetService {
 
     ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey);
 
+    TniSourceDto tniSccm(ApplicationUser user, String projectKey);
+
+    TniSourceDto saveTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    ImportResultDto loadTniSccm(ApplicationUser user, String projectKey);
+
     ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
 }

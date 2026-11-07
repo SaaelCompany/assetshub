@@ -1670,6 +1670,39 @@ public class AssetResource {
         });
     }
 
+    @GET
+    @Path("projects/{projectKey}/sccm")
+    public Response tniSccm(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniSccm(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/sccm")
+    public Response saveTniSccm(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniSccm(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/sccm/load")
+    public Response loadTniSccm(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.loadTniSccm(user(), projectKey)).build();
+            }
+        });
+    }
+
     private Response receiveJson(final String projectKey, final JsonImportDraft draft, final String idempotencyKey) {
         return invoke(new Callable<Response>() {
             @Override

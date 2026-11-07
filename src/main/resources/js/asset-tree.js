@@ -529,7 +529,8 @@
         tniList: null,
         tniError: '',
         tniTimer: null,
-        tniDir: null
+        tniDir: null,
+        tniSccm: null
     };
     var idIndex = null;
     var childIndex = null;
@@ -10802,6 +10803,7 @@
         state.tniList = null;
         state.tniError = '';
         state.tniDir = null;
+        state.tniSccm = null;
         if (state.tniTimer) {
             clearInterval(state.tniTimer);
             state.tniTimer = null;
@@ -20266,6 +20268,7 @@
         scan.appendChild(board);
         panel.appendChild(scan);
         panel.appendChild(renderTniDirectory());
+        panel.appendChild(renderTniSccm());
     }
 
     function loadTni(quiet) {
@@ -20487,6 +20490,105 @@
             if (key !== state.projectKey || state.moduleDialog !== 'tni' || status !== 200 || !payload) return;
             state.tniDir = payload;
             fillTniDirectory(payload);
+        });
+    }
+
+    function renderTniSccm() {
+        var box = el('div', 'asset-tree-tni-block');
+        box.appendChild(el('h4', null, t('tniSccmTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('tniSccmHint')));
+        var host = document.createElement('input');
+        host.type = 'text';
+        host.id = 'asset-tree-tni-sccm-host';
+        host.placeholder = 'sccm.corp.local';
+        var port = document.createElement('input');
+        port.type = 'number';
+        port.id = 'asset-tree-tni-sccm-port';
+        port.min = '1';
+        port.max = '65535';
+        port.value = '443';
+        var account = document.createElement('input');
+        account.type = 'text';
+        account.id = 'asset-tree-tni-sccm-account';
+        account.placeholder = 'CORP\\user';
+        var password = document.createElement('input');
+        password.type = 'password';
+        password.id = 'asset-tree-tni-sccm-password';
+        password.autocomplete = 'new-password';
+        var grid = el('div', 'asset-tree-tni-grid');
+        grid.appendChild(planField(t('tniSccmHost'), host));
+        grid.appendChild(planField(t('tniSccmPort'), port));
+        grid.appendChild(planField(t('tniDirAccount'), account));
+        grid.appendChild(planField(t('tniDirPassword'), password));
+        box.appendChild(grid);
+        var actions = el('div', 'asset-tree-tni-actions');
+        var trustLabel = el('label', 'asset-tree-tni-ssl');
+        var trust = document.createElement('input');
+        trust.type = 'checkbox';
+        trust.id = 'asset-tree-tni-sccm-trust';
+        trustLabel.appendChild(trust);
+        trustLabel.appendChild(document.createTextNode(t('tniSccmTrust')));
+        actions.appendChild(trustLabel);
+        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: trust.checked,
+                base: '',
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    state.tniSccm = payload;
+                    if (payload && payload.passwordSet) password.placeholder = t('tniDirPasswordSet');
+                    tniSccmNote(t('tniScanDone'));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        actions.appendChild(button(t('tniSccmLoad'), 'asset-tree-btn primary', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm/load', {}, function (status, payload) {
+                if (status >= 200 && status < 300) tniSccmNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        box.appendChild(actions);
+        var note = el('p', 'asset-tree-hint');
+        note.id = 'asset-tree-tni-sccm-note';
+        box.appendChild(note);
+        if (state.tniSccm) fillTniSccm(state.tniSccm);
+        else loadTniSccm();
+        return box;
+    }
+
+    function tniSccmNote(text) {
+        var note = document.getElementById('asset-tree-tni-sccm-note');
+        if (note) note.textContent = text || '';
+    }
+
+    function fillTniSccm(row) {
+        var host = document.getElementById('asset-tree-tni-sccm-host');
+        if (!host || host.getAttribute('data-ready') === '1') return;
+        host.value = row.host || '';
+        var port = document.getElementById('asset-tree-tni-sccm-port');
+        if (port) port.value = row.port || 443;
+        var account = document.getElementById('asset-tree-tni-sccm-account');
+        if (account) account.value = row.account || '';
+        var trust = document.getElementById('asset-tree-tni-sccm-trust');
+        if (trust) trust.checked = !!row.ssl;
+        var password = document.getElementById('asset-tree-tni-sccm-password');
+        if (password && row.passwordSet) password.placeholder = t('tniDirPasswordSet');
+        host.setAttribute('data-ready', '1');
+    }
+
+    function loadTniSccm() {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/sccm', null, function (status, payload) {
+            if (key !== state.projectKey || state.moduleDialog !== 'tni' || status !== 200 || !payload) return;
+            state.tniSccm = payload;
+            fillTniSccm(payload);
         });
     }
 

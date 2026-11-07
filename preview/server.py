@@ -1556,6 +1556,57 @@ def load_directory(project_key, text):
     return directory_apply(project_key, computers, text)
 
 
+def sccm_row(project_key):
+    return (STATE.get("sccm") or {}).get(project_key)
+
+
+def sccm_dto(project_key):
+    row = sccm_row(project_key) or {}
+    return {
+        "host": row.get("host") or "",
+        "port": row.get("port") or 443,
+        "ssl": bool(row.get("ssl")),
+        "base": "",
+        "account": row.get("account") or "",
+        "passwordSet": bool(row.get("secret")),
+        "note": "",
+        "finished": 0,
+    }
+
+
+def save_sccm(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or any(ch in host for ch in " /\\"):
+        return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
+    row = sccm_row(project_key) or {}
+    if not account or (not password and not row.get("secret")):
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    port = int(body.get("port") or 0)
+    if port <= 0:
+        port = 443
+    saved = {
+        "host": host, "port": port, "ssl": bool(body.get("ssl")), "account": account,
+        "secret": password or row.get("secret") or "",
+    }
+    STATE.setdefault("sccm", {})[project_key] = saved
+    return 200, sccm_dto(project_key)
+
+
+def load_sccm(project_key, text):
+    row = sccm_row(project_key) or {}
+    if not row.get("secret"):
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    host = row.get("host") or "sccm"
+    computers = [
+        {"key": "sccm:501", "name": host.split(".")[0] + "-501", "detail": "Windows 10 · " + host},
+        {"key": "sccm:502", "name": host.split(".")[0] + "-502", "detail": "Windows 11 · " + host},
+    ]
+    return directory_apply(project_key, computers, text)
+
+
 def sheet_computers(csv):
     text = str(csv or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     if not text.strip():
@@ -8630,6 +8681,23 @@ setTimeout(function () {
             if blocked:
                 return blocked
             return scan_subnet(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/sccm/load", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return load_sccm(project_key, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/sccm", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, sccm_dto(project_key)
+            if method == "POST":
+                return save_sccm(project_key, self.read_json(), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/load", path)
         if match and method == "POST":
             project_key = match.group(1)
