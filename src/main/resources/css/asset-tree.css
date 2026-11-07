@@ -12477,6 +12477,52 @@ button.asset-tree-attach-remove {
     margin: 8px 0 12px;
 }
 
+#asset-tree-app .asset-tree-tni-scan {
+    gap: 16px;
+}
+
+#asset-tree-app .asset-tree-tni-add {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+}
+
+#asset-tree-app .asset-tree-tni-add textarea {
+    min-height: 72px;
+    resize: vertical;
+}
+
+#asset-tree-app .asset-tree-tni-scan td .asset-tree-btn + .asset-tree-btn {
+    margin-left: 8px;
+}
+
+#asset-tree-app .asset-tree-tni-log {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-tni-log p {
+    flex: 1 0 100%;
+    margin: 0;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-tni-log span {
+    color: #172b4d;
+    font-size: 13px;
+}
+
+@media (max-width: 860px) {
+    #asset-tree-app .asset-tree-tni-add {
+        grid-template-columns: 1fr;
+    }
+}
+
 @media (max-width: 720px) {
     .asset-tree-tni-types {
         grid-template-columns: 1fr;

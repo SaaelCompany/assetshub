@@ -105,7 +105,8 @@ public class AssetPageServlet extends HttpServlet {
             return "all";
         }
         if ("mine".equals(value) || "search".equals(value) || "settings".equals(value)
-                || "schedules".equals(value) || "reports".equals(value) || "map".equals(value)) {
+                || "schedules".equals(value) || "reports".equals(value) || "map".equals(value)
+                || "tni".equals(value)) {
             return value;
         }
         return "all";

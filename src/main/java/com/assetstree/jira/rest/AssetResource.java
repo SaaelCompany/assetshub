@@ -46,6 +46,7 @@ import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.TypeDraft;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
 import org.slf4j.Logger;
@@ -1586,6 +1587,51 @@ public class AssetResource {
             public Response call() {
                 assetService.rememberTni(user(), draft);
                 return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/subnets")
+    public Response tniSubnets(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniSubnets(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/subnets")
+    public Response createTniSubnet(@PathParam("projectKey") final String projectKey, final TniSubnetDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createTniSubnet(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/subnets/{subnetId}")
+    public Response deleteTniSubnet(@PathParam("projectKey") final String projectKey, @PathParam("subnetId") final int subnetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteTniSubnet(user(), projectKey, subnetId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/subnets/{subnetId}/scan")
+    public Response scanTniSubnet(@PathParam("projectKey") final String projectKey, @PathParam("subnetId") final int subnetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.ACCEPTED).entity(assetService.scanTniSubnet(user(), projectKey, subnetId)).build();
             }
         });
     }

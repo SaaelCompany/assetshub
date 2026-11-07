@@ -85,6 +85,7 @@ import com.assetstree.jira.ao.WebhookEntity;
 import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.RoomEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
+import com.assetstree.jira.ao.TniSubnetEntity;
 import com.assetstree.jira.ao.ServicePlanEntity;
 import com.assetstree.jira.ao.StaffDutyEntity;
 import com.assetstree.jira.ao.AssetTypeEntity;
@@ -149,6 +150,7 @@ import com.assetstree.jira.dto.ReportVennDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
 import com.assetstree.jira.dto.SavedReportDto;
+import com.assetstree.jira.dto.TniSubnetDto;
 import com.assetstree.jira.dto.ScheduleRowDto;
 import com.assetstree.jira.dto.StaffDutyDto;
 import com.assetstree.jira.dto.ServicePlanDto;
@@ -226,7 +228,9 @@ import com.assetstree.jira.model.TniName;
 import com.assetstree.jira.model.TniPeer;
 import com.assetstree.jira.model.TniPlace;
 import com.assetstree.jira.model.TniPolicy;
+import com.assetstree.jira.model.TniRange;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.web.PortalDesk;
 import com.assetstree.jira.web.PortalLookup;
@@ -13093,6 +13097,257 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             log.warn("TNI retention was not applied", ex);
         }
+    }
+
+    private static final int TNI_NET_LIMIT = 40;
+    private static final long TNI_SCAN_STALE = 15L * 60L * 1000L;
+
+    @Override
+    public List<TniSubnetDto> tniSubnets(ApplicationUser user, String projectKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        return ao().executeInTransaction(new TransactionCallback<List<TniSubnetDto>>() {
+            @Override
+            public List<TniSubnetDto> doInTransaction() {
+                return tniSubnetList(project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public TniSubnetDto createTniSubnet(ApplicationUser user, String projectKey, TniSubnetDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        if (draft == null) {
+            throw new AssetException(400, TniRange.BAD);
+        }
+        final String name = TniRange.name(draft.getName());
+        final String target = draft.getTarget() == null ? "" : draft.getTarget().trim();
+        final int hosts = TniRange.expand(target).size();
+        return ao().executeInTransaction(new TransactionCallback<TniSubnetDto>() {
+            @Override
+            public TniSubnetDto doInTransaction() {
+                if (tniSubnetList(project.getKey()).size() >= TNI_NET_LIMIT) {
+                    throw new AssetException(400, "asset-tree.error.tni.many");
+                }
+                TniSubnetEntity row = ao().create(TniSubnetEntity.class,
+                        new DBParam("PROJECT_KEY", project.getKey()),
+                        new DBParam("NAME", name),
+                        new DBParam("TARGET", target),
+                        new DBParam("HOSTS", Integer.valueOf(hosts)),
+                        new DBParam("STATE", "idle"),
+                        new DBParam("SCANNED", Integer.valueOf(0)),
+                        new DBParam("ONLINE", Integer.valueOf(0)),
+                        new DBParam("ADDED", Integer.valueOf(0)),
+                        new DBParam("NOTE", ""),
+                        new DBParam("LOG", ""),
+                        new DBParam("STARTED", Long.valueOf(0L)),
+                        new DBParam("FINISHED", Long.valueOf(0L)));
+                return tniSubnetDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void deleteTniSubnet(ApplicationUser user, String projectKey, final int subnetId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                TniSubnetEntity row = tniSubnet(project.getKey(), subnetId);
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public TniSubnetDto scanTniSubnet(final ApplicationUser user, String projectKey, final int subnetId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.TNI);
+        final String typeKey = tniComputerType(project.getKey());
+        final String found = i18n().getText("asset-tree.ui.tniFound");
+        final long now = System.currentTimeMillis();
+        final TniSubnetDto started = ao().executeInTransaction(new TransactionCallback<TniSubnetDto>() {
+            @Override
+            public TniSubnetDto doInTransaction() {
+                TniSubnetEntity row = tniSubnet(project.getKey(), subnetId);
+                if ("running".equals(row.getState()) && now - row.getStarted() < TNI_SCAN_STALE) {
+                    throw new AssetException(409, "asset-tree.error.tni.busy");
+                }
+                row.setState("running");
+                row.setScanned(0);
+                row.setOnline(0);
+                row.setAdded(0);
+                row.setNote("");
+                row.setLog("");
+                row.setStarted(now);
+                row.setFinished(0L);
+                row.setHosts(TniRange.expand(row.getTarget()).size());
+                row.save();
+                return tniSubnetDto(row);
+            }
+        });
+        final String target = started.getTarget();
+        final String projectKeyFinal = project.getKey();
+        Thread worker = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final List<String> hosts = TniRange.expand(target);
+                    TniScan.run(hosts, TniReach.LIVE, TniScan.DNS, new TniScan.Sink() {
+                        @Override
+                        public boolean keep(String address, String name) {
+                            return tniKeepHost(user, projectKeyFinal, typeKey, address, name, found);
+                        }
+                    }, new TniScan.Tick() {
+                        @Override
+                        public void step(int scanned, int total, int online, int added, String log) {
+                            tniScanProgress(subnetId, projectKeyFinal, scanned, total, online, added, log, "running", "");
+                        }
+                    });
+                    tniScanProgress(subnetId, projectKeyFinal, hosts.size(), hosts.size(), -1, -1, null, "done", "");
+                } catch (RuntimeException ex) {
+                    log.warn("TNI scan {} failed", Integer.valueOf(subnetId), ex);
+                    String key = ex instanceof AssetException ? ((AssetException) ex).getMessageKey() : "asset-tree.error.unexpected";
+                    String note = key;
+                    try {
+                        String text = i18n().getText(key);
+                        if (text != null && !text.equals(key)) {
+                            note = text;
+                        }
+                    } catch (RuntimeException ignored) {
+                        note = key;
+                    }
+                    tniScanProgress(subnetId, projectKeyFinal, -1, -1, -1, -1, null, "failed", note);
+                }
+            }
+        }, "tni-scan-" + subnetId);
+        worker.setDaemon(true);
+        worker.start();
+        return started;
+    }
+
+    private String tniComputerType(String projectKey) {
+        ProjectViewEntity view = viewRow(projectKey);
+        ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+        String typeKey = TniPolicy.typeFor(setup, TniPolicy.COMPUTER);
+        if (typeKey.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.tni.type");
+        }
+        AssetTypeEntity type = findType(typeKey);
+        if (type == null || type.isLocation() || !ProjectKeys.same(type.getProjectKey(), projectKey)) {
+            throw new AssetException(400, "asset-tree.error.tni.type");
+        }
+        return type.getTypeKey();
+    }
+
+    private synchronized boolean tniKeepHost(ApplicationUser user, final String projectKey, String typeKey,
+                                             final String address, String hostName, String found) {
+        final String external = "tni:" + address;
+        Boolean known = ao().executeInTransaction(new TransactionCallback<Boolean>() {
+            @Override
+            public Boolean doInTransaction() {
+                for (AssetEntity row : assetsIn(projectKey)) {
+                    if (row != null && external.equals(row.getExternalKey())) {
+                        return Boolean.TRUE;
+                    }
+                }
+                return Boolean.FALSE;
+            }
+        });
+        if (Boolean.TRUE.equals(known)) {
+            return false;
+        }
+        AssetDraft draft = new AssetDraft();
+        draft.setProjectKey(projectKey);
+        draft.setTypeKey(typeKey);
+        draft.setStatus(Statuses.IN_USE);
+        draft.setExternalId(external);
+        draft.setName(hostName == null || hostName.trim().isEmpty() ? address : hostName.trim());
+        String pattern = found == null || found.isEmpty() || found.startsWith("asset-tree.") ? address : found;
+        draft.setDescription(pattern.indexOf("{0}") >= 0 ? pattern.replace("{0}", address) : pattern);
+        createAsset(user, draft);
+        return true;
+    }
+
+    private void tniScanProgress(final int subnetId, final String projectKey, final int scanned, final int total,
+                                 final int online, final int added, final String logText, final String state, final String note) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                TniSubnetEntity row = ao().get(TniSubnetEntity.class, subnetId);
+                if (row == null || row.getProjectKey() == null || !ProjectKeys.same(row.getProjectKey(), projectKey)) {
+                    return null;
+                }
+                if (scanned >= 0) {
+                    row.setScanned(scanned);
+                }
+                if (total >= 0) {
+                    row.setHosts(total);
+                }
+                if (online >= 0) {
+                    row.setOnline(online);
+                }
+                if (added >= 0) {
+                    row.setAdded(added);
+                }
+                if (logText != null) {
+                    row.setLog(logText);
+                }
+                if (state != null && !state.isEmpty()) {
+                    row.setState(state);
+                    if ("done".equals(state) || "failed".equals(state)) {
+                        row.setFinished(System.currentTimeMillis());
+                    }
+                }
+                if (note != null) {
+                    row.setNote(note.length() > 255 ? note.substring(0, 255) : note);
+                }
+                row.save();
+                return null;
+            }
+        });
+    }
+
+    private List<TniSubnetDto> tniSubnetList(String projectKey) {
+        List<TniSubnetDto> list = new ArrayList<TniSubnetDto>();
+        TniSubnetEntity[] rows = ao().find(TniSubnetEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return list;
+        }
+        for (TniSubnetEntity row : rows) {
+            if (row != null) {
+                list.add(tniSubnetDto(row));
+            }
+        }
+        return list;
+    }
+
+    private TniSubnetEntity tniSubnet(String projectKey, int subnetId) {
+        TniSubnetEntity row = ao().get(TniSubnetEntity.class, subnetId);
+        if (row == null || row.getProjectKey() == null || !ProjectKeys.same(row.getProjectKey(), projectKey)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        return row;
+    }
+
+    private TniSubnetDto tniSubnetDto(TniSubnetEntity row) {
+        TniSubnetDto dto = new TniSubnetDto();
+        dto.setId(row.getID());
+        dto.setName(row.getName() == null ? "" : row.getName());
+        dto.setTarget(row.getTarget() == null ? "" : row.getTarget());
+        dto.setHosts(row.getHosts());
+        dto.setState(row.getState() == null || row.getState().isEmpty() ? "idle" : row.getState());
+        dto.setScanned(row.getScanned());
+        dto.setOnline(row.getOnline());
+        dto.setAdded(row.getAdded());
+        dto.setNote(row.getNote() == null ? "" : row.getNote());
+        dto.setLog(row.getLog() == null ? "" : row.getLog());
+        dto.setStarted(row.getStarted());
+        dto.setFinished(row.getFinished());
+        return dto;
     }
 
     private Integer tniParent(final Issue issue) {

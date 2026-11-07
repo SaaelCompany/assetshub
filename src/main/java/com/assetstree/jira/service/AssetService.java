@@ -68,7 +68,9 @@ import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
+import com.assetstree.jira.dto.TniSubnetDto;
 import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.TypeDraft;
 
 import java.util.List;
@@ -373,4 +375,12 @@ public interface AssetService {
 
     /** Pings stored devices whose storage period has ended and retires the ones that stay silent. */
     void applyTniRetention();
+
+    List<TniSubnetDto> tniSubnets(ApplicationUser user, String projectKey);
+
+    TniSubnetDto createTniSubnet(ApplicationUser user, String projectKey, TniSubnetDraft draft);
+
+    void deleteTniSubnet(ApplicationUser user, String projectKey, int subnetId);
+
+    TniSubnetDto scanTniSubnet(ApplicationUser user, String projectKey, int subnetId);
 }

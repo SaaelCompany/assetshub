@@ -525,7 +525,10 @@
         lifeLoading: {},
         lifeFailed: {},
         lifeToken: {},
-        lifeEditing: {}
+        lifeEditing: {},
+        tniList: null,
+        tniError: '',
+        tniTimer: null
     };
     var idIndex = null;
     var childIndex = null;
@@ -536,7 +539,7 @@
 
     function normalizeView(raw) {
         var value = String(raw || '').toLowerCase();
-        if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
+        if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map' || value === 'tni') {
             return value;
         }
         return 'all';
@@ -548,6 +551,7 @@
         if (view === 'schedules') return t('menuSchedules');
         if (view === 'reports') return t('menuReports');
         if (view === 'map') return t('menuMap');
+        if (view === 'tni') return t('menuTni');
         return t('menuAll');
     }
 
@@ -2153,6 +2157,9 @@
         if (moduleOn('map') && (state.canView !== false || state.canMap)) {
             items.push({ view: 'map', label: t('menuMap') });
         }
+        if (moduleOn('tni') && state.canEdit) {
+            items.push({ view: 'tni', label: t('menuTni') });
+        }
         if (state.canManage && state.canView !== false) {
             items.push({ view: 'settings', label: t('menuSettings') });
         }
@@ -2234,7 +2241,7 @@
         var titles = el('div', 'asset-tree-heading');
         var heading = el('h1', null, viewTitle(state.view));
         if (state.view === 'schedules' || state.view === 'reports') heading.appendChild(stageMark('beta'));
-        if (state.view === 'map') heading.appendChild(stageMark('beta'));
+        if (state.view === 'map' || state.view === 'tni') heading.appendChild(stageMark('beta'));
         titles.appendChild(heading);
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
@@ -2468,7 +2475,8 @@
         }
         if ((state.view === 'schedules' && !moduleOn('service'))
                 || (state.view === 'reports' && !moduleOn('reports'))
-                || (state.view === 'map' && !moduleOn('map'))) {
+                || (state.view === 'map' && !moduleOn('map'))
+                || (state.view === 'tni' && !moduleOn('tni'))) {
             state.view = 'all';
             rememberView('all');
             mount();
@@ -2486,6 +2494,10 @@
         }
         if (state.view === 'map') {
             frame.appendChild(renderSchemes());
+            return;
+        }
+        if (state.view === 'tni') {
+            frame.appendChild(renderTni());
             return;
         }
         if (state.view === 'settings') {
@@ -10661,7 +10673,7 @@
                 state.treeReady = false;
                 state.loading = false;
                 var message = (payload && payload.message) || t('errorTitle');
-                if (state.view === 'settings' || state.view === 'reports' || state.view === 'map' || state.view === 'schedules') {
+                if (state.view === 'settings' || state.view === 'reports' || state.view === 'map' || state.view === 'schedules' || state.view === 'tni') {
                     state.treeError = message;
                     state.error = null;
                     if (done) done();
@@ -10794,6 +10806,12 @@
         state.staffError = '';
         state.floors = null;
         state.floorId = 0;
+        state.tniList = null;
+        state.tniError = '';
+        if (state.tniTimer) {
+            clearInterval(state.tniTimer);
+            state.tniTimer = null;
+        }
         state.mapPlaceId = 0;
         state.mapDraft = null;
         state.mapGroup = [];
@@ -20206,6 +20224,174 @@
             return (row.objectKey || row.name || '') + ' ' + (row.replaceOn || '');
         }).join(', ');
         return el('p', 'asset-tree-hint', t('lifeForecast') + ': ' + names);
+    }
+
+    function renderTni() {
+        var panel = el('section', 'asset-tree-sheet asset-tree-tni-scan');
+        appendTreeError(panel);
+        panel.appendChild(el('p', 'asset-tree-hint', t('tniScanHint')));
+        var setup = currentProject() && currentProject().setup;
+        if (!setup || !setup.tniComputer) {
+            panel.appendChild(el('p', 'asset-tree-banner', t('tniScanNeedType')));
+        }
+        if (state.canEdit) {
+            var form = el('div', 'asset-tree-tni-add');
+            var name = document.createElement('input');
+            name.type = 'text';
+            name.maxLength = 80;
+            name.placeholder = t('tniScanName');
+            name.setAttribute('aria-label', t('tniScanName'));
+            var target = document.createElement('textarea');
+            target.rows = 3;
+            target.placeholder = t('tniScanPlaceholder');
+            target.setAttribute('aria-label', t('tniScanTarget'));
+            var add = button(t('tniScanAdd'), 'asset-tree-btn primary', function () {
+                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets', {
+                    name: name.value,
+                    target: target.value
+                }, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        name.value = '';
+                        target.value = '';
+                        state.tniError = '';
+                        loadTni(true);
+                    } else {
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
+                });
+            });
+            form.appendChild(name);
+            form.appendChild(target);
+            form.appendChild(add);
+            panel.appendChild(form);
+        }
+        var board = el('div');
+        board.id = 'asset-tree-tni-board';
+        if (state.tniList == null) {
+            board.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadTni(true);
+        } else {
+            board.appendChild(tniBoard());
+        }
+        panel.appendChild(board);
+        return panel;
+    }
+
+    function loadTni(quiet) {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/subnets', null, function (status, payload) {
+            if (key !== state.projectKey || state.view !== 'tni') return;
+            if (status !== 200) {
+                state.tniError = (payload && payload.message) || t('errorTitle');
+                state.tniList = [];
+            } else {
+                state.tniError = '';
+                state.tniList = payload || [];
+            }
+            var running = false;
+            var i;
+            for (i = 0; i < state.tniList.length; i++) {
+                if (state.tniList[i].state === 'running') running = true;
+            }
+            if (running) armTniWatch();
+            else if (state.tniTimer) {
+                clearInterval(state.tniTimer);
+                state.tniTimer = null;
+            }
+            var board = document.getElementById('asset-tree-tni-board');
+            if (board) {
+                board.innerHTML = '';
+                board.appendChild(tniBoard());
+            } else if (!quiet) {
+                renderFrame();
+            }
+        });
+    }
+
+    function armTniWatch() {
+        if (state.tniTimer) return;
+        state.tniTimer = setInterval(function () {
+            if (state.view !== 'tni') {
+                clearInterval(state.tniTimer);
+                state.tniTimer = null;
+                return;
+            }
+            loadTni(true);
+        }, 1000);
+    }
+
+    function tniBoard() {
+        var wrap = el('div');
+        if (state.tniError) wrap.appendChild(el('p', 'asset-tree-banner', state.tniError));
+        var rows = state.tniList || [];
+        if (!rows.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', t('tniScanEmpty')));
+            return wrap;
+        }
+        var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
+        var header = el('tr');
+        [t('tniScanName'), t('tniScanTarget'), t('tniScanHosts'), t('tniScanState'), t('tniScanOnline'), t('tniScanAdded'), ''].forEach(function (label) {
+            header.appendChild(el('th', null, label));
+        });
+        table.appendChild(header);
+        var shown = null;
+        rows.forEach(function (row) {
+            if (row.state === 'running' || (row.log && !shown)) shown = row;
+            var line = el('tr');
+            var title = el('td', null, row.name || '');
+            title.title = row.target || '';
+            line.appendChild(title);
+            var network = el('td', null, row.target || '');
+            network.title = row.target || '';
+            line.appendChild(network);
+            line.appendChild(el('td', 'is-num', String(row.hosts || 0)));
+            line.appendChild(el('td', null, tniStateText(row)));
+            line.appendChild(el('td', 'is-num', String(row.online || 0)));
+            line.appendChild(el('td', 'is-num', String(row.added || 0)));
+            var actions = el('td');
+            if (state.canEdit) {
+                var scan = button(t('tniScanRun'), 'asset-tree-btn slim', function () {
+                    ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets/' + encodeURIComponent(row.id) + '/scan', {}, function (status, payload) {
+                        if (status >= 200 && status < 300) loadTni(true);
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+                if (row.state === 'running') scan.disabled = true;
+                actions.appendChild(scan);
+                actions.appendChild(button(t('tniScanDelete'), 'asset-tree-btn slim', function () {
+                    if (!window.confirm(t('tniScanDeleteConfirm', row.name || ''))) return;
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets/' + encodeURIComponent(row.id), null, function (status, payload) {
+                        if (status >= 200 && status < 300) loadTni(true);
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }));
+            }
+            line.appendChild(actions);
+            table.appendChild(line);
+        });
+        wrap.appendChild(table);
+        if (shown && shown.log) wrap.appendChild(tniLog(shown));
+        return wrap;
+    }
+
+    function tniStateText(row) {
+        if (!row || row.state === 'idle') return t('tniScanIdle');
+        if (row.state === 'running') return t('tniScanRunning') + ' ' + (row.scanned || 0) + ' / ' + (row.hosts || 0);
+        if (row.state === 'failed') return row.note || t('tniScanFailed');
+        return t('tniScanDone');
+    }
+
+    function tniLog(row) {
+        var box = el('div', 'asset-tree-tni-log');
+        box.appendChild(el('p', null, t('tniScanLog')));
+        String(row.log || '').split('\n').forEach(function (line) {
+            if (!line) return;
+            var parts = line.split('\t');
+            var mark = parts[2] === 'new' ? t('tniScanNew') : t('tniScanKnown');
+            var text = (parts[1] ? parts[1] + ' · ' : '') + (parts[0] || '') + ' · ' + mark;
+            box.appendChild(el('span', null, text));
+        });
+        return box;
     }
 
     function renderReports() {

@@ -1255,6 +1255,218 @@ def tni_type(value):
     return ""
 
 
+def tni_ip(token):
+    parts = str(token or "").strip().split(".")
+    if len(parts) != 4:
+        return None
+    nums = []
+    for part in parts:
+        if not part.isdigit() or (len(part) > 1 and part.startswith("0")) or int(part) > 255:
+            return None
+        nums.append(int(part))
+    return nums
+
+
+def tni_private(nums):
+    if nums[0] in (0, 127) or nums[0] >= 224:
+        return False
+    if nums[0] == 169 and nums[1] == 254:
+        return False
+    if nums[0] == 10:
+        return True
+    if nums[0] == 192 and nums[1] == 168:
+        return True
+    return nums[0] == 172 and 16 <= nums[1] <= 31
+
+
+def tni_one(token):
+    nums = tni_ip(token)
+    if not nums or nums[0] in (0, 127) or nums[0] >= 224 or (nums[0] == 169 and nums[1] == 254):
+        return None, "scan"
+    if not tni_private(nums):
+        return None, "public"
+    return "%d.%d.%d.%d" % tuple(nums), ""
+
+
+def tni_expand(raw):
+    text = str(raw or "").strip()
+    if not text or len(text) > 2000:
+        return None, "scan"
+    hosts = []
+    seen = set()
+
+    def add(address):
+        _kept, kind = tni_one(address)
+        if kind:
+            return kind
+        if address in seen:
+            return ""
+        seen.add(address)
+        hosts.append(address)
+        return "large" if len(hosts) > 1024 else ""
+
+    def add_span(start, end):
+        if end < start:
+            return "scan"
+        if end - start + 1 > 1024:
+            return "large"
+        for value in range(start, end + 1):
+            nums = [(value >> 24) & 255, (value >> 16) & 255, (value >> 8) & 255, value & 255]
+            kind = add("%d.%d.%d.%d" % tuple(nums))
+            if kind:
+                return kind
+        return ""
+
+    def add_cidr(token):
+        if token.count("/") != 1:
+            return "scan"
+        left, prefix_text = token.split("/", 1)
+        address, kind = tni_one(left)
+        if kind:
+            return kind
+        if not prefix_text.isdigit() or len(prefix_text) > 2:
+            return "scan"
+        prefix = int(prefix_text)
+        if prefix < 0 or prefix > 32:
+            return "scan"
+        host_bits = 32 - prefix
+        if host_bits > 10:
+            return "large"
+        parts = [int(part) for part in address.split(".")]
+        base = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+        mask = 0 if prefix == 0 else ((0xffffffff << host_bits) & 0xffffffff)
+        network = base & mask
+        count = 1 << host_bits
+        start = network
+        end = network + count - 1
+        if prefix <= 30:
+            start += 1
+            end -= 1
+        return add_span(start, end)
+
+    def add_range(token):
+        left, right = token.split("-", 1)
+        start, kind = tni_one(left)
+        if kind:
+            return kind
+        finish, kind = tni_one(right)
+        if kind:
+            return kind
+        def as_long(address):
+            parts = [int(part) for part in address.split(".")]
+            return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+        return add_span(as_long(start), as_long(finish))
+
+    for chunk in re.split(r"[,;\r\n]+", text):
+        piece = chunk.strip()
+        if not piece:
+            continue
+        if piece.count("-") == 1 and "/" not in piece:
+            kind = add_range(piece)
+        elif "/" in piece and " " not in piece:
+            kind = add_cidr(piece)
+        else:
+            kind = ""
+            for word in piece.split():
+                if "/" in word:
+                    kind = add_cidr(word)
+                elif word.count("-") == 1:
+                    kind = add_range(word)
+                else:
+                    address, kind = tni_one(word)
+                    if not kind:
+                        kind = add(address)
+                if kind:
+                    break
+        if kind:
+            return None, kind
+    if not hosts:
+        return None, "scan"
+    return hosts, ""
+
+
+def tni_message(text, kind):
+    keys = {
+        "scan": "asset-tree.error.tni.scan",
+        "public": "asset-tree.error.tni.public",
+        "large": "asset-tree.error.tni.large",
+        "name": "asset-tree.error.tni.name",
+        "type": "asset-tree.error.tni.type",
+        "busy": "asset-tree.error.tni.busy",
+        "many": "asset-tree.error.tni.many",
+    }
+    return text.get(keys.get(kind, "asset-tree.error.tni.scan"), kind)
+
+
+def tni_rows(project_key):
+    return [row for row in STATE.setdefault("subnets", {}).values() if row.get("projectKey") == project_key]
+
+
+def tni_dto(row):
+    return {
+        "id": row["id"], "name": row["name"], "target": row["target"], "hosts": row["hosts"],
+        "state": row.get("state") or "idle", "scanned": row.get("scanned") or 0,
+        "online": row.get("online") or 0, "added": row.get("added") or 0,
+        "note": row.get("note") or "", "log": row.get("log") or "",
+        "started": row.get("started") or 0, "finished": row.get("finished") or 0,
+    }
+
+
+def create_subnet(project_key, body, text):
+    name = str((body or {}).get("name") or "").strip()
+    target = str((body or {}).get("target") or "").strip()
+    if not name or len(name) > 80:
+        return 400, {"message": tni_message(text, "name")}
+    hosts, kind = tni_expand(target)
+    if kind:
+        return 400, {"message": tni_message(text, kind)}
+    if len(tni_rows(project_key)) >= 40:
+        return 400, {"message": tni_message(text, "many")}
+    subnet_id = STATE.setdefault("subnet_seq", 1)
+    STATE["subnet_seq"] = subnet_id + 1
+    row = {
+        "id": subnet_id, "projectKey": project_key, "name": name, "target": target, "hosts": len(hosts),
+        "state": "idle", "scanned": 0, "online": 0, "added": 0, "note": "", "log": "", "started": 0, "finished": 0,
+    }
+    STATE.setdefault("subnets", {})[subnet_id] = row
+    return 201, tni_dto(row)
+
+
+def scan_subnet(project_key, subnet_id, text):
+    row = STATE.setdefault("subnets", {}).get(subnet_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text.get("asset-tree.error.notFound", "Missing")}
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    type_key = module_setup(view.get("setup") or {}).get("tniComputer") or ""
+    if not type_key or type_key not in STATE["types"] or STATE["types"][type_key].get("location"):
+        return 400, {"message": tni_message(text, "type")}
+    hosts, kind = tni_expand(row["target"])
+    if kind:
+        return 400, {"message": tni_message(text, kind)}
+    added = 0
+    online = []
+    for address in hosts:
+        if int(address.rsplit(".", 1)[-1]) not in (1, 10, 20):
+            continue
+        external = "tni:" + address
+        known = any(asset.get("externalKey") == external and asset.get("projectKey") == project_key for asset in STATE["assets"].values())
+        if not known:
+            asset_id = add_asset(project_key, type_key, address, None, "in_use", None, {})
+            if not asset_id:
+                continue
+            STATE["assets"][asset_id]["externalKey"] = external
+            STATE["assets"][asset_id]["description"] = text.get("asset-tree.ui.tniFound", address).replace("{0}", address)
+            added += 1
+            online.append(address + "\t\tnew")
+        else:
+            online.append(address + "\t\tknown")
+    row.update({
+        "hosts": len(hosts), "state": "done", "scanned": len(hosts), "online": len(online),
+        "added": added, "note": "", "log": "\n".join(online), "finished": 1,
+    })
+    return 202, tni_dto(row)
+
+
 def plan_kind(kind):
     value = str(kind or "room").strip().lower()
     allowed = {
@@ -1750,12 +1962,14 @@ def ensure_profile_demo():
         view = STATE.setdefault("views", {}).setdefault(project, {})
         modules = [item for item in (view.get("modules") or []) if item != "portal"]
         modules.append("portal")
-        for extra in ("reports", "life", "service", "map"):
+        for extra in ("reports", "life", "service", "map", "tni"):
             if extra not in modules:
                 modules.append(extra)
         view["modules"] = modules
         setup = view.setdefault("setup", {})
         setup["portalMine"] = True
+        if project == "STP" and not setup.get("tniComputer"):
+            setup["tniComputer"] = "stp-pc"
     if "stp-laptop" not in STATE["types"]:
         STATE["types"]["stp-laptop"] = {
             "typeKey": "stp-laptop", "projectKey": "STP", "baseKey": "laptop", "label": "Ноутбук",
@@ -7461,7 +7675,7 @@ class Handler(BaseHTTPRequestHandler):
         view = (query.get("view") or ["all"])[0]
         if view == "dashboard":
             view = "all"
-        if view not in ("all", "mine", "search", "settings", "schedules", "reports", "map"):
+        if view not in ("all", "mine", "search", "settings", "schedules", "reports", "map", "tni"):
             view = "all"
         html = (template
                 .replace("@@LANG@@", "ru" if self.lang() == "ru" else "en")
@@ -8220,6 +8434,36 @@ setTimeout(function () {
                 return save_floor(project_key, floor_id, self.read_json(), text)
             if method == "DELETE":
                 return delete_floor(project_key, floor_id, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, [tni_dto(row) for row in tni_rows(project_key)]
+            if method == "POST":
+                return create_subnet(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets/(\d+)", path)
+        if match:
+            project_key = match.group(1)
+            subnet_id = int(match.group(2))
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "DELETE":
+                row = STATE.setdefault("subnets", {}).get(subnet_id)
+                if not row or row.get("projectKey") != project_key:
+                    return 404, {"message": text.get("asset-tree.error.notFound", "Missing")}
+                STATE["subnets"].pop(subnet_id, None)
+                return 204, None
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets/(\d+)/scan", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return scan_subnet(project_key, int(match.group(2)), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports", path)
         if match:
             project_key = match.group(1)
