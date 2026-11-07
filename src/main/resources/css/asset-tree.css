@@ -10190,126 +10190,111 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-link-graph {
     position: relative;
     width: 100%;
-    overflow: hidden;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background-color: #fafbfc;
-    background-image: radial-gradient(circle, #dfe1e6 1px, transparent 1px);
-    background-size: 16px 16px;
-}
-
-#asset-tree-app .asset-tree-link-graph.is-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 120px;
+    overflow: visible;
+    border: 0;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-link-canvas {
     position: absolute;
     left: 0;
     top: 0;
+    z-index: 0;
     width: 100%;
     height: 100%;
     pointer-events: none;
 }
 
-#asset-tree-app .asset-tree-link-graph .asset-tree-link-node {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    width: 46%;
-    max-width: 120px;
-    min-width: 0;
-    margin: 0;
-    padding: 6px 20px 6px 8px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fff;
-    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.12);
-    text-align: left;
-}
-
 #asset-tree-app .asset-tree-link-graph .asset-tree-graph-node {
-    position: absolute;
-    z-index: 2;
-    transform: translate(-50%, -50%);
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: auto;
+    max-width: 100%;
+    margin: 0 0 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: none;
     cursor: pointer;
 }
 
-#asset-tree-app .asset-tree-link-graph.is-empty .asset-tree-link-node,
-#asset-tree-app .asset-tree-link-graph.is-pair .asset-tree-link-node {
-    width: calc(100% - 16px);
-    max-width: 220px;
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node:last-child {
+    margin-bottom: 0;
 }
 
-#asset-tree-app .asset-tree-link-graph.is-empty .asset-tree-link-node {
-    position: static;
-    width: auto;
-    max-width: 220px;
-    transform: none;
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node.is-self {
+    margin-left: 28px;
+    background: transparent;
+    border: 0;
+}
+
+#asset-tree-app .asset-tree-link-graph.is-empty .asset-tree-graph-node.is-self {
+    margin-left: 0;
     cursor: default;
 }
 
-#asset-tree-app .asset-tree-link-graph .asset-tree-link-node.is-self {
-    z-index: 3;
-    border-color: #4c9aff;
-    background: #deebff;
+#asset-tree-app .asset-tree-graph-mark {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    border-radius: 4px;
+    background: #dfe1e6 !important;
 }
 
-#asset-tree-app .asset-tree-link-graph .asset-tree-link-node.is-selected {
-    border-color: #0052cc;
-    box-shadow: 0 0 0 2px rgba(0, 82, 204, 0.25);
+#asset-tree-app .asset-tree-graph-mark svg path {
+    fill: #6b778c;
+}
+
+#asset-tree-app .asset-tree-graph-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.3;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-name,
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-copy button.asset-tree-linkish {
+    display: block !important;
+    width: auto !important;
+    max-width: 100%;
+    max-height: 2.6em;
+    overflow: hidden;
+    color: #6b778c !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.3 !important;
+    text-align: left;
+    white-space: normal !important;
+}
+
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node:hover .asset-tree-graph-name,
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node:hover .asset-tree-graph-copy button.asset-tree-linkish,
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node.is-selected .asset-tree-graph-name,
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node.is-selected .asset-tree-graph-copy button.asset-tree-linkish {
+    color: #172b4d !important;
 }
 
 #asset-tree-app .asset-tree-link-graph .asset-tree-link-node.is-locked {
     opacity: 0.72;
 }
 
-#asset-tree-app .asset-tree-link-graph .asset-tree-link-node > strong,
-#asset-tree-app .asset-tree-link-graph .asset-tree-link-node > button.asset-tree-linkish {
-    display: block !important;
-    width: 100% !important;
-    max-width: 100%;
-    overflow: hidden;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.3;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-#asset-tree-app .asset-tree-link-graph .asset-tree-link-key {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 #asset-tree-app .asset-tree-link-graph .asset-tree-peer-remove {
-    position: absolute;
-    top: 2px;
-    right: 2px;
+    position: static;
+    flex: 0 0 auto;
+    opacity: 0;
 }
 
-#asset-tree-app .asset-tree-graph-label {
-    position: absolute;
-    z-index: 1;
-    max-width: calc(100% - 24px);
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: #fff;
-    color: #0747a6;
-    font-size: 11px;
-    font-weight: 600;
-    line-height: 16px;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+#asset-tree-app .asset-tree-link-graph .asset-tree-graph-node:hover .asset-tree-peer-remove {
+    opacity: 1;
 }
 
 #asset-tree-app .asset-tree-link-detail {
