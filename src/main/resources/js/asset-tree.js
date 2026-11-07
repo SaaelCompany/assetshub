@@ -21705,12 +21705,22 @@
                 attributes: attributes
             };
         });
+        var places = placeAssets().map(function (asset) {
+            var path = placePath(asset);
+            var name = asset.name || '';
+            return {
+                id: asset.id,
+                name: path ? path + ' / ' + name : name,
+                key: asset.objectKey || asset.key || ''
+            };
+        });
         window.AssetTreeSchemes.mount(host, {
             t: t,
             ajax: ajax,
             projectKey: state.projectKey,
             canEdit: !!state.canEdit,
-            assets: assets
+            assets: assets,
+            places: places
         });
         return host;
     }

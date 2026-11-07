@@ -180,6 +180,7 @@
             ],
             activeLayerId: 'walls',
             symbols: {},
+            placeId: 0,
             settings: { showOtherFloors: true, unit: 'cm' }
         };
     }
@@ -207,6 +208,7 @@
                 space: false,
                 stamp: '',
                 symbolId: 'rack',
+                catalog: [],
                 dirty: false,
                 past: [],
                 future: [],
@@ -221,6 +223,9 @@
         host.className = 'asset-tree-schemes';
         host.innerHTML = '';
         var bar = el('div', 'asset-tree-scheme-bar');
+        var head = el('div', 'asset-tree-scheme-head');
+        var schemePick = el('select', 'asset-tree-scheme-pick');
+        var placePick = el('select', 'asset-tree-scheme-pick');
         var nameInput = el('input', 'asset-tree-scheme-name');
         nameInput.value = session.doc.name || '';
         nameInput.disabled = !api.canEdit;
@@ -238,10 +243,14 @@
             ['window', '', 'schemeToolWindow']
         ];
         toolDefs.forEach(function (item) {
-            var button = el('button', 'asset-tree-scheme-tool', api.t(item[2]) + (item[1] ? ' ' + item[1] : ''));
+            var button = el('button', 'asset-tree-scheme-tool');
             button.type = 'button';
+            button.title = api.t(item[2]) + (item[1] ? ' (' + item[1] + ')' : '');
             button.setAttribute('data-tool', item[0]);
             button.disabled = !api.canEdit && item[0] !== 'select';
+            button.innerHTML = toolIcon(item[0]);
+            var caption = el('span', null, api.t(item[2]));
+            button.appendChild(caption);
             button.addEventListener('click', function () {
                 session.tool = item[0];
                 session.draft = null;
@@ -265,11 +274,14 @@
         newBtn.type = 'button';
         newBtn.disabled = !api.canEdit;
         var status = el('div', 'asset-tree-scheme-status', '');
-        bar.appendChild(nameInput);
+        head.appendChild(labeled(api.t('schemeList'), schemePick));
+        head.appendChild(labeled(api.t('name'), nameInput));
+        head.appendChild(labeled(api.t('schemePlace'), placePick));
+        head.appendChild(unit);
+        head.appendChild(newBtn);
+        head.appendChild(saveBtn);
+        bar.appendChild(head);
         bar.appendChild(tools);
-        bar.appendChild(unit);
-        bar.appendChild(newBtn);
-        bar.appendChild(saveBtn);
         var body = el('div', 'asset-tree-scheme-body');
         var side = el('div', 'asset-tree-scheme-side');
         var stage = el('div', 'asset-tree-scheme-stage');
@@ -293,6 +305,29 @@
             if (cls) node.className = cls;
             if (text) node.textContent = text;
             return node;
+        }
+
+        function labeled(text, control) {
+            var wrap = el('label', 'asset-tree-scheme-field-inline');
+            wrap.appendChild(document.createTextNode(text));
+            wrap.appendChild(control);
+            return wrap;
+        }
+
+        function toolIcon(name) {
+            var body = {
+                select: '<path d="M6 4l9 12-3-.5-2 4-2-1 2-4-4-2z"/>',
+                line: '<path d="M5 19L19 5"/>',
+                rect: '<rect x="5" y="7" width="14" height="10"/>',
+                ellipse: '<ellipse cx="12" cy="12" rx="7" ry="5"/>',
+                polyline: '<path d="M4 17l5-8 4 5 7-9"/>',
+                wall: '<path d="M4 16V8h16v8"/>',
+                text: '<path d="M6 7h12M12 7v11"/>',
+                dimension: '<path d="M4 12h16M6 9L4 12l2 3M18 9l2 3-2 3"/>',
+                door: '<path d="M8 19V6h5a7 7 0 0 1 0 13"/>',
+                window: '<rect x="5" y="6" width="14" height="12"/><path d="M12 6v12M5 12h14"/>'
+            };
+            return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (body[name] || '') + '</svg>';
         }
 
         function activeFloor() {
@@ -930,6 +965,12 @@
                     ctx.moveTo(part.x1, part.y1);
                     ctx.lineTo(part.x2, part.y2);
                     ctx.stroke();
+                } else if (part.t === 'p' && part.points && part.points.length) {
+                    ctx.beginPath();
+                    ctx.moveTo(part.points[0].x, part.points[0].y);
+                    var p;
+                    for (p = 1; p < part.points.length; p++) ctx.lineTo(part.points[p].x, part.points[p].y);
+                    ctx.stroke();
                 } else if (part.t === 't') {
                     ctx.fillStyle = part.c || '#172b4d';
                     ctx.font = '8px sans-serif';
@@ -960,20 +1001,16 @@
             ctx.globalAlpha = wall.opacity == null ? 1 : wall.opacity;
             ctx.fillStyle = '#f4f5f7';
             ctx.strokeStyle = wall.color || '#172b4d';
-            ctx.lineWidth = 0.6;
-            if (!openings.length) {
-                var left = offsetPoints(points, wall.closed, half);
-                var right = offsetPoints(points, wall.closed, -half);
-                var band = left.concat(right.slice().reverse());
-                pathOf(ctx, band, true);
+            ctx.lineWidth = 1.2;
+            ctx.fillStyle = '#eef2f6';
+            var i;
+            for (i = 1; i < points.length; i++) drawWallSegment(ctx, wall, points[i - 1], points[i], i - 1, openings);
+            if (wall.closed) drawWallSegment(ctx, wall, points[points.length - 1], points[0], points.length - 1, openings);
+            for (i = 0; i < points.length; i++) {
+                ctx.beginPath();
+                ctx.arc(points[i].x, points[i].y, half, 0, Math.PI * 2);
                 ctx.fill();
-                if (wall.hatch !== 'none') hatch(ctx, band, wall.hatch || 'diagonal', wall.color || '#97a0af');
-                pathOf(ctx, band, true);
                 ctx.stroke();
-            } else {
-                var i;
-                for (i = 1; i < points.length; i++) drawWallSegment(ctx, wall, points[i - 1], points[i], i - 1, openings);
-                if (wall.closed) drawWallSegment(ctx, wall, points[points.length - 1], points[0], points.length - 1, openings);
             }
             ctx.restore();
         }
@@ -1278,7 +1315,7 @@
                 ctx.lineWidth = 1 / session.cam.z;
                 ctx.setLineDash([6 / session.cam.z, 4 / session.cam.z]);
                 objects.forEach(function (obj) {
-                    if (obj.points) pathOf(ctx, obj.points, true);
+                    if (obj.points) pathOf(ctx, obj.points, !!obj.closed);
                     else if (obj.x1 != null) {
                         ctx.beginPath();
                         ctx.moveTo(obj.x1, obj.y1);
@@ -1288,10 +1325,21 @@
                 });
                 ctx.setLineDash([]);
                 if (session.draft && session.draft.points) {
+                    if (session.draft.tool === 'wall') {
+                        drawWall(ctx, {
+                            points: session.draft.points,
+                            thickness: 15,
+                            color: '#172b4d',
+                            hatch: 'diagonal',
+                            opacity: 1
+                        }, { objects: [] });
+                    } else {
+                        ctx.strokeStyle = '#0052cc';
+                        ctx.lineWidth = 1;
+                        pathOf(ctx, session.draft.points, false);
+                        ctx.stroke();
+                    }
                     ctx.strokeStyle = '#0052cc';
-                    ctx.lineWidth = (session.draft.tool === 'wall' ? 15 : 1);
-                    pathOf(ctx, session.draft.points, false);
-                    ctx.stroke();
                     ctx.lineWidth = 1;
                     ctx.strokeRect(session.draft.points[0].x - 4 / session.cam.z, session.draft.points[0].y - 4 / session.cam.z, 8 / session.cam.z, 8 / session.cam.z);
                 } else if (session.draft && session.draft.phase === 1) {
@@ -1302,9 +1350,6 @@
                         ctx.moveTo(session.draft.x1, session.draft.y1);
                         ctx.lineTo(session.draft.x2, session.draft.y2);
                         ctx.stroke();
-                        ctx.font = (12 / session.cam.z) + 'px sans-serif';
-                        ctx.fillStyle = '#0052cc';
-                        ctx.fillText(formatLen(dist(session.draft.x1, session.draft.y1, session.draft.x2, session.draft.y2)), session.draft.x2, session.draft.y2);
                     } else {
                         ctx.strokeRect(
                             Math.min(session.draft.x1, session.draft.x2),
@@ -1324,10 +1369,43 @@
                 }
             });
             drawRulers(over, width, height);
-            var read = session.hover ? formatLen(session.hover.x).replace(' cm', '') : '0';
+            var live = liveLength();
+            if (live) badge(over, live.x, live.y, live.text);
             status.textContent = api.t('schemeReadout') + '  ' + (session.hover ? (roundCm(session.hover.x) + ', ' + roundCm(session.hover.y) + ' ' + (session.doc.settings.unit || 'cm')) : '') +
                 '   ' + api.t('schemeGrid') + ' ' + formatLen(gridStep()) +
+                (live ? '   ' + api.t('schemeLength') + ' ' + live.text : '') +
                 (session.typed ? '   ' + session.typed : '');
+        }
+
+        function liveLength() {
+            var a = null;
+            var b = null;
+            if (session.draft && session.draft.points && session.draft.points.length >= 2) {
+                a = session.draft.points[session.draft.points.length - 2];
+                b = session.draft.points[session.draft.points.length - 1];
+            } else if (session.draft && session.draft.phase === 1) {
+                a = { x: session.draft.x1, y: session.draft.y1 };
+                b = { x: session.draft.x2, y: session.draft.y2 };
+            }
+            if (!a || !b) return null;
+            var mid = screenFrom((a.x + b.x) / 2, (a.y + b.y) / 2);
+            var text = formatLen(dist(a.x, a.y, b.x, b.y));
+            if (session.draft.tool === 'rect' || session.draft.tool === 'ellipse') {
+                text = formatLen(Math.abs(b.x - a.x)) + ' × ' + formatLen(Math.abs(b.y - a.y));
+            }
+            return { x: mid.x, y: mid.y, text: text };
+        }
+
+        function badge(ctx, x, y, text) {
+            ctx.save();
+            ctx.setTransform(global.devicePixelRatio || 1, 0, 0, global.devicePixelRatio || 1, 0, 0);
+            ctx.font = '12px sans-serif';
+            var width = Math.max(48, text.length * 7 + 14);
+            ctx.fillStyle = '#172b4d';
+            ctx.fillRect(x + 10, y - 24, width, 20);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(text, x + 16, y - 10);
+            ctx.restore();
         }
 
         function drawMarker(ctx, x, y, kind) {
@@ -1535,10 +1613,22 @@
             });
 
             side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeSymbols')));
+            var addTemplate = el('button', 'asset-tree-scheme-mini', api.t('schemeTemplateNew'));
+            addTemplate.type = 'button';
+            addTemplate.disabled = !api.canEdit;
+            addTemplate.addEventListener('click', function () {
+                openSymbolEditor({ id: nid('sym'), name: api.t('schemeTemplateNew'), w: 100, h: 60, parts: [] });
+            });
+            side.appendChild(addTemplate);
             var library = builtins(api.t).slice();
+            var seenSymbol = {};
+            library.forEach(function (def) { seenSymbol[def.id] = true; });
             var customId;
-            for (customId in session.doc.symbols) library.push(session.doc.symbols[customId]);
+            for (customId in session.doc.symbols) {
+                if (!seenSymbol[customId]) library.push(session.doc.symbols[customId]);
+            }
             library.forEach(function (def) {
+                var row = el('div', 'asset-tree-scheme-symbol-row');
                 var card = el('button', 'asset-tree-scheme-symbol' + (session.symbolId === def.id ? ' is-on' : ''), def.name);
                 card.type = 'button';
                 card.addEventListener('click', function () {
@@ -1547,10 +1637,16 @@
                     markTools();
                     refreshSide();
                 });
-                card.addEventListener('dblclick', function () {
-                    openSymbolEditor(def);
+                var editCard = el('button', 'asset-tree-scheme-mini', api.t('schemeTemplateEdit'));
+                editCard.type = 'button';
+                editCard.disabled = !api.canEdit;
+                editCard.addEventListener('click', function () {
+                    var current = (session.doc.symbols && session.doc.symbols[def.id]) || def;
+                    openSymbolEditor(current);
                 });
-                side.appendChild(card);
+                row.appendChild(card);
+                row.appendChild(editCard);
+                side.appendChild(row);
             });
         }
 
@@ -1612,69 +1708,175 @@
                 field(api.t('name'), obj.name, function (value) { obj.name = value.slice(0, 80); });
             }
             if (obj.type === 'symbol' || (obj.points && !obj.type)) {
-                var bind = el('label', 'asset-tree-scheme-field', api.t('schemeBind'));
-                var select = el('select');
-                var empty = el('option', null, api.t('schemeNone'));
-                empty.value = '';
-                select.appendChild(empty);
-                (api.assets || []).forEach(function (asset) {
-                    var option = el('option', null, (asset.key ? asset.key + ' ' : '') + (asset.name || asset.id));
-                    option.value = String(asset.id);
-                    select.appendChild(option);
-                });
-                select.value = obj.assetBinding ? String(obj.assetBinding.objectId) : '';
-                select.disabled = !api.canEdit;
-                select.addEventListener('change', function () {
-                    remember();
-                    var chosen = null;
-                    var i;
-                    for (i = 0; i < (api.assets || []).length; i++) {
-                        if (String(api.assets[i].id) === select.value) chosen = api.assets[i];
-                    }
-                    if (!chosen) obj.assetBinding = null;
-                    else {
-                        obj.assetBinding = {
-                            workspaceId: api.projectKey,
-                            objectSchemaId: '',
-                            objectTypeId: '',
-                            objectId: String(chosen.id),
-                            objectKey: chosen.key || String(chosen.id),
-                            objectLabel: chosen.name || '',
-                            attributes: chosen.attributes || {},
-                            boundAt: Date.now()
-                        };
-                        if (obj.name && !obj.type) obj.name = chosen.name || obj.name;
-                    }
-                    paint();
-                    renderProps();
-                });
-                bind.appendChild(select);
-                props.appendChild(bind);
-                if (obj.assetBinding) {
-                    props.appendChild(el('p', 'asset-tree-scheme-muted', obj.assetBinding.objectLabel || obj.assetBinding.objectKey));
-                }
+                props.appendChild(assetCard(obj));
             }
+        }
+
+        function assetCard(obj) {
+            var box = el('div', 'asset-tree-scheme-bind');
+            box.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeAssetTitle')));
+            var binding = obj.assetBinding;
+            if (binding) {
+                box.appendChild(el('div', 'asset-tree-scheme-bind-name', binding.objectLabel || binding.objectKey || ''));
+                if (binding.objectKey) box.appendChild(el('div', 'asset-tree-scheme-muted', binding.objectKey));
+                var attrs = binding.attributes || {};
+                var key;
+                for (key in attrs) {
+                    if (attrs[key] !== '') box.appendChild(el('div', 'asset-tree-scheme-muted', key + ': ' + attrs[key]));
+                }
+                var detach = el('button', 'asset-tree-scheme-mini', api.t('schemeUnbind'));
+                detach.type = 'button';
+                detach.disabled = !api.canEdit;
+                detach.addEventListener('click', function () {
+                    remember();
+                    obj.assetBinding = null;
+                    renderProps();
+                    paint();
+                });
+                box.appendChild(detach);
+            } else {
+                box.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeNone')));
+            }
+            var attach = el('button', 'asset-tree-scheme-save', api.t('schemeBind'));
+            attach.type = 'button';
+            attach.disabled = !api.canEdit;
+            attach.addEventListener('click', function () { openAssetPicker(obj); });
+            box.appendChild(attach);
+            return box;
+        }
+
+        function bindAsset(obj, asset) {
+            remember();
+            obj.assetBinding = {
+                workspaceId: api.projectKey,
+                objectSchemaId: '',
+                objectTypeId: '',
+                objectId: String(asset.id),
+                objectKey: asset.key || String(asset.id),
+                objectLabel: asset.name || '',
+                attributes: asset.attributes || {},
+                boundAt: Date.now()
+            };
+            if (obj.name && !obj.type) obj.name = asset.name || obj.name;
+            renderProps();
+            refreshSide();
+            paint();
+        }
+
+        function openAssetPicker(obj) {
+            var back = el('div', 'asset-tree-scheme-modal');
+            var dialog = el('div', 'asset-tree-scheme-dialog asset-tree-scheme-picker');
+            dialog.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeAssetTitle')));
+            var search = el('input', 'asset-tree-scheme-name');
+            search.placeholder = api.t('schemeSearch');
+            var list = el('div', 'asset-tree-scheme-asset-list');
+            function renderList() {
+                list.innerHTML = '';
+                var query = String(search.value || '').toLowerCase();
+                var count = 0;
+                (api.assets || []).forEach(function (asset) {
+                    var label = (asset.key ? asset.key + '  ' : '') + (asset.name || '');
+                    if (query && label.toLowerCase().indexOf(query) < 0) return;
+                    count++;
+                    var row = el('button', 'asset-tree-scheme-row', label);
+                    row.type = 'button';
+                    row.addEventListener('click', function () {
+                        bindAsset(obj, asset);
+                        if (back.parentNode) back.parentNode.removeChild(back);
+                    });
+                    list.appendChild(row);
+                });
+                if (!count) list.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeNone')));
+            }
+            search.addEventListener('input', renderList);
+            var cancel = el('button', 'asset-tree-scheme-mini', api.t('cancel'));
+            cancel.type = 'button';
+            cancel.addEventListener('click', function () {
+                if (back.parentNode) back.parentNode.removeChild(back);
+            });
+            dialog.appendChild(search);
+            dialog.appendChild(list);
+            dialog.appendChild(cancel);
+            back.appendChild(dialog);
+            host.appendChild(back);
+            renderList();
+            search.focus();
         }
 
         function openSymbolEditor(def) {
             var edit = clone(def);
             edit.parts = edit.parts || [];
+            if (!edit.w) edit.w = 100;
+            if (!edit.h) edit.h = 60;
+            var editor = { tool: 'select', sel: -1, draft: null, pen: null, drag: null };
             var back = el('div', 'asset-tree-scheme-modal');
-            var dialog = el('div', 'asset-tree-scheme-dialog');
-            var title = el('div', 'asset-tree-scheme-label', edit.name);
+            var dialog = el('div', 'asset-tree-scheme-dialog asset-tree-scheme-editor-dialog');
+            var title = el('input', 'asset-tree-scheme-name');
+            title.value = edit.name || '';
+            var toolRow = el('div', 'asset-tree-scheme-tools');
+            var editorTools = [
+                ['select', 'schemeToolSelect'],
+                ['line', 'schemeToolLine'],
+                ['rect', 'schemeToolRect'],
+                ['ellipse', 'schemeToolEllipse'],
+                ['pen', 'schemeToolPen'],
+                ['text', 'schemeToolText']
+            ];
+            editorTools.forEach(function (item) {
+                var button = el('button', 'asset-tree-scheme-tool');
+                button.type = 'button';
+                button.title = api.t(item[1]);
+                button.setAttribute('data-editor-tool', item[0]);
+                button.innerHTML = toolIcon(item[0] === 'pen' ? 'polyline' : item[0]);
+                button.appendChild(el('span', null, api.t(item[1])));
+                button.addEventListener('click', function () {
+                    editor.tool = item[0];
+                    editor.pen = null;
+                    markEditorTools();
+                });
+                toolRow.appendChild(button);
+            });
             var canvas = el('canvas', 'asset-tree-scheme-symbol-canvas');
-            canvas.width = 420;
-            canvas.height = 280;
-            var editor = { tool: 'rect', draft: null, parts: edit.parts };
+            canvas.width = 640;
+            canvas.height = 420;
+            var propsBox = el('div', 'asset-tree-scheme-editor-props');
+            function scaleOf() {
+                return Math.min(600 / edit.w, 380 / edit.h);
+            }
+            function localPoint(event) {
+                var rect = canvas.getBoundingClientRect();
+                var scale = scaleOf();
+                var x = (event.clientX - rect.left) * (canvas.width / rect.width);
+                var y = (event.clientY - rect.top) * (canvas.height / rect.height);
+                return {
+                    x: Math.max(0, Math.min(edit.w, Math.round(((x - 16) / scale) / 5) * 5)),
+                    y: Math.max(0, Math.min(edit.h, Math.round(((y - 16) / scale) / 5) * 5))
+                };
+            }
+            function partHit(pt) {
+                var i;
+                for (i = edit.parts.length - 1; i >= 0; i--) {
+                    var part = edit.parts[i];
+                    if ((part.t === 'r' || part.t === 'e' || part.t === 't') && pt.x >= part.x && pt.y >= part.y && pt.x <= part.x + (part.w || 20) && pt.y <= part.y + (part.h || 12)) return i;
+                    if (part.t === 'l' && projectSeg(part.x1, part.y1, part.x2, part.y2, pt.x, pt.y).dist <= 4) return i;
+                    if (part.t === 'p' && part.points) {
+                        var k;
+                        for (k = 1; k < part.points.length; k++) {
+                            if (projectSeg(part.points[k - 1].x, part.points[k - 1].y, part.points[k].x, part.points[k].y, pt.x, pt.y).dist <= 4) return i;
+                        }
+                    }
+                }
+                return -1;
+            }
             function paintSymbol() {
                 var ctx = canvas.getContext('2d');
+                var scale = scaleOf();
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
-                ctx.clearRect(0, 0, 420, 280);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, 420, 280);
-                var scale = Math.min(400 / edit.w, 260 / edit.h);
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.save();
-                ctx.translate(10, 10);
+                ctx.translate(16, 16);
                 ctx.scale(scale, scale);
                 ctx.strokeStyle = '#ebecf0';
                 ctx.lineWidth = 1 / scale;
@@ -1691,32 +1893,153 @@
                     ctx.lineTo(edit.w, g);
                     ctx.stroke();
                 }
+                ctx.strokeStyle = '#dfe1e6';
+                ctx.strokeRect(0, 0, edit.w, edit.h);
                 drawParts(ctx, edit, 0, 0, edit.w, edit.h);
+                if (editor.sel >= 0 && edit.parts[editor.sel]) {
+                    var part = edit.parts[editor.sel];
+                    ctx.strokeStyle = '#0052cc';
+                    ctx.lineWidth = 1 / scale;
+                    ctx.setLineDash([4 / scale, 3 / scale]);
+                    if (part.t === 'l') ctx.strokeRect(Math.min(part.x1, part.x2), Math.min(part.y1, part.y2), Math.abs(part.x2 - part.x1) || 1, Math.abs(part.y2 - part.y1) || 1);
+                    else if (part.t === 'p' && part.points && part.points.length) {
+                        var minX = part.points[0].x;
+                        var minY = part.points[0].y;
+                        var maxX = minX;
+                        var maxY = minY;
+                        part.points.forEach(function (p) {
+                            minX = Math.min(minX, p.x);
+                            minY = Math.min(minY, p.y);
+                            maxX = Math.max(maxX, p.x);
+                            maxY = Math.max(maxY, p.y);
+                        });
+                        ctx.strokeRect(minX, minY, Math.max(1, maxX - minX), Math.max(1, maxY - minY));
+                    } else ctx.strokeRect(part.x, part.y, part.w || 20, part.h || 12);
+                    ctx.setLineDash([]);
+                }
+                if (editor.pen && editor.pen.length) {
+                    ctx.strokeStyle = '#0052cc';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(editor.pen[0].x, editor.pen[0].y);
+                    editor.pen.forEach(function (p) { ctx.lineTo(p.x, p.y); });
+                    ctx.stroke();
+                }
                 ctx.restore();
+                renderEditorProps();
+                markEditorTools();
             }
-            function localPoint(event) {
-                var rect = canvas.getBoundingClientRect();
-                var scale = Math.min(400 / edit.w, 260 / edit.h);
-                var x = (event.clientX - rect.left) * (canvas.width / rect.width);
-                var y = (event.clientY - rect.top) * (canvas.height / rect.height);
-                return {
-                    x: Math.round(((x - 10) / scale) / 5) * 5,
-                    y: Math.round(((y - 10) / scale) / 5) * 5
-                };
+            function renderEditorProps() {
+                propsBox.innerHTML = '';
+                function num(label, value, apply) {
+                    var wrap = el('label', 'asset-tree-scheme-field', label);
+                    var input = el('input');
+                    input.value = value == null ? '' : String(value);
+                    input.addEventListener('change', function () { apply(Number(input.value)); paintSymbol(); });
+                    wrap.appendChild(input);
+                    propsBox.appendChild(wrap);
+                }
+                num('W', edit.w, function (value) { edit.w = Math.max(10, value || 10); });
+                num('H', edit.h, function (value) { edit.h = Math.max(10, value || 10); });
+                var part = editor.sel >= 0 ? edit.parts[editor.sel] : null;
+                if (!part) {
+                    propsBox.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeHint')));
+                    return;
+                }
+                if (part.x != null) num('X', part.x, function (value) { part.x = value; });
+                if (part.y != null) num('Y', part.y, function (value) { part.y = value; });
+                if (part.w != null) num('W', part.w, function (value) { part.w = Math.max(1, value || 1); });
+                if (part.h != null) num('H', part.h, function (value) { part.h = Math.max(1, value || 1); });
+                if (part.x1 != null) {
+                    num('X1', part.x1, function (value) { part.x1 = value; });
+                    num('Y1', part.y1, function (value) { part.y1 = value; });
+                    num('X2', part.x2, function (value) { part.x2 = value; });
+                    num('Y2', part.y2, function (value) { part.y2 = value; });
+                }
+                num(api.t('schemeThickness'), part.s || 1, function (value) { part.s = Math.max(0.2, value || 1); });
+                var colorWrap = el('label', 'asset-tree-scheme-field', api.t('schemeColor'));
+                var color = el('input');
+                color.type = 'color';
+                color.value = /^#[0-9a-fA-F]{6}$/.test(part.c || '') ? part.c : '#172b4d';
+                color.addEventListener('change', function () { part.c = color.value; paintSymbol(); });
+                colorWrap.appendChild(color);
+                propsBox.appendChild(colorWrap);
+                if (part.t === 't') {
+                    var textWrap = el('label', 'asset-tree-scheme-field', api.t('schemeText'));
+                    var text = el('input');
+                    text.value = part.text || '';
+                    text.addEventListener('change', function () { part.text = text.value.slice(0, 80); paintSymbol(); });
+                    textWrap.appendChild(text);
+                    propsBox.appendChild(textWrap);
+                }
+                var remove = el('button', 'asset-tree-scheme-mini', api.t('schemeDeletePart'));
+                remove.type = 'button';
+                remove.addEventListener('click', function () {
+                    edit.parts.splice(editor.sel, 1);
+                    editor.sel = -1;
+                    paintSymbol();
+                });
+                propsBox.appendChild(remove);
+            }
+            function markEditorTools() {
+                var buttons = toolRow.querySelectorAll('button');
+                var i;
+                for (i = 0; i < buttons.length; i++) {
+                    buttons[i].className = buttons[i].getAttribute('data-editor-tool') === editor.tool ? 'asset-tree-scheme-tool is-on' : 'asset-tree-scheme-tool';
+                }
             }
             canvas.addEventListener('mousedown', function (event) {
-                editor.draft = localPoint(event);
+                dialog.focus();
+                var pt = localPoint(event);
+                if (editor.tool === 'select') {
+                    editor.sel = partHit(pt);
+                    editor.drag = editor.sel >= 0 ? { x: pt.x, y: pt.y } : null;
+                    paintSymbol();
+                    return;
+                }
+                if (editor.tool === 'text') {
+                    var value = global.prompt(api.t('schemeText'), '');
+                    if (!value) return;
+                    edit.parts.push({ t: 't', x: pt.x, y: pt.y, w: Math.max(20, value.length * 6), h: 12, text: value.slice(0, 80), c: '#172b4d', s: 1 });
+                    editor.sel = edit.parts.length - 1;
+                    paintSymbol();
+                    return;
+                }
+                if (editor.tool === 'pen') {
+                    if (!editor.pen) editor.pen = [pt];
+                    else editor.pen.push(pt);
+                    paintSymbol();
+                    return;
+                }
+                editor.draft = pt;
+            });
+            canvas.addEventListener('mousemove', function (event) {
+                if (!editor.drag || editor.sel < 0) return;
+                var pt = localPoint(event);
+                var dx = pt.x - editor.drag.x;
+                var dy = pt.y - editor.drag.y;
+                if (!dx && !dy) return;
+                editor.drag = pt;
+                var part = edit.parts[editor.sel];
+                ['x', 'y', 'x1', 'y1', 'x2', 'y2'].forEach(function (key) {
+                    if (part[key] != null) part[key] += dx;
+                });
+                if (part.points) part.points.forEach(function (p) { p.x += dx; p.y += dy; });
+                paintSymbol();
             });
             canvas.addEventListener('mouseup', function (event) {
-                if (!editor.draft) return;
+                editor.drag = null;
+                if (!editor.draft || editor.tool === 'select' || editor.tool === 'pen' || editor.tool === 'text') return;
                 var end = localPoint(event);
-                var part = { t: editor.tool === 'ellipse' ? 'e' : editor.tool === 'line' ? 'l' : 'r', c: '#172b4d', s: 1 };
-                if (part.t === 'l') {
+                var part = { c: '#172b4d', s: 1 };
+                if (editor.tool === 'line') {
+                    part.t = 'l';
                     part.x1 = editor.draft.x;
                     part.y1 = editor.draft.y;
                     part.x2 = end.x;
                     part.y2 = end.y;
                 } else {
+                    part.t = editor.tool === 'ellipse' ? 'e' : 'r';
                     part.x = Math.min(editor.draft.x, end.x);
                     part.y = Math.min(editor.draft.y, end.y);
                     part.w = Math.max(5, Math.abs(end.x - editor.draft.x));
@@ -1724,21 +2047,53 @@
                     part.f = '#ffffff';
                 }
                 edit.parts.push(part);
+                editor.sel = edit.parts.length - 1;
                 editor.draft = null;
                 paintSymbol();
             });
-            var toolRow = el('div', 'asset-tree-scheme-tools');
-            [['rect', 'R'], ['line', 'L'], ['ellipse', 'E']].forEach(function (item) {
-                var button = el('button', 'asset-tree-scheme-tool', item[1]);
-                button.type = 'button';
-                button.addEventListener('click', function () { editor.tool = item[0]; });
-                toolRow.appendChild(button);
+            function finishPen() {
+                if (!editor.pen || editor.pen.length < 2) {
+                    editor.pen = null;
+                    paintSymbol();
+                    return;
+                }
+                edit.parts.push({ t: 'p', points: editor.pen.slice(), c: '#172b4d', s: 1 });
+                editor.sel = edit.parts.length - 1;
+                editor.pen = null;
+                paintSymbol();
+            }
+            dialog.addEventListener('keydown', function (event) {
+                var tag = event.target && event.target.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+                event.stopPropagation();
+                if (event.key === 'Enter' && editor.tool === 'pen') {
+                    event.preventDefault();
+                    finishPen();
+                }
+                if (event.key === 'Backspace' && editor.pen && editor.pen.length) {
+                    editor.pen.pop();
+                    paintSymbol();
+                }
+                if (event.key === 'Delete' && editor.sel >= 0) {
+                    edit.parts.splice(editor.sel, 1);
+                    editor.sel = -1;
+                    paintSymbol();
+                }
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    if (back.parentNode) back.parentNode.removeChild(back);
+                }
             });
+            var actions = el('div', 'asset-tree-scheme-head');
             var save = el('button', 'asset-tree-scheme-save', api.t('save'));
             save.type = 'button';
             save.addEventListener('click', function () {
+                finishPen();
+                edit.name = title.value.slice(0, 80) || edit.name || api.t('schemeTemplateNew');
                 remember();
+                if (!session.doc.symbols) session.doc.symbols = {};
                 session.doc.symbols[edit.id] = edit;
+                session.symbolId = edit.id;
                 if (back.parentNode) back.parentNode.removeChild(back);
                 refreshSide();
                 paint();
@@ -1748,17 +2103,110 @@
             cancel.addEventListener('click', function () {
                 if (back.parentNode) back.parentNode.removeChild(back);
             });
+            actions.appendChild(save);
+            actions.appendChild(cancel);
+            var layout = el('div', 'asset-tree-scheme-editor');
+            layout.appendChild(toolRow);
+            layout.appendChild(canvas);
+            layout.appendChild(propsBox);
             dialog.appendChild(title);
-            dialog.appendChild(toolRow);
-            dialog.appendChild(canvas);
-            dialog.appendChild(save);
-            dialog.appendChild(cancel);
+            dialog.appendChild(layout);
+            dialog.appendChild(actions);
             back.appendChild(dialog);
             host.appendChild(back);
+            dialog.tabIndex = 0;
             paintSymbol();
+            dialog.focus();
         }
 
-        function save() {
+        function acceptDoc(raw, id) {
+            var doc = raw || blankDoc(api.t);
+            if (!doc.floors || !doc.floors.length) throw new Error('empty');
+            if (!doc.settings) doc.settings = { showOtherFloors: true, unit: 'cm' };
+            if (!doc.layers) doc.layers = blankDoc(api.t).layers;
+            if (!doc.symbols) doc.symbols = {};
+            if (!doc.activeFloorId) doc.activeFloorId = doc.floors[0].id;
+            if (!doc.placeId) doc.placeId = 0;
+            session.doc = doc;
+            session.id = id || 0;
+            session.past = [];
+            session.future = [];
+            session.selection = [];
+            session.draft = null;
+        }
+
+        function upsertCatalog(row) {
+            var i;
+            for (i = 0; i < session.catalog.length; i++) {
+                if (session.catalog[i].id === row.id) {
+                    session.catalog[i].name = row.name;
+                    return;
+                }
+            }
+            session.catalog.push({ id: row.id, name: row.name });
+        }
+
+        function schemeLabel(row) {
+            var name = (row && row.name) || api.t('schemeDefaultName');
+            var same = 0;
+            var i;
+            for (i = 0; i < (session.catalog || []).length; i++) {
+                if ((session.catalog[i].name || '') === ((row && row.name) || '')) same++;
+            }
+            if (same > 1 && row && row.id) return name + ' #' + row.id;
+            return name;
+        }
+
+        function fillSchemePick() {
+            var current = String(session.id || 0);
+            var seen = false;
+            schemePick.innerHTML = '';
+            (session.catalog || []).forEach(function (row) {
+                var option = el('option', null, schemeLabel(row));
+                option.value = String(row.id);
+                schemePick.appendChild(option);
+                if (String(row.id) === current) seen = true;
+            });
+            if (!seen) {
+                var fresh = el('option', null, (session.doc && session.doc.name) || api.t('schemeDefaultName'));
+                fresh.value = '0';
+                schemePick.appendChild(fresh);
+            }
+            schemePick.value = seen ? current : '0';
+        }
+
+        function fillPlacePick() {
+            var value = String((session.doc && session.doc.placeId) || 0);
+            placePick.innerHTML = '';
+            var none = el('option', null, api.t('schemePlaceNone'));
+            none.value = '0';
+            placePick.appendChild(none);
+            (api.places || []).forEach(function (place) {
+                var option = el('option', null, place.name || String(place.id));
+                option.value = String(place.id);
+                placePick.appendChild(option);
+            });
+            placePick.value = value;
+            if (placePick.value !== value) placePick.value = '0';
+        }
+
+        function openScheme(id) {
+            api.ajax('GET', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + id, null, function (code, payload) {
+                if (code !== 200 || !payload || !payload.body) {
+                    if (session.statusNode) session.statusNode.textContent = api.t('schemeSaveFailed');
+                    return;
+                }
+                try {
+                    acceptDoc(JSON.parse(payload.body), payload.id);
+                } catch (error) {
+                    if (session.statusNode) session.statusNode.textContent = api.t('schemeSaveFailed');
+                    return;
+                }
+                if (session.repaint) session.repaint();
+            });
+        }
+
+        function save(done) {
             if (!api.canEdit) return;
             session.doc.name = nameInput.value || session.doc.name;
             var path = '/projects/' + encodeURIComponent(api.projectKey) + '/schemes';
@@ -1768,9 +2216,13 @@
                 if (code >= 200 && code < 300 && payload && payload.id) {
                     session.id = payload.id;
                     session.dirty = false;
+                    upsertCatalog({ id: payload.id, name: session.doc.name });
+                    fillSchemePick();
                     status.textContent = api.t('schemeSaved');
+                    if (done) done();
                 } else {
                     status.textContent = (payload && payload.message) || api.t('schemeSaveFailed');
+                    fillSchemePick();
                 }
             });
         }
@@ -1788,23 +2240,9 @@
             api.ajax('GET', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes', null, function (code, list) {
                 session.loading = false;
                 session.loaded = true;
+                session.catalog = code === 200 && list && list.length ? list : (session.catalog || []);
                 if (code === 200 && list && list.length) {
-                    api.ajax('GET', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + list[0].id, null, function (oneCode, payload) {
-                        if (oneCode === 200 && payload && payload.body) {
-                            try {
-                                session.doc = JSON.parse(payload.body);
-                                if (!session.doc.floors || !session.doc.floors.length) throw new Error('empty');
-                                if (!session.doc.settings) session.doc.settings = { showOtherFloors: true, unit: 'cm' };
-                                if (!session.doc.layers) session.doc.layers = blankDoc(api.t).layers;
-                                if (!session.doc.symbols) session.doc.symbols = {};
-                                if (!session.doc.activeFloorId) session.doc.activeFloorId = session.doc.floors[0].id;
-                                session.id = payload.id;
-                            } catch (error) {
-                                if (session.statusNode) session.statusNode.textContent = api.t('schemeSaveFailed');
-                            }
-                        }
-                        show();
-                    });
+                    openScheme(list[0].id);
                     return;
                 }
                 show();
@@ -2038,6 +2476,7 @@
                 document.removeEventListener('keydown', onKey);
                 return;
             }
+            if (host.querySelector('.asset-tree-scheme-modal')) return;
             var tag = event.target && event.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
             if (event.key === ' ' ) {
@@ -2127,24 +2566,37 @@
         nameInput.addEventListener('change', function () {
             session.doc.name = nameInput.value.slice(0, 80) || session.doc.name;
             session.dirty = true;
+            if (session.id) upsertCatalog({ id: session.id, name: session.doc.name });
+            fillSchemePick();
         });
         unit.addEventListener('change', function () {
             session.doc.settings.unit = unit.value;
             session.dirty = true;
             paint();
         });
-        saveBtn.addEventListener('click', save);
+        placePick.addEventListener('change', function () {
+            session.doc.placeId = Number(placePick.value) || 0;
+            session.dirty = true;
+        });
+        schemePick.addEventListener('change', function () {
+            var next = Number(schemePick.value);
+            if (!next || next === session.id) return;
+            var target = next;
+            if (session.dirty && api.canEdit) save(function () { openScheme(target); });
+            else openScheme(target);
+        });
+        saveBtn.addEventListener('click', function () { save(); });
         newBtn.addEventListener('click', function () {
-            remember();
-            var fresh = blankDoc(api.t);
-            fresh.activeFloorId = fresh.floors[0].id;
-            session.doc = fresh;
-            session.id = 0;
-            nameInput.value = fresh.name;
-            session.selection = [];
-            refreshSide();
-            renderProps();
-            paint();
+            var startFresh = function () {
+                var fresh = blankDoc(api.t);
+                fresh.name = api.t('schemeDefaultName') + ' ' + (session.catalog.length + 1);
+                fresh.activeFloorId = fresh.floors[0].id;
+                acceptDoc(fresh, 0);
+                session.dirty = true;
+                if (session.repaint) session.repaint();
+            };
+            if (session.dirty && api.canEdit) save(startFresh);
+            else startFresh();
         });
 
         var timer = global.setInterval(function () {
@@ -2159,6 +2611,8 @@
             if (!host.parentNode) return;
             nameInput.value = session.doc.name || '';
             if (unit.value !== (session.doc.settings.unit || 'cm')) unit.value = session.doc.settings.unit || 'cm';
+            fillSchemePick();
+            fillPlacePick();
             markTools();
             refreshSide();
             renderProps();
@@ -2166,6 +2620,8 @@
         };
         session.statusNode = status;
         markTools();
+        fillSchemePick();
+        fillPlacePick();
         refreshSide();
         renderProps();
         load();
