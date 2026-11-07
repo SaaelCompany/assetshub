@@ -46,7 +46,6 @@ import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.TypeDraft;
 import com.assetstree.jira.model.TniSightDraft;
-import com.assetstree.jira.model.TniSheetDraft;
 import com.assetstree.jira.model.TniSourceDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.service.AssetBridge;
@@ -1667,17 +1666,6 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.loadTniDirectory(user(), projectKey)).build();
-            }
-        });
-    }
-
-    @POST
-    @Path("projects/{projectKey}/directory/sheet")
-    public Response importTniSheet(@PathParam("projectKey") final String projectKey, final TniSheetDraft draft) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.ok(assetService.importTniSheet(user(), projectKey, draft)).build();
             }
         });
     }

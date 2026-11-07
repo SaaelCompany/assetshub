@@ -13110,7 +13110,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public List<TniSubnetDto> tniSubnets(ApplicationUser user, String projectKey) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         return ao().executeInTransaction(new TransactionCallback<List<TniSubnetDto>>() {
             @Override
@@ -13122,7 +13122,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public TniSubnetDto createTniSubnet(ApplicationUser user, String projectKey, TniSubnetDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         if (draft == null) {
             throw new AssetException(400, TniRange.BAD);
@@ -13156,7 +13156,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteTniSubnet(ApplicationUser user, String projectKey, final int subnetId) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
@@ -13170,7 +13170,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public TniSubnetDto scanTniSubnet(final ApplicationUser user, String projectKey, final int subnetId) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         final String typeKey = tniComputerType(project.getKey());
         final String found = i18n().getText("asset-tree.ui.tniFound");
@@ -13237,14 +13237,14 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public TniSourceDto tniDirectory(ApplicationUser user, String projectKey) {
-        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         return tniSourceDto(tniSourceRow(project.getKey()));
     }
 
     @Override
     public TniSourceDto saveTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         if (draft == null) {
             throw new AssetException(400, TniDirectory.ACCOUNT);
@@ -13294,7 +13294,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey) {
-        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         String typeKey = tniComputerType(project.getKey());
         TniSourceEntity row = tniSourceRow(project.getKey());
@@ -13311,7 +13311,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft) {
-        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
         String typeKey = tniComputerType(project.getKey());
         List<TniComputer> computers = TniDirectory.parseSheet(draft == null ? null : draft.getCsv());

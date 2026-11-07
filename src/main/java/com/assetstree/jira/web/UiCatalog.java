@@ -1107,6 +1107,7 @@ public final class UiCatalog {
             "tniDirSsl",
             "tniDirBase",
             "tniDirAccount",
+            "tniNetTitle",
             "tniDirPassword",
             "tniDirPasswordSet",
             "tniDirSave",

@@ -540,7 +540,8 @@
 
     function normalizeView(raw) {
         var value = String(raw || '').toLowerCase();
-        if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map' || value === 'tni') {
+        if (value === 'tni') return 'settings';
+        if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
             return value;
         }
         return 'all';
@@ -552,7 +553,6 @@
         if (view === 'schedules') return t('menuSchedules');
         if (view === 'reports') return t('menuReports');
         if (view === 'map') return t('menuMap');
-        if (view === 'tni') return t('menuTni');
         return t('menuAll');
     }
 
@@ -2158,9 +2158,6 @@
         if (moduleOn('map') && (state.canView !== false || state.canMap)) {
             items.push({ view: 'map', label: t('menuMap') });
         }
-        if (moduleOn('tni') && state.canEdit) {
-            items.push({ view: 'tni', label: t('menuTni') });
-        }
         if (state.canManage && state.canView !== false) {
             items.push({ view: 'settings', label: t('menuSettings') });
         }
@@ -2242,7 +2239,7 @@
         var titles = el('div', 'asset-tree-heading');
         var heading = el('h1', null, viewTitle(state.view));
         if (state.view === 'schedules' || state.view === 'reports') heading.appendChild(stageMark('beta'));
-        if (state.view === 'map' || state.view === 'tni') heading.appendChild(stageMark('beta'));
+        if (state.view === 'map') heading.appendChild(stageMark('beta'));
         titles.appendChild(heading);
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
@@ -2476,8 +2473,7 @@
         }
         if ((state.view === 'schedules' && !moduleOn('service'))
                 || (state.view === 'reports' && !moduleOn('reports'))
-                || (state.view === 'map' && !moduleOn('map'))
-                || (state.view === 'tni' && !moduleOn('tni'))) {
+                || (state.view === 'map' && !moduleOn('map'))) {
             state.view = 'all';
             rememberView('all');
             mount();
@@ -2495,10 +2491,6 @@
         }
         if (state.view === 'map') {
             frame.appendChild(renderSchemes());
-            return;
-        }
-        if (state.view === 'tni') {
-            frame.appendChild(renderTni());
             return;
         }
         if (state.view === 'settings') {
@@ -10674,7 +10666,7 @@
                 state.treeReady = false;
                 state.loading = false;
                 var message = (payload && payload.message) || t('errorTitle');
-                if (state.view === 'settings' || state.view === 'reports' || state.view === 'map' || state.view === 'schedules' || state.view === 'tni') {
+                if (state.view === 'settings' || state.view === 'reports' || state.view === 'map' || state.view === 'schedules') {
                     state.treeError = message;
                     state.error = null;
                     if (done) done();
@@ -13703,6 +13695,7 @@
             var phone = typeSelect(setup.tniPhone || '', t('tniKindPhone'));
             var tablet = typeSelect(setup.tniTablet || '', t('tniKindTablet'));
             panel.appendChild(types);
+            if (state.canAdmin) appendTniTools(panel);
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
                 next.tniKeep = clampNum(keep.value, 1, 3650);
@@ -13898,6 +13891,7 @@
             ['card', 'moduleCard', 'moduleCardHint', '', 'beta'],
             ['tni', 'moduleTni', 'moduleTniHint', '', 'beta']
         ].forEach(function (item) {
+            if (item[0] === 'tni' && !state.canAdmin) return;
             var option = el('div', 'asset-tree-module-option');
             var label = el('label');
             var box = el('input');
@@ -20228,47 +20222,40 @@
         return el('p', 'asset-tree-hint', t('lifeForecast') + ': ' + names);
     }
 
-    function renderTni() {
-        var panel = el('section', 'asset-tree-sheet asset-tree-tni-scan');
-        appendTreeError(panel);
-        panel.appendChild(el('p', 'asset-tree-hint', t('tniScanHint')));
+    function appendTniTools(panel) {
+        var scan = el('div', 'asset-tree-tni-block');
+        scan.appendChild(el('h4', null, t('tniNetTitle')));
+        scan.appendChild(el('p', 'asset-tree-hint', t('tniScanHint')));
         var setup = currentProject() && currentProject().setup;
         if (!setup || !setup.tniComputer) {
-            panel.appendChild(el('p', 'asset-tree-banner', t('tniScanNeedType')));
+            scan.appendChild(el('p', 'asset-tree-banner', t('tniScanNeedType')));
         }
-        if (state.canEdit) panel.appendChild(renderTniDirectory());
-        if (state.canEdit) {
-            var form = el('div', 'asset-tree-tni-add');
-            var name = document.createElement('input');
-            name.type = 'text';
-            name.maxLength = 80;
-            name.placeholder = t('tniScanName');
-            name.setAttribute('aria-label', t('tniScanName'));
-            var target = document.createElement('textarea');
-            target.rows = 3;
-            target.placeholder = t('tniScanPlaceholder');
-            target.setAttribute('aria-label', t('tniScanTarget'));
-            var add = button(t('tniScanAdd'), 'asset-tree-btn primary', function () {
-                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets', {
-                    name: name.value,
-                    target: target.value
-                }, function (status, payload) {
-                    if (status >= 200 && status < 300) {
-                        name.value = '';
-                        target.value = '';
-                        state.tniError = '';
-                        loadTni(true);
-                    } else {
-                        notify((payload && payload.message) || t('errorTitle'));
-                    }
-                });
+        var name = document.createElement('input');
+        name.type = 'text';
+        name.maxLength = 80;
+        var target = document.createElement('textarea');
+        target.rows = 2;
+        target.placeholder = t('tniScanPlaceholder');
+        scan.appendChild(planField(t('tniScanName'), name));
+        scan.appendChild(planField(t('tniScanTarget'), target));
+        var addRow = el('div', 'asset-tree-tni-actions');
+        addRow.appendChild(button(t('tniScanAdd'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets', {
+                name: name.value,
+                target: target.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    name.value = '';
+                    target.value = '';
+                    state.tniError = '';
+                    loadTni(true);
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
             });
-            form.appendChild(name);
-            form.appendChild(target);
-            form.appendChild(add);
-            panel.appendChild(form);
-        }
-        var board = el('div');
+        }));
+        scan.appendChild(addRow);
+        var board = el('div', 'asset-tree-tni-board');
         board.id = 'asset-tree-tni-board';
         if (state.tniList == null) {
             board.appendChild(el('p', 'asset-tree-hint', t('loading')));
@@ -20276,14 +20263,15 @@
         } else {
             board.appendChild(tniBoard());
         }
-        panel.appendChild(board);
-        return panel;
+        scan.appendChild(board);
+        panel.appendChild(scan);
+        panel.appendChild(renderTniDirectory());
     }
 
     function loadTni(quiet) {
         var key = state.projectKey;
         ajax('GET', '/projects/' + encodeURIComponent(key) + '/subnets', null, function (status, payload) {
-            if (key !== state.projectKey || state.view !== 'tni') return;
+            if (key !== state.projectKey || state.moduleDialog !== 'tni') return;
             if (status !== 200) {
                 state.tniError = (payload && payload.message) || t('errorTitle');
                 state.tniList = [];
@@ -20314,7 +20302,7 @@
     function armTniWatch() {
         if (state.tniTimer) return;
         state.tniTimer = setInterval(function () {
-            if (state.view !== 'tni') {
+            if (state.moduleDialog !== 'tni') {
                 clearInterval(state.tniTimer);
                 state.tniTimer = null;
                 return;
@@ -20333,7 +20321,7 @@
         }
         var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
         var header = el('tr');
-        [t('tniScanName'), t('tniScanTarget'), t('tniScanHosts'), t('tniScanState'), t('tniScanOnline'), t('tniScanAdded'), ''].forEach(function (label) {
+        [t('tniScanName'), t('tniScanHosts'), t('tniScanState'), t('tniScanOnline'), t('tniScanAdded'), ''].forEach(function (label) {
             header.appendChild(el('th', null, label));
         });
         table.appendChild(header);
@@ -20344,15 +20332,12 @@
             var title = el('td', null, row.name || '');
             title.title = row.target || '';
             line.appendChild(title);
-            var network = el('td', null, row.target || '');
-            network.title = row.target || '';
-            line.appendChild(network);
             line.appendChild(el('td', 'is-num', String(row.hosts || 0)));
             line.appendChild(el('td', null, tniStateText(row)));
             line.appendChild(el('td', 'is-num', String(row.online || 0)));
             line.appendChild(el('td', 'is-num', String(row.added || 0)));
             var actions = el('td');
-            if (state.canEdit) {
+            if (state.canAdmin) {
                 var scan = button(t('tniScanRun'), 'asset-tree-btn slim', function () {
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets/' + encodeURIComponent(row.id) + '/scan', {}, function (status, payload) {
                         if (status >= 200 && status < 300) loadTni(true);
@@ -20398,28 +20383,41 @@
     }
 
     function renderTniDirectory() {
-        var box = el('div', 'asset-tree-tni-dir');
-        box.appendChild(el('p', 'asset-tree-nav-label', t('tniDirTitle')));
+        var box = el('div', 'asset-tree-tni-block');
+        box.appendChild(el('h4', null, t('tniDirTitle')));
         box.appendChild(el('p', 'asset-tree-hint', t('tniDirHint')));
-        var fields = el('div', 'asset-tree-tni-dir-fields');
-        var host = tniInput('asset-tree-tni-host', t('tniDirHost'));
-        var port = tniInput('asset-tree-tni-port', t('tniDirPort'));
+        var host = document.createElement('input');
+        host.type = 'text';
+        host.id = 'asset-tree-tni-host';
+        host.placeholder = 'dc.corp.local';
+        var port = document.createElement('input');
         port.type = 'number';
+        port.id = 'asset-tree-tni-port';
         port.min = '1';
         port.max = '65535';
-        var account = tniInput('asset-tree-tni-account', t('tniDirAccount'));
-        var base = tniInput('asset-tree-tni-base', t('tniDirBase'));
-        base.className = 'asset-tree-tni-base';
-        var password = tniInput('asset-tree-tni-password', t('tniDirPassword'));
+        port.value = '389';
+        var account = document.createElement('input');
+        account.type = 'text';
+        account.id = 'asset-tree-tni-account';
+        account.placeholder = 'CORP\\user';
+        var password = document.createElement('input');
         password.type = 'password';
+        password.id = 'asset-tree-tni-password';
         password.autocomplete = 'new-password';
-        fields.appendChild(host);
-        fields.appendChild(port);
-        fields.appendChild(account);
-        fields.appendChild(base);
-        fields.appendChild(password);
-        box.appendChild(fields);
-        var actions = el('div', 'asset-tree-tni-dir-actions');
+        var base = document.createElement('input');
+        base.type = 'text';
+        base.id = 'asset-tree-tni-base';
+        base.placeholder = 'DC=corp,DC=local';
+        var grid = el('div', 'asset-tree-tni-grid');
+        grid.appendChild(planField(t('tniDirHost'), host));
+        grid.appendChild(planField(t('tniDirPort'), port));
+        grid.appendChild(planField(t('tniDirAccount'), account));
+        grid.appendChild(planField(t('tniDirPassword'), password));
+        var baseField = planField(t('tniDirBase'), base);
+        baseField.className += ' is-full';
+        grid.appendChild(baseField);
+        box.appendChild(grid);
+        var actions = el('div', 'asset-tree-tni-actions');
         var sslLabel = el('label', 'asset-tree-tni-ssl');
         var ssl = document.createElement('input');
         ssl.type = 'checkbox';
@@ -20427,7 +20425,7 @@
         sslLabel.appendChild(ssl);
         sslLabel.appendChild(document.createTextNode(t('tniDirSsl')));
         actions.appendChild(sslLabel);
-        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn slim', function () {
+        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn', function () {
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory', {
                 host: host.value,
                 port: Number(port.value) || 0,
@@ -20456,48 +20454,9 @@
         var note = el('p', 'asset-tree-hint');
         note.id = 'asset-tree-tni-dir-note';
         box.appendChild(note);
-        box.appendChild(el('p', 'asset-tree-nav-label', t('tniSheetTitle')));
-        box.appendChild(el('p', 'asset-tree-hint', t('tniSheetHint')));
-        var fileRow = el('div', 'asset-tree-tni-dir-actions');
-        var file = document.createElement('input');
-        file.type = 'file';
-        file.accept = '.csv,text/csv';
-        file.id = 'asset-tree-tni-sheet';
-        fileRow.appendChild(file);
-        fileRow.appendChild(button(t('tniSheetLoad'), 'asset-tree-btn slim', function () {
-            var chosen = file.files && file.files[0];
-            if (!chosen) {
-                notify(t('tniSheetPick'));
-                return;
-            }
-            var reader = new FileReader();
-            reader.onload = function () {
-                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory/sheet', {
-                    csv: String(reader.result || '')
-                }, function (status, payload) {
-                    if (status >= 200 && status < 300) {
-                        file.value = '';
-                        tniDirNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
-                    } else {
-                        notify((payload && payload.message) || t('errorTitle'));
-                    }
-                });
-            };
-            reader.readAsText(chosen);
-        }));
-        box.appendChild(fileRow);
         if (state.tniDir) fillTniDirectory(state.tniDir);
         else loadTniDirectory();
         return box;
-    }
-
-    function tniInput(id, label) {
-        var input = document.createElement('input');
-        input.type = 'text';
-        input.id = id;
-        input.placeholder = label;
-        input.setAttribute('aria-label', label);
-        return input;
     }
 
     function tniDirNote(text) {
@@ -20525,7 +20484,7 @@
     function loadTniDirectory() {
         var key = state.projectKey;
         ajax('GET', '/projects/' + encodeURIComponent(key) + '/directory', null, function (status, payload) {
-            if (key !== state.projectKey || state.view !== 'tni' || status !== 200 || !payload) return;
+            if (key !== state.projectKey || state.moduleDialog !== 'tni' || status !== 200 || !payload) return;
             state.tniDir = payload;
             fillTniDirectory(payload);
         });
