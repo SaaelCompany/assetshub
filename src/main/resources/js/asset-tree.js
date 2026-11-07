@@ -7861,6 +7861,8 @@
         if (extra.length) ops.appendChild(moreMenu(extra));
         main.appendChild(ops);
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
+        var watch = watchBlock(asset);
+        if (watch) main.appendChild(watch);
 
         var items = [detailItem(t('type'), typeBadge(typeFor(asset), asset.typeLabel || typeOf(asset.typeKey).label || ''))];
         items.push(detailItem(t('status'), statusPicker(asset)));
@@ -7912,8 +7914,6 @@
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
-        var watch = watchBlock(asset);
-        if (watch) aside.appendChild(watch);
         aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
@@ -28767,7 +28767,18 @@
             loadTniWatch(asset.id);
             return moduleBlock(t('tniWatch'), waiting);
         }
-        if (row.missing || (!row.armed && !mayEdit(asset))) return null;
+        if (!row.armed && !mayEdit(asset)) return null;
+        if (row.missing) {
+            var failed = el('div');
+            failed.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
+            failed.appendChild(button(t('retry'), 'asset-tree-btn', function () {
+                delete state.tniWatch[asset.id];
+                state.tniWatchLoading[asset.id] = false;
+                loadTniWatch(asset.id);
+                showDetail(state.detail || asset, false);
+            }));
+            return moduleBlock(t('tniWatch'), failed);
+        }
         return moduleBlock(t('tniWatch'), watchBody(asset, row));
     }
 
