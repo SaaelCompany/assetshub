@@ -1117,6 +1117,8 @@ public final class UiCatalog {
             "schemePlaceNone",
             "schemeLength",
             "schemeTemplateNew",
+            "schemeMakeTemplate",
+            "schemeTemplateSaved",
             "schemeTemplateEdit",
             "schemeUnbind",
             "schemeAssetTitle",

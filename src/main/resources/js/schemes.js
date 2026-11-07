@@ -1613,13 +1613,6 @@
             });
 
             side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeSymbols')));
-            var addTemplate = el('button', 'asset-tree-scheme-mini', api.t('schemeTemplateNew'));
-            addTemplate.type = 'button';
-            addTemplate.disabled = !api.canEdit;
-            addTemplate.addEventListener('click', function () {
-                openSymbolEditor({ id: nid('sym'), name: api.t('schemeTemplateNew'), w: 100, h: 60, parts: [] });
-            });
-            side.appendChild(addTemplate);
             var library = builtins(api.t).slice();
             var seenSymbol = {};
             library.forEach(function (def) { seenSymbol[def.id] = true; });
@@ -2251,11 +2244,17 @@
 
         var drag = null;
         stage.addEventListener('mousedown', function (event) {
+            if (event.button !== 2) hideTemplateMenu();
             host.focus();
             var rect = overC.getBoundingClientRect();
             var sx = event.clientX - rect.left;
             var sy = event.clientY - rect.top;
-            if (event.button === 1 || event.button === 2 || (event.button === 0 && session.space)) {
+            if (event.button === 2) {
+                drag = { mode: 'rmb', x: event.clientX, y: event.clientY, camX: session.cam.x, camY: session.cam.y };
+                event.preventDefault();
+                return;
+            }
+            if (event.button === 1 || (event.button === 0 && session.space)) {
                 drag = { mode: 'pan', x: event.clientX, y: event.clientY, camX: session.cam.x, camY: session.cam.y };
                 event.preventDefault();
                 return;
@@ -2353,6 +2352,10 @@
                 paint();
                 return;
             }
+            if (drag.mode === 'rmb') {
+                if (Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) <= 16) return;
+                drag.mode = 'pan';
+            }
             if (drag.mode === 'pan') {
                 session.cam.x = drag.camX - (event.clientX - drag.x) / session.cam.z;
                 session.cam.y = drag.camY - (event.clientY - drag.y) / session.cam.z;
@@ -2413,8 +2416,18 @@
         });
 
         global.addEventListener('mouseup', onUp);
-        function onUp() {
+        function onUp(event) {
             if (!drag) return;
+            if (drag.mode === 'rmb') {
+                var pt = pointer(event);
+                var id = hit(pt.x, pt.y);
+                if (id && session.selection.indexOf(id) < 0) session.selection = [id];
+                drag = null;
+                renderProps();
+                paint();
+                showTemplateMenu(event.clientX, event.clientY);
+                return;
+            }
             if (drag.mode === 'marquee' && session.marquee) {
                 var box = session.marquee;
                 var ids = [];
@@ -2449,6 +2462,154 @@
                 return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
             }
             return null;
+        }
+
+        function hideTemplateMenu() {
+            var old = host.querySelector('.asset-tree-scheme-menu');
+            if (old && old.parentNode) old.parentNode.removeChild(old);
+        }
+
+        function partsOf(obj) {
+            if (obj.type === 'line' || obj.type === 'dimension') {
+                return [{ t: 'l', x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2, c: obj.color || '#172b4d', s: obj.thickness || 1 }];
+            }
+            if (obj.type === 'rect' || obj.type === 'ellipse') {
+                return [{ t: obj.type === 'ellipse' ? 'e' : 'r', x: obj.x, y: obj.y, w: obj.w, h: obj.h, c: obj.color || '#172b4d', f: obj.fill || '', s: obj.thickness || 1 }];
+            }
+            if (obj.type === 'text') {
+                return [{ t: 't', x: obj.x, y: obj.y, w: obj.w || 40, h: obj.h || 18, text: obj.text || '', c: obj.color || '#172b4d', s: 1 }];
+            }
+            if ((obj.type === 'polyline' || obj.type === 'wall') && obj.points && obj.points.length) {
+                var points = obj.points.map(function (p) { return { x: p.x, y: p.y }; });
+                if (obj.closed && points.length > 2) points.push({ x: points[0].x, y: points[0].y });
+                return [{ t: 'p', points: points, c: obj.color || '#172b4d', s: obj.type === 'wall' ? (obj.thickness || 15) : (obj.thickness || 1) }];
+            }
+            if (obj.type === 'symbol') {
+                var def = symbolDef(obj.symbolId);
+                var sx = (obj.w || def.w || 1) / (def.w || 1);
+                var sy = (obj.h || def.h || 1) / (def.h || 1);
+                return (def.parts || []).map(function (part) {
+                    var next = clone(part);
+                    if (next.x != null) { next.x = obj.x + next.x * sx; next.w = (next.w || 0) * sx; }
+                    if (next.y != null) { next.y = obj.y + next.y * sy; next.h = (next.h || 0) * sy; }
+                    if (next.x1 != null) {
+                        next.x1 = obj.x + next.x1 * sx;
+                        next.y1 = obj.y + next.y1 * sy;
+                        next.x2 = obj.x + next.x2 * sx;
+                        next.y2 = obj.y + next.y2 * sy;
+                    }
+                    if (next.points) {
+                        next.points = next.points.map(function (p) { return { x: obj.x + p.x * sx, y: obj.y + p.y * sy }; });
+                    }
+                    if (next.s) next.s = next.s * ((Math.abs(sx) + Math.abs(sy)) / 2);
+                    return next;
+                });
+            }
+            return [];
+        }
+
+        function shiftPart(part, ox, oy) {
+            var next = clone(part);
+            if (next.x != null) next.x = roundCm(next.x - ox);
+            if (next.y != null) next.y = roundCm(next.y - oy);
+            if (next.w != null) next.w = roundCm(next.w);
+            if (next.h != null) next.h = roundCm(next.h);
+            if (next.x1 != null) {
+                next.x1 = roundCm(next.x1 - ox);
+                next.y1 = roundCm(next.y1 - oy);
+                next.x2 = roundCm(next.x2 - ox);
+                next.y2 = roundCm(next.y2 - oy);
+            }
+            if (next.points) next.points = next.points.map(function (p) { return { x: roundCm(p.x - ox), y: roundCm(p.y - oy) }; });
+            return next;
+        }
+
+        function makeTemplateFromSelection(name) {
+            var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
+            name = String(name || '').replace(/^\s+|\s+$/g, '');
+            if (!api.canEdit || !objects.length || !name) return;
+            var box = null;
+            var pad = 1;
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                var one = bounds(objects[i]);
+                if (!one) continue;
+                var extra = objects[i].type === 'wall' ? (objects[i].thickness || 15) / 2 : (objects[i].thickness || 1) / 2;
+                if (extra > pad) pad = extra;
+                if (!box) box = { x: one.x, y: one.y, r: one.x + one.w, b: one.y + one.h };
+                else {
+                    box.x = Math.min(box.x, one.x);
+                    box.y = Math.min(box.y, one.y);
+                    box.r = Math.max(box.r, one.x + one.w);
+                    box.b = Math.max(box.b, one.y + one.h);
+                }
+            }
+            if (!box) return;
+            box.x -= pad;
+            box.y -= pad;
+            var parts = [];
+            objects.forEach(function (obj) {
+                partsOf(obj).forEach(function (part) { parts.push(shiftPart(part, box.x, box.y)); });
+            });
+            if (!parts.length) return;
+            remember();
+            var def = {
+                id: nid('sym'),
+                name: name.slice(0, 80),
+                w: Math.max(5, roundCm(box.r - box.x + pad)),
+                h: Math.max(5, roundCm(box.b - box.y + pad)),
+                parts: parts
+            };
+            if (!session.doc.symbols) session.doc.symbols = {};
+            session.doc.symbols[def.id] = def;
+            session.symbolId = def.id;
+            refreshSide();
+            paint();
+            status.textContent = api.t('schemeTemplateSaved');
+        }
+
+        function showTemplateMenu(clientX, clientY) {
+            hideTemplateMenu();
+            if (!api.canEdit) return;
+            var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
+            if (!objects.length) return;
+            var menu = el('div', 'asset-tree-scheme-menu');
+            var suggested = objects.length === 1 && objects[0].type === 'symbol' ? (symbolDef(objects[0].symbolId).name || '') : api.t('schemeTemplateNew');
+            var field = el('input', 'asset-tree-scheme-name');
+            field.value = suggested;
+            field.placeholder = api.t('name');
+            var item = el('button', 'asset-tree-scheme-menu-item', api.t('schemeMakeTemplate'));
+            item.type = 'button';
+            function commit() {
+                var value = field.value;
+                hideTemplateMenu();
+                makeTemplateFromSelection(value);
+            }
+            item.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                commit();
+            });
+            field.addEventListener('keydown', function (event) {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commit();
+                }
+            });
+            menu.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            menu.appendChild(field);
+            menu.appendChild(item);
+            host.appendChild(menu);
+            var hostRect = host.getBoundingClientRect();
+            var left = clientX - hostRect.left;
+            var top = clientY - hostRect.top;
+            if (left + 200 > host.clientWidth) left = Math.max(8, host.clientWidth - 200);
+            if (top + 88 > host.clientHeight) top = Math.max(8, host.clientHeight - 88);
+            menu.style.left = left + 'px';
+            menu.style.top = top + 'px';
+            field.focus();
+            field.select();
         }
 
         stage.addEventListener('wheel', function (event) {
@@ -2508,6 +2669,7 @@
                 return;
             }
             if (event.key === 'Escape') {
+                hideTemplateMenu();
                 session.draft = null;
                 session.selection = [];
                 session.typed = '';
