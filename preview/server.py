@@ -3449,6 +3449,85 @@ def floor_dto(row):
     }
 
 
+def scheme_name(raw):
+    name = (raw or "").strip() or "Scheme"
+    return name[:80]
+
+
+def scheme_body(raw):
+    if not isinstance(raw, str):
+        return None
+    body = raw.strip()
+    if not body.startswith("{") or len(body) > 1500000:
+        return None
+    return body
+
+
+def scheme_summary(row):
+    return {"id": row["id"], "name": row["name"], "updatedAt": row["updatedAt"]}
+
+
+def project_schemes(project_key):
+    rows = [row for row in STATE.setdefault("schemes", {}).values() if row.get("projectKey") == project_key]
+    rows.sort(key=lambda item: item["id"])
+    return [scheme_summary(row) for row in rows]
+
+
+def create_scheme(project_key, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None or len(project_schemes(project_key)) >= 40:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    scheme_id = STATE.setdefault("scheme_seq", 1)
+    STATE["scheme_seq"] = scheme_id + 1
+    row = {
+        "id": scheme_id,
+        "projectKey": project_key,
+        "name": scheme_name((body or {}).get("name")),
+        "body": stored,
+        "updatedAt": int(datetime.datetime.now().timestamp() * 1000),
+    }
+    STATE["schemes"][scheme_id] = row
+    return 201, scheme_summary(row)
+
+
+def read_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    payload = scheme_summary(row)
+    payload["body"] = row["body"]
+    return 200, payload
+
+
+def save_scheme(project_key, scheme_id, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    row["name"] = scheme_name((body or {}).get("name"))
+    row["body"] = stored
+    row["updatedAt"] = int(datetime.datetime.now().timestamp() * 1000)
+    return 200, scheme_summary(row)
+
+
+def delete_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    del STATE["schemes"][scheme_id]
+    return 204, None
+
+
 def project_floors(project_key):
     rows = [row for row in STATE.setdefault("floors", {}).values() if row.get("projectKey") == project_key]
     rows.sort(key=lambda item: (item.get("level") or 0, item["id"]))
@@ -7215,6 +7294,7 @@ class Handler(BaseHTTPRequestHandler):
                 .replace("@@CSS@@", "/download/resources/asset-tree/asset-tree.css")
                 .replace("@@QR@@", "/download/resources/asset-tree/qr-code.js")
                 .replace("@@PLAN@@", "/download/resources/asset-tree/plan-exchange.js")
+                .replace("@@SCHEME@@", "/download/resources/asset-tree/schemes.js")
                 .replace("@@JS@@", "/download/resources/asset-tree/asset-tree.js")
                 .replace("@@REST@@", "/rest/asset-tree/1.0")
                 .replace("@@PROJECT@@", project)
@@ -7845,6 +7925,29 @@ setTimeout(function () {
             if not module_on(project_key, "service"):
                 return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
             return delete_staff(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes", path)
+        if match:
+            project_key = match.group(1)
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if not module_on(project_key, "map"):
+                return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+            if method == "GET":
+                return 200, project_schemes(project_key)
+            if method == "POST":
+                return create_scheme(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes/(\d+)", path)
+        if match:
+            project_key = match.group(1)
+            scheme_id = int(match.group(2))
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if method == "GET":
+                return read_scheme(project_key, scheme_id, text)
+            if method == "PUT":
+                return save_scheme(project_key, scheme_id, self.read_json(), text)
+            if method == "DELETE":
+                return delete_scheme(project_key, scheme_id, text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/floors", path)
         if match:
             project_key = match.group(1)

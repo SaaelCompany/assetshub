@@ -34,6 +34,7 @@ import com.assetstree.jira.dto.MetaDto;
 import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
 import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportViewDto;
@@ -282,6 +283,16 @@ public interface AssetService {
     FloorDto saveFloor(ApplicationUser user, String projectKey, int floorId, FloorDto draft);
 
     void deleteFloor(ApplicationUser user, String projectKey, int floorId);
+
+    List<SchemeDocumentDto> schemes(ApplicationUser user, String projectKey);
+
+    SchemeDocumentDto scheme(ApplicationUser user, String projectKey, int schemeId);
+
+    SchemeDocumentDto createScheme(ApplicationUser user, String projectKey, SchemeDocumentDto draft);
+
+    SchemeDocumentDto saveScheme(ApplicationUser user, String projectKey, int schemeId, SchemeDocumentDto draft);
+
+    void deleteScheme(ApplicationUser user, String projectKey, int schemeId);
 
     List<SavedReportDto> reports(ApplicationUser user, String projectKey);
 

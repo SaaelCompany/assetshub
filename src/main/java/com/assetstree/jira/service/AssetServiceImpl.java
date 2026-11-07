@@ -137,6 +137,7 @@ import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportHolderDto;
 import com.assetstree.jira.dto.ReportPlaceDto;
 import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
 import com.assetstree.jira.dto.PinDto;
 import com.assetstree.jira.dto.ReportLineDto;
@@ -8770,6 +8771,67 @@ public class AssetServiceImpl implements AssetService {
                 ao().deleteWithSQL(RoomEntity.class, "FLOOR_ID = ?", Integer.valueOf(row.getID()));
                 ao().deleteWithSQL(PinEntity.class, "FLOOR_ID = ?", Integer.valueOf(row.getID()));
                 ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public List<SchemeDocumentDto> schemes(ApplicationUser user, String projectKey) {
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.MAP);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<List<SchemeDocumentDto>>() {
+            @Override
+            public List<SchemeDocumentDto> doInTransaction() {
+                return SchemeDocuments.list(ao(), project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public SchemeDocumentDto scheme(ApplicationUser user, String projectKey, final int schemeId) {
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.MAP);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
+            @Override
+            public SchemeDocumentDto doInTransaction() {
+                return SchemeDocuments.one(ao(), project.getKey(), schemeId);
+            }
+        });
+    }
+
+    @Override
+    public SchemeDocumentDto createScheme(ApplicationUser user, String projectKey, final SchemeDocumentDto draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
+            @Override
+            public SchemeDocumentDto doInTransaction() {
+                return SchemeDocuments.create(ao(), project.getKey(), draft);
+            }
+        });
+    }
+
+    @Override
+    public SchemeDocumentDto saveScheme(ApplicationUser user, String projectKey, final int schemeId, final SchemeDocumentDto draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
+            @Override
+            public SchemeDocumentDto doInTransaction() {
+                return SchemeDocuments.save(ao(), project.getKey(), schemeId, draft);
+            }
+        });
+    }
+
+    @Override
+    public void deleteScheme(ApplicationUser user, String projectKey, final int schemeId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                SchemeDocuments.delete(ao(), project.getKey(), schemeId);
                 return null;
             }
         });

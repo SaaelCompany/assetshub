@@ -38,6 +38,7 @@
         <entity>com.assetstree.jira.ao.FloorEntity</entity>
         <entity>com.assetstree.jira.ao.RoomEntity</entity>
         <entity>com.assetstree.jira.ao.PinEntity</entity>
+        <entity>com.assetstree.jira.ao.SchemeEntity</entity>
         <entity>com.assetstree.jira.ao.SavedReportEntity</entity>
         <entity>com.assetstree.jira.ao.LifecycleEntity</entity>
         <entity>com.assetstree.jira.ao.CardTemplateEntity</entity>
@@ -121,6 +122,7 @@
         <resource type="download" name="asset-tree.css" location="css/asset-tree.css"/>
         <resource type="download" name="qr-code.js" location="js/qr-code.js"/>
         <resource type="download" name="plan-exchange.js" location="js/plan-exchange.js"/>
+        <resource type="download" name="schemes.js" location="js/schemes.js"/>
         <resource type="download" name="asset-tree.js" location="js/asset-tree.js"/>
     </web-resource>
 

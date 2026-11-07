@@ -2482,7 +2482,7 @@
             return;
         }
         if (state.view === 'map') {
-            frame.appendChild(renderMap());
+            frame.appendChild(renderSchemes());
             return;
         }
         if (state.view === 'settings') {
@@ -21683,6 +21683,36 @@
         if (state.mapResize) window.removeEventListener('resize', state.mapResize);
         state.mapResize = apply;
         window.addEventListener('resize', apply);
+    }
+
+    function renderSchemes() {
+        var host = el('div', 'asset-tree-schemes');
+        if (!window.AssetTreeSchemes) {
+            host.appendChild(el('p', null, t('schemeMissing')));
+            return host;
+        }
+        var assets = equipmentAssets().map(function (asset) {
+            var attributes = {};
+            var list = asset.attributes || [];
+            var i;
+            for (i = 0; i < list.length && i < 2; i++) {
+                if (list[i] && list[i].name) attributes[list[i].name] = list[i].value || '';
+            }
+            return {
+                id: asset.id,
+                name: asset.name || '',
+                key: asset.objectKey || asset.key || '',
+                attributes: attributes
+            };
+        });
+        window.AssetTreeSchemes.mount(host, {
+            t: t,
+            ajax: ajax,
+            projectKey: state.projectKey,
+            canEdit: !!state.canEdit,
+            assets: assets
+        });
+        return host;
     }
 
     function renderMap() {
