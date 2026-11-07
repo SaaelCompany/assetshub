@@ -4224,6 +4224,32 @@
         return box;
     }
 
+    function placeSchemesBlock(asset) {
+        var box = el('div');
+        box.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schemes', null, function (status, list) {
+            if (!box.parentNode) return;
+            box.innerHTML = '';
+            var rows = status === 200 && list && list.length ? list : [];
+            var matched = [];
+            var i;
+            for (i = 0; i < rows.length; i++) {
+                if (Number(rows[i].placeId) === Number(asset.id)) matched.push(rows[i]);
+            }
+            if (!matched.length) {
+                box.appendChild(el('p', 'asset-tree-hint', t('schemeNoSchemes')));
+                return;
+            }
+            matched.forEach(function (row) {
+                box.appendChild(linkLine(row.name || t('schemeDefaultName'), t('schemeOpen'), function () {
+                    window.__assetSchemeFocus = { project: state.projectKey, id: row.id };
+                    showView('map');
+                }));
+            });
+        });
+        return moduleBlock(t('menuMap'), box);
+    }
+
     function renderPlaceHome(asset) {
         var full = (state.detail && state.detail.id == asset.id) ? state.detail : asset;
         if (state.editing && mayEdit(asset)) {
@@ -4287,6 +4313,7 @@
         });
         main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
         main.appendChild(descriptionModule(full, true));
+        main.appendChild(placeSchemesBlock(asset));
         main.appendChild(fileBlock(full));
 
         if (departments.length) {
@@ -21714,13 +21741,19 @@
                 key: asset.objectKey || asset.key || ''
             };
         });
+        var focusId = 0;
+        if (window.__assetSchemeFocus && window.__assetSchemeFocus.project === state.projectKey) {
+            focusId = window.__assetSchemeFocus.id || 0;
+            window.__assetSchemeFocus = null;
+        }
         window.AssetTreeSchemes.mount(host, {
             t: t,
             ajax: ajax,
             projectKey: state.projectKey,
             canEdit: !!state.canEdit,
             assets: assets,
-            places: places
+            places: places,
+            focusId: focusId
         });
         return host;
     }

@@ -12348,6 +12348,89 @@ button.asset-tree-attach-remove {
     color: #de350b;
 }
 
+#asset-tree-app .asset-tree-scheme-gallery {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 16px 18px 24px;
+    background: #f4f5f7;
+}
+
+#asset-tree-app .asset-tree-scheme-gallery-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+#asset-tree-app .asset-tree-scheme-gallery-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-scheme-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+#asset-tree-app .asset-tree-scheme-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 132px;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+}
+
+#asset-tree-app .asset-tree-scheme-card-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-scheme-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: auto;
+}
+
+#asset-tree-app .asset-tree-scheme-note {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 8px;
+    background: #deebff;
+    color: #0747a6;
+    border-radius: 3px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-scheme-fill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-scheme-fill input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
+#asset-tree-app .asset-tree-scheme-fill input[type="color"] {
+    width: 42px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid #dfe1e6;
+    background: #fff;
+}
+
 .asset-tree-scheme-status {
     min-height: 28px;
     padding: 6px 10px;

@@ -3463,8 +3463,20 @@ def scheme_body(raw):
     return body
 
 
+def scheme_place_id(row):
+    raw = row.get("body") or ""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return 0
+    try:
+        return int(data.get("placeId") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def scheme_summary(row):
-    return {"id": row["id"], "name": row["name"], "updatedAt": row["updatedAt"]}
+    return {"id": row["id"], "name": row["name"], "updatedAt": row["updatedAt"], "placeId": scheme_place_id(row)}
 
 
 def project_schemes(project_key):

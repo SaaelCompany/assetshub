@@ -9,6 +9,7 @@ public class SchemeDocumentDto {
     private String name;
     private String body;
     private long updatedAt;
+    private int placeId;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -18,4 +19,6 @@ public class SchemeDocumentDto {
     public void setBody(String body) { this.body = body; }
     public long getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(long updatedAt) { this.updatedAt = updatedAt; }
+    public int getPlaceId() { return placeId; }
+    public void setPlaceId(int placeId) { this.placeId = placeId; }
 }

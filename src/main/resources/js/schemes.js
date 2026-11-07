@@ -201,6 +201,8 @@
                 selection: [],
                 draft: null,
                 typed: '',
+                mode: 'browse',
+                templateId: '',
                 snapOn: true,
                 orthoOn: false,
                 osnapOn: true,
@@ -219,6 +221,8 @@
             };
             global.__assetScheme = session;
         }
+        if (!session.mode) session.mode = 'browse';
+        if (api.focusId) session.pendingFocus = api.focusId;
 
         host.className = 'asset-tree-schemes';
         host.innerHTML = '';
@@ -270,6 +274,12 @@
         var saveBtn = el('button', 'asset-tree-scheme-save', api.t('save'));
         saveBtn.type = 'button';
         saveBtn.disabled = !api.canEdit;
+        var editBtn = el('button', 'asset-tree-scheme-save', api.t('schemeEdit'));
+        editBtn.type = 'button';
+        var backBtn = el('button', 'asset-tree-scheme-new', api.t('schemeBack'));
+        backBtn.type = 'button';
+        var templateNote = el('div', 'asset-tree-scheme-note');
+        templateNote.style.display = 'none';
         var newBtn = el('button', 'asset-tree-scheme-new', api.t('schemeNew'));
         newBtn.type = 'button';
         newBtn.disabled = !api.canEdit;
@@ -277,11 +287,14 @@
         deleteBtn.type = 'button';
         deleteBtn.disabled = !api.canEdit;
         var status = el('div', 'asset-tree-scheme-status', '');
+        head.appendChild(templateNote);
         head.appendChild(labeled(api.t('schemeList'), schemePick));
         head.appendChild(labeled(api.t('name'), nameInput));
         head.appendChild(labeled(api.t('schemePlace'), placePick));
         head.appendChild(unit);
         head.appendChild(newBtn);
+        head.appendChild(editBtn);
+        head.appendChild(backBtn);
         head.appendChild(saveBtn);
         head.appendChild(deleteBtn);
         bar.appendChild(head);
@@ -299,10 +312,17 @@
         body.appendChild(side);
         body.appendChild(stage);
         body.appendChild(props);
+        var gallery = el('div', 'asset-tree-scheme-gallery');
         host.appendChild(bar);
         host.appendChild(body);
+        host.appendChild(gallery);
         host.appendChild(status);
         host.tabIndex = 0;
+        if (session.mode === 'browse') {
+            bar.style.display = 'none';
+            body.style.display = 'none';
+            status.style.display = 'none';
+        }
 
         function el(tag, cls, text) {
             var node = document.createElement(tag);
@@ -690,6 +710,7 @@
                 if (obj.closed && obj.points.length > 2) {
                     var last = obj.points[obj.points.length - 1];
                     if (projectSeg(last.x, last.y, obj.points[0].x, obj.points[0].y, wx, wy).dist <= Math.max(tol, (obj.thickness || 15) / 2)) return true;
+                    if ((obj.fill || obj.text) && pointInPoly(wx, wy, obj.points)) return true;
                 }
             }
             if (obj.type === 'opening') return false;
@@ -739,11 +760,16 @@
                 return;
             }
             var obj = baseObject(session.draft.tool);
-            obj.points = session.draft.points.map(function (p) { return { x: roundCm(p.x), y: roundCm(p.y) }; });
+            obj.points = session.draft.points.map(function (p) {
+                var next = { x: roundCm(p.x), y: roundCm(p.y) };
+                if (p.outx != null) { next.outx = roundCm(p.outx); next.outy = roundCm(p.outy); }
+                if (p.inx != null) { next.inx = roundCm(p.inx); next.iny = roundCm(p.iny); }
+                return next;
+            });
             while (obj.points.length >= 2 && dist(obj.points[obj.points.length - 1].x, obj.points[obj.points.length - 1].y, obj.points[obj.points.length - 2].x, obj.points[obj.points.length - 2].y) < 0.5) {
                 obj.points.pop();
             }
-            if (closed && obj.points.length >= 4 && dist(obj.points[0].x, obj.points[0].y, obj.points[obj.points.length - 1].x, obj.points[obj.points.length - 1].y) <= 40) {
+            if (closed && obj.points.length >= 4 && dist(obj.points[0].x, obj.points[0].y, obj.points[obj.points.length - 1].x, obj.points[obj.points.length - 1].y) <= Math.max(40, 12 / (session.cam.z || 1))) {
                 obj.points.pop();
             }
             if (obj.points.length < 2) {
@@ -958,6 +984,8 @@
                 obj.points.forEach(function (p) {
                     p.x = roundCm(p.x + dx);
                     p.y = roundCm(p.y + dy);
+                    if (p.outx != null) { p.outx = roundCm(p.outx + dx); p.outy = roundCm(p.outy + dy); }
+                    if (p.inx != null) { p.inx = roundCm(p.inx + dx); p.iny = roundCm(p.iny + dy); }
                 });
             } else if (obj.x1 != null) {
                 obj.x1 = roundCm(obj.x1 + dx);
@@ -1027,10 +1055,7 @@
                     ctx.lineTo(part.x2, part.y2);
                     ctx.stroke();
                 } else if (part.t === 'p' && part.points && part.points.length) {
-                    ctx.beginPath();
-                    ctx.moveTo(part.points[0].x, part.points[0].y);
-                    var p;
-                    for (p = 1; p < part.points.length; p++) ctx.lineTo(part.points[p].x, part.points[p].y);
+                    pathCurve(ctx, part.points, false);
                     ctx.stroke();
                 } else if (part.t === 't') {
                     ctx.fillStyle = part.c || '#172b4d';
@@ -1048,6 +1073,159 @@
             var i;
             for (i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
             if (closed) ctx.closePath();
+        }
+
+        function pathCurve(ctx, points, closed) {
+            if (!points || !points.length) return;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            var count = points.length;
+            var last = closed ? count : count - 1;
+            var i;
+            for (i = 0; i < last; i++) {
+                var a = points[i];
+                var b = points[(i + 1) % count];
+                if (a.outx == null && b.inx == null) ctx.lineTo(b.x, b.y);
+                else ctx.bezierCurveTo(a.outx != null ? a.outx : a.x, a.outy != null ? a.outy : a.y, b.inx != null ? b.inx : b.x, b.iny != null ? b.iny : b.y, b.x, b.y);
+            }
+            if (closed) ctx.closePath();
+        }
+
+        function cornerDegrees(a, b, c) {
+            var left = Math.atan2(a.y - b.y, a.x - b.x);
+            var right = Math.atan2(c.y - b.y, c.x - b.x);
+            var deg = Math.abs(left - right) * 180 / Math.PI;
+            if (deg > 180) deg = 360 - deg;
+            return Math.round(deg);
+        }
+
+        function materialHatch(material) {
+            if (material === 'brick') return 'brick';
+            if (material === 'concrete') return 'concrete';
+            if (material === 'wood' || material === 'metal') return 'diagonal';
+            return 'none';
+        }
+
+        function paintFill(ctx, obj) {
+            if (obj.fill) {
+                ctx.fillStyle = obj.fill;
+                ctx.fill();
+                return;
+            }
+            if (obj.material === 'glass') {
+                ctx.save();
+                ctx.globalAlpha *= 0.35;
+                ctx.fillStyle = '#deebff';
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function hatchShape(ctx, poly, material, color) {
+            var kind = materialHatch(material);
+            if (kind === 'none' || !poly || poly.length < 3) return;
+            hatch(ctx, poly, kind, color || '#97a0af');
+        }
+
+        function ellipsePoly(obj) {
+            var pts = [];
+            var cx = obj.x + obj.w / 2;
+            var cy = obj.y + obj.h / 2;
+            var rx = Math.abs(obj.w) / 2;
+            var ry = Math.abs(obj.h) / 2;
+            var i;
+            for (i = 0; i < 24; i++) {
+                var angle = Math.PI * 2 * i / 24;
+                pts.push({ x: cx + Math.cos(angle) * rx, y: cy + Math.sin(angle) * ry });
+            }
+            return pts;
+        }
+
+        function drawShapeText(ctx, text, x, y, color) {
+            if (!text) return;
+            ctx.save();
+            ctx.fillStyle = color || '#172b4d';
+            ctx.font = (14 / session.cam.z) + 'px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y);
+            ctx.restore();
+        }
+
+        function drawPenHandles(ctx, points) {
+            if (!points) return;
+            ctx.save();
+            ctx.strokeStyle = '#6554c0';
+            ctx.fillStyle = '#6554c0';
+            ctx.lineWidth = 1 / session.cam.z;
+            var i;
+            for (i = 0; i < points.length; i++) {
+                var p = points[i];
+                if (p.outx == null && p.inx == null) continue;
+                ctx.beginPath();
+                if (p.inx != null) {
+                    ctx.moveTo(p.inx, p.iny);
+                    ctx.lineTo(p.x, p.y);
+                }
+                if (p.outx != null) {
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(p.outx, p.outy);
+                }
+                ctx.stroke();
+                var radius = 3 / session.cam.z;
+                if (p.inx != null) {
+                    ctx.beginPath();
+                    ctx.arc(p.inx, p.iny, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                if (p.outx != null) {
+                    ctx.beginPath();
+                    ctx.arc(p.outx, p.outy, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawMeasures(ctx, obj) {
+            if (!obj || obj.type === 'text' || obj.type === 'symbol' || obj.type === 'dimension' || obj.type === 'opening') return;
+            ctx.save();
+            ctx.fillStyle = '#5e6c84';
+            ctx.font = (11 / session.cam.z) + 'px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            function label(x, y, text) { ctx.fillText(text, x, y); }
+            if (obj.type === 'line') {
+                var bearing = Math.atan2(obj.y2 - obj.y1, obj.x2 - obj.x1) * 180 / Math.PI;
+                if (bearing < 0) bearing += 360;
+                label((obj.x1 + obj.x2) / 2, (obj.y1 + obj.y2) / 2 - 8 / session.cam.z, formatLen(dist(obj.x1, obj.y1, obj.x2, obj.y2)) + '  ' + Math.round(bearing) + '°');
+            } else if (obj.type === 'rect') {
+                label(obj.x + obj.w / 2, obj.y - 8 / session.cam.z, formatLen(Math.abs(obj.w)));
+                label(obj.x + obj.w + 8 / session.cam.z, obj.y + obj.h / 2, formatLen(Math.abs(obj.h)));
+                label(obj.x + 14 / session.cam.z, obj.y + 12 / session.cam.z, '90°');
+            } else if (obj.type === 'ellipse') {
+                label(obj.x + obj.w / 2, obj.y - 8 / session.cam.z, formatLen(Math.abs(obj.w)) + ' × ' + formatLen(Math.abs(obj.h)));
+            } else if ((obj.type === 'polyline' || obj.type === 'wall') && obj.points && obj.points.length >= 2) {
+                var pts = obj.points;
+                var count = obj.closed ? pts.length : pts.length - 1;
+                var i;
+                for (i = 0; i < count; i++) {
+                    var a = pts[i];
+                    var b = pts[(i + 1) % pts.length];
+                    if (dist(a.x, a.y, b.x, b.y) < 2) continue;
+                    label((a.x + b.x) / 2, (a.y + b.y) / 2 - 7 / session.cam.z, formatLen(dist(a.x, a.y, b.x, b.y)));
+                }
+                var corners = obj.closed ? pts.length : Math.max(0, pts.length - 2);
+                var start = obj.closed ? 0 : 1;
+                for (i = 0; i < corners; i++) {
+                    var idx = (start + i) % pts.length;
+                    var prev = pts[(idx - 1 + pts.length) % pts.length];
+                    var cur = pts[idx];
+                    var next = pts[(idx + 1) % pts.length];
+                    label(cur.x, cur.y - 9 / session.cam.z, cornerDegrees(prev, cur, next) + '°');
+                }
+            }
+            ctx.restore();
         }
 
         function drawWall(ctx, wall, floor) {
@@ -1213,16 +1391,38 @@
                 ctx.lineTo(obj.x2, obj.y2);
                 ctx.stroke();
             } else if (obj.type === 'rect') {
-                ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+                ctx.beginPath();
+                ctx.rect(obj.x, obj.y, obj.w, obj.h);
+                paintFill(ctx, obj);
+                ctx.stroke();
+                if (obj.material) hatchShape(ctx, [
+                    { x: obj.x, y: obj.y }, { x: obj.x + obj.w, y: obj.y },
+                    { x: obj.x + obj.w, y: obj.y + obj.h }, { x: obj.x, y: obj.y + obj.h }
+                ], obj.material, obj.color);
+                if (obj.text) drawShapeText(ctx, obj.text, obj.x + obj.w / 2, obj.y + obj.h / 2, obj.color);
             } else if (obj.type === 'ellipse') {
                 ctx.beginPath();
                 ctx.ellipse(obj.x + obj.w / 2, obj.y + obj.h / 2, Math.abs(obj.w) / 2, Math.abs(obj.h) / 2, 0, 0, Math.PI * 2);
+                paintFill(ctx, obj);
                 ctx.stroke();
+                if (obj.material) hatchShape(ctx, ellipsePoly(obj), obj.material, obj.color);
+                if (obj.text) drawShapeText(ctx, obj.text, obj.x + obj.w / 2, obj.y + obj.h / 2, obj.color);
             } else if (obj.type === 'polyline') {
-                pathOf(ctx, obj.points, obj.closed);
+                pathCurve(ctx, obj.points, obj.closed);
+                if (obj.closed) paintFill(ctx, obj);
                 ctx.stroke();
+                if (obj.closed && obj.material) hatchShape(ctx, obj.points, obj.material, obj.color);
+                if (obj.text && obj.points && obj.points.length) {
+                    var middle = centroid(obj.points);
+                    drawShapeText(ctx, obj.text, middle.x, middle.y, obj.color);
+                }
             } else if (obj.type === 'wall') {
+                if (obj.material) obj.hatch = materialHatch(obj.material);
                 drawWall(ctx, obj, floor);
+                if (obj.text && obj.points && obj.points.length) {
+                    var wallMiddle = centroid(obj.points);
+                    drawShapeText(ctx, obj.text, wallMiddle.x, wallMiddle.y, obj.color);
+                }
             } else if (obj.type === 'text') {
                 ctx.font = (obj.h || 18) + 'px sans-serif';
                 ctx.fillText(obj.text || '', obj.x, obj.y + (obj.h || 18));
@@ -1247,6 +1447,7 @@
                     for (n = 0; n < lines.length; n++) ctx.fillText(lines[n], obj.x, obj.y + obj.h + 10 + n * 10);
                 }
             }
+            drawMeasures(ctx, obj);
             ctx.restore();
         }
 
@@ -1376,7 +1577,8 @@
                 ctx.lineWidth = 1 / session.cam.z;
                 ctx.setLineDash([6 / session.cam.z, 4 / session.cam.z]);
                 objects.forEach(function (obj) {
-                    if (obj.points) pathOf(ctx, obj.points, !!obj.closed);
+                    if (obj.type === 'polyline') pathCurve(ctx, obj.points, !!obj.closed);
+                    else if (obj.points) pathOf(ctx, obj.points, !!obj.closed);
                     else if (obj.x1 != null) {
                         ctx.beginPath();
                         ctx.moveTo(obj.x1, obj.y1);
@@ -1397,8 +1599,9 @@
                     } else {
                         ctx.strokeStyle = '#0052cc';
                         ctx.lineWidth = 1;
-                        pathOf(ctx, session.draft.points, false);
+                        pathCurve(ctx, session.draft.points, false);
                         ctx.stroke();
+                        drawPenHandles(ctx, session.draft.points);
                     }
                     ctx.strokeStyle = '#0052cc';
                     ctx.lineWidth = 1;
@@ -1453,6 +1656,15 @@
             var text = formatLen(dist(a.x, a.y, b.x, b.y));
             if (session.draft.tool === 'rect' || session.draft.tool === 'ellipse') {
                 text = formatLen(Math.abs(b.x - a.x)) + ' × ' + formatLen(Math.abs(b.y - a.y));
+                if (session.draft.tool === 'rect') text += '  90°';
+            } else {
+                var bearing = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+                if (bearing < 0) bearing += 360;
+                text += '  ' + Math.round(bearing) + '°';
+                if (session.draft.points && session.draft.points.length >= 3) {
+                    var prev = session.draft.points[session.draft.points.length - 3];
+                    text += '  ∠' + cornerDegrees(prev, a, b) + '°';
+                }
             }
             return { x: mid.x, y: mid.y, text: text };
         }
@@ -1706,8 +1918,9 @@
                 if (!seenSymbol[customId]) library.push(session.doc.symbols[customId]);
             }
             library.forEach(function (def) {
+                var current = (session.doc.symbols && session.doc.symbols[def.id]) || def;
                 var row = el('div', 'asset-tree-scheme-symbol-row');
-                var card = el('button', 'asset-tree-scheme-symbol' + (session.symbolId === def.id ? ' is-on' : ''), def.name);
+                var card = el('button', 'asset-tree-scheme-symbol' + (session.symbolId === current.id ? ' is-on' : ''), current.name);
                 card.type = 'button';
                 card.addEventListener('click', function () {
                     session.symbolId = def.id;
@@ -1719,8 +1932,7 @@
                 editCard.type = 'button';
                 editCard.disabled = !api.canEdit;
                 editCard.addEventListener('click', function () {
-                    var current = (session.doc.symbols && session.doc.symbols[def.id]) || def;
-                    openSymbolEditor(current);
+                    editTemplate(current);
                 });
                 row.appendChild(card);
                 row.appendChild(editCard);
@@ -1756,8 +1968,9 @@
                 var wrap = el('label', 'asset-tree-scheme-field', label);
                 var input = el('input');
                 input.value = value == null ? '' : String(value);
+                input.disabled = !api.canEdit || session.mode !== 'edit';
                 input.addEventListener('change', function () {
-                    if (!api.canEdit) return;
+                    if (!api.canEdit || session.mode !== 'edit') return;
                     remember();
                     apply(input.value);
                     paint();
@@ -1771,12 +1984,14 @@
             if (obj.w != null) field('W', obj.w, function (value) { obj.w = Math.max(1, roundCm(Number(value) || 1)); });
             if (obj.h != null && obj.type !== 'text') field('H', obj.h, function (value) { obj.h = Math.max(1, roundCm(Number(value) || 1)); });
             if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || 15, function (value) { obj.thickness = Math.max(1, roundCm(Number(value) || 15)); });
-            if (obj.color) {
+            if (obj.type === 'line' || obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'text' || obj.type === 'dimension') {
                 var colorWrap = el('label', 'asset-tree-scheme-field', api.t('schemeColor'));
                 var color = el('input');
                 color.type = 'color';
-                color.value = /^#[0-9a-fA-F]{6}$/.test(obj.color) ? obj.color : '#172b4d';
+                color.disabled = !api.canEdit || session.mode !== 'edit';
+                color.value = /^#[0-9a-fA-F]{6}$/.test(obj.color || '') ? obj.color : '#172b4d';
                 color.addEventListener('change', function () {
+                    if (!api.canEdit || session.mode !== 'edit') return;
                     remember();
                     obj.color = color.value;
                     paint();
@@ -1784,8 +1999,56 @@
                 colorWrap.appendChild(color);
                 props.appendChild(colorWrap);
             }
-            if (obj.text != null || obj.type === 'text') {
+            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline') {
+                var fillWrap = el('label', 'asset-tree-scheme-field', api.t('schemeFill'));
+                var fillRow = el('div', 'asset-tree-scheme-fill');
+                var fillOn = el('input');
+                fillOn.type = 'checkbox';
+                fillOn.checked = !!obj.fill;
+                fillOn.disabled = !api.canEdit || session.mode !== 'edit';
+                var fillColor = el('input');
+                fillColor.type = 'color';
+                fillColor.disabled = !api.canEdit || session.mode !== 'edit';
+                fillColor.value = /^#[0-9a-fA-F]{6}$/.test(obj.fill || '') ? obj.fill : '#deebff';
+                var applyFill = function () {
+                    if (!api.canEdit || session.mode !== 'edit') return;
+                    remember();
+                    obj.fill = fillOn.checked ? fillColor.value : '';
+                    if (obj.fill && obj.type === 'polyline') obj.closed = true;
+                    paint();
+                };
+                fillOn.addEventListener('change', applyFill);
+                fillColor.addEventListener('change', function () {
+                    fillOn.checked = true;
+                    applyFill();
+                });
+                fillRow.appendChild(fillOn);
+                fillRow.appendChild(fillColor);
+                fillWrap.appendChild(fillRow);
+                props.appendChild(fillWrap);
+            }
+            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'text') {
                 field(api.t('schemeText'), obj.text || '', function (value) { obj.text = value.slice(0, 200); });
+            }
+            if (obj.type === 'wall' || obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline') {
+                var matWrap = el('label', 'asset-tree-scheme-field', api.t('schemeMaterial'));
+                var mat = el('select');
+                mat.disabled = !api.canEdit || session.mode !== 'edit';
+                [['', 'schemeMaterialNone'], ['brick', 'schemeMatBrick'], ['concrete', 'schemeMatConcrete'], ['wood', 'schemeMatWood'], ['glass', 'schemeMatGlass'], ['metal', 'schemeMatMetal']].forEach(function (item) {
+                    var option = el('option', null, api.t(item[1]));
+                    option.value = item[0];
+                    mat.appendChild(option);
+                });
+                mat.value = obj.material || '';
+                mat.addEventListener('change', function () {
+                    if (!api.canEdit || session.mode !== 'edit') return;
+                    remember();
+                    obj.material = mat.value;
+                    if (obj.type === 'wall') obj.hatch = obj.material ? materialHatch(obj.material) : 'diagonal';
+                    paint();
+                });
+                matWrap.appendChild(mat);
+                props.appendChild(matWrap);
             }
             if (obj.name && obj.points && !obj.type) {
                 field(api.t('name'), obj.name, function (value) { obj.name = value.slice(0, 80); });
@@ -2229,10 +2492,11 @@
             for (i = 0; i < session.catalog.length; i++) {
                 if (session.catalog[i].id === row.id) {
                     session.catalog[i].name = row.name;
+                    if (row.placeId != null) session.catalog[i].placeId = row.placeId;
                     return;
                 }
             }
-            session.catalog.push({ id: row.id, name: row.name });
+            session.catalog.push({ id: row.id, name: row.name, placeId: row.placeId || 0 });
         }
 
         function schemeLabel(row) {
@@ -2283,12 +2547,13 @@
             session.catalog = (session.catalog || []).filter(function (row) { return row.id !== id; });
             session.dirty = false;
             if (session.catalog.length) {
-                openScheme(session.catalog[0].id);
+                openScheme(session.catalog[0].id, 'view');
                 return;
             }
             var fresh = blankDoc(api.t);
             fresh.activeFloorId = fresh.floors[0].id;
             acceptDoc(fresh, 0);
+            session.mode = 'browse';
             if (session.repaint) session.repaint();
         }
 
@@ -2304,10 +2569,15 @@
             });
         }
 
-        function openScheme(id) {
+        function openScheme(id, mode) {
+            session.pendingMode = mode || 'view';
+            session.templateId = '';
+            session.templateReturn = null;
             api.ajax('GET', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + id, null, function (code, payload) {
                 if (code !== 200 || !payload || !payload.body) {
                     if (session.statusNode) session.statusNode.textContent = api.t('schemeSaveFailed');
+                    session.mode = 'browse';
+                    if (session.repaint) session.repaint();
                     return;
                 }
                 try {
@@ -2316,11 +2586,14 @@
                     if (session.statusNode) session.statusNode.textContent = api.t('schemeSaveFailed');
                     return;
                 }
+                upsertCatalog({ id: payload.id, name: session.doc.name, placeId: session.doc.placeId || 0 });
+                session.mode = session.pendingMode || 'view';
                 if (session.repaint) session.repaint();
             });
         }
 
         function save(done) {
+            if (session.templateId) return;
             if (!api.canEdit) return;
             session.doc.name = nameInput.value || session.doc.name;
             var path = '/projects/' + encodeURIComponent(api.projectKey) + '/schemes';
@@ -2330,7 +2603,7 @@
                 if (code >= 200 && code < 300 && payload && payload.id) {
                     session.id = payload.id;
                     session.dirty = false;
-                    upsertCatalog({ id: payload.id, name: session.doc.name });
+                    upsertCatalog({ id: payload.id, name: session.doc.name, placeId: session.doc.placeId || 0 });
                     fillSchemePick();
                     status.textContent = api.t('schemeSaved');
                     if (done) done();
@@ -2347,20 +2620,233 @@
 
         function load() {
             if (session.loaded || session.loading) {
-                paint();
+                if (session.pendingFocus && !session.loading) {
+                    var waiting = session.pendingFocus;
+                    session.pendingFocus = 0;
+                    openScheme(waiting, 'view');
+                    return;
+                }
+                if (!session.loading) {
+                    showMode();
+                    paint();
+                }
                 return;
             }
             session.loading = true;
             api.ajax('GET', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes', null, function (code, list) {
                 session.loading = false;
                 session.loaded = true;
-                session.catalog = code === 200 && list && list.length ? list : (session.catalog || []);
-                if (code === 200 && list && list.length) {
-                    openScheme(list[0].id);
+                session.catalog = code === 200 && list && list.length ? list : [];
+                var focus = session.pendingFocus;
+                session.pendingFocus = 0;
+                if (focus) {
+                    openScheme(focus, 'view');
                     return;
                 }
-                show();
+                session.mode = 'browse';
+                if (session.repaint) session.repaint();
+                else showMode();
             });
+        }
+
+        function placeName(id) {
+            var places = api.places || [];
+            var i;
+            for (i = 0; i < places.length; i++) {
+                if (String(places[i].id) === String(id)) return places[i].name || '';
+            }
+            return '';
+        }
+
+        function showMode() {
+            var browse = session.mode === 'browse' && !session.templateId;
+            var editing = session.mode === 'edit' || !!session.templateId;
+            bar.style.display = browse ? 'none' : '';
+            body.style.display = browse ? 'none' : '';
+            status.style.display = browse ? 'none' : '';
+            gallery.style.display = browse ? '' : 'none';
+            tools.style.display = editing ? '' : 'none';
+            editBtn.style.display = !browse && !editing && api.canEdit ? '' : 'none';
+            backBtn.style.display = browse ? 'none' : '';
+            saveBtn.textContent = session.templateId ? api.t('schemeTemplateSave') : api.t('save');
+            newBtn.style.display = session.templateId ? 'none' : '';
+            deleteBtn.style.display = session.templateId ? 'none' : '';
+            if (schemePick.parentNode) schemePick.parentNode.style.display = session.templateId ? 'none' : '';
+            if (placePick.parentNode) placePick.parentNode.style.display = session.templateId ? 'none' : '';
+            templateNote.style.display = session.templateId ? '' : 'none';
+            templateNote.textContent = session.templateId ? (api.t('schemeTemplateEditing') + ': ' + (nameInput.value || session.templateName || '')) : '';
+            if (browse) renderGallery();
+        }
+
+        function renderGallery() {
+            gallery.innerHTML = '';
+            var title = el('div', 'asset-tree-scheme-gallery-head');
+            title.appendChild(el('h2', 'asset-tree-scheme-gallery-title', api.t('schemeList')));
+            var create = el('button', 'asset-tree-scheme-save', api.t('schemeNew'));
+            create.type = 'button';
+            create.disabled = !api.canEdit;
+            create.addEventListener('click', function () { startFresh(); });
+            title.appendChild(create);
+            gallery.appendChild(title);
+            if (!session.catalog || !session.catalog.length) {
+                gallery.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeNoSchemes')));
+                return;
+            }
+            var cards = el('div', 'asset-tree-scheme-cards');
+            session.catalog.forEach(function (row) {
+                var card = el('div', 'asset-tree-scheme-card');
+                card.appendChild(el('div', 'asset-tree-scheme-card-name', schemeLabel(row)));
+                var bound = placeName(row.placeId);
+                card.appendChild(el('div', 'asset-tree-scheme-muted', bound ? (api.t('schemePlace') + ': ' + bound) : api.t('schemePlaceNone')));
+                var actions = el('div', 'asset-tree-scheme-card-actions');
+                var open = el('button', 'asset-tree-scheme-new', api.t('schemeOpen'));
+                open.type = 'button';
+                open.addEventListener('click', function () { openScheme(row.id, 'view'); });
+                var edit = el('button', 'asset-tree-scheme-save', api.t('schemeEdit'));
+                edit.type = 'button';
+                edit.disabled = !api.canEdit;
+                edit.addEventListener('click', function () { openScheme(row.id, 'edit'); });
+                actions.appendChild(open);
+                actions.appendChild(edit);
+                card.appendChild(actions);
+                cards.appendChild(card);
+            });
+            gallery.appendChild(cards);
+        }
+
+        function startFresh() {
+            if (!api.canEdit) return;
+            var fresh = blankDoc(api.t);
+            fresh.name = api.t('schemeDefaultName') + ' ' + ((session.catalog || []).length + 1);
+            fresh.activeFloorId = fresh.floors[0].id;
+            session.templateId = '';
+            session.templateReturn = null;
+            acceptDoc(fresh, 0);
+            session.dirty = true;
+            session.mode = 'edit';
+            if (session.repaint) session.repaint();
+        }
+
+        function objectsFromParts(def) {
+            var objects = [];
+            (def.parts || []).forEach(function (part) {
+                var obj = null;
+                if (part.t === 'r' || part.t === 'e') {
+                    obj = baseObject(part.t === 'e' ? 'ellipse' : 'rect');
+                    obj.x = part.x;
+                    obj.y = part.y;
+                    obj.w = part.w;
+                    obj.h = part.h;
+                    obj.color = part.c || '#172b4d';
+                    obj.fill = part.f || '';
+                    obj.thickness = part.s || 1;
+                    if (part.text) obj.text = part.text;
+                    if (part.material) obj.material = part.material;
+                } else if (part.t === 'l') {
+                    obj = baseObject('line');
+                    obj.x1 = part.x1;
+                    obj.y1 = part.y1;
+                    obj.x2 = part.x2;
+                    obj.y2 = part.y2;
+                    obj.color = part.c || '#172b4d';
+                    obj.thickness = part.s || 1;
+                } else if (part.t === 'p' && part.points) {
+                    obj = baseObject('polyline');
+                    obj.points = part.points.map(function (p) {
+                        var next = { x: p.x, y: p.y };
+                        if (p.outx != null) { next.outx = p.outx; next.outy = p.outy; }
+                        if (p.inx != null) { next.inx = p.inx; next.iny = p.iny; }
+                        return next;
+                    });
+                    var first = obj.points[0];
+                    var end = obj.points[obj.points.length - 1];
+                    obj.closed = obj.points.length >= 4 && dist(first.x, first.y, end.x, end.y) < 0.5;
+                    if (obj.closed) obj.points.pop();
+                    obj.color = part.c || '#172b4d';
+                    obj.thickness = part.s || 1;
+                    if (part.text) obj.text = part.text;
+                } else if (part.t === 't') {
+                    obj = baseObject('text');
+                    obj.x = part.x;
+                    obj.y = part.y;
+                    obj.w = part.w || 40;
+                    obj.h = part.h || 18;
+                    obj.text = part.text || '';
+                    obj.color = part.c || '#172b4d';
+                }
+                if (obj) objects.push(obj);
+            });
+            return objects;
+        }
+
+        function editTemplate(def) {
+            if (!def || !api.canEdit || session.templateId) return;
+            session.templateReturn = {
+                id: session.id,
+                doc: clone(session.doc),
+                mode: session.mode || 'view',
+                dirty: !!session.dirty
+            };
+            var doc = blankDoc(api.t);
+            doc.name = def.name || api.t('schemeTemplateNew');
+            doc.activeFloorId = doc.floors[0].id;
+            doc.symbols = clone((session.doc && session.doc.symbols) || {});
+            session.templateId = def.id;
+            session.templateName = def.name || '';
+            acceptDoc(doc, 0);
+            activeFloor().objects = objectsFromParts(def);
+            session.dirty = false;
+            session.mode = 'edit';
+            if (session.repaint) session.repaint();
+        }
+
+        function templateDefFromCanvas() {
+            var objects = (activeFloor().objects || []).filter(function (obj) { return obj.type && obj.type !== 'opening'; });
+            var box = null;
+            var pad = 1;
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                var one = bounds(objects[i]);
+                if (!one) continue;
+                if (!box) box = { x: one.x, y: one.y, r: one.x + one.w, b: one.y + one.h };
+                else {
+                    box.x = Math.min(box.x, one.x);
+                    box.y = Math.min(box.y, one.y);
+                    box.r = Math.max(box.r, one.x + one.w);
+                    box.b = Math.max(box.b, one.y + one.h);
+                }
+            }
+            if (!box) box = { x: 0, y: 0, r: 40, b: 40 };
+            box.x -= pad;
+            box.y -= pad;
+            var parts = [];
+            objects.forEach(function (obj) {
+                partsOf(obj).forEach(function (part) { parts.push(shiftPart(part, box.x, box.y)); });
+            });
+            return {
+                id: session.templateId,
+                name: (nameInput.value || session.templateName || api.t('schemeTemplateNew')).slice(0, 80),
+                w: Math.max(5, roundCm(box.r - box.x + pad)),
+                h: Math.max(5, roundCm(box.b - box.y + pad)),
+                parts: parts
+            };
+        }
+
+        function saveTemplate() {
+            if (!session.templateId || !session.templateReturn) return;
+            var def = templateDefFromCanvas();
+            var back = session.templateReturn;
+            session.templateId = '';
+            session.templateName = '';
+            session.templateReturn = null;
+            acceptDoc(back.doc, back.id);
+            if (!session.doc.symbols) session.doc.symbols = {};
+            session.doc.symbols[def.id] = def;
+            session.symbolId = def.id;
+            session.dirty = true;
+            session.mode = back.mode && back.mode !== 'browse' ? back.mode : 'edit';
+            if (session.repaint) session.repaint();
+            status.textContent = api.t('schemeTemplateSaved');
         }
 
         var drag = null;
@@ -2382,6 +2868,14 @@
             }
             if (event.button !== 0) return;
             var pt = pointer(event);
+            if (session.mode !== 'edit') {
+                var viewId = hit(pt.x, pt.y);
+                session.selection = viewId ? [viewId] : [];
+                renderProps();
+                refreshSide();
+                paint();
+                return;
+            }
             if (session.tool === 'select') {
                 var handle = handleAt(sx, sy);
                 if (handle && api.canEdit) {
@@ -2442,7 +2936,29 @@
                 placeOpening(session.tool, pt);
                 return;
             }
-            if (session.tool === 'polyline' || session.tool === 'wall') {
+            if (session.tool === 'polyline') {
+                if (!session.draft) {
+                    session.draft = { tool: 'polyline', points: [{ x: pt.x, y: pt.y }] };
+                    drag = { mode: 'pen', index: 0, ox: pt.x, oy: pt.y };
+                } else if (session.draft.points && session.draft.points.length) {
+                    var firstPoint = session.draft.points[0];
+                    var nearStart = dist(pt.x, pt.y, firstPoint.x, firstPoint.y) <= 12 / session.cam.z;
+                    if (nearStart && session.draft.points.length >= 4) finishPoly(true);
+                    else {
+                        var lastPoint = session.draft.points[session.draft.points.length - 1];
+                        lastPoint.x = pt.x;
+                        lastPoint.y = pt.y;
+                        delete lastPoint.outx;
+                        delete lastPoint.outy;
+                        delete lastPoint.inx;
+                        delete lastPoint.iny;
+                        drag = { mode: 'pen', index: session.draft.points.length - 1, ox: pt.x, oy: pt.y };
+                    }
+                }
+                paint();
+                return;
+            }
+            if (session.tool === 'wall') {
                 if (!session.draft) session.draft = { tool: session.tool, points: [pt, { x: pt.x, y: pt.y }] };
                 else {
                     session.draft.points[session.draft.points.length - 1] = { x: pt.x, y: pt.y };
@@ -2479,6 +2995,19 @@
                 paint();
                 return;
             }
+            if (drag.mode === 'pen' && session.draft && session.draft.points && session.draft.points[drag.index]) {
+                var anchor = session.draft.points[drag.index];
+                var pullX = pt.x - drag.ox;
+                var pullY = pt.y - drag.oy;
+                if (Math.abs(pullX) + Math.abs(pullY) > 3 / session.cam.z) {
+                    anchor.outx = pt.x;
+                    anchor.outy = pt.y;
+                    anchor.inx = drag.ox - pullX;
+                    anchor.iny = drag.oy - pullY;
+                }
+                paint();
+                return;
+            }
             if (drag.mode === 'rmb') {
                 if (Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) <= 16) return;
                 drag.mode = 'pan';
@@ -2509,7 +3038,15 @@
                     if (all[i].id === drag.handle.id || ('room:' + all[i].id) === drag.handle.id) target = all[i];
                 }
                 if (target && target.points && target.points[drag.handle.index]) {
-                    target.points[drag.handle.index] = { x: roundCm(pt.x), y: roundCm(pt.y) };
+                    var point = target.points[drag.handle.index];
+                    var nextX = roundCm(pt.x);
+                    var nextY = roundCm(pt.y);
+                    var shiftX = nextX - point.x;
+                    var shiftY = nextY - point.y;
+                    point.x = nextX;
+                    point.y = nextY;
+                    if (point.outx != null) { point.outx = roundCm(point.outx + shiftX); point.outy = roundCm(point.outy + shiftY); }
+                    if (point.inx != null) { point.inx = roundCm(point.inx + shiftX); point.iny = roundCm(point.iny + shiftY); }
                     if (target.type === 'wall') syncRooms(activeFloor());
                 } else if (target && target.x1 != null) {
                     if (drag.handle.index === 0) { target.x1 = roundCm(pt.x); target.y1 = roundCm(pt.y); }
@@ -2545,6 +3082,22 @@
         global.addEventListener('mouseup', onUp);
         function onUp(event) {
             if (!drag) return;
+            if (drag.mode === 'pen') {
+                var pts = session.draft && session.draft.points;
+                if (pts && pts[drag.index]) {
+                    var anchor = pts[drag.index];
+                    if (anchor.outx == null || dist(anchor.x, anchor.y, anchor.outx, anchor.outy) < 2) {
+                        delete anchor.outx;
+                        delete anchor.outy;
+                        delete anchor.inx;
+                        delete anchor.iny;
+                    }
+                    pts.push({ x: anchor.x, y: anchor.y });
+                }
+                drag = null;
+                paint();
+                return;
+            }
             if (drag.mode === 'rmb') {
                 var pt = pointer(event);
                 var id = hit(pt.x, pt.y);
@@ -2601,14 +3154,23 @@
                 return [{ t: 'l', x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2, c: obj.color || '#172b4d', s: obj.thickness || 1 }];
             }
             if (obj.type === 'rect' || obj.type === 'ellipse') {
-                return [{ t: obj.type === 'ellipse' ? 'e' : 'r', x: obj.x, y: obj.y, w: obj.w, h: obj.h, c: obj.color || '#172b4d', f: obj.fill || '', s: obj.thickness || 1 }];
+                return [{ t: obj.type === 'ellipse' ? 'e' : 'r', x: obj.x, y: obj.y, w: obj.w, h: obj.h, c: obj.color || '#172b4d', f: obj.fill || '', s: obj.thickness || 1, text: obj.text || '', material: obj.material || '' }];
             }
             if (obj.type === 'text') {
                 return [{ t: 't', x: obj.x, y: obj.y, w: obj.w || 40, h: obj.h || 18, text: obj.text || '', c: obj.color || '#172b4d', s: 1 }];
             }
             if ((obj.type === 'polyline' || obj.type === 'wall') && obj.points && obj.points.length) {
-                var points = obj.points.map(function (p) { return { x: p.x, y: p.y }; });
-                if (obj.closed && points.length > 2) points.push({ x: points[0].x, y: points[0].y });
+                var points = obj.points.map(function (p) {
+                    var next = { x: p.x, y: p.y };
+                    if (p.outx != null) { next.outx = p.outx; next.outy = p.outy; }
+                    if (p.inx != null) { next.inx = p.inx; next.iny = p.iny; }
+                    return next;
+                });
+                if (obj.closed && points.length > 2) {
+                    var endPoint = { x: points[0].x, y: points[0].y };
+                    if (points[0].inx != null) { endPoint.inx = points[0].inx; endPoint.iny = points[0].iny; }
+                    points.push(endPoint);
+                }
                 return [{ t: 'p', points: points, c: obj.color || '#172b4d', s: obj.type === 'wall' ? (obj.thickness || 15) : (obj.thickness || 1) }];
             }
             if (obj.type === 'symbol') {
@@ -2647,7 +3209,12 @@
                 next.x2 = roundCm(next.x2 - ox);
                 next.y2 = roundCm(next.y2 - oy);
             }
-            if (next.points) next.points = next.points.map(function (p) { return { x: roundCm(p.x - ox), y: roundCm(p.y - oy) }; });
+            if (next.points) next.points = next.points.map(function (p) {
+                var moved = { x: roundCm(p.x - ox), y: roundCm(p.y - oy) };
+                if (p.outx != null) { moved.outx = roundCm(p.outx - ox); moved.outy = roundCm(p.outy - oy); }
+                if (p.inx != null) { moved.inx = roundCm(p.inx - ox); moved.iny = roundCm(p.iny - oy); }
+                return moved;
+            });
             return next;
         }
 
@@ -2697,7 +3264,7 @@
 
         function showTemplateMenu(clientX, clientY) {
             hideTemplateMenu();
-            if (!api.canEdit) return;
+            if (!api.canEdit || session.mode !== 'edit' || session.templateId) return;
             var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
             if (!objects.length) return;
             var menu = el('div', 'asset-tree-scheme-menu');
@@ -2753,8 +3320,33 @@
             paint();
         }, { passive: false });
 
-        stage.addEventListener('dblclick', function () {
-            if (session.draft && session.draft.points && session.draft.points.length >= 3) finishPoly(false);
+        stage.addEventListener('dblclick', function (event) {
+            if (session.draft && session.draft.points && session.draft.points.length >= 3) {
+                finishPoly(false);
+                return;
+            }
+            if (session.mode !== 'edit' || !api.canEdit) return;
+            var pt = pointer(event);
+            var id = hit(pt.x, pt.y);
+            if (!id) return;
+            var objects = (activeFloor().objects || []);
+            var i;
+            var found = null;
+            for (i = 0; i < objects.length; i++) if (objects[i].id === id) found = objects[i];
+            if (!found) return;
+            if (found.type !== 'text' && found.type !== 'rect' && found.type !== 'ellipse' && found.type !== 'polyline' && found.type !== 'wall') return;
+            askBox({
+                title: api.t('schemeText'),
+                input: true,
+                value: found.text || '',
+                onOk: function (value) {
+                    remember();
+                    found.text = value.slice(0, 200);
+                    session.selection = [found.id];
+                    renderProps();
+                    paint();
+                }
+            });
         });
 
         stage.addEventListener('contextmenu', function (event) { event.preventDefault(); });
@@ -2765,6 +3357,14 @@
                 return;
             }
             if (host.querySelector('.asset-tree-scheme-modal')) return;
+            if (session.mode !== 'edit') {
+                if (event.key === 'Escape') {
+                    session.selection = [];
+                    renderProps();
+                    paint();
+                }
+                return;
+            }
             var tag = event.target && event.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
             if (event.key === ' ' ) {
@@ -2866,15 +3466,41 @@
         placePick.addEventListener('change', function () {
             session.doc.placeId = Number(placePick.value) || 0;
             session.dirty = true;
+            if (session.id) upsertCatalog({ id: session.id, name: session.doc.name, placeId: session.doc.placeId });
         });
         schemePick.addEventListener('change', function () {
+            if (session.templateId) return;
             var next = Number(schemePick.value);
             if (!next || next === session.id) return;
             var target = next;
-            if (session.dirty && api.canEdit) save(function () { openScheme(target); });
-            else openScheme(target);
+            var nextMode = session.mode === 'edit' ? 'edit' : 'view';
+            if (session.dirty && api.canEdit) save(function () { openScheme(target, nextMode); });
+            else openScheme(target, nextMode);
         });
-        saveBtn.addEventListener('click', function () { save(); });
+        saveBtn.addEventListener('click', function () {
+            if (session.templateId) saveTemplate();
+            else save();
+        });
+        editBtn.addEventListener('click', function () {
+            if (!api.canEdit || session.templateId) return;
+            session.mode = 'edit';
+            showMode();
+            renderProps();
+            paint();
+        });
+        backBtn.addEventListener('click', function () {
+            if (session.templateId) {
+                saveTemplate();
+                return;
+            }
+            var leave = function () {
+                session.mode = 'browse';
+                showMode();
+            };
+            if (session.dirty && api.canEdit && session.id) save(leave);
+            else if (session.dirty && api.canEdit && !session.id) save(leave);
+            else leave();
+        });
         deleteBtn.addEventListener('click', function () {
             if (!api.canEdit) return;
             askBox({
@@ -2886,14 +3512,7 @@
             });
         });
         newBtn.addEventListener('click', function () {
-            var startFresh = function () {
-                var fresh = blankDoc(api.t);
-                fresh.name = api.t('schemeDefaultName') + ' ' + (session.catalog.length + 1);
-                fresh.activeFloorId = fresh.floors[0].id;
-                acceptDoc(fresh, 0);
-                session.dirty = true;
-                if (session.repaint) session.repaint();
-            };
+            if (session.templateId) return;
             if (session.dirty && api.canEdit) save(startFresh);
             else startFresh();
         });
@@ -2903,6 +3522,7 @@
                 global.clearInterval(timer);
                 return;
             }
+            if (session.templateId || session.mode === 'browse') return;
             if (session.dirty && api.canEdit && session.loaded) save();
         }, 30000);
         global.addEventListener('resize', paint);
@@ -2915,6 +3535,7 @@
             markTools();
             refreshSide();
             renderProps();
+            showMode();
             paint();
         };
         session.statusNode = status;
@@ -2923,6 +3544,7 @@
         fillPlacePick();
         refreshSide();
         renderProps();
+        showMode();
         load();
         global.setTimeout(paint, 30);
     }

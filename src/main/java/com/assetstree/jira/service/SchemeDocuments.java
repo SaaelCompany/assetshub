@@ -40,6 +40,35 @@ public final class SchemeDocuments {
         return body;
     }
 
+    public static int placeIdOf(String body) {
+        if (body == null) {
+            return 0;
+        }
+        int at = body.indexOf("\"placeId\"");
+        if (at < 0) {
+            return 0;
+        }
+        int colon = body.indexOf(':', at + 9);
+        if (colon < 0) {
+            return 0;
+        }
+        int i = colon + 1;
+        while (i < body.length() && (body.charAt(i) == ' ' || body.charAt(i) == '\t')) {
+            i++;
+        }
+        int value = 0;
+        boolean digit = false;
+        while (i < body.length() && body.charAt(i) >= '0' && body.charAt(i) <= '9') {
+            digit = true;
+            value = value * 10 + (body.charAt(i) - '0');
+            if (value > 100000000) {
+                return 0;
+            }
+            i++;
+        }
+        return digit ? value : 0;
+    }
+
     public static List<SchemeDocumentDto> list(ActiveObjects ao, String projectKey) {
         List<SchemeDocumentDto> found = new ArrayList<SchemeDocumentDto>();
         SchemeEntity[] rows = ao.find(SchemeEntity.class);
@@ -107,6 +136,7 @@ public final class SchemeDocuments {
         dto.setId(row.getID());
         dto.setName(row.getName());
         dto.setUpdatedAt(row.getUpdatedAt());
+        dto.setPlaceId(placeIdOf(row.getBody()));
         return dto;
     }
 

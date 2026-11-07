@@ -17,6 +17,10 @@ public class SchemeDocumentsTest {
         }
         assertEquals(80, SchemeDocuments.nameOf(longName.toString()).length());
         assertEquals("{\"floors\":[]}", SchemeDocuments.bodyOf("  {\"floors\":[]}  "));
+        assertEquals(0, SchemeDocuments.placeIdOf(null));
+        assertEquals(0, SchemeDocuments.placeIdOf("{}"));
+        assertEquals(12, SchemeDocuments.placeIdOf("{\"name\":\"Hall\",\"placeId\":12}"));
+        assertEquals(0, SchemeDocuments.placeIdOf("{\"placeId\":0}"));
     }
 
     @Test
