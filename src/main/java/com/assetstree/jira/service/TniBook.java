@@ -164,14 +164,14 @@ public final class TniBook {
             });
             after(ao, host, outcome);
         }
-        sweepWatches(ao, now, check);
+        sweepWatches(ao, now);
     }
 
     public static boolean watchDue(long checkedAt, long now) {
         return checkedAt <= 0L || now - checkedAt >= TniClock.MIN_GAP;
     }
 
-    private void sweepWatches(ActiveObjects ao, final long now, TniReach.Probe check) {
+    private void sweepWatches(ActiveObjects ao, final long now) {
         List<long[]> due = ao.executeInTransaction(new TransactionCallback<List<long[]>>() {
             @Override
             public List<long[]> doInTransaction() {
@@ -213,7 +213,7 @@ public final class TniBook {
             pings++;
             boolean up = false;
             try {
-                up = check.up(address);
+                up = TniReach.station(address);
             } catch (RuntimeException ex) {
                 log.warn("TNI could not reach {}", address, ex);
             }
@@ -246,7 +246,7 @@ public final class TniBook {
             ao.delete(row);
             return "";
         }
-        String address = TniAddress.local(row.getAddress());
+        String address = TniAddress.station(row.getAddress());
         if (address.isEmpty()) {
             return "";
         }

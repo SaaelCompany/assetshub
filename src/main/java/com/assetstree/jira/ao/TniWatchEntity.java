@@ -19,7 +19,7 @@ public interface TniWatchEntity extends Entity {
 
     void setProjectKey(String projectKey);
 
-    @StringLength(64)
+    @StringLength(253)
     String getAddress();
 
     void setAddress(String address);

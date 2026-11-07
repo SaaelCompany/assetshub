@@ -1611,6 +1611,29 @@ def load_sccm(project_key, body, text):
     return directory_apply(project_key, computers, text)
 
 
+def watch_station(raw):
+    text = str(raw or "").strip()
+    local = watch_local(text)
+    if local:
+        return local
+    if not text or len(text) > 253 or text[0] in ".-" or text[-1] in ".-" or ".." in text:
+        return ""
+    if text.lower() == "localhost":
+        return ""
+    letter = False
+    for label in text.split("."):
+        if not label or len(label) > 63 or label[0] == "-" or label[-1] == "-":
+            return ""
+        for ch in label:
+            digit = "0" <= ch <= "9"
+            alpha = ("a" <= ch <= "z") or ("A" <= ch <= "Z")
+            if not (digit or alpha or ch == "-"):
+                return ""
+            if alpha:
+                letter = True
+    return text if letter else ""
+
+
 def watch_local(address):
     parts = str(address or "").strip().split(".")
     if len(parts) != 4:
@@ -1667,15 +1690,18 @@ def save_watch(asset_id, body, text):
         return blocked
     body = body or {}
     armed = bool(body.get("armed"))
-    address = watch_local(body.get("address"))
+    address = watch_station(body.get("address"))
     if armed and not address:
         return 400, {"message": text.get("asset-tree.error.tni.watch", "Address")}
     checked = 0
     up = 0
     if armed:
         checked = int(datetime.datetime.utcnow().timestamp() * 1000)
-        last = int(address.split(".")[-1])
-        up = 1 if last in (1, 10, 20) else 2
+        if any(("a" <= ch <= "z") or ("A" <= ch <= "Z") for ch in address):
+            up = 1
+        else:
+            last = int(address.split(".")[-1])
+            up = 1 if last in (1, 10, 20) else 2
     STATE.setdefault("watch", {})[asset_id] = {
         "armed": armed, "address": address if address else "", "up": up, "checkedAt": checked,
     }

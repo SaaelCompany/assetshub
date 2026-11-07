@@ -13417,7 +13417,7 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.tni.watch");
         }
         final boolean armed = Boolean.TRUE.equals(draft.getArmed());
-        final String address = TniAddress.local(draft.getAddress());
+        final String address = TniAddress.station(draft.getAddress());
         if (armed && address.isEmpty()) {
             throw new AssetException(400, "asset-tree.error.tni.watch");
         }
@@ -13452,7 +13452,7 @@ public class AssetServiceImpl implements AssetService {
         }
         boolean reached = false;
         try {
-            reached = TniReach.LIVE.up(address);
+            reached = TniReach.station(address);
         } catch (RuntimeException ex) {
             log.warn("TNI could not reach {}", address, ex);
         }

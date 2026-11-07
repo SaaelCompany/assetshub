@@ -28785,7 +28785,7 @@
         var address = document.createElement('input');
         address.type = 'text';
         address.value = row.address || '';
-        address.placeholder = row.suggestion || '192.168.1.10';
+        address.placeholder = row.suggestion || 'pc-01.corp.local';
         address.disabled = !mayEdit(asset);
         body.appendChild(planField(t('tniWatchAddress'), address));
         body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
