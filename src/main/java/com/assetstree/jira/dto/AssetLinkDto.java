@@ -18,6 +18,8 @@ public class AssetLinkDto {
     private String projectKey;
     private boolean open;
     private List<LinkAttrDto> attributes = new ArrayList<LinkAttrDto>();
+    /** The other object, so the graph can show the same card as a plain link. */
+    private AssetPeerDto card;
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -43,4 +45,6 @@ public class AssetLinkDto {
     public void setAttributes(List<LinkAttrDto> attributes) {
         this.attributes = attributes == null ? new ArrayList<LinkAttrDto>() : attributes;
     }
+    public AssetPeerDto getCard() { return card; }
+    public void setCard(AssetPeerDto card) { this.card = card; }
 }

@@ -8486,6 +8486,10 @@
     function relationNodes(asset) {
         var nodes = [];
         var linked = {};
+        var peers = {};
+        (asset.peers || []).forEach(function (peer) {
+            if (peer && peer.id) peers[peer.id] = peer;
+        });
         (asset.links || []).forEach(function (link) {
             var id = linkOtherId(link);
             if (id) linked[id] = true;
@@ -8503,7 +8507,8 @@
                 incoming: link.direction === 'in',
                 linkId: link.id,
                 typeKey: (id && byId()[id] && byId()[id].typeKey) || '',
-                meta: meta
+                meta: meta,
+                peer: link.card || peers[id] || null
             });
         });
         (asset.peers || []).forEach(function (peer) {
@@ -8655,7 +8660,7 @@
             if (item.node.key) bits.push(item.node.key);
             panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' · ')));
             if (item.node.peer) panel.appendChild(peerCard(item.node.peer));
-            else if (item.node.meta) panel.appendChild(el('p', 'asset-tree-hint', item.node.meta));
+            if (item.node.kind === 'link' && item.node.meta) panel.appendChild(el('p', 'asset-tree-hint', item.node.meta));
         }
         var selfCard = linkGraphNode(asset, null, true);
         selfCard.addEventListener('click', function () {

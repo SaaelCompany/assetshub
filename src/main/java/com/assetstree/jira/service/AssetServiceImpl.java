@@ -2733,6 +2733,7 @@ public class AssetServiceImpl implements AssetService {
             dto.setProjectKey(target.getProjectKey() == null ? "" : target.getProjectKey());
             Project owner = project(target.getProjectKey());
             dto.setOpen(canOpen(user, owner));
+            dto.setCard(peerDto(user, target));
         } else {
             dto.setObjectKey("");
             dto.setName("");

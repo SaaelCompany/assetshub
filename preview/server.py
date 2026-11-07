@@ -4678,7 +4678,7 @@ def relations_for(asset_id):
     return rows
 
 
-def relation_dto(row, target, direction="out"):
+def relation_dto(row, target, direction="out", text=None):
     return {
         "id": row["id"],
         "fromId": row.get("fromId") or 0,
@@ -4691,6 +4691,7 @@ def relation_dto(row, target, direction="out"):
         "projectKey": (target or {}).get("projectKey") or "",
         "open": target is not None,
         "attributes": [{"key": item.get("key") or "", "value": item.get("value") or ""} for item in (row.get("attributes") or [])],
+        "card": peer_dto(target, text) if target else None,
     }
 
 
