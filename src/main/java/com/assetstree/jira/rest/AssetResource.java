@@ -1279,6 +1279,18 @@ public class AssetResource {
     }
 
     @POST
+    @Path("portal/assets/{id}/requests/{issueKey}")
+    public Response portalLinkRequest(@PathParam("id") final int id, @PathParam("issueKey") final String issueKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalLinkRequest(user(), id, issueKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
     @Path("portal/assets/{id}/requests")
     public Response createPortalRequest(@PathParam("id") final int id, final PortalRequestDraft draft) {
         return invoke(new Callable<Response>() {

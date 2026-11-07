@@ -2027,6 +2027,22 @@ def portal_detail(asset_id, text, user_key="ivanov"):
     }
 
 
+def portal_link_request(asset_id, issue_key, text):
+    detail = portal_detail(asset_id, text)
+    if not detail:
+        return 403, {"message": text["asset-tree.error.forbidden"]}
+    row = {
+        "assetId": asset_id,
+        "issueKey": issue_key,
+        "name": detail.get("name") or "",
+        "objectKey": detail.get("objectKey") or "",
+    }
+    links = STATE.setdefault("portal_request_links", [])
+    if not any(item.get("assetId") == asset_id and item.get("issueKey") == issue_key for item in links):
+        links.append(row)
+    return 204, None
+
+
 def portal_request_types():
     return [
         {
@@ -7217,6 +7233,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         query = parse_qs(parsed.query)
+        if path == "/preview/portal-links" and method == "GET":
+            return self.respond(200, json.dumps({"links": list(STATE.get("portal_request_links") or [])}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         if path == "/preview/mails" and method == "GET":
             return self.respond(200, json.dumps(STATE["mails"]).encode("utf-8"), "application/json; charset=utf-8")
         if path == "/preview/report-mail" and method == "POST":
@@ -7230,6 +7248,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_portal(path, query)
         if re.fullmatch(r"/servicedesk/customer/portal/\d+", path):
             return self.serve_portal_home(query)
+        if re.fullmatch(r"/servicedesk/customer/portal/\d+/[A-Z][A-Z0-9_]*-\d+", path):
+            return self.serve_portal_request(path)
         if path in ("/servicedesk/customer/user/profile",) or re.fullmatch(r"/servicedesk/customer/portal/\d+/user/profile", path):
             return self.serve_profile()
         if path.startswith("/rest/servicedeskapi/portals/") or path.startswith("/rest/servicedeskapi/servicedesk/"):
@@ -7471,6 +7491,47 @@ a.portal-type span { color: #6b778c; font-size: 13px; }
 <a class="portal-type" href="/servicedesk/customer/portal/7/create/12%s"><strong>Запрос на обслуживание</strong><span>Плановая работа или настройка</span></a>
 </main>
 </body></html>""" % (suffix, suffix)
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_portal_request(self, path):
+        key = path.rstrip("/").rsplit("/", 1)[-1]
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>%s</title>
+<link rel="stylesheet" href="/download/resources/asset-tree/asset-field.css">
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+main { max-width: 720px; margin: 32px auto; background: #fff; border-radius: 3px; padding: 24px; }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 500; }
+p { margin: 0; color: #6b778c; }
+#linked { margin-top: 16px; color: #172b4d; font-size: 16px; }
+</style></head>
+<body>
+<header>Центр поддержки</header>
+<main>
+<h1>%s</h1>
+<p>На этой форме нет поля актива.</p>
+<p id="linked">Оборудование ещё не привязано</p>
+</main>
+<script src="/download/resources/asset-tree/asset-field.js"></script>
+<script>
+setInterval(function () {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', '/preview/portal-links', true);
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4 || xhr.status !== 200) return;
+    var payload = JSON.parse(xhr.responseText || '{}');
+    var links = payload.links || [];
+    var line = document.getElementById('linked');
+    var found = null;
+    for (var i = 0; i < links.length; i++) if (links[i].issueKey === '%s') found = links[i];
+    if (!found || !line) return;
+    line.textContent = 'Оборудование привязано: ' + (found.objectKey ? found.objectKey + ' ' : '') + (found.name || '');
+  };
+  xhr.send(null);
+}, 400);
+</script>
+</body></html>""" % (key, key, key)
         self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
     def serve_portal(self, path, query=None):
@@ -7821,6 +7882,9 @@ setTimeout(function () {
             if not portal_detail(asset_id, text):
                 return 403, {"message": text["asset-tree.error.forbidden"]}
             return self.add_share(asset_id, (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/requests/([A-Z][A-Z0-9_]*-\d+)", path)
+        if match and method == "POST":
+            return portal_link_request(int(match.group(1)), match.group(2), text)
         match = re.fullmatch(r"/portal/assets/(\d+)/requests", path)
         if match and method == "GET":
             return portal_request_form(int(match.group(1)), text)

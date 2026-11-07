@@ -361,7 +361,8 @@
                 eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/>',
                 eyeOff: '<path d="M4 5l16 14M9.5 9.7A4 4 0 0 0 14.3 14.5M6.1 6.8C3.7 8.4 2 12 2 12s3.5 6 10 6c1.7 0 3.2-.4 4.5-1.1M10.1 6.2C10.7 6.1 11.3 6 12 6c6.5 0 10 6 10 6a18 18 0 0 1-2.4 3"/>',
                 lock: '<rect x="6" y="11" width="12" height="8" rx="1"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
-                unlock: '<rect x="6" y="11" width="12" height="8" rx="1"/><path d="M16 11V8a4 4 0 0 0-7.5-2"/>'
+                unlock: '<rect x="6" y="11" width="12" height="8" rx="1"/><path d="M16 11V8a4 4 0 0 0-7.5-2"/>',
+                pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>'
             };
             return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (body[name] || '') + '</svg>';
         }
@@ -449,6 +450,7 @@
             for (i = 0; i < list.length; i++) {
                 if (list[i].id === id) return list[i];
             }
+            if (id) return { id: id, name: '', w: 40, h: 40, parts: [] };
             return list[0];
         }
 
@@ -2067,43 +2069,114 @@
             });
 
             side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeSymbols')));
-            var library = builtins(api.t).slice();
-            var seenSymbol = {};
-            library.forEach(function (def) { seenSymbol[def.id] = true; });
+            var symbolSearch = el('input', 'asset-tree-scheme-name');
+            symbolSearch.placeholder = api.t('schemeSearch');
+            symbolSearch.value = session.symbolQuery || '';
+            var symbolList = el('div', 'asset-tree-scheme-asset-list asset-tree-scheme-template-list');
+            var paintSymbols = function () {
+                symbolList.innerHTML = '';
+                var query = String(symbolSearch.value || '').toLowerCase();
+                var count = 0;
+                libraryTemplates().forEach(function (current) {
+                    var name = current.name || '';
+                    if (query && name.toLowerCase().indexOf(query) < 0) return;
+                    count++;
+                    var armed = session.symbolId === current.id;
+                    var row = el('div', 'asset-tree-scheme-asset' + (armed ? ' is-on' : ''));
+                    var card = el('button', 'asset-tree-scheme-asset-main');
+                    card.type = 'button';
+                    card.disabled = !api.canEdit || session.mode !== 'edit';
+                    card.title = armed ? api.t('schemeTemplateOff') : name;
+                    card.appendChild(el('strong', null, name));
+                    card.addEventListener('click', function () {
+                        if (!api.canEdit || session.mode !== 'edit') return;
+                        if (session.symbolId === current.id) {
+                            session.symbolId = '';
+                            session.tool = 'select';
+                        } else {
+                            session.symbolId = current.id;
+                            session.assetId = 0;
+                            session.tool = 'symbol';
+                        }
+                        markTools();
+                        refreshSide();
+                        paint();
+                    });
+                    var editCard = el('button', 'asset-tree-scheme-icon');
+                    editCard.type = 'button';
+                    editCard.title = api.t('schemeTemplateEdit');
+                    editCard.disabled = !api.canEdit || !!session.templateId;
+                    editCard.innerHTML = toolIcon('pencil');
+                    editCard.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        editTemplate(current);
+                    });
+                    var dropCard = el('button', 'asset-tree-scheme-icon', '×');
+                    dropCard.type = 'button';
+                    dropCard.title = api.t('schemeTemplateDelete');
+                    dropCard.disabled = !api.canEdit || !!session.templateId;
+                    dropCard.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        deleteTemplate(current);
+                    });
+                    row.appendChild(card);
+                    row.appendChild(editCard);
+                    row.appendChild(dropCard);
+                    symbolList.appendChild(row);
+                });
+                if (!count) symbolList.appendChild(el('p', 'asset-tree-scheme-muted', api.t('noResults')));
+            };
+            symbolSearch.addEventListener('input', function () {
+                session.symbolQuery = symbolSearch.value;
+                paintSymbols();
+            });
+            side.appendChild(symbolSearch);
+            side.appendChild(symbolList);
+            paintSymbols();
+            renderAssetList();
+        }
+
+        function libraryTemplates() {
+            var hidden = {};
+            (session.doc.hiddenSymbols || []).forEach(function (id) { hidden[id] = true; });
+            var library = [];
+            var seen = {};
+            builtins(api.t).forEach(function (def) {
+                if (hidden[def.id]) return;
+                seen[def.id] = true;
+                library.push((session.doc.symbols && session.doc.symbols[def.id]) || def);
+            });
             var customId;
-            for (customId in session.doc.symbols) {
-                if (!seenSymbol[customId]) library.push(session.doc.symbols[customId]);
+            for (customId in (session.doc.symbols || {})) {
+                if (!seen[customId] && !hidden[customId]) library.push(session.doc.symbols[customId]);
             }
-            library.forEach(function (def) {
-                var current = (session.doc.symbols && session.doc.symbols[def.id]) || def;
-                var row = el('div', 'asset-tree-scheme-symbol-row');
-                var card = el('button', 'asset-tree-scheme-symbol' + (session.symbolId === current.id ? ' is-on' : ''), current.name);
-                card.type = 'button';
-                card.title = session.symbolId === def.id ? api.t('schemeTemplateOff') : current.name;
-                card.addEventListener('click', function () {
-                    if (!api.canEdit || session.mode !== 'edit') return;
+            library.sort(function (left, right) {
+                return String(left.name || '').localeCompare(String(right.name || ''));
+            });
+            return library;
+        }
+
+        function deleteTemplate(def) {
+            if (!def || !api.canEdit || session.templateId) return;
+            askBox({
+                title: api.t('schemeTemplateDelete'),
+                text: def.name || '',
+                okLabel: api.t('delete'),
+                danger: true,
+                onOk: function () {
+                    remember();
+                    if (session.doc.symbols && session.doc.symbols[def.id]) delete session.doc.symbols[def.id];
+                    if (!session.doc.hiddenSymbols) session.doc.hiddenSymbols = [];
+                    if (session.doc.hiddenSymbols.indexOf(def.id) < 0) session.doc.hiddenSymbols.push(def.id);
                     if (session.symbolId === def.id) {
                         session.symbolId = '';
                         session.tool = 'select';
-                    } else {
-                        session.symbolId = def.id;
-                        session.tool = 'symbol';
+                        markTools();
                     }
-                    markTools();
                     refreshSide();
                     paint();
-                });
-                var editCard = el('button', 'asset-tree-scheme-mini', api.t('schemeTemplateEdit'));
-                editCard.type = 'button';
-                editCard.disabled = !api.canEdit;
-                editCard.addEventListener('click', function () {
-                    editTemplate(current);
-                });
-                row.appendChild(card);
-                row.appendChild(editCard);
-                side.appendChild(row);
+                }
             });
-            renderAssetList();
         }
 
         function deleteLayer(layer) {
@@ -2228,7 +2301,16 @@
         }
 
         function renderAssetList() {
-            side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeAssets')));
+            var head = el('div', 'asset-tree-scheme-list-head');
+            head.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeAssets')));
+            var only = el('button', 'asset-tree-scheme-filter' + (session.assetPlacedOnly ? ' is-on' : ''), api.t('schemeOnScheme'));
+            only.type = 'button';
+            only.addEventListener('click', function () {
+                session.assetPlacedOnly = !session.assetPlacedOnly;
+                refreshSide();
+            });
+            head.appendChild(only);
+            side.appendChild(head);
             var search = el('input', 'asset-tree-scheme-name');
             search.placeholder = api.t('schemeSearch');
             search.value = session.assetQuery || '';
@@ -2242,6 +2324,7 @@
                     var key = asset.key || '';
                     var hay = (key + ' ' + name).toLowerCase();
                     if (query && hay.indexOf(query) < 0) return;
+                    if (session.assetPlacedOnly && !assetPlaced(asset.id)) return;
                     count++;
                     var placed = assetPlaced(asset.id);
                     var armed = String(session.assetId) === String(asset.id);
@@ -3124,16 +3207,23 @@
             var editing = session.mode === 'edit' || !!session.templateId;
             bar.style.display = browse ? 'none' : '';
             body.style.display = browse ? 'none' : '';
+            body.style.gridTemplateColumns = editing ? '' : 'minmax(0, 1fr)';
             status.style.display = browse ? 'none' : '';
             gallery.style.display = browse ? '' : 'none';
             tools.style.display = editing ? '' : 'none';
+            side.style.display = editing ? '' : 'none';
+            props.style.display = editing ? '' : 'none';
             editBtn.style.display = !browse && !editing && api.canEdit ? '' : 'none';
             backBtn.style.display = browse ? 'none' : '';
+            saveBtn.style.display = editing ? '' : 'none';
             saveBtn.textContent = session.templateId ? api.t('schemeTemplateSave') : api.t('save');
-            newBtn.style.display = session.templateId ? 'none' : '';
-            deleteBtn.style.display = session.templateId ? 'none' : '';
+            newBtn.style.display = editing && !session.templateId ? '' : 'none';
+            deleteBtn.style.display = editing && !session.templateId ? '' : 'none';
             if (schemePick.parentNode) schemePick.parentNode.style.display = session.templateId ? 'none' : '';
-            if (placePick.parentNode) placePick.parentNode.style.display = session.templateId ? 'none' : '';
+            if (nameInput.parentNode) nameInput.parentNode.style.display = editing ? '' : 'none';
+            if (placePick.parentNode) placePick.parentNode.style.display = editing && !session.templateId ? '' : 'none';
+            unit.style.display = editing ? '' : 'none';
+            measureWrap.style.display = editing && !session.templateId ? '' : 'none';
             templateNote.style.display = session.templateId ? '' : 'none';
             templateNote.textContent = session.templateId ? (api.t('schemeTemplateEditing') + ': ' + (nameInput.value || session.templateName || '')) : '';
             if (browse) renderGallery();

@@ -1116,6 +1116,75 @@ public class AssetServiceImpl implements AssetService {
         return dto;
     }
 
+    @Override
+    public void portalLinkRequest(ApplicationUser user, int assetId, String issueKey) {
+        requirePortalAsset(user, assetId);
+        String normalized = AssetValidator.normalizeIssueKey(issueKey);
+        if (!AssetValidator.isIssueKey(normalized)) {
+            throw new AssetException(404, "asset-tree.error.issue.notFound");
+        }
+        Issue issue = issueManager().getIssueObject(normalized);
+        if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
+            throw new AssetException(404, "asset-tree.error.issue.notFound");
+        }
+        if (!raisedBy(user, issue) || !freshRequest(issue)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        AssetEntity asset = requireAsset(assetId);
+        if (!ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+            throw new AssetException(400, "asset-tree.error.project.mismatch");
+        }
+        Integer chosen = chosenAssetId(issue);
+        int target = chosen == null ? assetId : chosen.intValue();
+        if (chosen == null) {
+            writeAssetField(user, issue, assetId);
+        }
+        attachPortalIssue(user, issue, target);
+    }
+
+    private boolean raisedBy(ApplicationUser user, Issue issue) {
+        if (user == null || user.getKey() == null || issue == null) {
+            return false;
+        }
+        ApplicationUser reporter = issue.getReporter();
+        if (reporter != null && user.getKey().equals(reporter.getKey())) {
+            return true;
+        }
+        ApplicationUser creator = issue.getCreator();
+        return creator != null && user.getKey().equals(creator.getKey());
+    }
+
+    private boolean freshRequest(Issue issue) {
+        if (issue == null || issue.getCreated() == null) {
+            return false;
+        }
+        long age = System.currentTimeMillis() - issue.getCreated().getTime();
+        return age >= 0 && age <= 2L * 60L * 60L * 1000L;
+    }
+
+    private Integer chosenAssetId(Issue issue) {
+        CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+        if (manager == null || issue == null) {
+            return null;
+        }
+        for (String id : PortalLookup.assetFieldIds()) {
+            CustomField field = manager.getCustomFieldObject(id);
+            if (field == null) {
+                continue;
+            }
+            Object raw = issue.getCustomFieldValue(field);
+            String text = raw == null ? "" : String.valueOf(raw).trim();
+            if (text.isEmpty() || "-1".equals(text)) {
+                continue;
+            }
+            Integer parsed = parseId(text);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
     private Project requirePortalProject(AssetEntity asset) {
         Project project = project(asset.getProjectKey());
         if (project == null) {

@@ -1907,11 +1907,30 @@
         window.location.assign(next);
     }
 
-    function presetAssetId() {
-        if (/\/portal\/\d+\/[A-Z][A-Z0-9_]*-\d+/.test(location.pathname || '')) {
-            try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) { return ''; }
-            return '';
+    function claimPortalRequest() {
+        var match = /\/portal\/\d+\/([A-Z][A-Z0-9_]*-\d+)/.exec(location.pathname || '');
+        if (!match || claimPortalRequest.done) return;
+        var stored = null;
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) stored = JSON.parse(raw);
+        } catch (error) {
+            stored = null;
         }
+        var id = stored && stored.id ? String(stored.id) : '';
+        if (!/^\d+$/.test(id)) return;
+        claimPortalRequest.done = true;
+        sendJson('POST', '/portal/assets/' + id + '/requests/' + encodeURIComponent(match[1]), {}, function (status) {
+            if (status === 0) {
+                claimPortalRequest.done = false;
+                return;
+            }
+            try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) {}
+        });
+    }
+
+    function presetAssetId() {
+        if (/\/portal\/\d+\/[A-Z][A-Z0-9_]*-\d+/.test(location.pathname || '')) return '';
         var stored = null;
         try {
             var raw = sessionStorage.getItem('asset-tree-portal-asset');
@@ -2108,6 +2127,7 @@
     }
 
     function boot() {
+        claimPortalRequest();
         var pickers = document.querySelectorAll('.asset-tree-picker');
         for (var i = 0; i < pickers.length; i++) mount(pickers[i]);
         var inputs = document.querySelectorAll('input[name^="customfield_"], textarea[name^="customfield_"], input[id^="customfield_"], textarea[id^="customfield_"]');
@@ -2181,6 +2201,7 @@
         refresh();
     });
 
+    setInterval(claimPortalRequest, 500);
     if (window.AJS && AJS.toInit) AJS.toInit(watch);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
     else watch();

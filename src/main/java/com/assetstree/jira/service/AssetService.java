@@ -242,6 +242,12 @@ public interface AssetService {
     /** Creates a customer request and attaches the equipment that was open. */
     PortalRequestCreatedDto createPortalRequest(ApplicationUser user, int assetId, PortalRequestDraft draft);
 
+    /**
+     * Attaches equipment to a request the customer just raised.
+     * Used when the portal form has no asset field to carry the id.
+     */
+    void portalLinkRequest(ApplicationUser user, int assetId, String issueKey);
+
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 
     /** Moves equipment already linked to this request when the request itself changes status. */

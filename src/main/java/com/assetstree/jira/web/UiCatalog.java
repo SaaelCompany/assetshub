@@ -1115,6 +1115,7 @@ public final class UiCatalog {
             "schemeMakeTemplate",
             "schemeTemplateSaved",
             "schemeTemplateEdit",
+            "schemeTemplateDelete",
             "schemeUnbind",
             "schemeAssetTitle",
             "schemeSearch",
