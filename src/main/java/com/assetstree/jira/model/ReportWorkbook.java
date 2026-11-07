@@ -52,6 +52,9 @@ public final class ReportWorkbook {
     }
 
     private static WorkbookSheet.Chart chartKind(ReportViewDto view, String kind, String countLabel, String moneyLabel, String startLabel, String spanLabel, String title) {
+        if ("bar".equals(kind) || "columns".equals(kind)) {
+            kind = "histogram";
+        }
         boolean money = view.getSum() != null && !view.getSum().isEmpty();
         int buckets = view.getRows() == null ? 0 : view.getRows().size();
         String series = money ? text(moneyLabel) : text(countLabel);
@@ -98,8 +101,8 @@ public final class ReportWorkbook {
         String[] parts = raw.split(",");
         for (int i = 0; i < parts.length; i++) {
             String kind = parts[i].trim();
-            if ("columns".equals(kind)) {
-                kind = "bar";
+            if ("columns".equals(kind) || "bar".equals(kind)) {
+                kind = "histogram";
             }
             if (!kind.isEmpty() && !kinds.contains(kind)) {
                 kinds.add(kind);

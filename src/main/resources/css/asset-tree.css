@@ -7265,6 +7265,10 @@ a.asset-tree-preview-icon:focus {
     max-width: 480px;
 }
 
+#asset-tree-app .asset-tree-report-chart-block.is-plot {
+    grid-column: span 2;
+}
+
 #asset-tree-app .asset-tree-report-chart-name {
     margin: 10px 12px 0;
     color: #6b778c;
@@ -7300,6 +7304,14 @@ a.asset-tree-preview-icon:focus {
     height: 168px !important;
     min-height: 0 !important;
     max-height: 168px !important;
+}
+
+#asset-tree-app .asset-tree-report-charts .asset-tree-report-plot svg.asset-tree-report-svg {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 200px !important;
+    max-height: none !important;
+    aspect-ratio: 3 / 1;
 }
 
 #asset-tree-app .asset-tree-report-charts .asset-tree-report-chart.is-round svg.asset-tree-report-svg,

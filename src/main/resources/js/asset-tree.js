@@ -19306,7 +19306,8 @@
     function viewerChart(projectKey, id) {
         try {
             var raw = window.localStorage.getItem(viewerChartKey(projectKey, id));
-            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'columns' || raw === 'histogram' || raw === 'line' || raw === 'area' || raw === 'scatter' || raw === 'radar' || raw === 'gantt' || raw === 'venn') return raw;
+            if (raw === 'columns' || raw === 'bar') return 'histogram';
+            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'histogram' || raw === 'line' || raw === 'area' || raw === 'scatter' || raw === 'radar' || raw === 'gantt' || raw === 'venn') return raw;
         } catch (error) {
             return '';
         }
@@ -19328,11 +19329,11 @@
             donut: 'reportDonut', pie: 'reportPie', radar: 'reportRadar',
             gantt: 'reportGantt', venn: 'reportVenn'
         };
-        return t(map[kind] || 'reportColumns');
+        return t(map[kind] || 'reportHistogram');
     }
 
     function reportChartList(view) {
-        var raw = String((view && view.chart) || 'bar');
+        var raw = String((view && view.chart) || 'histogram');
         var parts = raw.split(',');
         if (parts.length < 2) return [reportChartKind(view)];
         var out = [];
@@ -19340,7 +19341,7 @@
             var kind = reportChartSession(part.replace(/^\s+|\s+$/g, ''));
             if (out.indexOf(kind) < 0) out.push(kind);
         });
-        if (!out.length) out.push('columns');
+        if (!out.length) out.push('histogram');
         return out;
     }
 
@@ -19358,7 +19359,7 @@
         var select = document.createElement('select');
         select.className = 'asset-tree-filter asset-tree-report-chart-pick';
         select.setAttribute('aria-label', t('reportChart'));
-        [['columns', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
+        [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
             var option = document.createElement('option');
             option.value = pair[0];
             option.textContent = t(pair[1]);
@@ -19375,14 +19376,15 @@
     }
 
     function reportChartWire(kind) {
-        if (kind === 'columns') return 'bar';
-        if (kind === 'donut' || kind === 'pie' || kind === 'bars' || kind === 'histogram' || kind === 'line' || kind === 'area' || kind === 'scatter' || kind === 'radar' || kind === 'gantt' || kind === 'venn' || kind === 'bar') return kind;
-        return 'bar';
+        if (kind === 'columns' || kind === 'bar') return 'histogram';
+        if (kind === 'donut' || kind === 'pie' || kind === 'bars' || kind === 'histogram' || kind === 'line' || kind === 'area' || kind === 'scatter' || kind === 'radar' || kind === 'gantt' || kind === 'venn') return kind;
+        return 'histogram';
     }
 
     function reportChartSession(wire) {
+        if (wire === 'bar' || wire === 'columns') return 'histogram';
         if (wire === 'donut' || wire === 'pie' || wire === 'bars' || wire === 'histogram' || wire === 'line' || wire === 'area' || wire === 'scatter' || wire === 'radar' || wire === 'gantt' || wire === 'venn') return wire;
-        return 'columns';
+        return 'histogram';
     }
 
     function rememberReportChart(view, kind) {
@@ -19413,7 +19415,7 @@
             return;
         }
         state.reportChartBusy = true;
-        var wire = job.kind === 'columns' ? 'bar' : job.kind;
+        var wire = job.kind === 'columns' || job.kind === 'bar' ? 'histogram' : job.kind;
         ajax('PUT', '/projects/' + encodeURIComponent(job.projectKey) + '/reports/' + encodeURIComponent(job.view.id), { chart: wire }, function (status, payload) {
             if (job.epoch !== state.reportChartEpoch || state.projectKey !== job.projectKey) {
                 return;
@@ -19602,7 +19604,7 @@
         var wrap = el('div', 'asset-tree-report-plot');
         var svg = svgEl('svg');
         svg.setAttribute('viewBox', '0 0 ' + plot.width + ' ' + plot.height);
-        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.setAttribute('class', 'asset-tree-report-svg');
         reportGrid(svg, plot);
         var coords = plot.points.map(function (point) { return point.x + ',' + point.y; }).join(' ');
@@ -19642,7 +19644,7 @@
         var width = 720;
         var height = 240;
         svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.setAttribute('class', 'asset-tree-report-svg');
         var axis = svgEl('line');
         axis.setAttribute('x1', '48');
@@ -20433,7 +20435,8 @@
             var placeChart = function (chartKind, wide) {
                 var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
                 if (!chartPanel) return null;
-                var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : ''));
+                var plot = chartKind === 'line' || chartKind === 'area' || chartKind === 'scatter';
+                var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : plot ? ' is-plot' : ''));
                 named.appendChild(el('p', 'asset-tree-report-chart-name', reportChartCaption(chartKind)));
                 named.appendChild(chartPanel);
                 return named;
@@ -20634,10 +20637,12 @@
             groupBits.forEach(function (part, index) {
                 if (index) extraOn[part] = true;
             });
-            var chartOrder = [['bar', 'reportColumns'], ['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']];
+            var chartOrder = [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']];
             var chartOn = {};
-            String(editing && existing.chart ? existing.chart : 'bar').split(',').forEach(function (part) {
-                chartOn[part.replace(/^\s+|\s+$/g, '')] = true;
+            String(editing && existing.chart ? existing.chart : 'histogram').split(',').forEach(function (part) {
+                var key = part.replace(/^\s+|\s+$/g, '');
+                if (key === 'bar' || key === 'columns') key = 'histogram';
+                if (key) chartOn[key] = true;
             });
             if (editing && existing.name) name.value = existing.name;
             var metric = document.createElement('select');
@@ -20893,7 +20898,7 @@
                 });
                 var charts = [];
                 chartOrder.forEach(function (item) { if (chartOn[item[0]]) charts.push(item[0]); });
-                if (!charts.length) charts.push('bar');
+                if (!charts.length) charts.push('histogram');
                 var body = {
                     name: name.value.trim(),
                     groupBy: groupValue,

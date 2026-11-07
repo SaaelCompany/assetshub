@@ -5762,12 +5762,12 @@ def report_charts(view, text):
     kinds = []
     for part in raw.split(","):
         kind = part.strip()
-        if kind == "columns":
-            kind = "bar"
+        if kind in ("columns", "bar"):
+            kind = "histogram"
         if kind and kind not in kinds:
             kinds.append(kind)
     if not kinds:
-        kinds = ["bar"]
+        kinds = ["histogram"]
     captions = {
         "bar": text.get("asset-tree.ui.reportColumns", "Column"),
         "histogram": text.get("asset-tree.ui.reportHistogram", "Histogram"),
@@ -5805,8 +5805,8 @@ def report_chart(view, text):
     kind = str(view.get("chart") or "").strip().lower()
     if "," in kind:
         kind = kind.split(",", 1)[0].strip()
-    if kind == "columns":
-        kind = "bar"
+    if kind in ("columns", "bar"):
+        kind = "histogram"
     money = bool(view.get("sum"))
     buckets = len(view.get("rows") or [])
     title = view.get("title") or ""
