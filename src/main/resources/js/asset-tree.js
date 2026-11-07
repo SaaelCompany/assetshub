@@ -20010,6 +20010,27 @@
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports?fresh=' + String(Date.now()), null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            if (state.reportSavedPayload && state.reportSavedPayload.id) {
+                var savedId = String(state.reportSavedPayload.id);
+                var seen = false;
+                var n;
+                for (n = 0; n < state.reportCatalog.length; n++) {
+                    if (String(state.reportCatalog[n].id) === savedId) seen = true;
+                }
+                if (!seen) state.reportCatalog.push(state.reportSavedPayload);
+                state.reportKey = savedId;
+                state.reportSavedPayload = null;
+                state.reportPendingName = '';
+            } else if (state.reportPendingName) {
+                var pendingName = state.reportPendingName;
+                var pendingMatch = null;
+                var p;
+                state.reportPendingName = '';
+                for (p = 0; p < state.reportCatalog.length; p++) {
+                    if (state.reportCatalog[p].name === pendingName) pendingMatch = state.reportCatalog[p];
+                }
+                if (pendingMatch && pendingMatch.id) state.reportKey = String(pendingMatch.id);
+            }
             state.reportEmptyNav = false;
             if (status !== 200) {
                 state.galleryLoading = false;
@@ -20018,7 +20039,7 @@
                 if (state.view === 'reports' && !paintReport()) renderFrame();
                 return;
             }
-            if (!reportVisible(state.reportKey)) {
+            if (!reportVisible(state.reportKey) && !state.reportWantedChart) {
                 state.reportKey = firstVisibleReport() || '';
             }
             if (!state.reportKey) {
@@ -20039,6 +20060,12 @@
             if (token !== state.galleryToken) return;
             state.galleryLoading = false;
             if (status === 200 && payload) {
+                var wanted = state.reportWantedChart || '';
+                state.reportWantedChart = '';
+                var got = String(payload.chart || '');
+                if (wanted && wanted !== got && ((wanted.indexOf(',') >= 0 && got.indexOf(',') < 0) || (wanted.indexOf(',') < 0 && (got === '' || got === 'bar') && wanted !== 'bar'))) {
+                    payload.chart = wanted;
+                }
                 state.reportView = payload;
                 state.reportError = '';
             } else {
@@ -20389,19 +20416,29 @@
         if (!rows.length) {
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
             if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
+        } else if (kinds.length < 2) {
+            var onlyChart = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares, view);
+            if (onlyChart) main.appendChild(onlyChart);
         } else {
+            var board = el('div', 'asset-tree-report-charts');
+            var compactKinds = [];
+            var wideKinds = [];
             kinds.forEach(function (chartKind) {
+                if (chartKind === 'gantt' || chartKind === 'bars' || chartKind === 'line' || chartKind === 'area' || chartKind === 'scatter') wideKinds.push(chartKind);
+                else compactKinds.push(chartKind);
+            });
+            compactKinds.concat(wideKinds).forEach(function (chartKind) {
                 var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
                 if (!chartPanel) return;
-                if (kinds.length < 2) {
-                    main.appendChild(chartPanel);
-                    return;
-                }
-                var named = el('div', 'asset-tree-report-chart-block');
+                var wide = wideKinds.indexOf(chartKind) >= 0;
+                var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : ''));
                 named.appendChild(el('p', 'asset-tree-report-chart-name', reportChartCaption(chartKind)));
                 named.appendChild(chartPanel);
-                main.appendChild(named);
+                board.appendChild(named);
             });
+            main.appendChild(board);
+        }
+        if (rows.length) {
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
             header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy, view)));
@@ -20544,31 +20581,20 @@
         return rules;
     }
 
-    function acceptSavedReport(payload) {
+    function acceptSavedReport(payload, requestedChart, requestedName) {
         var created = payload && (payload.id || payload.key || '');
         state.reportChart = '';
         state.reportChartFor = '';
-        if (created && state.reportCatalog) {
-            var items = state.reportCatalog.slice();
-            var index = -1;
-            var i;
-            for (i = 0; i < items.length; i++) {
-                if (String(items[i].id) === String(created)) index = i;
-            }
-            if (index >= 0) items[index] = payload;
-            else items.push(payload);
-            state.reportCatalog = items;
-            state.reportKey = String(created);
-            state.reportView = null;
-            state.galleryLoading = false;
-            var token = ++state.galleryToken;
-            renderFrame();
-            fetchGalleryView(token);
-            return;
-        }
+        state.reportChartPending = null;
+        state.reportChartBusy = false;
+        state.reportChartEpoch += 1;
+        state.reportWantedChart = payload && payload.chart ? String(payload.chart) : (requestedChart || '');
+        state.reportSavedPayload = created ? payload : null;
+        state.reportPendingName = created ? '' : (requestedName || '');
         if (created) state.reportKey = String(created);
         state.reportCatalog = null;
         state.reportView = null;
+        state.reportError = '';
         state.galleryLoading = false;
         renderFrame();
     }
@@ -20888,7 +20914,22 @@
                 ajax(editing ? 'PUT' : 'POST', path, body, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal(hold);
-                        acceptSavedReport(payload);
+                        acceptSavedReport(payload, body.chart, body.name);
+                    } else if (status >= 500) {
+                        closeModal(hold);
+                        notify((payload && payload.message) || t('errorTitle'));
+                        state.reportChart = '';
+                        state.reportChartFor = '';
+                        state.reportChartPending = null;
+                        state.reportChartBusy = false;
+                        state.reportChartEpoch += 1;
+                        state.reportWantedChart = body.chart || '';
+                        state.reportPendingName = body.name || '';
+                        state.reportSavedPayload = null;
+                        state.reportCatalog = null;
+                        state.reportView = null;
+                        state.reportError = '';
+                        renderFrame();
                     } else {
                         save.disabled = false;
                         notify((payload && payload.message) || t('errorTitle'));

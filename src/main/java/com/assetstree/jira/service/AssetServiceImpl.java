@@ -9341,7 +9341,9 @@ public class AssetServiceImpl implements AssetService {
                 SavedReportEntity row = ao().create(SavedReportEntity.class,
                         new DBParam("PROJECT_KEY", project.getKey()),
                         new DBParam("NAME", name),
-                        new DBParam("GROUP_BY", group));
+                        new DBParam("GROUP_BY", group),
+                        new DBParam("CHART", chartHead(chart.isEmpty() ? "bar" : chart)),
+                        new DBParam("CHART_TEXT", chart.isEmpty() ? "bar" : chart));
                 row.setFilterField(filter);
                 writeFilter(row, value);
                 writeChart(row, chart);
@@ -9350,7 +9352,19 @@ public class AssetServiceImpl implements AssetService {
                 row.setAttrKey(attrKey);
                 row.setAttrValue(attrValue);
                 row.save();
-                return savedReportDto(row);
+                SavedReportEntity stored = ao().get(SavedReportEntity.class, row.getID());
+                if (stored == null) {
+                    return savedReportDto(row);
+                }
+                stored.setFilterField(filter);
+                writeFilter(stored, value);
+                writeChart(stored, chart);
+                stored.setMetric(metric);
+                stored.setFieldKey(fieldKey);
+                stored.setAttrKey(attrKey);
+                stored.setAttrValue(attrValue);
+                stored.save();
+                return savedReportDto(stored);
             }
         });
     }
@@ -9418,18 +9432,22 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    /** The short chart column keeps the first kind. The full list lives beside it. */
+    /** The short chart column keeps a value that fits. The full list lives beside it. */
+    private String chartHead(String stored) {
+        if (stored == null || stored.isEmpty()) {
+            return "bar";
+        }
+        if (stored.length() <= 16) {
+            return stored;
+        }
+        int comma = stored.indexOf(',');
+        String head = comma > 0 ? stored.substring(0, comma) : "bar";
+        return head.length() > 16 ? "bar" : head;
+    }
+
     private void writeChart(SavedReportEntity row, String chart) {
         String stored = chart == null || chart.isEmpty() ? "bar" : chart;
-        String head = stored;
-        int comma = stored.indexOf(',');
-        if (comma > 0) {
-            head = stored.substring(0, comma);
-        }
-        if (head.length() > 16) {
-            head = "bar";
-        }
-        row.setChart(stored.length() <= 16 ? stored : head);
+        row.setChart(chartHead(stored));
         row.setChartText(stored);
     }
 
@@ -9575,7 +9593,7 @@ public class AssetServiceImpl implements AssetService {
         if ("kind".equals(group)) {
             metric = "count";
         }
-        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue);
+        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue, chart);
         view.setGroupBy(group);
         view.setFieldKey(fieldKey);
         view.setChart(chart);
@@ -9735,7 +9753,7 @@ public class AssetServiceImpl implements AssetService {
 
     private ReportViewDto buildReport(Project project, String key, String title, boolean standard,
             String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket,
-            String fieldKey, String attrKey, String attrValue) {
+            String fieldKey, String attrKey, String attrValue, String chartList) {
         AssetEntity[] assets = assetsIn(project.getKey());
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), assets));
         Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
@@ -9759,7 +9777,8 @@ public class AssetServiceImpl implements AssetService {
         if (works) {
             return buildWorkReport(project, key, title, standard, group, filter, value, assets, types, index, statusNames, lineFrom, allLines, onlyBucket, attrKey, attrValue);
         }
-        boolean needsLife = reportNeedsLife(key, group, money);
+        boolean needsLife = reportNeedsLife(key, group, money)
+                || (chartList != null && chartList.indexOf("gantt") >= 0);
         List<Integer> lifeIds = new ArrayList<Integer>();
         if (needsLife) {
             for (AssetEntity asset : assets) {
