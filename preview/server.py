@@ -3934,6 +3934,24 @@ def field_rules_ok(packed):
     return True
 
 
+def report_chart_list(raw):
+    value = (raw or "").strip().lower()
+    if value in REPORT_CHARTS:
+        return value
+    if "," not in value or len(value) > 120:
+        return ""
+    seen = []
+    for part in value.split(","):
+        item = part.strip()
+        if item not in REPORT_CHARTS or item in seen:
+            return ""
+        seen.append(item)
+    stored = ",".join(seen)
+    if len(stored) > 120 or len(seen) < 2:
+        return ""
+    return stored
+
+
 def create_saved_report(project_key, body, text):
     if not module_on(project_key, "reports"):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
@@ -3965,9 +3983,7 @@ def create_saved_report(project_key, body, text):
                 continue
             if not part.startswith(("t=", "s=", "h=", "p=")):
                 return 400, {"message": text.get("asset-tree.error.report", "Report")}
-    chart = (body.get("chart") or "bar").strip().lower()
-    if chart not in REPORT_CHARTS:
-        chart = "bar"
+    chart = report_chart_list(body.get("chart")) or "bar"
     metric = (body.get("metric") or "count").strip().lower()
     if metric not in ("count", "cost"):
         metric = "count"
@@ -4025,8 +4041,8 @@ def update_report_chart(project_key, report_key, body, text):
             "fieldKey": saved.get("fieldKey") or "", "attrKey": saved.get("attrKey") or "", "attrValue": saved.get("attrValue") or "",
         })
         return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False, "fieldKey": row["fieldKey"], "attrKey": row["attrKey"], "attrValue": row["attrValue"]}
-    chart = (body.get("chart") or "").strip().lower()
-    if chart not in REPORT_CHARTS:
+    chart = report_chart_list(body.get("chart"))
+    if not chart:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if report_key in REPORT_STANDARD:
         view = STATE.setdefault("views", {}).setdefault(project_key, {})

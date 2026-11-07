@@ -9343,7 +9343,7 @@ public class AssetServiceImpl implements AssetService {
                         new DBParam("GROUP_BY", group));
                 row.setFilterField(filter);
                 writeFilter(row, value);
-                row.setChart(chart.isEmpty() ? "bar" : chart);
+                writeChart(row, chart);
                 row.setMetric(metric);
                 row.setFieldKey(fieldKey);
                 row.setAttrKey(attrKey);
@@ -9386,7 +9386,7 @@ public class AssetServiceImpl implements AssetService {
                 row.setGroupBy(group);
                 row.setFilterField(filter);
                 writeFilter(row, value);
-                row.setChart(chart.isEmpty() ? "bar" : chart);
+                writeChart(row, chart);
                 row.setMetric("kind".equals(group) ? "count" : metric);
                 row.setFieldKey(fieldKey);
                 row.setAttrKey(attrKey);
@@ -9415,6 +9415,29 @@ public class AssetServiceImpl implements AssetService {
         if ("mix".equals(filter) && !mixLooksValid(value)) {
             throw new AssetException(400, "asset-tree.error.report");
         }
+    }
+
+    /** The short chart column keeps the first kind. The full list lives beside it. */
+    private void writeChart(SavedReportEntity row, String chart) {
+        String stored = chart == null || chart.isEmpty() ? "bar" : chart;
+        String head = stored;
+        int comma = stored.indexOf(',');
+        if (comma > 0) {
+            head = stored.substring(0, comma);
+        }
+        if (head.length() > 16) {
+            head = "bar";
+        }
+        row.setChart(stored.length() <= 16 ? stored : head);
+        row.setChartText(stored);
+    }
+
+    private String storedChart(SavedReportEntity row) {
+        String chart = ReportCatalog.chart(row.getChartText());
+        if (chart.isEmpty()) {
+            chart = ReportCatalog.chart(row.getChart());
+        }
+        return chart.isEmpty() ? "bar" : chart;
     }
 
     private void writeFilter(SavedReportEntity row, String value) {
@@ -9471,7 +9494,7 @@ public class AssetServiceImpl implements AssetService {
                 if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
-                row.setChart(chart);
+                writeChart(row, chart);
                 row.save();
                 return savedReportDto(row);
             }
@@ -9541,10 +9564,7 @@ public class AssetServiceImpl implements AssetService {
             group = saved.getGroupBy();
             filter = saved.getFilterField() == null ? "" : saved.getFilterField();
             value = storedFilter(saved);
-            chart = ReportCatalog.chart(saved.getChart());
-            if (chart.isEmpty()) {
-                chart = "bar";
-            }
+            chart = storedChart(saved);
             metric = reportMetric(saved.getMetric());
             fieldKey = saved.getFieldKey() == null ? "" : saved.getFieldKey();
             attrKey = saved.getAttrKey() == null ? "" : saved.getAttrKey();
@@ -9601,7 +9621,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setGroupBy(row.getGroupBy() == null ? "" : row.getGroupBy());
         dto.setFilterField(row.getFilterField() == null ? "" : row.getFilterField());
         dto.setFilterValue(storedFilter(row));
-        dto.setChart(ReportCatalog.chart(row.getChart()).isEmpty() ? "bar" : ReportCatalog.chart(row.getChart()));
+        dto.setChart(storedChart(row));
         dto.setMetric(reportMetric(row.getMetric()));
         dto.setFieldKey(row.getFieldKey() == null ? "" : row.getFieldKey());
         dto.setAttrKey(row.getAttrKey() == null ? "" : row.getAttrKey());

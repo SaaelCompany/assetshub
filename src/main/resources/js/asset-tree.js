@@ -19314,6 +19314,16 @@
         }
     }
 
+    function reportChartCaption(kind) {
+        var map = {
+            columns: 'reportColumns', histogram: 'reportHistogram', bars: 'reportBars',
+            line: 'reportLine', area: 'reportArea', scatter: 'reportScatter',
+            donut: 'reportDonut', pie: 'reportPie', radar: 'reportRadar',
+            gantt: 'reportGantt', venn: 'reportVenn'
+        };
+        return t(map[kind] || 'reportColumns');
+    }
+
     function reportChartList(view) {
         var raw = String((view && view.chart) || 'bar');
         var parts = raw.split(',');
@@ -20377,7 +20387,15 @@
         } else {
             kinds.forEach(function (chartKind) {
                 var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
-                if (chartPanel) main.appendChild(chartPanel);
+                if (!chartPanel) return;
+                if (kinds.length < 2) {
+                    main.appendChild(chartPanel);
+                    return;
+                }
+                var named = el('div', 'asset-tree-report-chart-block');
+                named.appendChild(el('p', 'asset-tree-report-chart-name', reportChartCaption(chartKind)));
+                named.appendChild(chartPanel);
+                main.appendChild(named);
             });
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
@@ -20704,12 +20722,6 @@
                     if (!chosen.length) {
                         chartOn[pair[0]] = true;
                         box.checked = true;
-                        return;
-                    }
-                    if (chosen.join(',').length > 16) {
-                        delete chartOn[pair[0]];
-                        box.checked = false;
-                        notify(t('reportCharts'));
                     }
                 });
                 label.appendChild(box);
@@ -20839,7 +20851,6 @@
                 });
                 var charts = [];
                 chartOrder.forEach(function (item) { if (chartOn[item[0]]) charts.push(item[0]); });
-                while (charts.join(',').length > 16 && charts.length > 1) charts.pop();
                 if (!charts.length) charts.push('bar');
                 var body = {
                     name: name.value.trim(),

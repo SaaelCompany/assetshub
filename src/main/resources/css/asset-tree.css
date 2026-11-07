@@ -7238,6 +7238,13 @@ a.asset-tree-preview-icon:focus {
     border-right: 0 !important;
 }
 
+#asset-tree-app .asset-tree-report-chart-name {
+    margin: 12px 16px 0;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
 #asset-tree-app .asset-tree-report-chart {
     box-sizing: border-box;
     width: 100%;

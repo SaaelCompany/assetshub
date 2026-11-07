@@ -26,6 +26,8 @@ public final class ReportCatalog {
             STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
             STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", FIELD));
+    /** Long enough for every chart name joined once. The short column stays separate. */
+    private static final int CHART_LIMIT = 120;
     private static final List<String> CHARTS = Collections.unmodifiableList(Arrays.asList(
             "donut", "pie", "bar", "bars", "line", "area", "histogram", "scatter", "radar", "gantt", "venn"));
 
@@ -94,7 +96,7 @@ public final class ReportCatalog {
         if (CHARTS.contains(value)) {
             return value;
         }
-        if (value.indexOf(',') < 0 || value.length() > 16) {
+        if (value.indexOf(',') < 0 || value.length() > CHART_LIMIT) {
             return "";
         }
         String[] parts = value.split(",");
@@ -114,7 +116,7 @@ public final class ReportCatalog {
             }
             out.append(item);
         }
-        return out.length() > 16 ? "" : out.toString();
+        return out.length() > CHART_LIMIT ? "" : out.toString();
     }
 
     /** Type-field key used when a saved report groups or filters by a field. */
