@@ -4,6 +4,7 @@ import com.atlassian.jira.event.issue.AbstractIssueEventListener;
 import com.atlassian.jira.event.issue.IssueEvent;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
+import com.assetstree.jira.web.PortalLookup;
 import org.ofbiz.core.entity.GenericEntityException;
 import org.ofbiz.core.entity.GenericValue;
 import org.slf4j.Logger;
@@ -53,6 +54,42 @@ public class AssetFlowListener extends AbstractIssueEventListener {
     @Override
     public void issueUpdated(IssueEvent event) {
         onStatus(event);
+        onAssetField(event);
+    }
+
+    /** A later edit of the asset field still creates or removes the request link. */
+    private void onAssetField(IssueEvent event) {
+        if (event == null || event.getIssue() == null || event.getChangeLog() == null) {
+            return;
+        }
+        AssetService service = AssetBridge.service();
+        if (service == null) {
+            return;
+        }
+        try {
+            List<GenericValue> items = event.getChangeLog().getRelated("ChildChangeItem");
+            if (items == null) {
+                return;
+            }
+            List<String> fields = PortalLookup.assetFieldIds();
+            for (GenericValue item : items) {
+                if (item == null) {
+                    continue;
+                }
+                String fieldId = item.getString("fieldid");
+                if (fieldId == null || !fields.contains(fieldId)) {
+                    continue;
+                }
+                String previous = firstText(item, "oldstring", "oldvalue");
+                String next = firstText(item, "newstring", "newvalue");
+                service.syncRequestAsset(event.getUser(), event.getIssue(), previous, next);
+                return;
+            }
+        } catch (GenericEntityException ex) {
+            log.warn("Could not read the asset field change", ex);
+        } catch (RuntimeException ex) {
+            log.warn("Could not link the asset field on {}", event.getIssue().getKey(), ex);
+        }
     }
 
     private void onStatus(IssueEvent event) {
@@ -97,5 +134,13 @@ public class AssetFlowListener extends AbstractIssueEventListener {
 
     private static boolean blank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static String firstText(GenericValue item, String primary, String fallback) {
+        String value = item.getString(primary);
+        if (value != null && !value.trim().isEmpty()) {
+            return value;
+        }
+        return item.getString(fallback);
     }
 }
