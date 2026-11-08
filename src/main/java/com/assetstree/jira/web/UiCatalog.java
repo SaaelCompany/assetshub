@@ -1049,7 +1049,6 @@ public final class UiCatalog {
             "photoHint",
             "photoShow",
             "photoAdd",
-            "photoReplace",
             "photoRemove",
             "photoSize",
             "projectSection",

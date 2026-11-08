@@ -7229,42 +7229,13 @@
 
     function photoStage(asset) {
         var current = state.detail && state.detail.id === asset.id ? state.detail : asset;
+        if (!current.photo) return null;
         var stage = el('div', 'asset-tree-photo-stage');
-        if (mayEdit(asset)) {
-            stage.addEventListener('dragover', function (event) {
-                event.preventDefault();
-                stage.classList.add('is-dropping');
-            });
-            stage.addEventListener('dragleave', function () {
-                stage.classList.remove('is-dropping');
-            });
-            stage.addEventListener('drop', function (event) {
-                event.preventDefault();
-                stage.classList.remove('is-dropping');
-                var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
-                if (file) uploadPhoto(current, file);
-            });
-        }
-        if (current.photo) {
-            var img = el('img', 'asset-tree-photo');
-            img.alt = '';
-            img.src = photoUrl(current);
-            img.addEventListener('click', function () { openPhotoPreview(img.src); });
-            stage.appendChild(img);
-            if (mayEdit(asset)) {
-                var tools = el('div', 'asset-tree-photo-tools');
-                tools.appendChild(button(t('photoReplace'), 'asset-tree-photo-tool', function () { pickPhoto(current); }));
-                var remove = button(t('photoRemove'), 'asset-tree-photo-tool is-danger', function () { deletePhoto(current); });
-                tools.appendChild(remove);
-                stage.appendChild(tools);
-            }
-        } else if (mayEdit(asset)) {
-            stage.appendChild(button(t('photoAdd'), 'asset-tree-photo-empty', function () { pickPhoto(current); }));
-        }
-        var error = el('p', 'asset-tree-photo-error');
-        error.id = 'asset-tree-photo-error';
-        error.hidden = true;
-        stage.appendChild(error);
+        var img = el('img', 'asset-tree-photo');
+        img.alt = '';
+        img.src = photoUrl(current);
+        img.addEventListener('click', function () { openPhotoPreview(img.src); });
+        stage.appendChild(img);
         return stage;
     }
 
@@ -8056,6 +8027,14 @@
                 extra.push({ label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
             }
         }
+        if (mayEdit(asset) && !isFolder(asset) && photoEnabled()) {
+            var pictured = state.detail && state.detail.id === asset.id ? state.detail : asset;
+            if (pictured.photo) {
+                extra.push({ label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
+            } else {
+                extra.push({ label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
+            }
+        }
         if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
             extra.unshift({
                 label: t('tniPing'),
@@ -8089,7 +8068,7 @@
         (asset.attributes || []).forEach(function (attribute) {
             items.push(detailItem(attribute.name || attribute.fieldKey, inlineAttribute(asset, attribute)));
         });
-        var showPhoto = !isFolder(asset) && photoEnabled() && (asset.photo || mayEdit(asset));
+        var showPhoto = !isFolder(asset) && photoEnabled() && asset.photo;
         var story = showPhoto ? el('div', 'asset-tree-photo-stack') : main;
         story.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items)));
         var service = serviceBlock(asset);

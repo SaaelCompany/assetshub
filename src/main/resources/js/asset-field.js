@@ -1263,6 +1263,27 @@
         box: 'M12 3l9 4v10l-9 4-9-4V7l9-4zm0 2.2L6.5 7.6 12 10l5.5-2.4L12 5.2zM5 9.1v6.9l6 2.7v-6.9L5 9.1zm14 0l-6 2.7v6.9l6-2.7V9.1z'
     };
     var mineState = { payload: null, loading: false, query: '', searching: false, caret: 0 };
+    var MINE_LAYOUTS = [
+        ['tiles', 'Плитка'],
+        ['cards', 'Карточки'],
+        ['list', 'Список']
+    ];
+
+    function mineLayout() {
+        var stored = '';
+        try { stored = localStorage.getItem('asset-tree.portalMineLayout') || ''; } catch (error) { stored = ''; }
+        for (var i = 0; i < MINE_LAYOUTS.length; i++) {
+            if (MINE_LAYOUTS[i][0] === stored) return stored;
+        }
+        return 'tiles';
+    }
+
+    function chooseMineLayout(layout) {
+        try { localStorage.setItem('asset-tree.portalMineLayout', layout); } catch (error) {}
+        var existing = document.getElementById('asset-tree-portal-mine');
+        if (existing) existing.removeAttribute('data-sig');
+        paintPortalMine();
+    }
 
     function profilePage() {
         return /\/user\/profile(?:\/|$|\?)/.test(location.pathname || '');
@@ -1305,7 +1326,7 @@
         (data.projects || []).forEach(function (group) {
             parts.push(group.key, String(group.count || 0));
             (group.assets || []).forEach(function (card) {
-                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.showKey ? '1' : '0', card.showStatus ? '1' : '0');
+                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.showKey ? '1' : '0', card.showStatus ? '1' : '0', card.photo ? '1' : '0');
                 (card.lines || []).forEach(function (line) {
                     parts.push(line.label, line.value);
                 });
@@ -1347,11 +1368,26 @@
     function renderMine(data) {
         var root = el('div', 'asset-tree-portal-mine-body');
         var head = el('div', 'asset-tree-portal-mine-head');
-        head.appendChild(el('h2', null, data.title || 'My assets'));
+        var titles = el('div', 'asset-tree-portal-mine-titles');
+        titles.appendChild(el('h2', null, data.title || 'My assets'));
         var count = el('span', 'asset-tree-portal-mine-count', data.totalLabel || '');
         count.setAttribute('data-label', data.totalLabel || '');
         count.setAttribute('data-total', String(data.total || 0));
-        head.appendChild(count);
+        titles.appendChild(count);
+        head.appendChild(titles);
+        var layouts = el('div', 'asset-tree-portal-mine-layouts');
+        layouts.setAttribute('role', 'tablist');
+        layouts.setAttribute('aria-label', 'Вид списка');
+        var chosen = mineLayout();
+        MINE_LAYOUTS.forEach(function (item) {
+            var pick = el('button', 'asset-tree-portal-mine-layout' + (item[0] === chosen ? ' is-active' : ''), item[1]);
+            pick.type = 'button';
+            pick.setAttribute('role', 'tab');
+            pick.setAttribute('aria-selected', item[0] === chosen ? 'true' : 'false');
+            pick.addEventListener('click', function () { chooseMineLayout(item[0]); });
+            layouts.appendChild(pick);
+        });
+        head.appendChild(layouts);
         root.appendChild(head);
         var search = el('input', 'asset-tree-portal-mine-search');
         search.type = 'search';
@@ -1381,6 +1417,7 @@
             title.appendChild(el('strong', null, group.key || ''));
             title.appendChild(document.createTextNode(' ' + (group.countLabel || '')));
             block.appendChild(title);
+            var grid = el('div', 'asset-tree-portal-mine-grid');
             (group.assets || []).forEach(function (card) {
                 var item = el('article', 'asset-tree-portal-mine-card');
                 item.setAttribute('data-hay', cardHaystack(group, card));
@@ -1395,12 +1432,14 @@
                 }
                 body.appendChild(row);
                 if (card.role) body.appendChild(el('p', 'asset-tree-portal-mine-role', card.role));
+                var lines = el('div', 'asset-tree-portal-mine-lines');
                 (card.lines || []).forEach(function (line) {
                     var field = el('p', 'asset-tree-portal-mine-line');
                     field.appendChild(el('span', null, line.label || ''));
                     field.appendChild(document.createTextNode(line.value || ''));
-                    body.appendChild(field);
+                    lines.appendChild(field);
                 });
+                if (lines.childNodes.length) body.appendChild(lines);
                 item.appendChild(body);
                 if (card.photo) {
                     item.classList.add('has-photo');
@@ -1419,8 +1458,9 @@
                 item.addEventListener('keydown', function (event) {
                     if (event.key === 'Enter' || event.keyCode === 13) openPortalCard(card.id);
                 });
-                block.appendChild(item);
+                grid.appendChild(item);
             });
+            block.appendChild(grid);
             root.appendChild(block);
         });
         applyMineFilter(root);
@@ -2320,8 +2360,9 @@
             existing.id = 'asset-tree-portal-mine';
         }
         if (existing.parentNode !== host) host.appendChild(existing);
-        var signature = mineSignature(data);
+        var signature = mineSignature(data) + '\u0001' + mineLayout();
         if (existing.getAttribute('data-sig') === signature) return;
+        existing.className = 'asset-tree-portal-mine is-' + mineLayout();
         existing.setAttribute('data-sig', signature);
         while (existing.firstChild) existing.removeChild(existing.firstChild);
         existing.appendChild(renderMine(data));
