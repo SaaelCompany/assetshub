@@ -14048,7 +14048,7 @@
         });
         modules.appendChild(grid);
         stack.appendChild(modules);
-        if (state.canAdmin) stack.appendChild(tniRemovalCard(allowed));
+        if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniRemovalCard(allowed));
         panel.appendChild(stack);
     }
 
@@ -20508,7 +20508,7 @@
     }
 
     function tniSurfaceOpen() {
-        return state.view === 'settings' && state.schemaTab === 'exchange';
+        return state.view === 'settings' && state.schemaTab === 'exchange' && moduleOn('tni');
     }
 
     function loadTni(quiet) {
@@ -29571,7 +29571,7 @@
             }
         }
         stack.appendChild(block);
-        if (state.canAdmin) stack.appendChild(tniImportCard());
+        if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniImportCard());
         panel.appendChild(stack);
     }
 
