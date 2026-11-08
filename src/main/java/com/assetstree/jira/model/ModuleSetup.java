@@ -46,6 +46,7 @@ public final class ModuleSetup {
         setup.setLifePlaces(LifeApprovers.normalize(values.get("lwho")));
         setup.setLifeCurrency(currency(values.get("cur")));
         setup.setLifeMonths(Integer.valueOf(months(values.get("months"))));
+        setup.setLifeFold(Boolean.valueOf("1".equals(values.get("fold"))));
         setup.setStaffMarks(staffMarks(values.get("marks")));
         setup.setStaffOrder(staffOrder(values.get("order")));
         setup.setStaffPlaceOrder(staffPlaces(values.get("places")));
@@ -98,6 +99,7 @@ public final class ModuleSetup {
         append(stored, "lwho", LifeApprovers.normalize(value.getLifePlaces()));
         append(stored, "cur", currency(value.getLifeCurrency()));
         append(stored, "months", String.valueOf(months(value.getLifeMonths() == null ? "" : String.valueOf(value.getLifeMonths()))));
+        append(stored, "fold", Boolean.TRUE.equals(value.getLifeFold()) ? "1" : "0");
         append(stored, "marks", staffMarks(value.getStaffMarks()));
         append(stored, "order", staffOrder(value.getStaffOrder()));
         append(stored, "places", staffPlaces(value.getStaffPlaceOrder()));
@@ -336,6 +338,7 @@ public final class ModuleSetup {
         merged.setLifePlaces(incoming.getLifePlaces() != null ? incoming.getLifePlaces() : base.getLifePlaces());
         merged.setLifeCurrency(incoming.getLifeCurrency() != null ? incoming.getLifeCurrency() : base.getLifeCurrency());
         merged.setLifeMonths(incoming.getLifeMonths() != null ? incoming.getLifeMonths() : base.getLifeMonths());
+        merged.setLifeFold(incoming.getLifeFold() != null ? incoming.getLifeFold() : base.getLifeFold());
         merged.setStaffMarks(incoming.getStaffMarks() != null ? incoming.getStaffMarks() : base.getStaffMarks());
         merged.setStaffOrder(incoming.getStaffOrder() != null ? incoming.getStaffOrder() : base.getStaffOrder());
         merged.setStaffPlaceOrder(incoming.getStaffPlaceOrder() != null ? incoming.getStaffPlaceOrder() : base.getStaffPlaceOrder());

@@ -526,6 +526,7 @@
         lifeFailed: {},
         lifeToken: {},
         lifeEditing: {},
+        lifeFolded: {},
         lifeContractOpen: {},
         tniList: null,
         tniError: '',
@@ -13721,6 +13722,13 @@
             panel.appendChild(mailActions);
         }
         if (moduleKey === 'life') {
+            var fold = el('label', 'asset-tree-check');
+            var foldBox = document.createElement('input');
+            foldBox.type = 'checkbox';
+            foldBox.checked = !!setup.lifeFold;
+            fold.appendChild(foldBox);
+            fold.appendChild(document.createTextNode(t('setupLifeFold')));
+            panel.appendChild(fold);
             var approval = el('label', 'asset-tree-check');
             var approvalBox = document.createElement('input');
             approvalBox.type = 'checkbox';
@@ -13816,6 +13824,7 @@
                 next.lifeApprover = approverKey;
                 next.lifeCurrency = currency.value;
                 next.lifeMonths = clampNum(months.value, 0, 600);
+                next.lifeFold = foldBox.checked;
                 saveSetup(next);
             }));
         }
@@ -21926,6 +21935,7 @@
             lifePlaces: setup.lifePlaces || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',
             lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
+            lifeFold: !!setup.lifeFold,
             staffMarks: setup.staffMarks || '',
             staffOrder: setup.staffOrder || '',
             staffPlaceOrder: setup.staffPlaceOrder || '',
@@ -29531,7 +29541,15 @@
     }
 
     function lifeModule(asset, inner) {
-        var block = moduleBlock(t('lifeTitle'), inner, false);
+        var remembered = Object.prototype.hasOwnProperty.call(state.lifeFolded, asset.id);
+        var collapsed = remembered ? !!state.lifeFolded[asset.id] : !!moduleSetup().lifeFold;
+        var block = moduleBlock(t('lifeTitle'), inner, collapsed);
+        var head = block.querySelector('.asset-tree-module-head');
+        if (head) {
+            head.addEventListener('click', function () {
+                state.lifeFolded[asset.id] = block.classList.contains('is-collapsed');
+            });
+        }
         block.classList.add('asset-tree-life-module');
         var title = block.querySelector('.asset-tree-module-head > span:last-child');
         if (title) {
