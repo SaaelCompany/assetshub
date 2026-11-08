@@ -1222,6 +1222,10 @@ public class AssetServiceImpl implements AssetService {
             pending = readPortalPending(user);
         }
         if (pending == null || pending.intValue() <= 0) {
+            Integer chosenOnForm = chosenAssetId(issue);
+            if (chosenOnForm != null) {
+                attachPortalIssue(user != null ? user : reporter, issue, chosenOnForm.intValue(), false);
+            }
             return;
         }
         AssetEntity asset;
@@ -2495,6 +2499,7 @@ public class AssetServiceImpl implements AssetService {
         }
         link(user, assetId, issue, false);
         applyLinkedFlow(user, assetId, issue);
+        writeAssetField(user, issue, assetId);
         return getAsset(user, assetId);
     }
 
@@ -4417,11 +4422,28 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId) {
-        if (user == null || issue == null || issue.getProjectObject() == null || !canBrowse(user, issue)) {
+        if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
             return;
         }
+        ApplicationUser actor = user != null ? user : issue.getReporter();
         Integer previous = parseId(previousAssetId);
         Integer next = parseId(nextAssetId);
+        if (actor == null || !canBrowse(actor, issue)) {
+            if (previous != null && (next == null || previous.intValue() != next.intValue())) {
+                try {
+                    String before = dropLink(previous.intValue(), issue.getId().longValue());
+                    if (before != null) {
+                        applyRemovedFlow(actor, ao().get(AssetEntity.class, previous.intValue()), issue, before);
+                    }
+                } catch (RuntimeException ex) {
+                    log.warn("Could not drop the previous asset link {}", previous, ex);
+                }
+            }
+            if (next != null) {
+                attachPortalIssue(actor, issue, next.intValue(), false);
+            }
+            return;
+        }
         if (previous != null && (next == null || previous.intValue() != next.intValue())) {
             try {
                 ao().executeInTransaction(new TransactionCallback<Void>() {
@@ -4429,7 +4451,7 @@ public class AssetServiceImpl implements AssetService {
                     public Void doInTransaction() {
                         String before = dropLink(previous.intValue(), issue.getId().longValue());
                         if (before != null) {
-                            applyRemovedFlow(user, ao().get(AssetEntity.class, previous.intValue()), issue, before);
+                            applyRemovedFlow(actor, ao().get(AssetEntity.class, previous.intValue()), issue, before);
                         }
                         return null;
                     }
@@ -4443,7 +4465,7 @@ public class AssetServiceImpl implements AssetService {
         }
         boolean fresh = previous == null || previous.intValue() != next.intValue();
         try {
-            link(user, next.intValue(), issue, false);
+            link(actor, next.intValue(), issue, false);
         } catch (AssetException ex) {
             if (ex.getStatus() != 409) {
                 log.warn("Could not link asset {} to {}", next, issue.getKey());
@@ -4454,7 +4476,7 @@ public class AssetServiceImpl implements AssetService {
             return;
         }
         try {
-            applyRequestFlow(user, next.intValue(), issue);
+            applyRequestFlow(actor, next.intValue(), issue);
         } catch (RuntimeException ex) {
             log.warn("Could not apply the equipment flow for {}", next, ex);
         }

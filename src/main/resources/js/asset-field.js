@@ -16,6 +16,56 @@
         return '';
     }
 
+    function portalPage() {
+        return /\/portal\//.test(location.pathname || '') || !!document.getElementById('asset-tree-portal-boot');
+    }
+
+    function signalField(input) {
+        if (!input) return;
+        if (window.AJS && AJS.$) {
+            try {
+                AJS.$(input).trigger('input').trigger('change');
+                return;
+            } catch (error) { /* the portal widget reads the input value itself */ }
+        }
+        try {
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (error) { /* older browsers still submit the input value */ }
+    }
+
+    function holdPortalChoice(id) {
+        if (!portalPage()) return;
+        var clean = /^\d+$/.test(String(id || '')) ? String(id) : '';
+        if (clean) {
+            document.cookie = 'assethub-portal-asset=' + encodeURIComponent(clean) + '; path=/; max-age=7200; SameSite=Lax';
+            try {
+                sessionStorage.setItem('asset-tree-portal-asset', JSON.stringify({ id: clean, projectKey: projectFromPage() }));
+            } catch (error) {}
+        } else {
+            document.cookie = 'assethub-portal-asset=; path=/; max-age=0';
+            try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) {}
+            holdPortalChoice.sent = '';
+        }
+        var forms = document.getElementsByTagName('form');
+        for (var i = 0; i < forms.length; i++) {
+            var field = forms[i].querySelector('input[name="assethubAsset"]');
+            if (!clean && !field) continue;
+            if (!field) {
+                field = document.createElement('input');
+                field.type = 'hidden';
+                field.name = 'assethubAsset';
+                forms[i].appendChild(field);
+            }
+            field.value = clean;
+        }
+        if (!clean || holdPortalChoice.sent === clean) return;
+        holdPortalChoice.sent = clean;
+        sendJson('POST', '/portal/assets/' + clean + '/intent', {}, function (status) {
+            if (status === 0 || status >= 500 || status === 403) holdPortalChoice.sent = '';
+        });
+    }
+
     function carriedAssetId() {
         try {
             var raw = sessionStorage.getItem('asset-tree-portal-asset');
@@ -462,6 +512,14 @@
         picker.setAttribute('data-ready', '1');
         var projectKey = picker.getAttribute('data-project') || '';
         var hidden = picker.valueInput || picker.querySelector('.asset-tree-picker-value');
+        function commitValue(value) {
+            var next = value == null ? '' : String(value);
+            if (hidden.getAttribute('data-asset-committed') === next) return;
+            hidden.value = next;
+            hidden.setAttribute('data-asset-committed', next);
+            signalField(hidden);
+            holdPortalChoice(next);
+        }
         var levels = picker.querySelector('.asset-tree-picker-levels');
         var current = picker.querySelector('.asset-tree-picker-current');
         var waitText = picker.getAttribute('data-wait') || phrase('wait');
@@ -496,7 +554,7 @@
         function applyPortal(force) {
             if (!nodesReady || !rulesReady) return;
             var pinned = presetAssetId();
-            if (pinned && byId[parseInt(pinned, 10)] && !hidden.value) hidden.value = pinned;
+            if (pinned && byId[parseInt(pinned, 10)] && !hidden.value) commitValue(pinned);
             var locked = rules.length > 0;
             var rule = locked ? chooseRule(rules, readAnswers(picker), byId) : null;
             var rootId = rule ? rule.assetId : null;
@@ -506,18 +564,18 @@
             var value = hidden.value ? parseInt(hidden.value, 10) : null;
             if (locked || flat) {
                 if (locked && !rootId && !pinned) {
-                    hidden.value = '';
+                    commitValue('');
                     drawList(null, true);
                     return;
                 }
                 if (rootId && value && !listedContains(rootId, value) && String(value) !== pinned) {
-                    hidden.value = '';
+                    commitValue('');
                 }
                 drawList(locked ? rootId : null, false);
                 return;
             }
             if (rootId && (!value || !contains(byId, rootId, value))) {
-                hidden.value = String(rootId);
+                commitValue(String(rootId));
                 value = rootId;
             }
             draw(value, rootId);
@@ -908,7 +966,7 @@
             }
             paintOptions();
             select.addEventListener('change', function () {
-                hidden.value = select.value;
+                commitValue(select.value);
                 show(hidden.value ? parseInt(hidden.value, 10) : null);
             });
             attachSelect(select);
@@ -985,7 +1043,7 @@
                 var chosen = select.value ? byId[parseInt(select.value, 10)] : null;
                 var cursor = chosen || parent;
                 var stored = cursor ? anchorId(cursor.id) : null;
-                hidden.value = stored ? String(stored) : '';
+                commitValue(stored ? String(stored) : '');
                 var rootId = appliedLock ? appliedRoot : null;
                 draw(cursor ? cursor.id : null, rootId);
             });

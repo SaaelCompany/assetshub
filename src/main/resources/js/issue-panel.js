@@ -157,12 +157,15 @@
                             hit.appendChild(el('span', null, asset.name));
                             hit.appendChild(el('span', 'asset-tree-panel-key', asset.objectKey));
                             hit.addEventListener('click', function () {
-                                ajax('POST', '/issues/' + issueId + '/assets', { assetId: asset.id }, function (linkStatus) {
+                                ajax('POST', '/issues/' + issueId + '/assets', { assetId: asset.id }, function (linkStatus, linked) {
                                     if (linkStatus >= 200 && linkStatus < 300) {
                                         input.value = '';
                                         results.innerHTML = '';
                                         loadLinks(panel, issueId, i18n, canEdit, projectKey);
+                                        return;
                                     }
+                                    results.innerHTML = '';
+                                    results.appendChild(el('li', 'asset-tree-panel-error', (linked && linked.message) || t(i18n, 'errorTitle')));
                                 });
                             });
                             item.appendChild(hit);
