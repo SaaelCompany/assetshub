@@ -78,6 +78,23 @@
 .asset-tree-picker-portal select:disabled {
     opacity: 1;
     color: #172b4d;
+    cursor: default;
+}
+
+.asset-tree-picker-portal-hint {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 6px 0 0;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    white-space: normal;
+}
+
+.select2-container.asset-tree-portal-select:not(.select2-dropdown-open) > .select2-drop {
+    display: none !important;
 }
 
 /* Jira sizes a plain text input to about 250px. That input, and select2's
@@ -187,9 +204,53 @@ textarea.asset-tree-picker-native {
 
 .asset-tree-portal-mine-head {
     display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    margin: 0 0 12px;
+}
+
+.asset-tree-portal-mine-titles {
+    display: flex;
     align-items: baseline;
     gap: 10px;
-    margin: 0 0 12px;
+}
+
+.asset-tree-portal-mine-layouts {
+    display: inline-flex;
+    margin-left: auto;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
+    background: #fff;
+}
+
+button.asset-tree-portal-mine-layout {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    height: 28px !important;
+    margin: 0 !important;
+    padding: 0 10px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #42526e !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    line-height: 28px !important;
+    white-space: nowrap !important;
+    cursor: pointer;
+}
+
+button.asset-tree-portal-mine-layout + button.asset-tree-portal-mine-layout {
+    border-left: 1px solid #dfe1e6 !important;
+}
+
+button.asset-tree-portal-mine-layout.is-active {
+    background: #deebff !important;
+    color: #0052cc !important;
+    font-weight: 700 !important;
 }
 
 .asset-tree-portal-mine-head h2 {
@@ -207,6 +268,34 @@ textarea.asset-tree-picker-native {
     font-weight: 400;
 }
 
+input.asset-tree-portal-mine-search {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0 0 14px;
+    padding: 8px 10px;
+    border: 2px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font: inherit;
+}
+
+input.asset-tree-portal-mine-search:focus {
+    border-color: #4c9aff;
+    outline: none;
+}
+
+.asset-tree-portal-mine-empty {
+    margin: 0 0 12px;
+    color: #6b778c;
+}
+
+.asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine-group.is-hidden {
+    display: none;
+}
+
 .asset-tree-portal-mine-group {
     margin: 0 0 14px;
 }
@@ -221,15 +310,112 @@ textarea.asset-tree-picker-native {
 }
 
 .asset-tree-portal-mine-card {
-    display: grid;
-    grid-template-columns: 36px 1fr;
-    gap: 12px;
-    margin: 0 0 10px;
-    padding: 12px;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     background: #fff;
     cursor: pointer;
+}
+
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    margin: 0 0 10px;
+    padding: 12px;
+}
+
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.has-photo {
+    grid-template-columns: 36px minmax(0, 1fr) 112px;
+}
+
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-photo {
+    width: 112px;
+    height: 72px;
+    object-fit: contain;
+    justify-self: end;
+}
+
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 196px;
+    overflow: hidden;
+}
+
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-photo,
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-icon {
+    width: 100%;
+    height: 132px;
+    border-radius: 0;
+    object-fit: contain;
+    background: #f4f5f7;
+}
+
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-icon svg {
+    width: 36px;
+    height: 36px;
+}
+
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon {
+    display: none;
+}
+
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-copy {
+    order: 1;
+    padding: 12px 14px 14px;
+}
+
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card {
+    display: grid;
+    grid-template-columns: 168px minmax(0, 1fr);
+    min-height: 128px;
+    overflow: hidden;
+}
+
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-photo,
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon {
+    grid-column: 1;
+    grid-row: 1;
+    width: 168px;
+    height: 100%;
+    min-height: 128px;
+    border-radius: 0;
+    object-fit: contain;
+    background: #f4f5f7;
+}
+
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-copy {
+    grid-column: 2;
+    grid-row: 1;
+    padding: 14px 16px;
+}
+
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon svg {
+    width: 36px;
+    height: 36px;
+}
+
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon {
+    display: none;
+}
+
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-lines {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 16px;
 }
 
 .asset-tree-portal-mine-card:hover,
@@ -335,12 +521,26 @@ textarea.asset-tree-picker-native {
 
 .asset-tree-portal-sheet-head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
-    padding: 20px 20px 16px;
+    padding: 16px 16px 16px 20px;
     border-bottom: 1px solid #ebecf0;
     background: #fff;
     color: #172b4d;
+}
+
+.asset-tree-portal-head-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.asset-tree-portal-head-actions .asset-tree-portal-request-help {
+    max-width: 240px;
+    margin: 0;
+    text-align: right;
 }
 
 .asset-tree-portal-sheet-titles {
@@ -423,10 +623,64 @@ button.asset-tree-portal-close:hover {
     text-transform: uppercase;
 }
 
+.asset-tree-portal-detail-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 16px 24px;
+    align-items: start;
+}
+
+.asset-tree-portal-photo {
+    display: block;
+    width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+}
+
 .asset-tree-portal-fields {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px 24px;
+}
+
+@media (max-width: 640px) {
+    .asset-tree-portal-mine-layouts {
+        margin-left: 0;
+    }
+
+    .asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card {
+        grid-template-columns: 96px minmax(0, 1fr);
+    }
+
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-photo,
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon {
+        width: 96px;
+        min-height: 96px;
+    }
+
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-lines,
+    .asset-tree-portal-detail-row {
+        grid-template-columns: 1fr;
+    }
+
+    .asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.has-photo {
+        grid-template-columns: 36px minmax(0, 1fr) 72px;
+    }
+
+    .asset-tree-portal-mine.is-list .asset-tree-portal-mine-photo {
+        width: 72px;
+        height: 56px;
+    }
+
+    .asset-tree-portal-photo {
+        width: 100%;
+        max-width: 220px;
+        height: auto;
+    }
 }
 
 .asset-tree-portal-fact span {
@@ -455,6 +709,16 @@ button.asset-tree-portal-close:hover {
     margin-bottom: 4px;
     color: #6b778c;
     font-size: 12px;
+}
+
+.asset-tree-portal-person-empty {
+    color: #6b778c;
+    font-size: 14px;
+}
+
+.asset-tree-portal-person > .asset-tree-portal-textbtn {
+    display: inline-block !important;
+    margin-top: 4px !important;
 }
 
 .asset-tree-portal-face {
@@ -571,16 +835,27 @@ button.asset-tree-portal-textbtn:hover {
     font-size: 12px;
 }
 
-.asset-tree-portal-drop {
-    display: block;
-    margin-top: 8px;
-    padding: 16px;
-    border: 2px dashed #dfe1e6;
-    border-radius: 3px;
-    background: #fafbfc;
-    color: #6b778c;
-    text-align: center;
+button.asset-tree-portal-drop {
+    display: inline-flex !important;
+    align-items: center;
+    width: auto !important;
+    min-height: 0 !important;
+    margin: 4px 0 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #0052cc !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    text-align: left;
+    box-shadow: none !important;
     cursor: pointer;
+}
+
+button.asset-tree-portal-drop:hover {
+    text-decoration: underline;
+    background: transparent !important;
 }
 
 .asset-tree-portal-drop input {
@@ -641,6 +916,32 @@ button.asset-tree-portal-textbtn:hover {
     margin: 2px 0 0;
 }
 
+textarea.asset-tree-portal-comment-box {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 72px;
+    margin: 0;
+    padding: 8px 10px;
+    border: 2px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font: inherit;
+    resize: vertical;
+}
+
+textarea.asset-tree-portal-comment-box:focus {
+    border-color: #4c9aff;
+    outline: none;
+}
+
+.asset-tree-portal-comment-send {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
 .asset-tree-portal-section textarea {
     display: block;
     width: 100%;
@@ -679,6 +980,80 @@ button.asset-tree-portal-send {
 
 button.asset-tree-portal-send:hover {
     background: #0747a6 !important;
+}
+
+.asset-tree-portal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 16px 0 4px;
+}
+
+.asset-tree-portal-actions .asset-tree-portal-request-help {
+    flex: 1 0 100%;
+    margin: 0;
+}
+
+.asset-tree-portal-request-note {
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    border-radius: 3px;
+    background: #deebff;
+    color: #172b4d;
+}
+
+.asset-tree-portal-request-help {
+    margin: 6px 0 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+.asset-tree-portal-request-error {
+    min-height: 1.2em;
+    margin: 8px 0 0;
+    color: #de350b;
+}
+
+.asset-tree-portal-request-fields label,
+.asset-tree-portal-sheet-body > .asset-tree-portal-section > label {
+    display: block;
+    margin: 12px 0 4px;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+input.asset-tree-portal-request-input,
+select.asset-tree-portal-request-input,
+textarea.asset-tree-portal-request-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 8px;
+    border: 2px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font: inherit;
+}
+
+textarea.asset-tree-portal-request-input {
+    min-height: 88px;
+    resize: vertical;
+}
+
+input.asset-tree-portal-request-input:focus,
+select.asset-tree-portal-request-input:focus,
+textarea.asset-tree-portal-request-input:focus {
+    border-color: #4c9aff;
+    outline: none;
+}
+
+.asset-tree-portal-request-note a {
+    color: #0052cc;
+    font-weight: 600;
 }
 
 .asset-tree-preview-overlay {

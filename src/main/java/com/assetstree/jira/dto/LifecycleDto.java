@@ -28,6 +28,12 @@ public class LifecycleDto {
     private String warrantyService;
     private String replaceOn;
     private int monthsLeft;
+    private String contractor;
+    private String contractNo;
+    private String contractFrom;
+    private String contractUntil;
+    /** 0 none, 1 in force, 2 ended, 3 not started. */
+    private int contractPhase;
 
     public int getAssetId() { return assetId; }
     public void setAssetId(int assetId) { this.assetId = assetId; }
@@ -75,4 +81,14 @@ public class LifecycleDto {
     public void setReplaceOn(String replaceOn) { this.replaceOn = replaceOn; }
     public int getMonthsLeft() { return monthsLeft; }
     public void setMonthsLeft(int monthsLeft) { this.monthsLeft = monthsLeft; }
+    public String getContractor() { return contractor; }
+    public void setContractor(String contractor) { this.contractor = contractor; }
+    public String getContractNo() { return contractNo; }
+    public void setContractNo(String contractNo) { this.contractNo = contractNo; }
+    public String getContractFrom() { return contractFrom; }
+    public void setContractFrom(String contractFrom) { this.contractFrom = contractFrom; }
+    public String getContractUntil() { return contractUntil; }
+    public void setContractUntil(String contractUntil) { this.contractUntil = contractUntil; }
+    public int getContractPhase() { return contractPhase; }
+    public void setContractPhase(int contractPhase) { this.contractPhase = contractPhase; }
 }

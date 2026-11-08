@@ -39,13 +39,37 @@ public interface SavedReportEntity extends Entity {
 
     void setFilterText(String filterText);
 
+    /** First chart, so a database that still has the short column keeps a valid value. */
     @StringLength(16)
     String getChart();
 
     void setChart(String chart);
 
+    /** Every chart marked in the constructor. The short column cannot hold the list. */
+    @StringLength(120)
+    String getChartText();
+
+    void setChartText(String chartText);
+
     @StringLength(16)
     String getMetric();
 
     void setMetric(String metric);
+
+    /** Type field used when {@link #getGroupBy()} is {@code field}. */
+    @StringLength(40)
+    String getFieldKey();
+
+    void setFieldKey(String fieldKey);
+
+    /** Optional type field the objects must match. */
+    @StringLength(40)
+    String getAttrKey();
+
+    void setAttrKey(String attrKey);
+
+    @StringLength(80)
+    String getAttrValue();
+
+    void setAttrValue(String attrValue);
 }

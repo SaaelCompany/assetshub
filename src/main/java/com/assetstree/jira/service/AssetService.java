@@ -9,6 +9,8 @@ import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.PortalCardDto;
 import com.assetstree.jira.dto.PortalMineDto;
+import com.assetstree.jira.dto.PortalRequestCreatedDto;
+import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.BulkResultDto;
 import com.assetstree.jira.dto.AssetListDto;
@@ -32,6 +34,7 @@ import com.assetstree.jira.dto.MetaDto;
 import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
 import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportViewDto;
@@ -55,6 +58,7 @@ import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.FlowRuleDraft;
+import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.dto.ServicePlanDto;
 import com.assetstree.jira.model.LifecycleDraft;
@@ -64,6 +68,14 @@ import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
+import com.assetstree.jira.dto.TniSourceDto;
+import com.assetstree.jira.dto.TniWatchDto;
+import com.assetstree.jira.dto.TniSubnetDto;
+import com.assetstree.jira.model.TniSheetDraft;
+import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSourceDraft;
+import com.assetstree.jira.dto.TniWatchDraft;
+import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.TypeDraft;
 
 import java.util.List;
@@ -91,6 +103,8 @@ public interface AssetService {
 
     FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
 
+    FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal, String slot);
+
     StoredFile openFile(ApplicationUser user, int fileId);
 
     void deleteFile(ApplicationUser user, int assetId, int fileId);
@@ -116,6 +130,12 @@ public interface AssetService {
     StoredFile openCardImage(ApplicationUser user, int assetId);
 
     void deleteCardImage(ApplicationUser user, int assetId);
+
+    void storePhoto(ApplicationUser user, int assetId, byte[] data);
+
+    StoredFile openPhoto(ApplicationUser user, int assetId);
+
+    void deletePhoto(ApplicationUser user, int assetId);
 
     void deleteAsset(ApplicationUser user, int id, boolean cascade);
 
@@ -231,6 +251,27 @@ public interface AssetService {
     /** Equipment the signed-in customer is responsible for, for the portal profile. */
     PortalMineDto portalMine(ApplicationUser user);
 
+    /** Request types the customer can raise for one piece of their equipment. */
+    PortalRequestFormDto portalRequestForm(ApplicationUser user, int assetId);
+
+    /** Creates a customer request and attaches the equipment that was open. */
+    PortalRequestCreatedDto createPortalRequest(ApplicationUser user, int assetId, PortalRequestDraft draft);
+
+    /**
+     * Attaches equipment to a request the customer just raised.
+     * Used when the portal form has no asset field to carry the id.
+     */
+    void portalLinkRequest(ApplicationUser user, int assetId, String issueKey);
+
+    /** Remembers the equipment chosen in the profile until the portal creates the request. */
+    void rememberPortalAsset(ApplicationUser user, int assetId);
+
+    /** True when this asset was already attached to the request opened from the profile. */
+    boolean portalAssetSettled(ApplicationUser user, int assetId);
+
+    /** Links that equipment to a request the same customer just raised, even when the request type has no asset field. */
+    void attachPortalAsset(ApplicationUser user, Issue issue);
+
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 
     /** Moves equipment already linked to this request when the request itself changes status. */
@@ -273,6 +314,16 @@ public interface AssetService {
 
     void deleteFloor(ApplicationUser user, String projectKey, int floorId);
 
+    List<SchemeDocumentDto> schemes(ApplicationUser user, String projectKey);
+
+    SchemeDocumentDto scheme(ApplicationUser user, String projectKey, int schemeId);
+
+    SchemeDocumentDto createScheme(ApplicationUser user, String projectKey, SchemeDocumentDto draft);
+
+    SchemeDocumentDto saveScheme(ApplicationUser user, String projectKey, int schemeId, SchemeDocumentDto draft);
+
+    void deleteScheme(ApplicationUser user, String projectKey, int schemeId);
+
     List<SavedReportDto> reports(ApplicationUser user, String projectKey);
 
     SavedReportDto createReport(ApplicationUser user, String projectKey, SavedReportDraft draft);
@@ -286,6 +337,8 @@ public interface AssetService {
     ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket);
 
     byte[] exportReports(ApplicationUser user, String projectKey);
+
+    byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart);
 
     void sendReportMail(ApplicationUser user, String projectKey);
 
@@ -326,4 +379,41 @@ public interface AssetService {
     String exportFileName(ApplicationUser user, String projectKey, String jobId);
 
     List<ForecastRowDto> forecast(ApplicationUser user, String projectKey, int within);
+
+    /** Stores a browser report from the portal create form. The asset is created when the request exists. */
+    void rememberTni(ApplicationUser user, TniSightDraft draft);
+
+    /** Links the reporter's latest portal device to a new request and creates the asset. */
+    void attachTni(ApplicationUser user, Issue issue);
+
+    /** Pings stored devices whose storage period has ended and retires the ones that stay silent. */
+    void applyTniRetention();
+
+    List<TniSubnetDto> tniSubnets(ApplicationUser user, String projectKey);
+
+    TniSubnetDto createTniSubnet(ApplicationUser user, String projectKey, TniSubnetDraft draft);
+
+    void deleteTniSubnet(ApplicationUser user, String projectKey, int subnetId);
+
+    TniSubnetDto scanTniSubnet(ApplicationUser user, String projectKey, int subnetId);
+
+    TniSourceDto tniDirectory(ApplicationUser user, String projectKey);
+
+    TniSourceDto saveTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    TniSourceDto tniSccm(ApplicationUser user, String projectKey);
+
+    TniSourceDto saveTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    ImportResultDto loadTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft);
+
+    TniWatchDto tniWatch(ApplicationUser user, int assetId);
+
+    TniWatchDto saveTniWatch(ApplicationUser user, int assetId, TniWatchDraft draft);
+
+    TniWatchDto pingTni(ApplicationUser user, int assetId);
+
+    ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
 }

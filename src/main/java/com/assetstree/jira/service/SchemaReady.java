@@ -32,6 +32,7 @@ import com.assetstree.jira.ao.ServicePlanEntity;
 import com.assetstree.jira.ao.StaffDutyEntity;
 import com.assetstree.jira.ao.TypeSchemaEntity;
 import com.assetstree.jira.ao.WebhookEntity;
+import com.assetstree.jira.ao.TniDeviceEntity;
 import com.atlassian.activeobjects.external.ActiveObjects;
 
 import net.java.ao.DatabaseProvider;
@@ -102,7 +103,8 @@ public final class SchemaReady {
             CardTemplateEntity.class,
             TypeSchemaEntity.class,
             WebhookEntity.class,
-            IdempotencyEntity.class
+            IdempotencyEntity.class,
+            TniDeviceEntity.class
     };
     private static volatile boolean ready;
     private static volatile long failedAt;

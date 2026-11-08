@@ -37,11 +37,12 @@ public class AssetPageServlet extends HttpServlet {
         String css = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/asset-tree.css?v=" + PluginInfo.VERSION;
         String qr = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/qr-code.js?v=" + PluginInfo.VERSION;
         String plan = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/plan-exchange.js?v=" + PluginInfo.VERSION;
+        String scheme = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/schemes.js?v=" + PluginInfo.VERSION;
         String js = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/asset-tree.js?v=" + PluginInfo.VERSION;
         String rest = contextPath + "/rest/asset-tree/1.0";
         String project = request.getParameter("project");
         String view = viewOf(request.getParameter("view"));
-        String html = fill(template(), language, title, css, qr, plan, js, rest, project, view);
+        String html = fill(template(), language, title, css, qr, plan, scheme, js, rest, project, view);
         response.setCharacterEncoding("UTF-8");
         response.setContentType("text/html; charset=UTF-8");
         response.setHeader("X-Content-Type-Options", "nosniff");
@@ -81,13 +82,14 @@ public class AssetPageServlet extends HttpServlet {
     }
 
     static String fill(String template, String language, String title, String css, String qr, String plan,
-                        String js, String rest, String project, String view) {
+                        String scheme, String js, String rest, String project, String view) {
         return template
                 .replace("@@LANG@@", escape(language))
                 .replace("@@TITLE@@", escape(title))
                 .replace("@@CSS@@", escape(css))
                 .replace("@@QR@@", escape(qr))
                 .replace("@@PLAN@@", escape(plan))
+                .replace("@@SCHEME@@", escape(scheme))
                 .replace("@@JS@@", escape(js))
                 .replace("@@REST@@", escape(rest))
                 .replace("@@PROJECT@@", escape(project == null ? "" : project))
@@ -101,6 +103,9 @@ public class AssetPageServlet extends HttpServlet {
         String value = raw.trim().toLowerCase(Locale.ROOT);
         if ("dashboard".equals(value)) {
             return "all";
+        }
+        if ("tni".equals(value)) {
+            return "settings";
         }
         if ("mine".equals(value) || "search".equals(value) || "settings".equals(value)
                 || "schedules".equals(value) || "reports".equals(value) || "map".equals(value)) {

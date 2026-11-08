@@ -12,6 +12,7 @@ public class FileDto {
     private String created;
     private String authorName;
     private boolean internal;
+    private String slot;
 
     public int getId() {
         return id;
@@ -67,5 +68,13 @@ public class FileDto {
 
     public void setInternal(boolean internal) {
         this.internal = internal;
+    }
+
+    public String getSlot() {
+        return slot;
+    }
+
+    public void setSlot(String slot) {
+        this.slot = slot;
     }
 }

@@ -53,6 +53,16 @@ public class PortalPageFilter implements Filter {
         }
         HttpServletRequest http = (HttpServletRequest) request;
         String uri = http.getRequestURI() == null ? "" : http.getRequestURI();
+        if (uri.indexOf("/servicedesk/customer/") >= 0) {
+            rememberPortalAsset(http);
+        }
+        if (uri.indexOf("/servicedesk/customer/") >= 0
+                && "POST".equalsIgnoreCase(http.getMethod())
+                && uri.contains("/create")) {
+            TniIntake.keep(http);
+            chain.doFilter(request, response);
+            return;
+        }
         if (!"GET".equalsIgnoreCase(http.getMethod()) || uri.indexOf("/servicedesk/customer/") < 0) {
             chain.doFilter(request, response);
             return;
@@ -73,6 +83,7 @@ public class PortalPageFilter implements Filter {
                 && body.length < MAX_HTML) {
             try {
                 output = PortalPageMarkup.insertBoot(body, boot(http));
+                output = PortalPageMarkup.insertTni(output, tniScript(http));
             } catch (RuntimeException ex) {
                 log.warn("Could not add the asset field to the customer portal", ex);
                 output = body;
@@ -84,6 +95,10 @@ public class PortalPageFilter implements Filter {
         HttpServletResponse raw = (HttpServletResponse) response;
         raw.setContentLength(output.length);
         raw.getOutputStream().write(output);
+    }
+
+    private static void rememberPortalAsset(HttpServletRequest request) {
+        PortalIntake.keep(request);
     }
 
     private static byte[] boot(HttpServletRequest request) {
@@ -104,10 +119,42 @@ public class PortalPageFilter implements Filter {
             log.debug("Portal project was not resolved for {}", portalId, ex);
         }
         boolean profile = uriContainsProfile(request);
-        if (!profile && !portalModuleOn(projectKey)) {
+        boolean portal = profile || portalModuleOn(projectKey);
+        String path = request.getRequestURI() == null ? "" : request.getRequestURI();
+        boolean tni = path.contains("/create") && (projectKey.isEmpty() || tniModuleOn(projectKey));
+        if (!portal && !tni) {
             return new byte[0];
         }
-        return PortalPageMarkup.snippet(base, portalId, projectKey, fieldIds);
+        return PortalPageMarkup.snippet(base, portalId, projectKey, fieldIds, portal, tni);
+    }
+
+    private static byte[] tniScript(HttpServletRequest request) {
+        String path = request.getRequestURI() == null ? "" : request.getRequestURI();
+        if (!path.contains("/create")) {
+            return new byte[0];
+        }
+        String projectKey = "";
+        try {
+            int portalId = PortalLookup.portalId(request);
+            if (portalId > 0) {
+                ApplicationUser user = ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser();
+                String key = PortalLookup.projectKeyForPortal(user, portalId);
+                if (key != null) {
+                    projectKey = key;
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.debug("TNI project was not resolved", ex);
+        }
+        if (!projectKey.isEmpty() && !tniModuleOn(projectKey)) {
+            return new byte[0];
+        }
+        String base = request.getContextPath() == null ? "" : request.getContextPath();
+        return PortalPageMarkup.tniScript(base);
+    }
+
+    private static boolean tniModuleOn(String projectKey) {
+        return moduleOn(projectKey, com.assetstree.jira.model.ProjectModules.TNI);
     }
 
     private static boolean uriContainsProfile(HttpServletRequest request) {
@@ -116,7 +163,11 @@ public class PortalPageFilter implements Filter {
     }
 
     private static boolean portalModuleOn(String projectKey) {
-        if (projectKey == null || projectKey.isEmpty()) {
+        return moduleOn(projectKey, ProjectModules.PORTAL);
+    }
+
+    private static boolean moduleOn(String projectKey, String module) {
+        if (projectKey == null || projectKey.isEmpty() || module == null) {
             return false;
         }
         try {
@@ -128,9 +179,9 @@ public class PortalPageFilter implements Filter {
             if (rows == null || rows.length == 0 || rows[0] == null) {
                 return false;
             }
-            return ProjectModules.has(rows[0].getModuleList(), ProjectModules.PORTAL);
+            return ProjectModules.has(rows[0].getModuleList(), module);
         } catch (RuntimeException ex) {
-            log.debug("Portal module was not read for {}", projectKey, ex);
+            log.debug("Module {} was not read for {}", module, projectKey, ex);
             return false;
         }
     }

@@ -11,6 +11,9 @@ public class SavedReportDraft {
     private String filterValue;
     private String chart;
     private String metric;
+    private String fieldKey;
+    private String attrKey;
+    private String attrValue;
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
@@ -24,4 +27,10 @@ public class SavedReportDraft {
     public void setChart(String chart) { this.chart = chart; }
     public String getMetric() { return metric; }
     public void setMetric(String metric) { this.metric = metric; }
+    public String getFieldKey() { return fieldKey; }
+    public void setFieldKey(String fieldKey) { this.fieldKey = fieldKey; }
+    public String getAttrKey() { return attrKey; }
+    public void setAttrKey(String attrKey) { this.attrKey = attrKey; }
+    public String getAttrValue() { return attrValue; }
+    public void setAttrValue(String attrValue) { this.attrValue = attrValue; }
 }

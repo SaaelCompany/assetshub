@@ -15,6 +15,11 @@ public class FloorDto {
     private String placeName;
     private int planW;
     private int planH;
+    private String underlay;
+    private int underlayX;
+    private int underlayY;
+    private int underlayW;
+    private int underlayH;
     private List<RoomDto> rooms = new ArrayList<RoomDto>();
     private List<PinDto> pins = new ArrayList<PinDto>();
 
@@ -32,6 +37,16 @@ public class FloorDto {
     public void setPlanW(int planW) { this.planW = planW; }
     public int getPlanH() { return planH; }
     public void setPlanH(int planH) { this.planH = planH; }
+    public String getUnderlay() { return underlay; }
+    public void setUnderlay(String underlay) { this.underlay = underlay; }
+    public int getUnderlayX() { return underlayX; }
+    public void setUnderlayX(int underlayX) { this.underlayX = underlayX; }
+    public int getUnderlayY() { return underlayY; }
+    public void setUnderlayY(int underlayY) { this.underlayY = underlayY; }
+    public int getUnderlayW() { return underlayW; }
+    public void setUnderlayW(int underlayW) { this.underlayW = underlayW; }
+    public int getUnderlayH() { return underlayH; }
+    public void setUnderlayH(int underlayH) { this.underlayH = underlayH; }
     public List<RoomDto> getRooms() { return rooms; }
     public void setRooms(List<RoomDto> rooms) { this.rooms = rooms; }
     public List<PinDto> getPins() { return pins; }

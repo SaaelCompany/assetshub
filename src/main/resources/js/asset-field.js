@@ -3,6 +3,136 @@
     if (window.__assetTreeFieldBoot) return;
     window.__assetTreeFieldBoot = true;
 
+    function cookieAssetId() {
+        var parts = (document.cookie || '').split(';');
+        var prefix = 'assethub-portal-asset=';
+        for (var i = 0; i < parts.length; i++) {
+            var piece = parts[i].replace(/^\s+/, '');
+            if (piece.indexOf(prefix) !== 0) continue;
+            var value = piece.substring(prefix.length);
+            try { value = decodeURIComponent(value); } catch (error) { value = ''; }
+            if (/^\d+$/.test(value)) return value;
+        }
+        return '';
+    }
+
+    function portalPage() {
+        return /\/portal\//.test(location.pathname || '') || !!document.getElementById('asset-tree-portal-boot');
+    }
+
+    function signalField(input) {
+        if (!input) return;
+        if (window.AJS && AJS.$) {
+            try {
+                AJS.$(input).trigger('input').trigger('change');
+                return;
+            } catch (error) { /* the portal widget reads the input value itself */ }
+        }
+        try {
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (error) { /* older browsers still submit the input value */ }
+    }
+
+    function holdPortalChoice(id) {
+        if (!portalPage()) return;
+        var clean = /^\d+$/.test(String(id || '')) ? String(id) : '';
+        if (clean) {
+            document.cookie = 'assethub-portal-asset=' + encodeURIComponent(clean) + '; path=/; max-age=7200; SameSite=Lax';
+            try {
+                sessionStorage.setItem('asset-tree-portal-asset', JSON.stringify({ id: clean, projectKey: projectFromPage() }));
+            } catch (error) {}
+        } else {
+            document.cookie = 'assethub-portal-asset=; path=/; max-age=0';
+            try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) {}
+            holdPortalChoice.sent = '';
+        }
+        var forms = document.getElementsByTagName('form');
+        for (var i = 0; i < forms.length; i++) {
+            var field = forms[i].querySelector('input[name="assethubAsset"]');
+            if (!clean && !field) continue;
+            if (!field) {
+                field = document.createElement('input');
+                field.type = 'hidden';
+                field.name = 'assethubAsset';
+                forms[i].appendChild(field);
+            }
+            field.value = clean;
+        }
+        if (!clean || holdPortalChoice.sent === clean) return;
+        holdPortalChoice.sent = clean;
+        sendJson('POST', '/portal/assets/' + clean + '/intent', {}, function (status) {
+            if (status === 0 || status >= 500 || status === 403) holdPortalChoice.sent = '';
+        });
+    }
+
+    function carriedAssetId() {
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) {
+                var stored = JSON.parse(raw);
+                if (stored && stored.id && /^\d+$/.test(String(stored.id))) return String(stored.id);
+            }
+        } catch (error) {}
+        return cookieAssetId();
+    }
+
+    function carryAssetHeader(url) {
+        var text = url == null ? '' : String(url);
+        if (!text || text.toLowerCase().indexOf('servicedesk') < 0) return '';
+        return carriedAssetId();
+    }
+
+    function installPortalCarry() {
+        if (installPortalCarry.done || !window.XMLHttpRequest) return;
+        installPortalCarry.done = true;
+        var nativeOpen = XMLHttpRequest.prototype.open;
+        var nativeSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            this._assetHubUrl = url;
+            return nativeOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function () {
+            try {
+                var id = carryAssetHeader(this._assetHubUrl);
+                if (id) this.setRequestHeader('X-AssetHub-Asset', id);
+            } catch (error) {}
+            return nativeSend.apply(this, arguments);
+        };
+        if (window.fetch && window.Headers) {
+            var nativeFetch = window.fetch;
+            window.fetch = function (input, init) {
+                var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+                var id = carryAssetHeader(url);
+                if (!id) return nativeFetch.apply(this, arguments);
+                try {
+                    var next = {};
+                    if (init) {
+                        for (var key in init) {
+                            if (Object.prototype.hasOwnProperty.call(init, key)) next[key] = init[key];
+                        }
+                    }
+                    var headers = new Headers(next.headers || (typeof input !== 'string' && input && input.headers));
+                    headers.set('X-AssetHub-Asset', id);
+                    next.headers = headers;
+                    return nativeFetch.call(this, input, next);
+                } catch (error) {
+                    return nativeFetch.apply(this, arguments);
+                }
+            };
+        }
+        if (window.history && history.pushState) {
+            var nativePush = history.pushState;
+            history.pushState = function () {
+                var result = nativePush.apply(this, arguments);
+                setTimeout(claimPortalRequest, 50);
+                return result;
+            };
+            window.addEventListener('popstate', function () { setTimeout(claimPortalRequest, 50); });
+        }
+    }
+    installPortalCarry();
+
     function contextPath() {
         if (window.AJS && typeof AJS.contextPath === 'function') return AJS.contextPath();
         var meta = document.querySelector('meta[name="ajs-context-path"]');
@@ -50,7 +180,16 @@
         return norm(copy.textContent || copy.innerText || '');
     }
 
+    function isChoice(control) {
+        var type = (control.type || '').toLowerCase();
+        return type === 'checkbox' || type === 'radio';
+    }
+
     function fieldCaption(control) {
+        if (isChoice(control)) {
+            var group = groupCaption(control);
+            if (group) return group;
+        }
         var linked = captionFor(control);
         if (linked) return linked;
         var wrapped = captionWrapped(control);
@@ -60,6 +199,34 @@
         var beside = captionBefore(control);
         if (beside) return beside;
         return tidy(control.getAttribute('aria-label') || control.name || control.id || '');
+    }
+
+    /* A portal checkbox's own label is the option ("111"), not the field ("Кабинет"). */
+    function groupCaption(control) {
+        var box = fieldBox(control);
+        var root = box || control.parentNode;
+        if (!root || !root.getElementsByTagName) return '';
+        var legends = root.getElementsByTagName('legend');
+        if (legends.length) {
+            var legendText = tidy(ownText(legends[0]));
+            if (legendText) return legendText;
+        }
+        if (box && box.getAttribute) {
+            var named = tidy(box.getAttribute('data-field-name') || '');
+            if (named) return named;
+        }
+        var labels = root.getElementsByTagName('label');
+        for (var i = 0; i < labels.length; i++) {
+            var label = labels[i];
+            if (control.id && label.htmlFor === control.id) continue;
+            if (label.htmlFor) {
+                var owner = document.getElementById(label.htmlFor);
+                if (owner && isChoice(owner)) continue;
+            }
+            var text = tidy(ownText(label));
+            if (text) return text;
+        }
+        return '';
     }
 
     function captionFor(control) {
@@ -183,6 +350,20 @@
         return false;
     }
 
+    function shownSelectText(select) {
+        var box = null;
+        if (select.id) box = document.getElementById('s2id_' + select.id);
+        if (!box) {
+            var next = select.nextSibling;
+            while (next && next.nodeType !== 1) next = next.nextSibling;
+            if (next && next.className && (' ' + next.className + ' ').indexOf(' select2-container ') !== -1) box = next;
+        }
+        if (!box || !box.querySelector) return '';
+        var chosen = box.querySelector('.select2-chosen');
+        if (!chosen) return '';
+        return String(chosen.textContent || '').replace(/^\s+|\s+$/g, '').replace(/\s+/g, ' ');
+    }
+
     function insideSelect2(node) {
         while (node) {
             var cls = node.className && typeof node.className === 'string' ? ' ' + node.className + ' ' : '';
@@ -199,14 +380,21 @@
         var i;
         for (i = 0; i < controls.length; i++) {
             var control = controls[i];
-            if (insidePicker(control) || insideSelect2(control) || control.getAttribute('data-asset-tree') === '1') continue;
             var tag = control.tagName ? control.tagName.toLowerCase() : '';
+            if (insidePicker(control) || control.getAttribute('data-asset-tree') === '1') continue;
+            if (tag !== 'select' && insideSelect2(control)) continue;
             if (tag === 'select') {
                 if (!control.options || control.selectedIndex < 0) continue;
                 var chosen = control.options[control.selectedIndex];
                 var text = chosen ? (chosen.text || '') : '';
-                if (blankChoice(text, control.value)) continue;
-                answers.push(answerOf(control, text, control.value || text));
+                var value = control.value || '';
+                if (blankChoice(text, value)) {
+                    var visible = shownSelectText(control);
+                    if (!visible || blankChoice(visible, visible)) continue;
+                    text = visible;
+                    value = value && !blankChoice('', value) ? value : visible;
+                }
+                answers.push(answerOf(control, text, value || text));
                 continue;
             }
             var type = (control.type || '').toLowerCase();
@@ -324,6 +512,14 @@
         picker.setAttribute('data-ready', '1');
         var projectKey = picker.getAttribute('data-project') || '';
         var hidden = picker.valueInput || picker.querySelector('.asset-tree-picker-value');
+        function commitValue(value) {
+            var next = value == null ? '' : String(value);
+            if (hidden.getAttribute('data-asset-committed') === next) return;
+            hidden.value = next;
+            hidden.setAttribute('data-asset-committed', next);
+            signalField(hidden);
+            holdPortalChoice(next);
+        }
         var levels = picker.querySelector('.asset-tree-picker-levels');
         var current = picker.querySelector('.asset-tree-picker-current');
         var waitText = picker.getAttribute('data-wait') || phrase('wait');
@@ -357,6 +553,8 @@
 
         function applyPortal(force) {
             if (!nodesReady || !rulesReady) return;
+            var pinned = presetAssetId();
+            if (pinned && byId[parseInt(pinned, 10)] && !hidden.value) commitValue(pinned);
             var locked = rules.length > 0;
             var rule = locked ? chooseRule(rules, readAnswers(picker), byId) : null;
             var rootId = rule ? rule.assetId : null;
@@ -365,19 +563,19 @@
             appliedLock = locked;
             var value = hidden.value ? parseInt(hidden.value, 10) : null;
             if (locked || flat) {
-                if (locked && !rootId) {
-                    hidden.value = '';
+                if (locked && !rootId && !pinned) {
+                    commitValue('');
                     drawList(null, true);
                     return;
                 }
-                if (rootId && value && !listedContains(rootId, value)) {
-                    hidden.value = '';
+                if (rootId && value && !listedContains(rootId, value) && String(value) !== pinned) {
+                    commitValue('');
                 }
                 drawList(locked ? rootId : null, false);
                 return;
             }
             if (rootId && (!value || !contains(byId, rootId, value))) {
-                hidden.value = String(rootId);
+                commitValue(String(rootId));
                 value = rootId;
             }
             draw(value, rootId);
@@ -460,7 +658,8 @@
         }
 
         function canSelect2() {
-            return !!(flat && window.AJS && AJS.$ && AJS.$.fn && typeof AJS.$.fn.auiSelect2 === 'function');
+            if (!flat || !window.AJS || !AJS.$ || !AJS.$.fn || typeof AJS.$.fn.auiSelect2 !== 'function') return false;
+            return !!neighbourSelect2();
         }
 
         function neighbourSelect2() {
@@ -683,8 +882,43 @@
             return fallback;
         }
 
+        function clearHint() {
+            if (picker.portalHint && picker.portalHint.parentNode) {
+                picker.portalHint.parentNode.removeChild(picker.portalHint);
+            }
+            picker.portalHint = null;
+        }
+
+        function hintAnchor() {
+            var select = picker.portalSelect;
+            if (!select || !select.parentNode) return null;
+            if (select.id) {
+                var box = document.getElementById('s2id_' + select.id);
+                if (box && box.parentNode === select.parentNode) return box;
+            }
+            var next = select.nextSibling;
+            while (next && next.nodeType !== 1) next = next.nextSibling;
+            if (next && next.className && (' ' + next.className + ' ').indexOf(' select2-container ') !== -1) return next;
+            return select;
+        }
+
+        function showHint(text) {
+            clearHint();
+            if (!text) return;
+            var hint = el('p', 'asset-tree-picker-wait asset-tree-picker-portal-hint', text);
+            var anchor = hintAnchor();
+            if (anchor && anchor.parentNode) {
+                if (anchor.nextSibling) anchor.parentNode.insertBefore(hint, anchor.nextSibling);
+                else anchor.parentNode.appendChild(hint);
+            } else {
+                levels.appendChild(hint);
+            }
+            picker.portalHint = hint;
+        }
+
         function drawList(rootId, waiting) {
             levels.innerHTML = '';
+            clearHint();
             if (picker.portalFind && picker.portalFind.parentNode) {
                 picker.portalFind.parentNode.removeChild(picker.portalFind);
             }
@@ -692,12 +926,11 @@
             if (waiting) {
                 var waitingSelect = el('select');
                 dressSelect(waitingSelect);
-                waitingSelect.disabled = true;
                 var placeholder = el('option', null, blankLabel('—'));
                 placeholder.value = '';
                 waitingSelect.appendChild(placeholder);
                 attachSelect(waitingSelect);
-                levels.appendChild(el('p', 'asset-tree-picker-wait', waitText));
+                showHint(waitText);
                 if (current) current.textContent = '';
                 return;
             }
@@ -721,15 +954,24 @@
                     if (chosen) option.selected = true;
                     select.appendChild(option);
                 });
+                if (hidden.value && !select.querySelector('option[value="' + hidden.value + '"]')) {
+                    var extra = byId[parseInt(hidden.value, 10)];
+                    if (extra && !extra.group) {
+                        var kept = el('option', null, optionText(extra));
+                        kept.value = String(extra.id);
+                        kept.selected = true;
+                        select.appendChild(kept);
+                    }
+                }
             }
             paintOptions();
             select.addEventListener('change', function () {
-                hidden.value = select.value;
+                commitValue(select.value);
                 show(hidden.value ? parseInt(hidden.value, 10) : null);
             });
             attachSelect(select);
             if (!select2Ready(select)) mountFind(select, paintOptions, function (value) { query = value; });
-            if (!options.length) levels.appendChild(el('p', 'asset-tree-picker-wait', emptyText));
+            if (!options.length) showHint(emptyText);
             show(hidden.value ? parseInt(hidden.value, 10) : null);
         }
 
@@ -801,7 +1043,7 @@
                 var chosen = select.value ? byId[parseInt(select.value, 10)] : null;
                 var cursor = chosen || parent;
                 var stored = cursor ? anchorId(cursor.id) : null;
-                hidden.value = stored ? String(stored) : '';
+                commitValue(stored ? String(stored) : '');
                 var rootId = appliedLock ? appliedRoot : null;
                 draw(cursor ? cursor.id : null, rootId);
             });
@@ -997,6 +1239,8 @@
                     continue;
                 }
                 hideNative(input);
+                var pinned = presetAssetId();
+                if (pinned && !input.value) input.value = pinned;
                 var picker = el('div', 'asset-tree-picker');
                 picker.setAttribute('data-project', ctx.projectKey);
                 picker.setAttribute('data-wait', phrase('wait'));
@@ -1018,7 +1262,28 @@
         desktop: 'M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h4v2H6v-2h4v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z',
         box: 'M12 3l9 4v10l-9 4-9-4V7l9-4zm0 2.2L6.5 7.6 12 10l5.5-2.4L12 5.2zM5 9.1v6.9l6 2.7v-6.9L5 9.1zm14 0l-6 2.7v6.9l6-2.7V9.1z'
     };
-    var mineState = { payload: null, loading: false };
+    var mineState = { payload: null, loading: false, query: '', searching: false, caret: 0 };
+    var MINE_LAYOUTS = [
+        ['tiles', 'Плитка'],
+        ['cards', 'Карточки'],
+        ['list', 'Список']
+    ];
+
+    function mineLayout() {
+        var stored = '';
+        try { stored = localStorage.getItem('asset-tree.portalMineLayout') || ''; } catch (error) { stored = ''; }
+        for (var i = 0; i < MINE_LAYOUTS.length; i++) {
+            if (MINE_LAYOUTS[i][0] === stored) return stored;
+        }
+        return 'tiles';
+    }
+
+    function chooseMineLayout(layout) {
+        try { localStorage.setItem('asset-tree.portalMineLayout', layout); } catch (error) {}
+        var existing = document.getElementById('asset-tree-portal-mine');
+        if (existing) existing.removeAttribute('data-sig');
+        paintPortalMine();
+    }
 
     function profilePage() {
         return /\/user\/profile(?:\/|$|\?)/.test(location.pathname || '');
@@ -1061,7 +1326,7 @@
         (data.projects || []).forEach(function (group) {
             parts.push(group.key, String(group.count || 0));
             (group.assets || []).forEach(function (card) {
-                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.showKey ? '1' : '0', card.showStatus ? '1' : '0');
+                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.showKey ? '1' : '0', card.showStatus ? '1' : '0', card.photo ? '1' : '0');
                 (card.lines || []).forEach(function (line) {
                     parts.push(line.label, line.value);
                 });
@@ -1070,20 +1335,92 @@
         return parts.join('\u0001');
     }
 
+    function cardHaystack(group, card) {
+        var parts = [group.key, card.name, card.objectKey, card.role, card.status, card.statusLabel];
+        (card.lines || []).forEach(function (line) {
+            parts.push(line.label, line.value);
+        });
+        return norm(parts.join(' '));
+    }
+
+    function applyMineFilter(root) {
+        if (!root) return;
+        var needle = norm(mineState.query);
+        var cards = root.querySelectorAll('.asset-tree-portal-mine-card');
+        var shown = 0;
+        for (var i = 0; i < cards.length; i++) {
+            var hit = !needle || (cards[i].getAttribute('data-hay') || '').indexOf(needle) !== -1;
+            if (hit) cards[i].classList.remove('is-hidden');
+            else cards[i].classList.add('is-hidden');
+            if (hit) shown++;
+        }
+        var groups = root.querySelectorAll('.asset-tree-portal-mine-group');
+        for (var g = 0; g < groups.length; g++) {
+            if (groups[g].querySelector('.asset-tree-portal-mine-card:not(.is-hidden)')) groups[g].classList.remove('is-hidden');
+            else groups[g].classList.add('is-hidden');
+        }
+        var empty = root.querySelector('.asset-tree-portal-mine-empty');
+        if (empty) empty.hidden = shown > 0;
+        var count = root.querySelector('.asset-tree-portal-mine-count');
+        if (count) count.textContent = needle ? (shown + ' / ' + (count.getAttribute('data-total') || '0')) : (count.getAttribute('data-label') || '');
+    }
+
     function renderMine(data) {
         var root = el('div', 'asset-tree-portal-mine-body');
         var head = el('div', 'asset-tree-portal-mine-head');
-        head.appendChild(el('h2', null, data.title || 'My assets'));
-        head.appendChild(el('span', null, data.totalLabel || ''));
+        var titles = el('div', 'asset-tree-portal-mine-titles');
+        titles.appendChild(el('h2', null, data.title || 'My assets'));
+        var count = el('span', 'asset-tree-portal-mine-count', data.totalLabel || '');
+        count.setAttribute('data-label', data.totalLabel || '');
+        count.setAttribute('data-total', String(data.total || 0));
+        titles.appendChild(count);
+        head.appendChild(titles);
+        var layouts = el('div', 'asset-tree-portal-mine-layouts');
+        layouts.setAttribute('role', 'tablist');
+        layouts.setAttribute('aria-label', 'Вид списка');
+        var chosen = mineLayout();
+        MINE_LAYOUTS.forEach(function (item) {
+            var pick = el('button', 'asset-tree-portal-mine-layout' + (item[0] === chosen ? ' is-active' : ''), item[1]);
+            pick.type = 'button';
+            pick.setAttribute('role', 'tab');
+            pick.setAttribute('aria-selected', item[0] === chosen ? 'true' : 'false');
+            pick.addEventListener('click', function () { chooseMineLayout(item[0]); });
+            layouts.appendChild(pick);
+        });
+        head.appendChild(layouts);
         root.appendChild(head);
+        var search = el('input', 'asset-tree-portal-mine-search');
+        search.type = 'search';
+        search.placeholder = 'Поиск по имени, ключу или полю';
+        search.setAttribute('aria-label', 'Поиск по своим активам');
+        search.value = mineState.query || '';
+        search.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.keyCode === 13) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        });
+        search.addEventListener('input', function () {
+            mineState.query = search.value;
+            mineState.searching = true;
+            mineState.caret = search.selectionStart || search.value.length;
+            applyMineFilter(root);
+        });
+        search.addEventListener('blur', function () { mineState.searching = false; });
+        root.appendChild(search);
+        var empty = el('p', 'asset-tree-portal-mine-empty', 'Ничего не найдено');
+        empty.hidden = true;
+        root.appendChild(empty);
         (data.projects || []).forEach(function (group) {
             var block = el('section', 'asset-tree-portal-mine-group');
             var title = el('h3', null);
             title.appendChild(el('strong', null, group.key || ''));
             title.appendChild(document.createTextNode(' ' + (group.countLabel || '')));
             block.appendChild(title);
+            var grid = el('div', 'asset-tree-portal-mine-grid');
             (group.assets || []).forEach(function (card) {
                 var item = el('article', 'asset-tree-portal-mine-card');
+                item.setAttribute('data-hay', cardHaystack(group, card));
                 item.appendChild(portalIcon(card));
                 var body = el('div', 'asset-tree-portal-mine-copy');
                 var row = el('div', 'asset-tree-portal-mine-title');
@@ -1095,23 +1432,45 @@
                 }
                 body.appendChild(row);
                 if (card.role) body.appendChild(el('p', 'asset-tree-portal-mine-role', card.role));
+                var lines = el('div', 'asset-tree-portal-mine-lines');
                 (card.lines || []).forEach(function (line) {
                     var field = el('p', 'asset-tree-portal-mine-line');
                     field.appendChild(el('span', null, line.label || ''));
                     field.appendChild(document.createTextNode(line.value || ''));
-                    body.appendChild(field);
+                    lines.appendChild(field);
                 });
+                if (lines.childNodes.length) body.appendChild(lines);
                 item.appendChild(body);
+                if (card.photo) {
+                    item.classList.add('has-photo');
+                    var picture = el('img', 'asset-tree-portal-mine-photo');
+                    picture.alt = '';
+                    picture.src = portalPhotoUrl(card);
+                    picture.addEventListener('error', function () {
+                        item.classList.remove('has-photo');
+                        if (picture.parentNode) picture.parentNode.removeChild(picture);
+                    });
+                    item.appendChild(picture);
+                }
                 item.tabIndex = 0;
                 item.setAttribute('role', 'button');
                 item.addEventListener('click', function () { openPortalCard(card.id); });
                 item.addEventListener('keydown', function (event) {
                     if (event.key === 'Enter' || event.keyCode === 13) openPortalCard(card.id);
                 });
-                block.appendChild(item);
+                grid.appendChild(item);
             });
+            block.appendChild(grid);
             root.appendChild(block);
         });
+        applyMineFilter(root);
+        if (mineState.searching) {
+            setTimeout(function () {
+                if (!search.parentNode) return;
+                search.focus();
+                if (search.setSelectionRange) search.setSelectionRange(mineState.caret, mineState.caret);
+            }, 0);
+        }
         return root;
     }
 
@@ -1182,6 +1541,15 @@
             }
             titles.appendChild(meta);
             head.appendChild(titles);
+            var actions = el('div', 'asset-tree-portal-head-actions');
+            var ask = el('button', 'asset-tree-portal-send', portalText('create'));
+            ask.type = 'button';
+            var miss = el('p', 'asset-tree-portal-request-help', '');
+            miss.hidden = true;
+            ask.addEventListener('click', function () { openStandardPortal(card, actions); });
+            actions.appendChild(ask);
+            actions.appendChild(miss);
+            head.appendChild(actions);
             var closer = el('button', 'asset-tree-portal-close', '');
             closer.type = 'button';
             closer.setAttribute('aria-label', 'Закрыть');
@@ -1200,7 +1568,21 @@
             if (!grid.childNodes.length && card.location) grid.appendChild(portalFact('Расположение', card.location));
             if (grid.childNodes.length) details.appendChild(grid);
             if (card.description && !described) details.appendChild(el('p', 'asset-tree-portal-prose', card.description));
-            if (details.childNodes.length > 1) body.appendChild(details);
+            var showDetails = details.childNodes.length > 1;
+            if (card.photo) {
+                var row = el('div', 'asset-tree-portal-detail-row');
+                if (showDetails) row.appendChild(details);
+                var frame = el('div', 'asset-tree-portal-photo-frame');
+                var picture = el('img', 'asset-tree-portal-photo');
+                picture.alt = '';
+                picture.src = portalPhotoUrl(card);
+                picture.addEventListener('click', function (event) { event.stopPropagation(); });
+                frame.appendChild(picture);
+                row.appendChild(frame);
+                body.appendChild(row);
+            } else if (showDetails) {
+                body.appendChild(details);
+            }
             var people = portalSection('Люди');
             people.appendChild(portalPerson('МОЛ', card.custodian));
             people.appendChild(portalPerson('Кому выдано', card.issued));
@@ -1218,6 +1600,11 @@
             }
             paint(payload);
         });
+    }
+
+    function portalPhotoUrl(card) {
+        var stamp = card && card.updated ? encodeURIComponent(card.updated) : '';
+        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + card.id + (stamp ? '&v=' + stamp : '');
     }
 
     function portalSection(title) {
@@ -1267,6 +1654,12 @@
         var field = el('div', 'asset-tree-portal-person');
         if (label) field.appendChild(el('div', 'asset-tree-portal-person-label', label));
         var who = profile && profile.displayName ? profile.displayName : '';
+        if (!who) {
+            var empty = el('div', 'asset-tree-portal-person-empty', 'Не назначен');
+            if (extra) empty.appendChild(extra);
+            field.appendChild(empty);
+            return field;
+        }
         var row = el('div', 'asset-tree-portal-face');
         row.appendChild(portalAvatar(who ? profile : null));
         var text = el('div', 'asset-tree-portal-person-text');
@@ -1283,18 +1676,15 @@
         field.appendChild(el('div', 'asset-tree-portal-person-label', 'Общий доступ'));
         var shares = card.shares || [];
         var mine = !shares.some(function (person) { return person && person.userKey === card.viewerKey; });
-        if (!shares.length) {
-            var self = null;
-            if (card.viewerKey && mine) {
-                self = el('button', 'asset-tree-portal-textbtn', 'Добавить меня');
-                self.type = 'button';
-                self.addEventListener('click', function () {
-                    sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: card.viewerKey }, function (status) {
-                        if (status >= 200 && status < 300) openPortalCard(card.id);
-                    });
+        if (!shares.length && card.viewerKey && mine) {
+            var self = el('button', 'asset-tree-portal-textbtn', 'Добавить меня');
+            self.type = 'button';
+            self.addEventListener('click', function () {
+                sendJson('POST', '/portal/assets/' + card.id + '/shares', { userKey: card.viewerKey }, function (status) {
+                    if (status >= 200 && status < 300) openPortalCard(card.id);
                 });
-            }
-            field.appendChild(portalPerson('', null, self).querySelector('.asset-tree-portal-face'));
+            });
+            field.appendChild(self);
         }
         shares.forEach(function (person) {
             var remove = el('button', 'asset-tree-portal-textbtn', 'Убрать');
@@ -1396,14 +1786,11 @@
             });
             bar.appendChild(node);
         }
-        var style = el('select', 'asset-tree-jira-style');
-        style.appendChild(el('option', null, 'Стиль'));
         tool('B', function () { command('bold'); });
         tool('I', function () { command('italic'); });
         tool('U', function () { command('underline'); });
         tool('•', function () { command('insertUnorderedList'); });
         tool('1.', function () { command('insertOrderedList'); });
-        bar.insertBefore(style, bar.firstChild);
         box.appendChild(bar);
         box.appendChild(visual);
         box.appendChild(source);
@@ -1455,16 +1842,17 @@
 
     function portalFiles(card) {
         var section = portalSection('Вложения');
-        (card.files || []).forEach(function (file) {
+        var shown = (card.files || []).filter(function (file) { return file && !file.slot; });
+        shown.forEach(function (file) {
             var row = el('div', 'asset-tree-portal-file');
             var kind = String(file.fileName || '').split('.').pop().toLowerCase();
             var icon = el('button', 'asset-tree-portal-file-icon is-' + kind, (kind || 'file').slice(0, 4).toUpperCase());
             icon.type = 'button';
-            icon.addEventListener('click', function () { openPortalPreview(file, card.files); });
+            icon.addEventListener('click', function () { openPortalPreview(file, shown); });
             row.appendChild(icon);
             var name = el('button', 'asset-tree-portal-file-name', file.fileName || '');
             name.type = 'button';
-            name.addEventListener('click', function () { openPortalPreview(file, card.files); });
+            name.addEventListener('click', function () { openPortalPreview(file, shown); });
             row.appendChild(name);
             if (file.size) row.appendChild(el('span', 'asset-tree-portal-file-meta', portalSize(file.size)));
             section.appendChild(row);
@@ -1594,21 +1982,21 @@
             note.appendChild(text);
             section.appendChild(note);
         });
-        var composer = portalComposer('Вставьте здесь комментарий...');
-        var submit = el('button', 'asset-tree-btn primary', 'Публичный комментарий');
+        var box = el('textarea', 'asset-tree-portal-comment-box');
+        box.placeholder = 'Комментарий';
+        var row = el('div', 'asset-tree-portal-comment-send');
+        var submit = el('button', 'asset-tree-portal-send', 'Отправить');
         submit.type = 'button';
         submit.addEventListener('click', function () {
-            var text = composer.read();
+            var text = String(box.value || '').replace(/^\s+|\s+$/g, '');
             if (!text) return;
             sendJson('POST', '/portal/assets/' + card.id + '/comments', { body: text }, function (status) {
                 if (status >= 200 && status < 300) openPortalCard(card.id);
             });
         });
-        var cancel = el('button', 'asset-tree-jira-quiet', 'Отмена');
-        cancel.type = 'button';
-        composer.actions.appendChild(submit);
-        composer.actions.appendChild(cancel);
-        section.appendChild(composer.root);
+        row.appendChild(submit);
+        section.appendChild(box);
+        section.appendChild(row);
         return section;
     }
 
@@ -1693,6 +2081,258 @@
         document.body.appendChild(overlay);
     }
 
+    function portalText(kind) {
+        var lang = (document.documentElement.getAttribute('lang') || '').toLowerCase();
+        var ru = lang.indexOf('ru') === 0;
+        if (kind === 'create') return ru ? 'Создать заявку' : 'Create request';
+        if (kind === 'noPortal') return ru ? 'Портал этого проекта не найден.' : 'This project has no portal.';
+        return ru
+            ? 'Заявка откроется на портале. Это оборудование уже выбрано и привяжется к заявке.'
+            : 'The request opens on the portal. This asset is already selected and will be linked.';
+    }
+
+    function openStandardPortal(card, actions) {
+        var id = card && card.id ? String(card.id) : '';
+        var url = card && card.portalUrl ? String(card.portalUrl) : '';
+        if (!id || !url) {
+            var note = actions ? actions.querySelector('.asset-tree-portal-request-help') : null;
+            if (note) {
+                note.hidden = false;
+                note.textContent = portalText('noPortal');
+            }
+            return;
+        }
+        try {
+            sessionStorage.setItem('asset-tree-portal-asset', JSON.stringify({
+                id: id,
+                projectKey: card.projectKey || '',
+                name: card.name || '',
+                objectKey: card.objectKey || ''
+            }));
+        } catch (error) {}
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200; SameSite=Lax';
+        try {
+            var hold = new XMLHttpRequest();
+            hold.open('POST', contextPath() + '/rest/asset-tree/1.0/portal/assets/' + encodeURIComponent(id) + '/intent', false);
+            hold.setRequestHeader('Accept', 'application/json');
+            hold.setRequestHeader('Content-Type', 'application/json');
+            hold.setRequestHeader('X-Atlassian-Token', 'no-check');
+            hold.send('{}');
+        } catch (error) {}
+        var glue = url.indexOf('?') >= 0 ? '&' : '?';
+        var next = url + glue + 'asset=' + encodeURIComponent(id);
+        if (card.projectKey) next += '&project=' + encodeURIComponent(card.projectKey);
+        window.location.assign(next);
+    }
+
+    function portalIssueKey() {
+        var path = location.pathname || '';
+        var match = /\/portal\/\d+\/(?:[A-Za-z0-9_.-]+\/)*([A-Z][A-Z0-9_]*-\d+)(?:\/|$)/.exec(path);
+        if (match) return match[1];
+        match = /(?:\?|&)(?:requestKey|issueKey|key)=([A-Z][A-Z0-9_]*-\d+)/.exec(location.search || '');
+        return match ? match[1] : '';
+    }
+
+    function claimPortalRequest() {
+        var key = portalIssueKey();
+        if (!key || claimPortalRequest.done || claimPortalRequest.busy) return;
+        var stored = null;
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) stored = JSON.parse(raw);
+        } catch (error) {
+            stored = null;
+        }
+        var id = stored && stored.id ? String(stored.id) : cookieAssetId();
+        if (!/^\d+$/.test(id)) return;
+        claimPortalRequest.busy = true;
+        sendJson('POST', '/portal/assets/' + id + '/requests/' + encodeURIComponent(key), {}, function (status) {
+            claimPortalRequest.busy = false;
+            if (status >= 200 && status < 300) {
+                claimPortalRequest.done = true;
+                try { sessionStorage.removeItem('asset-tree-portal-asset'); } catch (error) {}
+                document.cookie = 'assethub-portal-asset=; path=/; max-age=0';
+                return;
+            }
+            if (status === 0) return;
+            claimPortalRequest.tries = (claimPortalRequest.tries || 0) + 1;
+            if (claimPortalRequest.tries > 40) claimPortalRequest.done = true;
+        });
+    }
+
+    function rememberPortalAsset() {
+        var id = presetAssetId();
+        if (!id || rememberPortalAsset.sent === id) return;
+        rememberPortalAsset.sent = id;
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200; SameSite=Lax';
+        sendJson('POST', '/portal/assets/' + id + '/intent', {}, function (status) {
+            if (status === 0 || status >= 500) rememberPortalAsset.sent = '';
+        });
+    }
+
+    function presetAssetId() {
+        if (/\/portal\/\d+\/[A-Z][A-Z0-9_]*-\d+/.test(location.pathname || '')) return '';
+        var stored = null;
+        try {
+            var raw = sessionStorage.getItem('asset-tree-portal-asset');
+            if (raw) stored = JSON.parse(raw);
+        } catch (error) {
+            stored = null;
+        }
+        var urlMatch = /(?:\?|&)asset=(\d+)/.exec(location.search || '');
+        var urlId = urlMatch ? urlMatch[1] : '';
+        var id = urlId || (stored && stored.id ? String(stored.id) : '') || cookieAssetId();
+        if (!id || !/^\d+$/.test(id)) return '';
+        var project = projectFromPage();
+        if (!urlId && stored && stored.projectKey && project && stored.projectKey !== project) return '';
+        return id;
+    }
+
+    function portalRequestBack(restore, label) {
+        var back = el('button', 'asset-tree-portal-textbtn', label || 'К карточке');
+        back.type = 'button';
+        back.addEventListener('click', function () { if (restore) restore(); });
+        return back;
+    }
+
+    function showPortalRequest(card, dialog, restore) {
+        var body = dialog.querySelector('.asset-tree-portal-sheet-body');
+        if (!body) return;
+        body.innerHTML = '';
+        body.appendChild(el('p', 'asset-tree-portal-loading', '...'));
+        ajax('/portal/assets/' + card.id + '/requests', function (status, payload) {
+            if (!dialog.parentNode) return;
+            body.innerHTML = '';
+            if (status !== 200 || !payload) {
+                body.appendChild(el('p', 'asset-tree-portal-request-error', (payload && payload.message) || 'Не удалось открыть форму заявки'));
+                body.appendChild(portalRequestBack(restore));
+                return;
+            }
+            paintPortalRequest(card, dialog, payload, restore);
+        });
+    }
+
+    function paintPortalRequest(card, dialog, form, restore) {
+        var body = dialog.querySelector('.asset-tree-portal-sheet-body');
+        if (!body) return;
+        body.innerHTML = '';
+        var section = portalSection('Новая заявка');
+        var note = el('p', 'asset-tree-portal-request-note');
+        var assetLabel = ((card.objectKey ? card.objectKey + ' ' : '') + (card.name || '')).replace(/^\s+|\s+$/g, '');
+        note.textContent = 'Оборудование ' + assetLabel + ' будет добавлено в заявку.';
+        section.appendChild(note);
+        var types = form.types || [];
+        if (!types.length) {
+            section.appendChild(el('p', null, 'В этом проекте нет типов запросов.'));
+            body.appendChild(section);
+            body.appendChild(portalRequestBack(restore));
+            return;
+        }
+        var typeLabel = el('label', null, 'Тип запроса');
+        typeLabel.setAttribute('for', 'asset-request-type');
+        var typeSelect = el('select', 'asset-tree-portal-request-input');
+        typeSelect.id = 'asset-request-type';
+        types.forEach(function (type) {
+            var option = el('option', null, type.name || type.id);
+            option.value = String(type.id || '');
+            typeSelect.appendChild(option);
+        });
+        section.appendChild(typeLabel);
+        section.appendChild(typeSelect);
+        var help = el('p', 'asset-tree-portal-request-help');
+        section.appendChild(help);
+        var fieldsHost = el('div', 'asset-tree-portal-request-fields');
+        section.appendChild(fieldsHost);
+        var error = el('p', 'asset-tree-portal-request-error');
+        section.appendChild(error);
+        function currentType() {
+            for (var i = 0; i < types.length; i++) {
+                if (String(types[i].id) === String(typeSelect.value)) return types[i];
+            }
+            return types[0];
+        }
+        function paintFields() {
+            var type = currentType();
+            help.textContent = type && type.description ? type.description : '';
+            fieldsHost.innerHTML = '';
+            (type && type.fields || []).forEach(function (field) {
+                var inputId = 'asset-request-' + field.id;
+                var label = el('label', null, (field.name || field.id) + (field.required ? ' *' : ''));
+                label.setAttribute('for', inputId);
+                var input;
+                if (field.kind === 'textarea') {
+                    input = el('textarea', 'asset-tree-portal-request-input');
+                } else if (field.kind === 'select') {
+                    input = el('select', 'asset-tree-portal-request-input');
+                    if (!field.required) {
+                        var blank = el('option', null, '');
+                        blank.value = '';
+                        input.appendChild(blank);
+                    }
+                    (field.options || []).forEach(function (option) {
+                        var node = el('option', null, option.label || option.value || '');
+                        node.value = option.value || '';
+                        input.appendChild(node);
+                    });
+                } else {
+                    input = el('input', 'asset-tree-portal-request-input');
+                    input.type = 'text';
+                }
+                input.id = inputId;
+                input.setAttribute('data-field', field.id || '');
+                fieldsHost.appendChild(label);
+                fieldsHost.appendChild(input);
+            });
+        }
+        typeSelect.addEventListener('change', paintFields);
+        paintFields();
+        var row = el('div', 'asset-tree-portal-actions');
+        var back = portalRequestBack(restore);
+        var send = el('button', 'asset-tree-portal-send', 'Создать');
+        send.type = 'button';
+        send.addEventListener('click', function () {
+            var type = currentType();
+            if (!type) return;
+            var values = [];
+            var nodes = fieldsHost.querySelectorAll('[data-field]');
+            for (var i = 0; i < nodes.length; i++) {
+                values.push({ id: nodes[i].getAttribute('data-field'), value: nodes[i].value || '' });
+            }
+            error.textContent = '';
+            send.disabled = true;
+            sendJson('POST', '/portal/assets/' + card.id + '/requests', { requestTypeId: type.id, values: values }, function (status, payload) {
+                if (!dialog.parentNode) return;
+                send.disabled = false;
+                if (status !== 200 && status !== 201) {
+                    error.textContent = (payload && payload.message) || 'Не удалось создать заявку';
+                    return;
+                }
+                body.innerHTML = '';
+                var done = portalSection('Заявка создана');
+                var line = el('p', 'asset-tree-portal-request-note');
+                var key = payload && payload.key ? payload.key : '';
+                line.appendChild(document.createTextNode('Заявка '));
+                if (payload && payload.url && key) {
+                    var link = el('a', null, key);
+                    link.href = payload.url;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    line.appendChild(link);
+                } else {
+                    line.appendChild(document.createTextNode(key));
+                }
+                line.appendChild(document.createTextNode(' создана. Оборудование ' + (card.name || '') + ' добавлено в заявку.'));
+                done.appendChild(line);
+                body.appendChild(done);
+                body.appendChild(portalRequestBack(restore));
+            });
+        });
+        row.appendChild(back);
+        row.appendChild(send);
+        section.appendChild(row);
+        body.appendChild(section);
+    }
+
     function paintPortalMine() {
         var existing = document.getElementById('asset-tree-portal-mine');
         if (!profilePage()) {
@@ -1720,14 +2360,35 @@
             existing.id = 'asset-tree-portal-mine';
         }
         if (existing.parentNode !== host) host.appendChild(existing);
-        var signature = mineSignature(data);
+        var signature = mineSignature(data) + '\u0001' + mineLayout();
         if (existing.getAttribute('data-sig') === signature) return;
+        existing.className = 'asset-tree-portal-mine is-' + mineLayout();
         existing.setAttribute('data-sig', signature);
         while (existing.firstChild) existing.removeChild(existing.firstChild);
         existing.appendChild(renderMine(data));
     }
 
+    function stampPortalForms() {
+        var id = presetAssetId() || cookieAssetId();
+        if (!id) return;
+        var forms = document.getElementsByTagName('form');
+        for (var i = 0; i < forms.length; i++) {
+            var form = forms[i];
+            var field = form.querySelector('input[name="assethubAsset"]');
+            if (!field) {
+                field = document.createElement('input');
+                field.type = 'hidden';
+                field.name = 'assethubAsset';
+                form.appendChild(field);
+            }
+            field.value = id;
+        }
+    }
+
     function boot() {
+        rememberPortalAsset();
+        stampPortalForms();
+        claimPortalRequest();
         var pickers = document.querySelectorAll('.asset-tree-picker');
         for (var i = 0; i < pickers.length; i++) mount(pickers[i]);
         var inputs = document.querySelectorAll('input[name^="customfield_"], textarea[name^="customfield_"], input[id^="customfield_"], textarea[id^="customfield_"]');
@@ -1796,10 +2457,12 @@
         var target = event.target;
         if (!target || insidePicker(target)) return;
         var tag = target.tagName ? target.tagName.toLowerCase() : '';
-        if (tag !== 'select' && target.type !== 'radio') return;
+        var type = (target.type || '').toLowerCase();
+        if (tag !== 'select' && tag !== 'textarea' && type !== 'radio' && type !== 'checkbox' && type !== 'text') return;
         refresh();
     });
 
+    setInterval(claimPortalRequest, 500);
     if (window.AJS && AJS.toInit) AJS.toInit(watch);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
     else watch();

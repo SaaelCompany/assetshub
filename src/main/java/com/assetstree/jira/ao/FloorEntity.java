@@ -37,4 +37,9 @@ public interface FloorEntity extends Entity {
     int getPlanH();
 
     void setPlanH(int planH);
+
+    @StringLength(StringLength.UNLIMITED)
+    String getUnderlay();
+
+    void setUnderlay(String underlay);
 }

@@ -997,8 +997,9 @@ def ensure_portal_demo():
             {"field": "Площадка", "option": "Пункт А"},
             {"field": "Отделение", "option": "Пункт А"},
         ]},
+        {"id": 4, "assetId": department, "position": 4, "conditions": [{"field": "Кабинет", "option": "111"}]},
     ]
-    STATE["portal_seq"] = 4
+    STATE["portal_seq"] = 5
 
 
 def portal_rule_dto(rule):
@@ -1071,7 +1072,7 @@ def next_object_key(project):
 
 
 VIEW_BASE = ("key", "type", "status", "custodian", "issued", "location", "description", "created", "updated")
-KNOWN_MODULES = ("service", "map", "reports", "life", "portal", "card")
+KNOWN_MODULES = ("service", "map", "reports", "life", "portal", "card", "tni")
 
 
 def stored_modules(project_key):
@@ -1166,7 +1167,7 @@ def module_setup(stored, migrate=True):
         chart_key, chart_kind = part.split(":", 1)
         chart_key = chart_key.strip().lower()
         chart_kind = chart_kind.strip().lower()
-        if chart_key in REPORT_STANDARD and chart_kind in ("donut", "pie", "bar", "bars") and chart_key not in seen_charts:
+        if chart_key in REPORT_STANDARD and chart_kind in REPORT_CHARTS and chart_key not in seen_charts:
             seen_charts.add(chart_key)
             charts.append("%s:%s" % (chart_key, chart_kind))
     every = "month" if str(stored.get("reportMailEvery") or "").strip().lower() == "month" else "week"
@@ -1214,18 +1215,658 @@ def module_setup(stored, migrate=True):
         "reportMailPart": mail_part,
         "lifeApproval": stored.get("lifeApproval") is not False,
         "lifeApprover": approver,
+        "lifePlaces": life_places(stored.get("lifePlaces")),
         "lifeCurrency": currency,
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
+        "lifeFold": stored.get("lifeFold") is True,
         "staffMarks": pack_staff_marks(stored.get("staffMarks")),
         "staffOrder": pack_staff_order(stored.get("staffOrder")),
         "staffPlaceOrder": pack_staff_places(stored.get("staffPlaceOrder")),
         "scheduleBoards": pack_boards(stored.get("scheduleBoards")),
         "scheduleOpen": pack_open(stored.get("scheduleOpen"), layer),
         "furniture": pack_furniture(stored.get("furniture")),
+        "glyphs": pack_glyphs(stored.get("glyphs")),
         "portalMine": bool(stored.get("portalMine")),
         "portalColumns": normalize_portal_columns(stored.get("portalColumns")),
+        "tniKeep": tni_span(stored.get("tniKeep"), 90, 1, 3650),
+        "tniProbeDays": tni_span(stored.get("tniProbeDays"), 3, 1, 30),
+        "tniProbeTries": tni_span(stored.get("tniProbeTries"), 3, 1, 30),
+        "tniAction": "delete" if stored.get("tniAction") == "delete" else "trash",
+        "tniComputer": tni_type(stored.get("tniComputer")),
+        "tniLaptop": tni_type(stored.get("tniLaptop")),
+        "tniPhone": tni_type(stored.get("tniPhone")),
+        "tniTablet": tni_type(stored.get("tniTablet")),
+        "tniBrowser": stored.get("tniBrowser") is not False,
+        "tniScan": stored.get("tniScan") is not False,
+        "tniAd": stored.get("tniAd") is not False,
+        "tniSccm": stored.get("tniSccm") is not False,
+        "tniPing": stored.get("tniPing") is not False,
         "scheduleKindVersion": 2,
     }
+
+
+def tni_span(value, fallback, low, high):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    if number < low or number > high:
+        return fallback
+    return number
+
+
+def tni_type(value):
+    text = str(value or "").strip().lower()
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,39}", text):
+        return text
+    return ""
+
+
+def tni_ip(token):
+    parts = str(token or "").strip().split(".")
+    if len(parts) != 4:
+        return None
+    nums = []
+    for part in parts:
+        if not part.isdigit() or (len(part) > 1 and part.startswith("0")) or int(part) > 255:
+            return None
+        nums.append(int(part))
+    return nums
+
+
+def tni_private(nums):
+    if nums[0] in (0, 127) or nums[0] >= 224:
+        return False
+    if nums[0] == 169 and nums[1] == 254:
+        return False
+    if nums[0] == 10:
+        return True
+    if nums[0] == 192 and nums[1] == 168:
+        return True
+    return nums[0] == 172 and 16 <= nums[1] <= 31
+
+
+def tni_one(token):
+    nums = tni_ip(token)
+    if not nums or nums[0] in (0, 127) or nums[0] >= 224 or (nums[0] == 169 and nums[1] == 254):
+        return None, "scan"
+    if not tni_private(nums):
+        return None, "public"
+    return "%d.%d.%d.%d" % tuple(nums), ""
+
+
+def tni_expand(raw):
+    text = str(raw or "").strip()
+    if not text or len(text) > 2000:
+        return None, "scan"
+    hosts = []
+    seen = set()
+
+    def add(address):
+        _kept, kind = tni_one(address)
+        if kind:
+            return kind
+        if address in seen:
+            return ""
+        seen.add(address)
+        hosts.append(address)
+        return "large" if len(hosts) > 1024 else ""
+
+    def add_span(start, end):
+        if end < start:
+            return "scan"
+        if end - start + 1 > 1024:
+            return "large"
+        for value in range(start, end + 1):
+            nums = [(value >> 24) & 255, (value >> 16) & 255, (value >> 8) & 255, value & 255]
+            kind = add("%d.%d.%d.%d" % tuple(nums))
+            if kind:
+                return kind
+        return ""
+
+    def add_cidr(token):
+        if token.count("/") != 1:
+            return "scan"
+        left, prefix_text = token.split("/", 1)
+        address, kind = tni_one(left)
+        if kind:
+            return kind
+        if not prefix_text.isdigit() or len(prefix_text) > 2:
+            return "scan"
+        prefix = int(prefix_text)
+        if prefix < 0 or prefix > 32:
+            return "scan"
+        host_bits = 32 - prefix
+        if host_bits > 10:
+            return "large"
+        parts = [int(part) for part in address.split(".")]
+        base = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+        mask = 0 if prefix == 0 else ((0xffffffff << host_bits) & 0xffffffff)
+        network = base & mask
+        count = 1 << host_bits
+        start = network
+        end = network + count - 1
+        if prefix <= 30:
+            start += 1
+            end -= 1
+        return add_span(start, end)
+
+    def add_range(token):
+        left, right = token.split("-", 1)
+        start, kind = tni_one(left)
+        if kind:
+            return kind
+        finish, kind = tni_one(right)
+        if kind:
+            return kind
+        def as_long(address):
+            parts = [int(part) for part in address.split(".")]
+            return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+        return add_span(as_long(start), as_long(finish))
+
+    for chunk in re.split(r"[,;\r\n]+", text):
+        piece = chunk.strip()
+        if not piece:
+            continue
+        if piece.count("-") == 1 and "/" not in piece:
+            kind = add_range(piece)
+        elif "/" in piece and " " not in piece:
+            kind = add_cidr(piece)
+        else:
+            kind = ""
+            for word in piece.split():
+                if "/" in word:
+                    kind = add_cidr(word)
+                elif word.count("-") == 1:
+                    kind = add_range(word)
+                else:
+                    address, kind = tni_one(word)
+                    if not kind:
+                        kind = add(address)
+                if kind:
+                    break
+        if kind:
+            return None, kind
+    if not hosts:
+        return None, "scan"
+    return hosts, ""
+
+
+def tni_message(text, kind):
+    keys = {
+        "scan": "asset-tree.error.tni.scan",
+        "public": "asset-tree.error.tni.public",
+        "large": "asset-tree.error.tni.large",
+        "name": "asset-tree.error.tni.name",
+        "type": "asset-tree.error.tni.type",
+        "busy": "asset-tree.error.tni.busy",
+        "many": "asset-tree.error.tni.many",
+    }
+    return text.get(keys.get(kind, "asset-tree.error.tni.scan"), kind)
+
+
+def tni_rows(project_key):
+    return [row for row in STATE.setdefault("subnets", {}).values() if row.get("projectKey") == project_key]
+
+
+def tni_dto(row):
+    return {
+        "id": row["id"], "name": row["name"], "target": row["target"], "hosts": row["hosts"],
+        "state": row.get("state") or "idle", "scanned": row.get("scanned") or 0,
+        "online": row.get("online") or 0, "added": row.get("added") or 0,
+        "note": row.get("note") or "", "log": row.get("log") or "",
+        "started": row.get("started") or 0, "finished": row.get("finished") or 0,
+    }
+
+
+def create_subnet(project_key, body, text):
+    name = str((body or {}).get("name") or "").strip()
+    target = str((body or {}).get("target") or "").strip()
+    if not name or len(name) > 80:
+        return 400, {"message": tni_message(text, "name")}
+    hosts, kind = tni_expand(target)
+    if kind:
+        return 400, {"message": tni_message(text, kind)}
+    if len(tni_rows(project_key)) >= 40:
+        return 400, {"message": tni_message(text, "many")}
+    subnet_id = STATE.setdefault("subnet_seq", 1)
+    STATE["subnet_seq"] = subnet_id + 1
+    row = {
+        "id": subnet_id, "projectKey": project_key, "name": name, "target": target, "hosts": len(hosts),
+        "state": "idle", "scanned": 0, "online": 0, "added": 0, "note": "", "log": "", "started": 0, "finished": 0,
+    }
+    STATE.setdefault("subnets", {})[subnet_id] = row
+    return 201, tni_dto(row)
+
+
+def assign_place_approver(project_key, place_id, user_key):
+    view = STATE.setdefault("views", {}).setdefault(project_key, {})
+    setup = view.setdefault("setup", {})
+    kept = []
+    for part in str(setup.get("lifePlaces") or "").split(","):
+        if ":" not in part:
+            continue
+        raw_id, _key = part.split(":", 1)
+        if raw_id.strip() == str(place_id):
+            continue
+        kept.append(part)
+    if user_key:
+        kept.append("%s:%s" % (int(place_id), user_key))
+    setup["lifePlaces"] = life_places(",".join(kept))
+
+
+def life_places(raw):
+    kept = []
+    seen = set()
+    for part in str(raw or "").split(","):
+        if ":" not in part or len(kept) >= 80:
+            continue
+        raw_id, key = part.split(":", 1)
+        raw_id = raw_id.strip()
+        key = key.strip()
+        if not raw_id.isdigit() or int(raw_id) <= 0 or raw_id in seen:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", key):
+            continue
+        seen.add(raw_id)
+        kept.append("%s:%s" % (int(raw_id), key))
+    return ",".join(kept)
+
+
+def branch_approver(asset, setup):
+    places = {}
+    for part in str((setup or {}).get("lifePlaces") or "").split(","):
+        if ":" not in part:
+            continue
+        raw_id, key = part.split(":", 1)
+        if raw_id.isdigit():
+            places[int(raw_id)] = key
+    current = asset
+    guard = 0
+    on_place = False
+    while current and current.get("parentId") and guard < 40:
+        guard += 1
+        parent = STATE["assets"].get(current.get("parentId"))
+        if not parent or not is_location_id(parent["id"]):
+            break
+        on_place = True
+        if parent["id"] in places:
+            return places[parent["id"]]
+        current = parent
+    if on_place:
+        return ""
+    return (setup or {}).get("lifeApprover") or ""
+
+
+def tni_source_off(project_key, key):
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    setup = module_setup(view.get("setup") or {})
+    return setup.get(key) is False
+
+
+def scan_subnet(project_key, subnet_id, text):
+    if tni_source_off(project_key, "tniScan"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
+    row = STATE.setdefault("subnets", {}).get(subnet_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text.get("asset-tree.error.notFound", "Missing")}
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    type_key = module_setup(view.get("setup") or {}).get("tniComputer") or ""
+    if not type_key or type_key not in STATE["types"] or STATE["types"][type_key].get("location"):
+        return 400, {"message": tni_message(text, "type")}
+    hosts, kind = tni_expand(row["target"])
+    if kind:
+        return 400, {"message": tni_message(text, kind)}
+    added = 0
+    online = []
+    for address in hosts:
+        if int(address.rsplit(".", 1)[-1]) not in (1, 10, 20):
+            continue
+        external = "tni:" + address
+        known = any(asset.get("externalKey") == external and asset.get("projectKey") == project_key for asset in STATE["assets"].values())
+        if not known:
+            asset_id = add_asset(project_key, type_key, address, None, "in_use", None, {})
+            if not asset_id:
+                continue
+            STATE["assets"][asset_id]["externalKey"] = external
+            STATE["assets"][asset_id]["description"] = text.get("asset-tree.ui.tniFound", address).replace("{0}", address)
+            added += 1
+            online.append(address + "\t\tnew")
+        else:
+            online.append(address + "\t\tknown")
+    row.update({
+        "hosts": len(hosts), "state": "done", "scanned": len(hosts), "online": len(online),
+        "added": added, "note": "", "log": "\n".join(online), "finished": 1,
+    })
+    return 202, tni_dto(row)
+
+
+def directory_row(project_key):
+    return STATE.setdefault("directory", {}).get(project_key)
+
+
+def directory_dto(project_key):
+    row = directory_row(project_key) or {}
+    return {
+        "host": row.get("host") or "",
+        "port": row.get("port") or 389,
+        "ssl": bool(row.get("ssl")),
+        "base": row.get("base") or "",
+        "account": row.get("account") or "",
+        "passwordSet": False,
+        "note": "",
+        "finished": 0,
+    }
+
+
+def directory_type(project_key, text):
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    type_key = module_setup(view.get("setup") or {}).get("tniComputer") or ""
+    if not type_key or type_key not in STATE["types"] or STATE["types"][type_key].get("location"):
+        return None
+    return type_key
+
+
+def directory_apply(project_key, computers, text):
+    type_key = directory_type(project_key, text)
+    if not type_key:
+        return 400, {"message": tni_message(text, "type")}
+    created = 0
+    updated = 0
+    for computer in computers:
+        found = None
+        for asset in STATE["assets"].values():
+            if asset.get("projectKey") == project_key and asset.get("externalKey") == computer["key"]:
+                found = asset
+                break
+        if found:
+            found["name"] = computer["name"]
+            found["description"] = computer["detail"]
+            updated += 1
+            continue
+        asset_id = add_asset(project_key, type_key, computer["name"], None, "in_use", None, {})
+        if not asset_id:
+            continue
+        STATE["assets"][asset_id]["externalKey"] = computer["key"]
+        STATE["assets"][asset_id]["description"] = computer["detail"]
+        created += 1
+    return 200, {"created": created, "updated": updated, "done": True, "totalRows": len(computers), "errors": []}
+
+
+def save_directory(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    base = str(body.get("base") or "").strip()
+    account = str(body.get("account") or "").strip()
+    if not host or any(ch in host for ch in " /\\"):
+        return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
+    if "=" not in base or len(base) < 3:
+        return 400, {"message": text.get("asset-tree.error.tni.base", "Base")}
+    if not account:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    port = int(body.get("port") or 0)
+    ssl = bool(body.get("ssl"))
+    if port <= 0:
+        port = 636 if ssl else 389
+    saved = {
+        "host": host, "port": port, "ssl": ssl, "base": base, "account": account, "secret": "",
+    }
+    STATE.setdefault("directory", {})[project_key] = saved
+    return 200, directory_dto(project_key)
+
+
+def load_directory(project_key, body, text):
+    if tni_source_off(project_key, "tniAd"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or not account or not password:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    row = directory_row(project_key)
+    if row is not None:
+        row["secret"] = ""
+    computers = [
+        {"key": "ad:preview-1", "name": host.split(".")[0] + "-1", "detail": "Windows 10 · " + host},
+        {"key": "ad:preview-2", "name": host.split(".")[0] + "-2", "detail": "Windows 11 · " + host},
+    ]
+    return directory_apply(project_key, computers, text)
+
+
+def sccm_row(project_key):
+    return (STATE.get("sccm") or {}).get(project_key)
+
+
+def sccm_dto(project_key):
+    row = sccm_row(project_key) or {}
+    return {
+        "host": row.get("host") or "",
+        "port": row.get("port") or 443,
+        "ssl": bool(row.get("ssl")),
+        "base": "",
+        "account": row.get("account") or "",
+        "passwordSet": False,
+        "note": "",
+        "finished": 0,
+    }
+
+
+def save_sccm(project_key, body, text):
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    if not host or any(ch in host for ch in " /\\"):
+        return 400, {"message": text.get("asset-tree.error.tni.connect", "Connect")}
+    if not account:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    port = int(body.get("port") or 0)
+    if port <= 0:
+        port = 443
+    saved = {
+        "host": host, "port": port, "ssl": bool(body.get("ssl")), "account": account, "secret": "",
+    }
+    STATE.setdefault("sccm", {})[project_key] = saved
+    return 200, sccm_dto(project_key)
+
+
+def load_sccm(project_key, body, text):
+    if tni_source_off(project_key, "tniSccm"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
+    body = body or {}
+    host = str(body.get("host") or "").strip()
+    account = str(body.get("account") or "").strip()
+    password = str(body.get("password") or "")
+    if not host or not account or not password:
+        return 400, {"message": text.get("asset-tree.error.tni.account", "Account")}
+    row = sccm_row(project_key)
+    if row is not None:
+        row["secret"] = ""
+    computers = [
+        {"key": "sccm:501", "name": host.split(".")[0] + "-501", "detail": "Windows 10 · " + host},
+        {"key": "sccm:502", "name": host.split(".")[0] + "-502", "detail": "Windows 11 · " + host},
+    ]
+    return directory_apply(project_key, computers, text)
+
+
+def watch_station(raw):
+    text = str(raw or "").strip()
+    local = watch_local(text)
+    if local:
+        return local
+    if not text or len(text) > 253 or text[0] in ".-" or text[-1] in ".-" or ".." in text:
+        return ""
+    if text.lower() == "localhost":
+        return ""
+    letter = False
+    for label in text.split("."):
+        if not label or len(label) > 63 or label[0] == "-" or label[-1] == "-":
+            return ""
+        for ch in label:
+            digit = "0" <= ch <= "9"
+            alpha = ("a" <= ch <= "z") or ("A" <= ch <= "Z")
+            if not (digit or alpha or ch == "-"):
+                return ""
+            if alpha:
+                letter = True
+    return text if letter else ""
+
+
+def watch_local(address):
+    parts = str(address or "").strip().split(".")
+    if len(parts) != 4:
+        return ""
+    try:
+        octets = [int(part) for part in parts]
+    except ValueError:
+        return ""
+    if any(part < 0 or part > 255 for part in octets):
+        return ""
+    private = octets[0] == 10 or (octets[0] == 192 and octets[1] == 168) or (
+        octets[0] == 172 and 16 <= octets[1] <= 31
+    )
+    if not private:
+        return ""
+    return ".".join(str(part) for part in octets)
+
+
+def watch_dto(asset):
+    row = (STATE.get("watch") or {}).get(asset["id"]) or {}
+    key = str(asset.get("externalKey") or "")
+    suggestion = watch_local(key[4:]) if key.startswith("tni:") else ""
+    return {
+        "armed": bool(row.get("armed")),
+        "address": asset.get("name") or "",
+        "suggestion": suggestion,
+        "up": int(row.get("up") or 0),
+        "checkedAt": int(row.get("checkedAt") or 0),
+    }
+
+
+def watch_asset(asset_id, text):
+    asset = STATE["assets"].get(asset_id)
+    if not asset:
+        return None, (404, {"message": text.get("asset-tree.error.notFound", "Missing")})
+    blocked = reject_module(asset["projectKey"], "tni", text)
+    if blocked:
+        return None, blocked
+    if (STATE["types"].get(asset.get("typeKey")) or {}).get("location"):
+        return None, (400, {"message": text.get("asset-tree.error.tni.watch", "Address")})
+    return asset, None
+
+
+def get_watch(asset_id, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    return 200, watch_dto(asset)
+
+
+def save_watch(asset_id, body, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    body = body or {}
+    row = STATE.setdefault("watch", {}).setdefault(asset_id, {})
+    row["exempt"] = bool(body.get("exempt"))
+    row.setdefault("up", 0)
+    row["address"] = asset.get("name") or ""
+    return 200, watch_dto(asset)
+
+
+def ping_asset(asset_id, text):
+    asset, blocked = watch_asset(asset_id, text)
+    if blocked:
+        return blocked
+    if tni_source_off(asset.get("projectKey"), "tniPing"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
+    host = watch_station(asset.get("name") or "")
+    up = 1 if host else 2
+    row = STATE.setdefault("watch", {}).setdefault(asset_id, {})
+    row["up"] = up
+    row["address"] = asset.get("name") or ""
+    row.setdefault("exempt", False)
+    record_activity(asset_id, "ping", asset.get("name") or "", "", "up" if up == 1 else "down")
+    dto = asset_dto(asset, text, True)
+    dto["up"] = up
+    return 200, dto
+
+
+def sheet_computers(csv):
+    text = str(csv or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        return []
+    header_line = ""
+    for line in text.split("\n"):
+        if line.startswith("#") or not line.strip():
+            continue
+        header_line = line
+        break
+    delim = ";" if header_line.count(";") > header_line.count(",") else ","
+    rows = []
+    for line in text.split("\n"):
+        if not line.strip():
+            continue
+        rows.append([cell.strip() for cell in line.split(delim)])
+    header_at = -1
+    cols = {}
+    aliases = {
+        "name": "name", "computername": "name", "имя": "name", "имякомпьютера": "name",
+        "dnshostname": "dns", "resourceid": "resource", "идресурса": "resource",
+        "operatingsystem": "os", "операционнаясистема": "os",
+        "username": "user", "пользователь": "user",
+    }
+    for index, row in enumerate(rows):
+        mapped = {}
+        for cell_at, cell in enumerate(row):
+            key = "".join(ch for ch in cell.lower() if ch not in " _-.")
+            name = aliases.get(key)
+            if name and name not in mapped:
+                mapped[name] = cell_at
+        if mapped.get("name") is not None or mapped.get("dns") is not None or mapped.get("resource") is not None:
+            header_at = index
+            cols = mapped
+            break
+    if header_at < 0:
+        return None
+    computers = []
+    seen = set()
+    for row in rows[header_at + 1:]:
+        def cell(key):
+            at = cols.get(key)
+            if at is None or at >= len(row):
+                return ""
+            return row[at].strip().strip('"')
+        name = cell("name") or cell("dns")
+        resource = cell("resource")
+        if resource.endswith(".0") and resource[:-2].isdigit():
+            resource = resource[:-2]
+        dns = cell("dns")
+        if resource:
+            key = "sccm:" + resource
+        elif dns:
+            key = "ad:" + dns.lower()
+        elif name:
+            key = "ad:" + name.lower()
+        else:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        detail = " · ".join(part for part in (cell("os"), cell("user")) if part)
+        computers.append({"key": key, "name": name or resource, "detail": detail})
+        if len(computers) > 2000:
+            return "rows"
+    return computers
+
+
+def import_sheet(project_key, body, text):
+    parsed = sheet_computers((body or {}).get("csv"))
+    if parsed == "rows":
+        return 400, {"message": text.get("asset-tree.error.tni.rows", "Rows")}
+    if not parsed:
+        return 400, {"message": text.get("asset-tree.error.tni.sheet", "Sheet")}
+    return directory_apply(project_key, parsed, text)
 
 
 def plan_kind(kind):
@@ -1234,7 +1875,9 @@ def plan_kind(kind):
         "room", "wall", "door", "window", "column", "stair", "desk", "partition",
         "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant",
         "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text",
+        "box", "ellipse", "diamond", "triangle", "note", "flow", "chart",
         "power", "scs", "comm", "vent", "water", "heat", "fire", "guard", "png",
+        "pen", "rack", "switch", "glyph",
     }
     if value in allowed:
         return value
@@ -1264,6 +1907,11 @@ def save_mine_view(user_key, body):
     }
     STATE.setdefault("mine_views", {})[user_key] = stored
     return stored
+
+
+def pack_glyphs(raw):
+    text = str(raw or "").replace(";", "").replace("=", "").replace("\n", "").replace("\r", "").strip()
+    return text[:24000]
 
 
 def pack_furniture(raw):
@@ -1716,9 +2364,14 @@ def ensure_profile_demo():
         view = STATE.setdefault("views", {}).setdefault(project, {})
         modules = [item for item in (view.get("modules") or []) if item != "portal"]
         modules.append("portal")
+        for extra in ("reports", "life", "service", "map", "tni"):
+            if extra not in modules:
+                modules.append(extra)
         view["modules"] = modules
         setup = view.setdefault("setup", {})
-        setup["portalMine"] = False
+        setup["portalMine"] = True
+        if project == "STP" and not setup.get("tniComputer"):
+            setup["tniComputer"] = "stp-pc"
     if "stp-laptop" not in STATE["types"]:
         STATE["types"]["stp-laptop"] = {
             "typeKey": "stp-laptop", "projectKey": "STP", "baseKey": "laptop", "label": "Ноутбук",
@@ -1730,6 +2383,17 @@ def ensure_profile_demo():
                 {"fieldKey": "serial", "label": "Серийный номер", "kind": "text", "required": False, "position": 2},
             ],
         }
+    for type_key, label, icon, order in (
+        ("stp-pc", "Компьютер", "desktop", 22),
+        ("stp-phone", "Телефон", "phone", 23),
+        ("stp-tablet", "Планшет", "tablet", 24),
+    ):
+        if type_key not in STATE["types"]:
+            STATE["types"][type_key] = {
+                "typeKey": type_key, "projectKey": "STP", "baseKey": "", "label": label,
+                "color": "#0052CC", "icon": icon, "systemType": False, "location": False,
+                "showInTree": True, "service": False, "sortOrder": order, "fields": [],
+            }
     if "test-uzi" not in STATE["types"]:
         STATE["types"]["test-uzi"] = {
             "typeKey": "test-uzi", "projectKey": "TEST", "baseKey": "uzi", "label": "Аппарат УЗИ",
@@ -1772,6 +2436,23 @@ def ensure_profile_demo():
     else:
         thin = next((asset for asset in STATE["assets"].values() if asset.get("objectKey") == "ASIT-2"), None)
         thin_id = thin["id"] if thin else None
+    lives = STATE.setdefault("lives", {})
+    if laptop and laptop["id"] not in lives:
+        lives[laptop["id"]] = {"purchased": "2022-03-01", "warrantyUntil": "2026-03-01", "priceMinor": 12000000, "residualMinor": 0, "lifeMonths": 36}
+    if thin_id and thin_id not in lives:
+        lives[thin_id] = {"purchased": "2024-01-15", "warrantyUntil": "2027-01-15", "priceMinor": 18000000, "residualMinor": 0, "lifeMonths": 36}
+    parent_id = labinsk["id"] if labinsk else (laptop.get("parentId") if laptop else None)
+    for name, type_key, custodian, issued, values in (
+        ("HP ProBook", "stp-laptop", "ivanov", None, {"model": "ProBook 450", "serial": "HP-450"}),
+        ("Монитор Samsung", "stp-pc", "ivanov", None, {}),
+        ("iPhone Иванова", "stp-phone", None, "ivanov", {}),
+        ("Планшет Lenovo", "stp-tablet", "ivanov", None, {}),
+    ):
+        if any(asset.get("name") == name and asset.get("projectKey") == "STP" for asset in STATE["assets"].values()):
+            continue
+        extra_id = add_asset("STP", type_key, name, parent_id, "in_use", custodian, values)
+        if issued:
+            STATE["assets"][extra_id]["issuedKey"] = issued
     if laptop and thin_id and not any(row.get("fromId") == laptop["id"] and row.get("toId") == thin_id for row in relation_rows()):
         row_id = STATE.get("relation_seq") or 1
         STATE["relation_seq"] = row_id + 1
@@ -1955,8 +2636,121 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "author": USERS.get("ivanov"),
         "shares": share_dtos(asset_id),
         "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
-        "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
+        "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal") and not row.get("slot")],
         "lines": summary["lines"],
+        "projectKey": project_key,
+        "portalUrl": "/servicedesk/customer/portal/7",
+    }
+
+
+def portal_link_request(asset_id, issue_key, text):
+    detail = portal_detail(asset_id, text)
+    if not detail:
+        return 403, {"message": text["asset-tree.error.forbidden"]}
+    row = {
+        "assetId": asset_id,
+        "issueKey": issue_key,
+        "name": detail.get("name") or "",
+        "objectKey": detail.get("objectKey") or "",
+    }
+    links = STATE.setdefault("portal_request_links", [])
+    if not any(item.get("assetId") == asset_id and item.get("issueKey") == issue_key for item in links):
+        links.append(row)
+    return 204, None
+
+
+def portal_request_types():
+    return [
+        {
+            "id": "1",
+            "name": "Сообщить о проблеме",
+            "description": "Что случилось с этим оборудованием",
+            "fields": [
+                {"id": "summary", "name": "Тема", "required": True, "kind": "text", "options": []},
+                {"id": "description", "name": "Описание", "required": True, "kind": "textarea", "options": []},
+            ],
+        },
+        {
+            "id": "2",
+            "name": "Запрос на обслуживание",
+            "description": "Плановая работа или настройка",
+            "fields": [
+                {"id": "summary", "name": "Тема", "required": True, "kind": "text", "options": []},
+                {"id": "description", "name": "Описание", "required": False, "kind": "textarea", "options": []},
+                {"id": "urgency", "name": "Срочность", "required": True, "kind": "select", "options": [
+                    {"value": "low", "label": "Низкая"},
+                    {"value": "normal", "label": "Обычная"},
+                    {"value": "high", "label": "Высокая"},
+                ]},
+            ],
+        },
+    ]
+
+
+def portal_request_form(asset_id, text):
+    detail = portal_detail(asset_id, text)
+    if not detail:
+        return 403, {"message": text["asset-tree.error.forbidden"]}
+    asset = STATE["assets"][asset_id]
+    return 200, {
+        "assetId": asset_id,
+        "assetName": detail["name"],
+        "objectKey": detail["objectKey"],
+        "projectKey": asset["projectKey"],
+        "types": portal_request_types(),
+    }
+
+
+def portal_request_create(asset_id, body, text):
+    detail = portal_detail(asset_id, text)
+    if not detail:
+        return 403, {"message": text["asset-tree.error.forbidden"]}
+    asset = STATE["assets"][asset_id]
+    types = {item["id"]: item for item in portal_request_types()}
+    type_id = str((body or {}).get("requestTypeId") or "")
+    chosen = types.get(type_id)
+    if not chosen:
+        return 400, {"message": text.get("asset-tree.error.portalRequest.type", "Choose a request type.")}
+    incoming = {}
+    for row in (body.get("values") or []):
+        if isinstance(row, dict) and row.get("id"):
+            incoming[str(row["id"])] = str(row.get("value") or "").strip()
+    for field in chosen["fields"]:
+        value = incoming.get(field["id"], "")
+        if field.get("required") and not value:
+            pattern = text.get("asset-tree.error.field.required", "Fill in {0}.")
+            return 400, {"message": pattern.replace("{0}", field["name"])}
+        if field.get("kind") == "select" and value:
+            allowed = {option["value"] for option in field.get("options") or []}
+            if value not in allowed:
+                pattern = text.get("asset-tree.error.portalRequest.option", "Choose a listed value for {0}.")
+                return 400, {"message": pattern.replace("{0}", field["name"])}
+    summary = incoming.get("summary") or detail["name"]
+    issue_id = (max(ISSUES_BY_ID) if ISSUES_BY_ID else 10000) + 1
+    number = 1 + sum(1 for item in ISSUES_BY_ID.values() if item.get("projectKey") == asset["projectKey"])
+    key = asset["projectKey"] + "-" + str(number)
+    while key in ISSUES:
+        number += 1
+        key = asset["projectKey"] + "-" + str(number)
+    issue = {
+        "issueId": issue_id,
+        "issueKey": key,
+        "projectKey": asset["projectKey"],
+        "summary": summary,
+        "status": "Открыта",
+        "assetId": asset_id,
+        "requestTypeId": type_id,
+        "values": incoming,
+    }
+    ISSUES[key] = issue
+    ISSUES_BY_ID[issue_id] = issue
+    if not any(link["assetId"] == asset_id and link["issueId"] == issue_id for link in STATE["links"]):
+        STATE["links"].append({"assetId": asset_id, "issueId": issue_id, "statusBefore": asset.get("status") or ""})
+    return 201, {
+        "key": key,
+        "url": "/browse/" + key,
+        "assetName": detail["name"],
+        "objectKey": detail["objectKey"],
     }
 
 
@@ -2020,7 +2814,8 @@ def type_dto(row, text, rows):
         "placeCaption": (row.get("placeCaption") or "") if row.get("location") else "",
         "showInTree": bool(row.get("location") or row.get("showInTree")),
         "parentTypeKey": (row.get("parentTypeKey") or ""),
-        "service": bool(row.get("service")) and not row.get("location"), "assetCount": count,
+        "service": bool(row.get("service")) and not row.get("location"),
+        "reach": bool(row.get("reach")) and not row.get("location"), "assetCount": count,
         "fields": with_parent_fields(row, text),
     }
 
@@ -2299,6 +3094,9 @@ def asset_dto(asset, text, with_issues):
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
         dto["shares"] = share_dtos(asset["id"])
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
+        watch = (STATE.get("watch") or {}).get(asset["id"]) or {}
+        dto["pingUp"] = int(watch.get("up") or 0)
+        dto["pingExempt"] = bool(watch.get("exempt"))
         dto["peers"] = peers_for(asset["id"], text)
         dto["links"] = relations_for(asset["id"])
     return dto
@@ -3257,6 +4055,27 @@ def room_place(place_id):
     return 0
 
 
+def floor_scan(row):
+    src = str((row or {}).get("underlay") or "")
+    empty = {"underlay": "", "underlayX": 0, "underlayY": 0, "underlayW": 0, "underlayH": 0}
+    if not src:
+        return empty
+    if not (src.startswith("data:image/jpeg;base64,") or src.startswith("data:image/png;base64,")):
+        return {}
+    if len(src) > 900000 or "|" in src:
+        return {}
+    try:
+        x = int(row.get("underlayX") or 0)
+        y = int(row.get("underlayY") or 0)
+        w = int(row.get("underlayW") or 0)
+        h = int(row.get("underlayH") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if w < 10 or h < 10 or w > 20000 or h > 20000 or x < -20000 or y < -20000 or x > 20000 or y > 20000:
+        return {}
+    return {"underlay": src, "underlayX": x, "underlayY": y, "underlayW": w, "underlayH": h}
+
+
 def floor_dto(row):
     rooms = []
     for room in row.get("rooms") or []:
@@ -3286,7 +4105,99 @@ def floor_dto(row):
         "planW": plan_limit(row.get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W),
         "planH": plan_limit(row.get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H),
         "rooms": rooms, "pins": pins,
+        **floor_scan(row),
     }
+
+
+def scheme_name(raw):
+    name = (raw or "").strip() or "Scheme"
+    return name[:80]
+
+
+def scheme_body(raw):
+    if not isinstance(raw, str):
+        return None
+    body = raw.strip()
+    if not body.startswith("{") or len(body) > 1500000:
+        return None
+    return body
+
+
+def scheme_place_id(row):
+    raw = row.get("body") or ""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return 0
+    try:
+        return int(data.get("placeId") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def scheme_summary(row):
+    return {"id": row["id"], "name": row["name"], "updatedAt": row["updatedAt"], "placeId": scheme_place_id(row)}
+
+
+def project_schemes(project_key):
+    rows = [row for row in STATE.setdefault("schemes", {}).values() if row.get("projectKey") == project_key]
+    rows.sort(key=lambda item: item["id"])
+    return [scheme_summary(row) for row in rows]
+
+
+def create_scheme(project_key, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None or len(project_schemes(project_key)) >= 40:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    scheme_id = STATE.setdefault("scheme_seq", 1)
+    STATE["scheme_seq"] = scheme_id + 1
+    row = {
+        "id": scheme_id,
+        "projectKey": project_key,
+        "name": scheme_name((body or {}).get("name")),
+        "body": stored,
+        "updatedAt": int(datetime.datetime.now().timestamp() * 1000),
+    }
+    STATE["schemes"][scheme_id] = row
+    return 201, scheme_summary(row)
+
+
+def read_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    payload = scheme_summary(row)
+    payload["body"] = row["body"]
+    return 200, payload
+
+
+def save_scheme(project_key, scheme_id, body, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    stored = scheme_body((body or {}).get("body"))
+    if stored is None:
+        return 400, {"message": text.get("asset-tree.error.scheme", "Scheme")}
+    row["name"] = scheme_name((body or {}).get("name"))
+    row["body"] = stored
+    row["updatedAt"] = int(datetime.datetime.now().timestamp() * 1000)
+    return 200, scheme_summary(row)
+
+
+def delete_scheme(project_key, scheme_id, text):
+    if not module_on(project_key, "map"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    row = STATE.setdefault("schemes", {}).get(scheme_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    del STATE["schemes"][scheme_id]
+    return 204, None
 
 
 def project_floors(project_key):
@@ -3349,7 +4260,7 @@ def save_floor(project_key, floor_id, body, text):
             label = "Комната"
         if kind in ("room", "stair"):
             minimum = 16
-        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text", "png"):
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text", "png", "rack", "switch", "glyph"):
             minimum = 8
         else:
             minimum = 4
@@ -3395,9 +4306,17 @@ def save_floor(project_key, floor_id, body, text):
             "y": max(0, min(plan_h, int(pin.get("y") or 0))),
         })
         pin_seq += 1
+    scan = floor_scan(body or {})
+    if (body or {}).get("underlay") and not scan.get("underlay"):
+        return 400, {"message": text.get("asset-tree.error.floor", "Floor")}
     row.update({
         "name": name, "level": level, "placeId": place_id, "planW": plan_w, "planH": plan_h,
         "rooms": stored_rooms, "pins": stored_pins,
+        "underlay": scan.get("underlay") or "",
+        "underlayX": scan.get("underlayX") or 0,
+        "underlayY": scan.get("underlayY") or 0,
+        "underlayW": scan.get("underlayW") or 0,
+        "underlayH": scan.get("underlayH") or 0,
     })
     return 200, floor_dto(row)
 
@@ -3412,7 +4331,181 @@ def delete_floor(project_key, floor_id, text):
     return 204, None
 
 
-REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work")
+REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work", "done")
+REPORT_CHARTS = ("donut", "pie", "bar", "bars", "line", "area", "histogram", "scatter", "radar", "gantt", "venn")
+REPORT_GROUPS = ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind", "done", "field")
+DONE_AXES = ("kind", "month", "place", "type", "who", "asset", "state")
+
+
+def done_report(group):
+    return group == "done" or str(group or "").startswith("done+")
+
+
+def clean_report_group(raw):
+    value = (raw or "").strip().lower()
+    if not value or len(value) > 16:
+        return ""
+    parts = value.split("+")
+    if len(parts) == 1:
+        if parts[0] == "who":
+            return ""
+        return parts[0] if parts[0] in REPORT_GROUPS else ""
+    if "done" in parts or "who" in parts:
+        if parts[0] != "done":
+            return ""
+        seen = []
+        for part in parts[1:]:
+            if part not in DONE_AXES or part in seen:
+                return ""
+            seen.append(part)
+        stored = "+".join(parts)
+        return stored if seen and len(stored) <= 16 else ""
+    seen = []
+    for part in parts:
+        if part not in REPORT_GROUPS or part in seen or part in ("done", "who"):
+            return ""
+        seen.append(part)
+    stored = "+".join(seen)
+    return stored if len(seen) >= 2 and len(stored) <= 16 else ""
+
+
+def report_axes(group):
+    if group == "done":
+        return ["kind"]
+    if done_report(group):
+        return [part for part in str(group)[5:].split("+") if part]
+    return None
+
+
+def done_day(piece):
+    text = str(piece or "").strip()
+    at = text.find(">")
+    if at < 1:
+        return ""
+    source = text[:at].strip()
+    flag = text[at + 1:].strip().split("@", 1)[0]
+    if flag != "done" or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", source):
+        return ""
+    return source
+
+
+def done_stamp(piece):
+    text = str(piece or "").strip()
+    at = text.find(">")
+    if at < 0:
+        return ""
+    target = text[at + 1:].strip()
+    if not target.startswith("done@"):
+        return ""
+    stamp = target[5:].strip()[:10]
+    return stamp if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp) else ""
+
+
+def work_state(day, stamp):
+    if not stamp:
+        return "done"
+    return "late" if stamp > day else "ontime"
+
+
+def finished_marks(plan):
+    stamps = {}
+    order = []
+    for part in str(plan.get("moves") or "").split(","):
+        day = done_day(part)
+        if not day or day in stamps:
+            continue
+        stamps[day] = done_stamp(part)
+        order.append(day)
+    unit = plan.get("everyUnit") or ""
+    last = str(plan.get("lastDone") or "")[:10]
+    marked = str(plan.get("completedOn") or "")[:10]
+    applied = plan.get("appliedFor") or ""
+    first = plan_next(plan)
+    completed = applied == "done" or (unit == "once" and first and applied == first.isoformat())
+    if unit != "once":
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", marked) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", last) and (last not in stamps or not stamps.get(last)):
+            stamps[last] = marked
+            if last not in order:
+                order.append(last)
+    elif completed:
+        anchor = last if re.fullmatch(r"\d{4}-\d{2}-\d{2}", last) else marked
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", anchor) and (anchor not in stamps or not stamps.get(anchor)):
+            stamps[anchor] = marked if re.fullmatch(r"\d{4}-\d{2}-\d{2}", marked) else ""
+            if anchor not in order:
+                order.append(anchor)
+    order.sort()
+    return [{"day": day, "state": work_state(day, stamps.get(day) or "")} for day in order]
+
+
+def finished_days(plan):
+    return [mark["day"] for mark in finished_marks(plan)]
+
+
+def expected_after(plan, today=None):
+    today = today or datetime.date.today()
+    unit = plan.get("everyUnit") or ""
+    if unit == "once":
+        return ""
+    cursor = plan_next(plan)
+    guard = 0
+    count = plan.get("everyCount")
+    while cursor and guard < 500:
+        if cursor > today:
+            return cursor.isoformat()
+        nxt = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        if not nxt or nxt <= cursor:
+            return ""
+        cursor = nxt
+        guard += 1
+    return ""
+
+
+STATE_ORDER = ("overdue", "late", "ontime", "done", "expected")
+STATE_COLOR = {"ontime": "#00875A", "late": "#FF8B00", "overdue": "#DE350B", "expected": "#0052CC", "done": "#6B778C"}
+
+
+def work_state_label(state, text):
+    keys = {
+        "ontime": "asset-tree.ui.reportStateOntime",
+        "late": "asset-tree.ui.reportStateLate",
+        "overdue": "asset-tree.ui.reportStateOverdue",
+        "expected": "asset-tree.ui.reportStateExpected",
+        "done": "asset-tree.ui.reportStateDone",
+    }
+    return text.get(keys.get(state or "", "asset-tree.ui.reportStateDone"), state or "")
+
+
+def work_clock(start, end):
+    begin = str(start or "").strip()
+    finish = str(end or "").strip()
+    if not begin:
+        return ""
+    return begin if not finish else begin + "–" + finish
+
+
+def work_line(slot, asset, name, equipment, kind_name, day, state, nxt, clock, bucket, text):
+    slot["count"] += 1
+    detail = "%s · %s · %s" % (kind_name, equipment, day)
+    if clock:
+        detail += " " + clock
+    detail += " · " + work_state_label(state, text)
+    if nxt and nxt != day:
+        detail += " · " + nxt
+    return {
+        "assetId": asset["id"] if asset else 0,
+        "objectKey": (asset.get("objectKey") if asset else "") or "",
+        "name": name,
+        "detail": detail,
+        "bucket": bucket,
+        "from": day,
+        "to": day,
+        "asset": equipment,
+        "kind": kind_name,
+        "when": day,
+        "state": state,
+        "next": nxt or "",
+        "clock": clock or "",
+    }
 
 
 def parse_money(raw):
@@ -3506,6 +4599,11 @@ def life_dto(asset_id):
         "warrantyService": row.get("warrantyService") or "",
         "replaceOn": replace_on,
         "monthsLeft": months_left,
+        "contractor": (row.get("contractor") or "").strip(),
+        "contractNo": (row.get("contractNo") or "").strip(),
+        "contractFrom": row.get("contractFrom") or "",
+        "contractUntil": row.get("contractUntil") or "",
+        "contractPhase": contract_phase(row),
     }
 
 
@@ -3528,7 +4626,8 @@ def save_life(asset_id, body, text):
     currency = (body.get("currency") or "RUB").strip().upper() or "RUB"
     document = (body.get("document") or "").strip()
     service = (body.get("warrantyService") or "").strip()
-    if len(currency) != 3 or len(document) > 160 or len(service) > 160:
+    contract = contract_fields(body)
+    if len(currency) != 3 or len(document) > 160 or len(service) > 160 or contract is None:
         return 400, {"message": text.get("asset-tree.error.life", "Life")}
     row.update({
         "purchased": (body.get("purchased") or "").strip(),
@@ -3542,12 +4641,54 @@ def save_life(asset_id, body, text):
         "residualMinor": residual,
         "lifeMonths": months,
     })
+    row.update(contract)
     if "approverKey" in body and row.get("writeoffState") != "pending":
         approver = str(body.get("approverKey") or "").strip()
         if approver and approver not in USERS:
             return 400, {"message": text.get("asset-tree.error.writeoff.approver", "Approver")}
         row["approverKey"] = approver
     return 200, life_dto(asset_id)
+
+
+def iso_day(value):
+    try:
+        datetime.date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+def contract_fields(body):
+    contractor = ((body or {}).get("contractor") or "").strip()
+    number = ((body or {}).get("contractNo") or "").strip()
+    start = ((body or {}).get("contractFrom") or "").strip()
+    end = ((body or {}).get("contractUntil") or "").strip()
+    if len(contractor) > 120 or len(number) > 160:
+        return None
+    if (start and not iso_day(start)) or (end and not iso_day(end)):
+        return None
+    if not contractor and not number:
+        if start or end:
+            return None
+        return {"contractor": "", "contractNo": "", "contractFrom": "", "contractUntil": ""}
+    if start and end and start > end:
+        return None
+    return {"contractor": contractor, "contractNo": number, "contractFrom": start, "contractUntil": end}
+
+
+def contract_phase(row):
+    contractor = (row.get("contractor") or "").strip()
+    number = (row.get("contractNo") or "").strip()
+    if not contractor and not number:
+        return 0
+    today = datetime.date.today().isoformat()
+    start = row.get("contractFrom") or ""
+    end = row.get("contractUntil") or ""
+    if start and today < start:
+        return 3
+    if end and today > end:
+        return 2
+    return 1
 
 
 def request_writeoff(asset_id, body, text):
@@ -3558,10 +4699,15 @@ def request_writeoff(asset_id, body, text):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     reason = ((body or {}).get("reason") or "").strip()
     approver = ((body or {}).get("approverKey") or "").strip()
+    view = (STATE.get("views") or {}).get(asset["projectKey"]) or {}
+    setup = module_setup(view.get("setup") or {})
+    if setup.get("lifeApproval") is not False:
+        approver = branch_approver(asset, setup)
     if not reason or len(reason) > 500:
         return 400, {"message": text.get("asset-tree.error.life", "Life")}
     if approver not in USERS:
-        return 400, {"message": text.get("asset-tree.error.writeoff.approver", "Approver")}
+        key = "asset-tree.error.writeoff.branch" if setup.get("lifeApproval") is not False else "asset-tree.error.writeoff.approver"
+        return 400, {"message": text.get(key, "Approver")}
     row = STATE["lives"].setdefault(asset_id, {"assetId": asset_id})
     if row.get("writeoffState") in ("pending", "approved"):
         return 400, {"message": text.get("asset-tree.error.writeoff", "Write-off")}
@@ -3592,7 +4738,7 @@ def stored_report_chart(project_key, report_key, fallback):
     for part in str(setup.get("reportCharts") or "").split(","):
         if part.startswith(report_key + ":"):
             chart = part.split(":", 1)[1]
-            if chart in ("donut", "pie", "bar", "bars"):
+            if chart in REPORT_CHARTS:
                 return chart
     return fallback
 
@@ -3600,7 +4746,7 @@ def stored_report_chart(project_key, report_key, fallback):
 def report_group(key):
     if key in ("status", "type", "place", "holder", "issued"):
         return key
-    return {"cost": "type", "receipts": "month", "age": "age", "warranty": "warranty", "writeoff": "writeoff", "work": "kind"}.get(key, "")
+    return {"cost": "type", "receipts": "month", "age": "age", "warranty": "warranty", "writeoff": "writeoff", "work": "kind", "done": "done"}.get(key, "")
 
 
 def report_catalog(project_key, text):
@@ -3616,13 +4762,72 @@ def report_catalog(project_key, text):
         "age": text.get("asset-tree.ui.reportAge", "Age"),
         "writeoff": text.get("asset-tree.ui.reportWriteoffs", "Write-offs"),
         "work": text.get("asset-tree.ui.reportWork", "Work"),
+        "done": text.get("asset-tree.ui.reportDone", "Completed work"),
     }
-    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": stored_report_chart(project_key, key, "donut" if key == "status" else "bar"), "metric": "cost" if key == "cost" else "count", "standard": True, "filterField": "", "filterValue": ""} for key in REPORT_STANDARD]
-    own = [row for row in STATE.setdefault("saved_reports", {}).values() if row.get("projectKey") == project_key]
+    service = module_on(project_key, "service")
+    keys = [key for key in REPORT_STANDARD if key != "done" or service]
+    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": stored_report_chart(project_key, key, "donut" if key == "status" else "bar"), "metric": "cost" if key == "cost" else "count", "standard": True, "filterField": "", "filterValue": ""} for key in keys]
+    own = [row for row in STATE.setdefault("saved_reports", {}).values() if row.get("projectKey") == project_key and (service or not done_report(row.get("groupBy")))]
     own.sort(key=lambda item: item["id"])
     for row in own:
-        items.append({"id": "s%s" % row["id"], "name": row["name"], "groupBy": row["groupBy"], "filterField": row.get("filterField") or "", "filterValue": row.get("filterValue") or "", "chart": row.get("chart") or "bar", "metric": row.get("metric") or "count", "standard": False})
+        items.append({"id": "s%s" % row["id"], "name": row["name"], "groupBy": row["groupBy"], "filterField": row.get("filterField") or "", "filterValue": row.get("filterValue") or "", "chart": row.get("chart") or "bar", "metric": row.get("metric") or "count", "standard": False, "fieldKey": row.get("fieldKey") or "", "attrKey": row.get("attrKey") or "", "attrValue": row.get("attrValue") or ""})
     return items
+
+
+def unescape_field_rule(raw):
+    out = []
+    text = raw or ""
+    index = 0
+    while index < len(text):
+        if text[index] == "~" and index + 1 < len(text):
+            nxt = text[index + 1]
+            if nxt == "~":
+                out.append("~")
+                index += 2
+                continue
+            if nxt == "p":
+                out.append("|")
+                index += 2
+                continue
+            if nxt == "s":
+                out.append(";")
+                index += 2
+                continue
+        out.append(text[index])
+        index += 1
+    return "".join(out)
+
+
+def field_rules_ok(packed):
+    rules = (packed or "").split("|")
+    if not packed or not rules or len(rules) > 8:
+        return False
+    for rule in rules:
+        mark = rule.find("~")
+        if mark <= 0 or not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", rule[:mark]):
+            return False
+        text = unescape_field_rule(rule[mark + 1:]).strip()
+        if not text or len(text) > 80:
+            return False
+    return True
+
+
+def report_chart_list(raw):
+    value = (raw or "").strip().lower()
+    if value in REPORT_CHARTS:
+        return value
+    if "," not in value or len(value) > 120:
+        return ""
+    seen = []
+    for part in value.split(","):
+        item = part.strip()
+        if item not in REPORT_CHARTS or item in seen:
+            return ""
+        seen.append(item)
+    stored = ",".join(seen)
+    if len(stored) > 120 or len(seen) < 2:
+        return ""
+    return stored
 
 
 def create_saved_report(project_key, body, text):
@@ -3630,10 +4835,19 @@ def create_saved_report(project_key, body, text):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     body = body or {}
     name = (body.get("name") or "").strip()
-    group = (body.get("groupBy") or "").strip().lower()
+    group = clean_report_group(body.get("groupBy"))
     filt = (body.get("filterField") or "").strip().lower()
     value = (body.get("filterValue") or "").strip()
-    if group not in ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
+    field_key = (body.get("fieldKey") or "").strip().lower()
+    attr_key = (body.get("attrKey") or "").strip().lower()
+    attr_value = (body.get("attrValue") or "").strip()
+    if not group or not name or len(name) > 80:
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if done_report(group) and not module_on(project_key, "service"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    if (group == "field" or group.startswith("field+") or "+field" in group) and not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", field_key):
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if bool(attr_key) != bool(attr_value) or len(attr_value) > 80 or (attr_key and not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", attr_key)):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if filt and filt not in ("status", "type", "holder", "mix"):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
@@ -3643,21 +4857,27 @@ def create_saved_report(project_key, body, text):
         return 400, {"message": text.get("asset-tree.error.report.filter", "The filter is longer than 4000 characters. Remove some conditions.")}
     if filt == "mix":
         for part in value.split(";"):
+            if part.startswith("f="):
+                if not field_rules_ok(part[2:]):
+                    return 400, {"message": text.get("asset-tree.error.report", "Report")}
+                continue
             if not part.startswith(("t=", "s=", "h=", "p=")):
                 return 400, {"message": text.get("asset-tree.error.report", "Report")}
-    chart = (body.get("chart") or "bar").strip().lower()
-    if chart not in ("bar", "bars", "donut", "pie"):
-        chart = "bar"
+    chart = report_chart_list(body.get("chart")) or "bar"
     metric = (body.get("metric") or "count").strip().lower()
-    if metric not in ("count", "cost"):
+    if metric not in ("count", "cost") or done_report(group) or group == "kind":
         metric = "count"
     report_id = STATE["report_seq"]
     STATE["report_seq"] += 1
     STATE["saved_reports"][report_id] = {
         "id": report_id, "projectKey": project_key, "name": name, "groupBy": group,
         "filterField": filt, "filterValue": value, "chart": chart, "metric": metric,
+        "fieldKey": field_key if group == "field" or group.startswith("field+") or "+field" in group else "",
+        "attrKey": attr_key,
+        "attrValue": attr_value,
     }
-    return 201, {"id": "s%s" % report_id, "name": name, "groupBy": group, "filterField": filt, "filterValue": value, "chart": chart, "metric": metric, "standard": False}
+    saved = STATE["saved_reports"][report_id]
+    return 201, {"id": "s%s" % report_id, "name": name, "groupBy": group, "filterField": filt, "filterValue": value, "chart": chart, "metric": metric, "standard": False, "fieldKey": saved["fieldKey"], "attrKey": saved["attrKey"], "attrValue": saved["attrValue"]}
 
 
 def delete_saved_report(project_key, report_key, text):
@@ -3697,11 +4917,12 @@ def update_report_chart(project_key, report_key, body, text):
         STATE["report_seq"] -= 1
         row.update({
             "name": saved["name"], "groupBy": saved["groupBy"], "filterField": saved["filterField"],
-            "filterValue": saved["filterValue"], "chart": saved["chart"], "metric": "count" if saved["groupBy"] == "kind" else saved["metric"],
+            "filterValue": saved["filterValue"], "chart": saved["chart"], "metric": saved["metric"],
+            "fieldKey": saved.get("fieldKey") or "", "attrKey": saved.get("attrKey") or "", "attrValue": saved.get("attrValue") or "",
         })
-        return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False}
-    chart = (body.get("chart") or "").strip().lower()
-    if chart not in ("donut", "pie", "bar", "bars"):
+        return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False, "fieldKey": row["fieldKey"], "attrKey": row["attrKey"], "attrValue": row["attrValue"]}
+    chart = report_chart_list(body.get("chart"))
+    if not chart:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if report_key in REPORT_STANDARD:
         view = STATE.setdefault("views", {}).setdefault(project_key, {})
@@ -3903,6 +5124,134 @@ def empty_reason(report_key, group, money, text, any_purchase=False):
     return ""
 
 
+def done_piece(axis, day, state, kind_key, plan, asset):
+    if axis == "month":
+        return day[:7]
+    if axis == "place":
+        if not asset:
+            return ""
+        place_id = place_root(asset["id"])
+        return str(place_id) if place_id else ""
+    if axis == "type":
+        return (asset or {}).get("typeKey") or ""
+    if axis == "who":
+        return (plan.get("assigneeKey") or "").strip()
+    if axis == "asset":
+        return "0" if not asset else str(asset.get("id") or 0)
+    if axis == "state":
+        return state or ""
+    return kind_key
+
+
+def done_piece_label(axis, piece, project_key, text):
+    if axis == "kind":
+        return kind_label(project_key, piece)
+    if axis == "month":
+        return month_label(piece, text)
+    if axis == "place":
+        if not piece:
+            return text.get("asset-tree.ui.reportNoAsset", "No object")
+        place = STATE["assets"].get(int(piece)) if str(piece).isdigit() else None
+        return (place or {}).get("name") or piece
+    if axis == "type":
+        if not piece:
+            return text.get("asset-tree.ui.reportNoAsset", "No object")
+        return (STATE["types"].get(piece) or {}).get("label") or piece
+    if axis == "who":
+        if not piece:
+            return text.get("asset-tree.ui.reportUnassigned", "None")
+        return (USERS.get(piece) or {}).get("displayName") or piece
+    if axis == "asset":
+        if not piece or piece == "0":
+            return text.get("asset-tree.ui.reportNoAsset", "No object")
+        equipment = STATE["assets"].get(int(piece)) if str(piece).isdigit() else None
+        return (equipment or {}).get("name") or piece
+    if axis == "state":
+        return work_state_label(piece, text)
+    return piece
+
+
+def done_report_view(project_key, report_key, spec, assets, filt, text, query):
+    plans = []
+    for asset in assets:
+        plans.extend(plan_rows(asset["id"]))
+    if not filt:
+        loose = [row for row in STATE["plans"].values() if row.get("assetId") == 0 and row.get("projectKey") == project_key]
+        loose.sort(key=lambda item: item["id"])
+        plans.extend(loose)
+    axes = report_axes(spec.get("groupBy") or "done") or ["kind"]
+    buckets = {}
+    lines = []
+    line_keys = []
+    place_sort = {}
+    for plan in plans:
+        asset = STATE["assets"].get(plan.get("assetId")) if plan.get("assetId") else None
+        if plan.get("assetId") and not asset:
+            continue
+        marks = finished_marks(plan)
+        if not marks:
+            continue
+        kind_key = plan.get("kind") or "to"
+        kind_name = kind_label(project_key, kind_key)
+        who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
+        name = (plan.get("name") or "").strip() or kind_name
+        clock = work_clock(plan.get("startTime"), plan.get("endTime"))
+        nxt = expected_after(plan)
+        for mark in marks:
+            day = mark["day"]
+            state = mark["state"]
+            pieces = []
+            labels = []
+            for axis in axes:
+                piece = done_piece(axis, day, state, kind_key, plan, asset)
+                pieces.append(piece)
+                labels.append(done_piece_label(axis, piece, project_key, text))
+                if axis == "place" and len(axes) == 1 and piece:
+                    place_sort[piece] = place_sort_key(piece)
+            bucket = "\u001f".join(pieces)
+            label = " · ".join(labels)
+            color = "#0052CC"
+            if axes == ["kind"]:
+                color = kind_color(kind_key)
+            elif axes == ["state"]:
+                color = STATE_COLOR.get(state, "#6B778C")
+            elif axes == ["type"] and bucket:
+                color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
+            slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
+            lines.append(work_line(slot, asset, name, who, kind_name, day, state, nxt, clock, bucket, text))
+            line_keys.append(bucket)
+    rows = list(buckets.values())
+    if axes == ["state"]:
+        rows.sort(key=lambda row: STATE_ORDER.index(row["key"]) if row["key"] in STATE_ORDER else len(STATE_ORDER))
+    elif axes == ["month"]:
+        rows.sort(key=lambda row: row["key"] if len(row["key"]) >= 7 and row["key"][4] == "-" else "9999-99")
+    elif axes == ["place"]:
+        rows.sort(key=lambda row: ((place_sort.get(row["key"]) or "").lower(), (row.get("label") or "").lower()))
+    else:
+        rows.sort(key=lambda row: ((row.get("label") or "").lower(), (row.get("key") or "").lower()))
+    if axes not in (["kind"], ["state"]):
+        distinct_report_colors(rows)
+    rank = {row["key"]: index for index, row in enumerate(rows)}
+    paired = list(zip(lines, line_keys))
+    paired.sort(key=lambda item: (rank.get(item[1], len(rows)), (item[0].get("name") or "").lower(), (item[0].get("objectKey") or "").lower()))
+    lines = [item[0] for item in paired]
+    keys = [item[1] for item in paired]
+    lines, filtered = lines_for_bucket(lines, keys, query)
+    overlap = report_venn(rows, lines)
+    page, line_total, capped, export_limited = report_line_page(lines, query, False if filtered else False)
+    chart = spec.get("chart") or "bar"
+    if spec.get("standard"):
+        chart = stored_report_chart(project_key, report_key, "bar")
+    return 200, {
+        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCountedDone", ""),
+        "total": sum(row["count"] for row in rows),
+        "sum": "", "standard": bool(spec.get("standard")), "groupBy": spec.get("groupBy") or "done", "chart": chart,
+        "capped": capped, "exportLimited": export_limited, "lineTotal": line_total,
+        "reason": "" if rows else text.get("asset-tree.ui.reportEmptyDone", ""),
+        "rows": rows, "lines": page, "venn": overlap,
+    }
+
+
 def work_report_view(project_key, report_key, spec, assets, filt, text, query):
     plans = []
     for asset in assets:
@@ -3928,14 +5277,16 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
         who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
         name = (plan.get("name") or "").strip() or label
+        nxt = expected_after(plan)
+        clock = work_clock(plan.get("startTime"), plan.get("endTime"))
+        seen_future = any(shown["day"] > datetime.date.today() for shown in days)
         for shown in days:
-            slot["count"] += 1
-            detail = "%s · %s · %s" % (label, who, shown["day"].isoformat())
-            if shown.get("start"):
-                detail += " " + shown["start"]
-                if shown.get("end"):
-                    detail += "–" + shown["end"]
-            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail})
+            day = shown["day"].isoformat()
+            state = "overdue" if shown["day"] < datetime.date.today() else "expected"
+            lines.append(work_line(slot, asset, name, who, label, day, state, nxt, work_clock(shown.get("start"), shown.get("end")) or clock, bucket, text))
+            line_keys.append(bucket)
+        if nxt and not seen_future:
+            lines.append(work_line(slot, asset, name, who, label, nxt, "expected", nxt, clock, bucket, text))
             line_keys.append(bucket)
     rows = list(buckets.values())
     rank = {row["key"]: index for index, row in enumerate(rows)}
@@ -3946,6 +5297,7 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
     lines, filtered = lines_for_bucket(lines, keys, query)
     if filtered:
         truncated = False
+    overlap = report_venn(rows, lines)
     page, line_total, capped, export_limited = report_line_page(lines, query, truncated)
     chart = spec.get("chart") or "bar"
     if spec.get("standard"):
@@ -3955,7 +5307,58 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         "total": sum(row["count"] for row in rows),
         "sum": "", "standard": bool(spec.get("standard")), "groupBy": "kind", "chart": chart,
         "capped": capped, "exportLimited": export_limited, "lineTotal": line_total, "reason": "", "rows": rows, "lines": page,
+        "venn": overlap,
     }
+
+
+def report_field_label(field_key):
+    if not field_key:
+        return ""
+    for type_row in STATE["types"].values():
+        for field in type_row.get("fields") or []:
+            if (field.get("fieldKey") or "") == field_key and field.get("label"):
+                return field["label"]
+    return field_key
+
+
+def report_venn(rows, lines):
+    top = [row for row in rows if row.get("count")][:3]
+    keys = [row.get("key") or "" for row in top]
+    labels = [row.get("label") or "" for row in top]
+    owned = {}
+    for index, line in enumerate(lines or []):
+        who = "a%s" % line.get("assetId") if line.get("assetId") else "l%s" % index
+        owned.setdefault(who, set()).add(line.get("bucket") or "")
+    size = len(keys)
+    only = [0] * size
+    ab = ac = bc = all_three = 0
+    for buckets in owned.values():
+        hit = [key in buckets for key in keys]
+        hits = sum(1 for item in hit if item)
+        if hits == size and size:
+            if size == 3:
+                all_three += 1
+            elif size == 2:
+                ab += 1
+            else:
+                only[0] += 1
+            continue
+        if size == 3 and hit[0] and hit[1] and not hit[2]:
+            ab += 1
+        elif size == 3 and hit[0] and hit[2] and not hit[1]:
+            ac += 1
+        elif size == 3 and hit[1] and hit[2] and not hit[0]:
+            bc += 1
+        elif hits == 1:
+            for index, item in enumerate(hit):
+                if item:
+                    only[index] += 1
+    pairs = []
+    if size >= 2:
+        pairs.append(ab)
+    if size == 3:
+        pairs.extend([ac, bc])
+    return {"keys": keys, "labels": labels, "only": only, "pairs": pairs, "all": all_three}
 
 
 def report_view(project_key, report_key, text, query=None):
@@ -3984,6 +5387,7 @@ def report_view(project_key, report_key, text, query=None):
         statuses = ""
         holders = ""
         places = ""
+        fields = ""
         for part in value.split(";"):
             if part.startswith("t="):
                 types = part[2:]
@@ -3993,6 +5397,8 @@ def report_view(project_key, report_key, text, query=None):
                 holders = part[2:]
             elif part.startswith("p="):
                 places = part[2:]
+            elif part.startswith("f="):
+                fields = part[2:]
 
         def place_hit(asset):
             if not places:
@@ -4000,11 +5406,27 @@ def report_view(project_key, report_key, text, query=None):
             wanted = [part for part in places.split(",") if part]
             return any(part in wanted for part in place_chain(asset["id"]))
 
-        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset)]
+        def fields_hit(asset):
+            if not fields:
+                return True
+            values = asset.get("values") or {}
+            for rule in fields.split("|"):
+                mark = rule.find("~")
+                if mark <= 0:
+                    continue
+                key = rule[:mark]
+                wanted = unescape_field_rule(rule[mark + 1:]).strip().lower()
+                if wanted and wanted not in str(values.get(key) or "").lower():
+                    return False
+            return True
+
+        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset) and fields_hit(asset)]
     metric = spec.get("metric") or ("cost" if report_key == "cost" else "count")
-    if group == "kind":
+    if group == "kind" or done_report(group) or report_key == "done":
         metric = "count"
     money = report_key == "cost" or metric == "cost"
+    if done_report(group) or report_key == "done":
+        return done_report_view(project_key, report_key, spec, assets, filt, text, query or {})
     if report_key in ("service", "work") or group == "kind":
         return work_report_view(project_key, report_key, spec, assets, filt, text, query or {})
     status_names = {row["statusKey"]: row.get("label") or row["statusKey"] for row in ensure_statuses(project_key, text)}
@@ -4018,6 +5440,10 @@ def report_view(project_key, report_key, text, query=None):
     any_purchase = False
     place_sort = {}
     needs_life = money or report_key in ("warranty", "receipts", "age", "writeoff") or group in ("warranty", "month", "age", "writeoff")
+    attr_key = (spec.get("attrKey") or "").strip().lower()
+    attr_value = (spec.get("attrValue") or "").strip().lower()
+    if attr_key and attr_value:
+        assets = [asset for asset in assets if attr_value in str((asset.get("values") or {}).get(attr_key) or "").lower()]
     for asset in assets:
         life = (life_row(asset["id"]) or {}) if needs_life else {}
         if life.get("purchased"):
@@ -4079,6 +5505,10 @@ def report_view(project_key, report_key, text, query=None):
             bucket = asset.get("issuedKey") or ""
             person = USERS.get(bucket) or {}
             label = text.get("asset-tree.ui.custodianNone", "None") if not bucket else (person.get("displayName") or bucket)
+        elif group == "field":
+            raw = str((asset.get("values") or {}).get(spec.get("fieldKey") or "") or "").strip()
+            bucket = raw
+            label = raw or text.get("asset-tree.ui.reportBlank", "Blank")
         elif group == "place":
             place_id = place_root(asset["id"])
             place = STATE["assets"].get(place_id) if place_id else None
@@ -4101,7 +5531,10 @@ def report_view(project_key, report_key, text, query=None):
         slot["count"] += 1
         if money:
             slot["amount"] += book
-        lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
+        span = life_row(asset["id"]) or {}
+        start = str(span.get("purchased") or "")[:10]
+        end = str(span.get("warrantyUntil") or "")[:10] or start
+        lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail, "bucket": bucket, "from": start, "to": end})
         line_keys.append(bucket)
     rows = list(buckets.values())
     if money:
@@ -4122,16 +5555,21 @@ def report_view(project_key, report_key, text, query=None):
     lines, filtered = lines_for_bucket(lines, keys, query)
     if filtered:
         capped = False
+    overlap = report_venn(rows, lines)
     page, line_total, page_capped, export_limited = report_line_page(lines, query, capped)
     chart = spec.get("chart") or ("donut" if report_key == "status" else "bar")
     if spec.get("standard"):
         chart = stored_report_chart(project_key, report_key, chart)
+    field_key = spec.get("fieldKey") or ""
     return 200, {
         "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCounted", ""),
         "total": chosen,
         "sum": format_money(total_book) if money else "",
         "standard": bool(spec.get("standard")),
         "groupBy": group,
+        "fieldKey": field_key,
+        "fieldLabel": report_field_label(field_key),
+        "venn": overlap,
         "chart": chart,
         "capped": page_capped,
         "exportLimited": export_limited,
@@ -4214,7 +5652,7 @@ def done_marks(raw):
     marks = []
     for part in str(raw or "").split(","):
         piece = part.strip()
-        if piece.endswith(">done") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", piece[:-5]) and piece not in marks:
+        if done_day(piece) and piece not in marks:
             marks.append(piece)
         if len(marks) >= 60:
             break
@@ -4229,11 +5667,24 @@ def keep_done(replacement, previous):
     return ",".join(parts)
 
 
-def remember_done(moves, day):
+def drop_done_day(moves, day):
+    kept = []
+    for part in str(moves or "").split(","):
+        piece = part.strip()
+        if piece and done_day(piece) != day:
+            kept.append(piece)
+    return ",".join(kept)
+
+
+def remember_done(moves, day, marked_on=""):
     text = str(day or "").strip()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         return moves or ""
-    return keep_done(moves, text + ">done")
+    stamp = str(marked_on or "").strip()[:10]
+    token = text + ">done"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp) and stamp > text:
+        token = text + ">done@" + stamp
+    return keep_done(drop_done_day(moves, text), token)
 
 
 def relation_rows():
@@ -4251,7 +5702,7 @@ def relations_for(asset_id):
     return rows
 
 
-def relation_dto(row, target, direction="out"):
+def relation_dto(row, target, direction="out", text=None):
     return {
         "id": row["id"],
         "fromId": row.get("fromId") or 0,
@@ -4264,6 +5715,7 @@ def relation_dto(row, target, direction="out"):
         "projectKey": (target or {}).get("projectKey") or "",
         "open": target is not None,
         "attributes": [{"key": item.get("key") or "", "value": item.get("value") or ""} for item in (row.get("attributes") or [])],
+        "card": peer_dto(target, text) if target else None,
     }
 
 
@@ -4476,7 +5928,7 @@ def fill_plan(row, body, creating, project_key, text):
     if body.get("moves") is not None or creating:
         row["moves"] = keep_done(clean_moves(body.get("moves")), row.get("moves"))
     if body.get("done") is True and row.get("everyUnit") != "once":
-        row["moves"] = remember_done(row.get("moves"), row.get("lastDone"))
+        row["moves"] = remember_done(row.get("moves"), row.get("lastDone"), datetime.date.today().isoformat())
     if not row.get("name") or not row.get("lastDone") or not row.get("everyUnit"):
         return text.get("asset-tree.error.service", "Schedule")
     return None
@@ -4597,6 +6049,7 @@ def file_dto(row):
         "size": row["size"], "created": row["created"],
         "authorName": author["displayName"] if author else "",
         "internal": bool(row.get("internal")),
+        "slot": row.get("slot") or "",
     }
 
 
@@ -4895,9 +6348,11 @@ def plain_numeric(raw):
     return True
 
 
-def sheet_xml(headers, rows):
-    sheet = ["<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
-             "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>"]
+def sheet_xml(headers, rows, drawing=False):
+    root = "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\""
+    if drawing:
+        root += " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+    sheet = ["<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>", root + "><sheetData>"]
     table = [headers] + rows
     for number, cells in enumerate(table, start=1):
         sheet.append("<row r=\"%d\">" % number)
@@ -4910,8 +6365,165 @@ def sheet_xml(headers, rows):
                 sheet.append("<c r=\"%s%d\" t=\"inlineStr\"><is><t xml:space=\"preserve\">%s</t></is></c>"
                              % (column_name(index), number, xml_text(raw)))
         sheet.append("</row>")
-    sheet.append("</sheetData></worksheet>")
+    sheet.append("</sheetData>")
+    if drawing:
+        sheet.append("<drawing r:id=\"rId1\"/>")
+    sheet.append("</worksheet>")
     return "".join(sheet)
+
+
+def chart_usable(chart):
+    if not chart:
+        return False
+    labels = chart.get("labels")
+    if labels is not None:
+        values = chart.get("values") or []
+        bases = chart.get("bases")
+        return bool(labels) and len(values) == len(labels) and (bases is None or len(bases) == len(labels))
+    return chart.get("firstRow", 0) >= 2 and chart.get("lastRow", 0) >= chart.get("firstRow", 0)
+
+
+def formula_sheet(name):
+    return "'" + (name or "Sheet").replace("'", "''") + "'"
+
+
+def cell_range(sheet, column, first, last):
+    col = column_name(column)
+    return "%s!$%s$%d:$%s$%d" % (formula_sheet(sheet), col, first, col, last)
+
+
+def cell_text(rows, column, excel_row):
+    index = excel_row - 2
+    if rows is None or index < 0 or index >= len(rows) or column < 0:
+        return ""
+    row = rows[index] or []
+    if column >= len(row) or row[column] is None:
+        return ""
+    raw = str(row[column])
+    if len(raw) > 3 and raw[0] == "\u0001" and raw[2] == ":":
+        return raw[3:]
+    return raw
+
+
+def numeric_text(raw):
+    return raw if plain_numeric(raw) else "0"
+
+
+def point_list(points):
+    parts = ["<c:ptCount val=\"%d\"/>" % len(points)]
+    for index, point in enumerate(points):
+        parts.append("<c:pt idx=\"%d\"><c:v>%s</c:v></c:pt>" % (index, xml_text(point)))
+    return "".join(parts)
+
+
+def text_points(formula, points):
+    if formula is None:
+        return "<c:strLit>%s</c:strLit>" % point_list(points)
+    return "<c:strRef><c:f>%s</c:f><c:strCache>%s</c:strCache></c:strRef>" % (xml_text(formula), point_list(points))
+
+
+def number_points(formula, points):
+    if formula is None:
+        return "<c:numLit><c:formatCode>General</c:formatCode>%s</c:numLit>" % point_list(points)
+    return "<c:numRef><c:f>%s</c:f><c:numCache><c:formatCode>General</c:formatCode>%s</c:numCache></c:numRef>" % (xml_text(formula), point_list(points))
+
+
+def one_series(index, name, cat_formula, cats, val_formula, vals, marker, hidden):
+    body = ["<c:ser><c:idx val=\"%d\"/><c:order val=\"%d\"/><c:tx><c:v>%s</c:v></c:tx>" % (index, index, xml_text(name))]
+    if marker:
+        body.append("<c:marker><c:symbol val=\"circle\"/><c:size val=\"6\"/></c:marker>")
+    if hidden:
+        body.append("<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>")
+    body.append("<c:cat>%s</c:cat><c:val>%s</c:val></c:ser>" % (text_points(cat_formula, cats), number_points(val_formula, vals)))
+    return "".join(body)
+
+
+def sheet_series(chart, sheet, rows, marker):
+    if chart.get("labels") is not None:
+        if chart.get("stacked") and chart.get("bases") is not None:
+            return one_series(0, chart.get("baseSeries") or "", None, chart["labels"], None, chart["bases"], False, True) + one_series(1, chart.get("series") or "", None, chart["labels"], None, chart["values"], marker, False)
+        return one_series(0, chart.get("series") or "", None, chart["labels"], None, chart["values"], marker, False)
+    cats = []
+    vals = []
+    for row in range(chart["firstRow"], chart["lastRow"] + 1):
+        cats.append(cell_text(rows, chart.get("catColumn") or 0, row))
+        vals.append(numeric_text(cell_text(rows, chart.get("valueColumn") or 1, row)))
+    return one_series(0, chart.get("series") or "", cell_range(sheet, chart.get("catColumn") or 0, chart["firstRow"], chart["lastRow"]), cats, cell_range(sheet, chart.get("valueColumn") or 1, chart["firstRow"], chart["lastRow"]), vals, marker, False)
+
+
+def category_axes(horizontal):
+    cat_pos = "l" if horizontal else "b"
+    val_pos = "b" if horizontal else "l"
+    return ("<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"%s\"/>"
+            "<c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/><c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/></c:catAx>"
+            "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"%s\"/>"
+            "<c:majorGridlines/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"1\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"between\"/></c:valAx>") % (cat_pos, val_pos)
+
+
+def chart_plot(chart, sheet, rows):
+    plot = chart.get("plot") or "col"
+    percent = "<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/><c:showLeaderLines val=\"1\"/></c:dLbls>"
+    if plot == "pie":
+        return "<c:pieChart><c:varyColors val=\"1\"/>%s%s</c:pieChart>" % (sheet_series(chart, sheet, rows, False), percent)
+    if plot == "doughnut":
+        return "<c:doughnutChart><c:varyColors val=\"1\"/>%s%s<c:holeSize val=\"60\"/></c:doughnutChart>" % (sheet_series(chart, sheet, rows, False), percent)
+    if plot == "line":
+        return "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>%s<c:marker val=\"1\"/><c:smooth val=\"0\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>%s" % (sheet_series(chart, sheet, rows, True), category_axes(False))
+    if plot == "area":
+        return "<c:areaChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:areaChart>%s" % (sheet_series(chart, sheet, rows, False), category_axes(False))
+    if plot == "radar":
+        return "<c:radarChart><c:radarStyle val=\"marker\"/><c:varyColors val=\"0\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:radarChart>%s" % (sheet_series(chart, sheet, rows, True), category_axes(False))
+    if plot == "scatter":
+        count = (chart["lastRow"] - chart["firstRow"] + 1) if chart.get("labels") is None else len(chart["labels"])
+        xs = []
+        ys = []
+        for offset in range(count):
+            row = chart["firstRow"] + offset
+            if chart.get("indexX"):
+                xs.append(str(offset + 1))
+            else:
+                xs.append(numeric_text(cell_text(rows, chart.get("xColumn") or 0, row)))
+            ys.append(numeric_text(cell_text(rows, chart.get("valueColumn") or 1, row)))
+        x_formula = None if chart.get("indexX") else cell_range(sheet, chart.get("xColumn") or 0, chart["firstRow"], chart["lastRow"])
+        y_formula = cell_range(sheet, chart.get("valueColumn") or 1, chart["firstRow"], chart["lastRow"])
+        series = "<c:ser><c:idx val=\"0\"/><c:order val=\"0\"/><c:tx><c:v>%s</c:v></c:tx><c:marker><c:symbol val=\"circle\"/><c:size val=\"7\"/></c:marker><c:xVal>%s</c:xVal><c:yVal>%s</c:yVal></c:ser>" % (xml_text(chart.get("series") or ""), number_points(x_formula, xs), number_points(y_formula, ys))
+        axes = ("<c:valAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"midCat\"/></c:valAx>"
+                "<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"1\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"midCat\"/></c:valAx>")
+        return "<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>%s" % (series, axes)
+    horizontal = plot == "bar"
+    gap = "0" if chart.get("histogram") else "80"
+    overlap = "<c:overlap val=\"100\"/>" if chart.get("stacked") else ""
+    grouping = "stacked" if chart.get("stacked") else "clustered"
+    return "<c:barChart><c:barDir val=\"%s\"/><c:grouping val=\"%s\"/><c:varyColors val=\"1\"/>%s<c:gapWidth val=\"%s\"/>%s<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>%s" % ("bar" if horizontal else "col", grouping, sheet_series(chart, sheet, rows, False), gap, overlap, category_axes(horizontal))
+
+
+def chart_xml(chart, sheet, rows):
+    title = chart.get("title") or chart.get("series") or ""
+    return ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">"
+            "<c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:rPr lang=\"ru-RU\" sz=\"1200\"/><a:t>%s</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title>"
+            "<c:plotArea><c:layout/>%s</c:plotArea><c:legend><c:legendPos val=\"b\"/><c:overlay val=\"0\"/></c:legend><c:plotVisOnly val=\"1\"/></c:chart>"
+            "<c:printSettings><c:headerFooter/><c:pageMargins b=\"0.75\" l=\"0.7\" r=\"0.7\" t=\"0.75\" header=\"0.3\" footer=\"0.3\"/><c:pageSetup/></c:printSettings></c:chartSpace>") % (xml_text(title), chart_plot(chart, sheet, rows))
+
+
+def drawing_xml(charts):
+    anchors = []
+    row = 0
+    for index, chart in enumerate(charts, start=1):
+        points = len(chart["labels"]) if chart.get("labels") is not None else chart["lastRow"] - chart["firstRow"] + 1
+        height = max(16, min(36, points + 4))
+        anchors.append(
+            "<xdr:twoCellAnchor><xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+            "<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"%d\" name=\"Chart %d\"/><xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>"
+            "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">"
+            "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId%d\"/>"
+            "</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>" % (row, row + height, index + 1, index, index)
+        )
+        row += height + 1
+    return ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+            "%s</xdr:wsDr>") % "".join(anchors)
 
 
 def equipment_pages(project_key, text, day_first):
@@ -4919,6 +6531,8 @@ def equipment_pages(project_key, text, day_first):
     common = equipment_headers(text)
     statuses = {row["statusKey"]: row["label"] for row in status_dtos(project_key, text)}
     kinds = [row for row in STATE["types"].values() if row["projectKey"] == project_key and not row.get("location")]
+    service_on = module_on(project_key, "service")
+    extra = service_headers(text) if service_on else []
     pages = []
     used = set()
     for kind in kinds:
@@ -4933,6 +6547,14 @@ def equipment_pages(project_key, text, day_first):
             seen.add(marker)
             fields.append((field, label))
             headers.append(label)
+        added_service = []
+        for index, header in enumerate(extra):
+            marker = header.strip().lower()
+            if not marker or marker in seen:
+                continue
+            seen.add(marker)
+            added_service.append(index)
+            headers.append(header)
         assets = [asset for asset in project_assets(project_key) if asset["typeKey"] == kind["typeKey"]]
         assets.sort(key=lambda item: item["objectKey"])
         lines = []
@@ -4955,10 +6577,27 @@ def equipment_pages(project_key, text, day_first):
                 if field.get("kind") == "date" and value:
                     value = display_date(value, day_first)
                 line.append(value)
+            owned = plan_rows(asset["id"])
+            one = owned[0] if len(owned) == 1 else None
+            for index in added_service:
+                line.append("" if one is None else service_cells(one, project_key, text, day_first)[index])
             lines.append(line)
         pages.append((sheet_title(kind.get("label") or kind["typeKey"], used), headers, lines))
     if not pages:
         pages.append(("Equipment", common, []))
+    if service_on:
+        sheet_rows = []
+        for kind in kinds:
+            assets = [asset for asset in project_assets(project_key) if asset["typeKey"] == kind["typeKey"]]
+            assets.sort(key=lambda item: item["objectKey"])
+            for asset in assets:
+                owned = plan_rows(asset["id"])
+                if len(owned) < 2:
+                    continue
+                for plan in owned:
+                    sheet_rows.append([asset.get("objectKey") or ""] + service_cells(plan, project_key, text, day_first))
+        title = text.get("asset-tree.ui.serviceSheet", "Service") if text else "Service"
+        pages.append((sheet_title(title, used), [text.get("asset-tree.ui.keyLabel", "Key") if text else "Key"] + extra, sheet_rows))
     return pages
 
 
@@ -4969,16 +6608,43 @@ def workbook_bytes(pages):
     sheet_tags = []
     relationships = []
     parts = {}
+    chart_file = 1
     for index, page in enumerate(pages, start=1):
-        name, headers, rows = page
+        name, headers, rows = page[0], page[1], page[2]
+        raw_chart = page[3] if len(page) > 3 else None
+        if isinstance(raw_chart, list):
+            charts = [chart for chart in raw_chart if chart_usable(chart)]
+        elif chart_usable(raw_chart):
+            charts = [raw_chart]
+        else:
+            charts = []
         overrides.append(
             "<Override PartName=\"/xl/worksheets/sheet%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" % index
         )
+        files = []
+        if charts:
+            overrides.append("<Override PartName=\"/xl/drawings/drawing%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>" % index)
+            for _chart in charts:
+                overrides.append("<Override PartName=\"/xl/charts/chart%d.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>" % chart_file)
+                files.append(chart_file)
+                chart_file += 1
         sheet_tags.append("<sheet name=\"%s\" sheetId=\"%d\" r:id=\"rId%d\"/>" % (xml_text(name).replace("\"", "&quot;"), index, index))
         relationships.append(
             "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet%d.xml\"/>" % (index, index)
         )
-        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows)
+        parts["xl/worksheets/sheet%d.xml" % index] = sheet_xml(headers, rows, bool(charts))
+        if charts:
+            rels = []
+            for rid, file_no in enumerate(files, start=1):
+                rels.append("<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart%d.xml\"/>" % (rid, file_no))
+            parts["xl/worksheets/_rels/sheet%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing%d.xml\"/></Relationships>" % index)
+            parts["xl/drawings/drawing%d.xml" % index] = drawing_xml(charts)
+            parts["xl/drawings/_rels/drawing%d.xml.rels" % index] = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">%s</Relationships>" % "".join(rels))
+            for chart, file_no in zip(charts, files):
+                parts["xl/charts/chart%d.xml" % file_no] = chart_xml(chart, name, rows)
     relationships.append(
         "<Relationship Id=\"rId%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" % (len(pages) + 1)
     )
@@ -5080,6 +6746,155 @@ def share_labels(values, total):
     return labels
 
 
+def report_day(raw):
+    text = str(raw or "")[:10]
+    if len(text) < 10:
+        return None
+    try:
+        return datetime.date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def report_gantt_chart(view, title, start_label, span_label):
+    names = []
+    starts = []
+    ends = []
+    for line in view.get("lines") or []:
+        if len(names) >= 40:
+            break
+        start = report_day(line.get("from"))
+        if start is None:
+            continue
+        end = report_day(line.get("to")) or start
+        if end < start:
+            end = start
+        name = (line.get("name") or "").strip() or (line.get("objectKey") or "")
+        names.append(name)
+        starts.append(start)
+        ends.append(end)
+    if not names:
+        return None
+    origin = min(starts)
+    offsets = [str((start - origin).days) for start in starts]
+    spans = [str(max(1, (end - start).days + 1)) for start, end in zip(starts, ends)]
+    return {"plot": "bar", "title": title, "series": span_label, "baseSeries": start_label, "stacked": True, "labels": names, "values": spans, "bases": offsets}
+
+
+def report_venn_chart(view, title, series):
+    venn = view.get("venn") or {}
+    labels = venn.get("labels") or []
+    if not labels:
+        return None
+    only = venn.get("only") or []
+    pairs = venn.get("pairs") or []
+    size = min(3, len(labels))
+    names = []
+    values = []
+    for index in range(size):
+        names.append(labels[index] or "")
+        values.append(str(only[index] if index < len(only) and only[index] is not None else 0))
+    if size >= 2:
+        names.append("%s + %s" % (labels[0] or "", labels[1] or ""))
+        values.append(str(pairs[0] if pairs else 0))
+    if size >= 3:
+        names.append("%s + %s" % (labels[0] or "", labels[2] or ""))
+        values.append(str(pairs[1] if len(pairs) > 1 else 0))
+        names.append("%s + %s" % (labels[1] or "", labels[2] or ""))
+        values.append(str(pairs[2] if len(pairs) > 2 else 0))
+        names.append("%s + %s + %s" % (labels[0] or "", labels[1] or "", labels[2] or ""))
+        values.append(str(venn.get("all") or 0))
+    if not names:
+        return None
+    return {"plot": "col", "title": title, "series": series, "labels": names, "values": values}
+
+
+def report_charts(view, text):
+    raw = str(view.get("chart") or "bar").strip().lower()
+    kinds = []
+    for part in raw.split(","):
+        kind = part.strip()
+        if kind in ("columns", "bar"):
+            kind = "histogram"
+        if kind and kind not in kinds:
+            kinds.append(kind)
+    if not kinds:
+        kinds = ["histogram"]
+    captions = {
+        "bar": text.get("asset-tree.ui.reportColumns", "Column"),
+        "histogram": text.get("asset-tree.ui.reportHistogram", "Histogram"),
+        "bars": text.get("asset-tree.ui.reportBars", "Bars"),
+        "line": text.get("asset-tree.ui.reportLine", "Line"),
+        "area": text.get("asset-tree.ui.reportArea", "Area"),
+        "scatter": text.get("asset-tree.ui.reportScatter", "Scatter"),
+        "donut": text.get("asset-tree.ui.reportDonut", "Donut"),
+        "pie": text.get("asset-tree.ui.reportPie", "Pie"),
+        "radar": text.get("asset-tree.ui.reportRadar", "Radar"),
+        "gantt": text.get("asset-tree.ui.reportGantt", "Gantt"),
+        "venn": text.get("asset-tree.ui.reportVenn", "Venn"),
+    }
+    pictures = []
+    for kind in kinds:
+        cloned = dict(view)
+        cloned["chart"] = kind
+        if len(kinds) > 1:
+            cloned["title"] = captions.get(kind) or (view.get("title") or "")
+        picture = report_chart(cloned, text)
+        if chart_usable(picture):
+            pictures.append(picture)
+    if pictures:
+        return pictures
+    if kinds and kinds[0] in ("gantt", "venn"):
+        cloned = dict(view)
+        cloned["chart"] = "bar"
+        picture = report_chart(cloned, text)
+        if chart_usable(picture):
+            return [picture]
+    return []
+
+
+def report_chart(view, text):
+    kind = str(view.get("chart") or "").strip().lower()
+    if "," in kind:
+        kind = kind.split(",", 1)[0].strip()
+    if kind in ("columns", "bar"):
+        kind = "histogram"
+    money = bool(view.get("sum"))
+    buckets = len(view.get("rows") or [])
+    title = view.get("title") or ""
+    series = text.get("asset-tree.ui.lifeBook", "Book value") if money else text.get("asset-tree.ui.reportCount", "Count")
+    if kind == "gantt":
+        picture = report_gantt_chart(view, title, text.get("asset-tree.ui.reportChartStart", "Start"), text.get("asset-tree.ui.reportChartSpan", "Length"))
+        if picture:
+            return picture
+    if kind == "venn":
+        picture = report_venn_chart(view, title, series)
+        if picture:
+            return picture
+    if buckets <= 0:
+        return None
+    last = 1 + min(buckets, 80)
+    if kind == "scatter":
+        if money:
+            return {"plot": "scatter", "title": title, "series": series, "xColumn": 1, "valueColumn": 2, "firstRow": 2, "lastRow": last}
+        return {"plot": "scatter", "title": title, "series": series, "valueColumn": 1, "firstRow": 2, "lastRow": last, "indexX": True}
+    plot = "col"
+    histogram = kind == "histogram"
+    if kind == "bars":
+        plot = "bar"
+    elif kind == "line":
+        plot = "line"
+    elif kind == "area":
+        plot = "area"
+    elif kind == "pie":
+        plot = "pie"
+    elif kind == "donut":
+        plot = "doughnut"
+    elif kind == "radar":
+        plot = "radar"
+    return {"plot": plot, "title": title, "series": series, "catColumn": 0, "valueColumn": 2 if money else 1, "firstRow": 2, "lastRow": last, "histogram": histogram}
+
+
 def report_sheet(view, text, used):
     money = bool(view.get("sum"))
     headers = [view.get("title") or "", text.get("asset-tree.ui.reportCount", "Count")]
@@ -5108,23 +6923,43 @@ def report_sheet(view, text, used):
         reason = view.get("reason") or text.get("asset-tree.ui.reportEmptyLines", "This report has no rows.")
         lines.append([reason])
     lines.append([])
-    lines.append([
-        text.get("asset-tree.ui.keyLabel", "Key"),
-        text.get("asset-tree.ui.name", "Name"),
-        text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
-    ])
-    for line in view.get("lines") or []:
-        detail = line.get("detail") or ""
-        if money:
-            minor = money_minor(detail)
-            detail = book_decimal(minor) if minor is not None else detail
-        lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
+    journal = any((line.get("state") or "") for line in (view.get("lines") or []))
+    if journal:
+        lines.append([
+            text.get("asset-tree.ui.keyLabel", "Key"),
+            text.get("asset-tree.ui.reportColAsset", "Equipment"),
+            text.get("asset-tree.ui.reportColWork", "Work"),
+            text.get("asset-tree.ui.reportColKind", "Kind"),
+            text.get("asset-tree.ui.reportColWhen", "Date"),
+            text.get("asset-tree.ui.reportColState", "Result"),
+            text.get("asset-tree.ui.reportColNext", "Next"),
+        ])
+        for line in view.get("lines") or []:
+            when = line.get("when") or ""
+            if line.get("clock"):
+                when = (when + " " + line["clock"]).strip()
+            lines.append([
+                line.get("objectKey") or "", line.get("asset") or "", line.get("name") or "", line.get("kind") or "",
+                when, work_state_label(line.get("state"), text), line.get("next") or "",
+            ])
+    else:
+        lines.append([
+            text.get("asset-tree.ui.keyLabel", "Key"),
+            text.get("asset-tree.ui.name", "Name"),
+            text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
+        ])
+        for line in view.get("lines") or []:
+            detail = line.get("detail") or ""
+            if money:
+                minor = money_minor(detail)
+                detail = book_decimal(minor) if minor is not None else detail
+            lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
     if view.get("exportLimited"):
         note = text.get("asset-tree.ui.reportExportCut", "The file keeps the first {0} rows.")
         lines.append([note.replace("{0}", str(REPORT_EXPORT_MAX))])
     elif view.get("capped"):
         lines.append([text.get("asset-tree.ui.reportLinesCut", "The list continues on the next page.")])
-    return (sheet_title(view.get("title") or "Report", used), headers, lines)
+    return (sheet_title(view.get("title") or "Report", used), headers, lines, report_charts(view, text))
 
 
 def reports_xlsx(project_key, text):
@@ -5261,6 +7096,10 @@ def queue_report_mail(project_key, text, force):
 
 
 def detail_word(group, text):
+    if report_axes(group):
+        return text.get("asset-tree.ui.reportDoneDetail", "Kind, object and date")
+    if group == "field":
+        return text.get("asset-tree.ui.reportField", "Field")
     if group == "kind":
         return text.get("asset-tree.ui.reportWorkDetail", "Kind, object, date and time")
     if group in ("age", "month"):
@@ -5273,16 +7112,26 @@ def detail_word(group, text):
 
 
 def group_word(group, text):
+    axes = report_axes(group)
+    if axes:
+        return " · ".join(group_word("done-month" if part == "month" else part, text) for part in axes)
+    if group and "+" in group:
+        return " · ".join(group_word(part, text) for part in group.split("+"))
     keys = {
         "type": "asset-tree.ui.groupWordType",
         "place": "asset-tree.ui.groupWordPlace",
         "holder": "asset-tree.ui.groupWordHolder",
         "issued": "asset-tree.ui.issuedTo",
         "month": "asset-tree.ui.groupWordMonth",
+        "done-month": "asset-tree.ui.groupWordDoneMonth",
         "age": "asset-tree.ui.groupWordAge",
         "warranty": "asset-tree.ui.groupWordWarranty",
         "writeoff": "asset-tree.ui.groupWordWriteoff",
         "kind": "asset-tree.ui.groupWordKind",
+        "who": "asset-tree.ui.groupWordWho",
+        "asset": "asset-tree.ui.groupWordAsset",
+        "state": "asset-tree.ui.groupWordState",
+        "field": "asset-tree.ui.reportField",
     }
     return text.get(keys.get(group or "", "asset-tree.ui.groupWordStatus"), group or "")
 
@@ -5478,8 +7327,76 @@ def sheet_role(header):
         "custodian": "custodian", "ответственный": "custodian", "мол": "custodian",
         "issued": "issued", "issued to": "issued", "кому выдано": "issued", "выдано": "issued",
         "description": "description", "описание": "description",
+        "service: kind": "serviceKind", "обслуживание: вид": "serviceKind",
+        "service: work": "serviceName", "обслуживание: работа": "serviceName",
+        "service: date": "serviceDate", "обслуживание: дата": "serviceDate",
+        "service: interval": "serviceEvery", "обслуживание: интервал": "serviceEvery",
+        "service: period": "serviceUnit", "обслуживание: период": "serviceUnit",
+        "service: assignee": "serviceWho", "обслуживание: исполнитель": "serviceWho",
     }
     return roles.get(name)
+
+
+def service_headers(text):
+    text = text or {}
+    return [
+        text.get("asset-tree.ui.serviceColKind", "Service: kind"),
+        text.get("asset-tree.ui.serviceColWork", "Service: work"),
+        text.get("asset-tree.ui.serviceColDate", "Service: date"),
+        text.get("asset-tree.ui.serviceColEvery", "Service: interval"),
+        text.get("asset-tree.ui.serviceColUnit", "Service: period"),
+        text.get("asset-tree.ui.serviceColWho", "Service: assignee"),
+    ]
+
+
+def service_sheet(headers):
+    roles = [sheet_role(header) for header in headers or []]
+    return "serviceKind" in roles and "name" not in roles
+
+
+def service_unit_word(unit, text):
+    text = text or {}
+    if unit == "day":
+        return text.get("asset-tree.ui.serviceUnitDay", "days")
+    if unit == "week":
+        return text.get("asset-tree.ui.serviceUnitWeek", "wk")
+    if unit == "month":
+        return text.get("asset-tree.ui.serviceUnitMonth", "months")
+    if unit == "year":
+        return text.get("asset-tree.ui.serviceUnitYear", "yr")
+    if unit == "once":
+        return text.get("asset-tree.ui.schedulesOnce", "Does not repeat")
+    return unit or ""
+
+
+def preview_kind_name(project_key, kind, text):
+    label = kind_label(project_key, kind)
+    if label and label != kind:
+        return label
+    names = {
+        "to": "asset-tree.ui.kindTo",
+        "kts": "asset-tree.ui.kindKts",
+        "verify": "asset-tree.ui.kindVerify",
+        "staff": "asset-tree.ui.kindStaff",
+        "event": "asset-tree.ui.kindEvent",
+        "update": "asset-tree.ui.kindUpdate",
+    }
+    key = names.get(kind)
+    if key and text and text.get(key):
+        return text.get(key)
+    return label or kind or ""
+
+
+def service_cells(plan, project_key, text, day_first):
+    person = USERS.get(plan.get("assigneeKey") or "")
+    return [
+        preview_kind_name(project_key, plan.get("kind") or "to", text),
+        plan.get("name") or "",
+        display_date(plan.get("lastDone") or "", day_first) if plan.get("lastDone") else "",
+        str(plan.get("everyCount") or ""),
+        service_unit_word(plan.get("everyUnit"), text),
+        person["displayName"] if person else "",
+    ]
 
 
 def find_preview_user(raw):
@@ -5766,6 +7683,212 @@ def import_equipment(project_key, source, text):
     return import_rows(project_key, headers, records, text)
 
 
+def sheet_marker(value):
+    return " ".join((value or "").strip().lower().replace("ё", "е").split())
+
+
+def service_period(raw, text):
+    marker = sheet_marker(raw).rstrip(".")
+    if not marker:
+        return ""
+    words = {
+        "once": ["once", "разово", "разовая", "разовое", "без повтора", "does not repeat", "one time"],
+        "day": ["day", "days", "дн", "день", "дня", "дней", "сут", "сутки"],
+        "week": ["week", "weeks", "wk", "wks", "нед", "неделя", "недели", "недель"],
+        "month": ["month", "months", "мес", "месяц", "месяца", "месяцев"],
+        "year": ["year", "years", "yr", "yrs", "г", "год", "года", "лет"],
+    }
+    text = text or {}
+    words["once"].append(sheet_marker(text.get("asset-tree.ui.schedulesOnce", "")).rstrip("."))
+    words["day"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitDay", "")).rstrip("."))
+    words["week"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitWeek", "")).rstrip("."))
+    words["month"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitMonth", "")).rstrip("."))
+    words["year"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitYear", "")).rstrip("."))
+    for unit, names in words.items():
+        if marker in {name for name in names if name}:
+            return unit
+    return ""
+
+
+def service_kind_id(project_key, raw, text):
+    marker = sheet_marker(raw)
+    if not marker:
+        return ""
+    stored = ((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}
+    kinds = parse_kinds(stored.get("scheduleKinds"))
+    text = text or {}
+    builtin = {
+        "to": ["to", "то", "maintenance", sheet_marker(text.get("asset-tree.ui.kindTo", ""))],
+        "kts": ["kts", "ктс", "inspection", sheet_marker(text.get("asset-tree.ui.kindKts", ""))],
+        "verify": ["verify", "поверка", "verification", sheet_marker(text.get("asset-tree.ui.kindVerify", ""))],
+        "staff": ["staff", "work", "работа", sheet_marker(text.get("asset-tree.ui.kindStaff", ""))],
+        "event": ["event", "мероприятие", sheet_marker(text.get("asset-tree.ui.kindEvent", ""))],
+        "update": ["update", "обновление", sheet_marker(text.get("asset-tree.ui.kindUpdate", ""))],
+    }
+    known = {ident for ident, _label in kinds}
+    for ident, label in kinds:
+        names = {ident, sheet_marker(label), sheet_marker(kind_label(project_key, ident))}
+        names.update(name for name in builtin.get(ident, []) if name)
+        if marker in names:
+            return ident
+    for ident, names in builtin.items():
+        if ident in known and marker in names:
+            return ident
+    return ""
+
+
+def service_count_allowed(count, unit):
+    if unit == "once":
+        return count == 1
+    if unit == "day":
+        return 1 <= count <= 3650
+    if unit == "week":
+        return 1 <= count <= 520
+    if unit == "month":
+        return 1 <= count <= 120
+    if unit == "year":
+        return 1 <= count <= 30
+    return False
+
+
+def service_wish(project_key, cells, roles, text, require_key):
+    def cell(role):
+        index = roles.get(role)
+        if index is None or index >= len(cells):
+            return ""
+        return cells[index].strip()
+
+    kind_raw = cell("serviceKind")
+    name_raw = cell("serviceName")
+    date_raw = cell("serviceDate")
+    every_raw = cell("serviceEvery")
+    unit_raw = cell("serviceUnit")
+    who_raw = cell("serviceWho")
+    if not any((kind_raw, name_raw, date_raw, every_raw, unit_raw, who_raw)):
+        return None, None
+    text = text or {}
+    object_key = ""
+    if require_key:
+        key = cell("key")
+        asset = None
+        if key:
+            for item in project_assets(project_key):
+                if (item.get("objectKey") or "").lower() == key.lower() and not is_location_id(item["id"]):
+                    asset = item
+                    break
+        if not asset:
+            return None, text.get("asset-tree.error.import.service.key", "Object").replace("{0}", key)
+        object_key = asset.get("objectKey") or ""
+    if not kind_raw or not date_raw or not unit_raw:
+        return None, text.get("asset-tree.error.import.service", "Service")
+    kind = service_kind_id(project_key, kind_raw, text)
+    if not kind:
+        return None, text.get("asset-tree.error.import.service.kind", "Kind").replace("{0}", kind_raw)
+    unit = service_period(unit_raw, text)
+    if not unit:
+        return None, text.get("asset-tree.error.import.service.unit", "Period").replace("{0}", unit_raw)
+    if not every_raw and unit != "once":
+        return None, text.get("asset-tree.error.import.service", "Service")
+    if not every_raw:
+        count = 1
+    else:
+        try:
+            count = int(every_raw)
+        except ValueError:
+            return None, text.get("asset-tree.error.import.number", "Number").replace("{0}", "interval")
+    if not service_count_allowed(count, unit):
+        return None, text.get("asset-tree.error.import.service", "Service")
+    last = parse_plan_date(date_raw)
+    if not last:
+        return None, text.get("asset-tree.error.import.date", "Date").replace("{0}", date_raw)
+    work = name_raw or kind_raw
+    if not work or len(work) > 80:
+        return None, text.get("asset-tree.error.import.service", "Service")
+    assignee = ""
+    if who_raw:
+        assignee = find_preview_user(who_raw)
+        if not assignee:
+            return None, text.get("asset-tree.error.import.user", "User").replace("{0}", who_raw)
+    return {
+        "objectKey": object_key,
+        "kind": kind,
+        "name": work,
+        "lastDone": last.isoformat(),
+        "everyCount": count,
+        "everyUnit": unit,
+        "assigneeKey": assignee,
+    }, None
+
+
+def apply_imported_plan(asset, wish, text):
+    if not asset or not wish:
+        return None
+    if not module_on(asset["projectKey"], "service"):
+        return text.get("asset-tree.error.module.off", "Module")
+    if not (STATE["types"].get(asset["typeKey"]) or {}).get("service"):
+        return text.get("asset-tree.error.service.type", "Type")
+    owned = plan_rows(asset["id"])
+    match = next((row for row in owned if row.get("kind") == wish["kind"]), None)
+    creating = match is None
+    if creating and len(owned) >= 12:
+        return text.get("asset-tree.error.service.limit", "Limit")
+    if creating:
+        plan_id = STATE["plan_seq"]
+        STATE["plan_seq"] += 1
+        row = {"id": plan_id, "assetId": asset["id"], "appliedFor": "", "notify": True}
+        STATE["plans"][plan_id] = row
+    else:
+        row = match
+    error = fill_plan(row, {
+        "name": wish["name"],
+        "lastDone": wish["lastDone"],
+        "everyCount": wish["everyCount"],
+        "everyUnit": wish["everyUnit"],
+        "kind": wish["kind"],
+        "assigneeKey": wish.get("assigneeKey") or "",
+    }, creating, asset["projectKey"], text)
+    if error and creating:
+        STATE["plans"].pop(row["id"], None)
+    return error
+
+
+def import_service_sheet(project_key, headers, records, text, sheet):
+    roles = {}
+    for index, header in enumerate(headers):
+        role = sheet_role(header)
+        if role and role not in roles:
+            roles[role] = index
+    updated = 0
+    errors = []
+    if "key" not in roles or "serviceKind" not in roles:
+        message = text.get("asset-tree.error.import.header", "Header")
+        if sheet:
+            message = "%s: %s" % (sheet, message)
+        return {"updated": 0, "errors": [{"row": 1, "message": message}]}
+    for row_number, cells in records:
+        wish, error = service_wish(project_key, cells, roles, text, True)
+        if error:
+            if sheet:
+                error = "%s: %s" % (sheet, error)
+            errors.append({"row": row_number, "message": error})
+            continue
+        if not wish:
+            continue
+        asset = None
+        for item in project_assets(project_key):
+            if (item.get("objectKey") or "").lower() == wish["objectKey"].lower():
+                asset = item
+                break
+        plan_error = apply_imported_plan(asset, wish, text)
+        if plan_error:
+            if sheet:
+                plan_error = "%s: %s" % (sheet, plan_error)
+            errors.append({"row": row_number, "message": plan_error})
+            continue
+        updated += 1
+    return {"updated": updated, "errors": errors}
+
+
 def import_book(project_key, pages, text):
     types = [row for row in STATE["types"].values() if row["projectKey"] == project_key and not row.get("location")]
     total = 0
@@ -5779,8 +7902,16 @@ def import_book(project_key, pages, text):
     errors = []
     seen = set()
     any_rows = False
+    service_on = module_on(project_key, "service")
     for name, headers, records in pages:
         if not headers and not records:
+            continue
+        if service_sheet(headers):
+            if service_on and records:
+                any_rows = True
+                result = import_service_sheet(project_key, headers, records, text, name)
+                updated += result["updated"]
+                errors.extend(result["errors"])
             continue
         bound = bound_sheet_type(name, types)
         headers, records, rejected = bind_sheet_type(name, headers, records, bound, text)
@@ -5788,7 +7919,7 @@ def import_book(project_key, pages, text):
         if not records:
             continue
         any_rows = True
-        result = import_rows(project_key, headers, records, text, seen, name)
+        result = import_rows(project_key, headers, records, text, seen, name, service_on)
         created += result["created"]
         updated += result["updated"]
         errors.extend(result["errors"])
@@ -5851,7 +7982,9 @@ def bind_sheet_type(name, headers, records, bound, text):
     return headers, prepared, errors
 
 
-def import_rows(project_key, headers, records, text, seen=None, sheet=""):
+def import_rows(project_key, headers, records, text, seen=None, sheet="", service_on=None):
+    if service_on is None:
+        service_on = module_on(project_key, "service")
     def finish(result):
         if sheet:
             for error in result["errors"]:
@@ -5902,6 +8035,12 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         if not name:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.name", "Name")})
             continue
+        wish = None
+        if service_on:
+            wish, wish_error = service_wish(project_key, cells, roles, text, False)
+            if wish_error:
+                errors.append({"row": row_number, "message": wish_error})
+                continue
         existing = None
         if key:
             marker = key.lower()
@@ -5921,6 +8060,14 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         if not kind:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.type", "Type").replace("{0}", type_name)})
             continue
+        if wish and not kind.get("service"):
+            errors.append({"row": row_number, "message": text.get("asset-tree.error.service.type", "Type")})
+            continue
+        if wish and existing:
+            owned = plan_rows(existing["id"])
+            if not any(row.get("kind") == wish["kind"] for row in owned) and len(owned) >= 12:
+                errors.append({"row": row_number, "message": text.get("asset-tree.error.service.limit", "Limit")})
+                continue
         status_key = ""
         if not status_name:
             status_key = "in_use"
@@ -5976,6 +8123,11 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
                     log_place(from_place, "place_out", existing)
                 if to_place and to_place != from_place:
                     log_place(to_place, "place_in", existing)
+            if wish:
+                plan_error = apply_imported_plan(existing, wish, text)
+                if plan_error:
+                    errors.append({"row": row_number, "message": plan_error})
+                    continue
             updated += 1
         else:
             if not asset_prefix(project_key):
@@ -5991,6 +8143,11 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
             by_key[STATE["assets"][asset_id]["objectKey"].lower()] = STATE["assets"][asset_id]
             log_activity(asset_id, "created", "", "", name)
             log_place(place_container(parent), "place_add", STATE["assets"][asset_id])
+            if wish:
+                plan_error = apply_imported_plan(STATE["assets"][asset_id], wish, text)
+                if plan_error:
+                    errors.append({"row": row_number, "message": plan_error})
+                    continue
             created += 1
     return finish({"created": created, "updated": updated, "errors": errors})
 
@@ -6608,6 +8765,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         query = parse_qs(parsed.query)
+        if path == "/preview/portal-links" and method == "GET":
+            return self.respond(200, json.dumps({"links": list(STATE.get("portal_request_links") or [])}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         if path == "/preview/mails" and method == "GET":
             return self.respond(200, json.dumps(STATE["mails"]).encode("utf-8"), "application/json; charset=utf-8")
         if path == "/preview/report-mail" and method == "POST":
@@ -6618,7 +8777,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/issue":
             return self.serve_issue(query)
         if path == "/portal" or re.fullmatch(r"/servicedesk/customer/portal/\d+/create/\d+", path):
-            return self.serve_portal(path)
+            return self.serve_portal(path, query)
+        if re.fullmatch(r"/servicedesk/customer/portal/\d+", path):
+            return self.serve_portal_home(query)
+        if re.fullmatch(r"/servicedesk/customer/portal/\d+/[A-Z][A-Z0-9_]*-\d+", path):
+            return self.serve_portal_request(path)
         if path in ("/servicedesk/customer/user/profile",) or re.fullmatch(r"/servicedesk/customer/portal/\d+/user/profile", path):
             return self.serve_profile()
         if path.startswith("/rest/servicedeskapi/portals/") or path.startswith("/rest/servicedeskapi/servicedesk/"):
@@ -6630,6 +8793,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_static(path.rsplit("/", 1)[-1])
         if path.startswith("/rest/asset-tree/1.0/"):
             rest = path[len("/rest/asset-tree/1.0"):]
+            one_book = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports/([A-Za-z0-9]+)/book\.xlsx", rest)
+            if method == "GET" and one_book:
+                status, view = report_view(one_book.group(1), one_book.group(2), self.text(), {"lines": ["all"]})
+                if status != 200:
+                    return self.respond(status, json.dumps(view).encode("utf-8"), "application/json; charset=utf-8")
+                chosen = report_chart_list((query.get("chart") or [""])[0])
+                if chosen:
+                    view["chart"] = chosen
+                body = workbook_bytes([report_sheet(view, self.text(), set())])
+                return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
+                    "Content-Disposition": 'attachment; filename="report-%s.xlsx"' % one_book.group(2),
+                })
             if method == "GET" and re.fullmatch(r"/projects/[A-Za-z0-9]+/reports\.xlsx", rest):
                 project_key = rest.split("/")[2]
                 body = reports_xlsx(project_key, self.text())
@@ -6677,7 +8852,7 @@ class Handler(BaseHTTPRequestHandler):
         view = (query.get("view") or ["all"])[0]
         if view == "dashboard":
             view = "all"
-        if view not in ("all", "mine", "search", "settings", "schedules", "reports", "map"):
+        if view not in ("all", "mine", "search", "settings", "schedules", "reports", "map", "tni"):
             view = "all"
         html = (template
                 .replace("@@LANG@@", "ru" if self.lang() == "ru" else "en")
@@ -6685,6 +8860,7 @@ class Handler(BaseHTTPRequestHandler):
                 .replace("@@CSS@@", "/download/resources/asset-tree/asset-tree.css")
                 .replace("@@QR@@", "/download/resources/asset-tree/qr-code.js")
                 .replace("@@PLAN@@", "/download/resources/asset-tree/plan-exchange.js")
+                .replace("@@SCHEME@@", "/download/resources/asset-tree/schemes.js")
                 .replace("@@JS@@", "/download/resources/asset-tree/asset-tree.js")
                 .replace("@@REST@@", "/rest/asset-tree/1.0")
                 .replace("@@PROJECT@@", project)
@@ -6791,7 +8967,7 @@ p { color: #5d6b82; }
 body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 header { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
 header a { color: #fff; text-decoration: none; }
-main { max-width: 560px; margin: 24px auto 48px; background: #fff; border: 1px solid #dfe1e6; border-radius: 3px; padding: 24px; }
+main { max-width: 720px; margin: 24px auto 48px; background: #fff; border: 1px solid #dfe1e6; border-radius: 3px; padding: 24px; }
 h1 { margin: 0 0 12px; font-size: 20px; }
 .muted { color: #6b778c; font-size: 12px; }
 dl { margin: 16px 0; }
@@ -6815,7 +8991,80 @@ dd { margin: 2px 0 0; }
 </body></html>"""
         self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
-    def serve_portal(self, path):
+    def serve_portal_home(self, query):
+        asset = ((query or {}).get("asset") or [""])[0]
+        project = ((query or {}).get("project") or [""])[0]
+        extra = ""
+        if asset.isdigit():
+            extra = "asset=" + asset
+        if project:
+            extra = (extra + "&" if extra else "") + "project=" + project
+        suffix = ("?" + extra) if extra else ""
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Портал</title>
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+main { max-width: 720px; margin: 32px auto; }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 500; }
+p { margin: 0 0 20px; color: #6b778c; }
+a.portal-type { display: block; margin: 0 0 12px; padding: 16px 18px; border-radius: 3px; background: #fff; color: #172b4d; text-decoration: none; box-shadow: 0 1px 1px rgba(9, 30, 66, 0.25); }
+a.portal-type strong { display: block; margin-bottom: 4px; color: #0052cc; font-weight: 600; }
+a.portal-type span { color: #6b778c; font-size: 13px; }
+</style></head>
+<body>
+<header>Центр поддержки</header>
+<main>
+<h1>Чем мы можем помочь?</h1>
+<p>Выберите тип запроса. Оборудование из карточки уже будет в поле актива.</p>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/5%s"><strong>Сообщить о проблеме</strong><span>Что случилось с этим оборудованием</span></a>
+<a class="portal-type" href="/servicedesk/customer/portal/7/create/12%s"><strong>Запрос на обслуживание</strong><span>Плановая работа или настройка</span></a>
+</main>
+</body></html>""" % (suffix, suffix)
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_portal_request(self, path):
+        key = path.rstrip("/").rsplit("/", 1)[-1]
+        html = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>%s</title>
+<link rel="stylesheet" href="/download/resources/asset-tree/asset-field.css">
+<style>
+body { margin: 0; background: #f4f5f7; color: #172b4d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0747a6; color: #fff; }
+main { max-width: 720px; margin: 32px auto; background: #fff; border-radius: 3px; padding: 24px; }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 500; }
+p { margin: 0; color: #6b778c; }
+#linked { margin-top: 16px; color: #172b4d; font-size: 16px; }
+</style></head>
+<body>
+<header>Центр поддержки</header>
+<main>
+<h1>%s</h1>
+<p>На этой форме нет поля актива.</p>
+<p id="linked">Оборудование ещё не привязано</p>
+</main>
+<script src="/download/resources/asset-tree/asset-field.js"></script>
+<script>
+setInterval(function () {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', '/preview/portal-links', true);
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4 || xhr.status !== 200) return;
+    var payload = JSON.parse(xhr.responseText || '{}');
+    var links = payload.links || [];
+    var line = document.getElementById('linked');
+    var found = null;
+    for (var i = 0; i < links.length; i++) if (links[i].issueKey === '%s') found = links[i];
+    if (!found || !line) return;
+    line.textContent = 'Оборудование привязано: ' + (found.objectKey ? found.objectKey + ' ' : '') + (found.name || '');
+  };
+  xhr.send(null);
+}, 400);
+</script>
+</body></html>""" % (key, key, key)
+        self.respond(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def serve_portal(self, path, query=None):
         ensure_portal_demo()
         # The script is in the head, before the form exists, and the asset input
         # appears later. Project key is not in the page: portal 7 answers only
@@ -7076,6 +9325,12 @@ form.vp-request-form .select2-container .select2-chosen { position: relative; z-
 </select>
 </div>
 </div>
+<div class="field-group">
+<label>Кабинет <span class="vp-optional">(необязательно)</span></label>
+<div class="checkbox"><input type="checkbox" id="customfield_10200-1" name="customfield_10200" value="20111"><label for="customfield_10200-1">111</label></div>
+<div class="checkbox"><input type="checkbox" id="customfield_10200-2" name="customfield_10200" value="20112"><label for="customfield_10200-2">112</label></div>
+<div class="checkbox"><input type="checkbox" id="customfield_10200-3" name="customfield_10200" value="20113"><label for="customfield_10200-3">113</label></div>
+</div>
 <div id="asset-slot" class="field-group"></div>
 </form>
 </main>
@@ -7157,6 +9412,14 @@ setTimeout(function () {
             if not portal_detail(asset_id, text):
                 return 403, {"message": text["asset-tree.error.forbidden"]}
             return self.add_share(asset_id, (self.read_json() or {}).get("userKey"), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/requests/([A-Z][A-Z0-9_]*-\d+)", path)
+        if match and method == "POST":
+            return portal_link_request(int(match.group(1)), match.group(2), text)
+        match = re.fullmatch(r"/portal/assets/(\d+)/requests", path)
+        if match and method == "GET":
+            return portal_request_form(int(match.group(1)), text)
+        if match and method == "POST":
+            return portal_request_create(int(match.group(1)), self.read_json() or {}, text)
         match = re.fullmatch(r"/portal/assets/(\d+)", path)
         if match and method == "GET":
             detail = portal_detail(int(match.group(1)), text)
@@ -7304,6 +9567,29 @@ setTimeout(function () {
             if not module_on(project_key, "service"):
                 return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
             return delete_staff(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes", path)
+        if match:
+            project_key = match.group(1)
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if not module_on(project_key, "map"):
+                return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+            if method == "GET":
+                return 200, project_schemes(project_key)
+            if method == "POST":
+                return create_scheme(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/schemes/(\d+)", path)
+        if match:
+            project_key = match.group(1)
+            scheme_id = int(match.group(2))
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            if method == "GET":
+                return read_scheme(project_key, scheme_id, text)
+            if method == "PUT":
+                return save_scheme(project_key, scheme_id, self.read_json(), text)
+            if method == "DELETE":
+                return delete_scheme(project_key, scheme_id, text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/floors", path)
         if match:
             project_key = match.group(1)
@@ -7325,6 +9611,77 @@ setTimeout(function () {
                 return save_floor(project_key, floor_id, self.read_json(), text)
             if method == "DELETE":
                 return delete_floor(project_key, floor_id, text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, [tni_dto(row) for row in tni_rows(project_key)]
+            if method == "POST":
+                return create_subnet(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets/(\d+)", path)
+        if match:
+            project_key = match.group(1)
+            subnet_id = int(match.group(2))
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "DELETE":
+                row = STATE.setdefault("subnets", {}).get(subnet_id)
+                if not row or row.get("projectKey") != project_key:
+                    return 404, {"message": text.get("asset-tree.error.notFound", "Missing")}
+                STATE["subnets"].pop(subnet_id, None)
+                return 204, None
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/subnets/(\d+)/scan", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return scan_subnet(project_key, int(match.group(2)), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/sccm/load", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return load_sccm(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/sccm", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, sccm_dto(project_key)
+            if method == "POST":
+                return save_sccm(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/load", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return load_directory(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory/sheet", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            return import_sheet(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/directory", path)
+        if match:
+            project_key = match.group(1)
+            blocked = reject_module(project_key, "tni", text)
+            if blocked:
+                return blocked
+            if method == "GET":
+                return 200, directory_dto(project_key)
+            if method == "POST":
+                return save_directory(project_key, self.read_json(), text)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports", path)
         if match:
             project_key = match.group(1)
@@ -7615,6 +9972,14 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/copy", path)
         if match and method == "POST":
             return self.copy_asset(int(match.group(1)), text)
+        match = re.fullmatch(r"/assets/(\d+)/ping", path)
+        if match and method == "POST":
+            return ping_asset(int(match.group(1)), text)
+        match = re.fullmatch(r"/assets/(\d+)/watch", path)
+        if match and method == "GET":
+            return get_watch(int(match.group(1)), text)
+        if match and method == "PUT":
+            return save_watch(int(match.group(1)), self.read_json(), text)
         match = re.fullmatch(r"/assets/(\d+)", path)
         if match and method == "GET":
             asset = STATE["assets"].get(int(match.group(1)))
@@ -8236,7 +10601,14 @@ setTimeout(function () {
         new_status = canonical(status)
         new_custodian = custodian or ""
         new_issued = issued or ""
+        place_approver = None
+        if row.get("location") and "approverKey" in (body or {}):
+            place_approver = str(body.get("approverKey") or "").strip()
+            if place_approver and place_approver not in USERS:
+                return 400, {"message": text["asset-tree.error.user"]}
         asset.update({"name": new_name, "description": new_description, "typeKey": type_key, "status": new_status, "custodianKey": custodian, "issuedKey": issued, "values": values, "updated": now_stamp()})
+        if place_approver is not None:
+            assign_place_approver(asset["projectKey"], asset_id, place_approver)
         log_activity(asset_id, "name", "", old_name, new_name)
         log_activity(asset_id, "description", "", old_description, new_description)
         old_type_row = type_row(old_type)
@@ -8372,6 +10744,7 @@ setTimeout(function () {
             "systemType": False, "location": location, "placeCaption": caption,
             "showInTree": location or bool((body or {}).get("showInTree")),
             "service": (not location) and bool((body or {}).get("service")),
+            "reach": (not location) and bool((body or {}).get("reach")),
             "parentTypeKey": parent,
             "sortOrder": order, "fields": [],
         }
@@ -8386,6 +10759,8 @@ setTimeout(function () {
             row["showInTree"] = bool(row.get("location")) or bool(body.get("showInTree"))
         if body.get("service") is not None and not row.get("location"):
             row["service"] = bool(body.get("service"))
+        if body.get("reach") is not None and not row.get("location"):
+            row["reach"] = bool(body.get("reach"))
         if body.get("icon") is not None:
             icon = resolve_icon(body.get("icon"), bool(row.get("location")))
             if icon is None:
@@ -8666,11 +11041,15 @@ setTimeout(function () {
                 missing = False
                 file_id = STATE["file_seq"]
                 STATE["file_seq"] += 1
+                slot = (query.get("slot") or [""])[0]
+                if slot not in ("buy", "contract") or (query.get("portal") or ["0"])[0] == "1":
+                    slot = ""
                 STATE["files"][file_id] = {
                     "id": file_id, "assetId": asset_id, "fileName": safe,
                     "contentType": content_type or "application/octet-stream",
                     "size": len(data), "authorKey": "ivanov", "created": now_stamp(),
                     "internal": (query.get("internal") or ["0"])[0] == "1" and (query.get("portal") or ["0"])[0] != "1",
+                    "slot": slot,
                 }
         if missing:
             self.respond(404, json.dumps({"message": text["asset-tree.error.notFound"]}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
@@ -8684,7 +11063,11 @@ setTimeout(function () {
             return
         with LOCK:
             log_activity(asset_id, "file", "", "", safe)
-        self.respond(201, json.dumps({"id": file_id}).encode("utf-8"), "application/json; charset=utf-8")
+        self.respond(201, json.dumps({
+            "id": file_id, "fileName": safe, "size": len(data), "slot": slot,
+            "contentType": content_type or "application/octet-stream",
+            "authorName": USERS["ivanov"]["displayName"], "internal": False,
+        }, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
     def serve_card_image(self, method, query):
         text = self.text()

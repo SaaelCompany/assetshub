@@ -42,6 +42,13 @@ public final class FloorBounds {
     public static final String ARC = "arc";
     public static final String DIM = "dim";
     public static final String TEXT = "text";
+    public static final String BOX = "box";
+    public static final String ELLIPSE = "ellipse";
+    public static final String DIAMOND = "diamond";
+    public static final String TRIANGLE = "triangle";
+    public static final String NOTE = "note";
+    public static final String FLOW = "flow";
+    public static final String CHART = "chart";
     public static final String POWER = "power";
     public static final String SCS = "scs";
     public static final String COMM = "comm";
@@ -51,6 +58,10 @@ public final class FloorBounds {
     public static final String FIRE = "fire";
     public static final String GUARD = "guard";
     public static final String PNG = "png";
+    public static final String GLYPH = "glyph";
+    public static final String PEN = "pen";
+    public static final String RACK = "rack";
+    public static final String SWITCH = "switch";
     private static final Pattern MARK = Pattern.compile("^(power|scs|comm|vent|water|heat|fire|guard)-[a-z]{1,12}$");
 
     private FloorBounds() {
@@ -88,9 +99,12 @@ public final class FloorBounds {
                 || BED.equals(value) || PLANT.equals(value) || BATH.equals(value)
                 || TOILET.equals(value) || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value)
                 || ARC.equals(value) || DIM.equals(value) || TEXT.equals(value)
+                || BOX.equals(value) || ELLIPSE.equals(value) || DIAMOND.equals(value)
+                || TRIANGLE.equals(value) || NOTE.equals(value) || FLOW.equals(value) || CHART.equals(value)
                 || POWER.equals(value) || SCS.equals(value) || COMM.equals(value)
                 || VENT.equals(value) || WATER.equals(value)
-                || HEAT.equals(value) || FIRE.equals(value) || GUARD.equals(value) || PNG.equals(value)) {
+                || HEAT.equals(value) || FIRE.equals(value) || GUARD.equals(value) || PNG.equals(value)
+                || PEN.equals(value) || RACK.equals(value) || SWITCH.equals(value) || GLYPH.equals(value)) {
             return value;
         }
         if (value.length() <= 16 && MARK.matcher(value).matches()) {
@@ -108,7 +122,9 @@ public final class FloorBounds {
                 || CABINET.equals(value) || SOFA.equals(value) || SEAT.equals(value) || PEDESTAL.equals(value)
                 || BED.equals(value) || PLANT.equals(value) || BATH.equals(value) || TOILET.equals(value)
                 || SINK.equals(value) || STOVE.equals(value) || RUG.equals(value) || TEXT.equals(value)
-                || PNG.equals(value)) {
+                || BOX.equals(value) || ELLIPSE.equals(value) || DIAMOND.equals(value)
+                || TRIANGLE.equals(value) || NOTE.equals(value) || CHART.equals(value)
+                || PNG.equals(value) || RACK.equals(value) || SWITCH.equals(value) || GLYPH.equals(value)) {
             return 8;
         }
         return MIN_PART;

@@ -99,6 +99,8 @@ public class PortalMineDto {
         private String role = "";
         private String color = "";
         private String icon = "";
+        private boolean photo;
+        private String updated = "";
         private List<Line> lines = new ArrayList<Line>();
 
         public int getId() {
@@ -187,6 +189,22 @@ public class PortalMineDto {
 
         public void setIcon(String icon) {
             this.icon = icon == null ? "" : icon;
+        }
+
+        public boolean isPhoto() {
+            return photo;
+        }
+
+        public void setPhoto(boolean photo) {
+            this.photo = photo;
+        }
+
+        public String getUpdated() {
+            return updated;
+        }
+
+        public void setUpdated(String updated) {
+            this.updated = updated == null ? "" : updated;
         }
 
         public List<Line> getLines() {

@@ -21,6 +21,7 @@ import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -82,6 +83,41 @@ public class ProductRulesTest {
         assertTrue(merged.getStaffMarks().contains("leave|Отпуск|d97706|0|0"));
         assertTrue(merged.getStaffMarks().contains("trip|Командировка|0f766e|8|1"));
         assertEquals(Integer.valueOf(1800), merged.getMapHeight());
+    }
+
+    @Test
+    public void lifecycleStartsOpenUntilTheProjectFoldsIt() {
+        ModuleSetupDto defaults = ModuleSetup.read("");
+        assertEquals(Boolean.FALSE, defaults.getLifeFold());
+        ModuleSetupDto folded = new ModuleSetupDto();
+        folded.setLifeFold(Boolean.TRUE);
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(folded));
+        assertEquals(Boolean.TRUE, read.getLifeFold());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setLifeCurrency("USD");
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals(Boolean.TRUE, merged.getLifeFold());
+        assertEquals("USD", merged.getLifeCurrency());
+    }
+
+    @Test
+    public void cardPhotoStartsOffAndSurvivesAnotherSetting() {
+        ModuleSetupDto defaults = ModuleSetup.read("");
+        assertEquals(Boolean.FALSE, defaults.getPhoto());
+        ModuleSetupDto shown = new ModuleSetupDto();
+        shown.setPhoto(Boolean.TRUE);
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(shown));
+        assertEquals(Boolean.TRUE, read.getPhoto());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setLifeCurrency("USD");
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals(Boolean.TRUE, merged.getPhoto());
+        assertEquals("USD", merged.getLifeCurrency());
+        ModuleSetupDto off = new ModuleSetupDto();
+        off.setPhoto(Boolean.FALSE);
+        ModuleSetupDto hidden = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(merged, off)));
+        assertEquals(Boolean.FALSE, hidden.getPhoto());
+        assertEquals("USD", hidden.getLifeCurrency());
     }
 
     @Test
@@ -154,6 +190,83 @@ public class ProductRulesTest {
         String replaced = ServiceDue.keepDone("2026-11-08>2026-11-09", moves);
         assertTrue(replaced.contains("2026-11-01>done"));
         assertTrue(replaced.contains("2026-11-08>2026-11-09"));
+    }
+
+    @Test
+    public void serviceColumnsFollowTheModuleAndStayOnTheObjectRow() {
+        List<EquipmentExchange.TypeRef> types = Collections.singletonList(
+                new EquipmentExchange.TypeRef("laptop", "Laptop", false, Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(new EquipmentExchange.Named("in_use", "In use"));
+        List<EquipmentExchange.Node> nodes = Arrays.asList(
+                new EquipmentExchange.Node(1, null, "Room", "STP-1", true),
+                new EquipmentExchange.Node(2, Integer.valueOf(1), "ThinkPad", "STP-2", false));
+        List<EquipmentExchange.Named> kinds = Arrays.asList(
+                new EquipmentExchange.Named("to", "Maintenance"),
+                new EquipmentExchange.Named("verify", "Verification"));
+        List<String> headers = Arrays.asList("Key", "Name", "Type", "Place",
+                "Service: kind", "Service: work", "Service: date", "Service: interval", "Service: period", "Service: assignee");
+        EquipmentSheet.Sheet created = new EquipmentSheet.Sheet("Laptop", headers, Collections.singletonList(
+                new EquipmentSheet.Record(2, Arrays.asList(
+                        "", "New laptop", "Laptop", "Room", "ТО", "Замена фильтра", "01.11.2026", "6", "мес.", "ivan"))));
+        EquipmentSheet.Sheet quiet = new EquipmentSheet.Sheet("Laptop", headers, Collections.singletonList(
+                new EquipmentSheet.Record(2, Arrays.asList(
+                        "STP-2", "ThinkPad", "Laptop", "Room", "", "", "", "", "", ""))));
+        EquipmentSheet.Sheet extra = new EquipmentSheet.Sheet("Service", Arrays.asList(
+                "Key", "Service: kind", "Service: work", "Service: date", "Service: interval", "Service: period", "Service: assignee"),
+                Collections.singletonList(new EquipmentSheet.Record(2, Arrays.asList(
+                        "STP-2", "Verification", "", "2026-03-01", "", "once", ""))));
+        EquipmentExchange.Plan on = EquipmentExchange.planBook(Arrays.asList(created, extra), types, statuses, nodes,
+                "in_use", new HashMap<String, String>(), servicePeople(), true, kinds);
+        assertTrue(on.getIssues().toString(), on.getIssues().isEmpty());
+        assertEquals(1, on.getChanges().size());
+        EquipmentExchange.Service wish = on.getChanges().get(0).getService();
+        assertNotNull(wish);
+        assertEquals("", wish.getObjectKey());
+        assertEquals("to", wish.getKind());
+        assertEquals("Замена фильтра", wish.getName());
+        assertEquals("2026-11-01", wish.getLastDone());
+        assertEquals(6, wish.getEveryCount());
+        assertEquals("month", wish.getEveryUnit());
+        assertEquals("ivan", wish.getAssigneeKey());
+        assertEquals(1, on.getServices().size());
+        assertEquals("STP-2", on.getServices().get(0).getObjectKey());
+        assertEquals("verify", on.getServices().get(0).getKind());
+        assertEquals(1, on.getServices().get(0).getEveryCount());
+        assertEquals("once", on.getServices().get(0).getEveryUnit());
+
+        EquipmentExchange.Plan off = EquipmentExchange.planBook(Arrays.asList(created, extra), types, statuses, nodes,
+                "in_use", new HashMap<String, String>(), servicePeople(), false, kinds);
+        assertTrue(off.getIssues().toString(), off.getIssues().isEmpty());
+        assertNull(off.getChanges().get(0).getService());
+        assertTrue(off.getServices().isEmpty());
+
+        EquipmentExchange.Plan blank = EquipmentExchange.planBook(Collections.singletonList(quiet), types, statuses, nodes,
+                "in_use", new HashMap<String, String>(), servicePeople(), true, kinds);
+        assertTrue(blank.getIssues().isEmpty());
+        assertNull(blank.getChanges().get(0).getService());
+
+        EquipmentSheet.Sheet broken = new EquipmentSheet.Sheet("Laptop", headers, Collections.singletonList(
+                new EquipmentSheet.Record(2, Arrays.asList(
+                        "", "New laptop", "Laptop", "Room", "Polish", "", "yesterday", "6", "hourly", ""))));
+        EquipmentExchange.Plan bad = EquipmentExchange.planBook(Collections.singletonList(broken), types, statuses, nodes,
+                "in_use", new HashMap<String, String>(), servicePeople(), true, kinds);
+        assertTrue(bad.getChanges().isEmpty());
+        assertEquals("asset-tree.error.import.service.kind", bad.getIssues().get(0).getMessageKey());
+    }
+
+    private static EquipmentExchange.Directory servicePeople() {
+        return new EquipmentExchange.Directory() {
+            @Override
+            public EquipmentExchange.Person find(String raw) {
+                if (raw == null || raw.trim().isEmpty()) {
+                    return EquipmentExchange.Person.blank();
+                }
+                if ("ivan".equalsIgnoreCase(raw.trim())) {
+                    return EquipmentExchange.Person.found("ivan");
+                }
+                return EquipmentExchange.Person.missing();
+            }
+        };
     }
 
     private static EquipmentExchange.Directory blankPeople() {

@@ -28,6 +28,7 @@ public class AssetDto {
     private String location;
     private boolean editable;
     private boolean cardImage;
+    private boolean photo;
     private UserProfileDto custodian;
     private UserProfileDto issued;
     private UserProfileDto author;
@@ -43,6 +44,8 @@ public class AssetDto {
     private List<ServicePlanDto> plans;
     private String serviceDue;
     private List<String> offeredTypes = new ArrayList<String>();
+    private int pingUp;
+    private boolean pingExempt;
 
     public int getId() {
         return id;
@@ -204,6 +207,14 @@ public class AssetDto {
         this.cardImage = cardImage;
     }
 
+    public boolean isPhoto() {
+        return photo;
+    }
+
+    public void setPhoto(boolean photo) {
+        this.photo = photo;
+    }
+
     public UserProfileDto getCustodian() {
         return custodian;
     }
@@ -322,5 +333,21 @@ public class AssetDto {
 
     public void setOfferedTypes(List<String> offeredTypes) {
         this.offeredTypes = offeredTypes == null ? new ArrayList<String>() : offeredTypes;
+    }
+
+    public int getPingUp() {
+        return pingUp;
+    }
+
+    public void setPingUp(int pingUp) {
+        this.pingUp = pingUp;
+    }
+
+    public boolean isPingExempt() {
+        return pingExempt;
+    }
+
+    public void setPingExempt(boolean pingExempt) {
+        this.pingExempt = pingExempt;
     }
 }

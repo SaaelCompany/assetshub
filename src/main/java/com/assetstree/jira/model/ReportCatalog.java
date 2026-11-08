@@ -1,5 +1,6 @@
 package com.assetstree.jira.model;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -19,11 +20,19 @@ public final class ReportCatalog {
     public static final String AGE = "age";
     public static final String WRITEOFF = "writeoff";
     public static final String WORK = "work";
+    public static final String DONE = "done";
+    public static final String FIELD = "field";
 
     private static final List<String> STANDARD = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
+            STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK, DONE));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind"));
+            STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", DONE, "who", FIELD));
+    private static final List<String> DONE_AXES = Collections.unmodifiableList(Arrays.asList(
+            "kind", "month", PLACE, TYPE, "who", "asset", "state"));
+    /** Long enough for every chart name joined once. The short column stays separate. */
+    private static final int CHART_LIMIT = 120;
+    private static final List<String> CHARTS = Collections.unmodifiableList(Arrays.asList(
+            "donut", "pie", "bar", "bars", "line", "area", "histogram", "scatter", "radar", "gantt", "venn"));
 
     private ReportCatalog() {
     }
@@ -41,7 +50,44 @@ public final class ReportCatalog {
             return "";
         }
         String value = raw.trim().toLowerCase(Locale.ROOT);
-        return GROUPS.contains(value) ? value : "";
+        if (GROUPS.contains(value)) {
+            return "who".equals(value) ? "" : value;
+        }
+        if (value.indexOf('+') < 0 || value.length() > 16) {
+            return "";
+        }
+        String[] parts = value.split("\\+");
+        if (parts.length < 2) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        List<String> seen = new ArrayList<String>();
+        for (String part : parts) {
+            if (!GROUPS.contains(part) || seen.contains(part)) {
+                return "";
+            }
+            seen.add(part);
+            if (out.length() > 0) {
+                out.append('+');
+            }
+            out.append(part);
+        }
+        if (seen.contains(DONE) || seen.contains("who")) {
+            if (!DONE.equals(seen.get(0))) {
+                return "";
+            }
+            for (int i = 1; i < seen.size(); i++) {
+                if (!DONE_AXES.contains(seen.get(i))) {
+                    return "";
+                }
+            }
+        }
+        return out.length() > 16 ? "" : out.toString();
+    }
+
+    /** A saved report whose rows are completed schedule days. */
+    public static boolean doneReport(String group) {
+        return DONE.equals(group) || (group != null && group.startsWith(DONE + "+"));
     }
 
     public static String savedKey(int id) {
@@ -59,15 +105,54 @@ public final class ReportCatalog {
         }
     }
 
-    /** Ring, pie, columns (bar) or horizontal bars. Anything else is rejected. */
+    /** A chart the report screen can draw. Anything else is rejected. */
     public static String chart(String raw) {
         if (raw == null) {
             return "";
         }
         String value = raw.trim().toLowerCase(Locale.ROOT);
-        if ("donut".equals(value) || "pie".equals(value) || "bar".equals(value) || "bars".equals(value)) {
+        if (CHARTS.contains(value)) {
             return value;
         }
-        return "";
+        if (value.indexOf(',') < 0 || value.length() > CHART_LIMIT) {
+            return "";
+        }
+        String[] parts = value.split(",");
+        if (parts.length < 2) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        List<String> seen = new ArrayList<String>();
+        for (String part : parts) {
+            String item = part.trim();
+            if (!CHARTS.contains(item) || seen.contains(item)) {
+                return "";
+            }
+            seen.add(item);
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(item);
+        }
+        return out.length() > CHART_LIMIT ? "" : out.toString();
+    }
+
+    /** Type-field key used when a saved report groups or filters by a field. */
+    public static String fieldKey(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String value = raw.trim().toLowerCase(Locale.ROOT);
+        if (value.isEmpty() || value.length() > 40 || value.charAt(0) < 'a' || value.charAt(0) > 'z') {
+            return "";
+        }
+        for (int i = 1; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            boolean ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
+            if (!ok) {
+                return "";
+            }
+        }
+        return value;
     }
 }

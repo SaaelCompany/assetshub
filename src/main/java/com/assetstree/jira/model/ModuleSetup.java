@@ -43,16 +43,33 @@ public final class ModuleSetup {
         setup.setReportMailPart(mailPart(values.get("rpart")));
         setup.setLifeApproval(Boolean.valueOf(!"0".equals(values.get("approve"))));
         setup.setLifeApprover(who(values.get("who")));
+        setup.setLifePlaces(LifeApprovers.normalize(values.get("lwho")));
         setup.setLifeCurrency(currency(values.get("cur")));
         setup.setLifeMonths(Integer.valueOf(months(values.get("months"))));
+        setup.setLifeFold(Boolean.valueOf("1".equals(values.get("fold"))));
         setup.setStaffMarks(staffMarks(values.get("marks")));
         setup.setStaffOrder(staffOrder(values.get("order")));
         setup.setStaffPlaceOrder(staffPlaces(values.get("places")));
         setup.setScheduleBoards(boards(values.get("boards")));
         setup.setScheduleOpen(openBoard(values.get("open"), values.get("layer")));
         setup.setFurniture(furniture(values.get("furn")));
+        setup.setGlyphs(glyphs(values.get("syms")));
         setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
         setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
+        setup.setPhoto(Boolean.valueOf("1".equals(values.get("photo"))));
+        setup.setTniKeep(Integer.valueOf(TniPolicy.keepDays(number(values.get("tkeep")))));
+        setup.setTniProbeDays(Integer.valueOf(TniPolicy.probeDays(number(values.get("tdays")))));
+        setup.setTniProbeTries(Integer.valueOf(TniPolicy.probeTries(number(values.get("ttry")))));
+        setup.setTniAction(TniPolicy.action(values.get("tact")));
+        setup.setTniComputer(TniPolicy.typeKey(values.get("tpc")));
+        setup.setTniLaptop(TniPolicy.typeKey(values.get("tnb")));
+        setup.setTniPhone(TniPolicy.typeKey(values.get("tph")));
+        setup.setTniTablet(TniPolicy.typeKey(values.get("ttb")));
+        setup.setTniBrowser(Boolean.valueOf(flag(values.get("tbrow"))));
+        setup.setTniScan(Boolean.valueOf(flag(values.get("tscan"))));
+        setup.setTniAd(Boolean.valueOf(flag(values.get("tad"))));
+        setup.setTniSccm(Boolean.valueOf(flag(values.get("tscc"))));
+        setup.setTniPing(Boolean.valueOf(flag(values.get("tping"))));
         return setup;
     }
 
@@ -80,16 +97,33 @@ public final class ModuleSetup {
         append(stored, "rpart", mailPart(value.getReportMailPart()));
         append(stored, "approve", Boolean.FALSE.equals(value.getLifeApproval()) ? "0" : "1");
         append(stored, "who", who(value.getLifeApprover()));
+        append(stored, "lwho", LifeApprovers.normalize(value.getLifePlaces()));
         append(stored, "cur", currency(value.getLifeCurrency()));
         append(stored, "months", String.valueOf(months(value.getLifeMonths() == null ? "" : String.valueOf(value.getLifeMonths()))));
+        append(stored, "fold", Boolean.TRUE.equals(value.getLifeFold()) ? "1" : "0");
         append(stored, "marks", staffMarks(value.getStaffMarks()));
         append(stored, "order", staffOrder(value.getStaffOrder()));
         append(stored, "places", staffPlaces(value.getStaffPlaceOrder()));
         append(stored, "boards", boards(value.getScheduleBoards()));
         append(stored, "open", openBoard(value.getScheduleOpen(), value.getScheduleLayer()));
         append(stored, "furn", furniture(value.getFurniture()));
+        append(stored, "syms", glyphs(value.getGlyphs()));
         append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
         append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
+        append(stored, "photo", Boolean.TRUE.equals(value.getPhoto()) ? "1" : "0");
+        append(stored, "tkeep", String.valueOf(TniPolicy.keepDays(value.getTniKeep() == null ? 0 : value.getTniKeep().intValue())));
+        append(stored, "tdays", String.valueOf(TniPolicy.probeDays(value.getTniProbeDays() == null ? 0 : value.getTniProbeDays().intValue())));
+        append(stored, "ttry", String.valueOf(TniPolicy.probeTries(value.getTniProbeTries() == null ? 0 : value.getTniProbeTries().intValue())));
+        append(stored, "tact", TniPolicy.action(value.getTniAction()));
+        append(stored, "tpc", TniPolicy.typeKey(value.getTniComputer()));
+        append(stored, "tnb", TniPolicy.typeKey(value.getTniLaptop()));
+        append(stored, "tph", TniPolicy.typeKey(value.getTniPhone()));
+        append(stored, "ttb", TniPolicy.typeKey(value.getTniTablet()));
+        append(stored, "tbrow", on(value.getTniBrowser()));
+        append(stored, "tscan", on(value.getTniScan()));
+        append(stored, "tad", on(value.getTniAd()));
+        append(stored, "tscc", on(value.getTniSccm()));
+        append(stored, "tping", on(value.getTniPing()));
         return stored.toString();
     }
 
@@ -303,16 +337,33 @@ public final class ModuleSetup {
         merged.setReportMailPart(incoming.getReportMailPart() != null ? incoming.getReportMailPart() : base.getReportMailPart());
         merged.setLifeApproval(incoming.getLifeApproval() != null ? incoming.getLifeApproval() : base.getLifeApproval());
         merged.setLifeApprover(incoming.getLifeApprover() != null ? incoming.getLifeApprover() : base.getLifeApprover());
+        merged.setLifePlaces(incoming.getLifePlaces() != null ? incoming.getLifePlaces() : base.getLifePlaces());
         merged.setLifeCurrency(incoming.getLifeCurrency() != null ? incoming.getLifeCurrency() : base.getLifeCurrency());
         merged.setLifeMonths(incoming.getLifeMonths() != null ? incoming.getLifeMonths() : base.getLifeMonths());
+        merged.setLifeFold(incoming.getLifeFold() != null ? incoming.getLifeFold() : base.getLifeFold());
         merged.setStaffMarks(incoming.getStaffMarks() != null ? incoming.getStaffMarks() : base.getStaffMarks());
         merged.setStaffOrder(incoming.getStaffOrder() != null ? incoming.getStaffOrder() : base.getStaffOrder());
         merged.setStaffPlaceOrder(incoming.getStaffPlaceOrder() != null ? incoming.getStaffPlaceOrder() : base.getStaffPlaceOrder());
         merged.setScheduleBoards(incoming.getScheduleBoards() != null ? incoming.getScheduleBoards() : base.getScheduleBoards());
         merged.setScheduleOpen(incoming.getScheduleOpen() != null ? incoming.getScheduleOpen() : base.getScheduleOpen());
         merged.setFurniture(incoming.getFurniture() != null ? incoming.getFurniture() : base.getFurniture());
+        merged.setGlyphs(incoming.getGlyphs() != null ? incoming.getGlyphs() : base.getGlyphs());
         merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
         merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
+        merged.setPhoto(incoming.getPhoto() != null ? incoming.getPhoto() : base.getPhoto());
+        merged.setTniKeep(incoming.getTniKeep() != null ? incoming.getTniKeep() : base.getTniKeep());
+        merged.setTniProbeDays(incoming.getTniProbeDays() != null ? incoming.getTniProbeDays() : base.getTniProbeDays());
+        merged.setTniProbeTries(incoming.getTniProbeTries() != null ? incoming.getTniProbeTries() : base.getTniProbeTries());
+        merged.setTniAction(incoming.getTniAction() != null ? incoming.getTniAction() : base.getTniAction());
+        merged.setTniComputer(incoming.getTniComputer() != null ? incoming.getTniComputer() : base.getTniComputer());
+        merged.setTniLaptop(incoming.getTniLaptop() != null ? incoming.getTniLaptop() : base.getTniLaptop());
+        merged.setTniPhone(incoming.getTniPhone() != null ? incoming.getTniPhone() : base.getTniPhone());
+        merged.setTniTablet(incoming.getTniTablet() != null ? incoming.getTniTablet() : base.getTniTablet());
+        merged.setTniBrowser(incoming.getTniBrowser() != null ? incoming.getTniBrowser() : base.getTniBrowser());
+        merged.setTniScan(incoming.getTniScan() != null ? incoming.getTniScan() : base.getTniScan());
+        merged.setTniAd(incoming.getTniAd() != null ? incoming.getTniAd() : base.getTniAd());
+        merged.setTniSccm(incoming.getTniSccm() != null ? incoming.getTniSccm() : base.getTniSccm());
+        merged.setTniPing(incoming.getTniPing() != null ? incoming.getTniPing() : base.getTniPing());
         return merged;
     }
 
@@ -586,6 +637,14 @@ public final class ModuleSetup {
         return day + ":" + keys;
     }
 
+    private static boolean flag(String raw) {
+        return raw == null || !"0".equals(raw.trim());
+    }
+
+    private static String on(Boolean value) {
+        return Boolean.FALSE.equals(value) ? "0" : "1";
+    }
+
     private static String who(String raw) {
         String value = raw == null ? "" : raw.trim();
         if (value.length() > 80 || !value.matches("[A-Za-z0-9._@-]*")) {
@@ -608,6 +667,18 @@ public final class ModuleSetup {
             return 0;
         }
         return value > 600 ? 600 : value;
+    }
+
+    /** Symbol library. Delimiters that would break the option row are removed. */
+    private static String glyphs(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        String value = raw.replace(";", "").replace("=", "").replace("\n", "").replace("\r", "").trim();
+        if (value.length() > 24000) {
+            value = value.substring(0, 24000);
+        }
+        return value;
     }
 
     /** id^name^kind,x,y,w,h,color,label,angle!shape|next . Colors are stored without a hash. Angle is optional. */

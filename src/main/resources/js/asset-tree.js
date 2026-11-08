@@ -443,6 +443,7 @@
         cardDrag: '',
         cardSuppressClick: false,
         cardSelected: '',
+        cardZoom: null,
         scheduleYear: 0,
         scheduleMonth: 0,
         scheduleSpan: 'month',
@@ -471,7 +472,9 @@
         floors: null,
         floorId: 0,
         mapPlaceId: 0,
-        mapStep: 8,
+        mapStep: 10,
+        mapPen: null,
+        mapGhost: true,
         mapTool: 'select',
         mapWire: '',
         mapAssetId: 0,
@@ -479,6 +482,7 @@
         mapLayer: 'plan',
         mapLayerShow: {},
         mapMode: 'plan',
+        mapBoard: 'figures',
         mapQuery: '',
         mapFurnCat: 'living',
         mapDraft: null,
@@ -487,6 +491,8 @@
         mapSelection: null,
         mapGroup: [],
         mapStamp: '',
+        mapGlyph: '',
+        mapRoomName: -1,
         mapNaming: false,
         mapEditing: false,
         mapDirty: false,
@@ -519,7 +525,17 @@
         lifeLoading: {},
         lifeFailed: {},
         lifeToken: {},
-        lifeEditing: {}
+        lifeEditing: {},
+        lifeFolded: {},
+        lifeContractOpen: {},
+        tniList: null,
+        tniError: '',
+        tniTimer: null,
+        tniDir: null,
+        tniSccm: null,
+        tniWatch: {},
+        tniWatchLoading: {},
+        tniWatchToken: {}
     };
     var idIndex = null;
     var childIndex = null;
@@ -530,6 +546,7 @@
 
     function normalizeView(raw) {
         var value = String(raw || '').toLowerCase();
+        if (value === 'tni') return 'settings';
         if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
             return value;
         }
@@ -592,7 +609,7 @@
                 try {
                     payload = JSON.parse(xhr.responseText);
                 } catch (error) {
-                    payload = { message: xhr.responseText };
+                    payload = { message: '' };
                 }
             }
             callback(xhr.status, payload);
@@ -1561,6 +1578,54 @@
         return !!typeOf(asset.typeKey).location;
     }
 
+    function rootPlaces() {
+        return (state.assets || []).filter(function (asset) {
+            if (!isFolder(asset)) return false;
+            var parent = asset.parentId ? byId()[asset.parentId] : null;
+            return !parent || !isFolder(parent);
+        });
+    }
+
+    function branchApprover(asset) {
+        var map = {};
+        String(moduleSetup().lifePlaces || '').split(',').forEach(function (part) {
+            var bits = part.split(':');
+            if (bits.length === 2 && bits[1]) map[bits[0]] = bits[1];
+        });
+        var current = asset;
+        var guard = 0;
+        var onPlace = false;
+        while (current && current.parentId && guard++ < 40) {
+            var parent = byId()[current.parentId];
+            if (!parent || !isFolder(parent)) break;
+            onPlace = true;
+            if (map[String(parent.id)]) return map[String(parent.id)];
+            current = parent;
+        }
+        return onPlace ? '' : (moduleSetup().lifeApprover || '');
+    }
+
+    function placeApproverKey(placeId) {
+        var found = '';
+        String(moduleSetup().lifePlaces || '').split(',').forEach(function (part) {
+            var bits = part.split(':');
+            if (bits.length === 2 && bits[0] === String(placeId) && bits[1]) found = bits[1];
+        });
+        return found;
+    }
+
+    function rememberPlaceApprover(placeId, userKey) {
+        var project = currentProject();
+        if (!project) return;
+        if (!project.setup) project.setup = {};
+        var parts = String(project.setup.lifePlaces || '').split(',').filter(function (part) {
+            var bits = part.split(':');
+            return bits.length === 2 && bits[0] && bits[0] !== String(placeId);
+        });
+        if (userKey) parts.push(String(placeId) + ':' + userKey);
+        project.setup.lifePlaces = parts.join(',');
+    }
+
     function selectedPlaceId() {
         var current = state.selectedId ? byId()[state.selectedId] : null;
         if (!current) return null;
@@ -1611,8 +1676,10 @@
     }
 
     function objectInTree(asset) {
-        if (!treeObjectsOn() || isFolder(asset)) return false;
-        var parent = asset.parentId ? byId()[asset.parentId] : null;
+        if (!asset || isFolder(asset)) return false;
+        if (!asset.parentId) return true;
+        if (!treeObjectsOn()) return false;
+        var parent = byId()[asset.parentId];
         return !!(parent && isFolder(parent));
     }
 
@@ -2111,7 +2178,10 @@
         if (!node) {
             return;
         }
-        node.textContent = message;
+        var text = String(message == null ? '' : message).replace(/\s+/g, ' ').trim();
+        if (!text || text.indexOf('<') >= 0 || text.length > 400) text = t('errorTitle');
+        else if (text.length > 160) text = text.slice(0, 157) + '\u2026';
+        node.textContent = text;
         node.className = 'asset-tree-notice is-visible';
         clearTimeout(noticeTimer);
         noticeTimer = setTimeout(function () {
@@ -2472,10 +2542,12 @@
         }
         if (state.view === 'reports') {
             frame.appendChild(renderReports());
+            reportFitPlotLabels(frame);
+            window.setTimeout(function () { reportFitPlotLabels(frame); }, 0);
             return;
         }
         if (state.view === 'map') {
-            frame.appendChild(renderMap());
+            frame.appendChild(renderSchemes());
             return;
         }
         if (state.view === 'settings') {
@@ -2838,6 +2910,13 @@
             }
             container.appendChild(branch);
         });
+        if (parentId == null) {
+            childrenOf(null).forEach(function (asset) {
+                if (isFolder(asset)) return;
+                if (visible && !visible[asset.id]) return;
+                container.appendChild(objectTreeRow(asset));
+            });
+        }
         if (parentId && byId()[parentId] && isFolder(byId()[parentId])) {
             hierarchySorted(typeGroupsFor(parentId), 'type').forEach(function (type) {
                 container.appendChild(typeGroupRow(parentId, type));
@@ -4149,10 +4228,15 @@
             menu.hidden = !menu.hidden;
         });
         items.forEach(function (item) {
-            menu.appendChild(button(item.label, 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''), function () {
+            var entry = el('button', 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''));
+            entry.type = 'button';
+            if (item.mark) entry.appendChild(pingDot(item.mark));
+            entry.appendChild(document.createTextNode(item.label));
+            entry.addEventListener('click', function () {
                 menu.hidden = true;
                 item.onClick();
-            }));
+            });
+            menu.appendChild(entry);
         });
         wrap.appendChild(toggle);
         wrap.appendChild(menu);
@@ -4208,6 +4292,32 @@
         box.appendChild(dateField(t('created'), asset.created));
         box.appendChild(dateField(t('updated'), asset.updated));
         return box;
+    }
+
+    function placeSchemesBlock(asset) {
+        var box = el('div');
+        box.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schemes', null, function (status, list) {
+            if (!box.parentNode) return;
+            box.innerHTML = '';
+            var rows = status === 200 && list && list.length ? list : [];
+            var matched = [];
+            var i;
+            for (i = 0; i < rows.length; i++) {
+                if (Number(rows[i].placeId) === Number(asset.id)) matched.push(rows[i]);
+            }
+            if (!matched.length) {
+                box.appendChild(el('p', 'asset-tree-hint', t('schemeNoSchemes')));
+                return;
+            }
+            matched.forEach(function (row) {
+                box.appendChild(linkLine(row.name || t('schemeDefaultName'), t('schemeOpen'), function () {
+                    window.__assetSchemeFocus = { project: state.projectKey, id: row.id };
+                    showView('map');
+                }));
+            });
+        });
+        return moduleBlock(t('menuMap'), box);
     }
 
     function renderPlaceHome(asset) {
@@ -4273,7 +4383,7 @@
         });
         main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
         main.appendChild(descriptionModule(full, true));
-        main.appendChild(fileBlock(full));
+        main.appendChild(placeSchemesBlock(asset));
 
         if (departments.length) {
             var places = el('div');
@@ -4325,6 +4435,7 @@
             });
         }
         main.appendChild(moduleBlock(t('placeTypes'), typeBlock));
+        main.appendChild(fileBlock(full));
         main.appendChild(activityBlock(full));
 
         var issues = el('div');
@@ -6398,6 +6509,8 @@
         if (item.action === 'share_remove') return t('actShareRemove');
         if (item.action === 'card_image') return t('actCardImage');
         if (item.action === 'card_image_delete') return t('actCardImageDelete');
+        if (item.action === 'photo') return t('actPhoto');
+        if (item.action === 'photo_delete') return t('actPhotoDelete');
         if (item.action === 'move') return t('actMove');
         if (item.action === 'place_add') return t('actPlaceAdd');
         if (item.action === 'place_remove') return t('actPlaceRemove');
@@ -6407,6 +6520,7 @@
         if (item.action === 'service_done') return t('actServiceDone');
         if (item.action === 'peer_add') return t('actPeerAdd');
         if (item.action === 'peer_remove') return t('actPeerRemove');
+        if (item.action === 'ping') return t('actPing');
         return t('actUpdated');
     }
 
@@ -6437,6 +6551,13 @@
         }
         row.appendChild(head);
         if (item.action === 'created' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
+        if (item.action === 'ping') {
+            var pingChange = el('div', 'asset-tree-history-change');
+            var pingWord = item.newValue === 'up' ? t('tniWatchUp') : t('tniWatchDown');
+            pingChange.appendChild(el('span', null, item.field ? (item.field + ' · ' + pingWord) : pingWord));
+            row.appendChild(pingChange);
+            return row;
+        }
         if (placeKind(item.action) || item.action === 'peer_add' || item.action === 'peer_remove') {
             var placeChange = el('div', 'asset-tree-history-change');
             var placeLabel = item.newValue || item.oldValue || '';
@@ -6811,6 +6932,9 @@
     function fileBlock(asset) {
         var body = el('div');
         var list = asset.files;
+        if (list != null) {
+            list = list.filter(function (file) { return file && !file.slot; });
+        }
         if (list == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
         } else {
@@ -7000,6 +7124,119 @@
             showCardImageError((payload && payload.message) || t('errorTitle'));
         };
         xhr.send();
+    }
+
+    function photoEnabled() {
+        return !!moduleSetup().photo;
+    }
+
+    function photoUrl(asset) {
+        var stamp = asset && asset.updated ? encodeURIComponent(asset.updated) : '';
+        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id + (stamp ? '&v=' + stamp : '');
+    }
+
+    function showPhotoError(message) {
+        var node = document.getElementById('asset-tree-photo-error');
+        if (!node) {
+            if (message) setFormError(message);
+            return;
+        }
+        node.hidden = !message;
+        node.textContent = message || '';
+    }
+
+    function uploadPhoto(asset, file) {
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+            showPhotoError(t('photoSize'));
+            return;
+        }
+        showPhotoError('');
+        var xhr = new XMLHttpRequest();
+        var data = new FormData();
+        data.append('file', file, file.name || 'photo.jpg');
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id, true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                notify(t('saved'));
+                selectAsset(asset.id, true);
+                return;
+            }
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            showPhotoError((payload && payload.message) || t('errorTitle'));
+        };
+        xhr.send(data);
+    }
+
+    function pickPhoto(asset) {
+        var input = document.getElementById('asset-tree-photo-file');
+        if (!input) {
+            input = el('input');
+            input.id = 'asset-tree-photo-file';
+            input.type = 'file';
+            input.accept = 'image/png,image/jpeg,.png,.jpg,.jpeg';
+            input.className = 'asset-tree-import-file';
+            document.body.appendChild(input);
+        }
+        input.onchange = function () {
+            var chosen = input.files && input.files[0];
+            input.value = '';
+            if (chosen) uploadPhoto(asset, chosen);
+        };
+        input.click();
+    }
+
+    function deletePhoto(asset) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('DELETE', contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id, true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                notify(t('saved'));
+                selectAsset(asset.id, true);
+                return;
+            }
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            showPhotoError((payload && payload.message) || t('errorTitle'));
+        };
+        xhr.send();
+    }
+
+    function openPhotoPreview(src) {
+        var overlay = el('div', 'asset-tree-photo-preview');
+        var picture = el('img');
+        picture.alt = '';
+        picture.src = src;
+        overlay.appendChild(picture);
+        function close() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            document.removeEventListener('keydown', onKey);
+        }
+        function onKey(event) {
+            if (event.key === 'Escape' || event.keyCode === 27) close();
+        }
+        overlay.addEventListener('click', close);
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    }
+
+    function photoStage(asset) {
+        var current = state.detail && state.detail.id === asset.id ? state.detail : asset;
+        if (!current.photo) return null;
+        var stage = el('div', 'asset-tree-photo-stage');
+        var img = el('img', 'asset-tree-photo');
+        img.alt = '';
+        img.src = photoUrl(current);
+        img.addEventListener('click', function () { openPhotoPreview(img.src); });
+        stage.appendChild(img);
+        return stage;
     }
 
     function uploadFile(asset, file, internal, done) {
@@ -7790,6 +8027,21 @@
                 extra.push({ label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
             }
         }
+        if (mayEdit(asset) && !isFolder(asset) && photoEnabled()) {
+            var pictured = state.detail && state.detail.id === asset.id ? state.detail : asset;
+            if (pictured.photo) {
+                extra.push({ label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
+            } else {
+                extra.push({ label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
+            }
+        }
+        if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
+            extra.unshift({
+                label: t('tniPing'),
+                mark: pingMark(asset),
+                onClick: function () { pingAsset(asset); }
+            });
+        }
         if (mayEdit(asset)) extra.push({ label: t('delete'), danger: true, onClick: function () { openDelete(asset); } });
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
@@ -7816,14 +8068,21 @@
         (asset.attributes || []).forEach(function (attribute) {
             items.push(detailItem(attribute.name || attribute.fieldKey, inlineAttribute(asset, attribute)));
         });
-        main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items)));
+        var showPhoto = !isFolder(asset) && photoEnabled() && asset.photo;
+        var story = showPhoto ? el('div', 'asset-tree-photo-stack') : main;
+        story.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items)));
         var service = serviceBlock(asset);
-        if (service) main.appendChild(service);
+        if (service) story.appendChild(service);
         if (moduleOn('life') && !isFolder(asset)) {
-            main.appendChild(lifeBlock(asset));
+            story.appendChild(lifeBlock(asset));
         }
-        main.appendChild(descriptionModule(asset, true));
-        main.appendChild(fileBlock(asset));
+        story.appendChild(descriptionModule(asset, true));
+        if (showPhoto) {
+            var band = el('div', 'asset-tree-photo-band');
+            band.appendChild(story);
+            band.appendChild(photoStage(asset));
+            main.appendChild(band);
+        }
 
         var issues = el('div');
         if (mayEdit(asset)) {
@@ -7846,6 +8105,7 @@
             });
         }
         main.appendChild(moduleBlock(t('issues'), issues));
+        main.appendChild(fileBlock(asset));
         main.appendChild(activityBlock(asset));
 
         var error = el('div', 'asset-tree-form-error');
@@ -7859,7 +8119,6 @@
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         aside.appendChild(moduleBlock(t('people'), people));
-        aside.appendChild(peerBlock(asset));
         aside.appendChild(linkBlock(asset));
         aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
 
@@ -7956,6 +8215,17 @@
         descriptionBox.className = 'asset-tree-description';
         description.appendChild(descriptionBox);
         main.appendChild(description);
+        if (!placePage && moduleOn('tni') && moduleSetup().tniPing !== false && typeOf(asset.typeKey).reach) {
+            var exemptRow = el('label', 'asset-tree-check');
+            var exemptBox = el('input');
+            exemptBox.type = 'checkbox';
+            exemptBox.id = 'asset-field-ping-exempt';
+            exemptBox.checked = !!asset.pingExempt;
+            exemptRow.appendChild(exemptBox);
+            exemptRow.appendChild(el('span', null, t('tniPingExempt')));
+            main.appendChild(exemptRow);
+            main.appendChild(el('p', 'asset-tree-hint', t('tniPingExemptHint')));
+        }
 
         var attributes = el('div', 'asset-tree-request-block');
         var fieldHead = el('div', 'asset-tree-block-head');
@@ -8013,8 +8283,20 @@
 
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
+        if (placePage && moduleOn('life')) {
+            var storedApprover = placeApproverKey(asset.id);
+            aside.appendChild(personFieldBox('asset-field-approver', t('lifeBranchApprover'), storedApprover ? { userKey: storedApprover, displayName: '' } : null));
+            aside.appendChild(el('p', 'asset-tree-hint', t('lifePlaceApproverHint')));
+            if (storedApprover) {
+                ajax('GET', '/users/' + encodeURIComponent(storedApprover), null, function (status, user) {
+                    var hidden = document.getElementById('asset-field-approver');
+                    if (!hidden || status !== 200 || !user || !user.displayName) return;
+                    var text = hidden.parentNode && hidden.parentNode.querySelector('input[type="search"]');
+                    if (text) text.value = user.displayName;
+                });
+            }
+        }
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
-        if (!placePage) aside.appendChild(peerBlock(asset));
         if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
         aside.appendChild(field(t('type'), selectBox('asset-field-type', placePage
@@ -8298,18 +8580,21 @@
     }
 
     function linkRow(asset, link) {
-        var block = el('div', 'asset-tree-peer' + (link.open ? '' : ' is-locked'));
-        var line = el('div', 'asset-tree-peer-line');
+        var block = el('div', 'asset-tree-link' + (link.open ? '' : ' is-locked'));
+        var line = el('div', 'asset-tree-link-line');
         line.appendChild(el('span', 'asset-tree-link-type', linkPhrase(link)));
-        var caption = (link.name || link.objectKey || '') + (link.objectKey ? ' · ' + link.objectKey : '');
+        var main = el('div', 'asset-tree-link-main');
+        var caption = link.name || link.objectKey || '';
         var otherId = linkOtherId(link);
         if (link.open && otherId) {
-            line.appendChild(button(caption, 'asset-tree-linkish', function () {
+            main.appendChild(button(caption, 'asset-tree-linkish', function () {
                 goToAsset(link.projectKey, otherId);
             }));
         } else {
-            line.appendChild(el('span', 'asset-tree-peer-name', caption));
+            main.appendChild(el('span', 'asset-tree-link-name', caption));
         }
+        if (link.objectKey) main.appendChild(el('span', 'asset-tree-link-key', link.objectKey));
+        line.appendChild(main);
         if (mayEdit(asset)) {
             var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
                 if (event && event.stopPropagation) event.stopPropagation();
@@ -8324,7 +8609,7 @@
         block.appendChild(line);
         var attrs = link.attributes || [];
         if (attrs.length) {
-            var meta = el('p', 'asset-tree-hint');
+            var meta = el('p', 'asset-tree-link-meta');
             meta.textContent = attrs.map(function (item) {
                 return (item.key || '') + ': ' + (item.value || '');
             }).join(' · ');
@@ -8337,7 +8622,7 @@
         var box = el('div', 'asset-tree-link-form');
         var type = document.createElement('select');
         type.className = 'asset-tree-filter';
-        [['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
+        [['peer', 'linkRelated'], ['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
             var option = document.createElement('option');
             option.value = pair[0];
             option.textContent = t(pair[1]);
@@ -8349,6 +8634,8 @@
         custom.hidden = true;
         type.addEventListener('change', function () {
             custom.hidden = type.value !== 'custom';
+            more.hidden = type.value === 'peer';
+            if (type.value === 'peer') extra.hidden = true;
         });
         var attrKey = el('input');
         attrKey.type = 'text';
@@ -8360,6 +8647,16 @@
         inbound.type = 'text';
         inbound.placeholder = t('linkInbound');
         inbound.title = t('linkInboundHint');
+        var extra = el('div', 'asset-tree-link-extra');
+        extra.hidden = true;
+        extra.appendChild(attrKey);
+        extra.appendChild(attrValue);
+        extra.appendChild(inbound);
+        var more = button(t('linkMore'), 'asset-tree-linkish asset-tree-link-more', function () {
+            extra.hidden = !extra.hidden;
+            more.textContent = extra.hidden ? t('linkMore') : t('linkLess');
+        });
+        more.hidden = type.value === 'peer';
         var search = el('input');
         search.type = 'search';
         search.placeholder = t('peerSearch');
@@ -8367,6 +8664,7 @@
         var timer = null;
         var seq = 0;
         function chosenType() {
+            if (type.value === 'peer') return 'peer';
             if (type.value !== 'custom') return type.value;
             return (custom.value || '').trim().toLowerCase();
         }
@@ -8390,6 +8688,17 @@
                     }
                     payload.forEach(function (peer) {
                         results.appendChild(button((peer.name || peer.objectKey || '') + (peer.objectKey ? ' · ' + peer.objectKey : ''), 'asset-tree-user-hit', function () {
+                            if (chosenType() === 'peer') {
+                                ajax('POST', '/assets/' + asset.id + '/peers', { assetId: peer.id }, function (st, answer) {
+                                    if (st >= 200 && st < 300) {
+                                        notify(t('peerAdded'));
+                                        selectAsset(asset.id, true);
+                                    } else {
+                                        setFormError((answer && answer.message) || t('errorTitle'));
+                                    }
+                                });
+                                return;
+                            }
                             var body = { assetId: peer.id, type: chosenType(), inbound: (inbound.value || '').trim(), attributes: [] };
                             var key = (attrKey.value || '').trim();
                             var value = (attrValue.value || '').trim();
@@ -8409,106 +8718,371 @@
         });
         box.appendChild(type);
         box.appendChild(custom);
-        box.appendChild(attrKey);
-        box.appendChild(attrValue);
-        box.appendChild(inbound);
         box.appendChild(search);
         box.appendChild(results);
+        box.appendChild(more);
+        box.appendChild(extra);
         return box;
+    }
+
+    function relationNodes(asset) {
+        var nodes = [];
+        var linked = {};
+        var peers = {};
+        (asset.peers || []).forEach(function (peer) {
+            if (peer && peer.id) peers[peer.id] = peer;
+        });
+        (asset.links || []).forEach(function (link) {
+            var id = linkOtherId(link);
+            if (id) linked[id] = true;
+            var meta = (link.attributes || []).map(function (item) {
+                return (item.key || '') + ': ' + (item.value || '');
+            }).join(' · ');
+            nodes.push({
+                id: id,
+                name: link.name || link.objectKey || '',
+                key: link.objectKey || '',
+                phrase: linkPhrase(link),
+                open: !!link.open,
+                projectKey: link.projectKey,
+                kind: 'link',
+                incoming: link.direction === 'in',
+                linkId: link.id,
+                typeKey: (id && byId()[id] && byId()[id].typeKey) || '',
+                meta: meta,
+                peer: link.card || peers[id] || null
+            });
+        });
+        (asset.peers || []).forEach(function (peer) {
+            if (!peer || !peer.id || linked[peer.id]) return;
+            nodes.push({
+                id: peer.id,
+                name: peer.name || peer.objectKey || '',
+                key: peer.objectKey || '',
+                phrase: t('linkRelated'),
+                open: !!peer.open,
+                projectKey: peer.projectKey,
+                kind: 'peer',
+                typeKey: (peer.id && byId()[peer.id] && byId()[peer.id].typeKey) || '',
+                peer: peer
+            });
+        });
+        return nodes;
+    }
+
+    function linkGraphNode(asset, node, self) {
+        var card = el('div', 'asset-tree-link-node asset-tree-graph-node' + (self ? ' is-self' : '') + (!self && node && !node.open ? ' is-locked' : ''));
+        var title = self ? (asset.name || asset.objectKey || '') : (node.name || node.key || '');
+        var objectKey = self ? (asset.objectKey || '') : (node.key || '');
+        var typeKey = self ? asset.typeKey : (node && node.typeKey);
+        var type = typeOf(typeKey);
+        var mark = typeTile(type, null, iconKeyOf(type), '#dfe1e6');
+        mark.className += ' asset-tree-graph-mark';
+        card.appendChild(mark);
+        var copy = el('div', 'asset-tree-graph-copy');
+        var caption = objectKey && objectKey !== title ? title + ' · ' + objectKey : title;
+        if (!self && node && node.phrase) caption = node.phrase + ' · ' + caption;
+        card.title = caption;
+        if (!self && node && node.open && node.id) {
+            copy.appendChild(button(title, 'asset-tree-linkish', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                goToAsset(node.projectKey, node.id);
+            }));
+        } else {
+            copy.appendChild(el('span', 'asset-tree-graph-name', title));
+        }
+        card.appendChild(copy);
+        if (!self && mayEdit(asset) && node && (node.kind === 'peer' ? node.id : node.linkId)) {
+            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                var path = node.kind === 'peer'
+                    ? '/assets/' + asset.id + '/peers/' + node.id
+                    : '/assets/' + asset.id + '/links/' + node.linkId;
+                ajax('DELETE', path, null, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            remove.setAttribute('aria-label', t('unlink'));
+            card.appendChild(remove);
+        }
+        return card;
+    }
+
+    function linkLayoutKey(asset) {
+        return 'asset-tree-graph:' + String(asset.projectKey || '') + ':' + String(asset.id || '');
+    }
+
+    function readLinkLayout(asset) {
+        try {
+            if (!window.localStorage) return null;
+            var raw = localStorage.getItem(linkLayoutKey(asset));
+            if (!raw) return null;
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeLinkLayout(asset, spots) {
+        try {
+            if (window.localStorage) localStorage.setItem(linkLayoutKey(asset), JSON.stringify(spots));
+        } catch (error) {}
+    }
+
+    function linkSpot(saved, key, fallback) {
+        var pair = saved ? saved[key] : null;
+        if (!pair || typeof pair.length !== 'number' || pair.length < 2) return fallback;
+        var x = Number(pair[0]);
+        var y = Number(pair[1]);
+        if (x !== x || y !== y) return fallback;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x > 480) x = 480;
+        if (y > 720) y = 720;
+        return { x: Math.round(x), y: Math.round(y) };
+    }
+
+    function linkNodeKey(node, self) {
+        if (self) return 'self';
+        if (node && node.kind === 'peer') return 'peer:' + node.id;
+        return 'link:' + (node ? node.linkId : '');
+    }
+
+    function linkGraph(asset, form) {
+        var nodes = relationNodes(asset);
+        var saved = readLinkLayout(asset);
+        var spots = {};
+        var stage = el('div', 'asset-tree-link-stage');
+        var box = el('div', 'asset-tree-link-graph is-placed' + (nodes.length ? '' : ' is-empty'));
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', t('linkGraph'));
+        if (mayEdit(asset)) {
+            var tools = el('div', 'asset-tree-graph-tools');
+            var pencil = button('', 'asset-tree-btn slim asset-tree-graph-pencil', function () {
+                var on = box.className.indexOf(' is-editing') < 0;
+                box.className = box.className.replace(' is-editing', '');
+                pencil.className = pencil.className.replace(' is-on', '');
+                if (on) {
+                    box.className += ' is-editing';
+                    pencil.className += ' is-on';
+                }
+                pencil.setAttribute('aria-pressed', on ? 'true' : 'false');
+                if (form) form.hidden = !on;
+            });
+            pencil.title = t('linkEdit');
+            pencil.setAttribute('aria-label', t('linkEdit'));
+            pencil.setAttribute('aria-pressed', 'false');
+            pencil.appendChild(toolIcon('edit'));
+            tools.appendChild(pencil);
+            stage.appendChild(tools);
+        }
+        var svg = svgEl('svg');
+        svg.setAttribute('class', 'asset-tree-link-canvas');
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('aria-hidden', 'true');
+        box.appendChild(svg);
+        function clearSelected() {
+            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var n;
+            for (n = 0; n < cards.length; n++) {
+                cards[n].className = cards[n].className.replace(' is-selected', '');
+            }
+        }
+        var panel = el('div', 'asset-tree-link-detail');
+        panel.hidden = true;
+        function showRelation(item, card) {
+            clearSelected();
+            card.className += ' is-selected';
+            panel.hidden = false;
+            panel.innerHTML = '';
+            var bits = [];
+            if (item.node.phrase) bits.push(item.node.phrase);
+            if (item.node.key) bits.push(item.node.key);
+            panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' · ')));
+            if (item.node.peer) panel.appendChild(peerCard(item.node.peer));
+            if (item.node.kind === 'link' && item.node.meta) panel.appendChild(el('p', 'asset-tree-hint', item.node.meta));
+        }
+        var selfCard = linkGraphNode(asset, null, true);
+        selfCard.addEventListener('click', function () {
+            clearSelected();
+            panel.hidden = true;
+            panel.innerHTML = '';
+        });
+        box.appendChild(selfCard);
+        var placed = [];
+        var firstCard = null;
+        nodes.forEach(function (node) {
+            var card = linkGraphNode(asset, node, false);
+            card.addEventListener('click', function () {
+                showRelation({ node: node }, card);
+            });
+            box.appendChild(card);
+            placed.push({ node: node, card: card });
+            if (!firstCard) firstCard = card;
+        });
+        function placeCard(card, key, index, self) {
+            var fallback = { x: self && nodes.length ? 28 : 0, y: index * 58 };
+            var spot = linkSpot(saved, key, fallback);
+            card.style.left = spot.x + 'px';
+            card.style.top = spot.y + 'px';
+            spots[key] = [spot.x, spot.y];
+            var mark = card.querySelector('.asset-tree-graph-mark');
+            if (!mark) return;
+            function begin(clientX, clientY, event) {
+                if (event && event.preventDefault) event.preventDefault();
+                if (event && event.stopPropagation) event.stopPropagation();
+                var originLeft = card.offsetLeft;
+                var originTop = card.offsetTop;
+                var moved = false;
+                if (mark.className.indexOf(' is-dragging') < 0) mark.className += ' is-dragging';
+                function point(ev) {
+                    if (ev.touches && ev.touches.length) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+                    return { x: ev.clientX, y: ev.clientY };
+                }
+                function move(ev) {
+                    var p = point(ev);
+                    var dx = p.x - clientX;
+                    var dy = p.y - clientY;
+                    if (dx * dx + dy * dy > 16) moved = true;
+                    var x = originLeft + dx;
+                    var y = originTop + dy;
+                    if (x < 0) x = 0;
+                    if (y < 0) y = 0;
+                    var limit = box.clientWidth - 40;
+                    if (limit < 0) limit = 0;
+                    if (x > limit) x = limit;
+                    card.style.left = Math.round(x) + 'px';
+                    card.style.top = Math.round(y) + 'px';
+                    fitGraph();
+                    paintWires();
+                    if (ev.preventDefault) ev.preventDefault();
+                }
+                function up() {
+                    document.removeEventListener('mousemove', move);
+                    document.removeEventListener('mouseup', up);
+                    document.removeEventListener('touchmove', move);
+                    document.removeEventListener('touchend', up);
+                    mark.className = mark.className.replace(' is-dragging', '');
+                    if (!moved) return;
+                    card.setAttribute('data-dragged', '1');
+                    spots[key] = [card.offsetLeft, card.offsetTop];
+                    writeLinkLayout(asset, spots);
+                    setTimeout(function () { card.removeAttribute('data-dragged'); }, 0);
+                }
+                document.addEventListener('mousemove', move);
+                document.addEventListener('mouseup', up);
+                document.addEventListener('touchmove', move);
+                document.addEventListener('touchend', up);
+            }
+            mark.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                begin(event.clientX, event.clientY, event);
+            });
+            mark.addEventListener('touchstart', function (event) {
+                if (!event.touches || !event.touches.length) return;
+                begin(event.touches[0].clientX, event.touches[0].clientY, event);
+            });
+            card.addEventListener('click', function (event) {
+                if (card.getAttribute('data-dragged') !== '1') return;
+                card.removeAttribute('data-dragged');
+                if (event.stopPropagation) event.stopPropagation();
+                if (event.preventDefault) event.preventDefault();
+            }, true);
+        }
+        placeCard(selfCard, 'self', 0, true);
+        placed.forEach(function (item, index) {
+            placeCard(item.card, linkNodeKey(item.node, false), index + 1, false);
+        });
+        var laidBottom = 36;
+        for (var spotKey in spots) {
+            if (!Object.prototype.hasOwnProperty.call(spots, spotKey) || !spots[spotKey]) continue;
+            var spotEdge = Number(spots[spotKey][1]) + 42;
+            if (spotEdge > laidBottom) laidBottom = spotEdge;
+        }
+        box.style.height = (laidBottom + 6) + 'px';
+        stage.appendChild(box);
+        if (!nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
+        stage.appendChild(panel);
+        if (firstCard) showRelation(placed[0], firstCard);
+        function iconCenter(card, origin) {
+            var mark = card.querySelector('.asset-tree-graph-mark') || card;
+            var rect = mark.getBoundingClientRect();
+            return {
+                x: rect.left + rect.width / 2 - origin.left,
+                y: rect.top + rect.height / 2 - origin.top,
+                w: rect.width / 2,
+                h: rect.height / 2
+            };
+        }
+        function along(x1, y1, x2, y2, half) {
+            var dx = x2 - x1;
+            var dy = y2 - y1;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var ux = dx / len;
+            var uy = dy / len;
+            var ax = Math.abs(ux) < 0.001 ? 0.001 : Math.abs(ux);
+            var ay = Math.abs(uy) < 0.001 ? 0.001 : Math.abs(uy);
+            var dist = Math.min(half.w / ax, half.h / ay) + 2;
+            if (dist > len * 0.46) dist = len * 0.46;
+            return { x: x1 + ux * dist, y: y1 + uy * dist };
+        }
+        function fitGraph() {
+            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var bottom = 36;
+            var i;
+            for (i = 0; i < cards.length; i++) {
+                var edge = cards[i].offsetTop + cards[i].offsetHeight;
+                if (edge > bottom) bottom = edge;
+            }
+            box.style.height = (bottom + 6) + 'px';
+        }
+        function paintWires() {
+            if (!box.parentNode) {
+                window.removeEventListener('resize', paintWires);
+                return;
+            }
+            fitGraph();
+            var origin = svg.getBoundingClientRect();
+            if (origin.width < 40 || origin.height < 20) return;
+            svg.setAttribute('viewBox', '0 0 ' + origin.width + ' ' + origin.height);
+            while (svg.firstChild) svg.removeChild(svg.firstChild);
+            var hub = iconCenter(selfCard, origin);
+            placed.forEach(function (item) {
+                var other = iconCenter(item.card, origin);
+                var from = along(hub.x, hub.y, other.x, other.y, hub);
+                var to = along(other.x, other.y, hub.x, hub.y, other);
+                var line = svgEl('line');
+                line.setAttribute('x1', String(Math.round(from.x)));
+                line.setAttribute('y1', String(Math.round(from.y)));
+                line.setAttribute('x2', String(Math.round(to.x)));
+                line.setAttribute('y2', String(Math.round(to.y)));
+                line.setAttribute('stroke', '#4C9AFF');
+                line.setAttribute('stroke-width', '1.5');
+                line.setAttribute('stroke-linecap', 'round');
+                svg.appendChild(line);
+            });
+        }
+        window.addEventListener('resize', paintWires);
+        setTimeout(paintWires, 0);
+        return stage;
     }
 
     function linkBlock(asset) {
         var body = el('div');
-        body.appendChild(el('p', 'asset-tree-hint', t('linksHint')));
-        if (mayEdit(asset)) body.appendChild(linkForm(asset));
-        if (asset.links == null) {
+        if (asset.links == null && asset.peers == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
-        } else if (!asset.links.length) {
-            body.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         } else {
-            var graph = linkGraph(asset);
-            if (graph) body.appendChild(graph);
-            asset.links.forEach(function (link) {
-                body.appendChild(linkRow(asset, link));
-            });
+            var form = null;
+            if (mayEdit(asset)) {
+                form = linkForm(asset);
+                form.hidden = true;
+            }
+            body.appendChild(linkGraph(asset, form));
+            if (form) body.appendChild(form);
         }
         return moduleBlock(t('links'), body);
-    }
-
-    function linkGraph(asset) {
-        var links = asset.links || [];
-        if (!links.length) return null;
-        var box = el('div', 'asset-tree-link-graph');
-        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        var count = links.length;
-        var width = 230;
-        var row = 36;
-        var height = 8 + count * row;
-        svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-        svg.setAttribute('class', 'asset-tree-link-svg');
-        svg.setAttribute('role', 'img');
-        svg.setAttribute('aria-label', t('linkGraph'));
-        var hx = 86;
-        var hy = height / 2;
-        var selfName = asset.name || asset.objectKey || '';
-        if (selfName.length > 12) selfName = selfName.substring(0, 11) + '\u2026';
-        for (var i = 0; i < count; i++) {
-            var y = 8 + row / 2 + i * row;
-            var edge = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            edge.setAttribute('x1', String(hx + 8));
-            edge.setAttribute('y1', String(hy));
-            edge.setAttribute('x2', '128');
-            edge.setAttribute('y2', String(y));
-            edge.setAttribute('class', 'asset-tree-link-edge');
-            svg.appendChild(edge);
-            var phrase = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            phrase.setAttribute('x', '108');
-            phrase.setAttribute('y', String(y - 7));
-            phrase.setAttribute('class', 'asset-tree-link-edge-label');
-            phrase.textContent = linkPhrase(links[i]);
-            svg.appendChild(phrase);
-            var node = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('cx', '136');
-            circle.setAttribute('cy', String(y));
-            circle.setAttribute('r', '5');
-            circle.setAttribute('class', 'asset-tree-link-node');
-            node.appendChild(circle);
-            var name = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            name.setAttribute('x', '148');
-            name.setAttribute('y', String(y + 4));
-            name.setAttribute('class', 'asset-tree-link-node-label');
-            var caption = links[i].name || links[i].objectKey || '';
-            if (caption.length > 14) caption = caption.substring(0, 13) + '\u2026';
-            name.textContent = caption;
-            node.appendChild(name);
-            var otherId = linkOtherId(links[i]);
-            if (links[i].open && otherId) {
-                node.style.cursor = 'pointer';
-                (function (projectKey, id) {
-                    node.addEventListener('click', function () {
-                        goToAsset(projectKey, id);
-                    });
-                })(links[i].projectKey, otherId);
-            }
-            svg.appendChild(node);
-        }
-        var hub = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        var hubCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        hubCircle.setAttribute('cx', String(hx));
-        hubCircle.setAttribute('cy', String(hy));
-        hubCircle.setAttribute('r', '6');
-        hubCircle.setAttribute('class', 'asset-tree-link-hub');
-        hub.appendChild(hubCircle);
-        var hubText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        hubText.setAttribute('x', '4');
-        hubText.setAttribute('y', String(hy + 4));
-        hubText.setAttribute('class', 'asset-tree-link-hub-label');
-        hubText.textContent = selfName;
-        hub.appendChild(hubText);
-        svg.appendChild(hub);
-        box.appendChild(svg);
-        return box;
     }
 
     function issueRow(assetId, issue) {
@@ -8581,9 +9155,11 @@
         var parentId = parentValue === '' ? null : parseInt(parentValue, 10);
         var parentChanged = !current || (current.parentId || null) !== parentId;
         var statusBox = document.getElementById('asset-field-status');
+        var approverBox = document.getElementById('asset-field-approver');
+        var approverKey = approverBox ? (approverBox.value || '') : null;
         setFormError('');
         setBusy(true);
-        ajax('PUT', '/assets/' + id, {
+        var saved = {
             name: name,
             projectKey: state.projectKey,
             typeKey: document.getElementById('asset-field-type').value,
@@ -8596,14 +9172,17 @@
                 return current && current.issued && current.issued.userKey ? current.issued.userKey : '';
             }()),
             attributes: collectAttributes(document.getElementById('asset-detail-form'))
-        }, function (status, payload) {
+        };
+        if (approverKey !== null) saved.approverKey = approverKey;
+        ajax('PUT', '/assets/' + id, saved, function (status, payload) {
             if (status < 200 || status >= 300) {
                 setBusy(false);
                 setFormError((payload && payload.message) || t('errorTitle'));
                 return;
             }
+            if (approverKey !== null) rememberPlaceApprover(id, approverKey);
             if (!parentChanged) {
-                finishSave(id, t('saved'), typeMoved);
+                savePingExempt(id, function () { finishSave(id, t('saved'), typeMoved); });
                 return;
             }
             ajax('POST', '/assets/' + id + '/move', { parentId: parentId, index: null }, function (moveStatus, movePayload) {
@@ -8617,8 +9196,47 @@
                     state.expanded[parentId] = true;
                     rememberExpanded();
                 }
-                finishSave(id, t('moved'), typeMoved);
+                savePingExempt(id, function () { finishSave(id, t('moved'), typeMoved); });
             });
+        });
+    }
+
+    function savePingExempt(id, done) {
+        var box = document.getElementById('asset-field-ping-exempt');
+        if (!box) {
+            done();
+            return;
+        }
+        ajax('PUT', '/assets/' + id + '/watch', { exempt: !!box.checked }, function () {
+            done();
+        });
+    }
+
+    function pingMark(asset) {
+        if (!asset) return 0;
+        if (state.ping && state.ping[asset.id]) return state.ping[asset.id];
+        var full = state.detail && state.detail.id === asset.id ? state.detail : asset;
+        return full && full.pingUp ? full.pingUp : 0;
+    }
+
+    function pingDot(mark) {
+        var dot = el('span', 'asset-tree-ping-dot ' + (mark === 1 ? 'is-up' : 'is-down'));
+        dot.title = mark === 1 ? t('tniWatchUp') : t('tniWatchDown');
+        return dot;
+    }
+
+    function pingAsset(asset) {
+        setBusy(true);
+        ajax('POST', '/assets/' + asset.id + '/ping', {}, function (status, payload) {
+            setBusy(false);
+            if (status < 200 || status >= 300 || !payload || (payload.up !== 1 && payload.up !== 2)) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            if (!state.ping) state.ping = {};
+            state.ping[asset.id] = payload.up;
+            notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
+            selectAsset(asset.id, true);
         });
     }
 
@@ -10010,6 +10628,30 @@
                 serviceRow.appendChild(el('p', 'asset-tree-hint', t('serviceTypeHint')));
                 wrap.appendChild(serviceRow);
             }
+            if (moduleOn('tni') && moduleSetup().tniPing !== false) {
+                var reachToggle = el('label', 'asset-tree-check');
+                reachToggle.title = t('tniReachTypeHint');
+                var reachBox = el('input');
+                reachBox.type = 'checkbox';
+                reachBox.checked = !!type.reach;
+                reachBox.disabled = !state.canConfigure;
+                if (!state.canConfigure) reachBox.setAttribute('data-disabled', '1');
+                reachBox.addEventListener('change', function () {
+                    ajax('PUT', '/types/' + encodeURIComponent(type.typeKey), { reach: reachBox.checked }, function (status, payload) {
+                        if (status >= 200 && status < 300) refreshSchema();
+                        else {
+                            reachBox.checked = !reachBox.checked;
+                            notify((payload && payload.message) || t('errorTitle'));
+                        }
+                    });
+                });
+                reachToggle.appendChild(reachBox);
+                reachToggle.appendChild(el('span', null, t('tniReachType')));
+                var reachRow = el('div', 'asset-tree-service-type');
+                reachRow.appendChild(reachToggle);
+                reachRow.appendChild(el('p', 'asset-tree-hint', t('tniReachTypeHint')));
+                wrap.appendChild(reachRow);
+            }
         }
         var fieldTools = el('div', 'asset-tree-schema-tools');
         var fieldRows = [];
@@ -10201,6 +10843,19 @@
             form.appendChild(serviceToggle);
             form.appendChild(el('p', 'asset-tree-hint asset-tree-service-type-hint', t('serviceTypeHint')));
         }
+        var reachToggle = null;
+        var reachInput = null;
+        if (moduleOn('tni') && moduleSetup().tniPing !== false) {
+            reachToggle = el('label', 'asset-tree-check');
+            reachInput = el('input');
+            reachInput.type = 'checkbox';
+            reachInput.id = 'type-reach';
+            reachToggle.appendChild(reachInput);
+            reachToggle.appendChild(el('span', null, t('tniReachType')));
+            reachToggle.title = t('tniReachTypeHint');
+            form.appendChild(reachToggle);
+            form.appendChild(el('p', 'asset-tree-hint asset-tree-reach-type-hint', t('tniReachTypeHint')));
+        }
         locationInput.addEventListener('change', function () {
             treeInput.disabled = locationInput.checked;
             if (locationInput.checked) treeInput.checked = false;
@@ -10210,6 +10865,13 @@
                 serviceToggle.hidden = locationInput.checked;
                 var serviceHint = form.querySelector('.asset-tree-service-type-hint');
                 if (serviceHint) serviceHint.hidden = locationInput.checked;
+            }
+            if (reachInput) {
+                reachInput.disabled = locationInput.checked;
+                if (locationInput.checked) reachInput.checked = false;
+                reachToggle.hidden = locationInput.checked;
+                var reachHint = form.querySelector('.asset-tree-reach-type-hint');
+                if (reachHint) reachHint.hidden = locationInput.checked;
             }
             captionField.hidden = !locationInput.checked;
             captionHint.hidden = !locationInput.checked;
@@ -10255,6 +10917,7 @@
                 location: place,
                 showInTree: place || treeInput.checked,
                 service: !!(serviceInput && !place && serviceInput.checked),
+                reach: !!(reachInput && !place && reachInput.checked),
                 placeCaption: place ? captionInput.value.trim() : '',
                 parentTypeKey: place ? '' : parentSelect.value
             }, function (status, payload) {
@@ -10460,6 +11123,17 @@
         state.staffError = '';
         state.floors = null;
         state.floorId = 0;
+        state.tniList = null;
+        state.tniError = '';
+        state.tniDir = null;
+        state.tniSccm = null;
+        state.tniWatch = {};
+        state.tniWatchLoading = {};
+        state.tniWatchToken = {};
+        if (state.tniTimer) {
+            clearInterval(state.tniTimer);
+            state.tniTimer = null;
+        }
         state.mapPlaceId = 0;
         state.mapDraft = null;
         state.mapGroup = [];
@@ -12527,6 +13201,20 @@
             renderFrame();
         });
         measures.appendChild(field(t('cardGrid'), grid));
+        var zoomLabel = el('span', 'asset-tree-card-zoom-label', '100 %');
+        var zoomOut = button('\u2212', 'asset-tree-btn', function () { setCardZoom(cardZoom() - 0.1); });
+        zoomOut.title = t('cardZoomOut');
+        zoomOut.setAttribute('aria-label', t('cardZoomOut'));
+        var zoomIn = button('+', 'asset-tree-btn', function () { setCardZoom(cardZoom() + 0.1); });
+        zoomIn.title = t('cardZoomIn');
+        zoomIn.setAttribute('aria-label', t('cardZoomIn'));
+        var zoomFit = button(t('cardZoomFit'), 'asset-tree-btn', function () { fitCardZoom(); });
+        var zoomRow = el('div', 'asset-tree-card-zoom');
+        zoomRow.appendChild(zoomOut);
+        zoomRow.appendChild(zoomLabel);
+        zoomRow.appendChild(zoomIn);
+        zoomRow.appendChild(zoomFit);
+        measures.appendChild(zoomRow);
         stage.appendChild(measures);
         renderCardTools(stage);
 
@@ -12549,6 +13237,49 @@
         stage.appendChild(actions);
         block.appendChild(stage);
         panel.appendChild(block);
+        sheet.addEventListener('wheel', function (event) {
+            event.preventDefault();
+            setCardZoom(cardZoom() + ((event.deltaY || 0) > 0 ? -0.1 : 0.1));
+        }, { passive: false });
+        if (state.cardZoom == null) {
+            var natural = article.offsetWidth;
+            var room = stage.clientWidth - 32;
+            state.cardZoom = natural && room && natural > room ? Math.max(0.25, room / natural) : 1;
+        }
+        paintCardZoom();
+
+        function cardZoom() {
+            var zoom = Number(state.cardZoom);
+            if (!zoom || zoom < 0.25) return 1;
+            if (zoom > 3) return 3;
+            return zoom;
+        }
+
+        function paintCardZoom() {
+            var zoom = cardZoom();
+            article.style.transformOrigin = '0 0';
+            article.style.transform = zoom === 1 ? '' : ('scale(' + zoom + ')');
+            var width = article.offsetWidth * zoom;
+            var height = article.offsetHeight * zoom;
+            sheet.style.width = width ? (Math.round(width) + 'px') : '';
+            sheet.style.height = height ? (Math.round(height) + 'px') : '';
+            zoomLabel.textContent = Math.round(zoom * 100) + ' %';
+        }
+
+        function setCardZoom(next) {
+            var value = Math.round(Number(next) * 100) / 100;
+            if (value < 0.25) value = 0.25;
+            if (value > 3) value = 3;
+            state.cardZoom = value;
+            paintCardZoom();
+        }
+
+        function fitCardZoom() {
+            var natural = article.offsetWidth;
+            var room = stage.clientWidth - 32;
+            if (!natural || room < 80) return;
+            setCardZoom(room / natural);
+        }
     }
 
     function fitPortalPanel(panel) {
@@ -12719,6 +13450,7 @@
         if (moduleKey === 'life') return 'moduleLife';
         if (moduleKey === 'portal') return 'modulePortal';
         if (moduleKey === 'card') return 'moduleCard';
+        if (moduleKey === 'tni') return 'moduleTni';
         return 'setupTitle';
     }
 
@@ -12746,10 +13478,10 @@
     }
 
     function openModuleSetup(moduleKey) {
-        if (moduleKey === 'portal') {
+        if (moduleKey === 'portal' || moduleKey === 'tni') {
             closeAllModals();
             state.view = 'settings';
-            state.schemaTab = 'portal';
+            state.schemaTab = moduleKey === 'tni' ? (state.canObjects ? 'exchange' : 'project') : 'portal';
             rememberView('settings');
             renderFrame();
             return;
@@ -12967,7 +13699,8 @@
         }
         if (moduleKey === 'reports') {
             var reports = el('div', 'asset-tree-check-list');
-            [['status', 'reportStatusTitle'], ['type', 'reportTypeTitle'], ['place', 'reportPlaceTitle'], ['holder', 'reportHolderTitle'], ['receipts', 'reportReceipts'], ['cost', 'reportCostTitle'], ['warranty', 'reportWarrantyTitle'], ['age', 'reportAge'], ['writeoff', 'reportWriteoffs'], ['work', 'reportWork']].forEach(function (pair) {
+            [['status', 'reportStatusTitle'], ['type', 'reportTypeTitle'], ['place', 'reportPlaceTitle'], ['holder', 'reportHolderTitle'], ['receipts', 'reportReceipts'], ['cost', 'reportCostTitle'], ['warranty', 'reportWarrantyTitle'], ['age', 'reportAge'], ['writeoff', 'reportWriteoffs'], ['work', 'reportWork'], ['done', 'reportDone']].forEach(function (pair) {
+                if (pair[0] === 'done' && !moduleOn('service')) return;
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
@@ -13120,6 +13853,13 @@
             panel.appendChild(mailActions);
         }
         if (moduleKey === 'life') {
+            var fold = el('label', 'asset-tree-check');
+            var foldBox = document.createElement('input');
+            foldBox.type = 'checkbox';
+            foldBox.checked = !!setup.lifeFold;
+            fold.appendChild(foldBox);
+            fold.appendChild(document.createTextNode(t('setupLifeFold')));
+            panel.appendChild(fold);
             var approval = el('label', 'asset-tree-check');
             var approvalBox = document.createElement('input');
             approvalBox.type = 'checkbox';
@@ -13193,6 +13933,7 @@
             who.appendChild(chosen);
             who.appendChild(hits);
             panel.appendChild(who);
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupBranchHint')));
             var currency = document.createElement('select');
             ['RUB', 'USD', 'EUR'].forEach(function (code) {
                 var option = document.createElement('option');
@@ -13214,6 +13955,7 @@
                 next.lifeApprover = approverKey;
                 next.lifeCurrency = currency.value;
                 next.lifeMonths = clampNum(months.value, 0, 600);
+                next.lifeFold = foldBox.checked;
                 saveSetup(next);
             }));
         }
@@ -13385,6 +14127,29 @@
         treeCard.appendChild(treeRow);
         stack.appendChild(treeCard);
 
+        var photoCard = el('section', 'asset-tree-project-card');
+        photoCard.appendChild(el('h3', 'asset-tree-settings-title', t('photoTitle')));
+        photoCard.appendChild(el('p', 'asset-tree-hint', t('photoHint')));
+        var photoRow = el('label', 'asset-tree-check-row');
+        var photoBox = el('input');
+        photoBox.type = 'checkbox';
+        photoBox.checked = photoEnabled();
+        photoBox.disabled = !allowed;
+        if (!allowed) photoBox.setAttribute('data-disabled', '1');
+        photoBox.setAttribute('aria-label', t('photoShow'));
+        photoBox.addEventListener('change', function () {
+            var want = photoBox.checked;
+            saveProjectView({ setup: { photo: want } }, function (ok) {
+                if (ok === false) photoBox.checked = !want;
+            });
+        });
+        photoRow.appendChild(photoBox);
+        var photoText = el('span');
+        photoText.appendChild(el('strong', null, t('photoShow')));
+        photoRow.appendChild(photoText);
+        photoCard.appendChild(photoRow);
+        stack.appendChild(photoCard);
+
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
         modules.appendChild(head);
@@ -13396,8 +14161,10 @@
             ['reports', 'moduleReports', 'moduleReportsHint', 'reports', 'beta'],
             ['life', 'moduleLife', 'moduleLifeHint', '', 'beta'],
             ['portal', 'modulePortal', 'modulePortalHint', '', 'beta'],
-            ['card', 'moduleCard', 'moduleCardHint', '', 'beta']
+            ['card', 'moduleCard', 'moduleCardHint', '', 'beta'],
+            ['tni', 'moduleTni', 'moduleTniHint', '', 'beta']
         ].forEach(function (item) {
+            if (item[0] === 'tni' && !state.canAdmin) return;
             var option = el('div', 'asset-tree-module-option');
             var label = el('label');
             var box = el('input');
@@ -13409,7 +14176,7 @@
             box.addEventListener('change', function () {
                 var want = box.checked;
                 var next = [];
-                var order = ['service', 'map', 'reports', 'life', 'portal', 'card'];
+                var order = ['service', 'map', 'reports', 'life', 'portal', 'card', 'tni'];
                 order.forEach(function (key) {
                     var on = key === item[0] ? want : moduleOn(key);
                     if (on) next.push(key);
@@ -13448,7 +14215,138 @@
         });
         modules.appendChild(grid);
         stack.appendChild(modules);
+        if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniRemovalCard(allowed));
         panel.appendChild(stack);
+    }
+
+    function tniSourceFields(panel, setup, locked) {
+        var boxes = {};
+        var list = el('div', 'asset-tree-tni-sources');
+        function sourceBox(key, label, hint) {
+            var line = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = setup[key] !== false;
+            box.disabled = !!locked;
+            line.appendChild(box);
+            line.appendChild(document.createTextNode(t(label)));
+            list.appendChild(line);
+            if (hint) list.appendChild(el('p', 'asset-tree-hint', t(hint)));
+            boxes[key] = box;
+        }
+        sourceBox('tniBrowser', 'tniSourceBrowser', 'tniSourceBrowserHint');
+        sourceBox('tniScan', 'tniSourceScan', '');
+        sourceBox('tniAd', 'tniSourceAd', '');
+        sourceBox('tniSccm', 'tniSourceSccm', '');
+        sourceBox('tniPing', 'tniSourcePing', 'tniSourcePingHint');
+        panel.appendChild(list);
+        return boxes;
+    }
+
+    function tniTypeFields(panel, setup, locked) {
+        panel.appendChild(el('span', 'asset-tree-nav-label', t('tniTypes')));
+        panel.appendChild(el('p', 'asset-tree-hint', t('tniTypesHint')));
+        var types = el('div', 'asset-tree-tni-types');
+        function typeSelect(current, label) {
+            var select = document.createElement('select');
+            select.setAttribute('aria-label', label);
+            select.disabled = !!locked;
+            var empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = t('tniTypeNone');
+            select.appendChild(empty);
+            placeFacts().forEach(function (type) {
+                if (!type || type.location) return;
+                var option = document.createElement('option');
+                option.value = type.typeKey;
+                option.textContent = type.label || type.typeKey;
+                select.appendChild(option);
+            });
+            var known = false;
+            var i;
+            for (i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === current) known = true;
+            }
+            select.value = known ? current : '';
+            types.appendChild(planField(label, select));
+            return select;
+        }
+        var chosen = {
+            computer: typeSelect(setup.tniComputer || '', t('tniKindComputer')),
+            laptop: typeSelect(setup.tniLaptop || '', t('tniKindLaptop')),
+            phone: typeSelect(setup.tniPhone || '', t('tniKindPhone')),
+            tablet: typeSelect(setup.tniTablet || '', t('tniKindTablet'))
+        };
+        panel.appendChild(types);
+        return chosen;
+    }
+
+    function tniRemovalFields(panel, setup, locked) {
+        var keep = document.createElement('input');
+        keep.type = 'number';
+        keep.min = '1';
+        keep.max = '3650';
+        keep.value = String(setup.tniKeep || 90);
+        keep.disabled = !!locked;
+        keep.setAttribute('aria-label', t('tniKeep'));
+        panel.appendChild(planField(t('tniKeep'), keep));
+        panel.appendChild(el('p', 'asset-tree-hint', t('tniKeepHint')));
+        var probeDays = document.createElement('input');
+        probeDays.type = 'number';
+        probeDays.min = '1';
+        probeDays.max = '30';
+        probeDays.value = String(setup.tniProbeDays || 3);
+        probeDays.disabled = !!locked;
+        probeDays.setAttribute('aria-label', t('tniProbeDays'));
+        var probeTries = document.createElement('input');
+        probeTries.type = 'number';
+        probeTries.min = '1';
+        probeTries.max = '30';
+        probeTries.value = String(setup.tniProbeTries || 3);
+        probeTries.disabled = !!locked;
+        probeTries.setAttribute('aria-label', t('tniProbeTries'));
+        var probeRow = el('div', 'asset-tree-tni-types');
+        probeRow.appendChild(planField(t('tniProbeDays'), probeDays));
+        probeRow.appendChild(planField(t('tniProbeTries'), probeTries));
+        panel.appendChild(probeRow);
+        panel.appendChild(el('p', 'asset-tree-hint', t('tniProbeHint')));
+        panel.appendChild(el('span', 'asset-tree-nav-label', t('tniAction')));
+        var action = el('div', 'asset-tree-tni-action');
+        function actionChoice(value, label) {
+            var line = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'radio';
+            box.name = 'asset-tree-tni-removal';
+            box.value = value;
+            box.disabled = !!locked;
+            box.checked = (setup.tniAction || 'trash') === value;
+            line.appendChild(box);
+            line.appendChild(document.createTextNode(label));
+            action.appendChild(line);
+            return box;
+        }
+        var trashBox = actionChoice('trash', t('tniTrash'));
+        actionChoice('delete', t('tniDelete'));
+        panel.appendChild(action);
+        return { keep: keep, probeDays: probeDays, probeTries: probeTries, trashBox: trashBox };
+    }
+
+    function tniRemovalCard(allowed) {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('tniRemovalTitle')));
+        card.appendChild(el('p', 'asset-tree-hint', t('tniRemovalHint')));
+        var fields = tniRemovalFields(card, moduleSetup(), !allowed);
+        if (allowed) {
+            card.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
+                var next = moduleSetup();
+                next.tniKeep = clampNum(fields.keep.value, 1, 3650);
+                next.tniProbeDays = clampNum(fields.probeDays.value, 1, 30);
+                next.tniProbeTries = clampNum(fields.probeTries.value, 1, 30);
+                next.tniAction = fields.trashBox.checked ? 'trash' : 'delete';
+                saveProjectView({ setup: next });
+            }));
+        }
+        return card;
     }
 
     function openListedAsset(asset) {
@@ -13571,7 +14469,9 @@
         var dates = [];
         String(plan && plan.moves || '').split(',').forEach(function (part) {
             var at = part.indexOf('>');
-            if (at < 1 || part.slice(at + 1) !== 'done') return;
+            if (at < 1) return;
+            var flag = part.slice(at + 1).split('@')[0];
+            if (flag !== 'done') return;
             var source = part.slice(0, at);
             if (/^\d{4}-\d{2}-\d{2}$/.test(source) && dates.indexOf(source) < 0) dates.push(source);
         });
@@ -13793,6 +14693,25 @@
         return palette[n];
     }
 
+    function paintEventChip(card) {
+        if (!card || card.classList.contains('is-done') || card.classList.contains('is-due')) return;
+        var color = card.style.getPropertyValue('--kind');
+        if (color) card.style.setProperty('background-color', tintColor(color, 0.84), 'important');
+    }
+
+    function tintColor(hex, towardWhite) {
+        var raw = String(hex || '').replace('#', '');
+        if (raw.length !== 6) return '#deebff';
+        var red = parseInt(raw.slice(0, 2), 16);
+        var green = parseInt(raw.slice(2, 4), 16);
+        var blue = parseInt(raw.slice(4, 6), 16);
+        if (isNaN(red) || isNaN(green) || isNaN(blue)) return '#deebff';
+        function mix(channel) {
+            return Math.round(channel + (255 - channel) * towardWhite);
+        }
+        return 'rgb(' + mix(red) + ',' + mix(green) + ',' + mix(blue) + ')';
+    }
+
     function fillKindSelect(select, current, longForm) {
         var rows = parseKindList(moduleSetup().scheduleKinds);
         var seen = false;
@@ -13812,12 +14731,7 @@
     }
 
     function monthTitle(year, month) {
-        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
-        try {
-            return new Date(year, month - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' });
-        } catch (error) {
-            return year + '-' + month;
-        }
+        return scheduleMonthName(year, month) + ' ' + year;
     }
 
     function weekdayLabels() {
@@ -14017,7 +14931,9 @@
             panel.appendChild(scheduleStaff());
         } else {
             panel.appendChild(scheduleLayers());
-            if (scheduleSpanName() === 'month') panel.appendChild(scheduleCalendar());
+            if (scheduleSpanName() === 'years') panel.appendChild(scheduleYears());
+            else if (scheduleSpanName() === 'year') panel.appendChild(scheduleYear());
+            else if (scheduleSpanName() === 'month') panel.appendChild(scheduleCalendar());
             else panel.appendChild(scheduleOutlook());
         }
         return panel;
@@ -14122,7 +15038,7 @@
 
     function scheduleSpanName() {
         var span = state.scheduleSpan;
-        if (span === 'week' || span === 'work' || span === 'day') return span;
+        if (span === 'week' || span === 'work' || span === 'day' || span === 'year' || span === 'years') return span;
         return 'month';
     }
 
@@ -14160,21 +15076,28 @@
         var options = { day: 'numeric', month: 'long' };
         if (withYear) options.year = 'numeric';
         try {
-            return date.toLocaleDateString(locale, options);
+            return String(date.toLocaleDateString(locale, options) || '').replace(/\s*г\.$/i, '');
         } catch (error) {
             return isoDate(date);
         }
     }
 
     function scheduleViewTitle() {
-        if (rosterOn() || scheduleSpanName() === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
+        var span = scheduleSpanName();
+        if (span === 'year') return String(state.scheduleYear);
+        if (span === 'years') {
+            var start = yearsPageStart(state.scheduleYear);
+            return start + '\u2013' + (start + 11);
+        }
+        if (rosterOn() || span === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
         var days = scheduleViewDays();
         var first = days[0];
         var last = days[days.length - 1];
         if (days.length === 1) {
             var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
             try {
-                return first.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                var text = String(first.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) || '').replace(/\s*г\.$/i, '');
+                return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
             } catch (error) {
                 return isoDate(first);
             }
@@ -14189,7 +15112,15 @@
     }
 
     function shiftScheduleView(delta) {
-        if (rosterOn() || scheduleSpanName() === 'month') {
+        var span = scheduleSpanName();
+        if (span === 'year' || span === 'years') {
+            state.scheduleYear += span === 'years' ? delta * 12 : delta;
+            state.scheduleExpanded = '';
+            state.scheduleClockDay = '';
+            renderFrame();
+            return;
+        }
+        if (rosterOn() || span === 'month') {
             shiftScheduleMonth(delta);
             return;
         }
@@ -14205,7 +15136,7 @@
     }
 
     function setScheduleSpan(span) {
-        state.scheduleSpan = span === 'week' || span === 'work' || span === 'day' ? span : 'month';
+        state.scheduleSpan = span === 'week' || span === 'work' || span === 'day' || span === 'year' || span === 'years' ? span : 'month';
         state.scheduleClockDay = '';
         var anchor = viewAnchorDate();
         state.scheduleYear = anchor.getFullYear();
@@ -14213,9 +15144,152 @@
         renderFrame();
     }
 
+    function yearsPageStart(year) {
+        var value = year || new Date().getFullYear();
+        return value - ((value % 12) + 12) % 12;
+    }
+
+    function scheduleMonthName(year, month) {
+        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+        var name = '';
+        try {
+            name = new Date(year, month - 1, 1).toLocaleDateString(locale, { month: 'long' });
+        } catch (error) {
+            name = String(month);
+        }
+        if (!name) return String(month);
+        return name.charAt(0).toUpperCase() + name.slice(1);
+    }
+
+    function plansInMonth(year, month) {
+        var count = 0;
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            count += monthDates(plan, year, month).length;
+        });
+        return count;
+    }
+
+    function monthMarks(year, month) {
+        var marks = {};
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            monthDates(plan, year, month).forEach(function (iso) {
+                if (!marks[iso]) marks[iso] = kindColor(plan.kind);
+            });
+        });
+        return marks;
+    }
+
+    function scheduleYear() {
+        var grid = el('div', 'asset-tree-year');
+        var now = new Date();
+        var month;
+        for (month = 1; month <= 12; month++) grid.appendChild(monthPoster(state.scheduleYear, month, now));
+        return grid;
+    }
+
+    function monthPoster(year, month, now) {
+        var label = scheduleMonthName(year, month);
+        var count = plansInMonth(year, month);
+        var current = now.getFullYear() === year && now.getMonth() + 1 === month;
+        var cell = button('', 'asset-tree-year-month' + (current ? ' is-today' : ''), openScheduleMonth(year, month));
+        cell.setAttribute('aria-label', label + (count ? ' ' + count : ''));
+        var head = el('span', 'asset-tree-year-head');
+        head.appendChild(el('span', 'asset-tree-year-name', label));
+        if (count) head.appendChild(el('strong', 'asset-tree-year-count', String(count)));
+        cell.appendChild(head);
+        var mini = el('span', 'asset-tree-mini');
+        weekdayLabels().forEach(function (name) {
+            mini.appendChild(el('span', 'asset-tree-mini-dow', String(name || '').slice(0, 2)));
+        });
+        var days = new Date(year, month, 0).getDate();
+        var lead = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+        var marks = monthMarks(year, month);
+        var todayIso = isoDate(now);
+        var index;
+        for (index = 0; index < lead; index++) mini.appendChild(el('span', 'asset-tree-mini-day is-pad'));
+        for (index = 1; index <= days; index++) {
+            var iso = isoDate(new Date(year, month - 1, index));
+            var day = el('span', 'asset-tree-mini-day' + (marks[iso] ? ' is-busy' : '') + (iso === todayIso ? ' is-today' : ''));
+            day.textContent = String(index);
+            if (marks[iso]) day.style.setProperty('--kind', marks[iso]);
+            mini.appendChild(day);
+        }
+        cell.appendChild(mini);
+        return cell;
+    }
+
+    function scheduleYears() {
+        var grid = el('div', 'asset-tree-year is-span');
+        var now = new Date();
+        var start = yearsPageStart(state.scheduleYear);
+        var index;
+        for (index = 0; index < 12; index++) grid.appendChild(yearPoster(start + index, now));
+        return grid;
+    }
+
+    function yearPoster(year, now) {
+        var current = now.getFullYear() === year;
+        var total = plansInYear(year);
+        var cell = button('', 'asset-tree-year-month is-span' + (current ? ' is-today' : ''), openScheduleYear(year));
+        cell.setAttribute('aria-label', String(year) + (total ? ' ' + total : ''));
+        var head = el('span', 'asset-tree-year-head');
+        head.appendChild(el('span', 'asset-tree-year-name', String(year)));
+        if (total) head.appendChild(el('strong', 'asset-tree-year-count', String(total)));
+        cell.appendChild(head);
+        var counts = [];
+        var max = 1;
+        var month;
+        for (month = 1; month <= 12; month++) {
+            var count = plansInMonth(year, month);
+            counts.push(count);
+            if (count > max) max = count;
+        }
+        if (!total) return cell;
+        var bars = el('span', 'asset-tree-year-bars');
+        counts.forEach(function (count, offset) {
+            var hot = current && now.getMonth() === offset;
+            var bar = el('i', 'asset-tree-year-bar' + (count ? ' is-hot' : '') + (hot ? ' is-now' : ''));
+            bar.style.height = (count ? Math.max(6, Math.round(count / max * 36)) : 3) + 'px';
+            bars.appendChild(bar);
+        });
+        cell.appendChild(bars);
+        return cell;
+    }
+
+    function plansInYear(year) {
+        var count = 0;
+        var month;
+        for (month = 1; month <= 12; month++) count += plansInMonth(year, month);
+        return count;
+    }
+
+    function openScheduleMonth(year, month) {
+        return function () {
+            var now = new Date();
+            var day = now.getFullYear() === year && now.getMonth() + 1 === month ? now.getDate() : 1;
+            state.scheduleSpan = 'month';
+            state.scheduleYear = year;
+            state.scheduleMonth = month;
+            state.scheduleAnchor = isoDate(new Date(year, month - 1, day));
+            state.scheduleExpanded = '';
+            state.scheduleClockDay = '';
+            renderFrame();
+        };
+    }
+
+    function openScheduleYear(year) {
+        return function () {
+            state.scheduleSpan = 'year';
+            state.scheduleYear = year;
+            state.scheduleExpanded = '';
+            state.scheduleClockDay = '';
+            renderFrame();
+        };
+    }
+
     function scheduleSpanSwitch() {
         var seg = el('div', 'asset-tree-board-switch asset-tree-span-switch');
-        [['month', 'schedulesSpanMonth'], ['week', 'schedulesSpanWeek'], ['work', 'schedulesSpanWork'], ['day', 'schedulesSpanDay']].forEach(function (pair) {
+        [['years', 'schedulesSpanYears'], ['year', 'schedulesSpanYear'], ['month', 'schedulesSpanMonth'], ['week', 'schedulesSpanWeek'], ['work', 'schedulesSpanWork'], ['day', 'schedulesSpanDay']].forEach(function (pair) {
             var on = scheduleSpanName() === pair[0];
             var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
                 setScheduleSpan(pair[0]);
@@ -14450,7 +15524,10 @@
                 var expanded = state.scheduleExpanded === iso;
                 var shown = !expanded && plans.length > 3 ? plans.slice(0, 2) : plans;
                 shown.forEach(function (plan) {
-                    cell.appendChild(scheduleEventCard(plan, iso));
+                    var card = scheduleEventCard(plan, iso);
+                    card.classList.add('is-chip');
+                    paintEventChip(card);
+                    cell.appendChild(card);
                 });
                 if (!expanded && plans.length > shown.length) {
                     cell.appendChild(dayMoreButton(iso, '+' + (plans.length - shown.length), true));
@@ -14576,6 +15653,7 @@
             if (bucket !== time) return;
             var card = scheduleEventCard(plan, iso, true);
             card.className += ' is-outlook';
+            paintEventChip(card);
             list.appendChild(card);
         });
         cell.appendChild(list);
@@ -14644,6 +15722,7 @@
         var source = seriesSource(plan, iso);
         var done = occurrenceDone(plan, iso);
         var due = occurrenceIsDue(plan, iso);
+        var color = kindColor(plan.kind);
         var card = button('', 'asset-tree-event' + (done ? ' is-done' : '') + (due ? ' is-due' : '') + (focused ? ' is-focus' : ''), function () {
             if (state.scheduleSuppressClick) {
                 state.scheduleSuppressClick = false;
@@ -14651,12 +15730,15 @@
             }
             openPlanEvent(plan, iso);
         });
+        card.style.setProperty('--kind', color);
         var mark = el('i', 'asset-tree-event-mark');
-        mark.style.background = kindColor(plan.kind);
+        mark.style.background = color;
         var text = el('span', 'asset-tree-event-text');
-        text.appendChild(el('strong', null, plan.name || kindName(plan.kind)));
-        var meta = kindName(plan.kind);
         var clock = occurrenceClock(plan, iso);
+        var title = plan.name || kindName(plan.kind);
+        if (clock.start) title = clock.start + ' ' + title;
+        text.appendChild(el('strong', null, title));
+        var meta = kindName(plan.kind);
         if (clock.start) meta = clock.start + (clock.end ? '–' + clock.end : '') + ' · ' + meta;
         if (done) meta += ' · ' + t('serviceMarked');
         if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
@@ -16177,7 +17259,23 @@
             if (node.getAttribute && node.getAttribute('data-staff-day') && node.getAttribute('data-staff-user')) return node;
             node = node.parentNode;
         }
-        return null;
+        var nodes = document.querySelectorAll('#asset-tree-app .asset-tree-roster-scroll td[data-staff-day][data-staff-user]');
+        var best = null;
+        var bestDist = 1296;
+        var index;
+        for (index = 0; index < nodes.length; index++) {
+            var rect = nodes[index].getBoundingClientRect();
+            if (!rect.width || !rect.height) continue;
+            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return nodes[index];
+            var dx = x < rect.left ? rect.left - x : (x > rect.right ? x - rect.right : 0);
+            var dy = y < rect.top ? rect.top - y : (y > rect.bottom ? y - rect.bottom : 0);
+            var dist = dx * dx + dy * dy;
+            if (dist <= bestDist) {
+                bestDist = dist;
+                best = nodes[index];
+            }
+        }
+        return best;
     }
 
     function staffSelectionCells() {
@@ -16461,12 +17559,12 @@
         }
     }
 
-    function beginStaffPaint(person, iso, event) {
+    function beginStaffPaint(person, iso, event, hit) {
         if (!person.hours || event.button !== 0) return;
         event.preventDefault();
         if (event.detail > 1) {
             staffClearClickTimer();
-            openStaffHourEditor(person, iso, event.currentTarget);
+            openStaffHourEditor(person, iso, hit || event.currentTarget);
             return;
         }
         if (event.ctrlKey || event.metaKey) {
@@ -16491,13 +17589,20 @@
             if (!node) return;
             var user = node.getAttribute('data-staff-user');
             var day = node.getAttribute('data-staff-day');
+            if (!user || !day) return;
             var key = staffCellKey(user, day);
             if (key === startKey && !moved) return;
             moved = true;
             staffClearClickTimer();
-            base[startKey] = true;
-            base[key] = true;
-            state.staffSelection = { map: base, anchor: startKey, active: key };
+            var range = staffRangePairs(user, day, startKey);
+            var map = {};
+            if (adding) {
+                Object.keys(base).forEach(function (saved) { map[saved] = true; });
+            }
+            range.pairs.forEach(function (pair) {
+                map[staffCellKey(pair.userKey, pair.iso)] = true;
+            });
+            state.staffSelection = { map: map, anchor: startKey, active: range.active };
             staffMarkSelectedCells();
         }
         function finish() {
@@ -17381,9 +18486,9 @@
                         hit.style.background = staffMarkTint(staffMarkColor(id));
                         hit.style.color = '#' + staffMarkColor(id);
                     }
-                    hit.addEventListener('mousedown', function (event) {
+                    cell.addEventListener('mousedown', function (event) {
                         if (event.button !== 0) return;
-                        beginStaffPaint(person, iso, event);
+                        beginStaffPaint(person, iso, event, hit);
                     });
                     cell.appendChild(hit);
                 } else if (caption) {
@@ -18704,7 +19809,7 @@
         });
         if (!money) shareTotal = view.total || 0;
         var shares = shareLabels(shareValues);
-        var head = [csvCell(groupWord(view.groupBy)), csvCell(t('reportCount'))];
+        var head = [csvCell(groupWord(view.groupBy, view)), csvCell(t('reportCount'))];
         if (money) head.push(csvCell(t('lifeBook')));
         head.push(csvCell(t('reportShare')));
         var rows = [head.join(';')];
@@ -18721,18 +19826,25 @@
         if (!(view.rows || []).length) rows.push(csvCell(view.reason || t('reportEmptyLines')));
         if (view.exportLimited) rows.push(csvCell(t('reportExportCut', '50000')));
         else if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
-        if (view.lines && view.lines.length) {
+            if (view.lines && view.lines.length) {
             rows.push('');
-            var detailHead = money ? t('lifeBook') : detailWord(view.groupBy);
-            rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
-            view.lines.forEach(function (row) {
-                var detail = row.detail;
-                if (money) {
-                    var minor = reportMoneyMinor(detail);
-                    if (minor != null) detail = reportMoneyCsv(minor);
-                }
-                rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(detail)].join(';'));
-            });
+            if (reportJournal(view)) {
+                rows.push([csvCell(t('keyLabel')), csvCell(t('reportColAsset')), csvCell(t('reportColWork')), csvCell(t('reportColKind')), csvCell(t('reportColWhen')), csvCell(t('reportColState')), csvCell(t('reportColNext'))].join(';'));
+                view.lines.forEach(function (row) {
+                    rows.push([csvCell(row.objectKey), csvCell(row.asset), csvCell(row.name), csvCell(row.kind), csvCell(reportWhenText(row)), csvCell(reportStateWord(row.state)), csvCell(formatFieldDate(row.next || ''))].join(';'));
+                });
+            } else {
+                var detailHead = money ? t('lifeBook') : detailWord(view.groupBy, view);
+                rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
+                view.lines.forEach(function (row) {
+                    var detail = row.detail;
+                    if (money) {
+                        var minor = reportMoneyMinor(detail);
+                        if (minor != null) detail = reportMoneyCsv(minor);
+                    }
+                    rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(detail)].join(';'));
+                });
+            }
         }
         var blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         var link = document.createElement('a');
@@ -18741,6 +19853,69 @@
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    }
+
+    function downloadReportFile(view) {
+        if (!view || !view.id) return;
+        var xhr = new XMLHttpRequest();
+        var chartQuery = String(view.chart || '');
+        if (chartQuery.indexOf(',') < 0) chartQuery = reportChartWire(reportChartKind(view));
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(chartQuery), true);
+        xhr.responseType = 'blob';
+        xhr.setRequestHeader('Accept', '*/*');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(xhr.response);
+                link.download = reportFileName(view).replace(/\.csv$/i, '') + '.xlsx';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                return;
+            }
+            notify(t('errorTitle'));
+        };
+        xhr.onerror = function () { notify(t('errorTitle')); };
+        xhr.send();
+    }
+
+    function printReport(view) {
+        if (!view) return;
+        var chart = document.querySelector('#asset-tree-app .asset-tree-report-chart');
+        var rows = view.rows || [];
+        var money = reportMoney(view);
+        var body = '<h1>' + htmlEscape(view.title || '') + '</h1><p>' + htmlEscape(groupPhrase(view.groupBy, view)) + '</p>';
+        if (chart) body += '<div class="chart">' + chart.innerHTML + '</div>';
+        body += '<table><tr><th>' + htmlEscape(groupWord(view.groupBy, view)) + '</th><th>' + htmlEscape(t('reportCount')) + '</th>';
+        if (money) body += '<th>' + htmlEscape(t('lifeBook')) + '</th>';
+        body += '</tr>';
+        rows.forEach(function (row) {
+            body += '<tr><td>' + htmlEscape(row.label || '') + '</td><td class="num">' + htmlEscape(String(row.count || 0)) + '</td>';
+            if (money) body += '<td class="num">' + htmlEscape(reportMoneyLabel(Number(row.amount) || 0)) + '</td>';
+            body += '</tr>';
+        });
+        body += '</table>';
+        if (reportJournal(view)) {
+            body += '<h2>' + htmlEscape(t('reportColWork')) + '</h2><table><tr><th>' + htmlEscape(t('keyLabel')) + '</th><th>' + htmlEscape(t('reportColAsset')) + '</th><th>' + htmlEscape(t('reportColWork')) + '</th><th>' + htmlEscape(t('reportColKind')) + '</th><th>' + htmlEscape(t('reportColWhen')) + '</th><th>' + htmlEscape(t('reportColState')) + '</th><th>' + htmlEscape(t('reportColNext')) + '</th></tr>';
+            (view.lines || []).forEach(function (row) {
+                body += '<tr><td>' + htmlEscape(row.objectKey || '') + '</td><td>' + htmlEscape(row.asset || '') + '</td><td>' + htmlEscape(row.name || '') + '</td><td>' + htmlEscape(row.kind || '') + '</td><td>' + htmlEscape(reportWhenText(row)) + '</td><td>' + htmlEscape(reportStateWord(row.state)) + '</td><td>' + htmlEscape(formatFieldDate(row.next || '')) + '</td></tr>';
+            });
+            body += '</table>';
+        }
+        var page = window.open('', '_blank');
+        if (!page) {
+            notify(t('errorTitle'));
+            return;
+        }
+        page.document.open();
+        page.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + htmlEscape(view.title || '') + '</title><style>'
+            + 'body{font:14px -apple-system,Segoe UI,sans-serif;color:#172b4d;margin:24px}h1{font-size:20px;margin:0 0 4px}p{color:#6b778c;margin:0 0 16px}'
+            + 'table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #dfe1e6;padding:6px 8px;text-align:left}.num{text-align:right}'
+            + '.chart svg{width:100%;height:auto;max-height:320px}'
+            + '</style></head><body>' + body + '<script>window.print()<\\/script></body></html>');
+        page.document.close();
     }
 
     function reportFact(color, value, label) {
@@ -18772,7 +19947,8 @@
     function viewerChart(projectKey, id) {
         try {
             var raw = window.localStorage.getItem(viewerChartKey(projectKey, id));
-            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'columns') return raw;
+            if (raw === 'columns' || raw === 'bar') return 'histogram';
+            if (raw === 'donut' || raw === 'pie' || raw === 'bars' || raw === 'histogram' || raw === 'line' || raw === 'area' || raw === 'scatter' || raw === 'radar' || raw === 'gantt' || raw === 'venn') return raw;
         } catch (error) {
             return '';
         }
@@ -18787,8 +19963,31 @@
         }
     }
 
+    function reportChartCaption(kind) {
+        var map = {
+            columns: 'reportColumns', histogram: 'reportHistogram', bars: 'reportBars',
+            line: 'reportLine', area: 'reportArea', scatter: 'reportScatter',
+            donut: 'reportDonut', pie: 'reportPie', radar: 'reportRadar',
+            gantt: 'reportGantt', venn: 'reportVenn'
+        };
+        return t(map[kind] || 'reportHistogram');
+    }
+
+    function reportChartList(view) {
+        var raw = String((view && view.chart) || 'histogram');
+        var parts = raw.split(',');
+        if (parts.length < 2) return [reportChartKind(view)];
+        var out = [];
+        parts.forEach(function (part) {
+            var kind = reportChartSession(part.replace(/^\s+|\s+$/g, ''));
+            if (out.indexOf(kind) < 0) out.push(kind);
+        });
+        if (!out.length) out.push('histogram');
+        return out;
+    }
+
     function reportChartKind(view) {
-        var stored = view.chart === 'donut' ? 'donut' : view.chart === 'pie' ? 'pie' : view.chart === 'bars' ? 'bars' : 'columns';
+        var stored = reportChartSession(view.chart);
         if (state.reportChartFor === String(view.id || '') && state.reportChart) return state.reportChart;
         if (!state.canEdit) {
             var local = viewerChart(state.projectKey, view.id);
@@ -18798,21 +19997,35 @@
     }
 
     function reportChartSwitch(view, kind) {
-        var seg = el('div', 'asset-tree-seg asset-tree-report-switch');
-        [['donut', 'reportDonut'], ['pie', 'reportPie'], ['columns', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
-            seg.appendChild(button(t(pair[1]), 'asset-tree-seg-btn' + (kind === pair[0] ? ' is-on' : ''), function () {
-                state.reportChartFor = String(view.id || '');
-                state.reportChart = pair[0];
-                if (!paintReport()) renderFrame();
-                rememberReportChart(view, pair[0]);
-            }));
+        var select = document.createElement('select');
+        select.className = 'asset-tree-filter asset-tree-report-chart-pick';
+        select.setAttribute('aria-label', t('reportChart'));
+        [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = t(pair[1]);
+            select.appendChild(option);
         });
-        return seg;
+        select.value = kind;
+        select.addEventListener('change', function () {
+            state.reportChartFor = String(view.id || '');
+            state.reportChart = select.value;
+            if (!paintReport()) renderFrame();
+            rememberReportChart(view, select.value);
+        });
+        return select;
+    }
+
+    function reportChartWire(kind) {
+        if (kind === 'columns' || kind === 'bar') return 'histogram';
+        if (kind === 'donut' || kind === 'pie' || kind === 'bars' || kind === 'histogram' || kind === 'line' || kind === 'area' || kind === 'scatter' || kind === 'radar' || kind === 'gantt' || kind === 'venn') return kind;
+        return 'histogram';
     }
 
     function reportChartSession(wire) {
-        if (wire === 'donut' || wire === 'pie' || wire === 'bars') return wire;
-        return 'columns';
+        if (wire === 'bar' || wire === 'columns') return 'histogram';
+        if (wire === 'donut' || wire === 'pie' || wire === 'bars' || wire === 'histogram' || wire === 'line' || wire === 'area' || wire === 'scatter' || wire === 'radar' || wire === 'gantt' || wire === 'venn') return wire;
+        return 'histogram';
     }
 
     function rememberReportChart(view, kind) {
@@ -18843,7 +20056,7 @@
             return;
         }
         state.reportChartBusy = true;
-        var wire = job.kind === 'columns' ? 'bar' : job.kind;
+        var wire = job.kind === 'columns' || job.kind === 'bar' ? 'histogram' : job.kind;
         ajax('PUT', '/projects/' + encodeURIComponent(job.projectKey) + '/reports/' + encodeURIComponent(job.view.id), { chart: wire }, function (status, payload) {
             if (job.epoch !== state.reportChartEpoch || state.projectKey !== job.projectKey) {
                 return;
@@ -18974,6 +20187,363 @@
         return list;
     }
 
+    function reportPlot(rows, max) {
+        var width = 720;
+        var height = 240;
+        var left = 36;
+        var right = 16;
+        var top = 16;
+        var bottom = 24;
+        var innerW = width - left - right;
+        var innerH = height - top - bottom;
+        var points = [];
+        var span = Math.max(rows.length - 1, 1);
+        rows.forEach(function (row, index) {
+            var x = left + (rows.length === 1 ? innerW / 2 : (index * innerW / span));
+            var value = row.count || 0;
+            var y = top + innerH - (max ? (value / max) * innerH : 0);
+            points.push({ x: x, y: y, row: row });
+        });
+        return { width: width, height: height, left: left, top: top, bottom: bottom, innerH: innerH, points: points };
+    }
+
+    function reportMark(node, row) {
+        if (!row || !row.activate) return;
+        node.style.cursor = 'pointer';
+        node.addEventListener('click', function () { row.activate(); });
+    }
+
+    function reportGrid(svg, plot) {
+        var step;
+        for (step = 0; step <= 4; step++) {
+            var line = svgEl('line');
+            var y = plot.top + plot.innerH * step / 4;
+            line.setAttribute('x1', String(plot.left));
+            line.setAttribute('x2', String(plot.width - 16));
+            line.setAttribute('y1', String(y));
+            line.setAttribute('y2', String(y));
+            line.setAttribute('class', 'asset-tree-report-radar-grid');
+            svg.appendChild(line);
+        }
+    }
+
+    function reportPlotLabels(points, width) {
+        var labels = el('div', 'asset-tree-report-plot-labels');
+        if (!points.length || points.length > 12 || !width) return labels;
+        var minX = points[0].x;
+        var maxX = points[0].x;
+        var index;
+        for (index = 1; index < points.length; index++) {
+            if (points[index].x < minX) minX = points[index].x;
+            if (points[index].x > maxX) maxX = points[index].x;
+        }
+        points.forEach(function (point) {
+            var caption = point.row ? (point.row.label || '') : (point.label || '');
+            var label = el('span', null, caption);
+            label.title = caption;
+            if (point.x === minX) {
+                label.style.left = '0';
+                label.style.right = 'auto';
+                label.style.transform = 'none';
+                label.setAttribute('data-edge', 'start');
+            } else if (point.x === maxX) {
+                label.style.left = 'auto';
+                label.style.right = '0';
+                label.style.transform = 'none';
+                label.setAttribute('data-edge', 'end');
+            } else {
+                label.style.left = (point.x / width * 100) + '%';
+            }
+            labels.appendChild(label);
+        });
+        return labels;
+    }
+
+    function reportFitPlotLabels(root) {
+        if (!root || !root.querySelectorAll) return;
+        var groups = root.querySelectorAll('.asset-tree-report-plot-labels');
+        var groupIndex;
+        for (groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            var spans = groups[groupIndex].querySelectorAll('span');
+            if (spans.length < 3) continue;
+            var items = [];
+            var spanIndex;
+            for (spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+                var box = spans[spanIndex].getBoundingClientRect();
+                if (!box.width) return;
+                items.push({ node: spans[spanIndex], left: box.left, right: box.right, edge: spans[spanIndex].getAttribute('data-edge') });
+            }
+            items.sort(function (a, b) { return a.left - b.left; });
+            var end = items[items.length - 1];
+            var cursor = items[0].right;
+            for (spanIndex = 1; spanIndex < items.length - 1; spanIndex++) {
+                var item = items[spanIndex];
+                if (item.edge) continue;
+                if (item.left < cursor + 8 || item.right > end.left - 8) item.node.style.display = 'none';
+                else cursor = item.right;
+            }
+        }
+    }
+
+    function reportTrendChart(rows, max, area) {
+        var plot = reportPlot(rows, max);
+        var wrap = el('div', 'asset-tree-report-plot');
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 ' + plot.width + ' ' + plot.height);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        reportGrid(svg, plot);
+        var coords = plot.points.map(function (point) { return point.x + ',' + point.y; }).join(' ');
+        if (area && plot.points.length) {
+            var shape = svgEl('polygon');
+            var base = plot.height - plot.bottom;
+            var first = plot.points[0];
+            var last = plot.points[plot.points.length - 1];
+            shape.setAttribute('points', first.x + ',' + base + ' ' + coords + ' ' + last.x + ',' + base);
+            shape.setAttribute('class', 'asset-tree-report-area');
+            svg.appendChild(shape);
+        }
+        var line = svgEl('polyline');
+        line.setAttribute('points', coords);
+        line.setAttribute('class', 'asset-tree-report-line');
+        svg.appendChild(line);
+        plot.points.forEach(function (point) {
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(point.x));
+            dot.setAttribute('cy', String(point.y));
+            dot.setAttribute('r', '5');
+            dot.setAttribute('fill', point.row.color || '#0052CC');
+            var title = svgEl('title');
+            title.textContent = (point.row.label || '') + ' · ' + (point.row.text || String(point.row.count || 0));
+            dot.appendChild(title);
+            reportMark(dot, point.row);
+            svg.appendChild(dot);
+        });
+        wrap.appendChild(svg);
+        wrap.appendChild(reportPlotLabels(plot.points, plot.width));
+        return wrap;
+    }
+
+    function reportScatterChart(rows, money) {
+        var wrap = el('div', 'asset-tree-report-plot');
+        var svg = svgEl('svg');
+        var width = 720;
+        var height = 240;
+        svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        var axis = svgEl('line');
+        axis.setAttribute('x1', '48');
+        axis.setAttribute('x2', '688');
+        axis.setAttribute('y1', '208');
+        axis.setAttribute('y2', '208');
+        axis.setAttribute('class', 'asset-tree-report-radar-grid');
+        svg.appendChild(axis);
+        var upright = svgEl('line');
+        upright.setAttribute('x1', '48');
+        upright.setAttribute('x2', '48');
+        upright.setAttribute('y1', '16');
+        upright.setAttribute('y2', '208');
+        upright.setAttribute('class', 'asset-tree-report-radar-grid');
+        svg.appendChild(upright);
+        var maxX = 1;
+        var maxY = 1;
+        var spots = [];
+        rows.forEach(function (row, index) {
+            var x = money ? (row.count || 0) : index + 1;
+            var y = money ? (Number(row.amount) || 0) : (row.count || 0);
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+            spots.push({ row: row, x: x, y: y });
+        });
+        spots.forEach(function (spot) {
+            var x = 48 + (spot.x / maxX) * 620;
+            var y = 208 - (spot.y / maxY) * 180;
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(x));
+            dot.setAttribute('cy', String(y));
+            dot.setAttribute('r', '7');
+            dot.setAttribute('fill', spot.row.color || '#0052CC');
+            var title = svgEl('title');
+            title.textContent = (spot.row.label || '') + ' · ' + (money ? reportMoneyLabel(Number(spot.row.amount) || 0) : String(spot.row.count || 0));
+            dot.appendChild(title);
+            reportMark(dot, spot.row);
+            svg.appendChild(dot);
+            spot.x = x;
+            spot.y = y;
+        });
+        wrap.appendChild(svg);
+        wrap.appendChild(reportPlotLabels(spots, width));
+        return wrap;
+    }
+
+    function reportRadarChart(rows, max) {
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 320 280');
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        var cx = 160;
+        var cy = 140;
+        var radius = 96;
+        var count = rows.length || 1;
+        function at(index, scale) {
+            var start = count === 2 ? 0 : -Math.PI / 2;
+            var angle = start + (Math.PI * 2 * index / count);
+            return [cx + Math.cos(angle) * radius * scale, cy + Math.sin(angle) * radius * scale];
+        }
+        [0.25, 0.5, 0.75, 1].forEach(function (scale) {
+            var ring = svgEl('circle');
+            ring.setAttribute('cx', String(cx));
+            ring.setAttribute('cy', String(cy));
+            ring.setAttribute('r', String(radius * scale));
+            ring.setAttribute('class', 'asset-tree-report-radar-grid');
+            svg.appendChild(ring);
+        });
+        rows.forEach(function (row, index) {
+            var edge = at(index, 1);
+            var spoke = svgEl('line');
+            spoke.setAttribute('x1', String(cx));
+            spoke.setAttribute('y1', String(cy));
+            spoke.setAttribute('x2', String(edge[0]));
+            spoke.setAttribute('y2', String(edge[1]));
+            spoke.setAttribute('class', 'asset-tree-report-radar-grid');
+            svg.appendChild(spoke);
+        });
+        var shape = svgEl('polygon');
+        var points = [];
+        var dots = [];
+        rows.forEach(function (row, index) {
+            var spot = at(index, max ? (row.count || 0) / max : 0);
+            points.push(spot[0] + ',' + spot[1]);
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(spot[0]));
+            dot.setAttribute('cy', String(spot[1]));
+            dot.setAttribute('r', '4');
+            dot.setAttribute('fill', row.color || '#0052CC');
+            dots.push(dot);
+        });
+        shape.setAttribute('points', points.join(' '));
+        shape.setAttribute('class', 'asset-tree-report-radar');
+        svg.appendChild(shape);
+        dots.forEach(function (dot) { svg.appendChild(dot); });
+        return svg;
+    }
+
+    function reportDay(value) {
+        var text = String(value || '');
+        if (text.length < 10) return null;
+        var year = parseInt(text.substring(0, 4), 10);
+        var month = parseInt(text.substring(5, 7), 10);
+        var day = parseInt(text.substring(8, 10), 10);
+        if (!year || !month || !day) return null;
+        return Date.UTC(year, month - 1, day);
+    }
+
+    function reportGanttChart(view) {
+        var box = el('div', 'asset-tree-report-chart');
+        var lines = (view && view.lines) || [];
+        var bars = [];
+        var min = 0;
+        var max = 0;
+        lines.forEach(function (line) {
+            var start = reportDay(line.from);
+            var end = reportDay(line.to);
+            if (start == null) return;
+            if (end == null || end < start) end = start;
+            bars.push({ line: line, start: start, end: end });
+            if (!min || start < min) min = start;
+            if (end > max) max = end;
+        });
+        if (!bars.length) {
+            box.appendChild(el('p', 'asset-tree-hint', t('reportGanttEmpty')));
+            return box;
+        }
+        var span = Math.max(max - min, 86400000);
+        var shown = bars.slice(0, 40);
+        shown.forEach(function (bar) {
+            var row = el('div', 'asset-tree-report-gantt');
+            var name = el('span', null, bar.line.name || bar.line.objectKey || '');
+            name.title = bar.line.name || '';
+            row.appendChild(name);
+            var track = el('span', 'asset-tree-report-gantt-track');
+            var fill = el('span');
+            fill.style.left = ((bar.start - min) / span * 100) + '%';
+            fill.style.width = Math.max(2, ((bar.end - bar.start) / span * 100)) + '%';
+            track.appendChild(fill);
+            row.appendChild(track);
+            if (bar.line.assetId) {
+                row.className += ' is-pick';
+                row.tabIndex = 0;
+                row.addEventListener('click', function () { goToAsset(state.projectKey, bar.line.assetId); });
+            }
+            box.appendChild(row);
+        });
+        return box;
+    }
+
+    function reportVennChart(view) {
+        var box = el('div', 'asset-tree-report-chart is-round');
+        var venn = view && view.venn;
+        var keys = venn && venn.keys ? venn.keys : [];
+        if (!keys.length) {
+            box.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
+            return box;
+        }
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '0 0 360 240');
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.setAttribute('class', 'asset-tree-report-svg');
+        var spots = keys.length === 1 ? [[180, 120]] : keys.length === 2 ? [[140, 120], [220, 120]] : [[130, 100], [230, 100], [180, 160]];
+        var colors = ['#0052CC', '#00875A', '#FF8B00'];
+        keys.forEach(function (key, index) {
+            var circle = svgEl('circle');
+            circle.setAttribute('cx', String(spots[index][0]));
+            circle.setAttribute('cy', String(spots[index][1]));
+            circle.setAttribute('r', '72');
+            circle.setAttribute('fill', colors[index]);
+            circle.setAttribute('fill-opacity', '0.35');
+            circle.setAttribute('stroke', colors[index]);
+            svg.appendChild(circle);
+        });
+        function number(x, y, value) {
+            var text = svgEl('text');
+            text.setAttribute('x', String(x));
+            text.setAttribute('y', String(y));
+            text.setAttribute('class', 'asset-tree-report-venn-num');
+            text.textContent = String(value || 0);
+            svg.appendChild(text);
+        }
+        var only = venn.only || [];
+        var pairs = venn.pairs || [];
+        if (keys.length === 1) number(180, 124, only[0]);
+        if (keys.length === 2) {
+            number(110, 124, only[0]);
+            number(250, 124, only[1]);
+            number(180, 124, pairs[0]);
+        }
+        if (keys.length === 3) {
+            number(100, 90, only[0]);
+            number(260, 90, only[1]);
+            number(180, 190, only[2]);
+            number(180, 88, pairs[0]);
+            number(140, 150, pairs[1]);
+            number(220, 150, pairs[2]);
+            number(180, 124, venn.all);
+        }
+        box.appendChild(svg);
+        var legend = el('ul', 'asset-tree-report-legend');
+        (venn.labels || []).forEach(function (label, index) {
+            var item = el('li');
+            var swatch = el('i');
+            swatch.style.background = colors[index];
+            item.appendChild(swatch);
+            item.appendChild(el('span', null, label || ''));
+            legend.appendChild(item);
+        });
+        box.appendChild(legend);
+        return box;
+    }
+
     function measuredRows(rows, money) {
         if (!money) return rows;
         var next = [];
@@ -18990,14 +20560,16 @@
         return next;
     }
 
-    function reportChartPanel(rows, total, max, kind, money, sumText, shares) {
+    function reportChartPanel(rows, total, max, kind, money, sumText, shares, view) {
         var measured = measuredRows(rows, money);
         if (!measured.length) return null;
         var drawn = [];
         measured.forEach(function (row) { if (row.count) drawn.push(row); });
-        if (kind === 'columns') {
+        if (kind === 'columns' || kind === 'histogram') {
             var columns = el('div', 'asset-tree-report-chart');
-            columns.appendChild(reportColumnsChart(measured, max, money));
+            var plot = reportColumnsChart(measured, max, money);
+            if (kind === 'histogram') plot.className += ' is-histogram';
+            columns.appendChild(plot);
             return columns;
         }
         if (kind === 'bars') {
@@ -19005,6 +20577,25 @@
             bars.appendChild(reportBarsChart(measured, max, money));
             return bars;
         }
+        if (kind === 'line' || kind === 'area') {
+            var trend = el('div', 'asset-tree-report-chart');
+            trend.appendChild(reportTrendChart(measured, max, kind === 'area'));
+            return trend;
+        }
+        if (kind === 'scatter') {
+            var scatter = el('div', 'asset-tree-report-chart');
+            scatter.appendChild(reportScatterChart(rows, money));
+            return scatter;
+        }
+        if (kind === 'radar') {
+            if (!drawn.length) return null;
+            var radar = el('div', 'asset-tree-report-chart is-round is-radar');
+            radar.appendChild(reportRadarChart(drawn, max));
+            radar.appendChild(reportLegend(money ? rows : measured, money ? maxShare(rows) : total, money, shares));
+            return radar;
+        }
+        if (kind === 'gantt') return reportGanttChart(view);
+        if (kind === 'venn') return reportVennChart(view);
         if (!drawn.length) return null;
         var round = el('div', 'asset-tree-report-chart is-round');
         var ring = el('div', 'asset-tree-report-ring');
@@ -19067,37 +20658,100 @@
         return shareLabels([count, Math.max(0, total - count)])[0] || '0 %';
     }
 
-    function groupWord(group) {
+    function reportAxes(group) {
+        if (group === 'done') return ['kind'];
+        if (group && String(group).indexOf('done+') === 0) return String(group).slice(5).split('+');
+        return null;
+    }
+
+    function groupWord(group, view) {
+        var axes = reportAxes(group);
+        if (axes) return axes.map(function (part) { return groupWord(part === 'month' ? 'done-month' : part, view); }).join(' · ');
+        if (group && String(group).indexOf('+') >= 0) {
+            return String(group).split('+').map(function (part) { return groupWord(part, view); }).join(' · ');
+        }
+        if (group === 'field' && view && view.fieldLabel) return view.fieldLabel;
         var map = {
             status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
-            month: 'groupWordMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind'
+            month: 'groupWordMonth', 'done-month': 'groupWordDoneMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind',
+            who: 'groupWordWho', asset: 'groupWordAsset', state: 'groupWordState', field: 'reportField'
         };
         return t(map[group] || 'groupWordStatus');
     }
 
-    function groupPhrase(group) {
+    function groupPhrase(group, view) {
+        var axes = reportAxes(group);
+        if (axes) return axes.map(function (part) { return groupPhrase(part === 'month' ? 'done-month' : part, view); }).join(' · ');
+        if (group && String(group).indexOf('+') >= 0) {
+            return String(group).split('+').map(function (part) { return groupPhrase(part, view); }).join(' · ');
+        }
+        if (group === 'field') {
+            return view && view.fieldLabel ? t('reportGroupField') + ': ' + view.fieldLabel : t('reportGroupField');
+        }
         var map = {
             status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder', issued: 'reportGroupIssued',
-            month: 'reportGroupMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind'
+            month: 'reportGroupMonth', 'done-month': 'reportGroupDoneMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind',
+            who: 'reportGroupWho', asset: 'reportGroupAsset', state: 'reportGroupState'
         };
         return t(map[group] || 'reportGroupStatus');
     }
 
-    function detailWord(group) {
+    function reportJournal(view) {
+        return !!(view && view.lines && view.lines.length && view.lines[0].state);
+    }
+
+    function reportStateWord(state) {
+        var map = {
+            ontime: 'reportStateOntime', late: 'reportStateLate', done: 'reportStateDone',
+            overdue: 'reportStateOverdue', expected: 'reportStateExpected'
+        };
+        return t(map[state] || 'reportStateDone');
+    }
+
+    function reportWhenText(line) {
+        var day = formatFieldDate(line && (line.when || line.from) || '');
+        var clock = line && line.clock ? String(line.clock) : '';
+        if (clock && day) return day + ' ' + clock;
+        return clock || day;
+    }
+
+    function detailWord(group, view) {
+        if (reportAxes(group)) return t('reportDoneDetail');
         if (group === 'kind') return t('reportWorkDetail');
         if (group === 'age' || group === 'month') return t('lifePurchase');
         if (group === 'warranty') return t('lifeWarranty');
         if (group === 'writeoff') return t('reportWriteoffDetail');
-        return groupWord(group);
+        return groupWord(group, view);
     }
 
     function loadGallery() {
         if (state.galleryLoading) return;
         state.galleryLoading = true;
         var token = ++state.galleryToken;
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports?fresh=' + String(Date.now()), null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            if (state.reportSavedPayload && state.reportSavedPayload.id) {
+                var savedId = String(state.reportSavedPayload.id);
+                var seen = false;
+                var n;
+                for (n = 0; n < state.reportCatalog.length; n++) {
+                    if (String(state.reportCatalog[n].id) === savedId) seen = true;
+                }
+                if (!seen) state.reportCatalog.push(state.reportSavedPayload);
+                state.reportKey = savedId;
+                state.reportSavedPayload = null;
+                state.reportPendingName = '';
+            } else if (state.reportPendingName) {
+                var pendingName = state.reportPendingName;
+                var pendingMatch = null;
+                var p;
+                state.reportPendingName = '';
+                for (p = 0; p < state.reportCatalog.length; p++) {
+                    if (state.reportCatalog[p].name === pendingName) pendingMatch = state.reportCatalog[p];
+                }
+                if (pendingMatch && pendingMatch.id) state.reportKey = String(pendingMatch.id);
+            }
             state.reportEmptyNav = false;
             if (status !== 200) {
                 state.galleryLoading = false;
@@ -19106,7 +20760,7 @@
                 if (state.view === 'reports' && !paintReport()) renderFrame();
                 return;
             }
-            if (!reportVisible(state.reportKey)) {
+            if (!reportVisible(state.reportKey) && !state.reportWantedChart) {
                 state.reportKey = firstVisibleReport() || '';
             }
             if (!state.reportKey) {
@@ -19127,6 +20781,12 @@
             if (token !== state.galleryToken) return;
             state.galleryLoading = false;
             if (status === 200 && payload) {
+                var wanted = state.reportWantedChart || '';
+                state.reportWantedChart = '';
+                var got = String(payload.chart || '');
+                if (wanted && wanted !== got && ((wanted.indexOf(',') >= 0 && got.indexOf(',') < 0) || (wanted.indexOf(',') < 0 && (got === '' || got === 'bar') && wanted !== 'bar'))) {
+                    payload.chart = wanted;
+                }
                 state.reportView = payload;
                 state.reportError = '';
             } else {
@@ -19152,7 +20812,10 @@
         var current = document.querySelector('#asset-tree-app .asset-tree-report-main');
         if (!current || !current.parentNode || state.reportCatalog == null) return false;
         paintReportTools();
-        current.parentNode.replaceChild(reportCard(), current);
+        var card = reportCard();
+        current.parentNode.replaceChild(card, current);
+        reportFitPlotLabels(card);
+        window.setTimeout(function () { reportFitPlotLabels(card); }, 0);
         return true;
     }
 
@@ -19185,9 +20848,8 @@
         var tools = el('div', 'asset-tree-inline-actions asset-tree-report-tools');
         tools.id = 'asset-tree-report-tools';
         if (state.canEdit) tools.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
-        tools.appendChild(button(t('reportBook'), 'asset-tree-btn', downloadReportBook));
         if (state.reportView) {
-            tools.appendChild(button(t('reportCsv'), 'asset-tree-btn', function () { downloadReport(state.reportView); }));
+            tools.appendChild(button(t('reportXlsx'), 'asset-tree-btn', function () { downloadReportFile(state.reportView); }));
         }
         return tools;
     }
@@ -19214,6 +20876,393 @@
             return (row.objectKey || row.name || '') + ' ' + (row.replaceOn || '');
         }).join(', ');
         return el('p', 'asset-tree-hint', t('lifeForecast') + ': ' + names);
+    }
+
+    function appendTniTools(panel) {
+        var scan = el('div', 'asset-tree-tni-block');
+        scan.appendChild(el('h4', null, t('tniNetTitle')));
+        scan.appendChild(el('p', 'asset-tree-hint', t('tniScanHint')));
+        var setup = currentProject() && currentProject().setup;
+        if (!setup || !setup.tniComputer) {
+            scan.appendChild(el('p', 'asset-tree-banner', t('tniScanNeedType')));
+        }
+        var name = document.createElement('input');
+        name.type = 'text';
+        name.maxLength = 80;
+        var target = document.createElement('textarea');
+        target.rows = 2;
+        target.placeholder = t('tniScanPlaceholder');
+        scan.appendChild(planField(t('tniScanName'), name));
+        scan.appendChild(planField(t('tniScanTarget'), target));
+        var addRow = el('div', 'asset-tree-tni-actions');
+        addRow.appendChild(button(t('tniScanAdd'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets', {
+                name: name.value,
+                target: target.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    name.value = '';
+                    target.value = '';
+                    state.tniError = '';
+                    loadTni(true);
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        scan.appendChild(addRow);
+        var board = el('div', 'asset-tree-tni-board');
+        board.id = 'asset-tree-tni-board';
+        if (state.tniList == null) {
+            board.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadTni(true);
+        } else {
+            board.appendChild(tniBoard());
+        }
+        scan.appendChild(board);
+        var sources = moduleSetup();
+        if (sources.tniScan !== false) panel.appendChild(scan);
+        if (sources.tniAd !== false) panel.appendChild(renderTniDirectory());
+        if (sources.tniSccm !== false) panel.appendChild(renderTniSccm());
+    }
+
+    function tniSurfaceOpen() {
+        return state.view === 'settings' && state.schemaTab === 'exchange' && moduleOn('tni');
+    }
+
+    function loadTni(quiet) {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/subnets', null, function (status, payload) {
+            if (key !== state.projectKey || !tniSurfaceOpen()) return;
+            if (status !== 200) {
+                state.tniError = (payload && payload.message) || t('errorTitle');
+                state.tniList = [];
+            } else {
+                state.tniError = '';
+                state.tniList = payload || [];
+            }
+            var running = false;
+            var i;
+            for (i = 0; i < state.tniList.length; i++) {
+                if (state.tniList[i].state === 'running') running = true;
+            }
+            if (running) armTniWatch();
+            else if (state.tniTimer) {
+                clearInterval(state.tniTimer);
+                state.tniTimer = null;
+            }
+            var board = document.getElementById('asset-tree-tni-board');
+            if (board) {
+                board.innerHTML = '';
+                board.appendChild(tniBoard());
+            } else if (!quiet) {
+                renderFrame();
+            }
+        });
+    }
+
+    function armTniWatch() {
+        if (state.tniTimer) return;
+        state.tniTimer = setInterval(function () {
+            if (!tniSurfaceOpen()) {
+                clearInterval(state.tniTimer);
+                state.tniTimer = null;
+                return;
+            }
+            loadTni(true);
+        }, 1000);
+    }
+
+    function tniBoard() {
+        var wrap = el('div');
+        if (state.tniError) wrap.appendChild(el('p', 'asset-tree-banner', state.tniError));
+        var rows = state.tniList || [];
+        if (!rows.length) {
+            wrap.appendChild(el('p', 'asset-tree-hint', t('tniScanEmpty')));
+            return wrap;
+        }
+        var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
+        var header = el('tr');
+        [t('tniScanName'), t('tniScanHosts'), t('tniScanState'), t('tniScanOnline'), t('tniScanAdded'), ''].forEach(function (label) {
+            header.appendChild(el('th', null, label));
+        });
+        table.appendChild(header);
+        var shown = null;
+        rows.forEach(function (row) {
+            if (row.state === 'running' || (row.log && !shown)) shown = row;
+            var line = el('tr');
+            var title = el('td', null, row.name || '');
+            title.title = row.target || '';
+            line.appendChild(title);
+            line.appendChild(el('td', 'is-num', String(row.hosts || 0)));
+            line.appendChild(el('td', null, tniStateText(row)));
+            line.appendChild(el('td', 'is-num', String(row.online || 0)));
+            line.appendChild(el('td', 'is-num', String(row.added || 0)));
+            var actions = el('td');
+            if (state.canAdmin) {
+                var scan = button(t('tniScanRun'), 'asset-tree-btn slim', function () {
+                    ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets/' + encodeURIComponent(row.id) + '/scan', {}, function (status, payload) {
+                        if (status >= 200 && status < 300) loadTni(true);
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+                if (row.state === 'running') scan.disabled = true;
+                actions.appendChild(scan);
+                actions.appendChild(button(t('tniScanDelete'), 'asset-tree-btn slim', function () {
+                    if (!window.confirm(t('tniScanDeleteConfirm', row.name || ''))) return;
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/subnets/' + encodeURIComponent(row.id), null, function (status, payload) {
+                        if (status >= 200 && status < 300) loadTni(true);
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }));
+            }
+            line.appendChild(actions);
+            table.appendChild(line);
+        });
+        wrap.appendChild(table);
+        if (shown && shown.log) wrap.appendChild(tniLog(shown));
+        return wrap;
+    }
+
+    function tniStateText(row) {
+        if (!row || row.state === 'idle') return t('tniScanIdle');
+        if (row.state === 'running') return t('tniScanRunning') + ' ' + (row.scanned || 0) + ' / ' + (row.hosts || 0);
+        if (row.state === 'failed') return row.note || t('tniScanFailed');
+        return t('tniScanDone');
+    }
+
+    function tniLog(row) {
+        var box = el('div', 'asset-tree-tni-log');
+        box.appendChild(el('p', null, t('tniScanLog')));
+        String(row.log || '').split('\n').forEach(function (line) {
+            if (!line) return;
+            var parts = line.split('\t');
+            var mark = parts[2] === 'new' ? t('tniScanNew') : t('tniScanKnown');
+            var text = (parts[1] ? parts[1] + ' · ' : '') + (parts[0] || '') + ' · ' + mark;
+            box.appendChild(el('span', null, text));
+        });
+        return box;
+    }
+
+    function renderTniDirectory() {
+        var box = el('div', 'asset-tree-tni-block');
+        box.appendChild(el('h4', null, t('tniDirTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('tniDirHint')));
+        var host = document.createElement('input');
+        host.type = 'text';
+        host.id = 'asset-tree-tni-host';
+        host.placeholder = 'dc.corp.local';
+        var port = document.createElement('input');
+        port.type = 'number';
+        port.id = 'asset-tree-tni-port';
+        port.min = '1';
+        port.max = '65535';
+        port.value = '389';
+        var account = document.createElement('input');
+        account.type = 'text';
+        account.id = 'asset-tree-tni-account';
+        account.placeholder = 'CORP\\user';
+        var password = document.createElement('input');
+        password.type = 'password';
+        password.id = 'asset-tree-tni-password';
+        password.autocomplete = 'new-password';
+        var base = document.createElement('input');
+        base.type = 'text';
+        base.id = 'asset-tree-tni-base';
+        base.placeholder = 'DC=corp,DC=local';
+        var grid = el('div', 'asset-tree-tni-grid');
+        grid.appendChild(planField(t('tniDirHost'), host));
+        grid.appendChild(planField(t('tniDirPort'), port));
+        grid.appendChild(planField(t('tniDirAccount'), account));
+        grid.appendChild(planField(t('tniDirPassword'), password));
+        var baseField = planField(t('tniDirBase'), base);
+        baseField.className += ' is-full';
+        grid.appendChild(baseField);
+        box.appendChild(grid);
+        var actions = el('div', 'asset-tree-tni-actions');
+        var sslLabel = el('label', 'asset-tree-tni-ssl');
+        var ssl = document.createElement('input');
+        ssl.type = 'checkbox';
+        ssl.id = 'asset-tree-tni-ssl';
+        sslLabel.appendChild(ssl);
+        sslLabel.appendChild(document.createTextNode(t('tniDirSsl')));
+        actions.appendChild(sslLabel);
+        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: ssl.checked,
+                base: base.value,
+                account: account.value,
+                password: ''
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    state.tniDir = payload;
+                    tniDirNote(t('tniScanDone'));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        actions.appendChild(button(t('tniDirLoad'), 'asset-tree-btn primary', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/directory/load', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: ssl.checked,
+                base: base.value,
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    tniDirNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        box.appendChild(actions);
+        var note = el('p', 'asset-tree-hint');
+        note.id = 'asset-tree-tni-dir-note';
+        box.appendChild(note);
+        if (state.tniDir) fillTniDirectory(state.tniDir);
+        else loadTniDirectory();
+        return box;
+    }
+
+    function tniDirNote(text) {
+        var note = document.getElementById('asset-tree-tni-dir-note');
+        if (note) note.textContent = text || '';
+    }
+
+    function fillTniDirectory(row) {
+        var host = document.getElementById('asset-tree-tni-host');
+        if (!host || host.getAttribute('data-ready') === '1') return;
+        host.value = row.host || '';
+        var port = document.getElementById('asset-tree-tni-port');
+        if (port) port.value = row.port || 389;
+        var account = document.getElementById('asset-tree-tni-account');
+        if (account) account.value = row.account || '';
+        var base = document.getElementById('asset-tree-tni-base');
+        if (base) base.value = row.base || '';
+        var ssl = document.getElementById('asset-tree-tni-ssl');
+        if (ssl) ssl.checked = !!row.ssl;
+        host.setAttribute('data-ready', '1');
+    }
+
+    function loadTniDirectory() {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/directory', null, function (status, payload) {
+            if (key !== state.projectKey || state.moduleDialog !== 'tni' || status !== 200 || !payload) return;
+            state.tniDir = payload;
+            fillTniDirectory(payload);
+        });
+    }
+
+    function renderTniSccm() {
+        var box = el('div', 'asset-tree-tni-block');
+        box.appendChild(el('h4', null, t('tniSccmTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('tniSccmHint')));
+        var host = document.createElement('input');
+        host.type = 'text';
+        host.id = 'asset-tree-tni-sccm-host';
+        host.placeholder = 'sccm.corp.local';
+        var port = document.createElement('input');
+        port.type = 'number';
+        port.id = 'asset-tree-tni-sccm-port';
+        port.min = '1';
+        port.max = '65535';
+        port.value = '443';
+        var account = document.createElement('input');
+        account.type = 'text';
+        account.id = 'asset-tree-tni-sccm-account';
+        account.placeholder = 'CORP\\user';
+        var password = document.createElement('input');
+        password.type = 'password';
+        password.id = 'asset-tree-tni-sccm-password';
+        password.autocomplete = 'new-password';
+        var grid = el('div', 'asset-tree-tni-grid');
+        grid.appendChild(planField(t('tniSccmHost'), host));
+        grid.appendChild(planField(t('tniSccmPort'), port));
+        grid.appendChild(planField(t('tniDirAccount'), account));
+        grid.appendChild(planField(t('tniDirPassword'), password));
+        box.appendChild(grid);
+        var actions = el('div', 'asset-tree-tni-actions');
+        var trustLabel = el('label', 'asset-tree-tni-ssl');
+        var trust = document.createElement('input');
+        trust.type = 'checkbox';
+        trust.id = 'asset-tree-tni-sccm-trust';
+        trustLabel.appendChild(trust);
+        trustLabel.appendChild(document.createTextNode(t('tniSccmTrust')));
+        actions.appendChild(trustLabel);
+        actions.appendChild(button(t('tniDirSave'), 'asset-tree-btn', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: trust.checked,
+                base: '',
+                account: account.value,
+                password: ''
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    state.tniSccm = payload;
+                    tniSccmNote(t('tniScanDone'));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        actions.appendChild(button(t('tniSccmLoad'), 'asset-tree-btn primary', function () {
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/sccm/load', {
+                host: host.value,
+                port: Number(port.value) || 0,
+                ssl: trust.checked,
+                base: '',
+                account: account.value,
+                password: password.value
+            }, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    password.value = '';
+                    tniSccmNote(t('tniDirCreated', payload.created || 0) + ' · ' + t('tniDirUpdated', payload.updated || 0));
+                } else {
+                    notify((payload && payload.message) || t('errorTitle'));
+                }
+            });
+        }));
+        box.appendChild(actions);
+        var note = el('p', 'asset-tree-hint');
+        note.id = 'asset-tree-tni-sccm-note';
+        box.appendChild(note);
+        if (state.tniSccm) fillTniSccm(state.tniSccm);
+        else loadTniSccm();
+        return box;
+    }
+
+    function tniSccmNote(text) {
+        var note = document.getElementById('asset-tree-tni-sccm-note');
+        if (note) note.textContent = text || '';
+    }
+
+    function fillTniSccm(row) {
+        var host = document.getElementById('asset-tree-tni-sccm-host');
+        if (!host || host.getAttribute('data-ready') === '1') return;
+        host.value = row.host || '';
+        var port = document.getElementById('asset-tree-tni-sccm-port');
+        if (port) port.value = row.port || 443;
+        var account = document.getElementById('asset-tree-tni-sccm-account');
+        if (account) account.value = row.account || '';
+        var trust = document.getElementById('asset-tree-tni-sccm-trust');
+        if (trust) trust.checked = !!row.ssl;
+        host.setAttribute('data-ready', '1');
+    }
+
+    function loadTniSccm() {
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/sccm', null, function (status, payload) {
+            if (key !== state.projectKey || state.moduleDialog !== 'tni' || status !== 200 || !payload) return;
+            state.tniSccm = payload;
+            fillTniSccm(payload);
+        });
     }
 
     function renderReports() {
@@ -19261,9 +21310,10 @@
         var group = (view && view.groupBy) || (saved && saved.groupBy) || '';
         if (view && view.sum) return true;
         if (saved && saved.metric === 'cost') return true;
-        if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind') return true;
+        if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind' || group === 'field') return true;
+        if (group === 'done' || String(group).indexOf('done+') === 0) return true;
         var id = String((view && view.id) || '');
-        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'service';
+        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'done' || id === 'service';
     }
 
     function reportJoin(labels) {
@@ -19462,13 +21512,14 @@
         });
         if (!money) shareTotal = view.total || 0;
         var shares = shareLabels(shareValues);
-        var kind = reportChartKind(view);
+        var kinds = reportChartList(view);
+        var kind = kinds[0];
         var titleRow = el('div', 'asset-tree-report-title');
         var titles = el('div');
         titles.appendChild(el('h3', null, view.title || ''));
-        titles.appendChild(el('p', null, groupPhrase(view.groupBy)));
+        titles.appendChild(el('p', null, groupPhrase(view.groupBy, view)));
         titleRow.appendChild(titles);
-        titleRow.appendChild(reportChartSwitch(view, kind));
+        if (kinds.length < 2) titleRow.appendChild(reportChartSwitch(view, kind));
         main.appendChild(titleRow);
         var facts = el('div', 'asset-tree-report-facts');
         facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
@@ -19477,12 +21528,41 @@
         if (!rows.length) {
             main.appendChild(el('p', 'asset-tree-hint', t('reportEmptyLines')));
             if (view.reason) main.appendChild(el('p', 'asset-tree-hint', view.reason));
+        } else if (kinds.length < 2) {
+            var onlyChart = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares, view);
+            if (onlyChart) main.appendChild(onlyChart);
         } else {
-            var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shares);
-            if (chartPanel) main.appendChild(chartPanel);
+            var board = el('div', 'asset-tree-report-charts');
+            var compactKinds = [];
+            var wideKinds = [];
+            kinds.forEach(function (chartKind) {
+                if (chartKind === 'gantt' || chartKind === 'bars') wideKinds.push(chartKind);
+                else compactKinds.push(chartKind);
+            });
+            var tiles = el('div', 'asset-tree-report-chart-row');
+            var placeChart = function (chartKind, wide) {
+                var chartPanel = reportChartPanel(rows, view.total || 0, maxValue, chartKind, money, view.sum || '', shares, view);
+                if (!chartPanel) return null;
+                var named = el('div', 'asset-tree-report-chart-block' + (wide ? ' is-wide' : ''));
+                named.appendChild(el('p', 'asset-tree-report-chart-name', reportChartCaption(chartKind)));
+                named.appendChild(chartPanel);
+                return named;
+            }
+            compactKinds.forEach(function (chartKind) {
+                var named = placeChart(chartKind, false);
+                if (named) tiles.appendChild(named);
+            });
+            if (tiles.childNodes.length) board.appendChild(tiles);
+            wideKinds.forEach(function (chartKind) {
+                var named = placeChart(chartKind, true);
+                if (named) board.appendChild(named);
+            });
+            main.appendChild(board);
+        }
+        if (rows.length) {
             var table = el('table', 'asset-tree-sheet-table asset-tree-report-table');
             var header = el('tr');
-            header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy)));
+            header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy, view)));
             header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
             header.appendChild(el('th', 'is-num', t('reportCount')));
             if (money) header.appendChild(el('th', 'is-num is-money', t('lifeBook')));
@@ -19522,6 +21602,39 @@
             total.appendChild(el('td', 'is-num', shareTotal ? '100 %' : '0 %'));
             table.appendChild(total);
             main.appendChild(table);
+        }
+        if (reportJournal(view)) {
+            var journal = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-journal');
+            var journalHead = el('tr');
+            ['keyLabel', 'reportColAsset', 'reportColWork', 'reportColKind', 'reportColWhen', 'reportColState', 'reportColNext'].forEach(function (key) {
+                journalHead.appendChild(el('th', null, t(key)));
+            });
+            journal.appendChild(journalHead);
+            view.lines.forEach(function (row) {
+                var item = el('tr');
+                item.appendChild(el('td', null, row.objectKey || ''));
+                item.appendChild(el('td', null, row.asset || ''));
+                item.appendChild(el('td', null, row.name || ''));
+                item.appendChild(el('td', null, row.kind || ''));
+                item.appendChild(el('td', null, reportWhenText(row)));
+                item.appendChild(el('td', 'asset-tree-report-state is-' + (row.state || 'done'), reportStateWord(row.state)));
+                item.appendChild(el('td', null, formatFieldDate(row.next || '')));
+                journal.appendChild(item);
+            });
+            main.appendChild(journal);
+            if ((view.lineTotal || view.lines.length) > view.lines.length) {
+                var more = button(t('reportLinesMore'), 'asset-tree-btn', function () {
+                    ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
+                        if (status === 200 && payload && state.reportView && String(state.reportView.id) === String(view.id)) {
+                            state.reportView.lines = payload.lines || [];
+                            state.reportView.lineTotal = payload.lineTotal || state.reportView.lines.length;
+                            state.reportView.capped = !!payload.capped;
+                            if (!paintReport()) renderFrame();
+                        } else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+                main.appendChild(more);
+            }
         }
         var foot = el('div', 'asset-tree-report-foot');
         var note = view.hint || t('reportCounted');
@@ -19565,32 +21678,138 @@
         return [];
     }
 
+    function reportFieldOptions() {
+        var seen = {};
+        var list = [];
+        (state.types || []).forEach(function (type) {
+            if (!type || type.location) return;
+            (type.fields || []).forEach(function (field) {
+                if (!field || !field.fieldKey || seen[field.fieldKey]) return;
+                seen[field.fieldKey] = true;
+                list.push({ key: field.fieldKey, label: field.label || field.fieldKey });
+            });
+        });
+        list.sort(function (left, right) { return left.label.localeCompare(right.label); });
+        return list;
+    }
+
+    function mixRaw(value, name) {
+        var parts = String(value || '').split(';');
+        var i;
+        for (i = 0; i < parts.length; i++) {
+            if (parts[i].indexOf(name + '=') === 0) return parts[i].slice(name.length + 1);
+        }
+        return '';
+    }
+
+    function unescapeFieldRule(raw) {
+        return String(raw || '').split('~~').join('\u0000').split('~p').join('|').split('~s').join(';').split('\u0000').join('~');
+    }
+
+    function packFieldRules(rules) {
+        var parts = [];
+        (rules || []).forEach(function (rule) {
+            var key = rule && rule.key ? rule.key : '';
+            var value = rule && rule.value ? String(rule.value).replace(/^\s+|\s+$/g, '') : '';
+            if (!key || !value) return;
+            var escaped = value.split('~').join('~~').split('|').join('~p').split(';').join('~s');
+            parts.push(key + '~' + escaped);
+        });
+        return parts.join('|');
+    }
+
+    function unpackFieldRules(value, attrKey, attrValue) {
+        var rules = [];
+        var packed = mixRaw(value, 'f');
+        if (packed) {
+            packed.split('|').forEach(function (piece) {
+                var mark = piece.indexOf('~');
+                if (mark <= 0) return;
+                var key = piece.slice(0, mark);
+                var text = unescapeFieldRule(piece.slice(mark + 1));
+                if (key) rules.push({ key: key, value: text });
+            });
+        }
+        if (!rules.length && attrKey) rules.push({ key: attrKey, value: attrValue || '' });
+        if (!rules.length) rules.push({ key: '', value: '' });
+        return rules;
+    }
+
+    function acceptSavedReport(payload, requestedChart, requestedName) {
+        var created = payload && (payload.id || payload.key || '');
+        state.reportChart = '';
+        state.reportChartFor = '';
+        state.reportChartPending = null;
+        state.reportChartBusy = false;
+        state.reportChartEpoch += 1;
+        state.reportWantedChart = payload && payload.chart ? String(payload.chart) : (requestedChart || '');
+        state.reportSavedPayload = created ? payload : null;
+        state.reportPendingName = created ? '' : (requestedName || '');
+        if (created) state.reportKey = String(created);
+        state.reportCatalog = null;
+        state.reportView = null;
+        state.reportError = '';
+        state.galleryLoading = false;
+        renderFrame();
+    }
+
     function openReportDialog(existing) {
         var editing = !!(existing && existing.id);
         var pickedTypes = {};
         var pickedStatuses = {};
         openModal(function (dialog) {
-            dialog.className += ' asset-tree-work-dialog';
+            dialog.className += ' asset-tree-work-dialog asset-tree-report-dialog';
             dialog.appendChild(el('h2', null, t(editing ? 'reportEdit' : 'reportCreate')));
             var name = document.createElement('input');
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
+            var storedGroup = editing && existing.groupBy ? String(existing.groupBy) : 'type';
+            var doneStored = storedGroup === 'done' || storedGroup.indexOf('done+') === 0;
+            var source = document.createElement('select');
+            [['assets', 'reportSourceAssets'], ['done', 'reportSourceDone']].forEach(function (pair) {
+                var option = document.createElement('option');
+                option.value = pair[0];
+                option.textContent = t(pair[1]);
+                source.appendChild(option);
+            });
+            source.value = doneStored ? 'done' : 'assets';
             var group = document.createElement('select');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
-                var option = document.createElement('option');
-                option.value = pair[0];
-                option.textContent = t(pair[1]);
-                group.appendChild(option);
+            var extraOn = {};
+            (doneStored ? (storedGroup === 'done' ? ['kind'] : storedGroup.slice(5).split('+')) : storedGroup.split('+')).forEach(function (part, index) {
+                if (index) extraOn[part] = true;
             });
-            group.value = editing && existing.groupBy ? existing.groupBy : 'type';
-            var chart = document.createElement('select');
-            [['donut', 'reportDonut'], ['pie', 'reportPie'], ['bar', 'reportColumns'], ['bars', 'reportBars']].forEach(function (pair) {
-                var option = document.createElement('option');
-                option.value = pair[0];
-                option.textContent = t(pair[1]);
-                chart.appendChild(option);
+            function groupChoices() {
+                if (source.value === 'done') {
+                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho'], ['asset', 'reportGroupAsset'], ['state', 'reportGroupState']];
+                }
+                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['field', 'reportGroupField'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']];
+            }
+            function extraChoices() {
+                if (source.value === 'done') {
+                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho'], ['asset', 'reportGroupAsset'], ['state', 'reportGroupState']];
+                }
+                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']];
+            }
+            function fillGroups(keep) {
+                var choices = groupChoices();
+                var current = keep ? group.value : (doneStored && source.value === 'done' ? (storedGroup === 'done' ? 'kind' : storedGroup.slice(5).split('+')[0]) : (source.value === 'assets' && !doneStored ? storedGroup.split('+')[0] : choices[0][0]));
+                group.innerHTML = '';
+                choices.forEach(function (pair) {
+                    var option = document.createElement('option');
+                    option.value = pair[0];
+                    option.textContent = t(pair[1]);
+                    group.appendChild(option);
+                });
+                group.value = current;
+                if (!group.value) group.value = choices[0][0];
+            }
+            var chartOrder = [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']];
+            var chartOn = {};
+            String(editing && existing.chart ? existing.chart : 'histogram').split(',').forEach(function (part) {
+                var key = part.replace(/^\s+|\s+$/g, '');
+                if (key === 'bar' || key === 'columns') key = 'histogram';
+                if (key) chartOn[key] = true;
             });
-            chart.value = editing && existing.chart ? existing.chart : 'bar';
             if (editing && existing.name) name.value = existing.name;
             var metric = document.createElement('select');
             [['count', 'reportCount'], ['cost', 'lifeBook']].forEach(function (pair) {
@@ -19608,18 +21827,149 @@
             initialStatuses.forEach(function (key) { pickedStatuses[key] = true; });
             function syncMetric() {
                 var cost = metric.querySelector('option[value="cost"]');
-                var kindGroup = group.value === 'kind';
-                if (cost) cost.disabled = kindGroup;
-                if (kindGroup && metric.value === 'cost') metric.value = 'count';
+                var countOnly = source.value === 'done' || group.value === 'kind';
+                if (cost) cost.disabled = countOnly;
+                if (countOnly && metric.value === 'cost') metric.value = 'count';
             }
-            group.addEventListener('change', syncMetric);
-            syncMetric();
+            function syncField() {
+                fieldRow.hidden = source.value === 'done' || group.value !== 'field';
+            }
+            group.addEventListener('change', function () {
+                if (extraOn[group.value]) delete extraOn[group.value];
+                syncMetric();
+                syncField();
+                paintExtras();
+            });
+            source.addEventListener('change', function () {
+                extraOn = {};
+                fillGroups(false);
+                syncMetric();
+                syncField();
+                paintExtras();
+            });
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
-            row.appendChild(planField(t('reportChart'), chart));
             row.appendChild(planField(t('reportMetric'), metric));
+            var field = document.createElement('select');
+            field.appendChild(new Option('\u2014', ''));
+            reportFieldOptions().forEach(function (item) {
+                field.appendChild(new Option(item.label, item.key));
+            });
+            if (editing && existing.fieldKey) field.value = existing.fieldKey;
+            var fieldRow = el('div', 'asset-tree-report-picks');
+            fieldRow.appendChild(planField(t('reportField'), field));
+            fillGroups(false);
+            syncMetric();
+            syncField();
+            var fieldRules = unpackFieldRules(editing ? existing.filterValue : '', editing ? existing.attrKey : '', editing ? existing.attrValue : '');
+            var fieldHost = el('div', 'asset-tree-report-fields');
+            function paintFieldRules() {
+                fieldHost.innerHTML = '';
+                fieldRules.forEach(function (rule, index) {
+                    var line = el('div', 'asset-tree-report-field-row');
+                    var select = document.createElement('select');
+                    select.className = 'asset-tree-filter';
+                    select.appendChild(new Option(t('reportFieldAny'), ''));
+                    reportFieldOptions().forEach(function (item) {
+                        select.appendChild(new Option(item.label, item.key));
+                    });
+                    select.value = rule.key || '';
+                    select.addEventListener('change', function () { rule.key = select.value; });
+                    var value = document.createElement('input');
+                    value.type = 'text';
+                    value.maxLength = 80;
+                    value.placeholder = t('reportFieldValue');
+                    value.setAttribute('aria-label', t('reportFieldValue'));
+                    value.value = rule.value || '';
+                    value.addEventListener('input', function () { rule.value = value.value; });
+                    line.appendChild(select);
+                    line.appendChild(value);
+                    if (fieldRules.length > 1) {
+                        var remove = button('\u00d7', 'asset-tree-peer-remove', function () {
+                            fieldRules.splice(index, 1);
+                            paintFieldRules();
+                        });
+                        remove.setAttribute('aria-label', t('unlink'));
+                        line.appendChild(remove);
+                    }
+                    fieldHost.appendChild(line);
+                });
+                if (fieldRules.length < 8) {
+                    fieldHost.appendChild(button(t('addField'), 'asset-tree-btn', function () {
+                        fieldRules.push({ key: '', value: '' });
+                        paintFieldRules();
+                    }));
+                }
+            }
+            paintFieldRules();
             dialog.appendChild(planField(t('reportName'), name));
+            var sourceRow = planField(t('reportSource'), source);
+            if (moduleOn('service') || doneStored) dialog.appendChild(sourceRow);
             dialog.appendChild(row);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportAlso')));
+            var extraList = el('div', 'asset-tree-check-list');
+            function plannedGroup(extra) {
+                var parts = [group.value];
+                extraChoices().forEach(function (pair) {
+                    if (extraOn[pair[0]] && pair[0] !== group.value) parts.push(pair[0]);
+                });
+                if (extra && parts.indexOf(extra) < 0) parts.push(extra);
+                if (source.value === 'done') {
+                    if (parts.length === 1 && parts[0] === 'kind') return 'done';
+                    return 'done+' + parts.join('+');
+                }
+                return parts.join('+');
+            }
+            function paintExtras() {
+                extraList.innerHTML = '';
+                extraChoices().forEach(function (pair) {
+                    if (pair[0] === group.value) return;
+                    var label = el('label', 'asset-tree-check');
+                    var box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.checked = !!extraOn[pair[0]];
+                    box.addEventListener('change', function () {
+                        if (box.checked) {
+                            if (plannedGroup(pair[0]).length > 16) {
+                                box.checked = false;
+                                notify(t('reportAlso'));
+                                return;
+                            }
+                            extraOn[pair[0]] = true;
+                        } else delete extraOn[pair[0]];
+                    });
+                    label.appendChild(box);
+                    label.appendChild(document.createTextNode(t(pair[1])));
+                    extraList.appendChild(label);
+                });
+            }
+            paintExtras();
+            dialog.appendChild(extraList);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportCharts')));
+            var chartList = el('div', 'asset-tree-check-list');
+            chartOrder.forEach(function (pair) {
+                var label = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = !!chartOn[pair[0]];
+                box.addEventListener('change', function () {
+                    if (box.checked) chartOn[pair[0]] = true;
+                    else delete chartOn[pair[0]];
+                    var chosen = [];
+                    chartOrder.forEach(function (item) { if (chartOn[item[0]]) chosen.push(item[0]); });
+                    if (!chosen.length) {
+                        chartOn[pair[0]] = true;
+                        box.checked = true;
+                    }
+                });
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(t(pair[1])));
+                chartList.appendChild(label);
+            });
+            dialog.appendChild(chartList);
+            dialog.appendChild(fieldRow);
+            dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyField')));
+            dialog.appendChild(fieldHost);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyTypes')));
             var types = el('div', 'asset-tree-check-list');
             (state.types || []).forEach(function (type) {
@@ -19708,14 +22058,55 @@
                 var statusKeys = Object.keys(pickedStatuses);
                 var holderKeys = Object.keys(pickedHolders);
                 var placeKeys = Object.keys(pickedPlaces);
-                var body = { name: name.value.trim(), groupBy: group.value, chart: chart.value, metric: metric.value, filterField: '', filterValue: '' };
-                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length) {
+                if (group.value === 'field' && !field.value) {
+                    save.disabled = false;
+                    notify(t('reportField'));
+                    field.focus();
+                    return;
+                }
+                var completeRules = [];
+                var brokenRule = false;
+                fieldRules.forEach(function (rule) {
+                    var key = rule.key || '';
+                    var text = (rule.value || '').replace(/^\s+|\s+$/g, '');
+                    if (!key && !text) return;
+                    if (!key || !text || text.length > 80) brokenRule = true;
+                    else completeRules.push({ key: key, value: text });
+                });
+                if (brokenRule) {
+                    save.disabled = false;
+                    notify(t('reportFieldValue'));
+                    return;
+                }
+                var groupValue = plannedGroup();
+                if (groupValue.length > 16) {
+                    save.disabled = false;
+                    notify(t('reportAlso'));
+                    return;
+                }
+                var charts = [];
+                chartOrder.forEach(function (item) { if (chartOn[item[0]]) charts.push(item[0]); });
+                if (!charts.length) charts.push('histogram');
+                var body = {
+                    name: name.value.trim(),
+                    groupBy: groupValue,
+                    chart: charts.join(','),
+                    metric: metric.value,
+                    filterField: '',
+                    filterValue: '',
+                    fieldKey: group.value === 'field' ? field.value : '',
+                    attrKey: '',
+                    attrValue: ''
+                };
+                var packedFields = packFieldRules(completeRules);
+                if (typeKeys.length || statusKeys.length || holderKeys.length || placeKeys.length || packedFields) {
                     body.filterField = 'mix';
                     var parts = [];
                     if (typeKeys.length) parts.push('t=' + typeKeys.join(','));
                     if (statusKeys.length) parts.push('s=' + statusKeys.join(','));
                     if (holderKeys.length) parts.push('h=' + holderKeys.join(','));
                     if (placeKeys.length) parts.push('p=' + placeKeys.join(','));
+                    if (packedFields) parts.push('f=' + packedFields);
                     body.filterValue = parts.join(';');
                 }
                 if (body.filterValue && body.filterValue.length > 4000) {
@@ -19727,13 +22118,21 @@
                 ajax(editing ? 'PUT' : 'POST', path, body, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal(hold);
-                        var created = payload && (payload.id || payload.key || '');
+                        acceptSavedReport(payload, body.chart, body.name);
+                    } else if (status >= 500) {
+                        closeModal(hold);
+                        notify((payload && payload.message) || t('errorTitle'));
                         state.reportChart = '';
                         state.reportChartFor = '';
-                        if (created) state.reportKey = created;
+                        state.reportChartPending = null;
+                        state.reportChartBusy = false;
+                        state.reportChartEpoch += 1;
+                        state.reportWantedChart = body.chart || '';
+                        state.reportPendingName = body.name || '';
+                        state.reportSavedPayload = null;
                         state.reportCatalog = null;
                         state.reportView = null;
-                        state.galleryLoading = false;
+                        state.reportError = '';
                         renderFrame();
                     } else {
                         save.disabled = false;
@@ -19790,8 +22189,10 @@
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,
             lifeApprover: setup.lifeApprover || '',
+            lifePlaces: setup.lifePlaces || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',
             lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
+            lifeFold: !!setup.lifeFold,
             staffMarks: setup.staffMarks || '',
             staffOrder: setup.staffOrder || '',
             staffPlaceOrder: setup.staffPlaceOrder || '',
@@ -19812,7 +22213,22 @@
                 return layer === 'roster' || layer === 'staff' ? 'roster' : 'calendar';
             })(),
             furniture: setup.furniture || '',
+            glyphs: setup.glyphs || '',
             portalMine: !!setup.portalMine,
+            photo: !!setup.photo,
+            tniKeep: clampNum(setup.tniKeep || 90, 1, 3650),
+            tniProbeDays: clampNum(setup.tniProbeDays || 3, 1, 30),
+            tniProbeTries: clampNum(setup.tniProbeTries || 3, 1, 30),
+            tniAction: setup.tniAction === 'delete' ? 'delete' : 'trash',
+            tniComputer: setup.tniComputer || '',
+            tniLaptop: setup.tniLaptop || '',
+            tniPhone: setup.tniPhone || '',
+            tniTablet: setup.tniTablet || '',
+            tniBrowser: setup.tniBrowser !== false,
+            tniScan: setup.tniScan !== false,
+            tniAd: setup.tniAd !== false,
+            tniSccm: setup.tniSccm !== false,
+            tniPing: setup.tniPing !== false,
             portalColumns: (function () {
                 var raw = setup.portalColumns;
                 if (raw == null || raw === '' || raw === '*') return 'key,type,status,location';
@@ -19890,7 +22306,7 @@
 
     function roomMin(kind) {
         if (kind === 'room' || kind === 'stair') return 16;
-        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || isRouteKind(kind)) return 4;
+        if (kind === 'wall' || kind === 'partition' || kind === 'door' || kind === 'window' || kind === 'arc' || kind === 'dim' || kind === 'flow' || kind === 'pen' || isRouteKind(kind)) return 4;
         return 8;
     }
 
@@ -19931,6 +22347,7 @@
         state.mapGroup = [];
         state.mapCam = null;
         state.mapAnchor = null;
+        state.mapPen = null;
         state.mapClickAt = 0;
         state.mapArmId = 0;
         state.mapAssetId = 0;
@@ -19948,8 +22365,8 @@
     }
 
     function snapCoord(value) {
-        var step = state.mapStep || 8;
-        if (step < 1) step = 8;
+        var step = state.mapStep || 10;
+        if (step < 1) step = 10;
         return Math.round(value / step) * step;
     }
 
@@ -20022,8 +22439,32 @@
                     x: clampNum(pin.x, 0, size.w),
                     y: clampNum(pin.y, 0, size.h)
                 };
-            })
+            }),
+            underlay: underlayOf(floor)
         };
+    }
+
+    function underlayOf(floor) {
+        if (!floor) return null;
+        if (floor.underlay && typeof floor.underlay === 'object' && floor.underlay.src) {
+            return {
+                src: floor.underlay.src,
+                x: Number(floor.underlay.x) || 0,
+                y: Number(floor.underlay.y) || 0,
+                w: Number(floor.underlay.w) || 0,
+                h: Number(floor.underlay.h) || 0
+            };
+        }
+        if (typeof floor.underlay === 'string' && floor.underlay.indexOf('data:image/') === 0) {
+            return {
+                src: floor.underlay,
+                x: Number(floor.underlayX) || 0,
+                y: Number(floor.underlayY) || 0,
+                w: Number(floor.underlayW) || 0,
+                h: Number(floor.underlayH) || 0
+            };
+        }
+        return null;
     }
 
     function clearMapDrag() {
@@ -20279,7 +22720,7 @@
     function beginDrag(svg, drag, onMove, onUp) {
         clearMapDrag();
         var before = null;
-        if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'end' || drag.kind === 'pin') {
+        if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'end' || drag.kind === 'pin' || drag.kind === 'vertex') {
             before = mapSnapshot();
         }
         state.mapDrag = drag;
@@ -20360,6 +22801,8 @@
             piece('sofa', 'mapSofa', 'sofa', 148, 52),
             piece('table', 'mapTable', 'table', 96, 56),
             piece('chair', 'mapChair', 'chair', 36, 36),
+            piece('rack', 'mapRack', 'rack', 60, 90),
+            piece('sw', 'mapSwitch', 'switch', 48, 18),
             piece('rug', 'mapRug', 'rug', 160, 110),
             piece('plant', 'mapPlant', 'plant', 40, 40),
             piece('bath', 'mapBath', 'bath', 68, 148),
@@ -20569,12 +23012,12 @@
         var copies = selectedShapeList();
         if (!copies.length) return;
         rememberMap();
-        var step = state.mapStep || 8;
+        var step = state.mapStep || 10;
         var box = planSize(state.mapDraft);
         var first = state.mapDraft.rooms.length;
         var groups = freshGroupIds(copies);
         copies.forEach(function (source) {
-            var shifted = roomPoints(source).map(function (point) {
+            var shifted = source.kind === 'pen' ? roomPoints(source) : roomPoints(source).map(function (point) {
                 return { x: point.x + step, y: point.y + step };
             });
             state.mapDraft.rooms.push(clampRoom({
@@ -20630,14 +23073,14 @@
             minX = Math.min(minX, shape.x);
             minY = Math.min(minY, shape.y);
         });
-        var originX = x == null ? minX + (state.mapStep || 8) : snapCoord(x);
-        var originY = y == null ? minY + (state.mapStep || 8) : snapCoord(y);
+        var originX = x == null ? minX + (state.mapStep || 10) : snapCoord(x);
+        var originY = y == null ? minY + (state.mapStep || 10) : snapCoord(y);
         var box = planSize(state.mapDraft);
         state.mapDraft.rooms = state.mapDraft.rooms || [];
         var first = state.mapDraft.rooms.length;
         var groups = freshGroupIds(copies);
         copies.forEach(function (source) {
-            var shifted = roomPoints(source).map(function (point) {
+            var shifted = source.kind === 'pen' ? roomPoints(source) : roomPoints(source).map(function (point) {
                 return { x: point.x - minX + originX, y: point.y - minY + originY };
             });
             state.mapDraft.rooms.push(clampRoom({
@@ -20798,7 +23241,11 @@
     }
 
     function isFurnKind(kind) {
-        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug' || kind === 'png';
+        return kind === 'desk' || kind === 'table' || kind === 'chair' || kind === 'cabinet' || kind === 'sofa' || kind === 'seat' || kind === 'pedestal' || kind === 'bed' || kind === 'plant' || kind === 'bath' || kind === 'toilet' || kind === 'sink' || kind === 'stove' || kind === 'rug' || kind === 'png' || kind === 'rack' || kind === 'switch' || kind === 'glyph';
+    }
+
+    function isFigureKind(kind) {
+        return kind === 'box' || kind === 'ellipse' || kind === 'diamond' || kind === 'triangle' || kind === 'note' || kind === 'flow' || kind === 'chart';
     }
 
     function nextGroupId(floor) {
@@ -21141,6 +23588,58 @@
         window.addEventListener('resize', apply);
     }
 
+    function renderSchemes() {
+        var host = el('div', 'asset-tree-schemes');
+        if (!window.AssetTreeSchemes) {
+            host.appendChild(el('p', null, t('schemeMissing')));
+            return host;
+        }
+        var assets = equipmentAssets().map(function (asset) {
+            var attributes = {};
+            var list = asset.attributes || [];
+            var i;
+            for (i = 0; i < list.length && i < 2; i++) {
+                if (list[i] && list[i].name) attributes[list[i].name] = list[i].value || '';
+            }
+            var type = typeOf(asset.typeKey);
+            var shape = iconShape(iconKeyOf(type));
+            return {
+                id: asset.id,
+                name: asset.name || '',
+                key: asset.objectKey || asset.key || '',
+                attributes: attributes,
+                icon: shape ? shape.d : '',
+                iconColor: (type && type.color) || '#5D6B82',
+                typeName: (type && type.label) || ''
+            };
+        });
+        var places = placeAssets().map(function (asset) {
+            var path = placePath(asset);
+            var name = asset.name || '';
+            return {
+                id: asset.id,
+                name: path ? path + ' / ' + name : name,
+                key: asset.objectKey || asset.key || ''
+            };
+        });
+        var focusId = 0;
+        if (window.__assetSchemeFocus && window.__assetSchemeFocus.project === state.projectKey) {
+            focusId = window.__assetSchemeFocus.id || 0;
+            window.__assetSchemeFocus = null;
+        }
+        window.AssetTreeSchemes.mount(host, {
+            t: t,
+            ajax: ajax,
+            projectKey: state.projectKey,
+            canEdit: !!state.canEdit,
+            say: notify,
+            assets: assets,
+            places: places,
+            focusId: focusId
+        });
+        return host;
+    }
+
     function renderMap() {
         var panel = el('section', 'asset-tree-floorplan');
         appendTreeError(panel);
@@ -21195,6 +23694,7 @@
         state.mapGroup = [];
         state.mapSelection = null;
         state.mapAnchor = null;
+        state.mapPen = null;
         state.mapArc = null;
         state.mapClickAt = 0;
         var floor = currentFloor();
@@ -21281,6 +23781,7 @@
                 state.mapGroup = [];
                 state.mapCam = null;
                 state.mapAnchor = null;
+                state.mapPen = null;
                 state.mapClickAt = 0;
                 state.mapArmId = 0;
                 state.mapAssetId = 0;
@@ -21307,7 +23808,6 @@
         if (filters.childNodes.length) row.appendChild(filters);
         bar.appendChild(row);
         if (state.mapEditing && state.mapDraft) bar.appendChild(mapEditorBar());
-        if (state.mapEditing) bar.appendChild(mapModeBar());
         return bar;
     }
 
@@ -21345,6 +23845,7 @@
         state.mapStamp = '';
         state.mapArmId = 0;
         state.mapAnchor = null;
+        state.mapPen = null;
         state.mapArc = null;
         state.mapClickAt = 0;
         state.mapWire = '';
@@ -21379,7 +23880,7 @@
 
     function mapModeTools() {
         var mode = state.mapMode || 'plan';
-        if (mode === 'plan') return [['select', 'mapSelect'], ['wall', 'mapWall'], ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['dim', 'mapDim'], ['arc', 'mapArc'], ['text', 'mapText']];
+        if (mode === 'plan') return [['select', 'mapSelect'], ['pen', 'mapPen'], ['wall', 'mapWall'], ['door', 'mapDoor'], ['window', 'mapWindow'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['dim', 'mapDim'], ['arc', 'mapArc'], ['text', 'mapText']];
         if (mode === 'demo') return [['select', 'mapSelect'], ['wall', 'mapWall'], ['dim', 'mapDim']];
         if (mode === 'partition') return [['select', 'mapSelect'], ['partition', 'mapPartition'], ['door', 'mapDoor'], ['window', 'mapWindow']];
         if (mode === 'rooms') return [['select', 'mapSelect'], ['room', 'mapRoom'], ['column', 'mapColumn'], ['stair', 'mapStair'], ['text', 'mapText']];
@@ -21393,9 +23894,14 @@
     }
 
     function mapHint() {
-        if (state.mapArmId || state.mapStamp) return t('mapPlaceHint');
+        if (state.mapArmId || state.mapStamp || state.mapGlyph) return t('mapPlaceHint');
+        if (state.mapTool === 'pen') return t('mapPenHint');
+        if (state.mapTool === 'flow') return state.mapAnchor ? t('mapFlowNext') : t('mapFlowHint');
+        if (isFigureKind(state.mapTool)) return t('mapFigureHint');
         if (state.mapTool === 'route') return state.mapAnchor ? t('mapRouteHint') : t('mapRouteIdle');
         if (state.mapAnchor && (state.mapTool === 'wall' || state.mapTool === 'partition' || state.mapTool === 'room')) return t('mapChainHint');
+        if ((state.mapBoard || 'figures') === 'figures') return t('mapSchemeHint');
+        if ((state.mapBoard || 'figures') === 'assets') return t('mapPlaceHint');
         return t('mapDrawHint');
     }
 
@@ -21580,6 +24086,7 @@
             rows.push({
                 index: index,
                 name: room.name || t('mapRoom'),
+                color: room.color || '#dbeafe',
                 area: (Math.round(meters * 10) / 10).toFixed(1) + ' ' + t('mapSq')
             });
         });
@@ -21588,14 +24095,64 @@
             return block;
         }
         rows.forEach(function (row) {
+            if (state.mapEditing && state.mapRoomName === row.index) {
+                var naming = el('div', 'asset-tree-explic-row is-on');
+                var swatch = el('span', 'asset-tree-room-swatch');
+                swatch.style.background = row.color;
+                naming.appendChild(swatch);
+                var input = document.createElement('input');
+                input.className = 'asset-tree-explic-name';
+                input.value = (rooms[row.index] && rooms[row.index].name) || '';
+                input.setAttribute('aria-label', t('name'));
+                input.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter') input.blur();
+                    if (event.key === 'Escape') {
+                        state.mapRoomName = -1;
+                        renderFrame();
+                    }
+                });
+                input.addEventListener('blur', function () {
+                    if (state.mapRoomName !== row.index || !rooms[row.index]) return;
+                    rememberMap();
+                    rooms[row.index].name = input.value;
+                    state.mapDirty = true;
+                    state.mapRoomName = -1;
+                    renderFrame();
+                });
+                naming.appendChild(input);
+                naming.appendChild(el('span', null, row.area));
+                block.appendChild(naming);
+                setTimeout(function () { if (input.parentNode) { input.focus(); input.select(); } }, 0);
+                return;
+            }
             var line = button('', 'asset-tree-explic-row' + (state.mapSelection === row.index ? ' is-on' : ''), function () {
-                state.mapTool = 'select';
-                state.mapStamp = '';
-                state.mapSelection = row.index;
-                state.mapGroup = [];
-                renderFrame();
+                if (state.mapExplicWait) {
+                    clearTimeout(state.mapExplicWait);
+                    state.mapExplicWait = 0;
+                    if (!state.mapEditing) return;
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    state.mapGlyph = '';
+                    state.mapSelection = row.index;
+                    state.mapGroup = [];
+                    state.mapRoomName = row.index;
+                    renderFrame();
+                    return;
+                }
+                state.mapExplicWait = setTimeout(function () {
+                    state.mapExplicWait = 0;
+                    state.mapTool = 'select';
+                    state.mapStamp = '';
+                    state.mapGlyph = '';
+                    state.mapSelection = row.index;
+                    state.mapGroup = [];
+                    renderFrame();
+                }, 400);
             });
-            line.appendChild(el('span', null, row.name));
+            var dot = el('span', 'asset-tree-room-swatch');
+            dot.style.background = row.color;
+            line.appendChild(dot);
+            line.appendChild(el('span', 'asset-tree-explic-label', row.name));
             line.appendChild(el('span', null, row.area));
             block.appendChild(line);
         });
@@ -21631,7 +24188,8 @@
             kitchen: 'kitchen', stove: 'kitchen', fridge: 'kitchen',
             bath: 'bath', toilet: 'bath', sink: 'bath',
             store: 'storage', wardrobe: 'storage', shelf: 'storage', locker: 'storage', safe: 'storage',
-            cabinet: 'storage', pedestal: 'storage', cooler: 'storage'
+            cabinet: 'storage', pedestal: 'storage', cooler: 'storage',
+            rack: 'office', sw: 'office'
         };
         return cats[id] || 'living';
     }
@@ -21767,17 +24325,746 @@
         return block;
     }
 
+    function figureTools() {
+        return [
+            ['select', 'mapSelect'],
+            ['box', 'mapBox'],
+            ['ellipse', 'mapEllipse'],
+            ['diamond', 'mapDiamond'],
+            ['triangle', 'mapTriangle'],
+            ['note', 'mapNote'],
+            ['text', 'mapText'],
+            ['flow', 'mapFlow'],
+            ['chart', 'mapChart']
+        ];
+    }
+
+    function mapStencilTabs() {
+        var row = el('div', 'asset-tree-stencil-tabs');
+        [['figures', 'mapBoardFigures'], ['plan', 'mapBoardPlan'], ['assets', 'mapBoardAssets']].forEach(function (pair) {
+            var on = (state.mapBoard || 'figures') === pair[0];
+            var tab = button(t(pair[1]), 'asset-tree-stencil-tab' + (on ? ' is-on' : ''), function () {
+                state.mapBoard = pair[0];
+                state.mapStamp = '';
+                state.mapArmId = 0;
+                if (pair[0] !== 'plan') state.mapPen = null;
+                if (pair[0] === 'figures' && !isFigureKind(state.mapTool) && state.mapTool !== 'select' && state.mapTool !== 'text') {
+                    state.mapTool = 'select';
+                }
+                renderFrame();
+            });
+            tab.setAttribute('aria-pressed', on ? 'true' : 'false');
+            row.appendChild(tab);
+        });
+        return row;
+    }
+
+    function glyphColor(raw, fallback) {
+        var value = String(raw || '').replace('#', '').toLowerCase();
+        if (value === 'none') return 'none';
+        return /^[0-9a-f]{6}$/.test(value) ? '#' + value : (fallback || 'none');
+    }
+
+    function glyphHex(raw, fallback) {
+        var value = String(raw || '').replace('#', '').toLowerCase();
+        return /^[0-9a-f]{6}$/.test(value) ? value : fallback;
+    }
+
+    function glyphText(raw) {
+        return String(raw || '').replace(/[,!^|;=\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24);
+    }
+
+    function glyphNum(raw) {
+        var value = Math.round(Number(raw) || 0);
+        if (value < -4000) return -4000;
+        if (value > 4000) return 4000;
+        return value;
+    }
+
+    function builtinGlyphs() {
+        function box(x, y, w, h, fill, stroke, sw) {
+            return { t: 'r', x: x, y: y, w: w, h: h, fill: fill, stroke: stroke, sw: sw || 1 };
+        }
+        function line(x1, y1, x2, y2, stroke, sw) {
+            return { t: 'l', x1: x1, y1: y1, x2: x2, y2: y2, stroke: stroke, sw: sw || 1 };
+        }
+        function text(x, y, label, fs, fill) {
+            return { t: 't', x: x, y: y, text: label, fs: fs || 8, fill: fill };
+        }
+        var rack = [];
+        rack.push(box(0, 0, 80, 200, 'eef2f7', '2b3440', 2));
+        rack.push(line(8, 4, 8, 196, 'b7c3d0', 1));
+        rack.push(line(72, 4, 72, 196, 'b7c3d0', 1));
+        var unit;
+        for (unit = 1; unit < 20; unit++) rack.push(line(4, unit * 10, 76, unit * 10, 'd3dbe4', 1));
+        function bay(y, ports, fill) {
+            rack.push(box(12, y, 56, 14, '33475e', '1d2a38', 1));
+            var port;
+            for (port = 0; port < ports; port++) rack.push(box(15 + port * 6, y + 4, 4, 7, fill, '1d2a38', 1));
+        }
+        bay(16, 8, '7fd0a0');
+        bay(46, 8, '7fd0a0');
+        bay(76, 8, '7fb2e5');
+        rack.push(box(12, 108, 56, 26, '4b5d72', '22303f', 1));
+        rack.push(box(12, 148, 56, 26, '4b5d72', '22303f', 1));
+        rack.push(box(12, 180, 56, 14, '6b5a3e', '3f3423', 1));
+        rack.push(text(18, 190, 'UPS', 8, 'f0e2c0'));
+        var sw = [box(0, 0, 120, 26, '33475e', '1d2a38', 2)];
+        var port;
+        for (port = 0; port < 16; port++) sw.push(box(5 + port * 7, 8, 4, 10, '7fd0a0', '1d2a38', 1));
+        sw.push(text(6, 6, 'SWITCH', 5, 'cfdae6'));
+        var door = [];
+        var step;
+        for (step = 0; step <= 8; step++) {
+            var angle = Math.PI / 2 * step / 8;
+            door.push({ x: Math.round(90 * (1 - Math.cos(angle))), y: Math.round(90 * (1 - Math.sin(angle))) });
+        }
+        return [
+            { id: 'rack', name: t('mapRack'), w: 80, h: 200, objects: rack },
+            { id: 'switch', name: t('mapSwitch'), w: 120, h: 26, objects: sw },
+            { id: 'desk', name: t('mapTable'), w: 140, h: 70, objects: [
+                box(0, 0, 140, 70, 'e6d9c3', '8a7451', 2),
+                box(10, 12, 46, 46, 'cfd8e0', '5b6b7b', 1),
+                box(92, 26, 36, 18, 'b8c4d0', '5b6b7b', 1)
+            ] },
+            { id: 'chair', name: t('mapChair'), w: 45, h: 45, objects: [
+                box(4, 10, 37, 31, 'dfe7ef', '5b6b7b', 2),
+                box(4, 0, 37, 8, 'b8c4d0', '5b6b7b', 1)
+            ] },
+            { id: 'sofa', name: t('mapSofa'), w: 170, h: 75, objects: [
+                box(0, 0, 170, 75, 'cfe0d8', '4e6b60', 2),
+                box(8, 12, 154, 55, 'bcd6cb', '4e6b60', 1),
+                line(85, 12, 85, 67, '4e6b60', 1)
+            ] },
+            { id: 'door', name: t('mapDoor'), w: 90, h: 90, objects: [
+                { t: 'p', closed: 0, stroke: '8a97a4', sw: 1, points: door },
+                line(0, 0, 0, 90, '2b3440', 3)
+            ] }
+        ];
+    }
+
+    function packGlyphPart(obj) {
+        if (!obj) return '';
+        if (obj.t === 'l') {
+            return ['l', glyphNum(obj.x1), glyphNum(obj.y1), glyphNum(obj.x2), glyphNum(obj.y2), glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1)].join(',');
+        }
+        if (obj.t === 'e') {
+            return ['e', glyphNum(obj.cx), glyphNum(obj.cy), glyphNum(obj.rx), glyphNum(obj.ry), glyphHex(obj.fill, 'none'), glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1)].join(',');
+        }
+        if (obj.t === 't') {
+            var label = glyphText(obj.text);
+            if (!label) return '';
+            return ['t', glyphNum(obj.x), glyphNum(obj.y), glyphNum(obj.fs || 8), glyphHex(obj.fill, '172b4d'), label].join(',');
+        }
+        if (obj.t === 'p') {
+            var pts = (obj.points || []).map(function (point) {
+                return glyphNum(point.x) + 'x' + glyphNum(point.y);
+            }).join('.');
+            if (!pts) return '';
+            return ['p', obj.closed ? 1 : 0, glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1), pts].join(',');
+        }
+        return ['r', glyphNum(obj.x), glyphNum(obj.y), Math.max(1, glyphNum(obj.w)), Math.max(1, glyphNum(obj.h)), glyphHex(obj.fill, 'none'), glyphHex(obj.stroke, '2b3440'), glyphNum(obj.sw || 1)].join(',');
+    }
+
+    function parseGlyphPart(raw) {
+        var bits = String(raw || '').split(',');
+        if (bits[0] === 'l' && bits.length >= 7) {
+            return { t: 'l', x1: glyphNum(bits[1]), y1: glyphNum(bits[2]), x2: glyphNum(bits[3]), y2: glyphNum(bits[4]), stroke: glyphColor(bits[5], '#2b3440'), sw: glyphNum(bits[6]) || 1 };
+        }
+        if (bits[0] === 'e' && bits.length >= 8) {
+            return { t: 'e', cx: glyphNum(bits[1]), cy: glyphNum(bits[2]), rx: Math.max(1, glyphNum(bits[3])), ry: Math.max(1, glyphNum(bits[4])), fill: glyphColor(bits[5], 'none'), stroke: glyphColor(bits[6], '#2b3440'), sw: glyphNum(bits[7]) || 1 };
+        }
+        if (bits[0] === 't' && bits.length >= 6) {
+            return { t: 't', x: glyphNum(bits[1]), y: glyphNum(bits[2]), fs: Math.max(4, glyphNum(bits[3])), fill: glyphColor(bits[4], '#172b4d'), text: glyphText(bits.slice(5).join(',')) };
+        }
+        if (bits[0] === 'p' && bits.length >= 5) {
+            var points = [];
+            String(bits.slice(4).join(',')).split('.').forEach(function (pair) {
+                var xy = pair.split('x');
+                if (xy.length < 2) return;
+                points.push({ x: glyphNum(xy[0]), y: glyphNum(xy[1]) });
+            });
+            if (points.length < 2) return null;
+            return { t: 'p', closed: bits[1] === '1' ? 1 : 0, stroke: glyphColor(bits[2], '#2b3440'), sw: glyphNum(bits[3]) || 1, points: points };
+        }
+        if (bits[0] === 'r' && bits.length >= 8) {
+            return { t: 'r', x: glyphNum(bits[1]), y: glyphNum(bits[2]), w: Math.max(1, glyphNum(bits[3])), h: Math.max(1, glyphNum(bits[4])), fill: glyphColor(bits[5], 'none'), stroke: glyphColor(bits[6], '#2b3440'), sw: glyphNum(bits[7]) || 1 };
+        }
+        return null;
+    }
+
+    function parseGlyphs(raw) {
+        var list = [];
+        String(raw || '').split('|').forEach(function (chunk) {
+            if (list.length >= 16 || !chunk) return;
+            var head = chunk.split('^');
+            if (head.length < 5) return;
+            var id = String(head[0] || '').toLowerCase();
+            if (!/^[a-z][a-z0-9]{0,11}$/.test(id)) return;
+            var objects = [];
+            String(head[4] || '').split('!').forEach(function (part) {
+                if (objects.length >= 48) return;
+                var obj = parseGlyphPart(part);
+                if (obj) objects.push(obj);
+            });
+            list.push({
+                id: id,
+                name: glyphText(head[1]) || id,
+                w: Math.max(8, Math.min(800, glyphNum(head[2]) || 100)),
+                h: Math.max(8, Math.min(800, glyphNum(head[3]) || 100)),
+                objects: objects
+            });
+        });
+        return list;
+    }
+
+    function packGlyphs(list) {
+        var rows = [];
+        (list || []).forEach(function (glyph) {
+            if (rows.length >= 16 || !glyph) return;
+            var id = String(glyph.id || '').toLowerCase();
+            if (!/^[a-z][a-z0-9]{0,11}$/.test(id)) return;
+            var parts = [];
+            (glyph.objects || []).forEach(function (obj) {
+                if (parts.length >= 48) return;
+                var packed = packGlyphPart(obj);
+                if (packed) parts.push(packed);
+            });
+            rows.push([id, glyphText(glyph.name) || id, Math.max(8, glyphNum(glyph.w) || 100), Math.max(8, glyphNum(glyph.h) || 100), parts.join('!')].join('^'));
+        });
+        var packed = rows.join('|');
+        return packed.length > 24000 ? packed.slice(0, 24000) : packed;
+    }
+
+    function storedGlyphs() {
+        return parseGlyphs(moduleSetup().glyphs);
+    }
+
+    function glyphById(id) {
+        var found = null;
+        storedGlyphs().forEach(function (glyph) { if (glyph.id === id) found = glyph; });
+        if (found) return found;
+        builtinGlyphs().forEach(function (glyph) { if (glyph.id === id) found = glyph; });
+        return found;
+    }
+
+    function glyphLibrary() {
+        var custom = storedGlyphs();
+        var seen = {};
+        var list = [];
+        builtinGlyphs().forEach(function (glyph) {
+            var over = null;
+            custom.forEach(function (item) { if (item.id === glyph.id) over = item; });
+            var chosen = over || glyph;
+            seen[chosen.id] = true;
+            list.push(chosen);
+        });
+        custom.forEach(function (glyph) {
+            if (!seen[glyph.id]) list.push(glyph);
+        });
+        return list;
+    }
+
+    function glyphBuiltinId(id) {
+        var found = false;
+        builtinGlyphs().forEach(function (glyph) { if (glyph.id === id) found = true; });
+        return found;
+    }
+
+    function glyphNode(obj) {
+        var node = svgEl('g');
+        if (!obj) return node;
+        if (obj.t === 'l') {
+            node = svgEl('line');
+            node.setAttribute('x1', String(obj.x1));
+            node.setAttribute('y1', String(obj.y1));
+            node.setAttribute('x2', String(obj.x2));
+            node.setAttribute('y2', String(obj.y2));
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        } else if (obj.t === 'e') {
+            node = svgEl('ellipse');
+            node.setAttribute('cx', String(obj.cx));
+            node.setAttribute('cy', String(obj.cy));
+            node.setAttribute('rx', String(Math.max(1, obj.rx || 1)));
+            node.setAttribute('ry', String(Math.max(1, obj.ry || 1)));
+            node.setAttribute('fill', glyphColor(obj.fill, 'none'));
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        } else if (obj.t === 't') {
+            node = svgEl('text');
+            node.setAttribute('x', String(obj.x));
+            node.setAttribute('y', String(obj.y));
+            node.setAttribute('font-size', String(obj.fs || 8));
+            node.setAttribute('fill', glyphColor(obj.fill, '#172b4d'));
+            node.textContent = obj.text || '';
+        } else if (obj.t === 'p') {
+            node = svgEl(obj.closed ? 'polygon' : 'polyline');
+            node.setAttribute('points', (obj.points || []).map(function (point) {
+                return point.x + ' ' + point.y;
+            }).join(' '));
+            node.setAttribute('fill', obj.closed ? 'rgba(90,150,220,0.12)' : 'none');
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        } else {
+            node = svgEl('rect');
+            node.setAttribute('x', String(obj.x || 0));
+            node.setAttribute('y', String(obj.y || 0));
+            node.setAttribute('width', String(Math.max(1, obj.w || 1)));
+            node.setAttribute('height', String(Math.max(1, obj.h || 1)));
+            node.setAttribute('fill', glyphColor(obj.fill, 'none'));
+            node.setAttribute('stroke', glyphColor(obj.stroke, '#2b3440'));
+            node.setAttribute('stroke-width', String(obj.sw || 1));
+        }
+        node.setAttribute('pointer-events', 'none');
+        return node;
+    }
+
+    function paintGlyph(parent, glyph, bw, bh) {
+        if (!glyph) return;
+        var host = svgEl('g');
+        host.setAttribute('transform', 'scale(' + ((bw || glyph.w || 1) / (glyph.w || 1)) + ' ' + ((bh || glyph.h || 1) / (glyph.h || 1)) + ')');
+        (glyph.objects || []).forEach(function (obj) { host.appendChild(glyphNode(obj)); });
+        parent.appendChild(host);
+    }
+
+    function glyphThumb(glyph) {
+        var svg = svgEl('svg');
+        svg.setAttribute('class', 'asset-tree-thumb');
+        svg.setAttribute('viewBox', '-4 -4 ' + ((glyph.w || 40) + 8) + ' ' + ((glyph.h || 40) + 8));
+        svg.appendChild(glyphNode({ t: 'r', x: 0, y: 0, w: glyph.w || 40, h: glyph.h || 40, fill: 'ffffff', stroke: 'dfe1e6', sw: 1 }));
+        paintGlyph(svg, glyph, glyph.w, glyph.h);
+        return svg;
+    }
+
+    function persistGlyphs(list) {
+        var packed = packGlyphs(list);
+        var next = moduleSetup();
+        next.glyphs = packed;
+        var project = currentProject();
+        if (project) {
+            project.setup = project.setup || {};
+            project.setup.glyphs = packed;
+        }
+        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/view', { setup: next }, function (status, payload) {
+            if (status >= 200 && status < 300) {
+                if (project && payload && payload.setup) {
+                    project.setup = payload.setup;
+                    if (project.setup.glyphs == null) project.setup.glyphs = packed;
+                }
+                notify(t('mapTemplateSaved'));
+            } else notify((payload && payload.message) || t('errorTitle'));
+            if (state.view === 'map') renderFrame();
+        });
+    }
+
+    function nextGlyphId() {
+        var used = {};
+        storedGlyphs().forEach(function (glyph) { used[glyph.id] = true; });
+        var number = 1;
+        while (used['g' + number]) number++;
+        return 'g' + number;
+    }
+
+    function cloneGlyphObjects(objects) {
+        return JSON.parse(JSON.stringify(objects || []));
+    }
+
+    function glyphBBox(obj) {
+        if (!obj) return { x: 0, y: 0, w: 1, h: 1 };
+        if (obj.t === 'l') {
+            var x = Math.min(obj.x1, obj.x2);
+            var y = Math.min(obj.y1, obj.y2);
+            return { x: x, y: y, w: Math.max(1, Math.abs(obj.x2 - obj.x1)), h: Math.max(1, Math.abs(obj.y2 - obj.y1)) };
+        }
+        if (obj.t === 'e') return { x: obj.cx - obj.rx, y: obj.cy - obj.ry, w: obj.rx * 2, h: obj.ry * 2 };
+        if (obj.t === 't') return { x: obj.x, y: obj.y - (obj.fs || 8), w: Math.max(8, String(obj.text || '').length * (obj.fs || 8) * 0.6), h: obj.fs || 8 };
+        if (obj.t === 'p') {
+            var points = obj.points || [];
+            if (!points.length) return { x: 0, y: 0, w: 1, h: 1 };
+            var minX = points[0].x;
+            var minY = points[0].y;
+            var maxX = minX;
+            var maxY = minY;
+            points.forEach(function (point) {
+                minX = Math.min(minX, point.x);
+                minY = Math.min(minY, point.y);
+                maxX = Math.max(maxX, point.x);
+                maxY = Math.max(maxY, point.y);
+            });
+            return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+        }
+        return { x: obj.x || 0, y: obj.y || 0, w: Math.max(1, obj.w || 1), h: Math.max(1, obj.h || 1) };
+    }
+
+    function glyphHit(edit, point) {
+        var objects = edit.objects || [];
+        var i;
+        for (i = objects.length - 1; i >= 0; i--) {
+            var box = glyphBBox(objects[i]);
+            if (point.x >= box.x - 3 && point.x <= box.x + box.w + 3 && point.y >= box.y - 3 && point.y <= box.y + box.h + 3) return i;
+        }
+        return -1;
+    }
+
+    function glyphSnapPoint(svg, event) {
+        var pt = svg.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        var ctm = svg.getScreenCTM();
+        if (!ctm) return { x: 0, y: 0 };
+        var world = pt.matrixTransform(ctm.inverse());
+        return { x: Math.round(world.x / 5) * 5, y: Math.round(world.y / 5) * 5 };
+    }
+
+    function glyphPushUndo() {
+        var edit = state.glyphEdit;
+        if (!edit) return;
+        edit.undo.push(JSON.stringify(edit.objects || []));
+        if (edit.undo.length > 40) edit.undo.shift();
+        edit.redo = [];
+    }
+
+    function closeGlyphEditor() {
+        state.glyphEdit = null;
+        var node = document.getElementById('asset-tree-glyph-editor');
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+    }
+
+    function saveGlyphEditor() {
+        var edit = state.glyphEdit;
+        if (!edit) return;
+        var name = glyphText(edit.name) || t('mapGlyphNew');
+        var list = storedGlyphs().filter(function (glyph) { return glyph.id !== edit.id; });
+        list.push({
+            id: edit.id,
+            name: name,
+            w: Math.max(8, glyphNum(edit.w) || 100),
+            h: Math.max(8, glyphNum(edit.h) || 100),
+            objects: edit.objects || []
+        });
+        closeGlyphEditor();
+        persistGlyphs(list);
+    }
+
+    function openGlyphEditor(glyph) {
+        var source = glyph || { id: nextGlyphId(), name: t('mapGlyphNew'), w: 100, h: 100, objects: [] };
+        state.glyphEdit = {
+            id: source.id,
+            name: source.name || t('mapGlyphNew'),
+            w: source.w || 100,
+            h: source.h || 100,
+            objects: cloneGlyphObjects(source.objects),
+            tool: 'select',
+            sel: -1,
+            pen: null,
+            undo: [],
+            redo: [],
+            clickAt: 0
+        };
+        renderGlyphEditor();
+    }
+
+    function renderGlyphEditor() {
+        var old = document.getElementById('asset-tree-glyph-editor');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+        var edit = state.glyphEdit;
+        if (!edit) return;
+        var back = el('div', 'asset-tree-backdrop');
+        back.id = 'asset-tree-glyph-editor';
+        var box = el('div', 'asset-tree-dialog asset-tree-glyph-dialog');
+        var head = el('div', 'asset-tree-glyph-head');
+        var name = document.createElement('input');
+        name.value = edit.name || '';
+        name.maxLength = 24;
+        name.setAttribute('aria-label', t('name'));
+        name.addEventListener('input', function () { edit.name = name.value; });
+        head.appendChild(name);
+        head.appendChild(button(t('save'), 'asset-tree-btn primary', saveGlyphEditor));
+        head.appendChild(button(t('cancel'), 'asset-tree-btn', closeGlyphEditor));
+        box.appendChild(head);
+        var tools = el('div', 'asset-tree-glyph-tools');
+        [['select', 'mapSelect'], ['pen', 'mapPen'], ['rect', 'mapBox'], ['line', 'mapLine'], ['ellipse', 'mapEllipse'], ['text', 'mapText']].forEach(function (pair) {
+            var on = edit.tool === pair[0];
+            var tool = button(t(pair[1]), 'asset-tree-btn slim' + (on ? ' is-on' : ''), function () {
+                edit.tool = pair[0];
+                if (pair[0] !== 'pen') edit.pen = null;
+                renderGlyphEditor();
+            });
+            tools.appendChild(tool);
+        });
+        tools.appendChild(button(t('mapUndo'), 'asset-tree-btn slim', function () {
+            if (!edit.undo.length) return;
+            edit.redo.push(JSON.stringify(edit.objects || []));
+            edit.objects = JSON.parse(edit.undo.pop());
+            edit.sel = -1;
+            edit.pen = null;
+            renderGlyphEditor();
+        }));
+        function sizeInput(key, label) {
+            var field = el('label', 'asset-tree-glyph-size', label);
+            var input = document.createElement('input');
+            input.type = 'number';
+            input.min = '8';
+            input.max = '800';
+            input.value = String(edit[key] || 100);
+            input.addEventListener('change', function () {
+                edit[key] = Math.max(8, Math.min(800, glyphNum(input.value) || 100));
+                renderGlyphEditor();
+            });
+            field.appendChild(input);
+            tools.appendChild(field);
+        }
+        sizeInput('w', t('mapGlyphW'));
+        sizeInput('h', t('mapGlyphH'));
+        box.appendChild(tools);
+        var frame = el('div', 'asset-tree-glyph-frame');
+        var svg = svgEl('svg');
+        svg.setAttribute('viewBox', '-12 -12 ' + ((edit.w || 100) + 24) + ' ' + ((edit.h || 100) + 24));
+        svg.setAttribute('class', 'asset-tree-glyph-svg');
+        var paper = svgEl('rect');
+        paper.setAttribute('x', '0');
+        paper.setAttribute('y', '0');
+        paper.setAttribute('width', String(edit.w || 100));
+        paper.setAttribute('height', String(edit.h || 100));
+        paper.setAttribute('class', 'asset-tree-glyph-paper');
+        svg.appendChild(paper);
+        (edit.objects || []).forEach(function (obj, index) {
+            svg.appendChild(glyphNode(obj));
+            if (index === edit.sel) {
+                var boxHit = glyphBBox(obj);
+                var mark = svgEl('rect');
+                mark.setAttribute('x', String(boxHit.x - 2));
+                mark.setAttribute('y', String(boxHit.y - 2));
+                mark.setAttribute('width', String(boxHit.w + 4));
+                mark.setAttribute('height', String(boxHit.h + 4));
+                mark.setAttribute('class', 'asset-tree-glyph-select');
+                svg.appendChild(mark);
+            }
+        });
+        if (edit.pen && edit.pen.length) {
+            var preview = svgEl('polyline');
+            preview.setAttribute('points', edit.pen.map(function (point) { return point.x + ' ' + point.y; }).join(' '));
+            preview.setAttribute('class', 'asset-tree-pen is-preview');
+            svg.appendChild(preview);
+        }
+        svg.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            var point = glyphSnapPoint(svg, event);
+            if (edit.tool === 'select') {
+                var hit = glyphHit(edit, point);
+                edit.sel = hit;
+                if (hit < 0) {
+                    renderGlyphEditor();
+                    return;
+                }
+                var origin = cloneGlyphObjects(edit.objects);
+                var start = point;
+                function move(ev) {
+                    var next = glyphSnapPoint(svg, ev);
+                    var dx = next.x - start.x;
+                    var dy = next.y - start.y;
+                    edit.objects = cloneGlyphObjects(origin);
+                    var obj = edit.objects[hit];
+                    if (!obj) return;
+                    if (obj.t === 'l') { obj.x1 += dx; obj.y1 += dy; obj.x2 += dx; obj.y2 += dy; }
+                    else if (obj.t === 'e') { obj.cx += dx; obj.cy += dy; }
+                    else if (obj.t === 't' || obj.t === 'r') { obj.x += dx; obj.y += dy; }
+                    else if (obj.t === 'p') obj.points.forEach(function (p) { p.x += dx; p.y += dy; });
+                    var host = svg.querySelector('.asset-tree-glyph-live');
+                    if (host) host.parentNode.removeChild(host);
+                    var live = glyphNode(obj);
+                    live.setAttribute('class', 'asset-tree-glyph-live');
+                    svg.appendChild(live);
+                }
+                function up() {
+                    window.removeEventListener('mousemove', move);
+                    window.removeEventListener('mouseup', up);
+                    if (JSON.stringify(edit.objects) !== JSON.stringify(origin)) {
+                        edit.undo.push(JSON.stringify(origin));
+                        edit.redo = [];
+                    }
+                    renderGlyphEditor();
+                }
+                window.addEventListener('mousemove', move);
+                window.addEventListener('mouseup', up);
+                return;
+            }
+            if (edit.tool === 'text') {
+                glyphPushUndo();
+                edit.objects.push({ t: 't', x: point.x, y: point.y, text: t('mapTextSample'), fs: 10, fill: '#172b4d' });
+                edit.sel = edit.objects.length - 1;
+                renderGlyphEditor();
+                return;
+            }
+            if (edit.tool === 'pen') {
+                var chain = (edit.pen || []).slice();
+                if (chain.length >= 3 && Math.abs(point.x - chain[0].x) <= 5 && Math.abs(point.y - chain[0].y) <= 5) {
+                    finishGlyphPen(true);
+                    return;
+                }
+                if (chain.length >= 2 && edit.clickAt && (Date.now() - edit.clickAt) < 400) {
+                    finishGlyphPen(false);
+                    return;
+                }
+                chain.push(point);
+                edit.pen = chain;
+                edit.clickAt = Date.now();
+                renderGlyphEditor();
+                return;
+            }
+            var down = point;
+            var live = null;
+            function drag(ev) {
+                var next = glyphSnapPoint(svg, ev);
+                if (live && live.parentNode) live.parentNode.removeChild(live);
+                live = glyphNode(glyphDraft(edit.tool, down, next));
+                svg.appendChild(live);
+            }
+            function done(ev) {
+                window.removeEventListener('mousemove', drag);
+                window.removeEventListener('mouseup', done);
+                var next = glyphSnapPoint(svg, ev);
+                var made = glyphDraft(edit.tool, down, next);
+                if (((made.w || 0) < 4 && (made.h || 0) < 4 && made.t !== 'l') || (made.t === 'l' && made.x1 === made.x2 && made.y1 === made.y2)) {
+                    if (live && live.parentNode) live.parentNode.removeChild(live);
+                    return;
+                }
+                glyphPushUndo();
+                edit.objects.push(made);
+                edit.sel = edit.objects.length - 1;
+                renderGlyphEditor();
+            }
+            window.addEventListener('mousemove', drag);
+            window.addEventListener('mouseup', done);
+        });
+        frame.appendChild(svg);
+        box.appendChild(frame);
+        box.appendChild(el('p', 'asset-tree-catalog-hint', t('mapGlyphHint')));
+        if (edit.sel >= 0 && edit.objects[edit.sel]) {
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('delete'), 'asset-tree-btn', function () {
+                glyphPushUndo();
+                edit.objects.splice(edit.sel, 1);
+                edit.sel = -1;
+                renderGlyphEditor();
+            }));
+            box.appendChild(actions);
+        }
+        back.appendChild(box);
+        back.addEventListener('mousedown', function (event) {
+            if (event.target === back) closeGlyphEditor();
+        });
+        var host = document.getElementById('asset-tree-app');
+        (host || document.body).appendChild(back);
+    }
+
+    function glyphDraft(tool, a, b) {
+        var x = Math.min(a.x, b.x);
+        var y = Math.min(a.y, b.y);
+        var w = Math.abs(b.x - a.x);
+        var h = Math.abs(b.y - a.y);
+        if (tool === 'line') return { t: 'l', x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#2b3440', sw: 2 };
+        if (tool === 'ellipse') return { t: 'e', cx: x + w / 2, cy: y + h / 2, rx: Math.max(1, w / 2), ry: Math.max(1, h / 2), fill: '#5a96dc', stroke: '#2b3440', sw: 2 };
+        return { t: 'r', x: x, y: y, w: Math.max(1, w), h: Math.max(1, h), fill: '#5a96dc', stroke: '#2b3440', sw: 2 };
+    }
+
+    function finishGlyphPen(closed) {
+        var edit = state.glyphEdit;
+        if (!edit || !edit.pen || edit.pen.length < 2) {
+            if (edit) edit.pen = null;
+            renderGlyphEditor();
+            return;
+        }
+        glyphPushUndo();
+        edit.objects.push({ t: 'p', closed: closed ? 1 : 0, stroke: '#2b3440', sw: 2, points: edit.pen.slice() });
+        edit.sel = edit.objects.length - 1;
+        edit.pen = null;
+        renderGlyphEditor();
+    }
+
+    function placeGlyph(floor, x, y) {
+        var glyph = glyphById(state.mapGlyph);
+        if (!glyph) return;
+        var w = glyph.w || 40;
+        var h = glyph.h || 40;
+        if (pushShape(floor, clampRoom({
+            kind: 'glyph',
+            name: glyph.id,
+            angle: 0,
+            x: snapCoord(x) - w / 2,
+            y: snapCoord(y) - h / 2,
+            w: w,
+            h: h
+        }))) state.mapSelection = floor.rooms.length - 1;
+        renderFrame();
+    }
+
+    function planSymbolRow() {
+        var block = el('div', 'asset-tree-glyph-library');
+        block.appendChild(el('h3', null, t('mapGlyphLibrary')));
+        block.appendChild(button(t('mapGlyphNew'), 'asset-tree-btn', function () { openGlyphEditor(null); }));
+        var row = el('div', 'asset-tree-thumb-grid is-plan-symbols');
+        glyphLibrary().forEach(function (glyph) {
+            var on = state.mapGlyph === glyph.id;
+            var card = el('div', 'asset-tree-glyph-card' + (on ? ' is-on' : ''));
+            card.addEventListener('click', function () {
+                if (state.mapGlyph === glyph.id) {
+                    state.mapGlyph = '';
+                    state.mapTool = 'select';
+                } else {
+                    state.mapGlyph = glyph.id;
+                    state.mapTool = 'glyph';
+                    state.mapStamp = '';
+                    state.mapPen = null;
+                    state.mapAnchor = null;
+                }
+                renderFrame();
+            });
+            card.appendChild(glyphThumb(glyph));
+            card.appendChild(el('span', 'asset-tree-thumb-name', glyph.name || glyph.id));
+            var edit = button('\u270e', 'asset-tree-glyph-edit', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                openGlyphEditor(glyphById(glyph.id) || glyph);
+            });
+            edit.title = t('mapGlyphEdit');
+            card.appendChild(edit);
+            if (!glyphBuiltinId(glyph.id) || storedGlyphs().some(function (item) { return item.id === glyph.id; })) {
+                var remove = button('\u00d7', 'asset-tree-glyph-edit is-drop', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    persistGlyphs(storedGlyphs().filter(function (item) { return item.id !== glyph.id; }));
+                });
+                remove.title = t('delete');
+                card.appendChild(remove);
+            }
+            row.appendChild(card);
+        });
+        block.appendChild(row);
+        return block;
+    }
+
     function mapCatalog() {
         var side = el('aside', 'asset-tree-catalog');
+        var board = state.mapBoard || 'figures';
+        side.appendChild(mapStencilTabs());
         side.appendChild(mapCatalogSearch());
-        if ((state.mapMode || 'plan') === 'furniture') side.appendChild(furnitureCatalog());
-        else side.appendChild(mapToolGrid(mapModeTools()));
+        if (board === 'assets') side.appendChild(mapGearCard());
+        else if (board === 'plan') {
+            side.appendChild(mapModeBar());
+            if ((state.mapMode || 'plan') === 'furniture') side.appendChild(furnitureCatalog());
+            else {
+                side.appendChild(mapToolGrid(mapModeTools()));
+                if ((state.mapMode || 'plan') === 'plan') side.appendChild(planSymbolRow());
+            }
+        } else side.appendChild(mapToolGrid(figureTools()));
         side.appendChild(el('p', 'asset-tree-catalog-hint', mapHint()));
         side.appendChild(mapPlanActions());
         side.appendChild(mapExplication());
         side.appendChild(el('h3', null, t('mapLayers')));
         side.appendChild(mapLayerBar(true));
-        side.appendChild(mapGearCard());
         return side;
     }
 
@@ -21911,6 +25198,10 @@
     function applyPlanImport(name, raw) {
         if (!state.mapDraft || !window.AssetTreePlan) return;
         var parsed = window.AssetTreePlan.importDrawing(name, raw);
+        if (parsed && parsed.underlay) {
+            placeUnderlay(parsed.underlay);
+            return;
+        }
         if (!parsed || parsed.error) {
             notify(t(parsed && parsed.error ? parsed.error : 'mapImportNone'));
             return;
@@ -22067,7 +25358,7 @@
         row.appendChild(button(t('mapMirror'), 'asset-tree-btn slim', mirrorSelection));
         var file = document.createElement('input');
         file.type = 'file';
-        file.accept = '.dxf,.dwg,.pdf,application/pdf';
+        file.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
         file.className = 'asset-tree-plan-file';
         file.addEventListener('change', function () {
             var picked = file.files && file.files[0];
@@ -22075,10 +25366,15 @@
             var reader = new FileReader();
             reader.onload = function () {
                 var bytes = new Uint8Array(reader.result);
-                var text = '';
-                var i;
-                for (i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
-                applyPlanImport(picked.name, text);
+                var lower = String(picked.name || '').toLowerCase();
+                if (/\.(png|jpe?g)$/.test(lower) || (picked.type && picked.type.indexOf('image/') === 0)) {
+                    shrinkScan(bytes, picked.type || 'image/jpeg', function (url) {
+                        placeUnderlay(url);
+                        file.value = '';
+                    });
+                    return;
+                }
+                applyPlanImport(picked.name, bytes);
                 file.value = '';
             };
             reader.readAsArrayBuffer(picked);
@@ -22090,8 +25386,106 @@
         row.appendChild(button(t('mapExportDwg'), 'asset-tree-btn slim', function () { exportPlan('dwg'); }));
         row.appendChild(button(t('mapExportPdf'), 'asset-tree-btn slim', function () { exportPlan('pdf'); }));
         row.appendChild(button(t('mapPrint'), 'asset-tree-btn slim', printPlanSheet));
+        var scan = state.mapDraft && state.mapDraft.underlay;
+        if (scan && scan.src) {
+            row.appendChild(button(t('mapScanRemove'), 'asset-tree-btn slim', function () {
+                if (!state.mapDraft) return;
+                state.mapDraft.underlay = null;
+                state.mapCalibrate = null;
+                state.mapDirty = true;
+                renderFrame();
+            }));
+            var width = document.createElement('input');
+            width.type = 'number';
+            width.min = '10';
+            width.max = '20000';
+            width.className = 'asset-tree-scan-width';
+            width.setAttribute('aria-label', t('mapScanWidth'));
+            width.value = String(Math.round(scan.w || 0));
+            width.addEventListener('change', function () {
+                var next = Number(width.value);
+                var current = state.mapDraft && state.mapDraft.underlay;
+                if (!current || !(next >= 10)) return;
+                var ratio = current.h / Math.max(1, current.w);
+                current.w = Math.round(next);
+                current.h = Math.max(10, Math.round(next * ratio));
+                state.mapDirty = true;
+                renderFrame();
+            });
+            row.appendChild(width);
+            row.appendChild(button(t('mapScanScale'), 'asset-tree-btn slim' + (state.mapCalibrate ? ' is-on' : ''), function () {
+                state.mapCalibrate = state.mapCalibrate ? null : { points: [] };
+                renderFrame();
+            }));
+            if (state.mapCalibrate && state.mapCalibrate.points.length === 2) {
+                var length = document.createElement('input');
+                length.type = 'number';
+                length.min = '1';
+                length.className = 'asset-tree-scan-width';
+                length.placeholder = t('mapScanLength');
+                length.setAttribute('aria-label', t('mapScanLength'));
+                length.addEventListener('change', function () {
+                    var cm = Number(length.value);
+                    var points = state.mapCalibrate && state.mapCalibrate.points;
+                    var current = state.mapDraft && state.mapDraft.underlay;
+                    if (!current || !points || points.length < 2 || !(cm > 0)) return;
+                    var dx = points[1].x - points[0].x;
+                    var dy = points[1].y - points[0].y;
+                    var dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 1) return;
+                    var scale = cm / dist;
+                    current.w = Math.max(10, Math.round(current.w * scale));
+                    current.h = Math.max(10, Math.round(current.h * scale));
+                    state.mapCalibrate = null;
+                    state.mapDirty = true;
+                    renderFrame();
+                });
+                row.appendChild(length);
+            }
+        }
         window.AssetTreePlanApply = function (name, raw) { applyPlanImport(name, raw); };
         return row;
+    }
+
+    function shrinkScan(bytes, mime, done) {
+        var blob = new Blob([bytes], { type: mime || 'image/jpeg' });
+        var url = URL.createObjectURL(blob);
+        var image = new Image();
+        image.onload = function () {
+            var limit = 1400;
+            var scale = Math.min(1, limit / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+            var canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+            canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+            canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+            var data = canvas.toDataURL('image/jpeg', 0.72);
+            URL.revokeObjectURL(url);
+            done(data);
+        };
+        image.onerror = function () {
+            URL.revokeObjectURL(url);
+            notify(t('mapImportNone'));
+        };
+        image.src = url;
+    }
+
+    function placeUnderlay(src) {
+        if (!state.mapDraft || !src) return;
+        var image = new Image();
+        image.onload = function () {
+            if (!state.mapDraft) return;
+            var size = planSize(state.mapDraft);
+            var w = Math.min(size.w - 80, 1000);
+            var h = Math.round(w * (image.naturalHeight || 1) / Math.max(1, image.naturalWidth || 1));
+            if (h > size.h - 80) {
+                h = size.h - 80;
+                w = Math.round(h * (image.naturalWidth || 1) / Math.max(1, image.naturalHeight || 1));
+            }
+            state.mapDraft.underlay = { src: src, x: 40, y: 40, w: Math.max(10, w), h: Math.max(10, h) };
+            state.mapDirty = true;
+            renderFrame();
+        };
+        image.src = src;
     }
 
     function routeToolPairs(layer) {
@@ -22142,7 +25536,9 @@
                 state.mapTool = wire ? 'route' : pair[0];
                 state.mapWire = wire;
                 state.mapStamp = '';
+                state.mapGlyph = '';
                 state.mapArmId = 0;
+                if (state.mapTool !== 'pen') state.mapPen = null;
                 state.mapAnchor = null;
                 state.mapArc = null;
                 state.mapClickAt = 0;
@@ -22242,6 +25638,8 @@
             } else {
                 state.mapStamp = tpl.id;
                 state.mapTool = 'stamp';
+                state.mapGlyph = '';
+                state.mapPen = null;
                 state.mapAssetId = 0;
                 state.mapArmId = 0;
                 state.mapAnchor = null;
@@ -22386,6 +25784,15 @@
         dock.appendChild(el('span', 'asset-tree-zoom-readout', zoomPercent() + '%'));
         dock.appendChild(zoomIn);
         dock.appendChild(fit);
+        var ghostOn = state.mapGhost !== false;
+        var ghost = button(t('mapGhost'), 'asset-tree-ghost-btn' + (ghostOn ? ' is-on' : ''), function () {
+            state.mapGhost = state.mapGhost === false;
+            renderFrame();
+        });
+        ghost.title = t('mapGhost');
+        ghost.setAttribute('aria-pressed', ghostOn ? 'true' : 'false');
+        dock.appendChild(ghost);
+        dock.appendChild(el('span', 'asset-tree-plan-xy', t('mapReadout')));
         return dock;
     }
 
@@ -22487,12 +25894,12 @@
         bar.appendChild(undo);
         bar.appendChild(redo);
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapSnap')));
-        [4, 8, 16, 24].forEach(function (step) {
-            var snap = button(String(step), 'asset-tree-btn slim' + ((state.mapStep || 8) === step ? ' is-on' : ''), function () {
+        [1, 5, 10, 25, 50, 100].forEach(function (step) {
+            var snap = button(String(step), 'asset-tree-btn slim' + ((state.mapStep || 10) === step ? ' is-on' : ''), function () {
                 state.mapStep = step;
                 renderFrame();
             });
-            snap.title = t('mapSnap') + ' ' + step;
+            snap.title = t('mapSnap') + ' ' + step + ' ' + t('mapCm');
             bar.appendChild(snap);
         });
         bar.appendChild(el('span', 'asset-tree-plan-label', t('mapPlanSize')));
@@ -22611,7 +26018,12 @@
                     swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
                     groupId: Math.max(0, parseInt(room.groupId, 10) || 0)
                 };
-            })
+            }),
+            underlay: draft.underlay ? draft.underlay.src : '',
+            underlayX: draft.underlay ? Math.round(draft.underlay.x) : 0,
+            underlayY: draft.underlay ? Math.round(draft.underlay.y) : 0,
+            underlayW: draft.underlay ? Math.round(draft.underlay.w) : 0,
+            underlayH: draft.underlay ? Math.round(draft.underlay.h) : 0
         };
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/floors/' + draft.id, body, function (status, payload) {
             if (status >= 200 && status < 300 && payload) {
@@ -23429,6 +26841,18 @@
         return !!room && (room.kind || 'room') === 'room' && roomPoints(room).length >= 3;
     }
 
+    function polygonPerimeter(points) {
+        var length = 0;
+        var i;
+        for (i = 0; i < points.length; i++) {
+            var next = points[(i + 1) % points.length];
+            var dx = next.x - points[i].x;
+            var dy = next.y - points[i].y;
+            length += Math.sqrt(dx * dx + dy * dy);
+        }
+        return length;
+    }
+
     function polygonArea(points) {
         var area = 0;
         var i;
@@ -23553,77 +26977,61 @@
     }
 
     function splitJunctions(rooms) {
-        if (!rooms) return false;
-        var guard = 0;
-        var any = false;
-        var changed = true;
-        while (changed && guard < 6) {
-            changed = false;
-            guard++;
-            var walls = planGraphSegments(rooms);
-            var cuts = {};
-            function addCut(index, t, x, y) {
-                if (index < 0) return;
-                if (t < 0.04 || t > 0.96) return;
-                var bucket = cuts[index] || (cuts[index] = []);
-                var n;
-                for (n = 0; n < bucket.length; n++) {
-                    if (Math.abs(bucket[n].t - t) < 0.02) return;
-                }
-                bucket.push({ t: t, x: x, y: y });
-                changed = true;
+        if (!rooms || !window.AssetTreePlan || !window.AssetTreePlan.cutTees) return false;
+        var specs = [];
+        planGraphSegments(rooms).forEach(function (edge) {
+            if (edge.index < 0) {
+                specs.push({
+                    source: -1, x1: edge.a.x, y1: edge.a.y, x2: edge.b.x, y2: edge.b.y, kind: 'wall', thick: 8
+                });
+                return;
             }
-            var i;
-            var j;
-            for (i = 0; i < walls.length; i++) {
-                for (j = i + 1; j < walls.length; j++) {
-                    var left = walls[i];
-                    var right = walls[j];
-                    [right.a, right.b].forEach(function (point) {
-                        var hit = projectOnSegment(left.a.x, left.a.y, left.b.x, left.b.y, point.x, point.y);
-                        if (hit && hit.dist <= 12) addCut(left.index, hit.t, hit.x, hit.y);
-                    });
-                    [left.a, left.b].forEach(function (point) {
-                        var hit = projectOnSegment(right.a.x, right.a.y, right.b.x, right.b.y, point.x, point.y);
-                        if (hit && hit.dist <= 12) addCut(right.index, hit.t, hit.x, hit.y);
-                    });
-                    var cross = segmentCross(left.a, left.b, right.a, right.b);
-                    if (cross) {
-                        addCut(left.index, cross.t, cross.x, cross.y);
-                        addCut(right.index, cross.u, cross.x, cross.y);
-                    }
-                }
-            }
-            if (!changed) break;
-            any = true;
-            Object.keys(cuts).map(Number).sort(function (a, b) { return b - a; }).forEach(function (index) {
-                var room = rooms[index];
-                if (!room) return;
-                var ends = segmentEnds(room);
-                var points = [{ x: ends[0].x, y: ends[0].y }].concat(cuts[index].slice().sort(function (a, b) {
-                    return a.t - b.t;
-                })).concat([{ x: ends[1].x, y: ends[1].y }]);
-                var pieces = [];
-                var k;
-                for (k = 0; k < points.length - 1; k++) {
-                    var piece = applySegment(room, points[k].x, points[k].y, points[k + 1].x, points[k + 1].y);
-                    if (piece) pieces.push(piece);
-                }
-                if (pieces.length < 2) return;
-                var first = pieces[0];
-                room.x = first.x;
-                room.y = first.y;
-                room.w = first.w;
-                room.h = first.h;
-                room.angle = first.angle;
-                var extra = pieces.slice(1);
-                Array.prototype.splice.apply(rooms, [index + 1, 0].concat(extra));
-                var added = extra.length;
-                state.mapSelection = shiftMapIndex(state.mapSelection, index, added);
-                state.mapGroup = (state.mapGroup || []).map(function (item) { return shiftMapIndex(item, index, added); });
+            var room = rooms[edge.index];
+            if (!room) return;
+            var thick = room.w < room.h ? room.w : room.h;
+            specs.push({
+                source: edge.index, index: edge.index,
+                x1: edge.a.x, y1: edge.a.y, x2: edge.b.x, y2: edge.b.y,
+                kind: room.kind || 'wall', thick: thick || 8, name: room.name || '', color: room.color || ''
             });
-        }
-        return any;
+        });
+        var cut = window.AssetTreePlan.cutTees(specs);
+        if (!cut) return false;
+        var grouped = {};
+        cut.forEach(function (piece) {
+            if (piece.source < 0) return;
+            var key = String(piece.source);
+            (grouped[key] || (grouped[key] = [])).push(piece);
+        });
+        Object.keys(grouped).map(Number).sort(function (a, b) { return b - a; }).forEach(function (index) {
+            var pieces = grouped[index];
+            var room = rooms[index];
+            if (!room || !pieces.length) return;
+            function paint(target, piece) {
+                var next = applySegment(target, piece.x1, piece.y1, piece.x2, piece.y2);
+                if (!next) return false;
+                target.x = next.x;
+                target.y = next.y;
+                target.w = next.w;
+                target.h = next.h;
+                target.angle = next.angle;
+                return true;
+            }
+            paint(room, pieces[0]);
+            if (pieces.length < 2) return;
+            var extra = [];
+            var k;
+            for (k = 1; k < pieces.length; k++) {
+                var made = applySegment(room, pieces[k].x1, pieces[k].y1, pieces[k].x2, pieces[k].y2);
+                if (made) extra.push(made);
+            }
+            if (!extra.length) return;
+            Array.prototype.splice.apply(rooms, [index + 1, 0].concat(extra));
+            var added = extra.length;
+            state.mapSelection = shiftMapIndex(state.mapSelection, index, added);
+            state.mapGroup = (state.mapGroup || []).map(function (item) { return shiftMapIndex(item, index, added); });
+        });
+        return true;
     }
 
     function closedFaces(rooms) {
@@ -23807,7 +27215,8 @@
         var bottom = Math.min(size.h, cam.y + cam.h + margin);
         var viewW = Math.max(20, right - left);
         var viewH = Math.max(20, bottom - top);
-        var step = 20;
+        var step = state.mapStep || 10;
+        if (step < 1) step = 10;
         var rough = Math.sqrt((viewW * viewH) / 4500);
         while (step < rough) step *= 2;
         var radius = Math.max(1.2, Math.round(step * 0.045 * 10) / 10);
@@ -23828,6 +27237,323 @@
         path.setAttribute('class', 'asset-tree-grid-dots');
         path.setAttribute('pointer-events', 'none');
         return path;
+    }
+
+    function penLocal(room) {
+        var points = roomPoints(room);
+        if (points.length >= 2) return points;
+        return [{ x: 0, y: 0 }, { x: room.w || 4, y: room.h || 4 }];
+    }
+
+    function penLength(points) {
+        var total = 0;
+        var i;
+        for (i = 1; i < points.length; i++) {
+            var dx = points[i].x - points[i - 1].x;
+            var dy = points[i].y - points[i - 1].y;
+            total += Math.sqrt(dx * dx + dy * dy);
+        }
+        return Math.round(total);
+    }
+
+    function penLengthText(room) {
+        return penLength(penLocal(room)) + ' ' + t('mapCm');
+    }
+
+    function pointSegDist(px, py, ax, ay, bx, by) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var len = dx * dx + dy * dy;
+        if (len < 1) return Math.sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+        var t = ((px - ax) * dx + (py - ay) * dy) / len;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        var qx = ax + dx * t;
+        var qy = ay + dy * t;
+        return Math.sqrt((px - qx) * (px - qx) + (py - qy) * (py - qy));
+    }
+
+    function normalizePen(room) {
+        var local = roomPoints(room);
+        if (local.length < 2) return;
+        var world = local.map(function (point) {
+            return { x: room.x + point.x, y: room.y + point.y };
+        });
+        var minX = world[0].x;
+        var minY = world[0].y;
+        var maxX = minX;
+        var maxY = minY;
+        world.forEach(function (point) {
+            minX = Math.min(minX, point.x);
+            minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x);
+            maxY = Math.max(maxY, point.y);
+        });
+        room.x = Math.round(minX);
+        room.y = Math.round(minY);
+        room.w = Math.max(4, Math.round(maxX - minX));
+        room.h = Math.max(4, Math.round(maxY - minY));
+        room.points = world.map(function (point) {
+            return { x: Math.round(point.x - room.x), y: Math.round(point.y - room.y) };
+        });
+    }
+
+    function orthoPoint(prev, point, shift) {
+        if (!shift || !prev) return point;
+        if (Math.abs(point.x - prev.x) >= Math.abs(point.y - prev.y)) return { x: point.x, y: prev.y };
+        return { x: prev.x, y: point.y };
+    }
+
+    function penNear(svg, point, other) {
+        var metrics = viewMetrics(svg);
+        var dx = (point.x - other.x) * metrics.scale;
+        var dy = (point.y - other.y) * metrics.scale;
+        return dx * dx + dy * dy <= 144;
+    }
+
+    function finishPen(floor, close) {
+        var points = (state.mapPen || []).slice();
+        state.mapPen = null;
+        state.mapClickAt = 0;
+        if (!floor || points.length < 2) {
+            renderFrame();
+            return;
+        }
+        var minX = points[0].x;
+        var minY = points[0].y;
+        var maxX = minX;
+        var maxY = minY;
+        points.forEach(function (point) {
+            minX = Math.min(minX, point.x);
+            minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x);
+            maxY = Math.max(maxY, point.y);
+        });
+        var shape = clampRoom({
+            kind: 'pen',
+            name: '',
+            color: '',
+            swing: close && points.length >= 3 ? 1 : 0,
+            angle: 0,
+            x: minX,
+            y: minY,
+            w: Math.max(4, maxX - minX),
+            h: Math.max(4, maxY - minY),
+            points: points.map(function (point) {
+                return { x: point.x - minX, y: point.y - minY };
+            })
+        });
+        if (pushShape(floor, shape)) state.mapSelection = floor.rooms.length - 1;
+        state.mapTool = 'select';
+        renderFrame();
+    }
+
+    function paintPlanReadout(svg, event) {
+        var read = document.querySelector('#asset-tree-app .asset-tree-plan-xy');
+        if (!read) return;
+        var at = svgPoint(svg, event);
+        var snapped = { x: snapCoord(at.x), y: snapCoord(at.y) };
+        var chain = state.mapPen || [];
+        if (chain.length) snapped = orthoPoint(chain[chain.length - 1], snapped, event.shiftKey);
+        var text = 'X ' + snapped.x + ' \u00b7 Y ' + snapped.y + ' ' + t('mapCm');
+        if (chain.length) {
+            var last = chain[chain.length - 1];
+            var dx = snapped.x - last.x;
+            var dy = snapped.y - last.y;
+            text += ' \u00b7 ' + Math.round(Math.sqrt(dx * dx + dy * dy)) + ' ' + t('mapCm');
+        }
+        read.textContent = text;
+    }
+
+    function paintPenCursor(svg, event) {
+        var node = svg.querySelector('#asset-tree-pen-preview');
+        if (!node || !state.mapPen || !state.mapPen.length) return;
+        var at = svgPoint(svg, event);
+        var snapped = orthoPoint(state.mapPen[state.mapPen.length - 1], { x: snapCoord(at.x), y: snapCoord(at.y) }, event.shiftKey);
+        var points = state.mapPen.concat([snapped]);
+        node.setAttribute('points', points.map(function (point) {
+            return point.x + ' ' + point.y;
+        }).join(' '));
+    }
+
+    function appendGhostFloors(svg, floor) {
+        if (state.mapGhost === false || !floor) return;
+        var others = floorsForBuilding(floor.placeId || state.mapPlaceId);
+        if (!others || others.length < 2) return;
+        var layer = svgEl('g');
+        layer.setAttribute('class', 'asset-tree-floor-ghost');
+        layer.setAttribute('pointer-events', 'none');
+        others.forEach(function (other) {
+            if (!other || other.id === floor.id) return;
+            (other.rooms || []).forEach(function (room) {
+                var kind = room.kind || 'room';
+                if (kind === 'wall' || kind === 'partition') {
+                    var ends = segmentEnds(room);
+                    var line = svgEl('line');
+                    line.setAttribute('x1', String(Math.round(ends[0].x)));
+                    line.setAttribute('y1', String(Math.round(ends[0].y)));
+                    line.setAttribute('x2', String(Math.round(ends[1].x)));
+                    line.setAttribute('y2', String(Math.round(ends[1].y)));
+                    line.setAttribute('stroke-width', kind === 'partition' ? '6' : '14');
+                    layer.appendChild(line);
+                } else if (kind === 'pen' || (kind === 'room' && roomPoints(room).length >= 3)) {
+                    var pts = roomPoints(room);
+                    if (pts.length < 2) return;
+                    var closed = kind === 'room' || parseInt(room.swing, 10) === 1;
+                    var node = svgEl(closed ? 'polygon' : 'polyline');
+                    node.setAttribute('points', pts.map(function (point) {
+                        var x = kind === 'pen' ? room.x + point.x : point.x;
+                        var y = kind === 'pen' ? room.y + point.y : point.y;
+                        return Math.round(x) + ' ' + Math.round(y);
+                    }).join(' '));
+                    layer.appendChild(node);
+                }
+            });
+        });
+        if (layer.childNodes.length) svg.appendChild(layer);
+    }
+
+    function appendPen(group, room, options) {
+        var points = penLocal(room);
+        var closed = parseInt(room.swing, 10) === 1 && points.length >= 3;
+        var text = points.map(function (point) {
+            return Math.round(point.x) + ' ' + Math.round(point.y);
+        }).join(' ');
+        var hit = svgEl(closed ? 'polygon' : 'polyline');
+        hit.setAttribute('points', text);
+        hit.setAttribute('class', 'asset-tree-pen-hit' + (closed ? ' is-closed' : ''));
+        group.appendChild(hit);
+        var line = svgEl(closed ? 'polygon' : 'polyline');
+        line.setAttribute('points', text);
+        line.setAttribute('class', 'asset-tree-pen' + (closed ? ' is-closed' : '') + (options && options.selected ? ' is-selected' : ''));
+        if (room.color) line.setAttribute('stroke', room.color);
+        line.setAttribute('pointer-events', 'none');
+        group.appendChild(line);
+        if (options && options.editing && options.svg) {
+            hit.addEventListener('dblclick', function (event) {
+                if (state.mapTool !== 'select') return;
+                event.preventDefault();
+                event.stopPropagation();
+                var at = svgPoint(options.svg, event);
+                var local = penLocal(room);
+                var best = 0;
+                var bestDist = Infinity;
+                var i;
+                var limit = local.length - (closed ? 0 : 1);
+                for (i = 0; i < limit; i++) {
+                    var next = local[(i + 1) % local.length];
+                    var dist = pointSegDist(at.x, at.y, room.x + local[i].x, room.y + local[i].y, room.x + next.x, room.y + next.y);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = i;
+                    }
+                }
+                rememberMap();
+                local.splice(best + 1, 0, { x: snapCoord(at.x) - room.x, y: snapCoord(at.y) - room.y });
+                room.points = local;
+                normalizePen(room);
+                state.mapDirty = true;
+                renderFrame();
+            });
+        }
+        return hit;
+    }
+
+    function drawPenVertices(group, room, options) {
+        penLocal(room).forEach(function (point, index) {
+            var dot = svgEl('circle');
+            dot.setAttribute('cx', String(point.x));
+            dot.setAttribute('cy', String(point.y));
+            dot.setAttribute('r', '5');
+            dot.setAttribute('class', 'asset-tree-pen-vertex');
+            dot.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                beginDrag(options.svg, { kind: 'vertex', index: options.index, at: index }, function (move) {
+                    var next = svgPoint(options.svg, move);
+                    var local = penLocal(room);
+                    local[index] = { x: snapCoord(next.x) - room.x, y: snapCoord(next.y) - room.y };
+                    room.points = local;
+                    var drawn = local.map(function (item) {
+                        return Math.round(item.x) + ' ' + Math.round(item.y);
+                    }).join(' ');
+                    var nodes = group.querySelectorAll('.asset-tree-pen, .asset-tree-pen-hit');
+                    var n;
+                    for (n = 0; n < nodes.length; n++) nodes[n].setAttribute('points', drawn);
+                    dot.setAttribute('cx', String(local[index].x));
+                    dot.setAttribute('cy', String(local[index].y));
+                    state.mapDirty = true;
+                }, function () {
+                    normalizePen(room);
+                    renderFrame();
+                });
+            });
+            dot.addEventListener('contextmenu', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var local = penLocal(room);
+                if (local.length <= 2) return;
+                rememberMap();
+                local.splice(index, 1);
+                room.points = local;
+                if (parseInt(room.swing, 10) === 1 && local.length < 3) room.swing = 0;
+                normalizePen(room);
+                state.mapDirty = true;
+                renderFrame();
+            });
+            group.appendChild(dot);
+        });
+    }
+
+    function appendUnderlay(svg, floor, editing) {
+        var scan = floor && floor.underlay;
+        if (!scan || !scan.src) return;
+        var image = svgEl('image');
+        image.setAttribute('class', 'asset-tree-underlay');
+        image.setAttribute('x', String(scan.x || 0));
+        image.setAttribute('y', String(scan.y || 0));
+        image.setAttribute('width', String(scan.w || 10));
+        image.setAttribute('height', String(scan.h || 10));
+        image.setAttribute('href', scan.src);
+        image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', scan.src);
+        if (editing) {
+            image.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (state.mapCalibrate) {
+                    var point = svgPoint(svg, event);
+                    var points = state.mapCalibrate.points || [];
+                    points.push({ x: point.x, y: point.y });
+                    state.mapCalibrate.points = points.slice(-2);
+                    renderFrame();
+                    return;
+                }
+                var originX = scan.x;
+                var originY = scan.y;
+                var start = svgPoint(svg, event);
+                beginDrag(svg, { kind: 'underlay' }, function (move) {
+                    var next = svgPoint(svg, move);
+                    scan.x = Math.round(originX + next.x - start.x);
+                    scan.y = Math.round(originY + next.y - start.y);
+                    image.setAttribute('x', String(scan.x));
+                    image.setAttribute('y', String(scan.y));
+                    state.mapDirty = true;
+                }, function () { renderFrame(); });
+            });
+        }
+        svg.appendChild(image);
+        if (state.mapCalibrate && state.mapCalibrate.points) {
+            state.mapCalibrate.points.forEach(function (point) {
+                var dot = svgEl('circle');
+                dot.setAttribute('cx', String(point.x));
+                dot.setAttribute('cy', String(point.y));
+                dot.setAttribute('r', '6');
+                dot.setAttribute('class', 'asset-tree-anchor');
+                svg.appendChild(dot);
+            });
+        }
     }
 
     function floorCanvas(floor, editing) {
@@ -23851,6 +27577,8 @@
         paper.setAttribute('class', 'asset-tree-paper');
         paper.setAttribute('fill', '#ffffff');
         svg.appendChild(paper);
+        appendUnderlay(svg, floor, editing);
+        appendGhostFloors(svg, floor);
         var gridPaper = gridDotPath(size);
         var shapeOptions = function (room, index) {
             return {
@@ -23957,13 +27685,32 @@
                 startMarquee(svg, floor, event);
             }
         });
-        if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room' || state.mapTool === 'route')) {
+        if (editing && state.mapAnchor && (isSegmentKind(state.mapTool) || state.mapTool === 'room' || state.mapTool === 'route' || state.mapTool === 'flow')) {
             var anchorDot = svgEl('circle');
             anchorDot.setAttribute('cx', String(state.mapAnchor.x));
             anchorDot.setAttribute('cy', String(state.mapAnchor.y));
             anchorDot.setAttribute('r', '6');
             anchorDot.setAttribute('class', 'asset-tree-anchor');
             svg.appendChild(anchorDot);
+        }
+        if (editing && state.mapPen && state.mapPen.length) {
+            var penPreview = svgEl('polyline');
+            penPreview.id = 'asset-tree-pen-preview';
+            penPreview.setAttribute('class', 'asset-tree-pen is-preview');
+            penPreview.setAttribute('points', state.mapPen.map(function (point) {
+                return point.x + ' ' + point.y;
+            }).join(' '));
+            penPreview.setAttribute('pointer-events', 'none');
+            svg.appendChild(penPreview);
+            state.mapPen.forEach(function (point) {
+                var penDot = svgEl('circle');
+                penDot.setAttribute('cx', String(point.x));
+                penDot.setAttribute('cy', String(point.y));
+                penDot.setAttribute('r', '4');
+                penDot.setAttribute('class', 'asset-tree-pen-vertex');
+                penDot.setAttribute('pointer-events', 'none');
+                svg.appendChild(penDot);
+            });
         }
         if (editing) {
             svg.addEventListener('contextmenu', function (event) {
@@ -24007,6 +27754,43 @@
                     placeStamp(floor, stamped.x, stamped.y);
                     return;
                 }
+                if (state.mapTool === 'glyph' && state.mapGlyph) {
+                    event.preventDefault();
+                    var markedGlyph = svgPoint(svg, event);
+                    placeGlyph(floor, markedGlyph.x, markedGlyph.y);
+                    return;
+                }
+                if (state.mapTool === 'pen') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var rawPen = svgPoint(svg, event);
+                    var chain = (state.mapPen || []).slice();
+                    var prevPen = chain.length ? chain[chain.length - 1] : null;
+                    var penPoint = orthoPoint(prevPen, { x: snapCoord(rawPen.x), y: snapCoord(rawPen.y) }, event.shiftKey);
+                    if (chain.length >= 3 && penNear(svg, penPoint, chain[0])) {
+                        finishPen(floor, true);
+                        return;
+                    }
+                    if (chain.length >= 2 && state.mapClickAt && (Date.now() - state.mapClickAt) < 400
+                        && Math.abs(event.clientX - state.mapClickX) < 8
+                        && Math.abs(event.clientY - state.mapClickY) < 8) {
+                        finishPen(floor, false);
+                        return;
+                    }
+                    if (prevPen && prevPen.x === penPoint.x && prevPen.y === penPoint.y) {
+                        state.mapClickAt = Date.now();
+                        state.mapClickX = event.clientX;
+                        state.mapClickY = event.clientY;
+                        return;
+                    }
+                    chain.push(penPoint);
+                    state.mapPen = chain;
+                    state.mapClickAt = Date.now();
+                    state.mapClickX = event.clientX;
+                    state.mapClickY = event.clientY;
+                    renderFrame();
+                    return;
+                }
                 if (state.mapTool === 'select') {
                     if (event.target === svg && !state.mapArmId) {
                         state.mapAssetId = 0;
@@ -24031,6 +27815,39 @@
                         w: 120,
                         h: 28
                     }))) state.mapSelection = floor.rooms.length - 1;
+                    renderFrame();
+                    return;
+                }
+                if (isFigureKind(state.mapTool) && state.mapTool !== 'flow') {
+                    event.preventDefault();
+                    var dropped = svgPoint(svg, event);
+                    var figureW = state.mapTool === 'chart' ? 180 : (state.mapTool === 'note' ? 140 : 120);
+                    var figureH = state.mapTool === 'chart' ? 110 : (state.mapTool === 'note' ? 88 : 72);
+                    if (pushShape(floor, clampRoom({
+                        kind: state.mapTool,
+                        name: t(state.mapTool === 'chart' ? 'mapChart' : 'mapTextSample'),
+                        color: '#deebff',
+                        angle: 0,
+                        x: snapCoord(dropped.x) - figureW / 2,
+                        y: snapCoord(dropped.y) - figureH / 2,
+                        w: figureW,
+                        h: figureH
+                    }))) state.mapSelection = floor.rooms.length - 1;
+                    renderFrame();
+                    return;
+                }
+                if (state.mapTool === 'flow') {
+                    event.preventDefault();
+                    var flowAt = svgPoint(svg, event);
+                    var flowPoint = snapStart(flowAt.x, flowAt.y);
+                    if (!state.mapAnchor) {
+                        state.mapAnchor = flowPoint;
+                        renderFrame();
+                        return;
+                    }
+                    var flow = applySegment({ kind: 'flow', name: '', color: '#0052cc', h: 2, w: 2 }, state.mapAnchor.x, state.mapAnchor.y, flowPoint.x, flowPoint.y);
+                    state.mapAnchor = null;
+                    if (flow && pushShape(floor, flow)) state.mapSelection = floor.rooms.length - 1;
                     renderFrame();
                     return;
                 }
@@ -24140,6 +27957,8 @@
                 });
             });
             svg.addEventListener('mousemove', function (event) {
+                paintPlanReadout(svg, event);
+                paintPenCursor(svg, event);
                 var ghost = svg.querySelector('#asset-tree-pin-ghost');
                 if (ghost && state.mapArmId && !state.mapDrag) {
                     var hover = svgPoint(svg, event);
@@ -24154,6 +27973,10 @@
                 paintPreviewBox(svg, shapeFromDrag(previewKind, state.mapAnchor.x, state.mapAnchor.y, end.x, end.y, true));
             });
         }
+        svg.addEventListener('mousemove', function (event) {
+            paintPlanReadout(svg, event);
+            if (editing) paintPenCursor(svg, event);
+        });
         svg.addEventListener('wheel', function (event) {
             if (state.mapDrag) return;
             event.preventDefault();
@@ -24284,6 +28107,7 @@
         group.setAttribute('transform', shapeTransform(room));
         var rect = svgEl('rect');
         applyWallCap(rect, room);
+        var penHit = null;
         var kindName = room.kind || 'room';
         var mark = routeMarkKind(kindName);
         if (mark) {
@@ -24301,12 +28125,16 @@
         if (kindName === 'sofa' || kindName === 'seat' || kindName === 'chair' || kindName === 'bath' || kindName === 'toilet' || kindName === 'bed') {
             rect.setAttribute('rx', String(Math.min(10, Math.round(Math.min(room.w, room.h) / 6))));
         }
-        if (kindName === 'png') rect.setAttribute('fill', 'transparent');
+        if (kindName === 'png' || isFigureKind(kindName) || kindName === 'pen' || kindName === 'glyph') rect.setAttribute('fill', 'transparent');
+        if (isFigureKind(kindName) || kindName === 'pen' || kindName === 'glyph') rect.setAttribute('stroke', 'transparent');
+        if (kindName === 'pen') rect.setAttribute('pointer-events', 'none');
         if (kindName === 'room' && room.color) rect.setAttribute('fill', room.color);
         if (kindName === 'table' && Math.abs(room.w - room.h) <= Math.max(room.w, room.h) * 0.2) {
             rect.setAttribute('fill', 'transparent');
         }
         group.appendChild(rect);
+        if (kindName === 'pen') penHit = appendPen(group, room, options);
+        if (kindName === 'glyph') paintGlyph(group, glyphById(room.name), room.w, room.h);
         if (isRouteKind(kindName)) {
             var routeEnds = segmentLocalEnds(room);
             if (options && options.selected) {
@@ -24352,7 +28180,7 @@
         appendLabel(group, room);
         }
         if (options && options.editing) {
-            rect.addEventListener('mousedown', function (event) {
+            (penHit || rect).addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
                 if (state.mapTool !== 'select') return;
                 event.preventDefault();
@@ -24442,13 +28270,170 @@
                     renderFrame();
                 });
             });
-            if (options.primary && state.mapTool === 'select' && !state.mapStamp) drawRoomHandles(group, rect, room, options);
+            if (options.primary && state.mapTool === 'select' && !state.mapStamp) {
+                if (kindName === 'pen') drawPenVertices(group, room, options);
+                else drawRoomHandles(group, rect, room, options);
+            }
+        } else if (room.assetId || room.placeId) {
+            group.style.cursor = 'pointer';
+            group.addEventListener('click', function () {
+                if (room.assetId) goToAsset(state.projectKey, room.assetId);
+                else if (room.placeId) chooseBuilding(room.placeId);
+            });
         }
         return group;
     }
 
+    function figureStroke(room) {
+        var selected = state.mapDraft && state.mapDraft.rooms && state.mapDraft.rooms[state.mapSelection] === room;
+        return selected ? '#ffab00' : '#0052cc';
+    }
+
+    function figureFill(room) {
+        return room.color || '#deebff';
+    }
+
+    function mutePointer(node) {
+        node.setAttribute('pointer-events', 'none');
+        return node;
+    }
+
+    function schemeCounts() {
+        var ids = {};
+        var pins = (state.mapDraft && state.mapDraft.pins) || [];
+        pins.forEach(function (pin) { if (pin.assetId) ids[pin.assetId] = true; });
+        ((state.mapDraft && state.mapDraft.rooms) || []).forEach(function (room) {
+            if (room.assetId) ids[room.assetId] = true;
+        });
+        if (!Object.keys(ids).length) {
+            equipmentAssets().forEach(function (asset) {
+                if (assetInBuilding(asset, state.mapPlaceId)) ids[asset.id] = true;
+            });
+        }
+        var counts = {};
+        Object.keys(ids).forEach(function (id) {
+            var asset = byId()[id];
+            if (!asset) return;
+            var key = asset.status || '';
+            counts[key] = (counts[key] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function drawFigure(parent, room) {
+        var kind = room.kind;
+        var fill = figureFill(room);
+        var stroke = figureStroke(room);
+        var node;
+        if (kind === 'ellipse') {
+            node = svgEl('ellipse');
+            node.setAttribute('cx', String(room.w / 2));
+            node.setAttribute('cy', String(room.h / 2));
+            node.setAttribute('rx', String(Math.max(1, room.w / 2 - 1)));
+            node.setAttribute('ry', String(Math.max(1, room.h / 2 - 1)));
+        } else if (kind === 'diamond') {
+            node = svgEl('polygon');
+            node.setAttribute('points', (room.w / 2) + ',2 ' + (room.w - 2) + ',' + (room.h / 2) + ' ' + (room.w / 2) + ',' + (room.h - 2) + ' 2,' + (room.h / 2));
+        } else if (kind === 'triangle') {
+            node = svgEl('polygon');
+            node.setAttribute('points', (room.w / 2) + ',2 ' + (room.w - 2) + ',' + (room.h - 2) + ' 2,' + (room.h - 2));
+        } else if (kind === 'chart') {
+            node = svgEl('rect');
+            node.setAttribute('x', '1');
+            node.setAttribute('y', '1');
+            node.setAttribute('width', String(Math.max(1, room.w - 2)));
+            node.setAttribute('height', String(Math.max(1, room.h - 2)));
+            node.setAttribute('rx', '4');
+        } else {
+            node = svgEl('rect');
+            node.setAttribute('x', '1');
+            node.setAttribute('y', '1');
+            node.setAttribute('width', String(Math.max(1, room.w - 2)));
+            node.setAttribute('height', String(Math.max(1, room.h - 2)));
+            node.setAttribute('rx', kind === 'note' ? '2' : '6');
+        }
+        node.setAttribute('fill', fill);
+        node.setAttribute('stroke', stroke);
+        node.setAttribute('stroke-width', '1.6');
+        parent.appendChild(mutePointer(node));
+        if (kind === 'note') {
+            var fold = svgEl('polygon');
+            fold.setAttribute('points', (room.w - 18) + ',1 ' + (room.w - 1) + ',18 ' + (room.w - 18) + ',18');
+            fold.setAttribute('fill', '#ffffff');
+            fold.setAttribute('stroke', stroke);
+            parent.appendChild(mutePointer(fold));
+        }
+        if (kind === 'chart') {
+            var counts = schemeCounts();
+            var keys = Object.keys(counts);
+            var max = 1;
+            keys.forEach(function (key) { if (counts[key] > max) max = counts[key]; });
+            var slot = Math.max(8, (room.w - 16) / Math.max(keys.length, 1));
+            keys.slice(0, 8).forEach(function (key, index) {
+                var height = Math.max(2, (counts[key] / max) * (room.h - 36));
+                var bar = svgEl('rect');
+                bar.setAttribute('x', String(8 + index * slot));
+                bar.setAttribute('y', String(room.h - 14 - height));
+                bar.setAttribute('width', String(Math.max(4, slot - 4)));
+                bar.setAttribute('height', String(height));
+                bar.setAttribute('fill', statusColor(key));
+                parent.appendChild(mutePointer(bar));
+            });
+        }
+        if (room.name) {
+            var caption = svgEl('text');
+            caption.setAttribute('x', String(room.w / 2));
+            caption.setAttribute('y', String(kind === 'chart' ? 16 : room.h / 2 + 4));
+            caption.setAttribute('text-anchor', 'middle');
+            caption.setAttribute('class', 'asset-tree-room-label');
+            var words = room.name;
+            if (words.length > 22) words = words.substring(0, 21) + '\u2026';
+            caption.textContent = words;
+            parent.appendChild(mutePointer(caption));
+        }
+    }
+
+    function drawFlow(parent, room) {
+        var ends = segmentLocalEnds(room);
+        var x1 = ends[0][0];
+        var y1 = ends[0][1];
+        var x2 = ends[1][0];
+        var y2 = ends[1][1];
+        var color = room.color || '#0052cc';
+        var line = svgEl('line');
+        line.setAttribute('x1', String(x1));
+        line.setAttribute('y1', String(y1));
+        line.setAttribute('x2', String(x2 - 8));
+        line.setAttribute('y2', String(y2));
+        line.setAttribute('stroke', color);
+        line.setAttribute('stroke-width', '2');
+        parent.appendChild(mutePointer(line));
+        var head = svgEl('polygon');
+        head.setAttribute('points', x2 + ',' + y2 + ' ' + (x2 - 12) + ',' + (y2 - 5) + ' ' + (x2 - 12) + ',' + (y2 + 5));
+        head.setAttribute('fill', color);
+        parent.appendChild(mutePointer(head));
+        if (room.name) {
+            var label = svgEl('text');
+            label.setAttribute('x', String((x1 + x2) / 2));
+            label.setAttribute('y', String(y1 - 6));
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('class', 'asset-tree-room-label');
+            label.textContent = room.name;
+            parent.appendChild(mutePointer(label));
+        }
+    }
+
     function decorateRoom(parent, room) {
         var kind = room.kind || 'room';
+        if (kind === 'pen' || kind === 'glyph') return;
+        if (kind === 'flow') {
+            drawFlow(parent, room);
+            return;
+        }
+        if (isFigureKind(kind)) {
+            drawFigure(parent, room);
+            return;
+        }
         if (isRouteKind(kind)) return;
         var x = 0;
         var y = 0;
@@ -24561,6 +28546,29 @@
             node.setAttribute('d', d);
             node.setAttribute('class', 'asset-tree-plan-mark');
             parent.appendChild(node);
+        }
+        if (kind === 'rack') {
+            markBox(x + 1, y + 1, w - 2, h - 2);
+            var units = 19;
+            var top = y + 4;
+            var inner = Math.max(units, h - 8);
+            var unit;
+            for (unit = 1; unit < units; unit++) {
+                var unitY = top + inner * unit / units;
+                markLine('M ' + (x + 4) + ' ' + unitY + ' L ' + (x + w - 4) + ' ' + unitY);
+            }
+            markLine('M ' + (x + 6) + ' ' + (y + 4) + ' L ' + (x + 6) + ' ' + (y + h - 4));
+            markLine('M ' + (x + w - 6) + ' ' + (y + 4) + ' L ' + (x + w - 6) + ' ' + (y + h - 4));
+            return;
+        }
+        if (kind === 'switch') {
+            markBox(x + 1, y + 1, w - 2, h - 2);
+            var ports = Math.max(4, Math.floor((w - 8) / 6));
+            var port;
+            for (port = 0; port < ports; port++) {
+                markBox(x + 4 + port * 6, y + Math.max(2, h * 0.28), 4, Math.max(3, h * 0.44));
+            }
+            return;
         }
         if (kind === 'table' && Math.abs(w - h) <= Math.max(w, h) * 0.2) {
             markOval(x + w / 2, y + h / 2, Math.max(4, w / 2 - 1), Math.max(4, h / 2 - 1), 'wood');
@@ -24722,6 +28730,10 @@
         if (room && room.kind === 'png') {
             var stamp = furnitureById(room.name);
             return stamp && stamp.name ? stamp.name : '';
+        }
+        if (room && room.kind === 'glyph') {
+            var glyph = glyphById(room.name);
+            return glyph && glyph.name ? glyph.name : (room.name || '');
         }
         return room && room.name ? room.name : '';
     }
@@ -25053,6 +29065,7 @@
             return svg;
         }
         if (kind === 'select') add('M8 4.5l.2 12.2 2.6-2.8 2.4 4.6 2.2-1.2-2.4-4.6H17z', 'currentColor');
+        else if (kind === 'pen') add('M5 18l4-9 4 3 6-8');
         else if (kind === 'room') add('M5 5h14v14H5z');
         else if (kind === 'wall') add('M4 9h16v6H4z', 'currentColor');
         else if (kind === 'partition') add('M5 7h14M5 12h14M5 17h14');
@@ -25063,6 +29076,12 @@
         else if (kind === 'arc') add('M5 17c2-8 12-8 14 0');
         else if (kind === 'dim') add('M4 16h16M4 16v-3M20 16v-3M12 8v8');
         else if (kind === 'text' || kind === 'label') add('M6 6h12M12 6v12');
+        else if (kind === 'box' || kind === 'note') add('M5 6h14v12H5z');
+        else if (kind === 'ellipse') add('M12 6a8 5 0 1 0 0.01 0z');
+        else if (kind === 'diamond') add('M12 4l8 8-8 8-8-8z');
+        else if (kind === 'triangle') add('M12 5l8 14H4z');
+        else if (kind === 'flow') add('M4 12h12M12 8l4 4-4 4');
+        else if (kind === 'chart') add('M6 16V10M12 16V7M18 16v-5');
         else if (kind === 'route') add('M4 16c4-8 12-8 16 0');
         else if (kind === 'outlet' || kind === 'socket' || kind === 'point') add('M12 5a7 7 0 1 0 0.01 0zM9 12h6M12 9v6');
         else if (kind === 'valve') add('M12 5a7 7 0 1 0 0.01 0zM6 12h12');
@@ -25078,9 +29097,15 @@
         if (!room) return el('div');
         var block = el('div', 'asset-tree-plan-inspector');
         block.appendChild(el('strong', null, mapSelectionLabel()));
+        if (room.kind === 'pen') block.appendChild(el('span', 'asset-tree-plan-label', penLengthText(room)));
+        if (room.kind === 'glyph') {
+            block.appendChild(button(t('mapGlyphEdit'), 'asset-tree-btn slim', function () {
+                openGlyphEditor(glyphById(room.name));
+            }));
+        }
         var name = document.createElement('input');
-        name.value = room.kind === 'png' ? furnitureCaption(room) : (room.name || '');
-        if (room.kind === 'png') name.disabled = true;
+        name.value = (room.kind === 'png' || room.kind === 'glyph') ? furnitureCaption(room) : (room.name || '');
+        if (room.kind === 'png' || room.kind === 'glyph') name.disabled = true;
         name.setAttribute('aria-label', t('name'));
         name.addEventListener('change', function () {
             if ((room.name || '') === name.value) return;
@@ -25090,7 +29115,22 @@
             renderFrame();
         });
         block.appendChild(name);
-        if (isFurnKind(room.kind)) {
+        if (isFigureKind(room.kind)) {
+            var colors = el('div', 'asset-tree-figure-colors');
+            ['#deebff', '#e3fcef', '#fffae6', '#ffebe6', '#eae6ff', '#ffffff'].forEach(function (color) {
+                var swatch = button('', 'asset-tree-figure-color' + (figureFill(room) === color ? ' is-on' : ''), function () {
+                    rememberMap();
+                    room.color = color;
+                    state.mapDirty = true;
+                    renderFrame();
+                });
+                swatch.style.background = color;
+                swatch.setAttribute('aria-label', color);
+                colors.appendChild(swatch);
+            });
+            block.appendChild(colors);
+        }
+        if (isFurnKind(room.kind) || isFigureKind(room.kind)) {
             block.appendChild(el('span', 'asset-tree-plan-label', t('mapObject')));
             var objectPick = document.createElement('select');
             objectPick.setAttribute('aria-label', t('mapObject'));
@@ -25179,7 +29219,11 @@
             }
         }
         if (isPolygonRoom(room)) {
-            block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(roomPoints(room))));
+            var face = roomPoints(room);
+            block.appendChild(el('span', 'asset-tree-plan-label', planAreaText(face)));
+            block.appendChild(el('span', 'asset-tree-plan-label', t('mapPerimeter') + ' ' + (Math.round(polygonPerimeter(face) / 10) / 10).toFixed(1) + ' ' + t('mapMeter')));
+        }
+        if (isPolygonRoom(room) || isFigureKind(room.kind)) {
             block.appendChild(el('span', 'asset-tree-plan-label', t('mapPlace')));
             var placePick = document.createElement('select');
             placePick.setAttribute('aria-label', t('mapPlace'));
@@ -25389,6 +29433,10 @@
         if (kind === 'arc') return t('mapArc');
         if (kind === 'dim') return t('mapDim');
         if (kind === 'text') return room.name || t('mapText');
+        if (kind === 'pen') return room.name || t('mapPen');
+        if (kind === 'glyph') return furnitureCaption(room) || t('mapGlyphLibrary');
+        if (kind === 'rack') return room.name || t('mapRack');
+        if (kind === 'switch') return room.name || t('mapSwitch');
         return room.name || t('mapRoom');
     }
 
@@ -25566,23 +29614,165 @@
         return !life.purchased && !life.warrantyUntil && !life.commissioned && !life.supplier && !(life.price && life.price !== '0');
     }
 
-    function lifeSteps(life) {
+    function lifeContractPresent(life) {
+        return !!((life.contractor || '').replace(/^\s+|\s+$/g, '') || (life.contractNo || '').replace(/^\s+|\s+$/g, ''));
+    }
+
+    function lifeSlotFiles(asset, slot) {
+        var list = asset && asset.files ? asset.files : [];
+        return list.filter(function (file) { return file && file.slot === slot; });
+    }
+
+    function lifeSteps(life, asset) {
         var buy = !!(life.purchased || life.supplier || (life.price && life.price !== '0'));
         var use = !!life.commissioned;
         var warranty = !!life.warrantyUntil;
         var off = life.writeoffState === 'approved';
-        return [
+        var steps = [
             { key: 'lifeStepBuy', on: buy },
             { key: 'lifeStepUse', on: use },
             { key: 'lifeStepWarranty', on: warranty },
-            { key: 'lifeStepRun', on: use && !off },
-            { key: 'lifeStepOff', on: off }
+            { key: 'lifeStepRun', on: use && !off }
         ];
+        if (lifeContractPresent(life) || lifeSlotFiles(asset, 'contract').length) {
+            steps.push({ key: 'lifeStepContract', on: true });
+        }
+        steps.push({ key: 'lifeStepOff', on: off });
+        return steps;
     }
 
-    function lifeStepper(life) {
+    function lifeContractFacts(life) {
+        if (!lifeContractPresent(life)) return [];
+        var lines = [];
+        var contractor = (life.contractor || '').replace(/^\s+|\s+$/g, '');
+        var number = (life.contractNo || '').replace(/^\s+|\s+$/g, '');
+        if (contractor) lines.push(t('lifeContractor') + ': ' + contractor);
+        if (number) lines.push(t('lifeContractNo') + ': ' + number);
+        if (life.contractFrom) lines.push(t('lifeContractFrom') + ': ' + life.contractFrom);
+        if (life.contractUntil) lines.push(t('lifeContractUntil') + ': ' + life.contractUntil);
+        if (life.contractPhase === 2) lines.push(t('lifeContractOff'));
+        else if (life.contractPhase === 3) lines.push(t('lifeContractWait'));
+        else lines.push(t('lifeContractOn'));
+        return lines;
+    }
+
+    function rememberLifeFile(asset, file) {
+        function put(list) {
+            var index;
+            for (index = 0; index < list.length; index++) {
+                if (list[index] && list[index].id === file.id) return;
+            }
+            list.push(file);
+        }
+        if (!asset.files) asset.files = [];
+        put(asset.files);
+        if (state.detail && state.detail.id === asset.id) {
+            if (!state.detail.files) state.detail.files = asset.files;
+            else if (state.detail.files !== asset.files) put(state.detail.files);
+        }
+    }
+
+    function forgetLifeFile(asset, fileId) {
+        function drop(list) {
+            if (!list) return;
+            var index;
+            for (index = list.length - 1; index >= 0; index--) {
+                if (list[index] && list[index].id === fileId) list.splice(index, 1);
+            }
+        }
+        drop(asset.files);
+        if (state.detail && state.detail.id === asset.id) drop(state.detail.files);
+    }
+
+    function uploadLifeFile(asset, file, slot, done) {
+        if (!file) {
+            if (done) done(null);
+            return;
+        }
+        var xhr = new XMLHttpRequest();
+        var data = new FormData();
+        data.append('file', file, file.name || 'file');
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id + '&slot=' + encodeURIComponent(slot), true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            if (xhr.status >= 200 && xhr.status < 300 && payload && payload.id) {
+                payload.slot = slot;
+                rememberLifeFile(asset, payload);
+                if (done) done(payload);
+                return;
+            }
+            notify((payload && payload.message) || t('errorTitle'));
+            if (done) done(null);
+        };
+        xhr.send(data);
+    }
+
+    function lifeDocs(asset, slot, editing) {
+        var files = lifeSlotFiles(asset, slot);
+        if (!editing && !files.length) return null;
+        var box = el('div', 'asset-tree-life-docs');
+        function paint() {
+            box.innerHTML = '';
+            lifeSlotFiles(asset, slot).forEach(function (file) {
+                var row = el('div', 'asset-tree-attachment');
+                var icon = button(fileGlyph(file.fileName), 'asset-tree-file-icon is-' + fileKind(file.fileName), function () {
+                    openFilePreview(file, lifeSlotFiles(asset, slot));
+                });
+                icon.title = t('filePreview');
+                row.appendChild(icon);
+                row.appendChild(button(file.fileName || '', 'asset-tree-file-name', function () {
+                    openFilePreview(file, lifeSlotFiles(asset, slot));
+                }));
+                row.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
+                if (mayEdit(asset)) {
+                    row.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
+                        ajax('DELETE', '/assets/' + asset.id + '/files/' + file.id, null, function (status, payload) {
+                            if (status >= 200 && status < 300) {
+                                forgetLifeFile(asset, file.id);
+                                if (editing) paint();
+                                else showDetail(state.detail || asset, false);
+                            } else notify((payload && payload.message) || t('errorTitle'));
+                        });
+                    }));
+                }
+                box.appendChild(row);
+            });
+            if (!editing) return;
+            var input = el('input', 'asset-tree-import-file');
+            input.type = 'file';
+            input.multiple = true;
+            input.addEventListener('change', function () {
+                var chosen = [];
+                var index;
+                for (index = 0; index < (input.files || []).length; index++) chosen.push(input.files[index]);
+                input.value = '';
+                var at = 0;
+                function next() {
+                    if (at >= chosen.length) {
+                        paint();
+                        return;
+                    }
+                    uploadLifeFile(asset, chosen[at], slot, function () {
+                        at += 1;
+                        next();
+                    });
+                }
+                next();
+            });
+            box.appendChild(button(t('lifeDocAdd'), 'asset-tree-btn', function () { input.click(); }));
+            box.appendChild(input);
+        }
+        paint();
+        return box;
+    }
+
+    function lifeStepper(life, asset) {
         var row = el('ol', 'asset-tree-steps');
-        lifeSteps(life).forEach(function (step) {
+        lifeSteps(life, asset).forEach(function (step) {
             var item = el('li', 'asset-tree-step' + (step.on ? ' is-on' : ''));
             item.appendChild(el('span', 'asset-tree-step-dot', ''));
             item.appendChild(el('span', 'asset-tree-step-label', t(step.key)));
@@ -25609,7 +29799,15 @@
     }
 
     function lifeModule(asset, inner) {
-        var block = moduleBlock(t('lifeTitle'), inner, false);
+        var remembered = Object.prototype.hasOwnProperty.call(state.lifeFolded, asset.id);
+        var collapsed = remembered ? !!state.lifeFolded[asset.id] : !!moduleSetup().lifeFold;
+        var block = moduleBlock(t('lifeTitle'), inner, collapsed);
+        var head = block.querySelector('.asset-tree-module-head');
+        if (head) {
+            head.addEventListener('click', function () {
+                state.lifeFolded[asset.id] = block.classList.contains('is-collapsed');
+            });
+        }
         block.classList.add('asset-tree-life-module');
         var title = block.querySelector('.asset-tree-module-head > span:last-child');
         if (title) {
@@ -25617,6 +29815,92 @@
             title.appendChild(stageMark('beta'));
         }
         return block;
+    }
+
+    function watchBlock(asset) {
+        if (!moduleOn('tni') || isFolder(asset)) return null;
+        var row = state.tniWatch[asset.id];
+        if (!row) {
+            if (!mayEdit(asset)) {
+                loadTniWatch(asset.id);
+                return null;
+            }
+            var waiting = el('div');
+            waiting.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadTniWatch(asset.id);
+            return moduleBlock(t('tniWatch'), waiting);
+        }
+        if (!row.armed && !mayEdit(asset)) return null;
+        if (row.missing) {
+            var failed = el('div');
+            failed.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
+            failed.appendChild(button(t('retry'), 'asset-tree-btn', function () {
+                delete state.tniWatch[asset.id];
+                state.tniWatchLoading[asset.id] = false;
+                loadTniWatch(asset.id);
+                showDetail(state.detail || asset, false);
+            }));
+            return moduleBlock(t('tniWatch'), failed);
+        }
+        return moduleBlock(t('tniWatch'), watchBody(asset, row));
+    }
+
+    function watchBody(asset, row) {
+        var body = el('div', 'asset-tree-watch');
+        body.appendChild(el('p', 'asset-tree-hint', t('tniWatchHint')));
+        var armed = document.createElement('input');
+        armed.type = 'checkbox';
+        armed.checked = !!row.armed;
+        armed.disabled = !mayEdit(asset);
+        var label = el('label', 'asset-tree-tni-ssl');
+        label.appendChild(armed);
+        label.appendChild(document.createTextNode(t('tniWatchOn')));
+        body.appendChild(label);
+        body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + (asset.name || '')));
+        body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
+        if (mayEdit(asset)) {
+            body.appendChild(button(t('tniWatchSave'), 'asset-tree-btn', function () {
+                ajax('PUT', '/assets/' + asset.id + '/watch', {
+                    armed: armed.checked
+                }, function (status, payload) {
+                    if (status >= 200 && status < 300 && payload) {
+                        state.tniWatch[asset.id] = payload;
+                        if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
+                    } else {
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
+                });
+            }));
+        }
+        return body;
+    }
+
+    function watchStatus(row) {
+        if (!row || !row.checkedAt) return t('tniWatchNone');
+        var word = row.up === 1 ? t('tniWatchUp') : (row.up === 2 ? t('tniWatchDown') : t('tniWatchNone'));
+        var when = '';
+        try {
+            when = stamp(new Date(row.checkedAt).toISOString());
+        } catch (ignore) {
+            when = '';
+        }
+        return word + (when ? ' · ' + t('tniWatchChecked', when) : '');
+    }
+
+    function loadTniWatch(assetId) {
+        if (state.tniWatchLoading[assetId]) return;
+        state.tniWatchLoading[assetId] = true;
+        var token = (state.tniWatchToken[assetId] || 0) + 1;
+        state.tniWatchToken[assetId] = token;
+        ajax('GET', '/assets/' + assetId + '/watch', null, function (status, payload) {
+            if (state.tniWatchToken[assetId] !== token) return;
+            state.tniWatchLoading[assetId] = false;
+            if (status === 200 && payload) state.tniWatch[assetId] = payload;
+            else state.tniWatch[assetId] = { armed: false, missing: true };
+            if (state.detail && state.detail.id === assetId && document.getElementById('asset-tree-detail')) {
+                showDetail(state.detail, false);
+            }
+        });
     }
 
     function lifeBlock(asset) {
@@ -25648,22 +29932,29 @@
             body.appendChild(lifeForm(asset, life));
             return body;
         }
-        body.appendChild(lifeStepper(life));
+        body.appendChild(lifeStepper(life, asset));
         if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
-        else {
-            var facts = el('div', 'asset-tree-life-facts');
+        var facts = el('div', 'asset-tree-life-facts');
+        if (!lifeBlank(life)) {
             if (life.price) facts.appendChild(el('span', null, t('lifePrice') + ': ' + moneyInput(life.price) + ' ' + currencyMark(life.currency || 'RUB')));
             if (life.monthly) facts.appendChild(el('span', null, t('lifeMonthly') + ': ' + moneyInput(life.monthly)));
             if (life.book) facts.appendChild(el('span', null, t('lifeBook') + ': ' + moneyInput(life.book)));
             if (life.replaceOn) facts.appendChild(el('span', null, t('lifeReplace') + ': ' + life.replaceOn));
             if (life.replaceOn) facts.appendChild(el('span', null, t('lifeMonthsLeft') + ': ' + (life.monthsLeft || 0)));
             if (life.warrantyUntil) facts.appendChild(el('span', null, life.warrantyActive ? t('lifeWarrantyOn') : t('lifeWarrantyOff')));
-            body.appendChild(facts);
         }
+        lifeContractFacts(life).forEach(function (line) {
+            facts.appendChild(el('span', null, line));
+        });
+        if (facts.childNodes.length) body.appendChild(facts);
+        var buyDocs = lifeDocs(asset, 'buy', false);
+        if (buyDocs) body.appendChild(buyDocs);
+        var contractDocs = lifeDocs(asset, 'contract', false);
+        if (contractDocs) body.appendChild(contractDocs);
         if (life.writeoffState === 'pending') {
-            body.appendChild(el('p', 'asset-tree-life-state', t('lifePending') + (life.approverName ? ' · ' + life.approverName : '')));
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifePending')));
         } else if (life.writeoffState === 'approved') {
-            body.appendChild(el('p', 'asset-tree-life-state', t('lifeApproved') + (life.approverName ? ' · ' + life.approverName : '')));
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifeApproved')));
         } else if (life.writeoffState === 'rejected') {
             body.appendChild(el('p', 'asset-tree-life-state', t('lifeRejected')));
         }
@@ -25715,6 +30006,7 @@
         buy.appendChild(planField(t('lifePurchase'), purchased));
         buy.appendChild(planField(t('lifeSupplier'), supplier));
         buy.appendChild(lifeWide(planField(t('lifeDocument'), documentNo)));
+        buy.appendChild(lifeDocs(asset, 'buy', true));
         buy.appendChild(planField(t('lifePrice'), price));
         buy.appendChild(planField(t('lifeCurrency'), currency));
         buyPanel.appendChild(buy);
@@ -25735,6 +30027,36 @@
         use.appendChild(lifeWide(planField(t('lifeWarrantyService'), service)));
         usePanel.appendChild(use);
         form.appendChild(usePanel);
+        var contractor = document.createElement('input');
+        contractor.value = life.contractor || '';
+        var contractNo = document.createElement('input');
+        contractNo.value = life.contractNo || '';
+        var contractFrom = document.createElement('input');
+        contractFrom.type = 'date';
+        contractFrom.value = life.contractFrom || '';
+        var contractUntil = document.createElement('input');
+        contractUntil.type = 'date';
+        contractUntil.value = life.contractUntil || '';
+        var contractPanel = el('section', 'asset-tree-life-panel');
+        contractPanel.appendChild(el('h4', null, t('lifeSectionContract')));
+        contractPanel.appendChild(el('p', 'asset-tree-hint', t('lifeContractHint')));
+        var contractGrid = el('div', 'asset-tree-life-grid');
+        contractGrid.appendChild(planField(t('lifeContractor'), contractor));
+        contractGrid.appendChild(planField(t('lifeContractNo'), contractNo));
+        contractGrid.appendChild(lifeDocs(asset, 'contract', true));
+        contractGrid.appendChild(planField(t('lifeContractFrom'), contractFrom));
+        contractGrid.appendChild(planField(t('lifeContractUntil'), contractUntil));
+        contractPanel.appendChild(contractGrid);
+        var contractOpen = lifeContractPresent(life) || !!state.lifeContractOpen[asset.id] || lifeSlotFiles(asset, 'contract').length > 0;
+        contractPanel.hidden = !contractOpen;
+        form.appendChild(contractPanel);
+        if (!contractOpen) {
+            form.appendChild(button(t('lifeContractAdd'), 'asset-tree-btn', function () {
+                state.lifeContractOpen[asset.id] = true;
+                contractPanel.hidden = false;
+                this.hidden = true;
+            }));
+        }
         var methodPanel = el('section', 'asset-tree-life-panel');
         methodPanel.appendChild(el('h4', null, t('lifeSectionMethod')));
         var method = el('div', 'asset-tree-life-grid is-three');
@@ -25766,18 +30088,24 @@
                 commissioned: commissioned.value,
                 warrantyUntil: warranty.value,
                 warrantyService: service.value,
+                contractor: contractor.value,
+                contractNo: contractNo.value,
+                contractFrom: contractFrom.value,
+                contractUntil: contractUntil.value,
                 lifeMonths: parseInt(months.value, 10) || 0,
                 residual: moneyWire(residual.value)
             }, function (status, payload) {
                 if (status >= 200 && status < 300 && payload) {
                     state.life[asset.id] = payload;
                     state.lifeEditing[asset.id] = false;
+                    state.lifeContractOpen[asset.id] = false;
                     showDetail(state.detail || asset, false);
                 } else notify((payload && payload.message) || t('errorTitle'));
             });
         }));
         actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
             state.lifeEditing[asset.id] = false;
+            state.lifeContractOpen[asset.id] = false;
             showDetail(state.detail || asset, false);
         }));
         form.appendChild(actions);
@@ -25785,7 +30113,7 @@
     }
 
     function openWriteoffDialog(asset, life, direct) {
-        var approverKey = life.approverKey || moduleSetup().lifeApprover || state.userKey || '';
+        var approverKey = direct ? (state.userKey || '') : branchApprover(asset);
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, t('lifeAsk')));
@@ -25794,66 +30122,19 @@
             reason.value = life.writeoffReason || '';
             dialog.appendChild(planField(t('lifeReason'), reason));
             if (!direct) {
-                var knownName = life.approverName || (approverKey === state.userKey ? (state.displayName || '') : '');
-                var chosen = el('div', 'asset-tree-userpick-name is-empty', t('lifeApproverEmpty'));
-                var finder = document.createElement('input');
-                finder.type = 'search';
-                finder.placeholder = t('schedulesFindUser');
-                finder.setAttribute('aria-label', t('lifeApprover'));
-                var hits = el('div', 'asset-tree-user-results');
-                var timer = null;
-                var seq = 0;
-                function showApprover(name) {
-                    chosen.textContent = name || t('lifeApproverEmpty');
-                    if (name) chosen.classList.remove('is-empty');
-                    else chosen.classList.add('is-empty');
-                }
-                showApprover(knownName);
-                finder.addEventListener('input', function () {
-                    clearTimeout(timer);
-                    timer = setTimeout(function () {
-                        var query = finder.value.trim();
-                        var mark = ++seq;
-                        hits.innerHTML = '';
-                        if (query.length < 2) return;
-                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                            if (mark !== seq) return;
-                            hits.innerHTML = '';
-                            (payload || []).forEach(function (user) {
-                                var label = user.displayName || user.userKey;
-                                if (user.email) label += ' · ' + user.email;
-                                hits.appendChild(button(label, 'asset-tree-user-hit', function () {
-                                    approverKey = user.userKey;
-                                    showApprover(user.displayName || user.userKey);
-                                    hits.innerHTML = '';
-                                    finder.value = '';
-                                }));
-                            });
-                        });
-                    }, 200);
-                });
-                var who = el('div', 'asset-tree-approver-pick');
-                var head = el('div', 'asset-tree-approver-head');
-                head.appendChild(el('span', null, t('lifeApprover')));
-                head.appendChild(button(t('schedulesMe'), 'asset-tree-linkish', function () {
-                    approverKey = state.userKey || '';
-                    showApprover(state.displayName || '');
-                    hits.innerHTML = '';
-                    finder.value = '';
-                }));
-                who.appendChild(head);
-                who.appendChild(chosen);
-                who.appendChild(finder);
-                who.appendChild(hits);
+                var who = el('p', 'asset-tree-life-state', t('lifeBranchApprover'));
                 dialog.appendChild(who);
-                if (approverKey && !knownName) {
+                if (!approverKey) who.textContent = t('lifeBranchEmpty');
+                else if (approverKey === state.userKey) who.textContent = t('lifeBranchApprover') + ': ' + (state.displayName || approverKey);
+                else {
                     ajax('GET', '/users/' + encodeURIComponent(approverKey), null, function (status, user) {
-                        if (status === 200 && user && user.displayName) showApprover(user.displayName);
+                        var name = status === 200 && user && user.displayName ? user.displayName : approverKey;
+                        who.textContent = t('lifeBranchApprover') + ': ' + name;
                     });
                 }
             }
             var actions = el('div', 'asset-tree-inline-actions');
-            actions.appendChild(button(direct ? t('lifeWriteoffNow') : t('lifeAsk'), 'asset-tree-btn primary', function () {
+            var ask = button(direct ? t('lifeWriteoffNow') : t('lifeAsk'), 'asset-tree-btn primary', function () {
                 var who = direct ? (state.userKey || '') : approverKey;
                 ajax('POST', '/assets/' + asset.id + '/lifecycle/writeoff', { reason: reason.value, approverKey: who }, function (status, payload) {
                     if (status >= 200 && status < 300 && payload) {
@@ -25863,7 +30144,9 @@
                         else showDetail(state.detail || asset, false);
                     } else notify((payload && payload.message) || t('errorTitle'));
                 });
-            }));
+            });
+            if (!direct && !approverKey) ask.disabled = true;
+            actions.appendChild(ask);
             actions.appendChild(button(t('cancel'), 'asset-tree-btn', closeModal));
             dialog.appendChild(actions);
         });
@@ -25983,8 +30266,37 @@
             }
         }
         stack.appendChild(block);
-        stack.appendChild(webhookSettings());
+        if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniImportCard());
         panel.appendChild(stack);
+    }
+
+    function tniImportCard() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('tniImportTitle')));
+        card.appendChild(el('p', 'asset-tree-hint', t('tniImportHint')));
+        var setup = moduleSetup();
+        var locked = !state.canArrange;
+        var boxes = tniSourceFields(card, setup, locked);
+        var kinds = tniTypeFields(card, setup, locked);
+        if (!locked) {
+            card.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
+                var next = moduleSetup();
+                next.tniBrowser = boxes.tniBrowser.checked;
+                next.tniScan = boxes.tniScan.checked;
+                next.tniAd = boxes.tniAd.checked;
+                next.tniSccm = boxes.tniSccm.checked;
+                next.tniPing = boxes.tniPing.checked;
+                next.tniComputer = kinds.computer.value;
+                next.tniLaptop = kinds.laptop.value;
+                next.tniPhone = kinds.phone.value;
+                next.tniTablet = kinds.tablet.value;
+                saveProjectView({ setup: next }, function (ok) {
+                    if (ok) renderFrame();
+                });
+            }));
+        }
+        if (state.canAdmin) appendTniTools(card);
+        return card;
     }
 
     function freshSecret() {
@@ -26008,18 +30320,6 @@
         node.spellcheck = false;
         node.placeholder = placeholder || '';
         return node;
-    }
-
-    function webhookSettings() {
-        var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('webhookRecipeTitle')));
-        block.appendChild(el('p', 'asset-tree-hint', t('automationPlain')));
-        var steps = el('ol', 'asset-tree-automation-steps');
-        [t('automationLink'), t('automationComment'), t('automationTrigger'), t('automationStatus')].forEach(function (line) {
-            steps.appendChild(el('li', null, line));
-        });
-        block.appendChild(steps);
-        return block;
     }
 
     function bytesToBase64(bytes) {
@@ -27188,6 +31488,13 @@
         return box;
     }
 
+    function scopeDisclosure(grant, onSave) {
+        var more = el('details', 'asset-tree-grant-more');
+        more.appendChild(el('summary', null, t('accessScope')));
+        more.appendChild(scopeEditor(grant, onSave));
+        return more;
+    }
+
     function schemaSettings() {
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('schemaTitle')));
@@ -27226,7 +31533,9 @@
         var name = textControl(t('schemaName'));
         name.setAttribute('aria-label', t('schemaName'));
         var picked = {};
-        block.appendChild(settingField(t('schemaName'), name));
+        var nameField = settingField(t('schemaName'), name);
+        nameField.classList.add('asset-tree-schema-name');
+        block.appendChild(nameField);
         block.appendChild(el('p', 'asset-tree-field-label', t('schemaTypes')));
         block.appendChild(typeTickList(picked, function (key, checked) {
             picked[key] = checked;
@@ -27252,13 +31561,16 @@
     }
 
     function renderAccessSettings(panel) {
-        var block = el('div', 'asset-tree-settings-block');
+        var stack = el('div', 'asset-tree-settings-block asset-tree-project-stack asset-tree-access-stack');
+        panel.appendChild(stack);
+        stack.appendChild(schemaSettings());
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
-        panel.appendChild(schemaSettings());
         if (state.grants === null) {
             state.grants = [];
             block.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            panel.appendChild(block);
+            stack.appendChild(block);
             var projectKey = state.projectKey;
             ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/grants', null, function (status, payload) {
                 if (state.view !== 'settings' || state.projectKey !== projectKey) return;
@@ -27272,7 +31584,7 @@
             return;
         }
         var grantRows = [];
-        var grantList = el('div', 'asset-tree-schema-scroll asset-tree-grant-list');
+        var grantList = el('div', 'asset-tree-grant-list');
         var grantEmpty = el('p', 'asset-tree-schema-empty', t('schemaNoMatch'));
         grantEmpty.hidden = true;
         var grantSearch = schemaSearchInput(state.grantQuery, function () {
@@ -27322,7 +31634,7 @@
                 }
                 postGrant(grant, caps, null);
             }));
-            row.appendChild(scopeEditor(grant, function (scope) {
+            row.appendChild(scopeDisclosure(grant, function (scope) {
                 postGrant(grant, capsJoined(grantCaps(grant)), null, scope);
             }));
             grantList.appendChild(row);
@@ -27372,7 +31684,7 @@
         });
         form.appendChild(grid);
         var scopeDraft = { typeScope: '', fieldScope: '', schemaName: '' };
-        form.appendChild(scopeEditor(scopeDraft, function (scope) {
+        form.appendChild(scopeDisclosure(scopeDraft, function (scope) {
             scopeDraft.typeScope = scope.typeScope;
             scopeDraft.fieldScope = scope.fieldScope;
             scopeDraft.schemaName = scope.schemaName;
@@ -27476,7 +31788,7 @@
         });
         block.appendChild(form);
         if (state.grants.length) block.appendChild(grantList);
-        panel.appendChild(block);
+        stack.appendChild(block);
     }
 
     function renderReport() {
@@ -27850,6 +32162,48 @@
                 saveDetail();
             }
         }
+        if (state.glyphEdit) {
+            var glyphTag = event.target && event.target.tagName;
+            var glyphField = glyphTag === 'INPUT' || glyphTag === 'TEXTAREA' || glyphTag === 'SELECT';
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                if (state.glyphEdit.pen) {
+                    state.glyphEdit.pen = null;
+                    renderGlyphEditor();
+                } else closeGlyphEditor();
+                return;
+            }
+            if (!glyphField && (event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z')) {
+                event.preventDefault();
+                if (state.glyphEdit.undo.length) {
+                    state.glyphEdit.redo.push(JSON.stringify(state.glyphEdit.objects || []));
+                    state.glyphEdit.objects = JSON.parse(state.glyphEdit.undo.pop());
+                    state.glyphEdit.sel = -1;
+                    renderGlyphEditor();
+                }
+                return;
+            }
+            if (!glyphField && event.key === 'Enter' && state.glyphEdit.pen && state.glyphEdit.pen.length >= 2) {
+                event.preventDefault();
+                finishGlyphPen(false);
+                return;
+            }
+            if (!glyphField && event.key === 'Backspace' && state.glyphEdit.pen && state.glyphEdit.pen.length) {
+                event.preventDefault();
+                state.glyphEdit.pen.pop();
+                if (!state.glyphEdit.pen.length) state.glyphEdit.pen = null;
+                renderGlyphEditor();
+                return;
+            }
+            if (!glyphField && (event.key === 'Delete' || event.key === 'Backspace') && state.glyphEdit.sel >= 0) {
+                event.preventDefault();
+                glyphPushUndo();
+                state.glyphEdit.objects.splice(state.glyphEdit.sel, 1);
+                state.glyphEdit.sel = -1;
+                renderGlyphEditor();
+                return;
+            }
+        }
         if (event.key === 'Escape') {
             closeMapMenu();
             closeColorMenu();
@@ -27892,9 +32246,31 @@
                     renderFrame();
                     return;
                 }
-                if (event.key === 'Escape' && (state.mapAnchor || state.mapArmId || state.mapAssetId || state.mapArc)) {
+                if (event.key === 'F2' && state.mapSelection != null) {
+                    var named = state.mapDraft.rooms && state.mapDraft.rooms[state.mapSelection];
+                    if (named && isPolygonRoom(named)) {
+                        event.preventDefault();
+                        state.mapRoomName = state.mapSelection;
+                        renderFrame();
+                        return;
+                    }
+                }
+                if (state.mapPen && state.mapPen.length && event.key === 'Backspace') {
+                    event.preventDefault();
+                    state.mapPen.pop();
+                    if (!state.mapPen.length) state.mapPen = null;
+                    renderFrame();
+                    return;
+                }
+                if (state.mapPen && state.mapPen.length >= 2 && event.key === 'Enter') {
+                    event.preventDefault();
+                    finishPen(state.mapDraft, false);
+                    return;
+                }
+                if (event.key === 'Escape' && (state.mapAnchor || state.mapPen || state.mapArmId || state.mapAssetId || state.mapArc)) {
                     event.preventDefault();
                     state.mapAnchor = null;
+                    state.mapPen = null;
                     state.mapArmId = 0;
                     state.mapAssetId = 0;
                     state.mapArc = null;
@@ -27905,7 +32281,7 @@
                 }
                 var rooms = state.mapDraft.rooms || [];
                 var room = state.mapSelection != null ? rooms[state.mapSelection] : null;
-                var step = state.mapStep || 8;
+                var step = state.mapStep || 10;
                 if (room && (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
                     event.preventDefault();
                     rememberMap();

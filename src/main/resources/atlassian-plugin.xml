@@ -38,12 +38,17 @@
         <entity>com.assetstree.jira.ao.FloorEntity</entity>
         <entity>com.assetstree.jira.ao.RoomEntity</entity>
         <entity>com.assetstree.jira.ao.PinEntity</entity>
+        <entity>com.assetstree.jira.ao.SchemeEntity</entity>
         <entity>com.assetstree.jira.ao.SavedReportEntity</entity>
         <entity>com.assetstree.jira.ao.LifecycleEntity</entity>
         <entity>com.assetstree.jira.ao.CardTemplateEntity</entity>
         <entity>com.assetstree.jira.ao.TypeSchemaEntity</entity>
         <entity>com.assetstree.jira.ao.WebhookEntity</entity>
         <entity>com.assetstree.jira.ao.IdempotencyEntity</entity>
+        <entity>com.assetstree.jira.ao.TniDeviceEntity</entity>
+        <entity>com.assetstree.jira.ao.TniSubnetEntity</entity>
+        <entity>com.assetstree.jira.ao.TniSourceEntity</entity>
+        <entity>com.assetstree.jira.ao.TniWatchEntity</entity>
     </ao>
 
     <customfield-type key="asset-cf" name="Project asset" i18n-name-key="asset-tree.field.cf.name" class="com.assetstree.jira.field.AssetCustomField">
@@ -68,6 +73,10 @@
 
     <servlet key="asset-tree-card-image" name="Asset Tree Card Image" class="com.assetstree.jira.servlet.CardImageServlet">
         <url-pattern>/asset-tree-card-image</url-pattern>
+    </servlet>
+
+    <servlet key="asset-tree-photo" name="Asset Tree Photo" class="com.assetstree.jira.servlet.PhotoServlet">
+        <url-pattern>/asset-tree-photo</url-pattern>
     </servlet>
 
     <web-item key="asset-tree-nav" name="Asset Tree Link" section="system.top.navigation.bar" weight="47">
@@ -120,6 +129,7 @@
         <resource type="download" name="asset-tree.css" location="css/asset-tree.css"/>
         <resource type="download" name="qr-code.js" location="js/qr-code.js"/>
         <resource type="download" name="plan-exchange.js" location="js/plan-exchange.js"/>
+        <resource type="download" name="schemes.js" location="js/schemes.js"/>
         <resource type="download" name="asset-tree.js" location="js/asset-tree.js"/>
     </web-resource>
 
@@ -140,11 +150,19 @@
         <context>customerportal</context>
         <resource type="download" name="asset-field.css" location="css/asset-field.css"/>
         <resource type="download" name="asset-field.js" location="js/asset-field.js"/>
+        <resource type="download" name="tni-portal.js" location="js/tni-portal.js"/>
     </web-resource>
 
     <listener key="asset-tree-flow-listener" name="Asset Tree Flow Listener" class="com.assetstree.jira.event.AssetFlowListener">
         <description>Moves linked equipment when a request changes status.</description>
     </listener>
+
+    <servlet-filter name="Asset Tree TNI Sight" key="asset-tree-tni-sight" class="com.assetstree.jira.servlet.TniSightFilter" location="before-dispatch" weight="10">
+        <description>Keeps the portal device report that arrives with the request which creates the issue.</description>
+        <url-pattern>/*</url-pattern>
+        <dispatcher>REQUEST</dispatcher>
+        <dispatcher>FORWARD</dispatcher>
+    </servlet-filter>
 
     <servlet-filter name="Asset Tree Portal Field" key="asset-tree-portal-filter" class="com.assetstree.jira.servlet.PortalPageFilter" location="before-decoration" weight="50">
         <description>Adds the asset dropdown to the customer portal create form.</description>
