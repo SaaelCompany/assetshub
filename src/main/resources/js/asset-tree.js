@@ -23259,6 +23259,7 @@
             ajax: ajax,
             projectKey: state.projectKey,
             canEdit: !!state.canEdit,
+            say: notify,
             assets: assets,
             places: places,
             focusId: focusId
@@ -25000,10 +25001,7 @@
                     });
                     return;
                 }
-                var text = '';
-                var i;
-                for (i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
-                applyPlanImport(picked.name, text);
+                applyPlanImport(picked.name, bytes);
                 file.value = '';
             };
             reader.readAsArrayBuffer(picked);
