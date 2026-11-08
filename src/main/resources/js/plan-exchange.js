@@ -724,6 +724,10 @@ var AssetTreePlan = (function () {
     }
 
     function planArea(points) {
+        return Math.abs(planSigned(points));
+    }
+
+    function planSigned(points) {
         var sum = 0;
         var i;
         for (i = 0; i < points.length; i++) {
@@ -731,7 +735,7 @@ var AssetTreePlan = (function () {
             var b = points[(i + 1) % points.length];
             sum += a.x * b.y - b.x * a.y;
         }
-        return Math.abs(sum) / 2;
+        return sum / 2;
     }
 
     function planFaces(segments) {
@@ -803,7 +807,7 @@ var AssetTreePlan = (function () {
             }
             if (!closed || loop.length < 3) return;
             var pts = loop.map(function (nid) { return { x: nodes[nid].x, y: nodes[nid].y }; });
-            if (planArea(pts) > 2500) faces.push(pts);
+            if (planSigned(pts) > 2500) faces.push(pts);
         });
         return faces.filter(function (face, index) {
             var area = planArea(face);

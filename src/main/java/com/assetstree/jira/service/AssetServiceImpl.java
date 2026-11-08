@@ -814,6 +814,10 @@ public class AssetServiceImpl implements AssetService {
                 entity.setUpdated(new Date());
                 entity.setUpdatedBy(user.getKey());
                 entity.save();
+                if (type.isLocation() && draft.getApproverKey() != null) {
+                    String approver = normalizeCustodian(draft.getApproverKey());
+                    storePlaceApprover(entity.getProjectKey(), entity.getID(), approver == null ? "" : approver);
+                }
                 if (draft.getAttributes() != null) {
                     replaceAttributes(entity, draft.getAttributes());
                 }
@@ -3676,6 +3680,19 @@ public class AssetServiceImpl implements AssetService {
     private boolean moduleOn(String projectKey, String module) {
         ProjectViewEntity row = viewRow(projectKey);
         return row != null && ProjectModules.has(row.getModuleList(), module);
+    }
+
+    private void storePlaceApprover(String projectKey, int placeId, String userKey) {
+        ProjectViewEntity row = viewRow(projectKey);
+        if (row == null) {
+            row = ao().create(ProjectViewEntity.class,
+                    new DBParam("PROJECT_KEY", projectKey),
+                    new DBParam("TREE_MODE", Integer.valueOf(0)));
+        }
+        ModuleSetupDto setup = ModuleSetup.read(row.getOptionList());
+        setup.setLifePlaces(LifeApprovers.assign(setup.getLifePlaces(), placeId, userKey));
+        row.setOptionList(ModuleSetup.write(setup));
+        row.save();
     }
 
     private ProjectViewEntity viewRow(String projectKey) {

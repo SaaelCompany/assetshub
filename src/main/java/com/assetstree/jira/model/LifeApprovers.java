@@ -15,7 +15,28 @@ public final class LifeApprovers {
     }
 
     public static String normalize(String raw) {
+        return join(parse(raw));
+    }
+
+    /** Puts one place's approver. An empty user clears that place and leaves the others. */
+    public static String assign(String raw, int placeId, String userKey) {
         Map<Integer, String> places = parse(raw);
+        if (placeId <= 0) {
+            return join(places);
+        }
+        if (userKey == null || userKey.trim().isEmpty()) {
+            places.remove(Integer.valueOf(placeId));
+        } else {
+            String user = userKey.trim();
+            Integer id = Integer.valueOf(placeId);
+            if (user.matches("[A-Za-z0-9._@-]{1,80}") && (places.containsKey(id) || places.size() < MAX)) {
+                places.put(id, user);
+            }
+        }
+        return join(places);
+    }
+
+    private static String join(Map<Integer, String> places) {
         StringBuilder stored = new StringBuilder();
         for (Map.Entry<Integer, String> entry : places.entrySet()) {
             if (stored.length() > 0) {

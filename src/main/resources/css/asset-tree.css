@@ -154,12 +154,19 @@
     right: 20px;
     bottom: 20px;
     z-index: 30;
+    width: auto;
+    max-width: min(360px, calc(100vw - 40px));
+    max-height: 72px;
+    overflow: hidden;
     background: #e3fcef;
     color: #006644;
     border: 1px solid #abf5d1;
     border-radius: 3px;
     padding: 8px 12px;
     font-size: 13px;
+    line-height: 1.35;
+    white-space: normal;
+    word-break: break-word;
     opacity: 0;
     transform: translateY(6px);
     pointer-events: none;
@@ -12504,6 +12511,21 @@ button.asset-tree-attach-remove {
     flex-direction: column;
     gap: 6px;
     margin: 8px 0 12px;
+}
+
+#asset-tree-app .asset-tree-tni-sources {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 8px 0 12px;
+}
+
+#asset-tree-app .asset-tree-project-card .asset-tree-tni-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
 }
 
 #asset-tree-app .asset-tree-tni-scan {

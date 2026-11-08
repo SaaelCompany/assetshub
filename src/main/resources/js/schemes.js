@@ -683,7 +683,18 @@
             }
             if (!found.length) return point;
             var rank = { endpoint: 0, midpoint: 1, intersection: 2, center: 3, perpendicular: 4, nearest: 5 };
-            found.sort(function (a, b) { return rank[a.kind] - rank[b.kind]; });
+            found.sort(function (a, b) {
+                var da = dist(a.x, a.y, raw.x, raw.y);
+                var db = dist(b.x, b.y, raw.x, raw.y);
+                if (Math.abs(da - db) > 0.5) return da - db;
+                return (rank[a.kind] || 9) - (rank[b.kind] || 9);
+            });
+            var closest = found[0];
+            var snapKey = closest.kind + ':' + closest.x + ':' + closest.y;
+            if (session.osnapKey !== snapKey) {
+                session.osnapKey = snapKey;
+                session.osnapIndex = 0;
+            }
             session.osnapList = found;
             if (session.osnapIndex >= found.length) session.osnapIndex = 0;
             session.osnap = found[session.osnapIndex];
@@ -867,6 +878,33 @@
             if (obj.type === 'wall') syncRooms(activeFloor());
             session.selection = [obj.id];
             session.draft = null;
+            session.typed = '';
+            refreshSide();
+            renderProps();
+            paint();
+        }
+
+        function commitWall(x1, y1, x2, y2) {
+            session.draft = null;
+            session.wallDoneAt = Date.now();
+            if (dist(x1, y1, x2, y2) < 2) {
+                paint();
+                return;
+            }
+            remember();
+            var obj = baseObject('wall');
+            obj.points = [
+                { x: roundCm(x1), y: roundCm(y1) },
+                { x: roundCm(x2), y: roundCm(y2) }
+            ];
+            obj.closed = false;
+            obj.thickness = 15;
+            obj.alignment = 'center';
+            obj.hatch = 'diagonal';
+            obj.height = 300;
+            activeFloor().objects.push(obj);
+            syncRooms(activeFloor());
+            session.selection = [obj.id];
             session.typed = '';
             refreshSide();
             renderProps();
@@ -1293,6 +1331,10 @@
                 x2 = session.draft.x1 + side * (x2 >= session.draft.x1 ? 1 : -1);
                 y2 = session.draft.y1 + side * (y2 >= session.draft.y1 ? 1 : -1);
             }
+            if (session.draft.tool === 'wall') {
+                commitWall(session.draft.x1, session.draft.y1, x2, y2);
+                return;
+            }
             commitTwo(session.draft.tool, session.draft.x1, session.draft.y1, x2, y2);
         }
 
@@ -1635,9 +1677,151 @@
             ctx.restore();
         }
 
-        function drawWall(ctx, wall, floor) {
+        var WALL_JOIN = 6;
+
+        function floorForWalls(floor) {
+            var objects = (floor && floor.objects) ? floor.objects.slice() : [];
+            var draft = session.draft;
+            if (!draft || draft.tool !== 'wall' || session.mode !== 'edit') return { objects: objects };
+            var points = null;
+            if (draft.points && draft.points.length >= 2) points = draft.points;
+            else if (draft.phase === 1 && draft.x1 != null) {
+                points = [{ x: draft.x1, y: draft.y1 }, { x: draft.x2, y: draft.y2 }];
+            }
+            if (!points) return { objects: objects };
+            objects.push({ type: 'wall', points: points, thickness: 15, closed: false, draft: true });
+            return { objects: objects };
+        }
+
+        function wallSegments(floor, self) {
+            var list = [];
+            (floor.objects || []).forEach(function (item, rank) {
+                if (!item || item === self || item.type !== 'wall' || !item.points || item.points.length < 2) return;
+                var pts = item.points;
+                var thick = item.thickness || 15;
+                var i;
+                for (i = 1; i < pts.length; i++) list.push({ a: pts[i - 1], b: pts[i], thick: thick, rank: rank });
+                if (item.closed && pts.length > 2) list.push({ a: pts[pts.length - 1], b: pts[0], thick: thick, rank: rank });
+            });
+            return list;
+        }
+
+        function wallRank(floor, wall) {
+            var objects = floor.objects || [];
+            var i;
+            for (i = 0; i < objects.length; i++) if (objects[i] === wall) return i;
+            return 1000000;
+        }
+
+        function wallVec(a, b) {
+            var dx = b.x - a.x;
+            var dy = b.y - a.y;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            return { x: dx / len, y: dy / len };
+        }
+
+        function wallTurn(u, v) {
+            var dot = u.x * v.x + u.y * v.y;
+            if (dot > 1) dot = 1;
+            if (dot < -1) dot = -1;
+            return Math.acos(dot) * 180 / Math.PI;
+        }
+
+        function wallLeft(dir) {
+            return { x: dir.y, y: -dir.x };
+        }
+
+        function wallNear(a, b) {
+            return dist(a.x, a.y, b.x, b.y) <= WALL_JOIN;
+        }
+
+        function slideCap(p, s, half, delta, cap) {
+            var toward = wallVec(s, p);
+            var leftN = wallLeft(toward);
+            var limit = Math.abs(half) * 1.4 + 2;
+            if (delta > limit) delta = limit;
+            if (delta < -limit) delta = -limit;
+            var capP = { x: p.x + toward.x * delta, y: p.y + toward.y * delta };
+            return {
+                cap: !!cap,
+                left: { x: capP.x + leftN.x * half, y: capP.y + leftN.y * half },
+                right: { x: capP.x - leftN.x * half, y: capP.y - leftN.y * half }
+            };
+        }
+
+        function meetAngle(toward, dir) {
+            return wallTurn(toward, dir);
+        }
+
+        function endJoin(segs, p, s, half, rank) {
+            var toward = wallVec(s, p);
+            var len = dist(p.x, p.y, s.x, s.y);
+            var ends = [];
+            var bodies = [];
+            segs.forEach(function (seg) {
+                var atA = wallNear(seg.a, p);
+                var atB = wallNear(seg.b, p);
+                if (atA && wallNear(seg.b, s)) return;
+                if (atB && wallNear(seg.a, s)) return;
+                if (atA) ends.push({ other: seg.b, thick: seg.thick, rank: seg.rank });
+                else if (atB) ends.push({ other: seg.a, thick: seg.thick, rank: seg.rank });
+                else {
+                    var hit = projectSeg(seg.a.x, seg.a.y, seg.b.x, seg.b.y, p.x, p.y);
+                    if (hit.t > 0.04 && hit.t < 0.96 && hit.dist <= WALL_JOIN) {
+                        bodies.push({ a: seg.a, b: seg.b, thick: seg.thick, dist: hit.dist, dir: wallVec(seg.a, seg.b) });
+                    }
+                }
+            });
+            var straight = [];
+            var angled = [];
+            ends.forEach(function (end) {
+                var deg = meetAngle(toward, wallVec(p, end.other));
+                if (deg < 12 || deg > 168) straight.push(end);
+                else angled.push(end);
+            });
+            if (straight.length) return { cap: false };
+            var pair = null;
+            var i;
+            var j;
+            for (i = 0; i < angled.length && !pair; i++) {
+                for (j = i + 1; j < angled.length; j++) {
+                    if (meetAngle(wallVec(p, angled[i].other), wallVec(p, angled[j].other)) > 168) pair = [angled[i], angled[j]];
+                }
+            }
+            function butt(barDir, barThick) {
+                var deg = meetAngle(toward, barDir);
+                var sin = Math.sin(deg * Math.PI / 180);
+                if (sin < 0.34) return { cap: false };
+                var cut = (barThick / 2) / sin - 1.5;
+                if (cut < 0) cut = 0;
+                if (cut > len * 0.45) cut = len * 0.45;
+                return slideCap(p, s, half, -cut);
+            }
+            if (pair) {
+                return butt(wallVec(pair[0].other, pair[1].other), Math.max(pair[0].thick, pair[1].thick));
+            }
+            if (angled.length === 1) {
+                var other = angled[0];
+                var away = wallVec(p, other.other);
+                var deg = meetAngle(toward, away);
+                var sin = Math.sin(deg * Math.PI / 180);
+                if (sin < 0.34) return { cap: false };
+                if (other.rank < rank) return butt(away, other.thick);
+                var ext = (other.thick / 2) / sin;
+                return slideCap(p, s, half, ext, true);
+            }
+            if (angled.length) return { cap: false };
+            if (bodies.length) {
+                bodies.sort(function (a, b) { return a.dist - b.dist; });
+                return butt(bodies[0].dir, bodies[0].thick);
+            }
+            return { cap: true };
+        }
+
+        function drawWall(ctx, wall, floor, mode) {
             var points = wall.points || [];
             if (points.length < 2) return;
+            var joined = floorForWalls(floor);
             var half = (wall.thickness || 15) / 2;
             if (wall.alignment === 'left') half = wall.thickness || 15;
             var openings = (floor.objects || []).filter(function (obj) {
@@ -1652,18 +1836,41 @@
             var closed = !!wall.closed && points.length > 2;
             var leftEdge = offsetPoints(points, closed, half);
             var rightEdge = offsetPoints(points, closed, -half);
+            var capStart = !closed;
+            var capEnd = !closed;
+            if (!closed) {
+                var segs = wallSegments(joined, wall);
+                var rank = wallRank(joined, wall);
+                var start = endJoin(segs, points[0], points[1], half, rank);
+                var end = endJoin(segs, points[points.length - 1], points[points.length - 2], half, rank);
+                if (start.left) {
+                    // The start cap is measured back along the wall, so its left and right are swapped.
+                    leftEdge[0] = start.right;
+                    rightEdge[0] = start.left;
+                }
+                var tail = points.length - 1;
+                if (end.left) {
+                    leftEdge[tail] = end.left;
+                    rightEdge[tail] = end.right;
+                }
+                capStart = !!start.cap;
+                capEnd = !!end.cap;
+            }
             var i;
             for (i = 1; i < points.length; i++) {
-                drawWallSegment(ctx, wall, points[i - 1], points[i], leftEdge[i - 1], leftEdge[i], rightEdge[i - 1], rightEdge[i], i - 1, openings);
+                drawWallSegment(ctx, wall, points[i - 1], points[i], leftEdge[i - 1], leftEdge[i], rightEdge[i - 1], rightEdge[i], i - 1, openings, {
+                    start: i === 1 && capStart,
+                    end: i === points.length - 1 && capEnd
+                }, mode);
             }
             if (closed) {
                 var last = points.length - 1;
-                drawWallSegment(ctx, wall, points[last], points[0], leftEdge[last], leftEdge[0], rightEdge[last], rightEdge[0], last, openings);
+                drawWallSegment(ctx, wall, points[last], points[0], leftEdge[last], leftEdge[0], rightEdge[last], rightEdge[0], last, openings, { start: false, end: false }, mode);
             }
             ctx.restore();
         }
 
-        function drawWallSegment(ctx, wall, a, b, la, lb, ra, rb, index, openings) {
+        function drawWallSegment(ctx, wall, a, b, la, lb, ra, rb, index, openings, caps, mode) {
             var gaps = [];
             var i;
             for (i = 0; i < openings.length; i++) {
@@ -1679,27 +1886,51 @@
             function at(t) { return { x: a.x + dx * t, y: a.y + dy * t }; }
             function along(p, q, t) { return { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }; }
             function band(t0, t1) {
-                quad(ctx, [along(la, lb, t0), along(la, lb, t1), along(ra, rb, t1), along(ra, rb, t0)], wall);
+                quad(ctx, [along(la, lb, t0), along(la, lb, t1), along(ra, rb, t1), along(ra, rb, t0)], wall, {
+                    start: t0 <= 0.001 && caps.start,
+                    end: t1 >= 0.999 && caps.end,
+                    cutStart: t0 > 0.001,
+                    cutEnd: t1 < 0.999
+                }, mode);
             }
             for (i = 0; i < gaps.length; i++) {
                 var gap = gaps[i];
                 var from = Math.max(0, gap.from);
                 var to = Math.min(1, gap.to);
                 if (from > cursor) band(cursor, from);
-                drawOpening(ctx, at(from), at(to), gap.opening);
+                if (!mode || mode === 'body' || mode === 'all') drawOpening(ctx, at(from), at(to), gap.opening);
                 cursor = to;
             }
             if (cursor < 1) band(cursor, 1);
         }
 
-        function quad(ctx, poly, wall) {
+        function quad(ctx, poly, wall, caps, mode) {
             if (!poly || poly.length < 4) return;
             if (dist(poly[0].x, poly[0].y, poly[1].x, poly[1].y) < 0.5 && dist(poly[0].x, poly[0].y, poly[3].x, poly[3].y) < 0.5) return;
-            pathOf(ctx, poly, true);
-            ctx.fill();
-            if (wall.hatch !== 'none') hatch(ctx, poly, wall.hatch || 'diagonal', wall.color || '#97a0af');
-            pathOf(ctx, poly, true);
-            ctx.stroke();
+            var paint = mode || 'all';
+            if (paint === 'body' || paint === 'cover' || paint === 'all') {
+                pathOf(ctx, poly, true);
+                ctx.fill();
+            }
+            if ((paint === 'hatch' || paint === 'all') && wall.hatch !== 'none') {
+                hatch(ctx, poly, wall.hatch || 'diagonal', wall.color || '#97a0af');
+            }
+            if (paint === 'stroke' || paint === 'all') {
+                ctx.beginPath();
+                ctx.moveTo(poly[0].x, poly[0].y);
+                ctx.lineTo(poly[1].x, poly[1].y);
+                ctx.moveTo(poly[3].x, poly[3].y);
+                ctx.lineTo(poly[2].x, poly[2].y);
+                if (caps && (caps.end || caps.cutEnd)) {
+                    ctx.moveTo(poly[1].x, poly[1].y);
+                    ctx.lineTo(poly[2].x, poly[2].y);
+                }
+                if (caps && (caps.start || caps.cutStart)) {
+                    ctx.moveTo(poly[3].x, poly[3].y);
+                    ctx.lineTo(poly[0].x, poly[0].y);
+                }
+                ctx.stroke();
+            }
         }
 
         function hatch(ctx, poly, kind, color) {
@@ -1721,33 +1952,37 @@
             ctx.lineWidth = 0.35;
             ctx.beginPath();
             if (kind === 'brick') {
+                var y0 = Math.floor(minY / 6) * 6;
                 var y;
-                var row = 0;
-                for (y = minY; y <= maxY; y += 6) {
-                    var shift = row % 2 ? 8 : 0;
+                for (y = y0; y <= maxY; y += 6) {
+                    var shift = Math.round(y / 6) % 2 ? 8 : 0;
+                    var x0 = Math.floor(minX / 16) * 16 + shift;
                     var x;
                     ctx.moveTo(minX, y);
                     ctx.lineTo(maxX, y);
-                    for (x = minX + shift; x <= maxX; x += 16) {
+                    for (x = x0; x <= maxX; x += 16) {
                         ctx.moveTo(x, y);
                         ctx.lineTo(x, Math.min(maxY, y + 6));
                     }
-                    row++;
                 }
             } else if (kind === 'concrete') {
+                var cx0 = Math.floor(minX / 4) * 4;
+                var cy0 = Math.floor(minY / 4) * 4;
                 var cx;
                 var cy;
-                for (cy = minY; cy <= maxY; cy += 4) {
-                    for (cx = minX; cx <= maxX; cx += 4) {
+                for (cy = cy0; cy <= maxY; cy += 4) {
+                    for (cx = cx0; cx <= maxX; cx += 4) {
                         ctx.moveTo(cx, cy);
                         ctx.lineTo(cx + 0.6, cy);
                     }
                 }
             } else {
-                var d;
-                for (d = minX - (maxY - minY); d < maxX; d += 4) {
-                    ctx.moveTo(d, minY);
-                    ctx.lineTo(d + (maxY - minY), maxY);
+                var low = minY - maxX;
+                var high = maxY - minX;
+                var c = Math.floor(low / 4) * 4;
+                for (; c <= high; c += 4) {
+                    ctx.moveTo(minX, minX + c);
+                    ctx.lineTo(maxX, maxX + c);
                 }
             }
             ctx.stroke();
@@ -1967,10 +2202,25 @@
             ctx.globalAlpha = ghost ? 0.16 : 1;
             var objects = floor.objects || [];
             for (i = 0; i < objects.length; i++) {
-                if (objects[i].type === 'opening') continue;
+                if (objects[i].type === 'opening' || objects[i].type === 'wall') continue;
                 drawObject(ctx, objects[i], floor);
             }
+            drawWallLayer(ctx, floor);
             ctx.restore();
+        }
+
+        function drawWallLayer(ctx, floor) {
+            var objects = floor.objects || [];
+            var walls = [];
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                if (objects[i].type === 'wall') walls.push(objects[i]);
+            }
+            if (!walls.length) return;
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'body');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'stroke');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'cover');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'hatch');
         }
 
         function paint() {
@@ -2082,7 +2332,7 @@
                             color: '#172b4d',
                             hatch: 'diagonal',
                             opacity: 1
-                        }, { objects: [] });
+                        }, activeFloor());
                     } else {
                         ctx.strokeStyle = '#0052cc';
                         ctx.lineWidth = 1;
@@ -2101,6 +2351,17 @@
                         ctx.moveTo(session.draft.x1, session.draft.y1);
                         ctx.lineTo(session.draft.x2, session.draft.y2);
                         ctx.stroke();
+                    } else if (session.draft.tool === 'wall') {
+                        drawWall(ctx, {
+                            points: [
+                                { x: session.draft.x1, y: session.draft.y1 },
+                                { x: session.draft.x2, y: session.draft.y2 }
+                            ],
+                            thickness: 15,
+                            color: '#172b4d',
+                            hatch: 'diagonal',
+                            opacity: 1
+                        }, activeFloor());
                     } else {
                         ctx.strokeRect(
                             Math.min(session.draft.x1, session.draft.x2),
@@ -2126,6 +2387,7 @@
                 '   ' + api.t('schemeGrid') + ' ' + formatLen(gridStep()) +
                 (live ? '   ' + api.t('schemeLength') + ' ' + live.text : '') +
                 (session.typed ? '   ' + session.typed : '');
+            if (session.tool === 'wall') status.textContent += '   ' + api.t('schemeWallOne');
         }
 
         function liveLength() {
@@ -4062,13 +4324,17 @@
                 return;
             }
             if (session.tool === 'wall') {
-                if (!session.draft) session.draft = { tool: session.tool, points: [pt, { x: pt.x, y: pt.y }] };
-                else {
-                    session.draft.points[session.draft.points.length - 1] = { x: pt.x, y: pt.y };
-                    var first = session.draft.points[0];
-                    var back = dist(pt.x, pt.y, first.x, first.y) <= 12 / session.cam.z;
-                    if (back && session.draft.points.length >= 4) finishPoly(true);
-                    else if (!back) session.draft.points.push({ x: pt.x, y: pt.y });
+                if (session.wallDoneAt && (Date.now() - session.wallDoneAt) < 280
+                    && Math.abs(event.clientX - session.wallDoneX) < 4
+                    && Math.abs(event.clientY - session.wallDoneY) < 4) {
+                    return;
+                }
+                if (!session.draft) {
+                    session.draft = { tool: 'wall', phase: 1, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
+                } else {
+                    session.wallDoneX = event.clientX;
+                    session.wallDoneY = event.clientY;
+                    commitWall(session.draft.x1, session.draft.y1, pt.x, pt.y);
                 }
                 paint();
                 return;
