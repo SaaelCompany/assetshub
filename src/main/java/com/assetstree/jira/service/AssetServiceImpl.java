@@ -8166,7 +8166,7 @@ public class AssetServiceImpl implements AssetService {
             row.setMoves(ServiceDue.keepDone(cleanMoves(draft.getMoves()), row.getMoves()));
         }
         if (!markedDay.isEmpty()) {
-            row.setMoves(ServiceDue.rememberDone(row.getMoves(), markedDay));
+            row.setMoves(ServiceDue.rememberDone(row.getMoves(), markedDay, businessToday().toString()));
         }
         if (row.getName() == null || row.getLastDone() == null || row.getEveryUnit() == null) {
             throw new AssetException(400, "asset-tree.error.service");
@@ -10383,7 +10383,16 @@ public class AssetServiceImpl implements AssetService {
             LocalDate series = ServiceDue.next(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit());
             List<ScheduleOccurrences.Shown> days = ScheduleOccurrences.reportDays(plan.getLastDone(), plan.getEveryCount(),
                     plan.getEveryUnit(), plan.getMoves(), plan.getStartTime(), plan.getEndTime(), today, planCompleted(plan, series));
-            if (days.isEmpty()) {
+            String next = ScheduleDone.expectedAfter(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit(), today);
+            boolean seenFuture = false;
+            if (days != null) {
+                for (ScheduleOccurrences.Shown shown : days) {
+                    if (shown.getDay() != null && shown.getDay().isAfter(today)) {
+                        seenFuture = true;
+                    }
+                }
+            }
+            if (days == null || days.isEmpty()) {
                 continue;
             }
             String bucketKey = WorkKind.clean(plan.getKind());
@@ -10398,22 +10407,16 @@ public class AssetServiceImpl implements AssetService {
             }
             String who = asset == null ? i18n().getText("asset-tree.ui.reportNoAsset") : asset.getName();
             String name = plan.getName() == null || plan.getName().trim().isEmpty() ? label : plan.getName().trim();
-            for (ScheduleOccurrences.Shown shown : days) {
-                bucket.setCount(bucket.getCount() + 1);
-                StringBuilder detail = new StringBuilder();
-                detail.append(label).append(" · ").append(who).append(" · ").append(shown.getDay().toString());
-                if (!shown.getStart().isEmpty()) {
-                    detail.append(' ').append(shown.getStart());
-                    if (!shown.getEnd().isEmpty()) {
-                        detail.append('–').append(shown.getEnd());
-                    }
+            String clock = workClock(plan.getStartTime(), plan.getEndTime());
+            if (days != null) {
+                for (ScheduleOccurrences.Shown shown : days) {
+                    String day = shown.getDay().toString();
+                    String state = shown.getDay().isBefore(today) ? ScheduleDone.OVERDUE : ScheduleDone.EXPECTED;
+                    addWorkLine(bucket, lines, lineKeys, bucketKey, asset, name, who, label, day, state, next, shownClock(shown, clock));
                 }
-                ReportLineDto line = new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString());
-                line.setBucket(bucketKey);
-                line.setFrom(shown.getDay().toString());
-                line.setTo(shown.getDay().toString());
-                lines.add(line);
-                lineKeys.add(bucketKey);
+            }
+            if (!next.isEmpty() && !seenFuture) {
+                addWorkLine(bucket, lines, lineKeys, bucketKey, asset, name, who, label, next, ScheduleDone.EXPECTED, next, clock);
             }
         }
         int total = 0;
@@ -10487,9 +10490,9 @@ public class AssetServiceImpl implements AssetService {
                 continue;
             }
             LocalDate series = ServiceDue.next(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit());
-            List<String> days = ScheduleDone.days(plan.getMoves(), plan.getLastDone(), plan.getEveryUnit(),
+            List<ScheduleDone.Mark> marks = ScheduleDone.marks(plan.getMoves(), plan.getLastDone(), plan.getEveryUnit(),
                     plan.getCompletedOn(), planCompleted(plan, series));
-            if (days.isEmpty()) {
+            if (marks.isEmpty()) {
                 continue;
             }
             String kindKey = WorkKind.clean(plan.getKind());
@@ -10499,11 +10502,15 @@ public class AssetServiceImpl implements AssetService {
             String kindLabel = namedKind(kindKey, kindNames);
             String who = asset == null ? i18n().getText("asset-tree.ui.reportNoAsset") : asset.getName();
             String name = plan.getName() == null || plan.getName().trim().isEmpty() ? kindLabel : plan.getName().trim();
-            for (String day : days) {
+            String next = ScheduleDone.expectedAfter(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit(), businessToday());
+            String clock = workClock(plan.getStartTime(), plan.getEndTime());
+            for (ScheduleDone.Mark mark : marks) {
+                String day = mark.getDay();
+                String state = mark.getState();
                 StringBuilder keyBuf = new StringBuilder();
                 StringBuilder labelBuf = new StringBuilder();
                 for (int axis = 0; axis < axes.size(); axis++) {
-                    String piece = donePiece(axes.get(axis), day, kindKey, plan, asset, types, index);
+                    String piece = donePiece(axes.get(axis), day, state, kindKey, plan, asset, types, index);
                     String pieceLabel = donePieceLabel(axes.get(axis), piece, kindNames, types, index);
                     if (axis > 0) {
                         keyBuf.append('\u001f');
@@ -10520,7 +10527,12 @@ public class AssetServiceImpl implements AssetService {
                 String label = labelBuf.toString();
                 ReportBucketDto bucket = buckets.get(bucketKey);
                 if (bucket == null) {
-                    String color = axes.size() == 1 && "kind".equals(axes.get(0)) ? kindColor(kindKey) : "#0052CC";
+                    String color = "#0052CC";
+                    if (axes.size() == 1 && "kind".equals(axes.get(0))) {
+                        color = kindColor(kindKey);
+                    } else if (axes.size() == 1 && "state".equals(axes.get(0))) {
+                        color = workStateColor(state);
+                    }
                     if (axes.size() == 1 && "type".equals(axes.get(0))) {
                         AssetTypeDto type = types.get(bucketKey);
                         color = type == null || type.getColor() == null || type.getColor().isEmpty() ? "#0052CC" : type.getColor();
@@ -10528,23 +10540,7 @@ public class AssetServiceImpl implements AssetService {
                     bucket = new ReportBucketDto(bucketKey, label, color, 0);
                     buckets.put(bucketKey, bucket);
                 }
-                bucket.setCount(bucket.getCount() + 1);
-                StringBuilder detail = new StringBuilder();
-                detail.append(kindLabel).append(" · ").append(who).append(" · ").append(day);
-                String start = plan.getStartTime() == null ? "" : plan.getStartTime().trim();
-                String end = plan.getEndTime() == null ? "" : plan.getEndTime().trim();
-                if (!start.isEmpty()) {
-                    detail.append(' ').append(start);
-                    if (!end.isEmpty()) {
-                        detail.append('–').append(end);
-                    }
-                }
-                ReportLineDto line = new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString());
-                line.setBucket(bucketKey);
-                line.setFrom(day);
-                line.setTo(day);
-                lines.add(line);
-                lineKeys.add(bucketKey);
+                addWorkLine(bucket, lines, lineKeys, bucketKey, asset, name, who, kindLabel, day, state, next, clock);
             }
         }
         int total = 0;
@@ -10555,7 +10551,81 @@ public class AssetServiceImpl implements AssetService {
                 i18n().getText("asset-tree.ui.reportEmptyDone"), placeSort);
     }
 
-    private String donePiece(String axis, String day, String kindKey, ServicePlanEntity plan, AssetEntity asset,
+    private void addWorkLine(ReportBucketDto bucket, List<ReportLineDto> lines, List<String> lineKeys, String bucketKey,
+            AssetEntity asset, String name, String equipment, String kindLabel, String day, String state, String next, String clock) {
+        bucket.setCount(bucket.getCount() + 1);
+        StringBuilder detail = new StringBuilder();
+        detail.append(kindLabel).append(" · ").append(equipment).append(" · ").append(day);
+        if (clock != null && !clock.isEmpty()) {
+            detail.append(' ').append(clock);
+        }
+        detail.append(" · ").append(workStateLabel(state));
+        if (next != null && !next.isEmpty() && !next.equals(day)) {
+            detail.append(" · ").append(next);
+        }
+        ReportLineDto line = new ReportLineDto(asset == null ? 0 : asset.getID(), asset == null ? "" : asset.getObjectKey(), name, detail.toString());
+        line.setBucket(bucketKey);
+        line.setFrom(day);
+        line.setTo(day);
+        line.setAsset(equipment);
+        line.setKind(kindLabel);
+        line.setWhen(day);
+        line.setState(state);
+        line.setNext(next == null ? "" : next);
+        line.setClock(clock == null ? "" : clock);
+        lines.add(line);
+        lineKeys.add(bucketKey);
+    }
+
+    private String workClock(String start, String end) {
+        String from = start == null ? "" : start.trim();
+        String to = end == null ? "" : end.trim();
+        if (from.isEmpty()) {
+            return "";
+        }
+        return to.isEmpty() ? from : from + "–" + to;
+    }
+
+    private String shownClock(ScheduleOccurrences.Shown shown, String fallback) {
+        if (shown == null || shown.getStart() == null || shown.getStart().isEmpty()) {
+            return fallback == null ? "" : fallback;
+        }
+        return workClock(shown.getStart(), shown.getEnd());
+    }
+
+    private String workStateLabel(String state) {
+        if (ScheduleDone.ONTIME.equals(state)) {
+            return i18n().getText("asset-tree.ui.reportStateOntime");
+        }
+        if (ScheduleDone.LATE.equals(state)) {
+            return i18n().getText("asset-tree.ui.reportStateLate");
+        }
+        if (ScheduleDone.OVERDUE.equals(state)) {
+            return i18n().getText("asset-tree.ui.reportStateOverdue");
+        }
+        if (ScheduleDone.EXPECTED.equals(state)) {
+            return i18n().getText("asset-tree.ui.reportStateExpected");
+        }
+        return i18n().getText("asset-tree.ui.reportStateDone");
+    }
+
+    private String workStateColor(String state) {
+        if (ScheduleDone.ONTIME.equals(state)) {
+            return "#00875A";
+        }
+        if (ScheduleDone.LATE.equals(state)) {
+            return "#FF8B00";
+        }
+        if (ScheduleDone.OVERDUE.equals(state)) {
+            return "#DE350B";
+        }
+        if (ScheduleDone.EXPECTED.equals(state)) {
+            return "#0052CC";
+        }
+        return "#6B778C";
+    }
+
+    private String donePiece(String axis, String day, String state, String kindKey, ServicePlanEntity plan, AssetEntity asset,
             Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
         if ("month".equals(axis)) {
             return day.length() >= 7 ? day.substring(0, 7) : "";
@@ -10568,6 +10638,12 @@ public class AssetServiceImpl implements AssetService {
         }
         if ("who".equals(axis)) {
             return plan.getAssigneeKey() == null ? "" : plan.getAssigneeKey().trim();
+        }
+        if ("asset".equals(axis)) {
+            return asset == null ? "0" : String.valueOf(asset.getID());
+        }
+        if ("state".equals(axis)) {
+            return state == null ? "" : state;
         }
         return kindKey;
     }
@@ -10597,6 +10673,16 @@ public class AssetServiceImpl implements AssetService {
         if ("who".equals(axis)) {
             return piece.isEmpty() ? i18n().getText("asset-tree.ui.reportUnassigned") : displayName(piece);
         }
+        if ("asset".equals(axis)) {
+            if (piece.isEmpty() || "0".equals(piece)) {
+                return i18n().getText("asset-tree.ui.reportNoAsset");
+            }
+            AssetEntity equipment = index.get(Integer.valueOf(piece));
+            return equipment == null || equipment.getName() == null ? piece : equipment.getName();
+        }
+        if ("state".equals(axis)) {
+            return workStateLabel(piece);
+        }
         return piece;
     }
 
@@ -10624,7 +10710,7 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         sortReportRows(key, group, rows, placeSort);
-        if (!kindColoredReport(group)) {
+        if (!keepReportColors(group)) {
             distinctReportColors(rows);
         }
         sortReportLines(rows, lines, lineKeys);
@@ -11134,22 +11220,55 @@ public class AssetServiceImpl implements AssetService {
             lines.add(note);
         }
         lines.add(new ArrayList<String>());
+        boolean journal = false;
+        if (view.getLines() != null) {
+            for (ReportLineDto line : view.getLines()) {
+                if (line.getState() != null && !line.getState().isEmpty()) {
+                    journal = true;
+                    break;
+                }
+            }
+        }
         List<String> detailHead = new ArrayList<String>();
-        detailHead.add(i18n().getText("asset-tree.ui.keyLabel"));
-        detailHead.add(i18n().getText("asset-tree.ui.name"));
-        detailHead.add(money ? i18n().getText("asset-tree.ui.lifeBook") : detailHeading(view.getGroupBy()));
+        if (journal) {
+            detailHead.add(i18n().getText("asset-tree.ui.keyLabel"));
+            detailHead.add(i18n().getText("asset-tree.ui.reportColAsset"));
+            detailHead.add(i18n().getText("asset-tree.ui.reportColWork"));
+            detailHead.add(i18n().getText("asset-tree.ui.reportColKind"));
+            detailHead.add(i18n().getText("asset-tree.ui.reportColWhen"));
+            detailHead.add(i18n().getText("asset-tree.ui.reportColState"));
+            detailHead.add(i18n().getText("asset-tree.ui.reportColNext"));
+        } else {
+            detailHead.add(i18n().getText("asset-tree.ui.keyLabel"));
+            detailHead.add(i18n().getText("asset-tree.ui.name"));
+            detailHead.add(money ? i18n().getText("asset-tree.ui.lifeBook") : detailHeading(view.getGroupBy()));
+        }
         lines.add(detailHead);
         if (view.getLines() != null) {
             for (ReportLineDto line : view.getLines()) {
                 List<String> cells = new ArrayList<String>();
-                cells.add(line.getObjectKey() == null ? "" : line.getObjectKey());
-                cells.add(line.getName() == null ? "" : line.getName());
-                String detail = line.getDetail() == null ? "" : line.getDetail();
-                if (money) {
-                    Long minor = MoneyText.parse(detail);
-                    detail = minor == null ? detail : bookDecimal(minor.longValue());
+                if (journal) {
+                    cells.add(line.getObjectKey() == null ? "" : line.getObjectKey());
+                    cells.add(line.getAsset() == null ? "" : line.getAsset());
+                    cells.add(line.getName() == null ? "" : line.getName());
+                    cells.add(line.getKind() == null ? "" : line.getKind());
+                    String when = line.getWhen() == null ? "" : line.getWhen();
+                    if (line.getClock() != null && !line.getClock().isEmpty()) {
+                        when = when.isEmpty() ? line.getClock() : when + " " + line.getClock();
+                    }
+                    cells.add(when);
+                    cells.add(workStateLabel(line.getState()));
+                    cells.add(line.getNext() == null ? "" : line.getNext());
+                } else {
+                    cells.add(line.getObjectKey() == null ? "" : line.getObjectKey());
+                    cells.add(line.getName() == null ? "" : line.getName());
+                    String detail = line.getDetail() == null ? "" : line.getDetail();
+                    if (money) {
+                        Long minor = MoneyText.parse(detail);
+                        detail = minor == null ? detail : bookDecimal(minor.longValue());
+                    }
+                    cells.add(detail);
                 }
-                cells.add(detail);
                 lines.add(cells);
             }
         }
@@ -11530,7 +11649,7 @@ public class AssetServiceImpl implements AssetService {
         return value == null ? "" : value;
     }
 
-    private boolean kindColoredReport(String group) {
+    private boolean keepReportColors(String group) {
         if ("kind".equals(group)) {
             return true;
         }
@@ -11538,12 +11657,16 @@ public class AssetServiceImpl implements AssetService {
             return false;
         }
         List<String> axes = ScheduleDone.axes(group);
-        return axes.size() == 1 && "kind".equals(axes.get(0));
+        return axes.size() == 1 && ("kind".equals(axes.get(0)) || "state".equals(axes.get(0)));
     }
 
     private void sortReportRows(String key, String group, List<ReportBucketDto> rows, final Map<String, String> placeSort) {
         if (ReportCatalog.doneReport(group) || ReportCatalog.DONE.equals(key)) {
             List<String> axes = ScheduleDone.axes(group == null || group.isEmpty() ? ReportCatalog.DONE : group);
+            if (axes.size() == 1 && "state".equals(axes.get(0))) {
+                sortByKeys(rows, Arrays.asList(ScheduleDone.OVERDUE, ScheduleDone.LATE, ScheduleDone.ONTIME, ScheduleDone.DONE, ScheduleDone.EXPECTED));
+                return;
+            }
             if (axes.size() == 1 && "month".equals(axes.get(0))) {
                 Collections.sort(rows, new Comparator<ReportBucketDto>() {
                     @Override

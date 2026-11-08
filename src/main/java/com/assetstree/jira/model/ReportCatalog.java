@@ -28,7 +28,7 @@ public final class ReportCatalog {
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
             STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", DONE, "who", FIELD));
     private static final List<String> DONE_AXES = Collections.unmodifiableList(Arrays.asList(
-            "kind", "month", PLACE, TYPE, "who"));
+            "kind", "month", PLACE, TYPE, "who", "asset", "state"));
     /** Long enough for every chart name joined once. The short column stays separate. */
     private static final int CHART_LIMIT = 120;
     private static final List<String> CHARTS = Collections.unmodifiableList(Arrays.asList(

@@ -4333,7 +4333,7 @@ def delete_floor(project_key, floor_id, text):
 REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work", "done")
 REPORT_CHARTS = ("donut", "pie", "bar", "bars", "line", "area", "histogram", "scatter", "radar", "gantt", "venn")
 REPORT_GROUPS = ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind", "done", "field")
-DONE_AXES = ("kind", "month", "place", "type", "who")
+DONE_AXES = ("kind", "month", "place", "type", "who", "asset", "state")
 
 
 def done_report(group):
@@ -4376,12 +4376,45 @@ def report_axes(group):
     return None
 
 
-def finished_days(plan):
-    found = []
+def done_day(piece):
+    text = str(piece or "").strip()
+    at = text.find(">")
+    if at < 1:
+        return ""
+    source = text[:at].strip()
+    flag = text[at + 1:].strip().split("@", 1)[0]
+    if flag != "done" or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", source):
+        return ""
+    return source
+
+
+def done_stamp(piece):
+    text = str(piece or "").strip()
+    at = text.find(">")
+    if at < 0:
+        return ""
+    target = text[at + 1:].strip()
+    if not target.startswith("done@"):
+        return ""
+    stamp = target[5:].strip()[:10]
+    return stamp if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp) else ""
+
+
+def work_state(day, stamp):
+    if not stamp:
+        return "done"
+    return "late" if stamp > day else "ontime"
+
+
+def finished_marks(plan):
+    stamps = {}
+    order = []
     for part in str(plan.get("moves") or "").split(","):
-        piece = part.strip()
-        if piece.endswith(">done") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", piece[:-5]) and piece[:-5] not in found:
-            found.append(piece[:-5])
+        day = done_day(part)
+        if not day or day in stamps:
+            continue
+        stamps[day] = done_stamp(part)
+        order.append(day)
     unit = plan.get("everyUnit") or ""
     last = str(plan.get("lastDone") or "")[:10]
     marked = str(plan.get("completedOn") or "")[:10]
@@ -4389,14 +4422,89 @@ def finished_days(plan):
     first = plan_next(plan)
     completed = applied == "done" or (unit == "once" and first and applied == first.isoformat())
     if unit != "once":
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", marked) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", last) and last not in found:
-            found.append(last)
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", marked) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", last) and (last not in stamps or not stamps.get(last)):
+            stamps[last] = marked
+            if last not in order:
+                order.append(last)
     elif completed:
         anchor = last if re.fullmatch(r"\d{4}-\d{2}-\d{2}", last) else marked
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", anchor) and anchor not in found:
-            found.append(anchor)
-    found.sort()
-    return found
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", anchor) and (anchor not in stamps or not stamps.get(anchor)):
+            stamps[anchor] = marked if re.fullmatch(r"\d{4}-\d{2}-\d{2}", marked) else ""
+            if anchor not in order:
+                order.append(anchor)
+    order.sort()
+    return [{"day": day, "state": work_state(day, stamps.get(day) or "")} for day in order]
+
+
+def finished_days(plan):
+    return [mark["day"] for mark in finished_marks(plan)]
+
+
+def expected_after(plan, today=None):
+    today = today or datetime.date.today()
+    unit = plan.get("everyUnit") or ""
+    if unit == "once":
+        return ""
+    cursor = plan_next(plan)
+    guard = 0
+    count = plan.get("everyCount")
+    while cursor and guard < 500:
+        if cursor > today:
+            return cursor.isoformat()
+        nxt = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        if not nxt or nxt <= cursor:
+            return ""
+        cursor = nxt
+        guard += 1
+    return ""
+
+
+STATE_ORDER = ("overdue", "late", "ontime", "done", "expected")
+STATE_COLOR = {"ontime": "#00875A", "late": "#FF8B00", "overdue": "#DE350B", "expected": "#0052CC", "done": "#6B778C"}
+
+
+def work_state_label(state, text):
+    keys = {
+        "ontime": "asset-tree.ui.reportStateOntime",
+        "late": "asset-tree.ui.reportStateLate",
+        "overdue": "asset-tree.ui.reportStateOverdue",
+        "expected": "asset-tree.ui.reportStateExpected",
+        "done": "asset-tree.ui.reportStateDone",
+    }
+    return text.get(keys.get(state or "", "asset-tree.ui.reportStateDone"), state or "")
+
+
+def work_clock(start, end):
+    begin = str(start or "").strip()
+    finish = str(end or "").strip()
+    if not begin:
+        return ""
+    return begin if not finish else begin + "–" + finish
+
+
+def work_line(slot, asset, name, equipment, kind_name, day, state, nxt, clock, bucket, text):
+    slot["count"] += 1
+    detail = "%s · %s · %s" % (kind_name, equipment, day)
+    if clock:
+        detail += " " + clock
+    detail += " · " + work_state_label(state, text)
+    if nxt and nxt != day:
+        detail += " · " + nxt
+    return {
+        "assetId": asset["id"] if asset else 0,
+        "objectKey": (asset.get("objectKey") if asset else "") or "",
+        "name": name,
+        "detail": detail,
+        "bucket": bucket,
+        "from": day,
+        "to": day,
+        "asset": equipment,
+        "kind": kind_name,
+        "when": day,
+        "state": state,
+        "next": nxt or "",
+        "clock": clock or "",
+    }
 
 
 def parse_money(raw):
@@ -4967,7 +5075,7 @@ def empty_reason(report_key, group, money, text, any_purchase=False):
     return ""
 
 
-def done_piece(axis, day, kind_key, plan, asset):
+def done_piece(axis, day, state, kind_key, plan, asset):
     if axis == "month":
         return day[:7]
     if axis == "place":
@@ -4979,6 +5087,10 @@ def done_piece(axis, day, kind_key, plan, asset):
         return (asset or {}).get("typeKey") or ""
     if axis == "who":
         return (plan.get("assigneeKey") or "").strip()
+    if axis == "asset":
+        return "0" if not asset else str(asset.get("id") or 0)
+    if axis == "state":
+        return state or ""
     return kind_key
 
 
@@ -5000,6 +5112,13 @@ def done_piece_label(axis, piece, project_key, text):
         if not piece:
             return text.get("asset-tree.ui.reportUnassigned", "None")
         return (USERS.get(piece) or {}).get("displayName") or piece
+    if axis == "asset":
+        if not piece or piece == "0":
+            return text.get("asset-tree.ui.reportNoAsset", "No object")
+        equipment = STATE["assets"].get(int(piece)) if str(piece).isdigit() else None
+        return (equipment or {}).get("name") or piece
+    if axis == "state":
+        return work_state_label(piece, text)
     return piece
 
 
@@ -5020,20 +5139,22 @@ def done_report_view(project_key, report_key, spec, assets, filt, text, query):
         asset = STATE["assets"].get(plan.get("assetId")) if plan.get("assetId") else None
         if plan.get("assetId") and not asset:
             continue
-        days = finished_days(plan)
-        if not days:
+        marks = finished_marks(plan)
+        if not marks:
             continue
         kind_key = plan.get("kind") or "to"
         kind_name = kind_label(project_key, kind_key)
         who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
         name = (plan.get("name") or "").strip() or kind_name
-        start = (plan.get("startTime") or "").strip()
-        end = (plan.get("endTime") or "").strip()
-        for day in days:
+        clock = work_clock(plan.get("startTime"), plan.get("endTime"))
+        nxt = expected_after(plan)
+        for mark in marks:
+            day = mark["day"]
+            state = mark["state"]
             pieces = []
             labels = []
             for axis in axes:
-                piece = done_piece(axis, day, kind_key, plan, asset)
+                piece = done_piece(axis, day, state, kind_key, plan, asset)
                 pieces.append(piece)
                 labels.append(done_piece_label(axis, piece, project_key, text))
                 if axis == "place" and len(axes) == 1 and piece:
@@ -5043,25 +5164,23 @@ def done_report_view(project_key, report_key, spec, assets, filt, text, query):
             color = "#0052CC"
             if axes == ["kind"]:
                 color = kind_color(kind_key)
+            elif axes == ["state"]:
+                color = STATE_COLOR.get(state, "#6B778C")
             elif axes == ["type"] and bucket:
                 color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
             slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
-            slot["count"] += 1
-            detail = "%s · %s · %s" % (kind_name, who, day)
-            if start:
-                detail += " " + start
-                if end:
-                    detail += "–" + end
-            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail, "bucket": bucket, "from": day, "to": day})
+            lines.append(work_line(slot, asset, name, who, kind_name, day, state, nxt, clock, bucket, text))
             line_keys.append(bucket)
     rows = list(buckets.values())
-    if axes == ["month"]:
+    if axes == ["state"]:
+        rows.sort(key=lambda row: STATE_ORDER.index(row["key"]) if row["key"] in STATE_ORDER else len(STATE_ORDER))
+    elif axes == ["month"]:
         rows.sort(key=lambda row: row["key"] if len(row["key"]) >= 7 and row["key"][4] == "-" else "9999-99")
     elif axes == ["place"]:
         rows.sort(key=lambda row: ((place_sort.get(row["key"]) or "").lower(), (row.get("label") or "").lower()))
     else:
         rows.sort(key=lambda row: ((row.get("label") or "").lower(), (row.get("key") or "").lower()))
-    if axes != ["kind"]:
+    if axes not in (["kind"], ["state"]):
         distinct_report_colors(rows)
     rank = {row["key"]: index for index, row in enumerate(rows)}
     paired = list(zip(lines, line_keys))
@@ -5109,15 +5228,16 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
         who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
         name = (plan.get("name") or "").strip() or label
+        nxt = expected_after(plan)
+        clock = work_clock(plan.get("startTime"), plan.get("endTime"))
+        seen_future = any(shown["day"] > datetime.date.today() for shown in days)
         for shown in days:
-            slot["count"] += 1
-            detail = "%s · %s · %s" % (label, who, shown["day"].isoformat())
-            if shown.get("start"):
-                detail += " " + shown["start"]
-                if shown.get("end"):
-                    detail += "–" + shown["end"]
             day = shown["day"].isoformat()
-            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail, "bucket": bucket, "from": day, "to": day})
+            state = "overdue" if shown["day"] < datetime.date.today() else "expected"
+            lines.append(work_line(slot, asset, name, who, label, day, state, nxt, work_clock(shown.get("start"), shown.get("end")) or clock, bucket, text))
+            line_keys.append(bucket)
+        if nxt and not seen_future:
+            lines.append(work_line(slot, asset, name, who, label, nxt, "expected", nxt, clock, bucket, text))
             line_keys.append(bucket)
     rows = list(buckets.values())
     rank = {row["key"]: index for index, row in enumerate(rows)}
@@ -5483,7 +5603,7 @@ def done_marks(raw):
     marks = []
     for part in str(raw or "").split(","):
         piece = part.strip()
-        if piece.endswith(">done") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", piece[:-5]) and piece not in marks:
+        if done_day(piece) and piece not in marks:
             marks.append(piece)
         if len(marks) >= 60:
             break
@@ -5498,11 +5618,24 @@ def keep_done(replacement, previous):
     return ",".join(parts)
 
 
-def remember_done(moves, day):
+def drop_done_day(moves, day):
+    kept = []
+    for part in str(moves or "").split(","):
+        piece = part.strip()
+        if piece and done_day(piece) != day:
+            kept.append(piece)
+    return ",".join(kept)
+
+
+def remember_done(moves, day, marked_on=""):
     text = str(day or "").strip()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         return moves or ""
-    return keep_done(moves, text + ">done")
+    stamp = str(marked_on or "").strip()[:10]
+    token = text + ">done"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp) and stamp > text:
+        token = text + ">done@" + stamp
+    return keep_done(drop_done_day(moves, text), token)
 
 
 def relation_rows():
@@ -5746,7 +5879,7 @@ def fill_plan(row, body, creating, project_key, text):
     if body.get("moves") is not None or creating:
         row["moves"] = keep_done(clean_moves(body.get("moves")), row.get("moves"))
     if body.get("done") is True and row.get("everyUnit") != "once":
-        row["moves"] = remember_done(row.get("moves"), row.get("lastDone"))
+        row["moves"] = remember_done(row.get("moves"), row.get("lastDone"), datetime.date.today().isoformat())
     if not row.get("name") or not row.get("lastDone") or not row.get("everyUnit"):
         return text.get("asset-tree.error.service", "Schedule")
     return None
@@ -6713,17 +6846,37 @@ def report_sheet(view, text, used):
         reason = view.get("reason") or text.get("asset-tree.ui.reportEmptyLines", "This report has no rows.")
         lines.append([reason])
     lines.append([])
-    lines.append([
-        text.get("asset-tree.ui.keyLabel", "Key"),
-        text.get("asset-tree.ui.name", "Name"),
-        text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
-    ])
-    for line in view.get("lines") or []:
-        detail = line.get("detail") or ""
-        if money:
-            minor = money_minor(detail)
-            detail = book_decimal(minor) if minor is not None else detail
-        lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
+    journal = any((line.get("state") or "") for line in (view.get("lines") or []))
+    if journal:
+        lines.append([
+            text.get("asset-tree.ui.keyLabel", "Key"),
+            text.get("asset-tree.ui.reportColAsset", "Equipment"),
+            text.get("asset-tree.ui.reportColWork", "Work"),
+            text.get("asset-tree.ui.reportColKind", "Kind"),
+            text.get("asset-tree.ui.reportColWhen", "Date"),
+            text.get("asset-tree.ui.reportColState", "Result"),
+            text.get("asset-tree.ui.reportColNext", "Next"),
+        ])
+        for line in view.get("lines") or []:
+            when = line.get("when") or ""
+            if line.get("clock"):
+                when = (when + " " + line["clock"]).strip()
+            lines.append([
+                line.get("objectKey") or "", line.get("asset") or "", line.get("name") or "", line.get("kind") or "",
+                when, work_state_label(line.get("state"), text), line.get("next") or "",
+            ])
+    else:
+        lines.append([
+            text.get("asset-tree.ui.keyLabel", "Key"),
+            text.get("asset-tree.ui.name", "Name"),
+            text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
+        ])
+        for line in view.get("lines") or []:
+            detail = line.get("detail") or ""
+            if money:
+                minor = money_minor(detail)
+                detail = book_decimal(minor) if minor is not None else detail
+            lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
     if view.get("exportLimited"):
         note = text.get("asset-tree.ui.reportExportCut", "The file keeps the first {0} rows.")
         lines.append([note.replace("{0}", str(REPORT_EXPORT_MAX))])
@@ -6899,6 +7052,8 @@ def group_word(group, text):
         "writeoff": "asset-tree.ui.groupWordWriteoff",
         "kind": "asset-tree.ui.groupWordKind",
         "who": "asset-tree.ui.groupWordWho",
+        "asset": "asset-tree.ui.groupWordAsset",
+        "state": "asset-tree.ui.groupWordState",
         "field": "asset-tree.ui.reportField",
     }
     return text.get(keys.get(group or "", "asset-tree.ui.groupWordStatus"), group or "")

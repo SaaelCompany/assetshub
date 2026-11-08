@@ -20,6 +20,15 @@ public class ScheduleDoneTest {
                 ScheduleDone.days("", "2026-05-01", "once", "", false));
         assertEquals(Arrays.asList(),
                 ScheduleDone.days("2026-06-01>2026-06-02", "2026-06-01", "month", "", false));
+        assertEquals(Arrays.asList("2026-10-01"),
+                ScheduleDone.days("2026-10-01>done@2026-11-08", "", "month", "", false));
+        assertEquals(ScheduleDone.LATE, ScheduleDone.marks("2026-10-01>done@2026-11-08", "", "month", "", false).get(0).getState());
+        assertEquals(ScheduleDone.ONTIME, ScheduleDone.marks("2026-10-01>done", "2026-10-01", "month", "2026-10-01", false).get(0).getState());
+        assertEquals(ScheduleDone.DONE, ScheduleDone.marks("2026-10-01>done", "2026-10-01", "month", "", false).get(0).getState());
+        assertEquals("2026-12-01", ScheduleDone.expectedAfter("2026-08-01", 1, "month", java.time.LocalDate.parse("2026-11-08")));
+        assertEquals("", ScheduleDone.expectedAfter("2026-08-15", 1, "once", java.time.LocalDate.parse("2026-11-08")));
+        String late = ServiceDue.rememberDone("2026-09-01>done", "2026-10-01", "2026-11-08");
+        assertEquals("2026-09-01>done,2026-10-01>done@2026-11-08", late);
     }
 
     @Test

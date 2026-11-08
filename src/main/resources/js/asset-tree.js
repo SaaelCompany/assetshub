@@ -14303,7 +14303,9 @@
         var dates = [];
         String(plan && plan.moves || '').split(',').forEach(function (part) {
             var at = part.indexOf('>');
-            if (at < 1 || part.slice(at + 1) !== 'done') return;
+            if (at < 1) return;
+            var flag = part.slice(at + 1).split('@')[0];
+            if (flag !== 'done') return;
             var source = part.slice(0, at);
             if (/^\d{4}-\d{2}-\d{2}$/.test(source) && dates.indexOf(source) < 0) dates.push(source);
         });
@@ -19453,18 +19455,25 @@
         if (!(view.rows || []).length) rows.push(csvCell(view.reason || t('reportEmptyLines')));
         if (view.exportLimited) rows.push(csvCell(t('reportExportCut', '50000')));
         else if (view.capped && (view.lines || []).length >= (view.lineTotal || (view.lines || []).length)) rows.push(csvCell(t('reportLinesCut')));
-        if (view.lines && view.lines.length) {
+            if (view.lines && view.lines.length) {
             rows.push('');
-            var detailHead = money ? t('lifeBook') : detailWord(view.groupBy, view);
-            rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
-            view.lines.forEach(function (row) {
-                var detail = row.detail;
-                if (money) {
-                    var minor = reportMoneyMinor(detail);
-                    if (minor != null) detail = reportMoneyCsv(minor);
-                }
-                rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(detail)].join(';'));
-            });
+            if (reportJournal(view)) {
+                rows.push([csvCell(t('keyLabel')), csvCell(t('reportColAsset')), csvCell(t('reportColWork')), csvCell(t('reportColKind')), csvCell(t('reportColWhen')), csvCell(t('reportColState')), csvCell(t('reportColNext'))].join(';'));
+                view.lines.forEach(function (row) {
+                    rows.push([csvCell(row.objectKey), csvCell(row.asset), csvCell(row.name), csvCell(row.kind), csvCell(reportWhenText(row)), csvCell(reportStateWord(row.state)), csvCell(formatFieldDate(row.next || ''))].join(';'));
+                });
+            } else {
+                var detailHead = money ? t('lifeBook') : detailWord(view.groupBy, view);
+                rows.push([csvCell(t('keyLabel')), csvCell(t('name')), csvCell(detailHead)].join(';'));
+                view.lines.forEach(function (row) {
+                    var detail = row.detail;
+                    if (money) {
+                        var minor = reportMoneyMinor(detail);
+                        if (minor != null) detail = reportMoneyCsv(minor);
+                    }
+                    rows.push([csvCell(row.objectKey), csvCell(row.name), csvCell(detail)].join(';'));
+                });
+            }
         }
         var blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         var link = document.createElement('a');
@@ -19517,6 +19526,13 @@
             body += '</tr>';
         });
         body += '</table>';
+        if (reportJournal(view)) {
+            body += '<h2>' + htmlEscape(t('reportColWork')) + '</h2><table><tr><th>' + htmlEscape(t('keyLabel')) + '</th><th>' + htmlEscape(t('reportColAsset')) + '</th><th>' + htmlEscape(t('reportColWork')) + '</th><th>' + htmlEscape(t('reportColKind')) + '</th><th>' + htmlEscape(t('reportColWhen')) + '</th><th>' + htmlEscape(t('reportColState')) + '</th><th>' + htmlEscape(t('reportColNext')) + '</th></tr>';
+            (view.lines || []).forEach(function (row) {
+                body += '<tr><td>' + htmlEscape(row.objectKey || '') + '</td><td>' + htmlEscape(row.asset || '') + '</td><td>' + htmlEscape(row.name || '') + '</td><td>' + htmlEscape(row.kind || '') + '</td><td>' + htmlEscape(reportWhenText(row)) + '</td><td>' + htmlEscape(reportStateWord(row.state)) + '</td><td>' + htmlEscape(formatFieldDate(row.next || '')) + '</td></tr>';
+            });
+            body += '</table>';
+        }
         var page = window.open('', '_blank');
         if (!page) {
             notify(t('errorTitle'));
@@ -20287,7 +20303,7 @@
         var map = {
             status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
             month: 'groupWordMonth', 'done-month': 'groupWordDoneMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind',
-            who: 'groupWordWho', field: 'reportField'
+            who: 'groupWordWho', asset: 'groupWordAsset', state: 'groupWordState', field: 'reportField'
         };
         return t(map[group] || 'groupWordStatus');
     }
@@ -20304,9 +20320,28 @@
         var map = {
             status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder', issued: 'reportGroupIssued',
             month: 'reportGroupMonth', 'done-month': 'reportGroupDoneMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind',
-            who: 'reportGroupWho'
+            who: 'reportGroupWho', asset: 'reportGroupAsset', state: 'reportGroupState'
         };
         return t(map[group] || 'reportGroupStatus');
+    }
+
+    function reportJournal(view) {
+        return !!(view && view.lines && view.lines.length && view.lines[0].state);
+    }
+
+    function reportStateWord(state) {
+        var map = {
+            ontime: 'reportStateOntime', late: 'reportStateLate', done: 'reportStateDone',
+            overdue: 'reportStateOverdue', expected: 'reportStateExpected'
+        };
+        return t(map[state] || 'reportStateDone');
+    }
+
+    function reportWhenText(line) {
+        var day = formatFieldDate(line && (line.when || line.from) || '');
+        var clock = line && line.clock ? String(line.clock) : '';
+        if (clock && day) return day + ' ' + clock;
+        return clock || day;
     }
 
     function detailWord(group, view) {
@@ -21197,6 +21232,39 @@
             table.appendChild(total);
             main.appendChild(table);
         }
+        if (reportJournal(view)) {
+            var journal = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-journal');
+            var journalHead = el('tr');
+            ['keyLabel', 'reportColAsset', 'reportColWork', 'reportColKind', 'reportColWhen', 'reportColState', 'reportColNext'].forEach(function (key) {
+                journalHead.appendChild(el('th', null, t(key)));
+            });
+            journal.appendChild(journalHead);
+            view.lines.forEach(function (row) {
+                var item = el('tr');
+                item.appendChild(el('td', null, row.objectKey || ''));
+                item.appendChild(el('td', null, row.asset || ''));
+                item.appendChild(el('td', null, row.name || ''));
+                item.appendChild(el('td', null, row.kind || ''));
+                item.appendChild(el('td', null, reportWhenText(row)));
+                item.appendChild(el('td', 'asset-tree-report-state is-' + (row.state || 'done'), reportStateWord(row.state)));
+                item.appendChild(el('td', null, formatFieldDate(row.next || '')));
+                journal.appendChild(item);
+            });
+            main.appendChild(journal);
+            if ((view.lineTotal || view.lines.length) > view.lines.length) {
+                var more = button(t('reportLinesMore'), 'asset-tree-btn', function () {
+                    ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
+                        if (status === 200 && payload && state.reportView && String(state.reportView.id) === String(view.id)) {
+                            state.reportView.lines = payload.lines || [];
+                            state.reportView.lineTotal = payload.lineTotal || state.reportView.lines.length;
+                            state.reportView.capped = !!payload.capped;
+                            if (!paintReport()) renderFrame();
+                        } else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+                main.appendChild(more);
+            }
+        }
         var foot = el('div', 'asset-tree-report-foot');
         var note = view.hint || t('reportCounted');
         if (rows.length) note += ' ' + t('reportClickValue');
@@ -21341,13 +21409,13 @@
             });
             function groupChoices() {
                 if (source.value === 'done') {
-                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho']];
+                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho'], ['asset', 'reportGroupAsset'], ['state', 'reportGroupState']];
                 }
                 return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['field', 'reportGroupField'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']];
             }
             function extraChoices() {
                 if (source.value === 'done') {
-                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho']];
+                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho'], ['asset', 'reportGroupAsset'], ['state', 'reportGroupState']];
                 }
                 return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']];
             }
