@@ -13343,10 +13343,10 @@
     }
 
     function openModuleSetup(moduleKey) {
-        if (moduleKey === 'portal') {
+        if (moduleKey === 'portal' || moduleKey === 'tni') {
             closeAllModals();
             state.view = 'settings';
-            state.schemaTab = 'portal';
+            state.schemaTab = moduleKey === 'tni' ? (state.canObjects ? 'exchange' : 'project') : 'portal';
             rememberView('settings');
             renderFrame();
             return;
@@ -13815,116 +13815,6 @@
                 saveSetup(next);
             }));
         }
-        if (moduleKey === 'tni') {
-            panel.appendChild(el('p', 'asset-tree-hint', t('tniHint')));
-            var sourceBoxes = {};
-            function sourceBox(key, label, hint) {
-                var line = el('label', 'asset-tree-check');
-                var box = document.createElement('input');
-                box.type = 'checkbox';
-                box.checked = setup[key] !== false;
-                line.appendChild(box);
-                line.appendChild(document.createTextNode(t(label)));
-                panel.appendChild(line);
-                if (hint) panel.appendChild(el('p', 'asset-tree-hint', t(hint)));
-                sourceBoxes[key] = box;
-            }
-            sourceBox('tniBrowser', 'tniSourceBrowser', 'tniSourceBrowserHint');
-            sourceBox('tniScan', 'tniSourceScan', '');
-            sourceBox('tniAd', 'tniSourceAd', '');
-            sourceBox('tniSccm', 'tniSourceSccm', '');
-            sourceBox('tniPing', 'tniSourcePing', 'tniSourcePingHint');
-            var keep = document.createElement('input');
-            keep.type = 'number';
-            keep.min = '1';
-            keep.max = '3650';
-            keep.value = String(setup.tniKeep || 90);
-            keep.setAttribute('aria-label', t('tniKeep'));
-            panel.appendChild(planField(t('tniKeep'), keep));
-            panel.appendChild(el('p', 'asset-tree-hint', t('tniKeepHint')));
-            var probeDays = document.createElement('input');
-            probeDays.type = 'number';
-            probeDays.min = '1';
-            probeDays.max = '30';
-            probeDays.value = String(setup.tniProbeDays || 3);
-            probeDays.setAttribute('aria-label', t('tniProbeDays'));
-            var probeTries = document.createElement('input');
-            probeTries.type = 'number';
-            probeTries.min = '1';
-            probeTries.max = '30';
-            probeTries.value = String(setup.tniProbeTries || 3);
-            probeTries.setAttribute('aria-label', t('tniProbeTries'));
-            var probeRow = el('div', 'asset-tree-tni-types');
-            probeRow.appendChild(planField(t('tniProbeDays'), probeDays));
-            probeRow.appendChild(planField(t('tniProbeTries'), probeTries));
-            panel.appendChild(probeRow);
-            panel.appendChild(el('p', 'asset-tree-hint', t('tniProbeHint')));
-            panel.appendChild(el('span', 'asset-tree-nav-label', t('tniAction')));
-            var action = el('div', 'asset-tree-tni-action');
-            function actionChoice(value, label) {
-                var line = el('label', 'asset-tree-check');
-                var box = document.createElement('input');
-                box.type = 'radio';
-                box.name = 'asset-tree-tni-action';
-                box.value = value;
-                box.checked = (setup.tniAction || 'trash') === value;
-                line.appendChild(box);
-                line.appendChild(document.createTextNode(label));
-                action.appendChild(line);
-                return box;
-            }
-            var trashBox = actionChoice('trash', t('tniTrash'));
-            actionChoice('delete', t('tniDelete'));
-            panel.appendChild(action);
-            panel.appendChild(el('span', 'asset-tree-nav-label', t('tniTypes')));
-            panel.appendChild(el('p', 'asset-tree-hint', t('tniTypesHint')));
-            var types = el('div', 'asset-tree-tni-types');
-            function typeSelect(current, label) {
-                var select = document.createElement('select');
-                select.setAttribute('aria-label', label);
-                var empty = document.createElement('option');
-                empty.value = '';
-                empty.textContent = t('tniTypeNone');
-                select.appendChild(empty);
-                placeFacts().forEach(function (type) {
-                    if (!type || type.location) return;
-                    var option = document.createElement('option');
-                    option.value = type.typeKey;
-                    option.textContent = type.label || type.typeKey;
-                    select.appendChild(option);
-                });
-                var known = false;
-                for (var i = 0; i < select.options.length; i++) {
-                    if (select.options[i].value === current) known = true;
-                }
-                select.value = known ? current : '';
-                types.appendChild(planField(label, select));
-                return select;
-            }
-            var computer = typeSelect(setup.tniComputer || '', t('tniKindComputer'));
-            var laptop = typeSelect(setup.tniLaptop || '', t('tniKindLaptop'));
-            var phone = typeSelect(setup.tniPhone || '', t('tniKindPhone'));
-            var tablet = typeSelect(setup.tniTablet || '', t('tniKindTablet'));
-            panel.appendChild(types);
-            if (state.canAdmin) appendTniTools(panel);
-            panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
-                var next = moduleSetup();
-                next.tniBrowser = sourceBoxes.tniBrowser.checked;
-                next.tniScan = sourceBoxes.tniScan.checked;
-                next.tniAd = sourceBoxes.tniAd.checked;
-                next.tniSccm = sourceBoxes.tniSccm.checked;
-                next.tniPing = sourceBoxes.tniPing.checked;
-                next.tniKeep = clampNum(keep.value, 1, 3650);
-                next.tniProbeDays = clampNum(probeDays.value, 1, 30);
-                next.tniProbeTries = clampNum(probeTries.value, 1, 30);
-                next.tniAction = trashBox.checked ? 'trash' : 'delete';
-                next.tniComputer = computer.value;
-                next.tniLaptop = laptop.value;
-                next.tniPhone = phone.value;
-                next.tniTablet = tablet.value;
-                saveSetup(next);
-            }));
-        }
         return panel;
     }
 
@@ -14158,7 +14048,138 @@
         });
         modules.appendChild(grid);
         stack.appendChild(modules);
+        if (state.canAdmin) stack.appendChild(tniRemovalCard(allowed));
         panel.appendChild(stack);
+    }
+
+    function tniSourceFields(panel, setup, locked) {
+        var boxes = {};
+        var list = el('div', 'asset-tree-tni-sources');
+        function sourceBox(key, label, hint) {
+            var line = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = setup[key] !== false;
+            box.disabled = !!locked;
+            line.appendChild(box);
+            line.appendChild(document.createTextNode(t(label)));
+            list.appendChild(line);
+            if (hint) list.appendChild(el('p', 'asset-tree-hint', t(hint)));
+            boxes[key] = box;
+        }
+        sourceBox('tniBrowser', 'tniSourceBrowser', 'tniSourceBrowserHint');
+        sourceBox('tniScan', 'tniSourceScan', '');
+        sourceBox('tniAd', 'tniSourceAd', '');
+        sourceBox('tniSccm', 'tniSourceSccm', '');
+        sourceBox('tniPing', 'tniSourcePing', 'tniSourcePingHint');
+        panel.appendChild(list);
+        return boxes;
+    }
+
+    function tniTypeFields(panel, setup, locked) {
+        panel.appendChild(el('span', 'asset-tree-nav-label', t('tniTypes')));
+        panel.appendChild(el('p', 'asset-tree-hint', t('tniTypesHint')));
+        var types = el('div', 'asset-tree-tni-types');
+        function typeSelect(current, label) {
+            var select = document.createElement('select');
+            select.setAttribute('aria-label', label);
+            select.disabled = !!locked;
+            var empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = t('tniTypeNone');
+            select.appendChild(empty);
+            placeFacts().forEach(function (type) {
+                if (!type || type.location) return;
+                var option = document.createElement('option');
+                option.value = type.typeKey;
+                option.textContent = type.label || type.typeKey;
+                select.appendChild(option);
+            });
+            var known = false;
+            var i;
+            for (i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === current) known = true;
+            }
+            select.value = known ? current : '';
+            types.appendChild(planField(label, select));
+            return select;
+        }
+        var chosen = {
+            computer: typeSelect(setup.tniComputer || '', t('tniKindComputer')),
+            laptop: typeSelect(setup.tniLaptop || '', t('tniKindLaptop')),
+            phone: typeSelect(setup.tniPhone || '', t('tniKindPhone')),
+            tablet: typeSelect(setup.tniTablet || '', t('tniKindTablet'))
+        };
+        panel.appendChild(types);
+        return chosen;
+    }
+
+    function tniRemovalFields(panel, setup, locked) {
+        var keep = document.createElement('input');
+        keep.type = 'number';
+        keep.min = '1';
+        keep.max = '3650';
+        keep.value = String(setup.tniKeep || 90);
+        keep.disabled = !!locked;
+        keep.setAttribute('aria-label', t('tniKeep'));
+        panel.appendChild(planField(t('tniKeep'), keep));
+        panel.appendChild(el('p', 'asset-tree-hint', t('tniKeepHint')));
+        var probeDays = document.createElement('input');
+        probeDays.type = 'number';
+        probeDays.min = '1';
+        probeDays.max = '30';
+        probeDays.value = String(setup.tniProbeDays || 3);
+        probeDays.disabled = !!locked;
+        probeDays.setAttribute('aria-label', t('tniProbeDays'));
+        var probeTries = document.createElement('input');
+        probeTries.type = 'number';
+        probeTries.min = '1';
+        probeTries.max = '30';
+        probeTries.value = String(setup.tniProbeTries || 3);
+        probeTries.disabled = !!locked;
+        probeTries.setAttribute('aria-label', t('tniProbeTries'));
+        var probeRow = el('div', 'asset-tree-tni-types');
+        probeRow.appendChild(planField(t('tniProbeDays'), probeDays));
+        probeRow.appendChild(planField(t('tniProbeTries'), probeTries));
+        panel.appendChild(probeRow);
+        panel.appendChild(el('p', 'asset-tree-hint', t('tniProbeHint')));
+        panel.appendChild(el('span', 'asset-tree-nav-label', t('tniAction')));
+        var action = el('div', 'asset-tree-tni-action');
+        function actionChoice(value, label) {
+            var line = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'radio';
+            box.name = 'asset-tree-tni-removal';
+            box.value = value;
+            box.disabled = !!locked;
+            box.checked = (setup.tniAction || 'trash') === value;
+            line.appendChild(box);
+            line.appendChild(document.createTextNode(label));
+            action.appendChild(line);
+            return box;
+        }
+        var trashBox = actionChoice('trash', t('tniTrash'));
+        actionChoice('delete', t('tniDelete'));
+        panel.appendChild(action);
+        return { keep: keep, probeDays: probeDays, probeTries: probeTries, trashBox: trashBox };
+    }
+
+    function tniRemovalCard(allowed) {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('tniRemovalTitle')));
+        card.appendChild(el('p', 'asset-tree-hint', t('tniRemovalHint')));
+        var fields = tniRemovalFields(card, moduleSetup(), !allowed);
+        if (allowed) {
+            card.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
+                var next = moduleSetup();
+                next.tniKeep = clampNum(fields.keep.value, 1, 3650);
+                next.tniProbeDays = clampNum(fields.probeDays.value, 1, 30);
+                next.tniProbeTries = clampNum(fields.probeTries.value, 1, 30);
+                next.tniAction = fields.trashBox.checked ? 'trash' : 'delete';
+                saveProjectView({ setup: next });
+            }));
+        }
+        return card;
     }
 
     function openListedAsset(asset) {
@@ -20486,10 +20507,14 @@
         if (sources.tniSccm !== false) panel.appendChild(renderTniSccm());
     }
 
+    function tniSurfaceOpen() {
+        return state.view === 'settings' && state.schemaTab === 'exchange';
+    }
+
     function loadTni(quiet) {
         var key = state.projectKey;
         ajax('GET', '/projects/' + encodeURIComponent(key) + '/subnets', null, function (status, payload) {
-            if (key !== state.projectKey || state.moduleDialog !== 'tni') return;
+            if (key !== state.projectKey || !tniSurfaceOpen()) return;
             if (status !== 200) {
                 state.tniError = (payload && payload.message) || t('errorTitle');
                 state.tniList = [];
@@ -20520,7 +20545,7 @@
     function armTniWatch() {
         if (state.tniTimer) return;
         state.tniTimer = setInterval(function () {
-            if (state.moduleDialog !== 'tni') {
+            if (!tniSurfaceOpen()) {
                 clearInterval(state.tniTimer);
                 state.tniTimer = null;
                 return;
@@ -29546,7 +29571,37 @@
             }
         }
         stack.appendChild(block);
+        if (state.canAdmin) stack.appendChild(tniImportCard());
         panel.appendChild(stack);
+    }
+
+    function tniImportCard() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('tniImportTitle')));
+        card.appendChild(el('p', 'asset-tree-hint', t('tniImportHint')));
+        var setup = moduleSetup();
+        var locked = !state.canArrange;
+        var boxes = tniSourceFields(card, setup, locked);
+        var kinds = tniTypeFields(card, setup, locked);
+        if (!locked) {
+            card.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
+                var next = moduleSetup();
+                next.tniBrowser = boxes.tniBrowser.checked;
+                next.tniScan = boxes.tniScan.checked;
+                next.tniAd = boxes.tniAd.checked;
+                next.tniSccm = boxes.tniSccm.checked;
+                next.tniPing = boxes.tniPing.checked;
+                next.tniComputer = kinds.computer.value;
+                next.tniLaptop = kinds.laptop.value;
+                next.tniPhone = kinds.phone.value;
+                next.tniTablet = kinds.tablet.value;
+                saveProjectView({ setup: next }, function (ok) {
+                    if (ok) renderFrame();
+                });
+            }));
+        }
+        if (state.canAdmin) appendTniTools(card);
+        return card;
     }
 
     function freshSecret() {

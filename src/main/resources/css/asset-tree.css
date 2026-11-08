@@ -12513,6 +12513,21 @@ button.asset-tree-attach-remove {
     margin: 8px 0 12px;
 }
 
+#asset-tree-app .asset-tree-tni-sources {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 8px 0 12px;
+}
+
+#asset-tree-app .asset-tree-project-card .asset-tree-tni-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
 #asset-tree-app .asset-tree-tni-scan {
     gap: 16px;
 }
