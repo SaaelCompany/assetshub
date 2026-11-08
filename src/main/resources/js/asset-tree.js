@@ -6509,6 +6509,8 @@
         if (item.action === 'share_remove') return t('actShareRemove');
         if (item.action === 'card_image') return t('actCardImage');
         if (item.action === 'card_image_delete') return t('actCardImageDelete');
+        if (item.action === 'photo') return t('actPhoto');
+        if (item.action === 'photo_delete') return t('actPhotoDelete');
         if (item.action === 'move') return t('actMove');
         if (item.action === 'place_add') return t('actPlaceAdd');
         if (item.action === 'place_remove') return t('actPlaceRemove');
@@ -7122,6 +7124,148 @@
             showCardImageError((payload && payload.message) || t('errorTitle'));
         };
         xhr.send();
+    }
+
+    function photoEnabled() {
+        return !!moduleSetup().photo;
+    }
+
+    function photoUrl(asset) {
+        var stamp = asset && asset.updated ? encodeURIComponent(asset.updated) : '';
+        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id + (stamp ? '&v=' + stamp : '');
+    }
+
+    function showPhotoError(message) {
+        var node = document.getElementById('asset-tree-photo-error');
+        if (!node) {
+            if (message) setFormError(message);
+            return;
+        }
+        node.hidden = !message;
+        node.textContent = message || '';
+    }
+
+    function uploadPhoto(asset, file) {
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+            showPhotoError(t('photoSize'));
+            return;
+        }
+        showPhotoError('');
+        var xhr = new XMLHttpRequest();
+        var data = new FormData();
+        data.append('file', file, file.name || 'photo.jpg');
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id, true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                notify(t('saved'));
+                selectAsset(asset.id, true);
+                return;
+            }
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            showPhotoError((payload && payload.message) || t('errorTitle'));
+        };
+        xhr.send(data);
+    }
+
+    function pickPhoto(asset) {
+        var input = document.getElementById('asset-tree-photo-file');
+        if (!input) {
+            input = el('input');
+            input.id = 'asset-tree-photo-file';
+            input.type = 'file';
+            input.accept = 'image/png,image/jpeg,.png,.jpg,.jpeg';
+            input.className = 'asset-tree-import-file';
+            document.body.appendChild(input);
+        }
+        input.onchange = function () {
+            var chosen = input.files && input.files[0];
+            input.value = '';
+            if (chosen) uploadPhoto(asset, chosen);
+        };
+        input.click();
+    }
+
+    function deletePhoto(asset) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('DELETE', contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id, true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                notify(t('saved'));
+                selectAsset(asset.id, true);
+                return;
+            }
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            showPhotoError((payload && payload.message) || t('errorTitle'));
+        };
+        xhr.send();
+    }
+
+    function openPhotoPreview(src) {
+        var overlay = el('div', 'asset-tree-photo-preview');
+        var picture = el('img');
+        picture.alt = '';
+        picture.src = src;
+        overlay.appendChild(picture);
+        function close() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            document.removeEventListener('keydown', onKey);
+        }
+        function onKey(event) {
+            if (event.key === 'Escape' || event.keyCode === 27) close();
+        }
+        overlay.addEventListener('click', close);
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    }
+
+    function photoStage(asset) {
+        var current = state.detail && state.detail.id === asset.id ? state.detail : asset;
+        var stage = el('div', 'asset-tree-photo-stage');
+        if (mayEdit(asset)) {
+            stage.addEventListener('dragover', function (event) {
+                event.preventDefault();
+                stage.classList.add('is-dropping');
+            });
+            stage.addEventListener('dragleave', function () {
+                stage.classList.remove('is-dropping');
+            });
+            stage.addEventListener('drop', function (event) {
+                event.preventDefault();
+                stage.classList.remove('is-dropping');
+                var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+                if (file) uploadPhoto(current, file);
+            });
+        }
+        if (current.photo) {
+            var img = el('img', 'asset-tree-photo');
+            img.alt = '';
+            img.src = photoUrl(current);
+            img.addEventListener('click', function () { openPhotoPreview(img.src); });
+            stage.appendChild(img);
+            if (mayEdit(asset)) {
+                var tools = el('div', 'asset-tree-photo-tools');
+                tools.appendChild(button(t('photoReplace'), 'asset-tree-photo-tool', function () { pickPhoto(current); }));
+                var remove = button(t('photoRemove'), 'asset-tree-photo-tool is-danger', function () { deletePhoto(current); });
+                tools.appendChild(remove);
+                stage.appendChild(tools);
+            }
+        } else if (mayEdit(asset)) {
+            stage.appendChild(button(t('photoAdd'), 'asset-tree-photo-empty', function () { pickPhoto(current); }));
+        }
+        var error = el('p', 'asset-tree-photo-error');
+        error.id = 'asset-tree-photo-error';
+        error.hidden = true;
+        stage.appendChild(error);
+        return stage;
     }
 
     function uploadFile(asset, file, internal, done) {
@@ -7945,13 +8089,21 @@
         (asset.attributes || []).forEach(function (attribute) {
             items.push(detailItem(attribute.name || attribute.fieldKey, inlineAttribute(asset, attribute)));
         });
-        main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items)));
+        var showPhoto = !isFolder(asset) && photoEnabled() && (asset.photo || mayEdit(asset));
+        var story = showPhoto ? el('div', 'asset-tree-photo-stack') : main;
+        story.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items)));
         var service = serviceBlock(asset);
-        if (service) main.appendChild(service);
+        if (service) story.appendChild(service);
         if (moduleOn('life') && !isFolder(asset)) {
-            main.appendChild(lifeBlock(asset));
+            story.appendChild(lifeBlock(asset));
         }
-        main.appendChild(descriptionModule(asset, true));
+        story.appendChild(descriptionModule(asset, true));
+        if (showPhoto) {
+            var band = el('div', 'asset-tree-photo-band');
+            band.appendChild(story);
+            band.appendChild(photoStage(asset));
+            main.appendChild(band);
+        }
 
         var issues = el('div');
         if (mayEdit(asset)) {
@@ -13995,6 +14147,29 @@
         treeRow.appendChild(treeText);
         treeCard.appendChild(treeRow);
         stack.appendChild(treeCard);
+
+        var photoCard = el('section', 'asset-tree-project-card');
+        photoCard.appendChild(el('h3', 'asset-tree-settings-title', t('photoTitle')));
+        photoCard.appendChild(el('p', 'asset-tree-hint', t('photoHint')));
+        var photoRow = el('label', 'asset-tree-check-row');
+        var photoBox = el('input');
+        photoBox.type = 'checkbox';
+        photoBox.checked = photoEnabled();
+        photoBox.disabled = !allowed;
+        if (!allowed) photoBox.setAttribute('data-disabled', '1');
+        photoBox.setAttribute('aria-label', t('photoShow'));
+        photoBox.addEventListener('change', function () {
+            var want = photoBox.checked;
+            saveProjectView({ setup: { photo: want } }, function (ok) {
+                if (ok === false) photoBox.checked = !want;
+            });
+        });
+        photoRow.appendChild(photoBox);
+        var photoText = el('span');
+        photoText.appendChild(el('strong', null, t('photoShow')));
+        photoRow.appendChild(photoText);
+        photoCard.appendChild(photoRow);
+        stack.appendChild(photoCard);
 
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
@@ -22061,6 +22236,7 @@
             furniture: setup.furniture || '',
             glyphs: setup.glyphs || '',
             portalMine: !!setup.portalMine,
+            photo: !!setup.photo,
             tniKeep: clampNum(setup.tniKeep || 90, 1, 3650),
             tniProbeDays: clampNum(setup.tniProbeDays || 3, 1, 30),
             tniProbeTries: clampNum(setup.tniProbeTries || 3, 1, 30),

@@ -1089,7 +1089,8 @@ public class AssetServiceImpl implements AssetService {
         ProjectViewEntity view = viewRow(projectKey);
         ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
         PortalMineDto.Card summary = portalCard(asset, attributes, type, index,
-                ModuleSetup.portalColumnList(setup.getPortalColumns()), role, projectKey);
+                ModuleSetup.portalColumnList(setup.getPortalColumns()), role, projectKey,
+                Boolean.TRUE.equals(setup.getPhoto()));
         PortalCardDto dto = new PortalCardDto();
         dto.setId(id);
         dto.setName(summary.getName());
@@ -1113,6 +1114,8 @@ public class AssetServiceImpl implements AssetService {
         dto.setViewerKey(user.getKey());
         dto.setProjectKey(projectKey);
         dto.setPortalUrl(PortalDesk.customerPortal(user, project(projectKey)));
+        dto.setPhoto(summary.isPhoto());
+        dto.setUpdated(summary.getUpdated());
         return dto;
     }
 
@@ -1731,6 +1734,129 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
+    @Override
+    public void storePhoto(ApplicationUser user, int assetId, byte[] data) {
+        if (data == null || data.length == 0) {
+            throw new AssetException(400, "asset-tree.error.file.required");
+        }
+        if (data.length > PhotoStore.MAX_BYTES) {
+            throw new AssetException(400, "asset-tree.error.photo.size");
+        }
+        final String kind = PhotoStore.kindOf(data);
+        if (kind.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.photo.type");
+        }
+        final byte[] bytes = data;
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+                if (!photosOn(entity.getProjectKey())) {
+                    throw new AssetException(403, "asset-tree.error.photo.off");
+                }
+                if (isLocation(entity)) {
+                    throw new AssetException(400, "asset-tree.error.photo.place");
+                }
+                entity.setPhoto(kind);
+                entity.setUpdated(new Date());
+                entity.setUpdatedBy(user.getKey());
+                entity.save();
+                return null;
+            }
+        });
+        try {
+            PhotoStore.write(assetId, bytes);
+        } catch (IOException ex) {
+            clearPhoto(assetId);
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+        logActivity(assetId, user.getKey(), "photo", "", "", "1");
+    }
+
+    @Override
+    public StoredFile openPhoto(ApplicationUser user, int assetId) {
+        AssetEntity entity = ao().get(AssetEntity.class, assetId);
+        if (entity == null || !photosOn(entity.getProjectKey())) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        String kind = entity.getPhoto();
+        if (kind == null || kind.isEmpty()) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        if (!portalParticipant(user, assetId)) {
+            requireReadable(user, assetId);
+        }
+        java.io.File stored = PhotoStore.file(assetId);
+        if (!stored.isFile()) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        byte[] data = new byte[(int) stored.length()];
+        try {
+            FileInputStream input = new FileInputStream(stored);
+            try {
+                int offset = 0;
+                while (offset < data.length) {
+                    int read = input.read(data, offset, data.length - offset);
+                    if (read < 0) {
+                        break;
+                    }
+                    offset += read;
+                }
+            } finally {
+                input.close();
+            }
+        } catch (IOException ex) {
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+        String name = "jpeg".equals(kind) ? "photo.jpg" : "photo.png";
+        return new StoredFile(name, PhotoStore.contentType(kind), data);
+    }
+
+    @Override
+    public void deletePhoto(ApplicationUser user, int assetId) {
+        final boolean[] had = new boolean[] {false};
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+                if (!photosOn(entity.getProjectKey())) {
+                    throw new AssetException(403, "asset-tree.error.photo.off");
+                }
+                String kind = entity.getPhoto();
+                had[0] = kind != null && !kind.isEmpty();
+                entity.setPhoto("");
+                entity.setUpdated(new Date());
+                entity.setUpdatedBy(user.getKey());
+                entity.save();
+                return null;
+            }
+        });
+        PhotoStore.delete(assetId);
+        if (had[0]) {
+            logActivity(assetId, user.getKey(), "photo_delete", "", "1", "");
+        }
+    }
+
+    private void clearPhoto(final int assetId) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = ao().get(AssetEntity.class, assetId);
+                if (entity != null) {
+                    entity.setPhoto("");
+                    entity.save();
+                }
+                return null;
+            }
+        });
+    }
+
+    private boolean photosOn(String projectKey) {
+        ProjectViewEntity view = viewRow(projectKey);
+        ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+        return Boolean.TRUE.equals(setup.getPhoto());
+    }
+
     private void clearCardImage(final int assetId) {
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
@@ -1807,6 +1933,7 @@ public class AssetServiceImpl implements AssetService {
                 }
                 for (Integer assetId : toDelete) {
                     CardImageStore.delete(assetId.intValue());
+                    PhotoStore.delete(assetId.intValue());
                 }
                 for (int i = descendants.size() - 1; i >= 0; i--) {
                     AssetEntity child = ao().get(AssetEntity.class, descendants.get(i));
@@ -4401,7 +4528,8 @@ public class AssetServiceImpl implements AssetService {
                         if (role == null) {
                             continue;
                         }
-                        cards.add(portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey()));
+                        cards.add(portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey(),
+                                Boolean.TRUE.equals(setup.getPhoto())));
                     }
                     Collections.sort(cards, new Comparator<PortalMineDto.Card>() {
                         @Override
@@ -5890,7 +6018,8 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private PortalMineDto.Card portalCard(AssetEntity row, List<AssetAttributeEntity> attributes, AssetTypeDto type,
-                                          Map<Integer, AssetEntity> index, List<String> columns, String role, String projectKey) {
+                                          Map<Integer, AssetEntity> index, List<String> columns, String role,
+                                          String projectKey, boolean photos) {
         PortalMineDto.Card card = new PortalMineDto.Card();
         card.setId(row.getID());
         card.setName(row.getName() == null ? "" : row.getName());
@@ -5938,6 +6067,11 @@ public class AssetServiceImpl implements AssetService {
             lines.add(line);
         }
         card.setLines(lines);
+        String kind = row.getPhoto();
+        if (photos && kind != null && !kind.isEmpty()) {
+            card.setPhoto(true);
+            card.setUpdated(format(row.getUpdated()));
+        }
         return card;
     }
 
@@ -7207,6 +7341,8 @@ public class AssetServiceImpl implements AssetService {
         dto.setEditable(canWrite(authenticationContext().getLoggedInUser(), project));
         String cardImage = entity.getCardImage();
         dto.setCardImage(cardImage != null && !cardImage.isEmpty());
+        String photo = entity.getPhoto();
+        dto.setPhoto(photo != null && !photo.isEmpty());
         dto.setLocation(location(entity, index));
         dto.setCustodian(profile(entity.getCustodianKey()));
         dto.setIssued(profile(entity.getIssuedKey()));

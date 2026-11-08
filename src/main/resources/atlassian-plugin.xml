@@ -75,6 +75,10 @@
         <url-pattern>/asset-tree-card-image</url-pattern>
     </servlet>
 
+    <servlet key="asset-tree-photo" name="Asset Tree Photo" class="com.assetstree.jira.servlet.PhotoServlet">
+        <url-pattern>/asset-tree-photo</url-pattern>
+    </servlet>
+
     <web-item key="asset-tree-nav" name="Asset Tree Link" section="system.top.navigation.bar" weight="47">
         <label key="asset-tree.nav.label"/>
         <link linkId="asset-tree-nav-link">/plugins/servlet/asset-tree?view=all</link>

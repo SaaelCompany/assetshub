@@ -277,6 +277,18 @@ input.asset-tree-portal-mine-search:focus {
     cursor: pointer;
 }
 
+.asset-tree-portal-mine-card.has-photo {
+    grid-template-columns: 36px minmax(0, 1fr) 128px;
+    align-items: center;
+}
+
+.asset-tree-portal-mine-photo {
+    width: 128px;
+    height: 80px;
+    object-fit: contain;
+    justify-self: end;
+}
+
 .asset-tree-portal-mine-card:hover,
 .asset-tree-portal-mine-card:focus {
     border-color: #4c9aff;
@@ -482,10 +494,45 @@ button.asset-tree-portal-close:hover {
     text-transform: uppercase;
 }
 
+.asset-tree-portal-detail-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 16px 24px;
+    align-items: start;
+}
+
+.asset-tree-portal-photo {
+    display: block;
+    width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+}
+
 .asset-tree-portal-fields {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px 24px;
+}
+
+@media (max-width: 640px) {
+    .asset-tree-portal-mine-card.has-photo {
+        grid-template-columns: 36px minmax(0, 1fr) 96px;
+    }
+
+    .asset-tree-portal-detail-row {
+        grid-template-columns: 1fr;
+    }
+
+    .asset-tree-portal-mine-photo {
+        width: 96px;
+        height: 64px;
+    }
+
+    .asset-tree-portal-photo {
+        width: 100%;
+        max-width: 220px;
+        height: auto;
+    }
 }
 
 .asset-tree-portal-fact span {

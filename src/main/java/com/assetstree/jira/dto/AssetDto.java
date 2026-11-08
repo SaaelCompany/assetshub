@@ -28,6 +28,7 @@ public class AssetDto {
     private String location;
     private boolean editable;
     private boolean cardImage;
+    private boolean photo;
     private UserProfileDto custodian;
     private UserProfileDto issued;
     private UserProfileDto author;
@@ -204,6 +205,14 @@ public class AssetDto {
 
     public void setCardImage(boolean cardImage) {
         this.cardImage = cardImage;
+    }
+
+    public boolean isPhoto() {
+        return photo;
+    }
+
+    public void setPhoto(boolean photo) {
+        this.photo = photo;
     }
 
     public UserProfileDto getCustodian() {

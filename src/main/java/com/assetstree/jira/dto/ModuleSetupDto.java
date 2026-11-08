@@ -38,6 +38,8 @@ public class ModuleSetupDto {
     private String glyphs;
     private Boolean portalMine;
     private String portalColumns;
+    /** True when an equipment card can show one photo. */
+    private Boolean photo;
     private Integer tniKeep;
     private Integer tniProbeDays;
     private Integer tniProbeTries;
@@ -114,6 +116,8 @@ public class ModuleSetupDto {
     public void setPortalMine(Boolean portalMine) { this.portalMine = portalMine; }
     public String getPortalColumns() { return portalColumns; }
     public void setPortalColumns(String portalColumns) { this.portalColumns = portalColumns; }
+    public Boolean getPhoto() { return photo; }
+    public void setPhoto(Boolean photo) { this.photo = photo; }
     public Integer getTniKeep() { return tniKeep; }
     public void setTniKeep(Integer tniKeep) { this.tniKeep = tniKeep; }
     public Integer getTniProbeDays() { return tniProbeDays; }

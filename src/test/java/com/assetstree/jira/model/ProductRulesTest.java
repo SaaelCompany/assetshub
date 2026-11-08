@@ -101,6 +101,26 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void cardPhotoStartsOffAndSurvivesAnotherSetting() {
+        ModuleSetupDto defaults = ModuleSetup.read("");
+        assertEquals(Boolean.FALSE, defaults.getPhoto());
+        ModuleSetupDto shown = new ModuleSetupDto();
+        shown.setPhoto(Boolean.TRUE);
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(shown));
+        assertEquals(Boolean.TRUE, read.getPhoto());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setLifeCurrency("USD");
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals(Boolean.TRUE, merged.getPhoto());
+        assertEquals("USD", merged.getLifeCurrency());
+        ModuleSetupDto off = new ModuleSetupDto();
+        off.setPhoto(Boolean.FALSE);
+        ModuleSetupDto hidden = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(merged, off)));
+        assertEquals(Boolean.FALSE, hidden.getPhoto());
+        assertEquals("USD", hidden.getLifeCurrency());
+    }
+
+    @Test
     public void timesheetDoublesNightAndSkipsLeave() {
         assertEquals(2, TimesheetMath.factor("night", 8, null));
         assertEquals(0, TimesheetMath.factor("leave", 0, null));

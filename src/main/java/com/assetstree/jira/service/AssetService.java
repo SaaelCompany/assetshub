@@ -131,6 +131,12 @@ public interface AssetService {
 
     void deleteCardImage(ApplicationUser user, int assetId);
 
+    void storePhoto(ApplicationUser user, int assetId, byte[] data);
+
+    StoredFile openPhoto(ApplicationUser user, int assetId);
+
+    void deletePhoto(ApplicationUser user, int assetId);
+
     void deleteAsset(ApplicationUser user, int id, boolean cascade);
 
     AssetDto moveAsset(ApplicationUser user, int id, MoveDraft move);

@@ -101,6 +101,12 @@ public interface AssetEntity extends Entity {
 
     void setCardImage(String cardImage);
 
+    /** png, jpeg, or empty when this equipment has no photo on the card. */
+    @StringLength(16)
+    String getPhoto();
+
+    void setPhoto(String photo);
+
     /** Id from an external CMDB. Empty until a discovery import sets it. */
     @Indexed
     @StringLength(120)

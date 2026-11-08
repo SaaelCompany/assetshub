@@ -1402,6 +1402,17 @@
                     body.appendChild(field);
                 });
                 item.appendChild(body);
+                if (card.photo) {
+                    item.classList.add('has-photo');
+                    var picture = el('img', 'asset-tree-portal-mine-photo');
+                    picture.alt = '';
+                    picture.src = portalPhotoUrl(card);
+                    picture.addEventListener('error', function () {
+                        item.classList.remove('has-photo');
+                        if (picture.parentNode) picture.parentNode.removeChild(picture);
+                    });
+                    item.appendChild(picture);
+                }
                 item.tabIndex = 0;
                 item.setAttribute('role', 'button');
                 item.addEventListener('click', function () { openPortalCard(card.id); });
@@ -1517,7 +1528,21 @@
             if (!grid.childNodes.length && card.location) grid.appendChild(portalFact('Расположение', card.location));
             if (grid.childNodes.length) details.appendChild(grid);
             if (card.description && !described) details.appendChild(el('p', 'asset-tree-portal-prose', card.description));
-            if (details.childNodes.length > 1) body.appendChild(details);
+            var showDetails = details.childNodes.length > 1;
+            if (card.photo) {
+                var row = el('div', 'asset-tree-portal-detail-row');
+                if (showDetails) row.appendChild(details);
+                var frame = el('div', 'asset-tree-portal-photo-frame');
+                var picture = el('img', 'asset-tree-portal-photo');
+                picture.alt = '';
+                picture.src = portalPhotoUrl(card);
+                picture.addEventListener('click', function (event) { event.stopPropagation(); });
+                frame.appendChild(picture);
+                row.appendChild(frame);
+                body.appendChild(row);
+            } else if (showDetails) {
+                body.appendChild(details);
+            }
             var people = portalSection('Люди');
             people.appendChild(portalPerson('МОЛ', card.custodian));
             people.appendChild(portalPerson('Кому выдано', card.issued));
@@ -1535,6 +1560,11 @@
             }
             paint(payload);
         });
+    }
+
+    function portalPhotoUrl(card) {
+        var stamp = card && card.updated ? encodeURIComponent(card.updated) : '';
+        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + card.id + (stamp ? '&v=' + stamp : '');
     }
 
     function portalSection(title) {
