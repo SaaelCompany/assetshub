@@ -211,6 +211,7 @@ import com.assetstree.jira.model.ReportLines;
 import com.assetstree.jira.model.LifeApprovers;
 import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.PlanUnderlay;
+import com.assetstree.jira.model.ContractorContract;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
 import com.assetstree.jira.model.ReportCatalog;
@@ -12465,6 +12466,20 @@ public class AssetServiceImpl implements AssetService {
                 String supplier = draft.getSupplier() == null ? "" : draft.getSupplier().trim();
                 String document = draft.getDocument() == null ? "" : draft.getDocument().trim();
                 String service = draft.getWarrantyService() == null ? "" : draft.getWarrantyService().trim();
+                String contractor = draft.getContractor() == null ? "" : draft.getContractor().trim();
+                String contractNo = draft.getContractNo() == null ? "" : draft.getContractNo().trim();
+                String contractError = ContractorContract.reject(contractor, contractNo, draft.getContractFrom(), draft.getContractUntil());
+                if (contractError != null) {
+                    throw new AssetException(400, contractError);
+                }
+                String contractFrom = FieldDates.canonical(draft.getContractFrom());
+                String contractUntil = FieldDates.canonical(draft.getContractUntil());
+                if (!ContractorContract.present(contractor, contractNo)) {
+                    contractor = "";
+                    contractNo = "";
+                    contractFrom = "";
+                    contractUntil = "";
+                }
                 String currency = draft.getCurrency() == null ? "" : draft.getCurrency().trim().toUpperCase(Locale.ROOT);
                 if (currency.isEmpty()) {
                     currency = "RUB";
@@ -12481,6 +12496,10 @@ public class AssetServiceImpl implements AssetService {
                 row.setDocument(document);
                 row.setCurrency(currency);
                 row.setWarrantyService(service);
+                row.setContractor(contractor);
+                row.setContractNo(contractNo);
+                row.setContractFrom(contractFrom);
+                row.setContractUntil(contractUntil);
                 row.setPriceMinor(price.longValue());
                 row.setResidualMinor(residual.longValue());
                 row.setLifeMonths(months);
@@ -12623,6 +12642,11 @@ public class AssetServiceImpl implements AssetService {
             dto.setWarrantyService("");
             dto.setReplaceOn("");
             dto.setMonthsLeft(0);
+            dto.setContractor("");
+            dto.setContractNo("");
+            dto.setContractFrom("");
+            dto.setContractUntil("");
+            dto.setContractPhase(0);
             return dto;
         }
         dto.setPurchased(row.getPurchased() == null ? "" : row.getPurchased());
@@ -12649,6 +12673,15 @@ public class AssetServiceImpl implements AssetService {
         LocalDate replace = replaceDate(row);
         dto.setReplaceOn(replace == null ? "" : replace.toString());
         dto.setMonthsLeft(monthsLeftOf(row, today));
+        String contractor = row.getContractor() == null ? "" : row.getContractor();
+        String contractNo = row.getContractNo() == null ? "" : row.getContractNo();
+        String contractFrom = row.getContractFrom() == null ? "" : row.getContractFrom();
+        String contractUntil = row.getContractUntil() == null ? "" : row.getContractUntil();
+        dto.setContractor(contractor);
+        dto.setContractNo(contractNo);
+        dto.setContractFrom(contractFrom);
+        dto.setContractUntil(contractUntil);
+        dto.setContractPhase(ContractorContract.phase(contractor, contractNo, contractFrom, contractUntil, today));
         return dto;
     }
 

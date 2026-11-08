@@ -526,6 +526,7 @@
         lifeFailed: {},
         lifeToken: {},
         lifeEditing: {},
+        lifeContractOpen: {},
         tniList: null,
         tniError: '',
         tniTimer: null,
@@ -29342,18 +29343,41 @@
         return !life.purchased && !life.warrantyUntil && !life.commissioned && !life.supplier && !(life.price && life.price !== '0');
     }
 
+    function lifeContractPresent(life) {
+        return !!((life.contractor || '').replace(/^\s+|\s+$/g, '') || (life.contractNo || '').replace(/^\s+|\s+$/g, ''));
+    }
+
     function lifeSteps(life) {
         var buy = !!(life.purchased || life.supplier || (life.price && life.price !== '0'));
         var use = !!life.commissioned;
         var warranty = !!life.warrantyUntil;
         var off = life.writeoffState === 'approved';
-        return [
+        var steps = [
             { key: 'lifeStepBuy', on: buy },
             { key: 'lifeStepUse', on: use },
             { key: 'lifeStepWarranty', on: warranty },
-            { key: 'lifeStepRun', on: use && !off },
-            { key: 'lifeStepOff', on: off }
+            { key: 'lifeStepRun', on: use && !off }
         ];
+        if (lifeContractPresent(life)) {
+            steps.push({ key: 'lifeStepContract', on: true });
+        }
+        steps.push({ key: 'lifeStepOff', on: off });
+        return steps;
+    }
+
+    function lifeContractFacts(life) {
+        if (!lifeContractPresent(life)) return [];
+        var lines = [];
+        var contractor = (life.contractor || '').replace(/^\s+|\s+$/g, '');
+        var number = (life.contractNo || '').replace(/^\s+|\s+$/g, '');
+        if (contractor) lines.push(t('lifeContractor') + ': ' + contractor);
+        if (number) lines.push(t('lifeContractNo') + ': ' + number);
+        if (life.contractFrom) lines.push(t('lifeContractFrom') + ': ' + life.contractFrom);
+        if (life.contractUntil) lines.push(t('lifeContractUntil') + ': ' + life.contractUntil);
+        if (life.contractPhase === 2) lines.push(t('lifeContractOff'));
+        else if (life.contractPhase === 3) lines.push(t('lifeContractWait'));
+        else lines.push(t('lifeContractOn'));
+        return lines;
     }
 
     function lifeStepper(life) {
@@ -29512,16 +29536,19 @@
         }
         body.appendChild(lifeStepper(life));
         if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
-        else {
-            var facts = el('div', 'asset-tree-life-facts');
+        var facts = el('div', 'asset-tree-life-facts');
+        if (!lifeBlank(life)) {
             if (life.price) facts.appendChild(el('span', null, t('lifePrice') + ': ' + moneyInput(life.price) + ' ' + currencyMark(life.currency || 'RUB')));
             if (life.monthly) facts.appendChild(el('span', null, t('lifeMonthly') + ': ' + moneyInput(life.monthly)));
             if (life.book) facts.appendChild(el('span', null, t('lifeBook') + ': ' + moneyInput(life.book)));
             if (life.replaceOn) facts.appendChild(el('span', null, t('lifeReplace') + ': ' + life.replaceOn));
             if (life.replaceOn) facts.appendChild(el('span', null, t('lifeMonthsLeft') + ': ' + (life.monthsLeft || 0)));
             if (life.warrantyUntil) facts.appendChild(el('span', null, life.warrantyActive ? t('lifeWarrantyOn') : t('lifeWarrantyOff')));
-            body.appendChild(facts);
         }
+        lifeContractFacts(life).forEach(function (line) {
+            facts.appendChild(el('span', null, line));
+        });
+        if (facts.childNodes.length) body.appendChild(facts);
         if (life.writeoffState === 'pending') {
             body.appendChild(el('p', 'asset-tree-life-state', t('lifePending')));
         } else if (life.writeoffState === 'approved') {
@@ -29597,6 +29624,35 @@
         use.appendChild(lifeWide(planField(t('lifeWarrantyService'), service)));
         usePanel.appendChild(use);
         form.appendChild(usePanel);
+        var contractor = document.createElement('input');
+        contractor.value = life.contractor || '';
+        var contractNo = document.createElement('input');
+        contractNo.value = life.contractNo || '';
+        var contractFrom = document.createElement('input');
+        contractFrom.type = 'date';
+        contractFrom.value = life.contractFrom || '';
+        var contractUntil = document.createElement('input');
+        contractUntil.type = 'date';
+        contractUntil.value = life.contractUntil || '';
+        var contractPanel = el('section', 'asset-tree-life-panel');
+        contractPanel.appendChild(el('h4', null, t('lifeSectionContract')));
+        contractPanel.appendChild(el('p', 'asset-tree-hint', t('lifeContractHint')));
+        var contractGrid = el('div', 'asset-tree-life-grid');
+        contractGrid.appendChild(planField(t('lifeContractor'), contractor));
+        contractGrid.appendChild(planField(t('lifeContractNo'), contractNo));
+        contractGrid.appendChild(planField(t('lifeContractFrom'), contractFrom));
+        contractGrid.appendChild(planField(t('lifeContractUntil'), contractUntil));
+        contractPanel.appendChild(contractGrid);
+        var contractOpen = lifeContractPresent(life) || !!state.lifeContractOpen[asset.id];
+        contractPanel.hidden = !contractOpen;
+        form.appendChild(contractPanel);
+        if (!contractOpen) {
+            form.appendChild(button(t('lifeContractAdd'), 'asset-tree-btn', function () {
+                state.lifeContractOpen[asset.id] = true;
+                contractPanel.hidden = false;
+                this.hidden = true;
+            }));
+        }
         var methodPanel = el('section', 'asset-tree-life-panel');
         methodPanel.appendChild(el('h4', null, t('lifeSectionMethod')));
         var method = el('div', 'asset-tree-life-grid is-three');
@@ -29628,18 +29684,24 @@
                 commissioned: commissioned.value,
                 warrantyUntil: warranty.value,
                 warrantyService: service.value,
+                contractor: contractor.value,
+                contractNo: contractNo.value,
+                contractFrom: contractFrom.value,
+                contractUntil: contractUntil.value,
                 lifeMonths: parseInt(months.value, 10) || 0,
                 residual: moneyWire(residual.value)
             }, function (status, payload) {
                 if (status >= 200 && status < 300 && payload) {
                     state.life[asset.id] = payload;
                     state.lifeEditing[asset.id] = false;
+                    state.lifeContractOpen[asset.id] = false;
                     showDetail(state.detail || asset, false);
                 } else notify((payload && payload.message) || t('errorTitle'));
             });
         }));
         actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
             state.lifeEditing[asset.id] = false;
+            state.lifeContractOpen[asset.id] = false;
             showDetail(state.detail || asset, false);
         }));
         form.appendChild(actions);
