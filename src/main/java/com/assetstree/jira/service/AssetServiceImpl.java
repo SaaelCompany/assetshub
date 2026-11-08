@@ -10,8 +10,12 @@ import com.atlassian.jira.bc.user.search.UserSearchService;
 import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.config.ConstantsManager;
 import com.atlassian.jira.config.properties.APKeys;
+import com.atlassian.jira.issue.CustomFieldManager;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.issue.IssueManager;
+import com.atlassian.jira.issue.ModifiedValue;
+import com.atlassian.jira.issue.fields.CustomField;
+import com.atlassian.jira.issue.util.DefaultIssueChangeHolder;
 import com.atlassian.jira.issue.issuetype.IssueType;
 import com.atlassian.jira.issue.status.Status;
 import com.atlassian.jira.workflow.JiraWorkflow;
@@ -60,6 +64,7 @@ import com.assetstree.jira.ao.SavedReportEntity;
 import com.assetstree.jira.ao.ServicePlanEntity;
 import com.assetstree.jira.ao.StaffDutyEntity;
 import com.assetstree.jira.ao.AssetTypeEntity;
+import com.assetstree.jira.field.AssetCustomField;
 import com.assetstree.jira.dto.ActivityDto;
 import com.assetstree.jira.dto.AssetDto;
 import com.assetstree.jira.dto.AssetKeyDto;
@@ -1518,11 +1523,11 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void unlinkIssue(ApplicationUser user, int assetId, long issueId) {
+        final Issue issue = issueManager().getIssueObject(Long.valueOf(issueId));
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
                 AssetEntity asset = requireVisible(user, assetId);
-                Issue issue = issueManager().getIssueObject(Long.valueOf(issueId));
                 Project project = project(asset.getProjectKey());
                 if (!canWrite(user, project) && !canEditIssue(user, issue)) {
                     throw new AssetException(403, "asset-tree.error.forbidden");
@@ -1534,6 +1539,7 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
+        clearAssetField(issue, assetId);
     }
 
     @Override
@@ -1543,6 +1549,7 @@ public class AssetServiceImpl implements AssetService {
         if (!canBrowse(user, issue)) {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
+        rememberFieldAssets(user, issue);
         return linkedAssets(user, issueId);
     }
 
@@ -2953,7 +2960,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId) {
-        if (user == null || issue == null || issue.getProjectObject() == null || !canBrowse(user, issue)) {
+        if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
             return;
         }
         Integer previous = parseId(previousAssetId);
@@ -2979,7 +2986,7 @@ public class AssetServiceImpl implements AssetService {
         }
         boolean fresh = previous == null || previous.intValue() != next.intValue();
         try {
-            link(user, next.intValue(), issue, false);
+            linkField(next.intValue(), issue);
         } catch (AssetException ex) {
             if (ex.getStatus() != 409) {
                 log.warn("Could not link asset {} to {}", next, issue.getKey());
@@ -3063,6 +3070,111 @@ public class AssetServiceImpl implements AssetService {
             return entity.getObjectKey();
         }
         return entity.getObjectKey() + "  " + entity.getName();
+    }
+
+    /**
+     * The request field is filled by portal customers, who can raise a request
+     * without Browse Projects. The field value itself is the link.
+     */
+    private void linkField(final int assetId, final Issue issue) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity asset = requireAsset(assetId);
+                if (issue.getProjectObject() == null || !ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+                    throw new AssetException(400, "asset-tree.error.project.mismatch");
+                }
+                AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
+                        Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, issue.getId()));
+                if (existing != null && existing.length > 0) {
+                    throw new AssetException(409, "asset-tree.error.issue.duplicate");
+                }
+                ao().create(AssetIssueLinkEntity.class,
+                        new DBParam("ASSET_ID", assetId),
+                        new DBParam("ISSUE_ID", issue.getId()),
+                        new DBParam("STATUS_BEFORE", Statuses.canonical(asset.getStatus())));
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public void syncIssueFields(ApplicationUser user, Issue issue) {
+        rememberFieldAssets(user, issue);
+    }
+
+    private void rememberFieldAssets(ApplicationUser user, Issue issue) {
+        if (issue == null) {
+            return;
+        }
+        for (String value : assetFieldValues(issue)) {
+            try {
+                syncRequestAsset(user, issue, null, value);
+            } catch (RuntimeException ex) {
+                log.warn("Could not link the asset field on {}", issue.getKey(), ex);
+            }
+        }
+    }
+
+    private void clearAssetField(Issue issue, int assetId) {
+        if (issue == null) {
+            return;
+        }
+        for (CustomField field : assetFields(issue)) {
+            Object raw = issue.getCustomFieldValue(field);
+            Integer stored = parseId(raw == null ? null : String.valueOf(raw));
+            if (stored == null || stored.intValue() != assetId) {
+                continue;
+            }
+            try {
+                // Write the field through the type itself. CustomField.updateValue
+                // needs a field layout to record history, and this unlink has none.
+                if (field.getCustomFieldType() instanceof AssetCustomField) {
+                    ((AssetCustomField) field.getCustomFieldType()).updateValue(field, issue, "");
+                } else {
+                    field.updateValue(null, issue, new ModifiedValue(raw, ""), new DefaultIssueChangeHolder());
+                }
+            } catch (RuntimeException ex) {
+                log.warn("Could not clear asset field {} on {}", field.getId(), issue.getKey(), ex);
+            }
+        }
+    }
+
+    private List<String> assetFieldValues(Issue issue) {
+        List<String> values = new ArrayList<String>();
+        for (CustomField field : assetFields(issue)) {
+            Object raw = issue.getCustomFieldValue(field);
+            if (raw != null && !String.valueOf(raw).trim().isEmpty()) {
+                values.add(String.valueOf(raw).trim());
+            }
+        }
+        return values;
+    }
+
+    private List<CustomField> assetFields(Issue issue) {
+        List<CustomField> found = new ArrayList<CustomField>();
+        CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+        if (manager == null || issue == null) {
+            return found;
+        }
+        List<CustomField> fields = manager.getCustomFieldObjects(issue);
+        if (fields == null) {
+            return found;
+        }
+        for (CustomField field : fields) {
+            if (field == null || field.getCustomFieldType() == null) {
+                continue;
+            }
+            if (field.getCustomFieldType() instanceof AssetCustomField) {
+                found.add(field);
+                continue;
+            }
+            String key = field.getCustomFieldType().getKey();
+            if (key != null && key.endsWith(":asset-cf")) {
+                found.add(field);
+            }
+        }
+        return found;
     }
 
     private IssueRefDto link(ApplicationUser user, int assetId, Issue issue, boolean requireWrite) {

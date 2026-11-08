@@ -342,6 +342,24 @@
         var appliedRoot = undefined;
         var appliedLock = undefined;
 
+        function commitValue(next) {
+            var stored = next === undefined || next === null ? '' : String(next);
+            if (hidden.value === stored) return;
+            hidden.value = stored;
+            if (window.AJS && AJS.$) {
+                try { AJS.$(hidden).val(stored).trigger('input').trigger('change'); } catch (error) { /* the form has no jQuery hook */ }
+                return;
+            }
+            try {
+                var inputEvent = document.createEvent('HTMLEvents');
+                inputEvent.initEvent('input', true, false);
+                hidden.dispatchEvent(inputEvent);
+                var changeEvent = document.createEvent('HTMLEvents');
+                changeEvent.initEvent('change', true, false);
+                hidden.dispatchEvent(changeEvent);
+            } catch (error) { /* the browser already stored the value */ }
+        }
+
         ajax('/projects/' + encodeURIComponent(projectKey) + '/picker', function (status, payload) {
             nodesReady = true;
             nodes = status === 200 && payload ? payload : [];
@@ -365,18 +383,19 @@
             var value = hidden.value ? parseInt(hidden.value, 10) : null;
             if (locked || flat) {
                 if (locked && !rootId) {
-                    hidden.value = '';
+                    commitValue('');
                     drawList(null, true);
                     return;
                 }
                 if (rootId && value && !listedContains(rootId, value)) {
-                    hidden.value = '';
+                    commitValue('');
+                    value = null;
                 }
                 drawList(locked ? rootId : null, false);
                 return;
             }
             if (rootId && (!value || !contains(byId, rootId, value))) {
-                hidden.value = String(rootId);
+                commitValue(String(rootId));
                 value = rootId;
             }
             draw(value, rootId);
@@ -689,7 +708,7 @@
                 select.appendChild(option);
             });
             select.addEventListener('change', function () {
-                hidden.value = select.value;
+                commitValue(select.value);
                 show(hidden.value ? parseInt(hidden.value, 10) : null);
             });
             attachSelect(select);
@@ -742,8 +761,8 @@
             select.addEventListener('change', function () {
                 var chosen = select.value ? byId[parseInt(select.value, 10)] : null;
                 var cursor = chosen || parent;
-                var stored = cursor ? anchorId(cursor.id) : null;
-                hidden.value = stored ? String(stored) : '';
+                var stored = cursor && !cursor.group ? cursor.id : (cursor ? anchorId(cursor.id) : null);
+                commitValue(stored ? String(stored) : '');
                 var rootId = appliedLock ? appliedRoot : null;
                 draw(cursor ? cursor.id : null, rootId);
             });

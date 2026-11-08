@@ -154,15 +154,19 @@
                         (payload || []).slice(0, 8).forEach(function (asset) {
                             var item = el('li');
                             var hit = el('button', 'asset-tree-panel-hit');
+                            hit.type = 'button';
                             hit.appendChild(el('span', null, asset.name));
                             hit.appendChild(el('span', 'asset-tree-panel-key', asset.objectKey));
                             hit.addEventListener('click', function () {
-                                ajax('POST', '/issues/' + issueId + '/assets', { assetId: asset.id }, function (linkStatus) {
+                                ajax('POST', '/issues/' + issueId + '/assets', { assetId: asset.id }, function (linkStatus, linkPayload) {
                                     if (linkStatus >= 200 && linkStatus < 300) {
                                         input.value = '';
                                         results.innerHTML = '';
                                         loadLinks(panel, issueId, i18n, canEdit, projectKey);
+                                        return;
                                     }
+                                    results.innerHTML = '';
+                                    results.appendChild(el('li', 'asset-tree-panel-error', (linkPayload && linkPayload.message) || t(i18n, 'errorTitle')));
                                 });
                             });
                             item.appendChild(hit);
@@ -232,6 +236,7 @@
                 line.appendChild(link);
                 if (canEdit) {
                     var remove = el('button', null, '×');
+                    remove.type = 'button';
                     remove.setAttribute('aria-label', t(i18n, 'unlink'));
                     remove.addEventListener('click', function () {
                         ajax('DELETE', '/assets/' + asset.id + '/issues/' + issueId, null, function () {
