@@ -19,6 +19,15 @@ public class ReportCatalogTest {
         assertEquals("", ReportCatalog.chart("bar,waffle"));
         assertEquals("", ReportCatalog.group("type+nope"));
         assertEquals("", ReportCatalog.group("type+status+place"));
+        assertEquals("done", ReportCatalog.group("done"));
+        assertEquals("done+month", ReportCatalog.group("done+month"));
+        assertEquals("done+kind+who", ReportCatalog.group("done+kind+who"));
+        assertEquals("done+month+place", ReportCatalog.group("done+month+place"));
+        assertEquals("", ReportCatalog.group("who"));
+        assertEquals("", ReportCatalog.group("month+done"));
+        assertEquals("", ReportCatalog.group("done+holder"));
+        assertEquals("", ReportCatalog.group("done+status"));
+        assertEquals("", ReportCatalog.group("done+kind+month+place"));
         assertEquals("model", ReportCatalog.fieldKey("Model"));
         assertEquals("", ReportCatalog.fieldKey("1bad"));
         assertEquals("", ReportCatalog.fieldKey("has space"));

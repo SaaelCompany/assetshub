@@ -13564,7 +13564,8 @@
         }
         if (moduleKey === 'reports') {
             var reports = el('div', 'asset-tree-check-list');
-            [['status', 'reportStatusTitle'], ['type', 'reportTypeTitle'], ['place', 'reportPlaceTitle'], ['holder', 'reportHolderTitle'], ['receipts', 'reportReceipts'], ['cost', 'reportCostTitle'], ['warranty', 'reportWarrantyTitle'], ['age', 'reportAge'], ['writeoff', 'reportWriteoffs'], ['work', 'reportWork']].forEach(function (pair) {
+            [['status', 'reportStatusTitle'], ['type', 'reportTypeTitle'], ['place', 'reportPlaceTitle'], ['holder', 'reportHolderTitle'], ['receipts', 'reportReceipts'], ['cost', 'reportCostTitle'], ['warranty', 'reportWarrantyTitle'], ['age', 'reportAge'], ['writeoff', 'reportWriteoffs'], ['work', 'reportWork'], ['done', 'reportDone']].forEach(function (pair) {
+                if (pair[0] === 'done' && !moduleOn('service')) return;
                 var label = el('label', 'asset-tree-check');
                 var box = document.createElement('input');
                 box.type = 'checkbox';
@@ -20270,20 +20271,30 @@
         return shareLabels([count, Math.max(0, total - count)])[0] || '0 %';
     }
 
+    function reportAxes(group) {
+        if (group === 'done') return ['kind'];
+        if (group && String(group).indexOf('done+') === 0) return String(group).slice(5).split('+');
+        return null;
+    }
+
     function groupWord(group, view) {
+        var axes = reportAxes(group);
+        if (axes) return axes.map(function (part) { return groupWord(part === 'month' ? 'done-month' : part, view); }).join(' · ');
         if (group && String(group).indexOf('+') >= 0) {
             return String(group).split('+').map(function (part) { return groupWord(part, view); }).join(' · ');
         }
         if (group === 'field' && view && view.fieldLabel) return view.fieldLabel;
         var map = {
             status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
-            month: 'groupWordMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind',
-            field: 'reportField'
+            month: 'groupWordMonth', 'done-month': 'groupWordDoneMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind',
+            who: 'groupWordWho', field: 'reportField'
         };
         return t(map[group] || 'groupWordStatus');
     }
 
     function groupPhrase(group, view) {
+        var axes = reportAxes(group);
+        if (axes) return axes.map(function (part) { return groupPhrase(part === 'month' ? 'done-month' : part, view); }).join(' · ');
         if (group && String(group).indexOf('+') >= 0) {
             return String(group).split('+').map(function (part) { return groupPhrase(part, view); }).join(' · ');
         }
@@ -20292,12 +20303,14 @@
         }
         var map = {
             status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder', issued: 'reportGroupIssued',
-            month: 'reportGroupMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind'
+            month: 'reportGroupMonth', 'done-month': 'reportGroupDoneMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind',
+            who: 'reportGroupWho'
         };
         return t(map[group] || 'reportGroupStatus');
     }
 
     function detailWord(group, view) {
+        if (reportAxes(group)) return t('reportDoneDetail');
         if (group === 'kind') return t('reportWorkDetail');
         if (group === 'age' || group === 'month') return t('lifePurchase');
         if (group === 'warranty') return t('lifeWarranty');
@@ -20892,8 +20905,9 @@
         if (view && view.sum) return true;
         if (saved && saved.metric === 'cost') return true;
         if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind' || group === 'field') return true;
+        if (group === 'done' || String(group).indexOf('done+') === 0) return true;
         var id = String((view && view.id) || '');
-        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'service';
+        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'done' || id === 'service';
     }
 
     function reportJoin(labels) {
@@ -21310,20 +21324,46 @@
             var name = document.createElement('input');
             name.placeholder = t('reportName');
             name.setAttribute('aria-label', t('reportName'));
-            var group = document.createElement('select');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['field', 'reportGroupField'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']].forEach(function (pair) {
+            var storedGroup = editing && existing.groupBy ? String(existing.groupBy) : 'type';
+            var doneStored = storedGroup === 'done' || storedGroup.indexOf('done+') === 0;
+            var source = document.createElement('select');
+            [['assets', 'reportSourceAssets'], ['done', 'reportSourceDone']].forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
-                group.appendChild(option);
+                source.appendChild(option);
             });
-            var storedGroup = editing && existing.groupBy ? String(existing.groupBy) : 'type';
-            var groupBits = storedGroup.split('+');
-            group.value = groupBits[0];
+            source.value = doneStored ? 'done' : 'assets';
+            var group = document.createElement('select');
             var extraOn = {};
-            groupBits.forEach(function (part, index) {
+            (doneStored ? (storedGroup === 'done' ? ['kind'] : storedGroup.slice(5).split('+')) : storedGroup.split('+')).forEach(function (part, index) {
                 if (index) extraOn[part] = true;
             });
+            function groupChoices() {
+                if (source.value === 'done') {
+                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho']];
+                }
+                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['field', 'reportGroupField'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']];
+            }
+            function extraChoices() {
+                if (source.value === 'done') {
+                    return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho']];
+                }
+                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']];
+            }
+            function fillGroups(keep) {
+                var choices = groupChoices();
+                var current = keep ? group.value : (doneStored && source.value === 'done' ? (storedGroup === 'done' ? 'kind' : storedGroup.slice(5).split('+')[0]) : (source.value === 'assets' && !doneStored ? storedGroup.split('+')[0] : choices[0][0]));
+                group.innerHTML = '';
+                choices.forEach(function (pair) {
+                    var option = document.createElement('option');
+                    option.value = pair[0];
+                    option.textContent = t(pair[1]);
+                    group.appendChild(option);
+                });
+                group.value = current;
+                if (!group.value) group.value = choices[0][0];
+            }
             var chartOrder = [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']];
             var chartOn = {};
             String(editing && existing.chart ? existing.chart : 'histogram').split(',').forEach(function (part) {
@@ -21348,12 +21388,26 @@
             initialStatuses.forEach(function (key) { pickedStatuses[key] = true; });
             function syncMetric() {
                 var cost = metric.querySelector('option[value="cost"]');
-                var kindGroup = group.value === 'kind';
-                if (cost) cost.disabled = kindGroup;
-                if (kindGroup && metric.value === 'cost') metric.value = 'count';
+                var countOnly = source.value === 'done' || group.value === 'kind';
+                if (cost) cost.disabled = countOnly;
+                if (countOnly && metric.value === 'cost') metric.value = 'count';
             }
-            group.addEventListener('change', syncMetric);
-            syncMetric();
+            function syncField() {
+                fieldRow.hidden = source.value === 'done' || group.value !== 'field';
+            }
+            group.addEventListener('change', function () {
+                if (extraOn[group.value]) delete extraOn[group.value];
+                syncMetric();
+                syncField();
+                paintExtras();
+            });
+            source.addEventListener('change', function () {
+                extraOn = {};
+                fillGroups(false);
+                syncMetric();
+                syncField();
+                paintExtras();
+            });
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
             row.appendChild(planField(t('reportMetric'), metric));
@@ -21365,11 +21419,9 @@
             if (editing && existing.fieldKey) field.value = existing.fieldKey;
             var fieldRow = el('div', 'asset-tree-report-picks');
             fieldRow.appendChild(planField(t('reportField'), field));
-            fieldRow.hidden = group.value !== 'field';
-            group.addEventListener('change', function () {
-                fieldRow.hidden = group.value !== 'field';
-                syncMetric();
-            });
+            fillGroups(false);
+            syncMetric();
+            syncField();
             var fieldRules = unpackFieldRules(editing ? existing.filterValue : '', editing ? existing.attrKey : '', editing ? existing.attrValue : '');
             var fieldHost = el('div', 'asset-tree-report-fields');
             function paintFieldRules() {
@@ -21412,34 +21464,47 @@
             }
             paintFieldRules();
             dialog.appendChild(planField(t('reportName'), name));
+            var sourceRow = planField(t('reportSource'), source);
+            if (moduleOn('service') || doneStored) dialog.appendChild(sourceRow);
             dialog.appendChild(row);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportAlso')));
             var extraList = el('div', 'asset-tree-check-list');
-            [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']].forEach(function (pair) {
-                var label = el('label', 'asset-tree-check');
-                var box = document.createElement('input');
-                box.type = 'checkbox';
-                box.checked = !!extraOn[pair[0]] && pair[0] !== group.value;
-                box.addEventListener('change', function () {
-                    if (box.checked) {
-                        var next = group.value;
-                        var key;
-                        for (key in extraOn) {
-                            if (extraOn[key] && key !== group.value) next += '+' + key;
-                        }
-                        next += '+' + pair[0];
-                        if (pair[0] === group.value || next.length > 16) {
-                            box.checked = false;
-                            notify(t('reportAlso'));
-                            return;
-                        }
-                        extraOn[pair[0]] = true;
-                    } else delete extraOn[pair[0]];
+            function plannedGroup(extra) {
+                var parts = [group.value];
+                extraChoices().forEach(function (pair) {
+                    if (extraOn[pair[0]] && pair[0] !== group.value) parts.push(pair[0]);
                 });
-                label.appendChild(box);
-                label.appendChild(document.createTextNode(t(pair[1])));
-                extraList.appendChild(label);
-            });
+                if (extra && parts.indexOf(extra) < 0) parts.push(extra);
+                if (source.value === 'done') {
+                    if (parts.length === 1 && parts[0] === 'kind') return 'done';
+                    return 'done+' + parts.join('+');
+                }
+                return parts.join('+');
+            }
+            function paintExtras() {
+                extraList.innerHTML = '';
+                extraChoices().forEach(function (pair) {
+                    if (pair[0] === group.value) return;
+                    var label = el('label', 'asset-tree-check');
+                    var box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.checked = !!extraOn[pair[0]];
+                    box.addEventListener('change', function () {
+                        if (box.checked) {
+                            if (plannedGroup(pair[0]).length > 16) {
+                                box.checked = false;
+                                notify(t('reportAlso'));
+                                return;
+                            }
+                            extraOn[pair[0]] = true;
+                        } else delete extraOn[pair[0]];
+                    });
+                    label.appendChild(box);
+                    label.appendChild(document.createTextNode(t(pair[1])));
+                    extraList.appendChild(label);
+                });
+            }
+            paintExtras();
             dialog.appendChild(extraList);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportCharts')));
             var chartList = el('div', 'asset-tree-check-list');
@@ -21574,15 +21639,12 @@
                     notify(t('reportFieldValue'));
                     return;
                 }
-                var extras = [];
-                ['type', 'status', 'place', 'holder', 'issued'].forEach(function (key) {
-                    if (extraOn[key] && key !== group.value) extras.push(key);
-                });
-                var groupValue = group.value;
-                extras.forEach(function (extra) {
-                    var next = groupValue + '+' + extra;
-                    if (next.length <= 16) groupValue = next;
-                });
+                var groupValue = plannedGroup();
+                if (groupValue.length > 16) {
+                    save.disabled = false;
+                    notify(t('reportAlso'));
+                    return;
+                }
                 var charts = [];
                 chartOrder.forEach(function (item) { if (chartOn[item[0]]) charts.push(item[0]); });
                 if (!charts.length) charts.push('histogram');

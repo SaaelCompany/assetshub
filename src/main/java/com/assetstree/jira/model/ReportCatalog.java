@@ -20,12 +20,15 @@ public final class ReportCatalog {
     public static final String AGE = "age";
     public static final String WRITEOFF = "writeoff";
     public static final String WORK = "work";
+    public static final String DONE = "done";
     public static final String FIELD = "field";
 
     private static final List<String> STANDARD = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK));
+            STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK, DONE));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", FIELD));
+            STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", DONE, "who", FIELD));
+    private static final List<String> DONE_AXES = Collections.unmodifiableList(Arrays.asList(
+            "kind", "month", PLACE, TYPE, "who"));
     /** Long enough for every chart name joined once. The short column stays separate. */
     private static final int CHART_LIMIT = 120;
     private static final List<String> CHARTS = Collections.unmodifiableList(Arrays.asList(
@@ -48,7 +51,7 @@ public final class ReportCatalog {
         }
         String value = raw.trim().toLowerCase(Locale.ROOT);
         if (GROUPS.contains(value)) {
-            return value;
+            return "who".equals(value) ? "" : value;
         }
         if (value.indexOf('+') < 0 || value.length() > 16) {
             return "";
@@ -69,7 +72,22 @@ public final class ReportCatalog {
             }
             out.append(part);
         }
+        if (seen.contains(DONE) || seen.contains("who")) {
+            if (!DONE.equals(seen.get(0))) {
+                return "";
+            }
+            for (int i = 1; i < seen.size(); i++) {
+                if (!DONE_AXES.contains(seen.get(i))) {
+                    return "";
+                }
+            }
+        }
         return out.length() > 16 ? "" : out.toString();
+    }
+
+    /** A saved report whose rows are completed schedule days. */
+    public static boolean doneReport(String group) {
+        return DONE.equals(group) || (group != null && group.startsWith(DONE + "+"));
     }
 
     public static String savedKey(int id) {
