@@ -84,6 +84,9 @@ public final class TniBook {
         if (!moduleOn(ao, projectKey)) {
             return;
         }
+        if (Boolean.FALSE.equals(setup(ao, projectKey).getTniBrowser())) {
+            return;
+        }
         final Prepared prepared = prepare(ao, projectKey, userKey, now);
         if (prepared == null) {
             return;
@@ -383,6 +386,9 @@ public final class TniBook {
             return null;
         }
         ModuleSetupDto setup = setup(ao, row.getProjectKey());
+        if (Boolean.FALSE.equals(setup.getTniPing())) {
+            return null;
+        }
         String hostName = TniAddress.station(asset.getName());
         TniClock.Mark mark = TniClock.look(row.getSeenAt(), row.getProbeFrom(), row.getProbeFails(), row.getLastProbe(),
                 TniPolicy.keepDays(days(setup.getTniKeep())), TniPolicy.probeDays(days(setup.getTniProbeDays())),
@@ -572,6 +578,9 @@ public final class TniBook {
             return null;
         }
         ModuleSetupDto setup = setup(ao, row.getProjectKey());
+        if (Boolean.FALSE.equals(setup.getTniPing())) {
+            return null;
+        }
         boolean hasAddress = TniAddressAllowed(row.getAddress());
         TniClock.Mark mark = TniClock.look(row.getSeenAt(), row.getProbeFrom(), row.getProbeFails(), row.getLastProbe(),
                 TniPolicy.keepDays(days(setup.getTniKeep())), TniPolicy.probeDays(days(setup.getTniProbeDays())),

@@ -569,8 +569,268 @@ var AssetTreePlan = (function () {
                 if (edge) rooms.push(edge);
             });
         });
+        if (!rooms.length) {
+            var scan = scanJpeg(text);
+            if (scan) return { rooms: [], underlay: scan };
+        }
         if (!rooms.length && skipped) return { rooms: [], error: 'mapPdfCompressed' };
         return { rooms: meta ? rooms : fitRooms(rooms) };
+    }
+
+    function scanJpeg(text) {
+        var start = text.indexOf('\xff\xd8\xff');
+        if (start < 0) return '';
+        var end = text.indexOf('\xff\xd9', start + 3);
+        if (end < 0 || end - start > 700000 || end - start < 32) return '';
+        var bytes = text.substring(start, end + 2);
+        if (typeof btoa !== 'function') return '';
+        try {
+            return 'data:image/jpeg;base64,' + btoa(bytes);
+        } catch (ex) {
+            return '';
+        }
+    }
+
+    function teeProject(ax, ay, bx, by, px, py) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var span2 = dx * dx + dy * dy;
+        if (span2 < 1) return null;
+        var t = ((px - ax) * dx + (py - ay) * dy) / span2;
+        var qx = ax + dx * t;
+        var qy = ay + dy * t;
+        var ex = px - qx;
+        var ey = py - qy;
+        return { t: t, x: qx, y: qy, dist: Math.sqrt(ex * ex + ey * ey) };
+    }
+
+    function teeTurn(left, right) {
+        var r1 = Math.atan2(left.y2 - left.y1, left.x2 - left.x1);
+        var r2 = Math.atan2(right.y2 - right.y1, right.x2 - right.x1);
+        var deg = Math.abs(r1 - r2) * 180 / Math.PI;
+        while (deg > 180) deg -= 180;
+        if (deg > 90) deg = 180 - deg;
+        return deg;
+    }
+
+    function teeCross(left, right) {
+        var rx = left.x2 - left.x1;
+        var ry = left.y2 - left.y1;
+        var sx = right.x2 - right.x1;
+        var sy = right.y2 - right.y1;
+        var den = rx * sy - ry * sx;
+        if (Math.abs(den) < 1) return null;
+        var t = ((right.x1 - left.x1) * sy - (right.y1 - left.y1) * sx) / den;
+        var u = ((right.x1 - left.x1) * ry - (right.y1 - left.y1) * rx) / den;
+        if (t <= 0.04 || t >= 0.96 || u <= 0.04 || u >= 0.96) return null;
+        return { t: t, u: u, x: left.x1 + t * rx, y: left.y1 + t * ry };
+    }
+
+    function cutTees(segments) {
+        var list = (segments || []).map(function (seg) {
+            return {
+                x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2,
+                kind: seg.kind || 'wall', thick: seg.thick || 8,
+                name: seg.name || '', color: seg.color || '',
+                source: seg.source != null ? seg.source : (seg.index != null ? seg.index : -1)
+            };
+        });
+        var changed = false;
+        var real = false;
+        var guard = 0;
+        while (guard < 6) {
+            guard += 1;
+            var snaps = [];
+            var cuts = {};
+            function addCut(index, t, x, y) {
+                if (index < 0 || t < 0.04 || t > 0.96) return;
+                var bucket = cuts[index] || (cuts[index] = []);
+                var n;
+                for (n = 0; n < bucket.length; n++) {
+                    if (Math.abs(bucket[n].t - t) < 0.02) return;
+                }
+                bucket.push({ t: t, x: x, y: y });
+            }
+            var i;
+            var j;
+            for (i = 0; i < list.length; i++) {
+                for (j = i + 1; j < list.length; j++) {
+                    var left = list[i];
+                    var right = list[j];
+                    var parallel = teeTurn(left, right) < 20;
+                    [[right, left, i], [left, right, j]].forEach(function (pair) {
+                        var stem = pair[0];
+                        var bar = pair[1];
+                        var barIndex = pair[2];
+                        [[stem.x1, stem.y1, 0], [stem.x2, stem.y2, 1]].forEach(function (end) {
+                            var hit = teeProject(bar.x1, bar.y1, bar.x2, bar.y2, end[0], end[1]);
+                            if (!hit || hit.t <= 0.02 || hit.t >= 0.98) return;
+                            if (hit.dist <= 0.8) addCut(barIndex, hit.t, hit.x, hit.y);
+                            else if (!parallel && hit.dist <= 18) {
+                                snaps.push({ seg: stem, end: end[2], x: hit.x, y: hit.y });
+                                addCut(barIndex, hit.t, hit.x, hit.y);
+                            }
+                        });
+                    });
+                    var cross = teeCross(left, right);
+                    if (cross) {
+                        addCut(i, cross.t, cross.x, cross.y);
+                        addCut(j, cross.u, cross.x, cross.y);
+                    }
+                }
+            }
+            var cutKeys = [];
+            for (var key in cuts) {
+                if (Object.prototype.hasOwnProperty.call(cuts, key)) cutKeys.push(key);
+            }
+            if (!snaps.length && !cutKeys.length) break;
+            changed = true;
+            snaps.forEach(function (snap) {
+                if (snap.seg.source >= 0) real = true;
+                if (snap.end) {
+                    snap.seg.x2 = snap.x;
+                    snap.seg.y2 = snap.y;
+                } else {
+                    snap.seg.x1 = snap.x;
+                    snap.seg.y1 = snap.y;
+                }
+            });
+            cutKeys.map(Number).sort(function (a, b) { return b - a; }).forEach(function (index) {
+                var seg = list[index];
+                if (!seg) return;
+                var points = [{ x: seg.x1, y: seg.y1 }].concat(cuts[index].slice().sort(function (a, b) {
+                    return a.t - b.t;
+                })).concat([{ x: seg.x2, y: seg.y2 }]);
+                var pieces = [];
+                var k;
+                for (k = 0; k < points.length - 1; k++) {
+                    var ax = points[k].x;
+                    var ay = points[k].y;
+                    var bx = points[k + 1].x;
+                    var by = points[k + 1].y;
+                    if ((ax - bx) * (ax - bx) + (ay - by) * (ay - by) < 64) continue;
+                    pieces.push({
+                        x1: ax, y1: ay, x2: bx, y2: by,
+                        kind: seg.kind, thick: seg.thick, name: seg.name, color: seg.color, source: seg.source
+                    });
+                }
+                if (pieces.length < 2) return;
+                if (seg.source >= 0) real = true;
+                var args = [index, 1].concat(pieces);
+                Array.prototype.splice.apply(list, args);
+            });
+        }
+        return changed && real ? list : null;
+    }
+
+    function planArea(points) {
+        var sum = 0;
+        var i;
+        for (i = 0; i < points.length; i++) {
+            var a = points[i];
+            var b = points[(i + 1) % points.length];
+            sum += a.x * b.y - b.x * a.y;
+        }
+        return Math.abs(sum) / 2;
+    }
+
+    function planFaces(segments) {
+        var nodes = [];
+        var adj = [];
+        function nodeAt(x, y) {
+            var i;
+            for (i = 0; i < nodes.length; i++) {
+                var dx = nodes[i].x - x;
+                var dy = nodes[i].y - y;
+                if (dx * dx + dy * dy <= 100) return i;
+            }
+            nodes.push({ x: x, y: y });
+            adj.push([]);
+            return nodes.length - 1;
+        }
+        (segments || []).forEach(function (seg) {
+            var a = nodeAt(seg.x1, seg.y1);
+            var b = nodeAt(seg.x2, seg.y2);
+            if (a === b) return;
+            if (adj[a].indexOf(b) < 0) adj[a].push(b);
+            if (adj[b].indexOf(a) < 0) adj[b].push(a);
+        });
+        var half = [];
+        var i;
+        var j;
+        for (i = 0; i < nodes.length; i++) {
+            for (j = 0; j < adj[i].length; j++) {
+                var to = adj[i][j];
+                half.push({
+                    from: i,
+                    to: to,
+                    ang: Math.atan2(nodes[to].y - nodes[i].y, nodes[to].x - nodes[i].x)
+                });
+            }
+        }
+        var outgoing = [];
+        for (i = 0; i < nodes.length; i++) outgoing.push([]);
+        half.forEach(function (edge, id) { outgoing[edge.from].push(id); });
+        outgoing.forEach(function (list) {
+            list.sort(function (left, right) { return half[left].ang - half[right].ang; });
+        });
+        var used = {};
+        var faces = [];
+        half.forEach(function (edge, startId) {
+            if (used[startId] || faces.length >= 80) return;
+            var loop = [];
+            var id = startId;
+            var guard = 0;
+            var closed = false;
+            while (guard < half.length + 2) {
+                if (used[id] && id !== startId) break;
+                used[id] = true;
+                loop.push(half[id].from);
+                var arrive = half[id].to;
+                var list = outgoing[arrive] || [];
+                var rev = -1;
+                var k;
+                for (k = 0; k < list.length; k++) {
+                    if (half[list[k]].to === half[id].from) rev = k;
+                }
+                if (rev < 0 || !list.length) break;
+                id = list[(rev - 1 + list.length) % list.length];
+                guard++;
+                if (id === startId) {
+                    closed = true;
+                    break;
+                }
+            }
+            if (!closed || loop.length < 3) return;
+            var pts = loop.map(function (nid) { return { x: nodes[nid].x, y: nodes[nid].y }; });
+            if (planArea(pts) > 2500) faces.push(pts);
+        });
+        return faces.filter(function (face, index) {
+            var area = planArea(face);
+            var holds = false;
+            faces.forEach(function (other, otherIndex) {
+                if (otherIndex === index) return;
+                var cx = 0;
+                var cy = 0;
+                var n;
+                for (n = 0; n < other.length; n++) { cx += other[n].x; cy += other[n].y; }
+                cx /= other.length;
+                cy /= other.length;
+                if (planInside(cx, cy, face) && planArea(other) < area * 0.95) holds = true;
+            });
+            return !holds;
+        });
+    }
+
+    function planInside(x, y, points) {
+        var inside = false;
+        var i;
+        for (i = 0; i < points.length; i++) {
+            var a = points[i];
+            var b = points[(i + 1) % points.length];
+            if (((a.y > y) !== (b.y > y)) && (x < (b.x - a.x) * (y - a.y) / ((b.y - a.y) || 1) + a.x)) inside = !inside;
+        }
+        return inside;
     }
 
     function importPdfFlate(raw, plain) {
@@ -703,6 +963,9 @@ var AssetTreePlan = (function () {
         exportDwg: exportDwg,
         importDwg: importDwg,
         importDrawing: importDrawing,
+        cutTees: cutTees,
+        planFaces: planFaces,
+        scanJpeg: scanJpeg,
         bytesOf: bytesOf
     };
 }());

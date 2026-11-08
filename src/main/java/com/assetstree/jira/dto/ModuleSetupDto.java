@@ -24,6 +24,7 @@ public class ModuleSetupDto {
     private String reportMailPart;
     private Boolean lifeApproval;
     private String lifeApprover;
+    private String lifePlaces;
     private String lifeCurrency;
     private Integer lifeMonths;
     private String staffMarks;
@@ -43,6 +44,11 @@ public class ModuleSetupDto {
     private String tniLaptop;
     private String tniPhone;
     private String tniTablet;
+    private Boolean tniBrowser;
+    private Boolean tniScan;
+    private Boolean tniAd;
+    private Boolean tniSccm;
+    private Boolean tniPing;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -80,6 +86,8 @@ public class ModuleSetupDto {
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }
     public void setLifeApprover(String lifeApprover) { this.lifeApprover = lifeApprover; }
+    public String getLifePlaces() { return lifePlaces; }
+    public void setLifePlaces(String lifePlaces) { this.lifePlaces = lifePlaces; }
     public String getLifeCurrency() { return lifeCurrency; }
     public void setLifeCurrency(String lifeCurrency) { this.lifeCurrency = lifeCurrency; }
     public Integer getLifeMonths() { return lifeMonths; }
@@ -118,4 +126,14 @@ public class ModuleSetupDto {
     public void setTniPhone(String tniPhone) { this.tniPhone = tniPhone; }
     public String getTniTablet() { return tniTablet; }
     public void setTniTablet(String tniTablet) { this.tniTablet = tniTablet; }
+    public Boolean getTniBrowser() { return tniBrowser; }
+    public void setTniBrowser(Boolean tniBrowser) { this.tniBrowser = tniBrowser; }
+    public Boolean getTniScan() { return tniScan; }
+    public void setTniScan(Boolean tniScan) { this.tniScan = tniScan; }
+    public Boolean getTniAd() { return tniAd; }
+    public void setTniAd(Boolean tniAd) { this.tniAd = tniAd; }
+    public Boolean getTniSccm() { return tniSccm; }
+    public void setTniSccm(Boolean tniSccm) { this.tniSccm = tniSccm; }
+    public Boolean getTniPing() { return tniPing; }
+    public void setTniPing(Boolean tniPing) { this.tniPing = tniPing; }
 }

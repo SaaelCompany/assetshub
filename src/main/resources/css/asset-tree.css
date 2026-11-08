@@ -11613,6 +11613,16 @@ a.asset-tree-preview-icon:focus {
     background: #f4f5f7;
 }
 
+#asset-tree-app .asset-tree-underlay {
+    opacity: 0.55;
+    cursor: move;
+}
+
+#asset-tree-app .asset-tree-scan-width {
+    width: 88px;
+    margin: 0 4px;
+}
+
 #asset-tree-app .asset-tree-canvas.is-pan {
     cursor: grab;
 }
