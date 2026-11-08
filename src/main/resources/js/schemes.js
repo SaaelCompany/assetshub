@@ -317,10 +317,7 @@
                     shrinkSchemeScan(bytes, picked.type || 'image/jpeg', function (url) { placeSchemeScan(url); });
                     return;
                 }
-                var text = '';
-                var i;
-                for (i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
-                importSchemeDrawing(picked.name, text);
+                importSchemeDrawing(picked.name, bytes);
             };
             reader.readAsArrayBuffer(picked);
         });
@@ -1052,6 +1049,10 @@
             image.src = url;
         }
 
+        function say(key) {
+            if (api.say) api.say(api.t(key));
+        }
+
         function importSchemeDrawing(name, raw) {
             if (!global.AssetTreePlan || !global.AssetTreePlan.importDrawing) return;
             var parsed = global.AssetTreePlan.importDrawing(name, raw);
@@ -1059,29 +1060,49 @@
                 placeSchemeScan(parsed.underlay);
                 return;
             }
-            if (!parsed || !parsed.rooms || !parsed.rooms.length) return;
-            remember();
+            if (!parsed || parsed.error || !parsed.rooms || !parsed.rooms.length) {
+                say(parsed && parsed.error ? parsed.error : 'mapImportNone');
+                return;
+            }
+            var added = 0;
+            var batch = [];
             parsed.rooms.forEach(function (room) {
                 if (room.kind && room.kind !== 'wall' && room.kind !== 'partition') return;
-                var len = room.w || 0;
-                if (len < 8) return;
-                var rad = (room.angle || 0) * Math.PI / 180;
-                var cx = (room.x || 0) + len / 2;
-                var cy = (room.y || 0) + (room.h || 0) / 2;
                 var wall = baseObject('wall');
-                wall.points = [
-                    { x: roundCm(cx - Math.cos(rad) * len / 2), y: roundCm(cy - Math.sin(rad) * len / 2) },
-                    { x: roundCm(cx + Math.cos(rad) * len / 2), y: roundCm(cy + Math.sin(rad) * len / 2) }
-                ];
+                if (room.x1 != null && room.y1 != null && room.x2 != null && room.y2 != null) {
+                    wall.points = [
+                        { x: roundCm(room.x1), y: roundCm(room.y1) },
+                        { x: roundCm(room.x2), y: roundCm(room.y2) }
+                    ];
+                } else {
+                    var len = room.w || 0;
+                    if (len < 8) return;
+                    var rad = (room.angle || 0) * Math.PI / 180;
+                    var cx = (room.x || 0) + len / 2;
+                    var cy = (room.y || 0) + (room.h || 0) / 2;
+                    wall.points = [
+                        { x: roundCm(cx - Math.cos(rad) * len / 2), y: roundCm(cy - Math.sin(rad) * len / 2) },
+                        { x: roundCm(cx + Math.cos(rad) * len / 2), y: roundCm(cy + Math.sin(rad) * len / 2) }
+                    ];
+                }
+                if (dist(wall.points[0].x, wall.points[0].y, wall.points[1].x, wall.points[1].y) < 8) return;
                 wall.closed = false;
-                wall.thickness = 15;
+                wall.thickness = room.kind === 'partition' ? 6 : 8;
                 wall.alignment = 'center';
-                wall.hatch = 'diagonal';
+                wall.hatch = 'none';
                 wall.height = 300;
                 wall.layerId = layerOr('walls');
-                activeFloor().objects.push(wall);
+                batch.push(wall);
+                added += 1;
             });
-            syncRooms(activeFloor());
+            if (!added) {
+                say('mapImportNone');
+                return;
+            }
+            remember();
+            var floor = activeFloor();
+            batch.forEach(function (wall) { floor.objects.push(wall); });
+            syncRooms(floor);
             refreshSide();
             renderProps();
             paint();
