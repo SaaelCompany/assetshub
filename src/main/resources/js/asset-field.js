@@ -1772,16 +1772,17 @@
 
     function portalFiles(card) {
         var section = portalSection('Вложения');
-        (card.files || []).forEach(function (file) {
+        var shown = (card.files || []).filter(function (file) { return file && !file.slot; });
+        shown.forEach(function (file) {
             var row = el('div', 'asset-tree-portal-file');
             var kind = String(file.fileName || '').split('.').pop().toLowerCase();
             var icon = el('button', 'asset-tree-portal-file-icon is-' + kind, (kind || 'file').slice(0, 4).toUpperCase());
             icon.type = 'button';
-            icon.addEventListener('click', function () { openPortalPreview(file, card.files); });
+            icon.addEventListener('click', function () { openPortalPreview(file, shown); });
             row.appendChild(icon);
             var name = el('button', 'asset-tree-portal-file-name', file.fileName || '');
             name.type = 'button';
-            name.addEventListener('click', function () { openPortalPreview(file, card.files); });
+            name.addEventListener('click', function () { openPortalPreview(file, shown); });
             row.appendChild(name);
             if (file.size) row.appendChild(el('span', 'asset-tree-portal-file-meta', portalSize(file.size)));
             section.appendChild(row);

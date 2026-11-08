@@ -93,13 +93,20 @@ public class AssetFileServlet extends HttpServlet {
                 throw new AssetException(400, "asset-tree.error.file.size");
             }
             boolean internal = "1".equals(request.getParameter("internal"));
+            String slot = request.getParameter("slot");
             FileDto saved = "1".equals(request.getParameter("portal"))
                     ? service().portalStoreFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), false)
-                    : service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), internal);
+                    : service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), internal, slot);
             response.setStatus(HttpServletResponse.SC_CREATED);
             response.setContentType("application/json; charset=UTF-8");
             response.setCharacterEncoding("UTF-8");
-            response.getWriter().write("{\"id\":" + saved.getId() + "}");
+            response.getWriter().write("{\"id\":" + saved.getId()
+                    + ",\"fileName\":\"" + jsonString(saved.getFileName())
+                    + "\",\"size\":" + saved.getSize()
+                    + ",\"slot\":\"" + jsonString(saved.getSlot())
+                    + "\",\"contentType\":\"" + jsonString(saved.getContentType())
+                    + "\",\"authorName\":\"" + jsonString(saved.getAuthorName())
+                    + "\",\"internal\":" + saved.isInternal() + "}");
         } catch (AssetException ex) {
             writeError(response, ex);
         }

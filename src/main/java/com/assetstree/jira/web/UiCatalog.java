@@ -1359,6 +1359,7 @@ public final class UiCatalog {
             "lifeContractWait",
             "lifeContractAdd",
             "lifeContractHint",
+            "lifeDocAdd",
             "schedulesPageTitle",
             "schedulesWeek",
             "schedulesDoneMonth",

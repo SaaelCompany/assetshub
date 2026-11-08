@@ -913,17 +913,22 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal) {
+        return storeFile(user, assetId, fileName, contentType, data, internal, "");
+    }
+
+    @Override
+    public FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal, String slot) {
         requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
-        return writeFile(user, assetId, fileName, contentType, data, internal);
+        return writeFile(user, assetId, fileName, contentType, data, internal, slot);
     }
 
     @Override
     public FileDto portalStoreFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal) {
         requirePortalAsset(user, assetId);
-        return writeFile(user, assetId, fileName, contentType, data, false);
+        return writeFile(user, assetId, fileName, contentType, data, false, "");
     }
 
-    private FileDto writeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal) {
+    private FileDto writeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal, String slot) {
         if (data == null || data.length == 0) {
             throw new AssetException(400, "asset-tree.error.file.required");
         }
@@ -934,6 +939,7 @@ public class AssetServiceImpl implements AssetService {
         final String safeType = contentType == null || contentType.trim().isEmpty() ? "application/octet-stream" : contentType.trim();
         final byte[] bytes = data;
         final boolean hidden = internal;
+        final String kept = fileSlot(slot);
         AssetFileEntity created = ao().executeInTransaction(new TransactionCallback<AssetFileEntity>() {
             @Override
             public AssetFileEntity doInTransaction() {
@@ -944,7 +950,8 @@ public class AssetServiceImpl implements AssetService {
                         new DBParam("SIZE_BYTES", Long.valueOf(bytes.length)),
                         new DBParam("AUTHOR_KEY", user.getKey()),
                         new DBParam("CREATED", new Date()),
-                        new DBParam("INTERNAL", Boolean.valueOf(hidden)));
+                        new DBParam("INTERNAL", Boolean.valueOf(hidden)),
+                        new DBParam("SLOT", kept));
             }
         });
         try {
@@ -7406,6 +7413,9 @@ public class AssetServiceImpl implements AssetService {
             if (!includeInternal && row.isInternal()) {
                 continue;
             }
+            if (!includeInternal && fileSlot(row.getSlot()).length() > 0) {
+                continue;
+            }
             result.add(fileDto(row));
         }
         return result;
@@ -7421,7 +7431,15 @@ public class AssetServiceImpl implements AssetService {
         UserProfileDto author = profile(row.getAuthorKey());
         dto.setAuthorName(author == null ? "" : author.getDisplayName());
         dto.setInternal(row.isInternal());
+        dto.setSlot(fileSlot(row.getSlot()));
         return dto;
+    }
+
+    private static String fileSlot(String slot) {
+        if ("buy".equals(slot) || "contract".equals(slot)) {
+            return slot;
+        }
+        return "";
     }
 
     private List<UserProfileDto> shareDtos(int assetId) {

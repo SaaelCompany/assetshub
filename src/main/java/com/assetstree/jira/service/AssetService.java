@@ -103,6 +103,8 @@ public interface AssetService {
 
     FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
 
+    FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal, String slot);
+
     StoredFile openFile(ApplicationUser user, int fileId);
 
     void deleteFile(ApplicationUser user, int assetId, int fileId);

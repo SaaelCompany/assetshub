@@ -8256,6 +8256,19 @@ a.asset-tree-preview-icon:focus {
     grid-column: 1 / -1;
 }
 
+#asset-tree-app .asset-tree-life-docs {
+    position: relative;
+}
+
+#asset-tree-app .asset-tree-life-grid > .asset-tree-life-docs {
+    grid-column: 1 / -1;
+}
+
+#asset-tree-app .asset-tree-life-docs > .asset-tree-btn {
+    align-self: flex-start;
+    margin-top: 4px;
+}
+
 #asset-tree-app .asset-tree-life-form .asset-tree-inline-actions {
     justify-content: flex-start;
 }
