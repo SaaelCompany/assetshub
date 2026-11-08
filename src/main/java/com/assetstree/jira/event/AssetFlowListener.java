@@ -25,8 +25,29 @@ public class AssetFlowListener extends AbstractIssueEventListener {
     }
 
     @Override
+    public void issueCreated(IssueEvent event) {
+        syncFields(event);
+    }
+
+    @Override
     public void issueUpdated(IssueEvent event) {
         onStatus(event);
+        syncFields(event);
+    }
+
+    private void syncFields(IssueEvent event) {
+        if (event == null || event.getIssue() == null) {
+            return;
+        }
+        AssetService service = AssetBridge.service();
+        if (service == null) {
+            return;
+        }
+        try {
+            service.syncIssueFields(event.getUser(), event.getIssue());
+        } catch (RuntimeException ex) {
+            log.warn("Asset field was not linked for {}", event.getIssue().getKey(), ex);
+        }
     }
 
     private void onStatus(IssueEvent event) {

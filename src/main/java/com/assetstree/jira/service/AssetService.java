@@ -184,6 +184,9 @@ public interface AssetService {
 
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 
+    /** Links whatever the request's asset field currently stores. Safe to call more than once. */
+    void syncIssueFields(ApplicationUser user, Issue issue);
+
     /** Moves equipment already linked to this request when the request itself changes status. */
     void syncRequestStatus(ApplicationUser user, Issue issue);
 
