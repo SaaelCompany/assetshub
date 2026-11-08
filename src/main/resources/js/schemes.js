@@ -683,7 +683,18 @@
             }
             if (!found.length) return point;
             var rank = { endpoint: 0, midpoint: 1, intersection: 2, center: 3, perpendicular: 4, nearest: 5 };
-            found.sort(function (a, b) { return rank[a.kind] - rank[b.kind]; });
+            found.sort(function (a, b) {
+                var da = dist(a.x, a.y, raw.x, raw.y);
+                var db = dist(b.x, b.y, raw.x, raw.y);
+                if (Math.abs(da - db) > 0.5) return da - db;
+                return (rank[a.kind] || 9) - (rank[b.kind] || 9);
+            });
+            var closest = found[0];
+            var snapKey = closest.kind + ':' + closest.x + ':' + closest.y;
+            if (session.osnapKey !== snapKey) {
+                session.osnapKey = snapKey;
+                session.osnapIndex = 0;
+            }
             session.osnapList = found;
             if (session.osnapIndex >= found.length) session.osnapIndex = 0;
             session.osnap = found[session.osnapIndex];
@@ -1666,7 +1677,7 @@
             ctx.restore();
         }
 
-        var WALL_JOIN = 12;
+        var WALL_JOIN = 6;
 
         function floorForWalls(floor) {
             var objects = (floor && floor.objects) ? floor.objects.slice() : [];
@@ -1716,76 +1727,35 @@
             return Math.acos(dot) * 180 / Math.PI;
         }
 
-        function wallCross(u, v) {
-            return u.x * v.y - u.y * v.x;
-        }
-
         function wallLeft(dir) {
             return { x: dir.y, y: -dir.x };
-        }
-
-        function wallHit(p, d, q, e) {
-            var den = d.x * e.y - d.y * e.x;
-            if (Math.abs(den) < 1e-8) return null;
-            var t = ((q.x - p.x) * e.y - (q.y - p.y) * e.x) / den;
-            return { x: p.x + d.x * t, y: p.y + d.y * t };
         }
 
         function wallNear(a, b) {
             return dist(a.x, a.y, b.x, b.y) <= WALL_JOIN;
         }
 
-        function trimToFace(p, s, half, ax, ay, bx, by, thick) {
+        function slideCap(p, s, half, delta, cap) {
             var toward = wallVec(s, p);
             var leftN = wallLeft(toward);
-            var bar = wallVec({ x: ax, y: ay }, { x: bx, y: by });
-            var barN = wallLeft(bar);
-            var side = (s.x - p.x) * barN.x + (s.y - p.y) * barN.y;
-            var face = side >= 0 ? barN : { x: -barN.x, y: -barN.y };
-            var faceP = { x: p.x + face.x * thick / 2, y: p.y + face.y * thick / 2 };
-            var left = wallHit({ x: p.x + leftN.x * half, y: p.y + leftN.y * half }, toward, faceP, bar);
-            var right = wallHit({ x: p.x - leftN.x * half, y: p.y - leftN.y * half }, toward, faceP, bar);
-            if (!left || !right) return { cap: true };
-            return { cap: false, left: left, right: right };
-        }
-
-        function extendToFarFace(p, s, half, neighbor) {
-            var toward = wallVec(s, p);
-            var away = wallVec(p, neighbor.other);
-            var n = wallLeft(away);
-            var faceSign = (toward.x * n.x + toward.y * n.y) >= 0 ? 1 : -1;
-            var faceN = { x: n.x * faceSign, y: n.y * faceSign };
-            var faceP = { x: p.x + faceN.x * neighbor.thick / 2, y: p.y + faceN.y * neighbor.thick / 2 };
-            var leftN = wallLeft(toward);
-            var left = wallHit({ x: p.x + leftN.x * half, y: p.y + leftN.y * half }, toward, faceP, away);
-            var right = wallHit({ x: p.x - leftN.x * half, y: p.y - leftN.y * half }, toward, faceP, away);
-            if (!left || !right) return { cap: true };
-            return { cap: true, left: left, right: right };
-        }
-
-        function miterCorner(p, s, half, neighbor) {
-            var toward = wallVec(s, p);
-            var away = wallVec(p, neighbor.other);
-            var leftN = wallLeft(toward);
-            var nAway = wallLeft(away);
-            function corner(normal) {
-                var oursLeft = wallCross(toward, normal) < 0;
-                var side = oursLeft ? nAway : { x: -nAway.x, y: -nAway.y };
-                var origin = { x: p.x + normal.x * half, y: p.y + normal.y * half };
-                var other = { x: p.x + side.x * neighbor.thick / 2, y: p.y + side.y * neighbor.thick / 2 };
-                var hit = wallHit(origin, toward, other, away);
-                if (!hit || dist(hit.x, hit.y, p.x, p.y) > (Math.abs(half) + neighbor.thick) * 4) return origin;
-                return hit;
-            }
+            var limit = Math.abs(half) * 1.4 + 2;
+            if (delta > limit) delta = limit;
+            if (delta < -limit) delta = -limit;
+            var capP = { x: p.x + toward.x * delta, y: p.y + toward.y * delta };
             return {
-                cap: false,
-                left: corner(leftN),
-                right: corner({ x: -leftN.x, y: -leftN.y })
+                cap: !!cap,
+                left: { x: capP.x + leftN.x * half, y: capP.y + leftN.y * half },
+                right: { x: capP.x - leftN.x * half, y: capP.y - leftN.y * half }
             };
+        }
+
+        function meetAngle(toward, dir) {
+            return wallTurn(toward, dir);
         }
 
         function endJoin(segs, p, s, half, rank) {
             var toward = wallVec(s, p);
+            var len = dist(p.x, p.y, s.x, s.y);
             var ends = [];
             var bodies = [];
             segs.forEach(function (seg) {
@@ -1797,15 +1767,15 @@
                 else if (atB) ends.push({ other: seg.a, thick: seg.thick, rank: seg.rank });
                 else {
                     var hit = projectSeg(seg.a.x, seg.a.y, seg.b.x, seg.b.y, p.x, p.y);
-                    if (hit.t > 0.02 && hit.t < 0.98 && hit.dist <= WALL_JOIN) {
-                        bodies.push({ a: seg.a, b: seg.b, thick: seg.thick, dist: hit.dist });
+                    if (hit.t > 0.04 && hit.t < 0.96 && hit.dist <= WALL_JOIN) {
+                        bodies.push({ a: seg.a, b: seg.b, thick: seg.thick, dist: hit.dist, dir: wallVec(seg.a, seg.b) });
                     }
                 }
             });
             var straight = [];
             var angled = [];
             ends.forEach(function (end) {
-                var deg = wallTurn(toward, wallVec(p, end.other));
+                var deg = meetAngle(toward, wallVec(p, end.other));
                 if (deg < 12 || deg > 168) straight.push(end);
                 else angled.push(end);
             });
@@ -1815,28 +1785,40 @@
             var j;
             for (i = 0; i < angled.length && !pair; i++) {
                 for (j = i + 1; j < angled.length; j++) {
-                    if (wallTurn(wallVec(p, angled[i].other), wallVec(p, angled[j].other)) > 168) pair = [angled[i], angled[j]];
+                    if (meetAngle(wallVec(p, angled[i].other), wallVec(p, angled[j].other)) > 168) pair = [angled[i], angled[j]];
                 }
             }
-            if (pair) return trimToFace(p, s, half, pair[0].other.x, pair[0].other.y, pair[1].other.x, pair[1].other.y, Math.max(pair[0].thick, pair[1].thick));
+            function butt(barDir, barThick) {
+                var deg = meetAngle(toward, barDir);
+                var sin = Math.sin(deg * Math.PI / 180);
+                if (sin < 0.34) return { cap: false };
+                var cut = (barThick / 2) / sin - 1.5;
+                if (cut < 0) cut = 0;
+                if (cut > len * 0.45) cut = len * 0.45;
+                return slideCap(p, s, half, -cut);
+            }
+            if (pair) {
+                return butt(wallVec(pair[0].other, pair[1].other), Math.max(pair[0].thick, pair[1].thick));
+            }
             if (angled.length === 1) {
                 var other = angled[0];
-                var deg = wallTurn(toward, wallVec(p, other.other));
-                if (deg > 80 && deg < 100) {
-                    if (other.rank < rank) return trimToFace(p, s, half, p.x, p.y, other.other.x, other.other.y, other.thick);
-                    return extendToFarFace(p, s, half, other);
-                }
-                return miterCorner(p, s, half, other);
+                var away = wallVec(p, other.other);
+                var deg = meetAngle(toward, away);
+                var sin = Math.sin(deg * Math.PI / 180);
+                if (sin < 0.34) return { cap: false };
+                if (other.rank < rank) return butt(away, other.thick);
+                var ext = (other.thick / 2) / sin;
+                return slideCap(p, s, half, ext, true);
             }
-            if (angled.length) return miterCorner(p, s, half, angled[0]);
+            if (angled.length) return { cap: false };
             if (bodies.length) {
                 bodies.sort(function (a, b) { return a.dist - b.dist; });
-                return trimToFace(p, s, half, bodies[0].a.x, bodies[0].a.y, bodies[0].b.x, bodies[0].b.y, bodies[0].thick);
+                return butt(bodies[0].dir, bodies[0].thick);
             }
             return { cap: true };
         }
 
-        function drawWall(ctx, wall, floor) {
+        function drawWall(ctx, wall, floor, mode) {
             var points = wall.points || [];
             if (points.length < 2) return;
             var joined = floorForWalls(floor);
@@ -1879,16 +1861,16 @@
                 drawWallSegment(ctx, wall, points[i - 1], points[i], leftEdge[i - 1], leftEdge[i], rightEdge[i - 1], rightEdge[i], i - 1, openings, {
                     start: i === 1 && capStart,
                     end: i === points.length - 1 && capEnd
-                });
+                }, mode);
             }
             if (closed) {
                 var last = points.length - 1;
-                drawWallSegment(ctx, wall, points[last], points[0], leftEdge[last], leftEdge[0], rightEdge[last], rightEdge[0], last, openings, { start: false, end: false });
+                drawWallSegment(ctx, wall, points[last], points[0], leftEdge[last], leftEdge[0], rightEdge[last], rightEdge[0], last, openings, { start: false, end: false }, mode);
             }
             ctx.restore();
         }
 
-        function drawWallSegment(ctx, wall, a, b, la, lb, ra, rb, index, openings, caps) {
+        function drawWallSegment(ctx, wall, a, b, la, lb, ra, rb, index, openings, caps, mode) {
             var gaps = [];
             var i;
             for (i = 0; i < openings.length; i++) {
@@ -1909,39 +1891,46 @@
                     end: t1 >= 0.999 && caps.end,
                     cutStart: t0 > 0.001,
                     cutEnd: t1 < 0.999
-                });
+                }, mode);
             }
             for (i = 0; i < gaps.length; i++) {
                 var gap = gaps[i];
                 var from = Math.max(0, gap.from);
                 var to = Math.min(1, gap.to);
                 if (from > cursor) band(cursor, from);
-                drawOpening(ctx, at(from), at(to), gap.opening);
+                if (!mode || mode === 'body' || mode === 'all') drawOpening(ctx, at(from), at(to), gap.opening);
                 cursor = to;
             }
             if (cursor < 1) band(cursor, 1);
         }
 
-        function quad(ctx, poly, wall, caps) {
+        function quad(ctx, poly, wall, caps, mode) {
             if (!poly || poly.length < 4) return;
             if (dist(poly[0].x, poly[0].y, poly[1].x, poly[1].y) < 0.5 && dist(poly[0].x, poly[0].y, poly[3].x, poly[3].y) < 0.5) return;
-            pathOf(ctx, poly, true);
-            ctx.fill();
-            if (wall.hatch !== 'none') hatch(ctx, poly, wall.hatch || 'diagonal', wall.color || '#97a0af');
-            ctx.beginPath();
-            ctx.moveTo(poly[0].x, poly[0].y);
-            ctx.lineTo(poly[1].x, poly[1].y);
-            ctx.moveTo(poly[3].x, poly[3].y);
-            ctx.lineTo(poly[2].x, poly[2].y);
-            if (caps && (caps.end || caps.cutEnd)) {
-                ctx.moveTo(poly[1].x, poly[1].y);
-                ctx.lineTo(poly[2].x, poly[2].y);
+            var paint = mode || 'all';
+            if (paint === 'body' || paint === 'cover' || paint === 'all') {
+                pathOf(ctx, poly, true);
+                ctx.fill();
             }
-            if (caps && (caps.start || caps.cutStart)) {
+            if ((paint === 'hatch' || paint === 'all') && wall.hatch !== 'none') {
+                hatch(ctx, poly, wall.hatch || 'diagonal', wall.color || '#97a0af');
+            }
+            if (paint === 'stroke' || paint === 'all') {
+                ctx.beginPath();
+                ctx.moveTo(poly[0].x, poly[0].y);
+                ctx.lineTo(poly[1].x, poly[1].y);
                 ctx.moveTo(poly[3].x, poly[3].y);
-                ctx.lineTo(poly[0].x, poly[0].y);
+                ctx.lineTo(poly[2].x, poly[2].y);
+                if (caps && (caps.end || caps.cutEnd)) {
+                    ctx.moveTo(poly[1].x, poly[1].y);
+                    ctx.lineTo(poly[2].x, poly[2].y);
+                }
+                if (caps && (caps.start || caps.cutStart)) {
+                    ctx.moveTo(poly[3].x, poly[3].y);
+                    ctx.lineTo(poly[0].x, poly[0].y);
+                }
+                ctx.stroke();
             }
-            ctx.stroke();
         }
 
         function hatch(ctx, poly, kind, color) {
@@ -1963,33 +1952,37 @@
             ctx.lineWidth = 0.35;
             ctx.beginPath();
             if (kind === 'brick') {
+                var y0 = Math.floor(minY / 6) * 6;
                 var y;
-                var row = 0;
-                for (y = minY; y <= maxY; y += 6) {
-                    var shift = row % 2 ? 8 : 0;
+                for (y = y0; y <= maxY; y += 6) {
+                    var shift = Math.round(y / 6) % 2 ? 8 : 0;
+                    var x0 = Math.floor(minX / 16) * 16 + shift;
                     var x;
                     ctx.moveTo(minX, y);
                     ctx.lineTo(maxX, y);
-                    for (x = minX + shift; x <= maxX; x += 16) {
+                    for (x = x0; x <= maxX; x += 16) {
                         ctx.moveTo(x, y);
                         ctx.lineTo(x, Math.min(maxY, y + 6));
                     }
-                    row++;
                 }
             } else if (kind === 'concrete') {
+                var cx0 = Math.floor(minX / 4) * 4;
+                var cy0 = Math.floor(minY / 4) * 4;
                 var cx;
                 var cy;
-                for (cy = minY; cy <= maxY; cy += 4) {
-                    for (cx = minX; cx <= maxX; cx += 4) {
+                for (cy = cy0; cy <= maxY; cy += 4) {
+                    for (cx = cx0; cx <= maxX; cx += 4) {
                         ctx.moveTo(cx, cy);
                         ctx.lineTo(cx + 0.6, cy);
                     }
                 }
             } else {
-                var d;
-                for (d = minX - (maxY - minY); d < maxX; d += 4) {
-                    ctx.moveTo(d, minY);
-                    ctx.lineTo(d + (maxY - minY), maxY);
+                var low = minY - maxX;
+                var high = maxY - minX;
+                var c = Math.floor(low / 4) * 4;
+                for (; c <= high; c += 4) {
+                    ctx.moveTo(minX, minX + c);
+                    ctx.lineTo(maxX, maxX + c);
                 }
             }
             ctx.stroke();
@@ -2209,10 +2202,25 @@
             ctx.globalAlpha = ghost ? 0.16 : 1;
             var objects = floor.objects || [];
             for (i = 0; i < objects.length; i++) {
-                if (objects[i].type === 'opening') continue;
+                if (objects[i].type === 'opening' || objects[i].type === 'wall') continue;
                 drawObject(ctx, objects[i], floor);
             }
+            drawWallLayer(ctx, floor);
             ctx.restore();
+        }
+
+        function drawWallLayer(ctx, floor) {
+            var objects = floor.objects || [];
+            var walls = [];
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                if (objects[i].type === 'wall') walls.push(objects[i]);
+            }
+            if (!walls.length) return;
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'body');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'stroke');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'cover');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'hatch');
         }
 
         function paint() {
