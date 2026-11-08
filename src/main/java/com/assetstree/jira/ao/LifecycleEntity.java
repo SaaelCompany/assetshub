@@ -100,4 +100,27 @@ public interface LifecycleEntity extends Entity {
     String getReplaceOn();
 
     void setReplaceOn(String replaceOn);
+
+    /** Contractor that services this asset. Empty when no contract is stored. */
+    @StringLength(120)
+    String getContractor();
+
+    void setContractor(String contractor);
+
+    @StringLength(160)
+    String getContractNo();
+
+    void setContractNo(String contractNo);
+
+    /** First day of contractor service, yyyy-MM-dd. */
+    @StringLength(16)
+    String getContractFrom();
+
+    void setContractFrom(String contractFrom);
+
+    /** Last day of contractor service, yyyy-MM-dd. */
+    @StringLength(16)
+    String getContractUntil();
+
+    void setContractUntil(String contractUntil);
 }

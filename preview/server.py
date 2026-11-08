@@ -4598,6 +4598,11 @@ def life_dto(asset_id):
         "warrantyService": row.get("warrantyService") or "",
         "replaceOn": replace_on,
         "monthsLeft": months_left,
+        "contractor": (row.get("contractor") or "").strip(),
+        "contractNo": (row.get("contractNo") or "").strip(),
+        "contractFrom": row.get("contractFrom") or "",
+        "contractUntil": row.get("contractUntil") or "",
+        "contractPhase": contract_phase(row),
     }
 
 
@@ -4620,7 +4625,8 @@ def save_life(asset_id, body, text):
     currency = (body.get("currency") or "RUB").strip().upper() or "RUB"
     document = (body.get("document") or "").strip()
     service = (body.get("warrantyService") or "").strip()
-    if len(currency) != 3 or len(document) > 160 or len(service) > 160:
+    contract = contract_fields(body)
+    if len(currency) != 3 or len(document) > 160 or len(service) > 160 or contract is None:
         return 400, {"message": text.get("asset-tree.error.life", "Life")}
     row.update({
         "purchased": (body.get("purchased") or "").strip(),
@@ -4634,12 +4640,54 @@ def save_life(asset_id, body, text):
         "residualMinor": residual,
         "lifeMonths": months,
     })
+    row.update(contract)
     if "approverKey" in body and row.get("writeoffState") != "pending":
         approver = str(body.get("approverKey") or "").strip()
         if approver and approver not in USERS:
             return 400, {"message": text.get("asset-tree.error.writeoff.approver", "Approver")}
         row["approverKey"] = approver
     return 200, life_dto(asset_id)
+
+
+def iso_day(value):
+    try:
+        datetime.date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+def contract_fields(body):
+    contractor = ((body or {}).get("contractor") or "").strip()
+    number = ((body or {}).get("contractNo") or "").strip()
+    start = ((body or {}).get("contractFrom") or "").strip()
+    end = ((body or {}).get("contractUntil") or "").strip()
+    if len(contractor) > 120 or len(number) > 160:
+        return None
+    if (start and not iso_day(start)) or (end and not iso_day(end)):
+        return None
+    if not contractor and not number:
+        if start or end:
+            return None
+        return {"contractor": "", "contractNo": "", "contractFrom": "", "contractUntil": ""}
+    if start and end and start > end:
+        return None
+    return {"contractor": contractor, "contractNo": number, "contractFrom": start, "contractUntil": end}
+
+
+def contract_phase(row):
+    contractor = (row.get("contractor") or "").strip()
+    number = (row.get("contractNo") or "").strip()
+    if not contractor and not number:
+        return 0
+    today = datetime.date.today().isoformat()
+    start = row.get("contractFrom") or ""
+    end = row.get("contractUntil") or ""
+    if start and today < start:
+        return 3
+    if end and today > end:
+        return 2
+    return 1
 
 
 def request_writeoff(asset_id, body, text):
