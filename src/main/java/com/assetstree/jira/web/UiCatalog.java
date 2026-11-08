@@ -1811,6 +1811,10 @@ public final class UiCatalog {
             "setupShow",
             "setupApproval",
             "setupApprover",
+            "setupBranch",
+            "setupBranchHint",
+            "lifeBranchApprover",
+            "lifeBranchEmpty",
             "setupCurrency",
             "setupMonths",
             "setupSave",
@@ -1821,7 +1825,18 @@ public final class UiCatalog {
             "mapZoomOut",
             "mapColor",
             "mapDeleteShape",
-            "mapPlanSize"
+            "mapPlanSize",
+            "tniSourceBrowser",
+            "tniSourceBrowserHint",
+            "tniSourceScan",
+            "tniSourceAd",
+            "tniSourceSccm",
+            "tniSourcePing",
+            "tniSourcePingHint",
+            "mapScanRemove",
+            "mapScanWidth",
+            "mapScanScale",
+            "mapScanLength"
     };
 
     private UiCatalog() {

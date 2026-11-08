@@ -1576,6 +1576,33 @@
         return !!typeOf(asset.typeKey).location;
     }
 
+    function rootPlaces() {
+        return (state.assets || []).filter(function (asset) {
+            if (!isFolder(asset)) return false;
+            var parent = asset.parentId ? byId()[asset.parentId] : null;
+            return !parent || !isFolder(parent);
+        });
+    }
+
+    function branchApprover(asset) {
+        var map = {};
+        String(moduleSetup().lifePlaces || '').split(',').forEach(function (part) {
+            var bits = part.split(':');
+            if (bits.length === 2 && bits[1]) map[bits[0]] = bits[1];
+        });
+        var current = asset;
+        var guard = 0;
+        var onPlace = false;
+        while (current && current.parentId && guard++ < 40) {
+            var parent = byId()[current.parentId];
+            if (!parent || !isFolder(parent)) break;
+            onPlace = true;
+            if (map[String(parent.id)]) return map[String(parent.id)];
+            current = parent;
+        }
+        return onPlace ? '' : (moduleSetup().lifeApprover || '');
+    }
+
     function selectedPlaceId() {
         var current = state.selectedId ? byId()[state.selectedId] : null;
         if (!current) return null;
@@ -7856,7 +7883,7 @@
                 extra.push({ label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
             }
         }
-        if (!isFolder(asset) && moduleOn('tni')) {
+        if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
             extra.unshift({
                 label: t('tniPing'),
                 mark: pingMark(asset),
@@ -8029,7 +8056,7 @@
         descriptionBox.className = 'asset-tree-description';
         description.appendChild(descriptionBox);
         main.appendChild(description);
-        if (!placePage && moduleOn('tni') && typeOf(asset.typeKey).reach) {
+        if (!placePage && moduleOn('tni') && moduleSetup().tniPing !== false && typeOf(asset.typeKey).reach) {
             var exemptRow = el('label', 'asset-tree-check');
             var exemptBox = el('input');
             exemptBox.type = 'checkbox';
@@ -10423,7 +10450,7 @@
                 serviceRow.appendChild(el('p', 'asset-tree-hint', t('serviceTypeHint')));
                 wrap.appendChild(serviceRow);
             }
-            if (moduleOn('tni')) {
+            if (moduleOn('tni') && moduleSetup().tniPing !== false) {
                 var reachToggle = el('label', 'asset-tree-check');
                 reachToggle.title = t('tniReachTypeHint');
                 var reachBox = el('input');
@@ -10640,7 +10667,7 @@
         }
         var reachToggle = null;
         var reachInput = null;
-        if (moduleOn('tni')) {
+        if (moduleOn('tni') && moduleSetup().tniPing !== false) {
             reachToggle = el('label', 'asset-tree-check');
             reachInput = el('input');
             reachInput.type = 'checkbox';
@@ -13720,6 +13747,69 @@
             who.appendChild(chosen);
             who.appendChild(hits);
             panel.appendChild(who);
+            var branchMap = {};
+            String(setup.lifePlaces || '').split(',').forEach(function (part) {
+                var bits = part.split(':');
+                if (bits.length === 2 && bits[1]) branchMap[bits[0]] = bits[1];
+            });
+            var branchEditors = [];
+            panel.appendChild(el('p', 'asset-tree-hint', t('setupBranchHint')));
+            rootPlaces().forEach(function (place) {
+                var rowKey = branchMap[String(place.id)] || '';
+                var rowName = '';
+                var rowChosen = el('div', 'asset-tree-userpick-name', rowKey || t('lifeApproverEmpty'));
+                var rowFinder = document.createElement('input');
+                rowFinder.type = 'search';
+                rowFinder.placeholder = t('schedulesFindUser');
+                rowFinder.setAttribute('aria-label', place.name || t('setupBranch'));
+                var rowHits = el('div', 'asset-tree-user-results');
+                var rowTimer = null;
+                var rowSeq = 0;
+                var editor = { id: place.id, key: rowKey };
+                branchEditors.push(editor);
+                function showRow(name) {
+                    rowName = name || '';
+                    rowFinder.value = rowName;
+                    rowChosen.textContent = rowName || t('lifeApproverEmpty');
+                }
+                rowFinder.addEventListener('input', function () {
+                    var typed = rowFinder.value.trim();
+                    if (!typed) {
+                        editor.key = '';
+                        rowName = '';
+                        rowChosen.textContent = t('lifeApproverEmpty');
+                    } else if (typed !== rowName) editor.key = '';
+                    clearTimeout(rowTimer);
+                    rowTimer = setTimeout(function () {
+                        var query = rowFinder.value.trim();
+                        var mark = ++rowSeq;
+                        rowHits.innerHTML = '';
+                        if (query.length < 2) return;
+                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                            if (mark !== rowSeq) return;
+                            rowHits.innerHTML = '';
+                            (payload || []).forEach(function (user) {
+                                var label = user.displayName || user.userKey;
+                                if (user.email) label += ' · ' + user.email;
+                                rowHits.appendChild(button(label, 'asset-tree-user-hit', function () {
+                                    editor.key = user.userKey;
+                                    showRow(user.displayName || user.userKey);
+                                    rowHits.innerHTML = '';
+                                }));
+                            });
+                        });
+                    }, 200);
+                });
+                if (rowKey) {
+                    ajax('GET', '/users/' + encodeURIComponent(rowKey), null, function (status, user) {
+                        if (status === 200 && user) showRow(user.displayName || rowKey);
+                    });
+                }
+                var field = planField(place.name || t('setupBranch'), rowFinder);
+                field.appendChild(rowChosen);
+                field.appendChild(rowHits);
+                panel.appendChild(field);
+            });
             var currency = document.createElement('select');
             ['RUB', 'USD', 'EUR'].forEach(function (code) {
                 var option = document.createElement('option');
@@ -13739,6 +13829,9 @@
                 var next = moduleSetup();
                 next.lifeApproval = approvalBox.checked;
                 next.lifeApprover = approverKey;
+                next.lifePlaces = branchEditors.filter(function (row) { return row.key; }).map(function (row) {
+                    return row.id + ':' + row.key;
+                }).join(',');
                 next.lifeCurrency = currency.value;
                 next.lifeMonths = clampNum(months.value, 0, 600);
                 saveSetup(next);
@@ -13746,6 +13839,23 @@
         }
         if (moduleKey === 'tni') {
             panel.appendChild(el('p', 'asset-tree-hint', t('tniHint')));
+            var sourceBoxes = {};
+            function sourceBox(key, label, hint) {
+                var line = el('label', 'asset-tree-check');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = setup[key] !== false;
+                line.appendChild(box);
+                line.appendChild(document.createTextNode(t(label)));
+                panel.appendChild(line);
+                if (hint) panel.appendChild(el('p', 'asset-tree-hint', t(hint)));
+                sourceBoxes[key] = box;
+            }
+            sourceBox('tniBrowser', 'tniSourceBrowser', 'tniSourceBrowserHint');
+            sourceBox('tniScan', 'tniSourceScan', '');
+            sourceBox('tniAd', 'tniSourceAd', '');
+            sourceBox('tniSccm', 'tniSourceSccm', '');
+            sourceBox('tniPing', 'tniSourcePing', 'tniSourcePingHint');
             var keep = document.createElement('input');
             keep.type = 'number';
             keep.min = '1';
@@ -13821,6 +13931,11 @@
             if (state.canAdmin) appendTniTools(panel);
             panel.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
+                next.tniBrowser = sourceBoxes.tniBrowser.checked;
+                next.tniScan = sourceBoxes.tniScan.checked;
+                next.tniAd = sourceBoxes.tniAd.checked;
+                next.tniSccm = sourceBoxes.tniSccm.checked;
+                next.tniPing = sourceBoxes.tniPing.checked;
                 next.tniKeep = clampNum(keep.value, 1, 3650);
                 next.tniProbeDays = clampNum(probeDays.value, 1, 30);
                 next.tniProbeTries = clampNum(probeTries.value, 1, 30);
@@ -20387,9 +20502,10 @@
             board.appendChild(tniBoard());
         }
         scan.appendChild(board);
-        panel.appendChild(scan);
-        panel.appendChild(renderTniDirectory());
-        panel.appendChild(renderTniSccm());
+        var sources = moduleSetup();
+        if (sources.tniScan !== false) panel.appendChild(scan);
+        if (sources.tniAd !== false) panel.appendChild(renderTniDirectory());
+        if (sources.tniSccm !== false) panel.appendChild(renderTniSccm());
     }
 
     function loadTni(quiet) {
@@ -21569,6 +21685,7 @@
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,
             lifeApprover: setup.lifeApprover || '',
+            lifePlaces: setup.lifePlaces || '',
             lifeCurrency: setup.lifeCurrency || 'RUB',
             lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
             staffMarks: setup.staffMarks || '',
@@ -21601,6 +21718,11 @@
             tniLaptop: setup.tniLaptop || '',
             tniPhone: setup.tniPhone || '',
             tniTablet: setup.tniTablet || '',
+            tniBrowser: setup.tniBrowser !== false,
+            tniScan: setup.tniScan !== false,
+            tniAd: setup.tniAd !== false,
+            tniSccm: setup.tniSccm !== false,
+            tniPing: setup.tniPing !== false,
             portalColumns: (function () {
                 var raw = setup.portalColumns;
                 if (raw == null || raw === '' || raw === '*') return 'key,type,status,location';
@@ -21811,8 +21933,32 @@
                     x: clampNum(pin.x, 0, size.w),
                     y: clampNum(pin.y, 0, size.h)
                 };
-            })
+            }),
+            underlay: underlayOf(floor)
         };
+    }
+
+    function underlayOf(floor) {
+        if (!floor) return null;
+        if (floor.underlay && typeof floor.underlay === 'object' && floor.underlay.src) {
+            return {
+                src: floor.underlay.src,
+                x: Number(floor.underlay.x) || 0,
+                y: Number(floor.underlay.y) || 0,
+                w: Number(floor.underlay.w) || 0,
+                h: Number(floor.underlay.h) || 0
+            };
+        }
+        if (typeof floor.underlay === 'string' && floor.underlay.indexOf('data:image/') === 0) {
+            return {
+                src: floor.underlay,
+                x: Number(floor.underlayX) || 0,
+                y: Number(floor.underlayY) || 0,
+                w: Number(floor.underlayW) || 0,
+                h: Number(floor.underlayH) || 0
+            };
+        }
+        return null;
     }
 
     function clearMapDrag() {
@@ -24545,6 +24691,10 @@
     function applyPlanImport(name, raw) {
         if (!state.mapDraft || !window.AssetTreePlan) return;
         var parsed = window.AssetTreePlan.importDrawing(name, raw);
+        if (parsed && parsed.underlay) {
+            placeUnderlay(parsed.underlay);
+            return;
+        }
         if (!parsed || parsed.error) {
             notify(t(parsed && parsed.error ? parsed.error : 'mapImportNone'));
             return;
@@ -24701,7 +24851,7 @@
         row.appendChild(button(t('mapMirror'), 'asset-tree-btn slim', mirrorSelection));
         var file = document.createElement('input');
         file.type = 'file';
-        file.accept = '.dxf,.dwg,.pdf,application/pdf';
+        file.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
         file.className = 'asset-tree-plan-file';
         file.addEventListener('change', function () {
             var picked = file.files && file.files[0];
@@ -24709,6 +24859,14 @@
             var reader = new FileReader();
             reader.onload = function () {
                 var bytes = new Uint8Array(reader.result);
+                var lower = String(picked.name || '').toLowerCase();
+                if (/\.(png|jpe?g)$/.test(lower) || (picked.type && picked.type.indexOf('image/') === 0)) {
+                    shrinkScan(bytes, picked.type || 'image/jpeg', function (url) {
+                        placeUnderlay(url);
+                        file.value = '';
+                    });
+                    return;
+                }
                 var text = '';
                 var i;
                 for (i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
@@ -24724,8 +24882,106 @@
         row.appendChild(button(t('mapExportDwg'), 'asset-tree-btn slim', function () { exportPlan('dwg'); }));
         row.appendChild(button(t('mapExportPdf'), 'asset-tree-btn slim', function () { exportPlan('pdf'); }));
         row.appendChild(button(t('mapPrint'), 'asset-tree-btn slim', printPlanSheet));
+        var scan = state.mapDraft && state.mapDraft.underlay;
+        if (scan && scan.src) {
+            row.appendChild(button(t('mapScanRemove'), 'asset-tree-btn slim', function () {
+                if (!state.mapDraft) return;
+                state.mapDraft.underlay = null;
+                state.mapCalibrate = null;
+                state.mapDirty = true;
+                renderFrame();
+            }));
+            var width = document.createElement('input');
+            width.type = 'number';
+            width.min = '10';
+            width.max = '20000';
+            width.className = 'asset-tree-scan-width';
+            width.setAttribute('aria-label', t('mapScanWidth'));
+            width.value = String(Math.round(scan.w || 0));
+            width.addEventListener('change', function () {
+                var next = Number(width.value);
+                var current = state.mapDraft && state.mapDraft.underlay;
+                if (!current || !(next >= 10)) return;
+                var ratio = current.h / Math.max(1, current.w);
+                current.w = Math.round(next);
+                current.h = Math.max(10, Math.round(next * ratio));
+                state.mapDirty = true;
+                renderFrame();
+            });
+            row.appendChild(width);
+            row.appendChild(button(t('mapScanScale'), 'asset-tree-btn slim' + (state.mapCalibrate ? ' is-on' : ''), function () {
+                state.mapCalibrate = state.mapCalibrate ? null : { points: [] };
+                renderFrame();
+            }));
+            if (state.mapCalibrate && state.mapCalibrate.points.length === 2) {
+                var length = document.createElement('input');
+                length.type = 'number';
+                length.min = '1';
+                length.className = 'asset-tree-scan-width';
+                length.placeholder = t('mapScanLength');
+                length.setAttribute('aria-label', t('mapScanLength'));
+                length.addEventListener('change', function () {
+                    var cm = Number(length.value);
+                    var points = state.mapCalibrate && state.mapCalibrate.points;
+                    var current = state.mapDraft && state.mapDraft.underlay;
+                    if (!current || !points || points.length < 2 || !(cm > 0)) return;
+                    var dx = points[1].x - points[0].x;
+                    var dy = points[1].y - points[0].y;
+                    var dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 1) return;
+                    var scale = cm / dist;
+                    current.w = Math.max(10, Math.round(current.w * scale));
+                    current.h = Math.max(10, Math.round(current.h * scale));
+                    state.mapCalibrate = null;
+                    state.mapDirty = true;
+                    renderFrame();
+                });
+                row.appendChild(length);
+            }
+        }
         window.AssetTreePlanApply = function (name, raw) { applyPlanImport(name, raw); };
         return row;
+    }
+
+    function shrinkScan(bytes, mime, done) {
+        var blob = new Blob([bytes], { type: mime || 'image/jpeg' });
+        var url = URL.createObjectURL(blob);
+        var image = new Image();
+        image.onload = function () {
+            var limit = 1400;
+            var scale = Math.min(1, limit / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+            var canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+            canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+            canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+            var data = canvas.toDataURL('image/jpeg', 0.72);
+            URL.revokeObjectURL(url);
+            done(data);
+        };
+        image.onerror = function () {
+            URL.revokeObjectURL(url);
+            notify(t('mapImportNone'));
+        };
+        image.src = url;
+    }
+
+    function placeUnderlay(src) {
+        if (!state.mapDraft || !src) return;
+        var image = new Image();
+        image.onload = function () {
+            if (!state.mapDraft) return;
+            var size = planSize(state.mapDraft);
+            var w = Math.min(size.w - 80, 1000);
+            var h = Math.round(w * (image.naturalHeight || 1) / Math.max(1, image.naturalWidth || 1));
+            if (h > size.h - 80) {
+                h = size.h - 80;
+                w = Math.round(h * (image.naturalWidth || 1) / Math.max(1, image.naturalHeight || 1));
+            }
+            state.mapDraft.underlay = { src: src, x: 40, y: 40, w: Math.max(10, w), h: Math.max(10, h) };
+            state.mapDirty = true;
+            renderFrame();
+        };
+        image.src = src;
     }
 
     function routeToolPairs(layer) {
@@ -25258,7 +25514,12 @@
                     swing: parseInt(room.swing, 10) === 1 ? 1 : 0,
                     groupId: Math.max(0, parseInt(room.groupId, 10) || 0)
                 };
-            })
+            }),
+            underlay: draft.underlay ? draft.underlay.src : '',
+            underlayX: draft.underlay ? Math.round(draft.underlay.x) : 0,
+            underlayY: draft.underlay ? Math.round(draft.underlay.y) : 0,
+            underlayW: draft.underlay ? Math.round(draft.underlay.w) : 0,
+            underlayH: draft.underlay ? Math.round(draft.underlay.h) : 0
         };
         ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/floors/' + draft.id, body, function (status, payload) {
             if (status >= 200 && status < 300 && payload) {
@@ -26212,77 +26473,61 @@
     }
 
     function splitJunctions(rooms) {
-        if (!rooms) return false;
-        var guard = 0;
-        var any = false;
-        var changed = true;
-        while (changed && guard < 6) {
-            changed = false;
-            guard++;
-            var walls = planGraphSegments(rooms);
-            var cuts = {};
-            function addCut(index, t, x, y) {
-                if (index < 0) return;
-                if (t < 0.04 || t > 0.96) return;
-                var bucket = cuts[index] || (cuts[index] = []);
-                var n;
-                for (n = 0; n < bucket.length; n++) {
-                    if (Math.abs(bucket[n].t - t) < 0.02) return;
-                }
-                bucket.push({ t: t, x: x, y: y });
-                changed = true;
+        if (!rooms || !window.AssetTreePlan || !window.AssetTreePlan.cutTees) return false;
+        var specs = [];
+        planGraphSegments(rooms).forEach(function (edge) {
+            if (edge.index < 0) {
+                specs.push({
+                    source: -1, x1: edge.a.x, y1: edge.a.y, x2: edge.b.x, y2: edge.b.y, kind: 'wall', thick: 8
+                });
+                return;
             }
-            var i;
-            var j;
-            for (i = 0; i < walls.length; i++) {
-                for (j = i + 1; j < walls.length; j++) {
-                    var left = walls[i];
-                    var right = walls[j];
-                    [right.a, right.b].forEach(function (point) {
-                        var hit = projectOnSegment(left.a.x, left.a.y, left.b.x, left.b.y, point.x, point.y);
-                        if (hit && hit.dist <= 12) addCut(left.index, hit.t, hit.x, hit.y);
-                    });
-                    [left.a, left.b].forEach(function (point) {
-                        var hit = projectOnSegment(right.a.x, right.a.y, right.b.x, right.b.y, point.x, point.y);
-                        if (hit && hit.dist <= 12) addCut(right.index, hit.t, hit.x, hit.y);
-                    });
-                    var cross = segmentCross(left.a, left.b, right.a, right.b);
-                    if (cross) {
-                        addCut(left.index, cross.t, cross.x, cross.y);
-                        addCut(right.index, cross.u, cross.x, cross.y);
-                    }
-                }
-            }
-            if (!changed) break;
-            any = true;
-            Object.keys(cuts).map(Number).sort(function (a, b) { return b - a; }).forEach(function (index) {
-                var room = rooms[index];
-                if (!room) return;
-                var ends = segmentEnds(room);
-                var points = [{ x: ends[0].x, y: ends[0].y }].concat(cuts[index].slice().sort(function (a, b) {
-                    return a.t - b.t;
-                })).concat([{ x: ends[1].x, y: ends[1].y }]);
-                var pieces = [];
-                var k;
-                for (k = 0; k < points.length - 1; k++) {
-                    var piece = applySegment(room, points[k].x, points[k].y, points[k + 1].x, points[k + 1].y);
-                    if (piece) pieces.push(piece);
-                }
-                if (pieces.length < 2) return;
-                var first = pieces[0];
-                room.x = first.x;
-                room.y = first.y;
-                room.w = first.w;
-                room.h = first.h;
-                room.angle = first.angle;
-                var extra = pieces.slice(1);
-                Array.prototype.splice.apply(rooms, [index + 1, 0].concat(extra));
-                var added = extra.length;
-                state.mapSelection = shiftMapIndex(state.mapSelection, index, added);
-                state.mapGroup = (state.mapGroup || []).map(function (item) { return shiftMapIndex(item, index, added); });
+            var room = rooms[edge.index];
+            if (!room) return;
+            var thick = room.w < room.h ? room.w : room.h;
+            specs.push({
+                source: edge.index, index: edge.index,
+                x1: edge.a.x, y1: edge.a.y, x2: edge.b.x, y2: edge.b.y,
+                kind: room.kind || 'wall', thick: thick || 8, name: room.name || '', color: room.color || ''
             });
-        }
-        return any;
+        });
+        var cut = window.AssetTreePlan.cutTees(specs);
+        if (!cut) return false;
+        var grouped = {};
+        cut.forEach(function (piece) {
+            if (piece.source < 0) return;
+            var key = String(piece.source);
+            (grouped[key] || (grouped[key] = [])).push(piece);
+        });
+        Object.keys(grouped).map(Number).sort(function (a, b) { return b - a; }).forEach(function (index) {
+            var pieces = grouped[index];
+            var room = rooms[index];
+            if (!room || !pieces.length) return;
+            function paint(target, piece) {
+                var next = applySegment(target, piece.x1, piece.y1, piece.x2, piece.y2);
+                if (!next) return false;
+                target.x = next.x;
+                target.y = next.y;
+                target.w = next.w;
+                target.h = next.h;
+                target.angle = next.angle;
+                return true;
+            }
+            paint(room, pieces[0]);
+            if (pieces.length < 2) return;
+            var extra = [];
+            var k;
+            for (k = 1; k < pieces.length; k++) {
+                var made = applySegment(room, pieces[k].x1, pieces[k].y1, pieces[k].x2, pieces[k].y2);
+                if (made) extra.push(made);
+            }
+            if (!extra.length) return;
+            Array.prototype.splice.apply(rooms, [index + 1, 0].concat(extra));
+            var added = extra.length;
+            state.mapSelection = shiftMapIndex(state.mapSelection, index, added);
+            state.mapGroup = (state.mapGroup || []).map(function (item) { return shiftMapIndex(item, index, added); });
+        });
+        return true;
     }
 
     function closedFaces(rooms) {
@@ -26757,6 +27002,56 @@
         });
     }
 
+    function appendUnderlay(svg, floor, editing) {
+        var scan = floor && floor.underlay;
+        if (!scan || !scan.src) return;
+        var image = svgEl('image');
+        image.setAttribute('class', 'asset-tree-underlay');
+        image.setAttribute('x', String(scan.x || 0));
+        image.setAttribute('y', String(scan.y || 0));
+        image.setAttribute('width', String(scan.w || 10));
+        image.setAttribute('height', String(scan.h || 10));
+        image.setAttribute('href', scan.src);
+        image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', scan.src);
+        if (editing) {
+            image.addEventListener('mousedown', function (event) {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (state.mapCalibrate) {
+                    var point = svgPoint(svg, event);
+                    var points = state.mapCalibrate.points || [];
+                    points.push({ x: point.x, y: point.y });
+                    state.mapCalibrate.points = points.slice(-2);
+                    renderFrame();
+                    return;
+                }
+                var originX = scan.x;
+                var originY = scan.y;
+                var start = svgPoint(svg, event);
+                beginDrag(svg, { kind: 'underlay' }, function (move) {
+                    var next = svgPoint(svg, move);
+                    scan.x = Math.round(originX + next.x - start.x);
+                    scan.y = Math.round(originY + next.y - start.y);
+                    image.setAttribute('x', String(scan.x));
+                    image.setAttribute('y', String(scan.y));
+                    state.mapDirty = true;
+                }, function () { renderFrame(); });
+            });
+        }
+        svg.appendChild(image);
+        if (state.mapCalibrate && state.mapCalibrate.points) {
+            state.mapCalibrate.points.forEach(function (point) {
+                var dot = svgEl('circle');
+                dot.setAttribute('cx', String(point.x));
+                dot.setAttribute('cy', String(point.y));
+                dot.setAttribute('r', '6');
+                dot.setAttribute('class', 'asset-tree-anchor');
+                svg.appendChild(dot);
+            });
+        }
+    }
+
     function floorCanvas(floor, editing) {
         syncClosedRooms(floor, editing);
         var size = planSize(floor);
@@ -26778,6 +27073,7 @@
         paper.setAttribute('class', 'asset-tree-paper');
         paper.setAttribute('fill', '#ffffff');
         svg.appendChild(paper);
+        appendUnderlay(svg, floor, editing);
         appendGhostFloors(svg, floor);
         var gridPaper = gridDotPath(size);
         var shapeOptions = function (room, index) {
@@ -29119,7 +29415,7 @@
     }
 
     function openWriteoffDialog(asset, life, direct) {
-        var approverKey = life.approverKey || moduleSetup().lifeApprover || state.userKey || '';
+        var approverKey = direct ? (state.userKey || '') : branchApprover(asset);
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, t('lifeAsk')));
@@ -29128,66 +29424,19 @@
             reason.value = life.writeoffReason || '';
             dialog.appendChild(planField(t('lifeReason'), reason));
             if (!direct) {
-                var knownName = life.approverName || (approverKey === state.userKey ? (state.displayName || '') : '');
-                var chosen = el('div', 'asset-tree-userpick-name is-empty', t('lifeApproverEmpty'));
-                var finder = document.createElement('input');
-                finder.type = 'search';
-                finder.placeholder = t('schedulesFindUser');
-                finder.setAttribute('aria-label', t('lifeApprover'));
-                var hits = el('div', 'asset-tree-user-results');
-                var timer = null;
-                var seq = 0;
-                function showApprover(name) {
-                    chosen.textContent = name || t('lifeApproverEmpty');
-                    if (name) chosen.classList.remove('is-empty');
-                    else chosen.classList.add('is-empty');
-                }
-                showApprover(knownName);
-                finder.addEventListener('input', function () {
-                    clearTimeout(timer);
-                    timer = setTimeout(function () {
-                        var query = finder.value.trim();
-                        var mark = ++seq;
-                        hits.innerHTML = '';
-                        if (query.length < 2) return;
-                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                            if (mark !== seq) return;
-                            hits.innerHTML = '';
-                            (payload || []).forEach(function (user) {
-                                var label = user.displayName || user.userKey;
-                                if (user.email) label += ' · ' + user.email;
-                                hits.appendChild(button(label, 'asset-tree-user-hit', function () {
-                                    approverKey = user.userKey;
-                                    showApprover(user.displayName || user.userKey);
-                                    hits.innerHTML = '';
-                                    finder.value = '';
-                                }));
-                            });
-                        });
-                    }, 200);
-                });
-                var who = el('div', 'asset-tree-approver-pick');
-                var head = el('div', 'asset-tree-approver-head');
-                head.appendChild(el('span', null, t('lifeApprover')));
-                head.appendChild(button(t('schedulesMe'), 'asset-tree-linkish', function () {
-                    approverKey = state.userKey || '';
-                    showApprover(state.displayName || '');
-                    hits.innerHTML = '';
-                    finder.value = '';
-                }));
-                who.appendChild(head);
-                who.appendChild(chosen);
-                who.appendChild(finder);
-                who.appendChild(hits);
+                var who = el('p', 'asset-tree-life-state', t('lifeBranchApprover'));
                 dialog.appendChild(who);
-                if (approverKey && !knownName) {
+                if (!approverKey) who.textContent = t('lifeBranchEmpty');
+                else if (approverKey === state.userKey) who.textContent = t('lifeBranchApprover') + ': ' + (state.displayName || approverKey);
+                else {
                     ajax('GET', '/users/' + encodeURIComponent(approverKey), null, function (status, user) {
-                        if (status === 200 && user && user.displayName) showApprover(user.displayName);
+                        var name = status === 200 && user && user.displayName ? user.displayName : approverKey;
+                        who.textContent = t('lifeBranchApprover') + ': ' + name;
                     });
                 }
             }
             var actions = el('div', 'asset-tree-inline-actions');
-            actions.appendChild(button(direct ? t('lifeWriteoffNow') : t('lifeAsk'), 'asset-tree-btn primary', function () {
+            var ask = button(direct ? t('lifeWriteoffNow') : t('lifeAsk'), 'asset-tree-btn primary', function () {
                 var who = direct ? (state.userKey || '') : approverKey;
                 ajax('POST', '/assets/' + asset.id + '/lifecycle/writeoff', { reason: reason.value, approverKey: who }, function (status, payload) {
                     if (status >= 200 && status < 300 && payload) {
@@ -29197,7 +29446,9 @@
                         else showDetail(state.detail || asset, false);
                     } else notify((payload && payload.message) || t('errorTitle'));
                 });
-            }));
+            });
+            if (!direct && !approverKey) ask.disabled = true;
+            actions.appendChild(ask);
             actions.appendChild(button(t('cancel'), 'asset-tree-btn', closeModal));
             dialog.appendChild(actions);
         });

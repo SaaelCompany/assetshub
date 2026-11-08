@@ -265,6 +265,65 @@
             });
             tools.appendChild(button);
         });
+        var scanFile = el('input');
+        scanFile.type = 'file';
+        scanFile.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
+        scanFile.style.display = 'none';
+        var importBtn = el('button', 'asset-tree-scheme-tool', api.t('mapImport'));
+        importBtn.type = 'button';
+        importBtn.disabled = !api.canEdit;
+        importBtn.addEventListener('click', function () {
+            if (session.mode !== 'edit') return;
+            scanFile.click();
+        });
+        tools.appendChild(importBtn);
+        tools.appendChild(scanFile);
+        var exportDxfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportDxf'));
+        exportDxfBtn.type = 'button';
+        exportDxfBtn.addEventListener('click', function () { exportScheme('dxf'); });
+        var exportPdfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportPdf'));
+        exportPdfBtn.type = 'button';
+        exportPdfBtn.addEventListener('click', function () { exportScheme('pdf'); });
+        tools.appendChild(exportDxfBtn);
+        tools.appendChild(exportPdfBtn);
+        var scaleBtn = el('button', 'asset-tree-scheme-tool', api.t('mapScanScale'));
+        scaleBtn.type = 'button';
+        scaleBtn.disabled = !api.canEdit;
+        scaleBtn.addEventListener('click', function () {
+            if (session.mode !== 'edit' || !activeFloor().underlay) return;
+            session.calibrate = { points: [] };
+        });
+        var removeScan = el('button', 'asset-tree-scheme-tool', api.t('mapScanRemove'));
+        removeScan.type = 'button';
+        removeScan.disabled = !api.canEdit;
+        removeScan.addEventListener('click', function () {
+            if (session.mode !== 'edit') return;
+            activeFloor().underlay = null;
+            session.calibrate = null;
+            session.dirty = true;
+            paint();
+        });
+        tools.appendChild(scaleBtn);
+        tools.appendChild(removeScan);
+        scanFile.addEventListener('change', function () {
+            var picked = scanFile.files && scanFile.files[0];
+            scanFile.value = '';
+            if (!picked || session.mode !== 'edit') return;
+            var reader = new FileReader();
+            reader.onload = function () {
+                var bytes = new Uint8Array(reader.result);
+                var lower = String(picked.name || '').toLowerCase();
+                if (/\.(png|jpe?g)$/.test(lower) || (picked.type && picked.type.indexOf('image/') === 0)) {
+                    shrinkSchemeScan(bytes, picked.type || 'image/jpeg', function (url) { placeSchemeScan(url); });
+                    return;
+                }
+                var text = '';
+                var i;
+                for (i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
+                importSchemeDrawing(picked.name, text);
+            };
+            reader.readAsArrayBuffer(picked);
+        });
         var unit = el('select', 'asset-tree-scheme-unit');
         ['cm', 'mm', 'm', 'in'].forEach(function (value) {
             var option = el('option', null, value);
@@ -920,15 +979,236 @@
             paint();
         }
 
+        var scanCache = { src: '', image: null };
+
+        function placeSchemeScan(src) {
+            if (!src) return;
+            var image = new Image();
+            image.onload = function () {
+                var floor = activeFloor();
+                var w = Math.min(1000, image.naturalWidth || 400);
+                var h = Math.round(w * (image.naturalHeight || 1) / Math.max(1, image.naturalWidth || 1));
+                floor.underlay = { src: src, x: 40, y: 40, w: Math.max(10, w), h: Math.max(10, h) };
+                session.dirty = true;
+                paint();
+            };
+            image.src = src;
+        }
+
+        function shrinkSchemeScan(bytes, mime, done) {
+            var blob = new Blob([bytes], { type: mime || 'image/jpeg' });
+            var url = URL.createObjectURL(blob);
+            var image = new Image();
+            image.onload = function () {
+                var limit = 1400;
+                var scale = Math.min(1, limit / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+                var canvas = el('canvas');
+                canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+                canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+                canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+                URL.revokeObjectURL(url);
+                var data = canvas.toDataURL('image/jpeg', 0.72);
+                if (data.length > 800000) return;
+                done(data);
+            };
+            image.src = url;
+        }
+
+        function importSchemeDrawing(name, raw) {
+            if (!global.AssetTreePlan || !global.AssetTreePlan.importDrawing) return;
+            var parsed = global.AssetTreePlan.importDrawing(name, raw);
+            if (parsed && parsed.underlay) {
+                placeSchemeScan(parsed.underlay);
+                return;
+            }
+            if (!parsed || !parsed.rooms || !parsed.rooms.length) return;
+            remember();
+            parsed.rooms.forEach(function (room) {
+                if (room.kind && room.kind !== 'wall' && room.kind !== 'partition') return;
+                var len = room.w || 0;
+                if (len < 8) return;
+                var rad = (room.angle || 0) * Math.PI / 180;
+                var cx = (room.x || 0) + len / 2;
+                var cy = (room.y || 0) + (room.h || 0) / 2;
+                var wall = baseObject('wall');
+                wall.points = [
+                    { x: roundCm(cx - Math.cos(rad) * len / 2), y: roundCm(cy - Math.sin(rad) * len / 2) },
+                    { x: roundCm(cx + Math.cos(rad) * len / 2), y: roundCm(cy + Math.sin(rad) * len / 2) }
+                ];
+                wall.closed = false;
+                wall.thickness = 15;
+                wall.alignment = 'center';
+                wall.hatch = 'diagonal';
+                wall.height = 300;
+                wall.layerId = layerOr('walls');
+                activeFloor().objects.push(wall);
+            });
+            syncRooms(activeFloor());
+            refreshSide();
+            renderProps();
+            paint();
+        }
+
+        function exportScheme(kind) {
+            if (!global.AssetTreePlan) return;
+            var items = [];
+            var maxY = 100;
+            (activeFloor().objects || []).forEach(function (obj) {
+                if (!obj.points || obj.points.length < 2) return;
+                if (obj.type !== 'wall' && obj.type !== 'polyline' && obj.type !== 'line') return;
+                var i;
+                for (i = 1; i < obj.points.length; i++) {
+                    items.push({
+                        kind: obj.type === 'wall' ? 'wall' : 'line',
+                        x1: obj.points[i - 1].x, y1: obj.points[i - 1].y,
+                        x2: obj.points[i].x, y2: obj.points[i].y
+                    });
+                    maxY = Math.max(maxY, obj.points[i - 1].y, obj.points[i].y);
+                }
+            });
+            var model = { planH: maxY + 40, items: items, rooms: [] };
+            var data = kind === 'pdf' ? global.AssetTreePlan.exportPdf(model) : global.AssetTreePlan.exportDxf(model);
+            if (!data) return;
+            var bytes = new Uint8Array(data.length);
+            var i;
+            for (i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 255;
+            var blob = new Blob([bytes], { type: kind === 'pdf' ? 'application/pdf' : 'image/vnd.dxf' });
+            var link = el('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = (session.doc.name || 'scheme') + (kind === 'pdf' ? '.pdf' : '.dxf');
+            link.click();
+            setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+        }
+
+        function drawSchemeScan(ctx, floor) {
+            var scan = floor && floor.underlay;
+            if (!scan || !scan.src) return;
+            if (scanCache.src !== scan.src) {
+                scanCache.src = scan.src;
+                scanCache.image = new Image();
+                scanCache.image.onload = function () { paint(); };
+                scanCache.image.src = scan.src;
+            }
+            if (!scanCache.image || !scanCache.image.complete || !scanCache.image.naturalWidth) return;
+            ctx.save();
+            ctx.globalAlpha = 0.55;
+            ctx.drawImage(scanCache.image, scan.x || 0, scan.y || 0, scan.w || 10, scan.h || 10);
+            ctx.restore();
+        }
+
+        function wallSpecs(floor) {
+            var specs = [];
+            (floor.objects || []).forEach(function (wall) {
+                if (wall.type !== 'wall' || !wall.points || wall.points.length < 2) return;
+                var i;
+                for (i = 1; i < wall.points.length; i++) {
+                    specs.push({
+                        x1: wall.points[i - 1].x, y1: wall.points[i - 1].y,
+                        x2: wall.points[i].x, y2: wall.points[i].y,
+                        source: specs.length, kind: 'wall', thick: wall.thickness || 15
+                    });
+                }
+                if (wall.closed && wall.points.length > 2) {
+                    var last = wall.points.length - 1;
+                    specs.push({
+                        x1: wall.points[last].x, y1: wall.points[last].y,
+                        x2: wall.points[0].x, y2: wall.points[0].y,
+                        source: specs.length, kind: 'wall', thick: wall.thickness || 15
+                    });
+                }
+            });
+            return specs;
+        }
+
+        function joinTees(floor) {
+            if (!global.AssetTreePlan || !global.AssetTreePlan.cutTees) return;
+            var specs = [];
+            var owners = [];
+            (floor.objects || []).forEach(function (wall) {
+                if (wall.type !== 'wall' || !wall.points || wall.points.length < 2) return;
+                var i;
+                for (i = 1; i < wall.points.length; i++) {
+                    owners.push({ wall: wall, at: i - 1, close: false });
+                    specs.push({
+                        x1: wall.points[i - 1].x, y1: wall.points[i - 1].y,
+                        x2: wall.points[i].x, y2: wall.points[i].y,
+                        source: specs.length, kind: 'wall', thick: wall.thickness || 15
+                    });
+                }
+                if (wall.closed && wall.points.length > 2) {
+                    var last = wall.points.length - 1;
+                    owners.push({ wall: wall, at: last, close: true });
+                    specs.push({
+                        x1: wall.points[last].x, y1: wall.points[last].y,
+                        x2: wall.points[0].x, y2: wall.points[0].y,
+                        source: specs.length, kind: 'wall', thick: wall.thickness || 15
+                    });
+                }
+            });
+            var cut = global.AssetTreePlan.cutTees(specs);
+            if (!cut) return;
+            var grouped = {};
+            cut.forEach(function (piece) {
+                if (piece.source < 0) return;
+                (grouped[piece.source] || (grouped[piece.source] = [])).push(piece);
+            });
+            var edits = {};
+            Object.keys(grouped).forEach(function (key) {
+                var owner = owners[Number(key)];
+                if (!owner) return;
+                (edits[owner.wall.id] || (edits[owner.wall.id] = [])).push({ owner: owner, pieces: grouped[key] });
+            });
+            Object.keys(edits).forEach(function (id) {
+                edits[id].sort(function (a, b) { return b.owner.at - a.owner.at; });
+                edits[id].forEach(function (edit) {
+                    var wall = edit.owner.wall;
+                    var pts = wall.points;
+                    var pieces = edit.pieces;
+                    function put(index, x, y) {
+                        pts[index].x = roundCm(x);
+                        pts[index].y = roundCm(y);
+                    }
+                    if (!edit.owner.close) {
+                        put(edit.owner.at, pieces[0].x1, pieces[0].y1);
+                        put(edit.owner.at + 1, pieces[pieces.length - 1].x2, pieces[pieces.length - 1].y2);
+                        if (pieces.length > 1) {
+                            var extra = [];
+                            var k;
+                            for (k = 0; k < pieces.length - 1; k++) extra.push({ x: roundCm(pieces[k].x2), y: roundCm(pieces[k].y2) });
+                            Array.prototype.splice.apply(pts, [edit.owner.at + 1, 0].concat(extra));
+                        }
+                    } else {
+                        put(pts.length - 1, pieces[0].x1, pieces[0].y1);
+                        put(0, pieces[pieces.length - 1].x2, pieces[pieces.length - 1].y2);
+                        if (pieces.length > 1) {
+                            var more = [];
+                            var n;
+                            for (n = 0; n < pieces.length - 1; n++) more.push({ x: roundCm(pieces[n].x2), y: roundCm(pieces[n].y2) });
+                            Array.prototype.splice.apply(pts, [pts.length, 0].concat(more));
+                        }
+                    }
+                });
+            });
+            session.dirty = true;
+        }
+
         function syncRooms(floor) {
+            joinTees(floor);
             var faces = [];
             var objects = floor.objects || [];
             var i;
-            for (i = 0; i < objects.length; i++) {
-                var wall = objects[i];
-                if (wall.type === 'wall' && wall.closed && wall.points && wall.points.length >= 3) {
-                    var area = polygonArea(wall.points);
-                    if (area >= 3000) faces.push({ points: wall.points, area: area, center: centroid(wall.points) });
+            if (global.AssetTreePlan && global.AssetTreePlan.planFaces) {
+                global.AssetTreePlan.planFaces(wallSpecs(floor)).forEach(function (points) {
+                    var area = polygonArea(points);
+                    if (area >= 3000) faces.push({ points: points, area: area, center: centroid(points) });
+                });
+            } else {
+                for (i = 0; i < objects.length; i++) {
+                    var wall = objects[i];
+                    if (wall.type === 'wall' && wall.closed && wall.points && wall.points.length >= 3) {
+                        var area = polygonArea(wall.points);
+                        if (area >= 3000) faces.push({ points: wall.points, area: area, center: centroid(wall.points) });
+                    }
                 }
             }
             var used = {};
@@ -1661,6 +1941,7 @@
 
         function drawFloor(ctx, floor, ghost) {
             ctx.save();
+            if (!ghost) drawSchemeScan(ctx, floor);
             if (ghost) ctx.globalAlpha = 0.16;
             var rooms = floor.rooms || [];
             var i;
@@ -3685,6 +3966,38 @@
                     placeAsset(pt);
                     return;
                 } else {
+                    var scan = activeFloor().underlay;
+                    if (session.calibrate && scan) {
+                        session.calibrate.points.push({ x: pt.x, y: pt.y });
+                        if (session.calibrate.points.length >= 2) {
+                            var marks = session.calibrate.points.slice(0, 2);
+                            session.calibrate = null;
+                            askBox({
+                                title: api.t('mapScanLength'),
+                                input: true,
+                                value: '',
+                                onOk: function (value) {
+                                    var cm = Number(String(value).replace(',', '.'));
+                                    var dx = marks[1].x - marks[0].x;
+                                    var dy = marks[1].y - marks[0].y;
+                                    var span = Math.sqrt(dx * dx + dy * dy);
+                                    var current = activeFloor().underlay;
+                                    if (!current || !(cm > 0) || span < 1) return;
+                                    var scale = cm / span;
+                                    current.w = Math.max(10, roundCm(current.w * scale));
+                                    current.h = Math.max(10, roundCm(current.h * scale));
+                                    session.dirty = true;
+                                    paint();
+                                }
+                            });
+                        }
+                        paint();
+                        return;
+                    }
+                    if (scan && pt.x >= scan.x && pt.y >= scan.y && pt.x <= scan.x + scan.w && pt.y <= scan.y + scan.h && api.canEdit) {
+                        drag = { mode: 'underlay', x: pt.x, y: pt.y, ox: scan.x, oy: scan.y, moved: false };
+                        return;
+                    }
                     if (!event.shiftKey) session.selection = [];
                     drag = { mode: 'marquee', x: pt.x, y: pt.y };
                     session.marquee = { x: pt.x, y: pt.y, w: 0, h: 0 };
@@ -3805,6 +4118,17 @@
             if (drag.mode === 'pan') {
                 session.cam.x = drag.camX - (event.clientX - drag.x) / session.cam.z;
                 session.cam.y = drag.camY - (event.clientY - drag.y) / session.cam.z;
+                paint();
+                return;
+            }
+            if (drag.mode === 'underlay') {
+                var scan = activeFloor().underlay;
+                if (scan) {
+                    scan.x = roundCm(drag.ox + pt.x - drag.x);
+                    scan.y = roundCm(drag.oy + pt.y - drag.y);
+                    drag.moved = true;
+                    session.dirty = true;
+                }
                 paint();
                 return;
             }

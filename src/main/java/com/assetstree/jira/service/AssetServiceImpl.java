@@ -208,7 +208,9 @@ import com.assetstree.jira.model.FieldInheritance;
 import com.assetstree.jira.model.LinkDraft;
 import com.assetstree.jira.model.LinkRules;
 import com.assetstree.jira.model.ReportLines;
+import com.assetstree.jira.model.LifeApprovers;
 import com.assetstree.jira.model.ModuleSetup;
+import com.assetstree.jira.model.PlanUnderlay;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
 import com.assetstree.jira.model.ReportCatalog;
@@ -5111,6 +5113,41 @@ public class AssetServiceImpl implements AssetService {
         return type != null && type.isLocation();
     }
 
+    private ModuleSetupDto moduleSetup(String projectKey) {
+        ProjectViewEntity view = viewRow(projectKey);
+        return ModuleSetup.read(view == null || view.getOptionList() == null ? "" : view.getOptionList());
+    }
+
+    private int[] placeChain(AssetEntity asset) {
+        java.util.ArrayList<Integer> chain = new java.util.ArrayList<Integer>();
+        AssetEntity current = asset;
+        int guard = 0;
+        while (current != null && current.getParentId() != null && guard < 40) {
+            guard++;
+            AssetEntity parent = ao().get(AssetEntity.class, current.getParentId().intValue());
+            if (parent == null || !isLocation(parent)) {
+                break;
+            }
+            chain.add(Integer.valueOf(parent.getID()));
+            current = parent;
+        }
+        int[] ids = new int[chain.size()];
+        for (int i = 0; i < chain.size(); i++) {
+            ids[i] = chain.get(i).intValue();
+        }
+        return ids;
+    }
+
+    private boolean tniSource(String projectKey, String source) {
+        ModuleSetupDto setup = moduleSetup(projectKey);
+        Boolean flag = "scan".equals(source) ? setup.getTniScan()
+                : "ad".equals(source) ? setup.getTniAd()
+                : "sccm".equals(source) ? setup.getTniSccm()
+                : "ping".equals(source) ? setup.getTniPing()
+                : setup.getTniBrowser();
+        return !Boolean.FALSE.equals(flag);
+    }
+
     private String assetLabel(int id) {
         AssetEntity entity = ao().get(AssetEntity.class, id);
         if (entity == null || entity.getName() == null || entity.getName().trim().isEmpty()) {
@@ -9016,6 +9053,11 @@ public class AssetServiceImpl implements AssetService {
         if (rooms.size() > FloorBounds.MAX_ROOMS || pins.size() > FloorBounds.MAX_PINS) {
             throw new AssetException(400, "asset-tree.error.floor");
         }
+        final String underlay = PlanUnderlay.store(draft.getUnderlay(), draft.getUnderlayX(), draft.getUnderlayY(),
+                draft.getUnderlayW(), draft.getUnderlayH());
+        if (draft.getUnderlay() != null && !draft.getUnderlay().trim().isEmpty() && underlay.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.floor");
+        }
         return ao().executeInTransaction(new TransactionCallback<FloorDto>() {
             @Override
             public FloorDto doInTransaction() {
@@ -9025,6 +9067,7 @@ public class AssetServiceImpl implements AssetService {
                 row.setPlaceId(checkedPlace(project.getKey(), draft.getPlaceId()));
                 row.setPlanW(planW);
                 row.setPlanH(planH);
+                row.setUnderlay(underlay);
                 row.save();
                 ao().deleteWithSQL(RoomEntity.class, "FLOOR_ID = ?", Integer.valueOf(row.getID()));
                 ao().deleteWithSQL(PinEntity.class, "FLOOR_ID = ?", Integer.valueOf(row.getID()));
@@ -9286,6 +9329,12 @@ public class AssetServiceImpl implements AssetService {
         }
         dto.setPlanW(FloorBounds.width(row.getPlanW()));
         dto.setPlanH(FloorBounds.height(row.getPlanH()));
+        PlanUnderlay.Sheet scan = PlanUnderlay.read(row.getUnderlay());
+        dto.setUnderlay(scan.src);
+        dto.setUnderlayX(scan.x);
+        dto.setUnderlayY(scan.y);
+        dto.setUnderlayW(scan.w);
+        dto.setUnderlayH(scan.h);
         RoomEntity[] rooms = ao().find(RoomEntity.class, Query.select().where("FLOOR_ID = ?", row.getID()));
         List<RoomDto> roomDtos = new ArrayList<RoomDto>();
         if (rooms != null) {
@@ -11788,12 +11837,19 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.life");
         }
         final String reason = draft.getReason() == null ? "" : draft.getReason().trim();
-        final String approver = draft.getApproverKey() == null ? "" : draft.getApproverKey().trim();
+        String chosen = draft.getApproverKey() == null ? "" : draft.getApproverKey().trim();
         if (reason.isEmpty() || reason.length() > 500) {
             throw new AssetException(400, "asset-tree.error.life");
         }
+        ModuleSetupDto lifeSetup = moduleSetup(asset.getProjectKey());
+        if (lifeSetup.getLifeApproval() == null || lifeSetup.getLifeApproval().booleanValue()) {
+            chosen = LifeApprovers.resolve(lifeSetup.getLifePlaces(), lifeSetup.getLifeApprover(), placeChain(asset));
+        }
+        final String approver = chosen;
         if (approver.isEmpty() || userManager().getUserByKey(approver) == null) {
-            throw new AssetException(400, "asset-tree.error.writeoff.approver");
+            throw new AssetException(400, lifeSetup.getLifeApproval() != null && !lifeSetup.getLifeApproval().booleanValue()
+                    ? "asset-tree.error.writeoff.approver"
+                    : "asset-tree.error.writeoff.branch");
         }
         return ao().executeInTransaction(new TransactionCallback<LifecycleDto>() {
             @Override
@@ -12996,6 +13052,9 @@ public class AssetServiceImpl implements AssetService {
         if (!moduleOn(projectKey, ProjectModules.TNI)) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
+        if (!tniSource(projectKey, "browser")) {
+            return;
+        }
         TniFacts facts = TniFacts.from(draft);
         if (!acceptTniSight(user.getKey(), !facts.address.isEmpty())) {
             return;
@@ -13055,6 +13114,9 @@ public class AssetServiceImpl implements AssetService {
             draft = new TniSightDraft();
         }
         if (draft == null || owner == null || projectKey == null || projectKey.trim().isEmpty()) {
+            return;
+        }
+        if (!tniSource(projectKey, "browser")) {
             return;
         }
         if (!seen.isEmpty()) {
@@ -13184,6 +13246,9 @@ public class AssetServiceImpl implements AssetService {
     public TniSubnetDto scanTniSubnet(final ApplicationUser user, String projectKey, final int subnetId) {
         final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
+        if (!tniSource(project.getKey(), "scan")) {
+            throw new AssetException(400, "asset-tree.error.tni.off");
+        }
         final String typeKey = tniComputerType(project.getKey());
         final String found = i18n().getText("asset-tree.ui.tniFound");
         final long now = System.currentTimeMillis();
@@ -13307,6 +13372,9 @@ public class AssetServiceImpl implements AssetService {
     public ImportResultDto loadTniDirectory(ApplicationUser user, String projectKey, TniSourceDraft draft) {
         Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
+        if (!tniSource(project.getKey(), "ad")) {
+            throw new AssetException(400, "asset-tree.error.tni.off");
+        }
         String typeKey = tniComputerType(project.getKey());
         if (draft == null) {
             throw new AssetException(400, TniDirectory.ACCOUNT);
@@ -13387,6 +13455,9 @@ public class AssetServiceImpl implements AssetService {
     public ImportResultDto loadTniSccm(ApplicationUser user, String projectKey, TniSourceDraft draft) {
         Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         requireModule(project.getKey(), ProjectModules.TNI);
+        if (!tniSource(project.getKey(), "sccm")) {
+            throw new AssetException(400, "asset-tree.error.tni.off");
+        }
         String typeKey = tniComputerType(project.getKey());
         if (draft == null) {
             throw new AssetException(400, TniDirectory.ACCOUNT);
@@ -13463,6 +13534,9 @@ public class AssetServiceImpl implements AssetService {
     public TniWatchDto pingTni(ApplicationUser user, int assetId) {
         final AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.OBJECT);
         requireModule(asset.getProjectKey(), ProjectModules.TNI);
+        if (!tniSource(asset.getProjectKey(), "ping")) {
+            throw new AssetException(400, "asset-tree.error.tni.off");
+        }
         rejectTniPlace(asset);
         final String host = TniAddress.station(asset.getName());
         boolean reached = false;

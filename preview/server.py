@@ -1215,6 +1215,7 @@ def module_setup(stored, migrate=True):
         "reportMailPart": mail_part,
         "lifeApproval": stored.get("lifeApproval") is not False,
         "lifeApprover": approver,
+        "lifePlaces": life_places(stored.get("lifePlaces")),
         "lifeCurrency": currency,
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
         "staffMarks": pack_staff_marks(stored.get("staffMarks")),
@@ -1234,6 +1235,11 @@ def module_setup(stored, migrate=True):
         "tniLaptop": tni_type(stored.get("tniLaptop")),
         "tniPhone": tni_type(stored.get("tniPhone")),
         "tniTablet": tni_type(stored.get("tniTablet")),
+        "tniBrowser": stored.get("tniBrowser") is not False,
+        "tniScan": stored.get("tniScan") is not False,
+        "tniAd": stored.get("tniAd") is not False,
+        "tniSccm": stored.get("tniSccm") is not False,
+        "tniPing": stored.get("tniPing") is not False,
         "scheduleKindVersion": 2,
     }
 
@@ -1432,7 +1438,58 @@ def create_subnet(project_key, body, text):
     return 201, tni_dto(row)
 
 
+def life_places(raw):
+    kept = []
+    seen = set()
+    for part in str(raw or "").split(","):
+        if ":" not in part or len(kept) >= 80:
+            continue
+        raw_id, key = part.split(":", 1)
+        raw_id = raw_id.strip()
+        key = key.strip()
+        if not raw_id.isdigit() or int(raw_id) <= 0 or raw_id in seen:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", key):
+            continue
+        seen.add(raw_id)
+        kept.append("%s:%s" % (int(raw_id), key))
+    return ",".join(kept)
+
+
+def branch_approver(asset, setup):
+    places = {}
+    for part in str((setup or {}).get("lifePlaces") or "").split(","):
+        if ":" not in part:
+            continue
+        raw_id, key = part.split(":", 1)
+        if raw_id.isdigit():
+            places[int(raw_id)] = key
+    current = asset
+    guard = 0
+    on_place = False
+    while current and current.get("parentId") and guard < 40:
+        guard += 1
+        parent = STATE["assets"].get(current.get("parentId"))
+        if not parent or not is_location_id(parent["id"]):
+            break
+        on_place = True
+        if parent["id"] in places:
+            return places[parent["id"]]
+        current = parent
+    if on_place:
+        return ""
+    return (setup or {}).get("lifeApprover") or ""
+
+
+def tni_source_off(project_key, key):
+    view = (STATE.get("views") or {}).get(project_key) or {}
+    setup = module_setup(view.get("setup") or {})
+    return setup.get(key) is False
+
+
 def scan_subnet(project_key, subnet_id, text):
+    if tni_source_off(project_key, "tniScan"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
     row = STATE.setdefault("subnets", {}).get(subnet_id)
     if not row or row.get("projectKey") != project_key:
         return 404, {"message": text.get("asset-tree.error.notFound", "Missing")}
@@ -1542,6 +1599,8 @@ def save_directory(project_key, body, text):
 
 
 def load_directory(project_key, body, text):
+    if tni_source_off(project_key, "tniAd"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
     body = body or {}
     host = str(body.get("host") or "").strip()
     account = str(body.get("account") or "").strip()
@@ -1595,6 +1654,8 @@ def save_sccm(project_key, body, text):
 
 
 def load_sccm(project_key, body, text):
+    if tni_source_off(project_key, "tniSccm"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
     body = body or {}
     host = str(body.get("host") or "").strip()
     account = str(body.get("account") or "").strip()
@@ -1700,6 +1761,8 @@ def ping_asset(asset_id, text):
     asset, blocked = watch_asset(asset_id, text)
     if blocked:
         return blocked
+    if tni_source_off(asset.get("projectKey"), "tniPing"):
+        return 400, {"message": text.get("asset-tree.error.tni.off", "Off")}
     host = watch_station(asset.get("name") or "")
     up = 1 if host else 2
     row = STATE.setdefault("watch", {}).setdefault(asset_id, {})
@@ -3975,6 +4038,27 @@ def room_place(place_id):
     return 0
 
 
+def floor_scan(row):
+    src = str((row or {}).get("underlay") or "")
+    empty = {"underlay": "", "underlayX": 0, "underlayY": 0, "underlayW": 0, "underlayH": 0}
+    if not src:
+        return empty
+    if not (src.startswith("data:image/jpeg;base64,") or src.startswith("data:image/png;base64,")):
+        return {}
+    if len(src) > 900000 or "|" in src:
+        return {}
+    try:
+        x = int(row.get("underlayX") or 0)
+        y = int(row.get("underlayY") or 0)
+        w = int(row.get("underlayW") or 0)
+        h = int(row.get("underlayH") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if w < 10 or h < 10 or w > 20000 or h > 20000 or x < -20000 or y < -20000 or x > 20000 or y > 20000:
+        return {}
+    return {"underlay": src, "underlayX": x, "underlayY": y, "underlayW": w, "underlayH": h}
+
+
 def floor_dto(row):
     rooms = []
     for room in row.get("rooms") or []:
@@ -4004,6 +4088,7 @@ def floor_dto(row):
         "planW": plan_limit(row.get("planW"), 1200, PLAN_MIN_W, PLAN_MAX_W),
         "planH": plan_limit(row.get("planH"), 760, PLAN_MIN_H, PLAN_MAX_H),
         "rooms": rooms, "pins": pins,
+        **floor_scan(row),
     }
 
 
@@ -4204,9 +4289,17 @@ def save_floor(project_key, floor_id, body, text):
             "y": max(0, min(plan_h, int(pin.get("y") or 0))),
         })
         pin_seq += 1
+    scan = floor_scan(body or {})
+    if (body or {}).get("underlay") and not scan.get("underlay"):
+        return 400, {"message": text.get("asset-tree.error.floor", "Floor")}
     row.update({
         "name": name, "level": level, "placeId": place_id, "planW": plan_w, "planH": plan_h,
         "rooms": stored_rooms, "pins": stored_pins,
+        "underlay": scan.get("underlay") or "",
+        "underlayX": scan.get("underlayX") or 0,
+        "underlayY": scan.get("underlayY") or 0,
+        "underlayW": scan.get("underlayW") or 0,
+        "underlayH": scan.get("underlayH") or 0,
     })
     return 200, floor_dto(row)
 
@@ -4369,10 +4462,15 @@ def request_writeoff(asset_id, body, text):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     reason = ((body or {}).get("reason") or "").strip()
     approver = ((body or {}).get("approverKey") or "").strip()
+    view = (STATE.get("views") or {}).get(asset["projectKey"]) or {}
+    setup = module_setup(view.get("setup") or {})
+    if setup.get("lifeApproval") is not False:
+        approver = branch_approver(asset, setup)
     if not reason or len(reason) > 500:
         return 400, {"message": text.get("asset-tree.error.life", "Life")}
     if approver not in USERS:
-        return 400, {"message": text.get("asset-tree.error.writeoff.approver", "Approver")}
+        key = "asset-tree.error.writeoff.branch" if setup.get("lifeApproval") is not False else "asset-tree.error.writeoff.approver"
+        return 400, {"message": text.get(key, "Approver")}
     row = STATE["lives"].setdefault(asset_id, {"assetId": asset_id})
     if row.get("writeoffState") in ("pending", "approved"):
         return 400, {"message": text.get("asset-tree.error.writeoff", "Write-off")}
