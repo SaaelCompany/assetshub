@@ -1218,6 +1218,7 @@ def module_setup(stored, migrate=True):
         "lifePlaces": life_places(stored.get("lifePlaces")),
         "lifeCurrency": currency,
         "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
+        "lifeFold": stored.get("lifeFold") is True,
         "staffMarks": pack_staff_marks(stored.get("staffMarks")),
         "staffOrder": pack_staff_order(stored.get("staffOrder")),
         "staffPlaceOrder": pack_staff_places(stored.get("staffPlaceOrder")),

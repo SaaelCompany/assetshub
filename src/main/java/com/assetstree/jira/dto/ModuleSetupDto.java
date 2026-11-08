@@ -27,6 +27,8 @@ public class ModuleSetupDto {
     private String lifePlaces;
     private String lifeCurrency;
     private Integer lifeMonths;
+    /** True when the lifecycle block starts collapsed on the asset card. */
+    private Boolean lifeFold;
     private String staffMarks;
     private String staffOrder;
     private String staffPlaceOrder;
@@ -92,6 +94,8 @@ public class ModuleSetupDto {
     public void setLifeCurrency(String lifeCurrency) { this.lifeCurrency = lifeCurrency; }
     public Integer getLifeMonths() { return lifeMonths; }
     public void setLifeMonths(Integer lifeMonths) { this.lifeMonths = lifeMonths; }
+    public Boolean getLifeFold() { return lifeFold; }
+    public void setLifeFold(Boolean lifeFold) { this.lifeFold = lifeFold; }
     public String getStaffMarks() { return staffMarks; }
     public void setStaffMarks(String staffMarks) { this.staffMarks = staffMarks; }
     public String getStaffOrder() { return staffOrder; }

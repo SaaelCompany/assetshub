@@ -1872,6 +1872,7 @@ public final class UiCatalog {
             "setupMonths",
             "setupSave",
             "lifeApproval",
+            "setupLifeFold",
             "lifeApproverEmpty",
             "lifeWriteoffNow",
             "mapZoomIn",

@@ -86,6 +86,21 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void lifecycleStartsOpenUntilTheProjectFoldsIt() {
+        ModuleSetupDto defaults = ModuleSetup.read("");
+        assertEquals(Boolean.FALSE, defaults.getLifeFold());
+        ModuleSetupDto folded = new ModuleSetupDto();
+        folded.setLifeFold(Boolean.TRUE);
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(folded));
+        assertEquals(Boolean.TRUE, read.getLifeFold());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setLifeCurrency("USD");
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals(Boolean.TRUE, merged.getLifeFold());
+        assertEquals("USD", merged.getLifeCurrency());
+    }
+
+    @Test
     public void timesheetDoublesNightAndSkipsLeave() {
         assertEquals(2, TimesheetMath.factor("night", 8, null));
         assertEquals(0, TimesheetMath.factor("leave", 0, null));
