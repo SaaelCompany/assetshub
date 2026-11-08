@@ -7929,7 +7929,6 @@
                 }
             });
         }
-        if (!isFolder(asset) && moduleOn('tni') && pingMark(asset)) ops.appendChild(pingDot(pingMark(asset)));
         if (extra.length) ops.appendChild(moreMenu(extra));
         main.appendChild(ops);
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
