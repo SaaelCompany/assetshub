@@ -14539,6 +14539,25 @@
         return palette[n];
     }
 
+    function paintEventChip(card) {
+        if (!card || card.classList.contains('is-done') || card.classList.contains('is-due')) return;
+        var color = card.style.getPropertyValue('--kind');
+        if (color) card.style.setProperty('background-color', tintColor(color, 0.84), 'important');
+    }
+
+    function tintColor(hex, towardWhite) {
+        var raw = String(hex || '').replace('#', '');
+        if (raw.length !== 6) return '#deebff';
+        var red = parseInt(raw.slice(0, 2), 16);
+        var green = parseInt(raw.slice(2, 4), 16);
+        var blue = parseInt(raw.slice(4, 6), 16);
+        if (isNaN(red) || isNaN(green) || isNaN(blue)) return '#deebff';
+        function mix(channel) {
+            return Math.round(channel + (255 - channel) * towardWhite);
+        }
+        return 'rgb(' + mix(red) + ',' + mix(green) + ',' + mix(blue) + ')';
+    }
+
     function fillKindSelect(select, current, longForm) {
         var rows = parseKindList(moduleSetup().scheduleKinds);
         var seen = false;
@@ -14558,12 +14577,7 @@
     }
 
     function monthTitle(year, month) {
-        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
-        try {
-            return new Date(year, month - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' });
-        } catch (error) {
-            return year + '-' + month;
-        }
+        return scheduleMonthName(year, month) + ' ' + year;
     }
 
     function weekdayLabels() {
@@ -14908,7 +14922,7 @@
         var options = { day: 'numeric', month: 'long' };
         if (withYear) options.year = 'numeric';
         try {
-            return date.toLocaleDateString(locale, options);
+            return String(date.toLocaleDateString(locale, options) || '').replace(/\s*г\.$/i, '');
         } catch (error) {
             return isoDate(date);
         }
@@ -14928,7 +14942,8 @@
         if (days.length === 1) {
             var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
             try {
-                return first.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                var text = String(first.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) || '').replace(/\s*г\.$/i, '');
+                return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
             } catch (error) {
                 return isoDate(first);
             }
@@ -15000,27 +15015,91 @@
         return count;
     }
 
+    function monthMarks(year, month) {
+        var marks = {};
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            monthDates(plan, year, month).forEach(function (iso) {
+                if (!marks[iso]) marks[iso] = kindColor(plan.kind);
+            });
+        });
+        return marks;
+    }
+
     function scheduleYear() {
         var grid = el('div', 'asset-tree-year');
         var now = new Date();
         var month;
-        for (month = 1; month <= 12; month++) {
-            grid.appendChild(schedulePeriodButton(scheduleMonthName(state.scheduleYear, month), plansInMonth(state.scheduleYear, month),
-                now.getFullYear() === state.scheduleYear && now.getMonth() + 1 === month, openScheduleMonth(state.scheduleYear, month)));
-        }
+        for (month = 1; month <= 12; month++) grid.appendChild(monthPoster(state.scheduleYear, month, now));
         return grid;
     }
 
+    function monthPoster(year, month, now) {
+        var label = scheduleMonthName(year, month);
+        var count = plansInMonth(year, month);
+        var current = now.getFullYear() === year && now.getMonth() + 1 === month;
+        var cell = button('', 'asset-tree-year-month' + (current ? ' is-today' : ''), openScheduleMonth(year, month));
+        cell.setAttribute('aria-label', label + (count ? ' ' + count : ''));
+        var head = el('span', 'asset-tree-year-head');
+        head.appendChild(el('span', 'asset-tree-year-name', label));
+        if (count) head.appendChild(el('strong', 'asset-tree-year-count', String(count)));
+        cell.appendChild(head);
+        var mini = el('span', 'asset-tree-mini');
+        weekdayLabels().forEach(function (name) {
+            mini.appendChild(el('span', 'asset-tree-mini-dow', String(name || '').slice(0, 2)));
+        });
+        var days = new Date(year, month, 0).getDate();
+        var lead = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+        var marks = monthMarks(year, month);
+        var todayIso = isoDate(now);
+        var index;
+        for (index = 0; index < lead; index++) mini.appendChild(el('span', 'asset-tree-mini-day is-pad'));
+        for (index = 1; index <= days; index++) {
+            var iso = isoDate(new Date(year, month - 1, index));
+            var day = el('span', 'asset-tree-mini-day' + (marks[iso] ? ' is-busy' : '') + (iso === todayIso ? ' is-today' : ''));
+            day.textContent = String(index);
+            if (marks[iso]) day.style.setProperty('--kind', marks[iso]);
+            mini.appendChild(day);
+        }
+        cell.appendChild(mini);
+        return cell;
+    }
+
     function scheduleYears() {
-        var grid = el('div', 'asset-tree-year');
+        var grid = el('div', 'asset-tree-year is-span');
         var now = new Date();
         var start = yearsPageStart(state.scheduleYear);
         var index;
-        for (index = 0; index < 12; index++) {
-            var year = start + index;
-            grid.appendChild(schedulePeriodButton(String(year), plansInYear(year), now.getFullYear() === year, openScheduleYear(year)));
-        }
+        for (index = 0; index < 12; index++) grid.appendChild(yearPoster(start + index, now));
         return grid;
+    }
+
+    function yearPoster(year, now) {
+        var current = now.getFullYear() === year;
+        var total = plansInYear(year);
+        var cell = button('', 'asset-tree-year-month is-span' + (current ? ' is-today' : ''), openScheduleYear(year));
+        cell.setAttribute('aria-label', String(year) + (total ? ' ' + total : ''));
+        var head = el('span', 'asset-tree-year-head');
+        head.appendChild(el('span', 'asset-tree-year-name', String(year)));
+        if (total) head.appendChild(el('strong', 'asset-tree-year-count', String(total)));
+        cell.appendChild(head);
+        var counts = [];
+        var max = 1;
+        var month;
+        for (month = 1; month <= 12; month++) {
+            var count = plansInMonth(year, month);
+            counts.push(count);
+            if (count > max) max = count;
+        }
+        if (!total) return cell;
+        var bars = el('span', 'asset-tree-year-bars');
+        counts.forEach(function (count, offset) {
+            var hot = current && now.getMonth() === offset;
+            var bar = el('i', 'asset-tree-year-bar' + (count ? ' is-hot' : '') + (hot ? ' is-now' : ''));
+            bar.style.height = (count ? Math.max(6, Math.round(count / max * 36)) : 3) + 'px';
+            bars.appendChild(bar);
+        });
+        cell.appendChild(bars);
+        return cell;
     }
 
     function plansInYear(year) {
@@ -15052,13 +15131,6 @@
             state.scheduleClockDay = '';
             renderFrame();
         };
-    }
-
-    function schedulePeriodButton(label, count, today, onClick) {
-        var cell = button('', 'asset-tree-year-month' + (today ? ' is-today' : ''), onClick);
-        cell.appendChild(el('span', 'asset-tree-year-name', label));
-        if (count) cell.appendChild(el('strong', 'asset-tree-year-count', String(count)));
-        return cell;
     }
 
     function scheduleSpanSwitch() {
@@ -15298,7 +15370,10 @@
                 var expanded = state.scheduleExpanded === iso;
                 var shown = !expanded && plans.length > 3 ? plans.slice(0, 2) : plans;
                 shown.forEach(function (plan) {
-                    cell.appendChild(scheduleEventCard(plan, iso));
+                    var card = scheduleEventCard(plan, iso);
+                    card.classList.add('is-chip');
+                    paintEventChip(card);
+                    cell.appendChild(card);
                 });
                 if (!expanded && plans.length > shown.length) {
                     cell.appendChild(dayMoreButton(iso, '+' + (plans.length - shown.length), true));
@@ -15424,6 +15499,7 @@
             if (bucket !== time) return;
             var card = scheduleEventCard(plan, iso, true);
             card.className += ' is-outlook';
+            paintEventChip(card);
             list.appendChild(card);
         });
         cell.appendChild(list);
@@ -15492,6 +15568,7 @@
         var source = seriesSource(plan, iso);
         var done = occurrenceDone(plan, iso);
         var due = occurrenceIsDue(plan, iso);
+        var color = kindColor(plan.kind);
         var card = button('', 'asset-tree-event' + (done ? ' is-done' : '') + (due ? ' is-due' : '') + (focused ? ' is-focus' : ''), function () {
             if (state.scheduleSuppressClick) {
                 state.scheduleSuppressClick = false;
@@ -15499,12 +15576,15 @@
             }
             openPlanEvent(plan, iso);
         });
+        card.style.setProperty('--kind', color);
         var mark = el('i', 'asset-tree-event-mark');
-        mark.style.background = kindColor(plan.kind);
+        mark.style.background = color;
         var text = el('span', 'asset-tree-event-text');
-        text.appendChild(el('strong', null, plan.name || kindName(plan.kind)));
-        var meta = kindName(plan.kind);
         var clock = occurrenceClock(plan, iso);
+        var title = plan.name || kindName(plan.kind);
+        if (clock.start) title = clock.start + ' ' + title;
+        text.appendChild(el('strong', null, title));
+        var meta = kindName(plan.kind);
         if (clock.start) meta = clock.start + (clock.end ? '–' + clock.end : '') + ' · ' + meta;
         if (done) meta += ' · ' + t('serviceMarked');
         if (plan.assigneeName) meta += ' · ' + plan.assigneeName;

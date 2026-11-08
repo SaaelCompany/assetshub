@@ -9564,22 +9564,47 @@ a.asset-tree-preview-icon:focus {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 12px 16px;
-    margin: 0 0 14px;
+    gap: 10px 12px;
+    margin: 0 0 16px;
 }
 
 #asset-tree-app .asset-tree-board-head .asset-tree-calendar-nav {
-    gap: 8px;
+    gap: 6px;
 }
 
 #asset-tree-app .asset-tree-board-head .asset-tree-calendar-title {
-    min-width: 240px;
+    min-width: 168px;
+    margin: 0 6px;
     color: #172b4d;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 600;
-    letter-spacing: 0;
+    letter-spacing: -0.02em;
     text-align: center;
-    text-transform: capitalize !important;
+    text-transform: none !important;
+}
+
+#asset-tree-app .asset-tree-board-head button.asset-tree-month-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 50%;
+    background: #f1f2f4 !important;
+    color: #172b4d !important;
+    font-size: 22px;
+    font-weight: 400;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app .asset-tree-board-head button.asset-tree-month-btn:hover {
+    background: #e3e6ea !important;
 }
 
 #asset-tree-app button.asset-tree-month-btn {
@@ -9604,11 +9629,12 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-board-switch {
     display: inline-flex;
-    padding: 0;
-    background: #fff;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    padding: 3px;
+    background: #f1f2f4;
+    border: 0;
+    border-radius: 12px;
     overflow: hidden;
+    gap: 2px;
 }
 
 #asset-tree-app .asset-tree-span-switch {
@@ -9618,14 +9644,13 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app button.asset-tree-board-tab {
-    height: 32px;
+    height: 30px;
     min-height: 0;
     margin: 0;
     padding: 0 12px !important;
     border: 0 !important;
-    border-right: 1px solid #dfe1e6 !important;
-    border-radius: 0;
-    background: #fafbfc !important;
+    border-radius: 9px;
+    background: transparent !important;
     color: #42526e !important;
     font-size: 13px;
     font-weight: 500;
@@ -9638,9 +9663,9 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app button.asset-tree-board-tab.is-on {
-    background: #deebff !important;
-    color: #0052cc !important;
-    box-shadow: none !important;
+    background: #fff !important;
+    color: #172b4d !important;
+    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.16) !important;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-layers {
@@ -9650,18 +9675,18 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-board button.asset-tree-layer {
     height: 32px;
-    padding: 0 10px !important;
-    border: 1px solid #dfe1e6 !important;
-    border-radius: 3px;
-    background: #fafbfc !important;
+    padding: 0 12px !important;
+    border: 0 !important;
+    border-radius: 999px;
+    background: #f1f2f4 !important;
     color: #42526e !important;
     gap: 6px;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-layer.is-on {
-    background: #deebff !important;
-    border-color: #4c9aff !important;
-    color: #0052cc !important;
+    background: #172b4d !important;
+    border-color: #172b4d !important;
+    color: #fff !important;
 }
 
 #asset-tree-app .asset-tree-layer-dot {
@@ -9674,33 +9699,47 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-board .asset-tree-year {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    background: #fff;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    overflow: hidden;
+    gap: 12px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-year-month {
-    display: flex;
+    display: flex !important;
     flex-direction: column;
-    align-items: flex-start;
-    justify-content: space-between;
-    min-height: 92px;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+    height: auto !important;
+    min-height: 0;
     margin: 0;
-    padding: 12px 14px !important;
+    padding: 14px 14px 12px !important;
     border: 0 !important;
-    border-top: 1px solid #f4f5f7 !important;
-    border-left: 1px solid #f4f5f7 !important;
-    border-radius: 0;
+    border-radius: 16px;
     background: #fff !important;
     color: #172b4d !important;
     text-align: left;
-    box-shadow: none !important;
+    box-shadow: 0 0 0 1px #e6e8ec !important;
     cursor: pointer;
 }
 
+#asset-tree-app .asset-tree-board button.asset-tree-year-month:hover {
+    box-shadow: 0 10px 24px rgba(9, 30, 66, 0.08), 0 0 0 1px #c1c7d0 !important;
+}
+
 #asset-tree-app .asset-tree-board button.asset-tree-year-month.is-today {
-    background: #deebff !important;
+    background: #fff !important;
+    box-shadow: 0 0 0 2px #4c9aff !important;
+}
+
+#asset-tree-app .asset-tree-year-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
 }
 
 #asset-tree-app .asset-tree-year-name {
@@ -9711,13 +9750,97 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-year-count {
     color: #0052cc;
-    font-size: 20px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 700;
 }
 
-#asset-tree-app .asset-tree-board button.asset-tree-year-month.is-today .asset-tree-year-name,
-#asset-tree-app .asset-tree-board button.asset-tree-year-month.is-today .asset-tree-year-count {
-    color: #0052cc;
+#asset-tree-app .asset-tree-mini {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 2px 0;
+    width: 100%;
+}
+
+#asset-tree-app .asset-tree-mini-dow,
+#asset-tree-app .asset-tree-mini-day {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    color: #6b778c;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+#asset-tree-app .asset-tree-mini-dow {
+    height: 14px;
+    color: #97a0af;
+    font-size: 9px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-mini-day {
+    position: relative;
+    color: #42526e;
+    font-weight: 500;
+    border-radius: 9px;
+}
+
+#asset-tree-app .asset-tree-mini-day.is-pad {
+    visibility: hidden;
+}
+
+#asset-tree-app .asset-tree-mini-day.is-busy {
+    color: #172b4d;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-mini-day.is-busy:after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 4px;
+    height: 4px;
+    margin-left: -2px;
+    border-radius: 50%;
+    background: var(--kind, #0052cc);
+}
+
+#asset-tree-app .asset-tree-mini-day.is-today {
+    background: #0052cc;
+    color: #fff;
+    font-weight: 700;
+}
+
+#asset-tree-app .asset-tree-mini-day.is-today.is-busy:after {
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-year-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    width: 100%;
+    height: 40px;
+    margin-top: 4px;
+}
+
+#asset-tree-app .asset-tree-year-bar {
+    flex: 1 1 0;
+    min-height: 3px;
+    border-radius: 3px 3px 1px 1px;
+    background: #ebecf0;
+}
+
+#asset-tree-app .asset-tree-year-bar.is-hot {
+    background: #4c9aff;
+}
+
+#asset-tree-app .asset-tree-year-bar.is-now {
+    background: #0052cc;
 }
 
 @media (max-width: 860px) {
@@ -9727,24 +9850,24 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-calendar {
-    gap: 0;
-    padding: 0;
-    background: #fff;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    gap: 6px;
+    padding: 10px;
+    background: #f4f5f7;
+    border: 0;
+    border-radius: 18px;
     overflow: hidden;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-weekday {
-    padding: 8px;
-    background: #fafbfc;
+    padding: 2px 0 6px;
+    background: transparent;
     border: 0;
-    border-bottom: 1px solid #dfe1e6;
     color: #6b778c;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: none;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-align: center;
+    text-transform: uppercase;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-weekday.is-weekend {
@@ -9752,64 +9875,70 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day {
-    min-height: 108px;
-    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 112px;
+    padding: 8px;
     background: #fff;
     border: 0;
-    border-top: 1px solid #f4f5f7;
-    border-left: 1px solid #f4f5f7;
-    border-radius: 0;
+    border-radius: 12px;
     box-shadow: none;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-weekend {
-    background: #fafbfc;
+    background: #fbfbfc;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-out {
-    background: #fafbfc;
-    border-top-color: #f4f5f7;
-    border-left-color: #f4f5f7;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-out .asset-tree-day-num {
-    color: #97a0af;
+    color: #c1c7d0 !important;
+    background: transparent !important;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-day:not(.is-out):hover {
+    box-shadow: 0 8px 18px rgba(9, 30, 66, 0.06);
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day-num {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: auto;
-    min-width: 22px;
-    height: auto;
-    padding: 0 4px;
-    border-radius: 3px;
-    color: #6b778c;
+    align-self: flex-start;
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 50%;
+    color: #42526e;
     font-size: 12px;
     font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-day.is-today .asset-tree-day-num,
 #asset-tree-app .asset-tree-board button.asset-tree-day-num.is-on {
-    background: #deebff !important;
-    color: #0052cc !important;
+    background: #0052cc !important;
+    color: #fff !important;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-day-num {
     display: inline-flex !important;
-    width: auto;
-    min-width: 22px;
-    height: auto !important;
+    align-self: flex-start;
+    width: 26px;
+    min-width: 26px;
+    height: 26px !important;
     margin: 0;
-    padding: 0 4px !important;
+    padding: 0 !important;
     border: 0 !important;
-    border-radius: 3px;
+    border-radius: 50%;
     background: transparent !important;
-    color: #6b778c !important;
+    color: #42526e !important;
     font-size: 12px;
     font-weight: 600;
-    line-height: 16px;
+    line-height: 26px;
     box-shadow: none !important;
 }
 
@@ -9906,9 +10035,10 @@ a.asset-tree-preview-icon:focus {
     display: grid;
     max-height: calc(100vh - 220px);
     overflow: auto;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    border: 0;
+    border-radius: 18px;
     background: #fff;
+    box-shadow: 0 0 0 1px #e6e8ec;
 }
 
 #asset-tree-app .asset-tree-outlook-corner {
@@ -9935,10 +10065,10 @@ a.asset-tree-preview-icon:focus {
     margin: 0;
     padding: 6px 4px !important;
     border: 0 !important;
-    border-left: 1px solid #f4f5f7 !important;
-    border-bottom: 1px solid #dfe1e6 !important;
+    border-left: 0 !important;
+    border-bottom: 1px solid #eef0f3 !important;
     border-radius: 0;
-    background: #fafbfc !important;
+    background: #fff !important;
     color: #172b4d !important;
     font-size: 12px;
     font-weight: 600;
@@ -9948,19 +10078,20 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head.is-weekend {
-    background: #fffaf3 !important;
+    background: #fafbfc !important;
 }
 
 #asset-tree-app .asset-tree-outlook button.asset-tree-outlook-head.is-today {
-    background: #deebff !important;
-    color: #0052cc !important;
+    background: #fff !important;
+    color: #172b4d !important;
 }
 
 #asset-tree-app .asset-tree-outlook-dow {
     color: #6b778c;
     font-size: 11px;
-    font-weight: 600;
-    text-transform: capitalize;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 #asset-tree-app .asset-tree-outlook-head.is-today .asset-tree-outlook-dow {
@@ -9971,11 +10102,12 @@ a.asset-tree-preview-icon:focus {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 22px;
-    height: 22px;
-    padding: 0 4px;
-    border-radius: 11px;
-    font-size: 13px;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 15px;
     font-weight: 700;
 }
 
@@ -10028,15 +10160,15 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-weekend {
-    background: #fffaf3;
+    background: #fafbfc;
 }
 
 #asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-today {
-    background: #f4f8ff;
+    background: #f7faff;
 }
 
 #asset-tree-app .asset-tree-outlook .asset-tree-slot.asset-tree-outlook-cell.is-all.is-weekend {
-    background: #fff6e8;
+    background: #f4f5f7;
 }
 
 #asset-tree-app .asset-tree-outlook-now {
@@ -10064,9 +10196,39 @@ a.asset-tree-preview-icon:focus {
     min-width: 0;
 }
 
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-chip,
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook {
-    min-height: 18px;
+    min-height: 20px;
+    margin: 4px 0 0;
+    border: 0 !important;
+    border-radius: 6px;
+    background: #deebff !important;
+    box-shadow: inset 3px 0 0 var(--kind, #0052cc);
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook {
     margin: 1px 2px 2px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-chip .asset-tree-event-mark,
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-mark {
+    display: none;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-chip .asset-tree-event-text,
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-text {
+    padding: 2px 6px 2px 8px;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-chip .asset-tree-event-text em {
+    display: none;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-chip .asset-tree-event-text strong,
+#asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-text strong {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-outlook .asset-tree-event-text {
@@ -10631,10 +10793,12 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-due {
     border-color: #ff5630 !important;
     background: #ffebe6 !important;
+    box-shadow: inset 3px 0 0 #de350b;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-done {
     background: #f4f5f7 !important;
+    box-shadow: inset 3px 0 0 #97a0af;
 }
 
 #asset-tree-app .asset-tree-board button.asset-tree-event.is-done .asset-tree-event-text strong {
@@ -10689,18 +10853,19 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-board button.asset-tree-day-more {
     display: inline-flex !important;
+    align-self: flex-start;
     width: auto;
-    height: auto !important;
+    height: 18px !important;
     min-height: 0;
     margin: 4px 0 0;
-    padding: 0 !important;
+    padding: 0 6px !important;
     border: 0 !important;
-    border-radius: 0;
-    background: transparent !important;
-    color: #0052cc !important;
+    border-radius: 9px;
+    background: #eef2f6 !important;
+    color: #42526e !important;
     font-size: 11px;
-    font-weight: 600;
-    line-height: 16px;
+    font-weight: 700;
+    line-height: 18px;
     text-align: left;
     box-shadow: none !important;
 }
