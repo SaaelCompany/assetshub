@@ -15,6 +15,7 @@ public class AssetDraft {
     private String projectKey;
     private String custodianKey;
     private String issuedKey;
+    private String approverKey;
     private String externalId;
     private List<AttributeDraft> attributes;
 
@@ -80,6 +81,15 @@ public class AssetDraft {
 
     public void setIssuedKey(String issuedKey) {
         this.issuedKey = issuedKey;
+    }
+
+    /** Write-off approver for a place. Null leaves the stored approver alone. */
+    public String getApproverKey() {
+        return approverKey;
+    }
+
+    public void setApproverKey(String approverKey) {
+        this.approverKey = approverKey;
     }
 
     public String getExternalId() {

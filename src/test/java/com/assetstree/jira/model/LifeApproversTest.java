@@ -15,6 +15,13 @@ public class LifeApproversTest {
     }
 
     @Test
+    public void assigningOnePlaceKeepsTheOthers() {
+        assertEquals("4:petrova,2:anna", LifeApprovers.assign("4:petrova,2:ivanov", 2, "anna"));
+        assertEquals("2:ivanov", LifeApprovers.assign("4:petrova,2:ivanov", 4, ""));
+        assertEquals("2:ivanov", LifeApprovers.assign("2:ivanov", 2, "not a user"));
+    }
+
+    @Test
     public void anAssetWithoutAPlaceUsesTheProjectApprover() {
         assertEquals("smirnov", LifeApprovers.resolve("2:ivanov", "smirnov", new int[0]));
         assertEquals("smirnov", LifeApprovers.resolve("2:ivanov", "smirnov", null));

@@ -607,7 +607,7 @@
                 try {
                     payload = JSON.parse(xhr.responseText);
                 } catch (error) {
-                    payload = { message: xhr.responseText };
+                    payload = { message: '' };
                 }
             }
             callback(xhr.status, payload);
@@ -1603,6 +1603,27 @@
         return onPlace ? '' : (moduleSetup().lifeApprover || '');
     }
 
+    function placeApproverKey(placeId) {
+        var found = '';
+        String(moduleSetup().lifePlaces || '').split(',').forEach(function (part) {
+            var bits = part.split(':');
+            if (bits.length === 2 && bits[0] === String(placeId) && bits[1]) found = bits[1];
+        });
+        return found;
+    }
+
+    function rememberPlaceApprover(placeId, userKey) {
+        var project = currentProject();
+        if (!project) return;
+        if (!project.setup) project.setup = {};
+        var parts = String(project.setup.lifePlaces || '').split(',').filter(function (part) {
+            var bits = part.split(':');
+            return bits.length === 2 && bits[0] && bits[0] !== String(placeId);
+        });
+        if (userKey) parts.push(String(placeId) + ':' + userKey);
+        project.setup.lifePlaces = parts.join(',');
+    }
+
     function selectedPlaceId() {
         var current = state.selectedId ? byId()[state.selectedId] : null;
         if (!current) return null;
@@ -2155,7 +2176,10 @@
         if (!node) {
             return;
         }
-        node.textContent = message;
+        var text = String(message == null ? '' : message).replace(/\s+/g, ' ').trim();
+        if (!text || text.indexOf('<') >= 0 || text.length > 400) text = t('errorTitle');
+        else if (text.length > 160) text = text.slice(0, 157) + '\u2026';
+        node.textContent = text;
         node.className = 'asset-tree-notice is-visible';
         clearTimeout(noticeTimer);
         noticeTimer = setTimeout(function () {
@@ -8124,6 +8148,19 @@
 
         aside.appendChild(el('h3', null, t('people')));
         aside.appendChild(custodianField('asset-field-custodian', asset.custodian));
+        if (placePage && moduleOn('life')) {
+            var storedApprover = placeApproverKey(asset.id);
+            aside.appendChild(personFieldBox('asset-field-approver', t('lifeBranchApprover'), storedApprover ? { userKey: storedApprover, displayName: '' } : null));
+            aside.appendChild(el('p', 'asset-tree-hint', t('lifePlaceApproverHint')));
+            if (storedApprover) {
+                ajax('GET', '/users/' + encodeURIComponent(storedApprover), null, function (status, user) {
+                    var hidden = document.getElementById('asset-field-approver');
+                    if (!hidden || status !== 200 || !user || !user.displayName) return;
+                    var text = hidden.parentNode && hidden.parentNode.querySelector('input[type="search"]');
+                    if (text) text.value = user.displayName;
+                });
+            }
+        }
         if (!placePage) aside.appendChild(issuedField('asset-field-issued', asset.issued));
         if (!placePage) aside.appendChild(linkBlock(asset));
         aside.appendChild(el('h3', null, t('details')));
@@ -8983,9 +9020,11 @@
         var parentId = parentValue === '' ? null : parseInt(parentValue, 10);
         var parentChanged = !current || (current.parentId || null) !== parentId;
         var statusBox = document.getElementById('asset-field-status');
+        var approverBox = document.getElementById('asset-field-approver');
+        var approverKey = approverBox ? (approverBox.value || '') : null;
         setFormError('');
         setBusy(true);
-        ajax('PUT', '/assets/' + id, {
+        var saved = {
             name: name,
             projectKey: state.projectKey,
             typeKey: document.getElementById('asset-field-type').value,
@@ -8998,12 +9037,15 @@
                 return current && current.issued && current.issued.userKey ? current.issued.userKey : '';
             }()),
             attributes: collectAttributes(document.getElementById('asset-detail-form'))
-        }, function (status, payload) {
+        };
+        if (approverKey !== null) saved.approverKey = approverKey;
+        ajax('PUT', '/assets/' + id, saved, function (status, payload) {
             if (status < 200 || status >= 300) {
                 setBusy(false);
                 setFormError((payload && payload.message) || t('errorTitle'));
                 return;
             }
+            if (approverKey !== null) rememberPlaceApprover(id, approverKey);
             if (!parentChanged) {
                 savePingExempt(id, function () { finishSave(id, t('saved'), typeMoved); });
                 return;
@@ -9052,12 +9094,13 @@
         setBusy(true);
         ajax('POST', '/assets/' + asset.id + '/ping', {}, function (status, payload) {
             setBusy(false);
-            if (status < 200 || status >= 300 || !payload) {
+            if (status < 200 || status >= 300 || !payload || (payload.up !== 1 && payload.up !== 2)) {
                 notify((payload && payload.message) || t('errorTitle'));
                 return;
             }
             if (!state.ping) state.ping = {};
-            state.ping[asset.id] = payload.up || 2;
+            state.ping[asset.id] = payload.up;
+            notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
             selectAsset(asset.id, true);
         });
     }
@@ -13747,69 +13790,7 @@
             who.appendChild(chosen);
             who.appendChild(hits);
             panel.appendChild(who);
-            var branchMap = {};
-            String(setup.lifePlaces || '').split(',').forEach(function (part) {
-                var bits = part.split(':');
-                if (bits.length === 2 && bits[1]) branchMap[bits[0]] = bits[1];
-            });
-            var branchEditors = [];
             panel.appendChild(el('p', 'asset-tree-hint', t('setupBranchHint')));
-            rootPlaces().forEach(function (place) {
-                var rowKey = branchMap[String(place.id)] || '';
-                var rowName = '';
-                var rowChosen = el('div', 'asset-tree-userpick-name', rowKey || t('lifeApproverEmpty'));
-                var rowFinder = document.createElement('input');
-                rowFinder.type = 'search';
-                rowFinder.placeholder = t('schedulesFindUser');
-                rowFinder.setAttribute('aria-label', place.name || t('setupBranch'));
-                var rowHits = el('div', 'asset-tree-user-results');
-                var rowTimer = null;
-                var rowSeq = 0;
-                var editor = { id: place.id, key: rowKey };
-                branchEditors.push(editor);
-                function showRow(name) {
-                    rowName = name || '';
-                    rowFinder.value = rowName;
-                    rowChosen.textContent = rowName || t('lifeApproverEmpty');
-                }
-                rowFinder.addEventListener('input', function () {
-                    var typed = rowFinder.value.trim();
-                    if (!typed) {
-                        editor.key = '';
-                        rowName = '';
-                        rowChosen.textContent = t('lifeApproverEmpty');
-                    } else if (typed !== rowName) editor.key = '';
-                    clearTimeout(rowTimer);
-                    rowTimer = setTimeout(function () {
-                        var query = rowFinder.value.trim();
-                        var mark = ++rowSeq;
-                        rowHits.innerHTML = '';
-                        if (query.length < 2) return;
-                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                            if (mark !== rowSeq) return;
-                            rowHits.innerHTML = '';
-                            (payload || []).forEach(function (user) {
-                                var label = user.displayName || user.userKey;
-                                if (user.email) label += ' · ' + user.email;
-                                rowHits.appendChild(button(label, 'asset-tree-user-hit', function () {
-                                    editor.key = user.userKey;
-                                    showRow(user.displayName || user.userKey);
-                                    rowHits.innerHTML = '';
-                                }));
-                            });
-                        });
-                    }, 200);
-                });
-                if (rowKey) {
-                    ajax('GET', '/users/' + encodeURIComponent(rowKey), null, function (status, user) {
-                        if (status === 200 && user) showRow(user.displayName || rowKey);
-                    });
-                }
-                var field = planField(place.name || t('setupBranch'), rowFinder);
-                field.appendChild(rowChosen);
-                field.appendChild(rowHits);
-                panel.appendChild(field);
-            });
             var currency = document.createElement('select');
             ['RUB', 'USD', 'EUR'].forEach(function (code) {
                 var option = document.createElement('option');
@@ -13829,9 +13810,6 @@
                 var next = moduleSetup();
                 next.lifeApproval = approvalBox.checked;
                 next.lifeApprover = approverKey;
-                next.lifePlaces = branchEditors.filter(function (row) { return row.key; }).map(function (row) {
-                    return row.id + ':' + row.key;
-                }).join(',');
                 next.lifeCurrency = currency.value;
                 next.lifeMonths = clampNum(months.value, 0, 600);
                 saveSetup(next);
@@ -29291,9 +29269,9 @@
             body.appendChild(facts);
         }
         if (life.writeoffState === 'pending') {
-            body.appendChild(el('p', 'asset-tree-life-state', t('lifePending') + (life.approverName ? ' · ' + life.approverName : '')));
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifePending')));
         } else if (life.writeoffState === 'approved') {
-            body.appendChild(el('p', 'asset-tree-life-state', t('lifeApproved') + (life.approverName ? ' · ' + life.approverName : '')));
+            body.appendChild(el('p', 'asset-tree-life-state', t('lifeApproved')));
         } else if (life.writeoffState === 'rejected') {
             body.appendChild(el('p', 'asset-tree-life-state', t('lifeRejected')));
         }

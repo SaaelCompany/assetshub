@@ -1438,6 +1438,22 @@ def create_subnet(project_key, body, text):
     return 201, tni_dto(row)
 
 
+def assign_place_approver(project_key, place_id, user_key):
+    view = STATE.setdefault("views", {}).setdefault(project_key, {})
+    setup = view.setdefault("setup", {})
+    kept = []
+    for part in str(setup.get("lifePlaces") or "").split(","):
+        if ":" not in part:
+            continue
+        raw_id, _key = part.split(":", 1)
+        if raw_id.strip() == str(place_id):
+            continue
+        kept.append(part)
+    if user_key:
+        kept.append("%s:%s" % (int(place_id), user_key))
+    setup["lifePlaces"] = life_places(",".join(kept))
+
+
 def life_places(raw):
     kept = []
     seen = set()
@@ -9848,7 +9864,14 @@ setTimeout(function () {
         new_status = canonical(status)
         new_custodian = custodian or ""
         new_issued = issued or ""
+        place_approver = None
+        if row.get("location") and "approverKey" in (body or {}):
+            place_approver = str(body.get("approverKey") or "").strip()
+            if place_approver and place_approver not in USERS:
+                return 400, {"message": text["asset-tree.error.user"]}
         asset.update({"name": new_name, "description": new_description, "typeKey": type_key, "status": new_status, "custodianKey": custodian, "issuedKey": issued, "values": values, "updated": now_stamp()})
+        if place_approver is not None:
+            assign_place_approver(asset["projectKey"], asset_id, place_approver)
         log_activity(asset_id, "name", "", old_name, new_name)
         log_activity(asset_id, "description", "", old_description, new_description)
         old_type_row = type_row(old_type)

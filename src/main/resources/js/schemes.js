@@ -873,6 +873,33 @@
             paint();
         }
 
+        function commitWall(x1, y1, x2, y2) {
+            session.draft = null;
+            session.wallDoneAt = Date.now();
+            if (dist(x1, y1, x2, y2) < 2) {
+                paint();
+                return;
+            }
+            remember();
+            var obj = baseObject('wall');
+            obj.points = [
+                { x: roundCm(x1), y: roundCm(y1) },
+                { x: roundCm(x2), y: roundCm(y2) }
+            ];
+            obj.closed = false;
+            obj.thickness = 15;
+            obj.alignment = 'center';
+            obj.hatch = 'diagonal';
+            obj.height = 300;
+            activeFloor().objects.push(obj);
+            syncRooms(activeFloor());
+            session.selection = [obj.id];
+            session.typed = '';
+            refreshSide();
+            renderProps();
+            paint();
+        }
+
         function commitTwo(kind, x1, y1, x2, y2) {
             remember();
             var obj = baseObject(kind);
@@ -1292,6 +1319,10 @@
                 var side = Math.max(Math.abs(x2 - session.draft.x1), Math.abs(y2 - session.draft.y1));
                 x2 = session.draft.x1 + side * (x2 >= session.draft.x1 ? 1 : -1);
                 y2 = session.draft.y1 + side * (y2 >= session.draft.y1 ? 1 : -1);
+            }
+            if (session.draft.tool === 'wall') {
+                commitWall(session.draft.x1, session.draft.y1, x2, y2);
+                return;
             }
             commitTwo(session.draft.tool, session.draft.x1, session.draft.y1, x2, y2);
         }
@@ -2101,6 +2132,17 @@
                         ctx.moveTo(session.draft.x1, session.draft.y1);
                         ctx.lineTo(session.draft.x2, session.draft.y2);
                         ctx.stroke();
+                    } else if (session.draft.tool === 'wall') {
+                        drawWall(ctx, {
+                            points: [
+                                { x: session.draft.x1, y: session.draft.y1 },
+                                { x: session.draft.x2, y: session.draft.y2 }
+                            ],
+                            thickness: 15,
+                            color: '#172b4d',
+                            hatch: 'diagonal',
+                            opacity: 1
+                        }, { objects: [] });
                     } else {
                         ctx.strokeRect(
                             Math.min(session.draft.x1, session.draft.x2),
@@ -2126,6 +2168,7 @@
                 '   ' + api.t('schemeGrid') + ' ' + formatLen(gridStep()) +
                 (live ? '   ' + api.t('schemeLength') + ' ' + live.text : '') +
                 (session.typed ? '   ' + session.typed : '');
+            if (session.tool === 'wall') status.textContent += '   ' + api.t('schemeWallOne');
         }
 
         function liveLength() {
@@ -4062,13 +4105,17 @@
                 return;
             }
             if (session.tool === 'wall') {
-                if (!session.draft) session.draft = { tool: session.tool, points: [pt, { x: pt.x, y: pt.y }] };
-                else {
-                    session.draft.points[session.draft.points.length - 1] = { x: pt.x, y: pt.y };
-                    var first = session.draft.points[0];
-                    var back = dist(pt.x, pt.y, first.x, first.y) <= 12 / session.cam.z;
-                    if (back && session.draft.points.length >= 4) finishPoly(true);
-                    else if (!back) session.draft.points.push({ x: pt.x, y: pt.y });
+                if (session.wallDoneAt && (Date.now() - session.wallDoneAt) < 280
+                    && Math.abs(event.clientX - session.wallDoneX) < 4
+                    && Math.abs(event.clientY - session.wallDoneY) < 4) {
+                    return;
+                }
+                if (!session.draft) {
+                    session.draft = { tool: 'wall', phase: 1, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
+                } else {
+                    session.wallDoneX = event.clientX;
+                    session.wallDoneY = event.clientY;
+                    commitWall(session.draft.x1, session.draft.y1, pt.x, pt.y);
                 }
                 paint();
                 return;
