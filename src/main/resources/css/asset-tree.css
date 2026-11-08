@@ -9598,6 +9598,12 @@ a.asset-tree-preview-icon:focus {
     overflow: hidden;
 }
 
+#asset-tree-app .asset-tree-span-switch {
+    flex-wrap: wrap;
+    max-width: 100%;
+    overflow: visible;
+}
+
 #asset-tree-app button.asset-tree-board-tab {
     height: 32px;
     min-height: 0;
@@ -9650,6 +9656,61 @@ a.asset-tree-preview-icon:focus {
     height: 8px;
     border-radius: 50%;
     display: inline-block;
+}
+
+#asset-tree-app .asset-tree-board .asset-tree-year {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-year-month {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: space-between;
+    min-height: 92px;
+    margin: 0;
+    padding: 12px 14px !important;
+    border: 0 !important;
+    border-top: 1px solid #f4f5f7 !important;
+    border-left: 1px solid #f4f5f7 !important;
+    border-radius: 0;
+    background: #fff !important;
+    color: #172b4d !important;
+    text-align: left;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-year-month.is-today {
+    background: #deebff !important;
+}
+
+#asset-tree-app .asset-tree-year-name {
+    color: #172b4d;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-year-count {
+    color: #0052cc;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-board button.asset-tree-year-month.is-today .asset-tree-year-name,
+#asset-tree-app .asset-tree-board button.asset-tree-year-month.is-today .asset-tree-year-count {
+    color: #0052cc;
+}
+
+@media (max-width: 860px) {
+    #asset-tree-app .asset-tree-board .asset-tree-year {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 #asset-tree-app .asset-tree-board .asset-tree-calendar {

@@ -14751,7 +14751,9 @@
             panel.appendChild(scheduleStaff());
         } else {
             panel.appendChild(scheduleLayers());
-            if (scheduleSpanName() === 'month') panel.appendChild(scheduleCalendar());
+            if (scheduleSpanName() === 'years') panel.appendChild(scheduleYears());
+            else if (scheduleSpanName() === 'year') panel.appendChild(scheduleYear());
+            else if (scheduleSpanName() === 'month') panel.appendChild(scheduleCalendar());
             else panel.appendChild(scheduleOutlook());
         }
         return panel;
@@ -14856,7 +14858,7 @@
 
     function scheduleSpanName() {
         var span = state.scheduleSpan;
-        if (span === 'week' || span === 'work' || span === 'day') return span;
+        if (span === 'week' || span === 'work' || span === 'day' || span === 'year' || span === 'years') return span;
         return 'month';
     }
 
@@ -14901,7 +14903,13 @@
     }
 
     function scheduleViewTitle() {
-        if (rosterOn() || scheduleSpanName() === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
+        var span = scheduleSpanName();
+        if (span === 'year') return String(state.scheduleYear);
+        if (span === 'years') {
+            var start = yearsPageStart(state.scheduleYear);
+            return start + '\u2013' + (start + 11);
+        }
+        if (rosterOn() || span === 'month') return monthTitle(state.scheduleYear, state.scheduleMonth);
         var days = scheduleViewDays();
         var first = days[0];
         var last = days[days.length - 1];
@@ -14923,7 +14931,15 @@
     }
 
     function shiftScheduleView(delta) {
-        if (rosterOn() || scheduleSpanName() === 'month') {
+        var span = scheduleSpanName();
+        if (span === 'year' || span === 'years') {
+            state.scheduleYear += span === 'years' ? delta * 12 : delta;
+            state.scheduleExpanded = '';
+            state.scheduleClockDay = '';
+            renderFrame();
+            return;
+        }
+        if (rosterOn() || span === 'month') {
             shiftScheduleMonth(delta);
             return;
         }
@@ -14939,7 +14955,7 @@
     }
 
     function setScheduleSpan(span) {
-        state.scheduleSpan = span === 'week' || span === 'work' || span === 'day' ? span : 'month';
+        state.scheduleSpan = span === 'week' || span === 'work' || span === 'day' || span === 'year' || span === 'years' ? span : 'month';
         state.scheduleClockDay = '';
         var anchor = viewAnchorDate();
         state.scheduleYear = anchor.getFullYear();
@@ -14947,9 +14963,95 @@
         renderFrame();
     }
 
+    function yearsPageStart(year) {
+        var value = year || new Date().getFullYear();
+        return value - ((value % 12) + 12) % 12;
+    }
+
+    function scheduleMonthName(year, month) {
+        var locale = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0 ? 'en-US' : 'ru-RU';
+        var name = '';
+        try {
+            name = new Date(year, month - 1, 1).toLocaleDateString(locale, { month: 'long' });
+        } catch (error) {
+            name = String(month);
+        }
+        if (!name) return String(month);
+        return name.charAt(0).toUpperCase() + name.slice(1);
+    }
+
+    function plansInMonth(year, month) {
+        var count = 0;
+        (state.scheduleRows || []).filter(scheduleVisible).forEach(function (plan) {
+            count += monthDates(plan, year, month).length;
+        });
+        return count;
+    }
+
+    function scheduleYear() {
+        var grid = el('div', 'asset-tree-year');
+        var now = new Date();
+        var month;
+        for (month = 1; month <= 12; month++) {
+            grid.appendChild(schedulePeriodButton(scheduleMonthName(state.scheduleYear, month), plansInMonth(state.scheduleYear, month),
+                now.getFullYear() === state.scheduleYear && now.getMonth() + 1 === month, openScheduleMonth(state.scheduleYear, month)));
+        }
+        return grid;
+    }
+
+    function scheduleYears() {
+        var grid = el('div', 'asset-tree-year');
+        var now = new Date();
+        var start = yearsPageStart(state.scheduleYear);
+        var index;
+        for (index = 0; index < 12; index++) {
+            var year = start + index;
+            grid.appendChild(schedulePeriodButton(String(year), plansInYear(year), now.getFullYear() === year, openScheduleYear(year)));
+        }
+        return grid;
+    }
+
+    function plansInYear(year) {
+        var count = 0;
+        var month;
+        for (month = 1; month <= 12; month++) count += plansInMonth(year, month);
+        return count;
+    }
+
+    function openScheduleMonth(year, month) {
+        return function () {
+            var now = new Date();
+            var day = now.getFullYear() === year && now.getMonth() + 1 === month ? now.getDate() : 1;
+            state.scheduleSpan = 'month';
+            state.scheduleYear = year;
+            state.scheduleMonth = month;
+            state.scheduleAnchor = isoDate(new Date(year, month - 1, day));
+            state.scheduleExpanded = '';
+            state.scheduleClockDay = '';
+            renderFrame();
+        };
+    }
+
+    function openScheduleYear(year) {
+        return function () {
+            state.scheduleSpan = 'year';
+            state.scheduleYear = year;
+            state.scheduleExpanded = '';
+            state.scheduleClockDay = '';
+            renderFrame();
+        };
+    }
+
+    function schedulePeriodButton(label, count, today, onClick) {
+        var cell = button('', 'asset-tree-year-month' + (today ? ' is-today' : ''), onClick);
+        cell.appendChild(el('span', 'asset-tree-year-name', label));
+        if (count) cell.appendChild(el('strong', 'asset-tree-year-count', String(count)));
+        return cell;
+    }
+
     function scheduleSpanSwitch() {
         var seg = el('div', 'asset-tree-board-switch asset-tree-span-switch');
-        [['month', 'schedulesSpanMonth'], ['week', 'schedulesSpanWeek'], ['work', 'schedulesSpanWork'], ['day', 'schedulesSpanDay']].forEach(function (pair) {
+        [['years', 'schedulesSpanYears'], ['year', 'schedulesSpanYear'], ['month', 'schedulesSpanMonth'], ['week', 'schedulesSpanWeek'], ['work', 'schedulesSpanWork'], ['day', 'schedulesSpanDay']].forEach(function (pair) {
             var on = scheduleSpanName() === pair[0];
             var item = button(t(pair[1]), 'asset-tree-board-tab' + (on ? ' is-on' : ''), function () {
                 setScheduleSpan(pair[0]);
