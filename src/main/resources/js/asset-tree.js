@@ -17105,7 +17105,23 @@
             if (node.getAttribute && node.getAttribute('data-staff-day') && node.getAttribute('data-staff-user')) return node;
             node = node.parentNode;
         }
-        return null;
+        var nodes = document.querySelectorAll('#asset-tree-app .asset-tree-roster-scroll td[data-staff-day][data-staff-user]');
+        var best = null;
+        var bestDist = 1296;
+        var index;
+        for (index = 0; index < nodes.length; index++) {
+            var rect = nodes[index].getBoundingClientRect();
+            if (!rect.width || !rect.height) continue;
+            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return nodes[index];
+            var dx = x < rect.left ? rect.left - x : (x > rect.right ? x - rect.right : 0);
+            var dy = y < rect.top ? rect.top - y : (y > rect.bottom ? y - rect.bottom : 0);
+            var dist = dx * dx + dy * dy;
+            if (dist <= bestDist) {
+                bestDist = dist;
+                best = nodes[index];
+            }
+        }
+        return best;
     }
 
     function staffSelectionCells() {
@@ -17389,12 +17405,12 @@
         }
     }
 
-    function beginStaffPaint(person, iso, event) {
+    function beginStaffPaint(person, iso, event, hit) {
         if (!person.hours || event.button !== 0) return;
         event.preventDefault();
         if (event.detail > 1) {
             staffClearClickTimer();
-            openStaffHourEditor(person, iso, event.currentTarget);
+            openStaffHourEditor(person, iso, hit || event.currentTarget);
             return;
         }
         if (event.ctrlKey || event.metaKey) {
@@ -17419,13 +17435,20 @@
             if (!node) return;
             var user = node.getAttribute('data-staff-user');
             var day = node.getAttribute('data-staff-day');
+            if (!user || !day) return;
             var key = staffCellKey(user, day);
             if (key === startKey && !moved) return;
             moved = true;
             staffClearClickTimer();
-            base[startKey] = true;
-            base[key] = true;
-            state.staffSelection = { map: base, anchor: startKey, active: key };
+            var range = staffRangePairs(user, day, startKey);
+            var map = {};
+            if (adding) {
+                Object.keys(base).forEach(function (saved) { map[saved] = true; });
+            }
+            range.pairs.forEach(function (pair) {
+                map[staffCellKey(pair.userKey, pair.iso)] = true;
+            });
+            state.staffSelection = { map: map, anchor: startKey, active: range.active };
             staffMarkSelectedCells();
         }
         function finish() {
@@ -18309,9 +18332,9 @@
                         hit.style.background = staffMarkTint(staffMarkColor(id));
                         hit.style.color = '#' + staffMarkColor(id);
                     }
-                    hit.addEventListener('mousedown', function (event) {
+                    cell.addEventListener('mousedown', function (event) {
                         if (event.button !== 0) return;
-                        beginStaffPaint(person, iso, event);
+                        beginStaffPaint(person, iso, event, hit);
                     });
                     cell.appendChild(hit);
                 } else if (caption) {
