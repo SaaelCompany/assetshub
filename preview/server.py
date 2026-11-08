@@ -2635,7 +2635,7 @@ def portal_detail(asset_id, text, user_key="ivanov"):
         "author": USERS.get("ivanov"),
         "shares": share_dtos(asset_id),
         "comments": [comment_dto(row) for row in comments_of(asset_id) if not row.get("internal")],
-        "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal")],
+        "files": [file_dto(row) for row in files_of(asset_id) if not row.get("internal") and not row.get("slot")],
         "lines": summary["lines"],
         "projectKey": project_key,
         "portalUrl": "/servicedesk/customer/portal/7",
@@ -6048,6 +6048,7 @@ def file_dto(row):
         "size": row["size"], "created": row["created"],
         "authorName": author["displayName"] if author else "",
         "internal": bool(row.get("internal")),
+        "slot": row.get("slot") or "",
     }
 
 
@@ -11039,11 +11040,15 @@ setTimeout(function () {
                 missing = False
                 file_id = STATE["file_seq"]
                 STATE["file_seq"] += 1
+                slot = (query.get("slot") or [""])[0]
+                if slot not in ("buy", "contract") or (query.get("portal") or ["0"])[0] == "1":
+                    slot = ""
                 STATE["files"][file_id] = {
                     "id": file_id, "assetId": asset_id, "fileName": safe,
                     "contentType": content_type or "application/octet-stream",
                     "size": len(data), "authorKey": "ivanov", "created": now_stamp(),
                     "internal": (query.get("internal") or ["0"])[0] == "1" and (query.get("portal") or ["0"])[0] != "1",
+                    "slot": slot,
                 }
         if missing:
             self.respond(404, json.dumps({"message": text["asset-tree.error.notFound"]}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
@@ -11057,7 +11062,11 @@ setTimeout(function () {
             return
         with LOCK:
             log_activity(asset_id, "file", "", "", safe)
-        self.respond(201, json.dumps({"id": file_id}).encode("utf-8"), "application/json; charset=utf-8")
+        self.respond(201, json.dumps({
+            "id": file_id, "fileName": safe, "size": len(data), "slot": slot,
+            "contentType": content_type or "application/octet-stream",
+            "authorName": USERS["ivanov"]["displayName"], "internal": False,
+        }, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
     def serve_card_image(self, method, query):
         text = self.text()

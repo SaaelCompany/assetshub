@@ -6929,6 +6929,9 @@
     function fileBlock(asset) {
         var body = el('div');
         var list = asset.files;
+        if (list != null) {
+            list = list.filter(function (file) { return file && !file.slot; });
+        }
         if (list == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
         } else {
@@ -29347,7 +29350,12 @@
         return !!((life.contractor || '').replace(/^\s+|\s+$/g, '') || (life.contractNo || '').replace(/^\s+|\s+$/g, ''));
     }
 
-    function lifeSteps(life) {
+    function lifeSlotFiles(asset, slot) {
+        var list = asset && asset.files ? asset.files : [];
+        return list.filter(function (file) { return file && file.slot === slot; });
+    }
+
+    function lifeSteps(life, asset) {
         var buy = !!(life.purchased || life.supplier || (life.price && life.price !== '0'));
         var use = !!life.commissioned;
         var warranty = !!life.warrantyUntil;
@@ -29358,7 +29366,7 @@
             { key: 'lifeStepWarranty', on: warranty },
             { key: 'lifeStepRun', on: use && !off }
         ];
-        if (lifeContractPresent(life)) {
+        if (lifeContractPresent(life) || lifeSlotFiles(asset, 'contract').length) {
             steps.push({ key: 'lifeStepContract', on: true });
         }
         steps.push({ key: 'lifeStepOff', on: off });
@@ -29380,9 +29388,123 @@
         return lines;
     }
 
-    function lifeStepper(life) {
+    function rememberLifeFile(asset, file) {
+        function put(list) {
+            var index;
+            for (index = 0; index < list.length; index++) {
+                if (list[index] && list[index].id === file.id) return;
+            }
+            list.push(file);
+        }
+        if (!asset.files) asset.files = [];
+        put(asset.files);
+        if (state.detail && state.detail.id === asset.id) {
+            if (!state.detail.files) state.detail.files = asset.files;
+            else if (state.detail.files !== asset.files) put(state.detail.files);
+        }
+    }
+
+    function forgetLifeFile(asset, fileId) {
+        function drop(list) {
+            if (!list) return;
+            var index;
+            for (index = list.length - 1; index >= 0; index--) {
+                if (list[index] && list[index].id === fileId) list.splice(index, 1);
+            }
+        }
+        drop(asset.files);
+        if (state.detail && state.detail.id === asset.id) drop(state.detail.files);
+    }
+
+    function uploadLifeFile(asset, file, slot, done) {
+        if (!file) {
+            if (done) done(null);
+            return;
+        }
+        var xhr = new XMLHttpRequest();
+        var data = new FormData();
+        data.append('file', file, file.name || 'file');
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id + '&slot=' + encodeURIComponent(slot), true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            if (xhr.status >= 200 && xhr.status < 300 && payload && payload.id) {
+                payload.slot = slot;
+                rememberLifeFile(asset, payload);
+                if (done) done(payload);
+                return;
+            }
+            notify((payload && payload.message) || t('errorTitle'));
+            if (done) done(null);
+        };
+        xhr.send(data);
+    }
+
+    function lifeDocs(asset, slot, editing) {
+        var files = lifeSlotFiles(asset, slot);
+        if (!editing && !files.length) return null;
+        var box = el('div', 'asset-tree-life-docs');
+        function paint() {
+            box.innerHTML = '';
+            lifeSlotFiles(asset, slot).forEach(function (file) {
+                var row = el('div', 'asset-tree-attachment');
+                var icon = button(fileGlyph(file.fileName), 'asset-tree-file-icon is-' + fileKind(file.fileName), function () {
+                    openFilePreview(file, lifeSlotFiles(asset, slot));
+                });
+                icon.title = t('filePreview');
+                row.appendChild(icon);
+                row.appendChild(button(file.fileName || '', 'asset-tree-file-name', function () {
+                    openFilePreview(file, lifeSlotFiles(asset, slot));
+                }));
+                row.appendChild(el('span', 'asset-tree-file-meta', fileSize(file.size)));
+                if (mayEdit(asset)) {
+                    row.appendChild(button(t('delete'), 'asset-tree-linkish', function () {
+                        ajax('DELETE', '/assets/' + asset.id + '/files/' + file.id, null, function (status, payload) {
+                            if (status >= 200 && status < 300) {
+                                forgetLifeFile(asset, file.id);
+                                if (editing) paint();
+                                else showDetail(state.detail || asset, false);
+                            } else notify((payload && payload.message) || t('errorTitle'));
+                        });
+                    }));
+                }
+                box.appendChild(row);
+            });
+            if (!editing) return;
+            var input = el('input', 'asset-tree-import-file');
+            input.type = 'file';
+            input.multiple = true;
+            input.addEventListener('change', function () {
+                var chosen = [];
+                var index;
+                for (index = 0; index < (input.files || []).length; index++) chosen.push(input.files[index]);
+                input.value = '';
+                var at = 0;
+                function next() {
+                    if (at >= chosen.length) {
+                        paint();
+                        return;
+                    }
+                    uploadLifeFile(asset, chosen[at], slot, function () {
+                        at += 1;
+                        next();
+                    });
+                }
+                next();
+            });
+            box.appendChild(button(t('lifeDocAdd'), 'asset-tree-btn', function () { input.click(); }));
+            box.appendChild(input);
+        }
+        paint();
+        return box;
+    }
+
+    function lifeStepper(life, asset) {
         var row = el('ol', 'asset-tree-steps');
-        lifeSteps(life).forEach(function (step) {
+        lifeSteps(life, asset).forEach(function (step) {
             var item = el('li', 'asset-tree-step' + (step.on ? ' is-on' : ''));
             item.appendChild(el('span', 'asset-tree-step-dot', ''));
             item.appendChild(el('span', 'asset-tree-step-label', t(step.key)));
@@ -29534,7 +29656,7 @@
             body.appendChild(lifeForm(asset, life));
             return body;
         }
-        body.appendChild(lifeStepper(life));
+        body.appendChild(lifeStepper(life, asset));
         if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
         var facts = el('div', 'asset-tree-life-facts');
         if (!lifeBlank(life)) {
@@ -29549,6 +29671,10 @@
             facts.appendChild(el('span', null, line));
         });
         if (facts.childNodes.length) body.appendChild(facts);
+        var buyDocs = lifeDocs(asset, 'buy', false);
+        if (buyDocs) body.appendChild(buyDocs);
+        var contractDocs = lifeDocs(asset, 'contract', false);
+        if (contractDocs) body.appendChild(contractDocs);
         if (life.writeoffState === 'pending') {
             body.appendChild(el('p', 'asset-tree-life-state', t('lifePending')));
         } else if (life.writeoffState === 'approved') {
@@ -29604,6 +29730,7 @@
         buy.appendChild(planField(t('lifePurchase'), purchased));
         buy.appendChild(planField(t('lifeSupplier'), supplier));
         buy.appendChild(lifeWide(planField(t('lifeDocument'), documentNo)));
+        buy.appendChild(lifeDocs(asset, 'buy', true));
         buy.appendChild(planField(t('lifePrice'), price));
         buy.appendChild(planField(t('lifeCurrency'), currency));
         buyPanel.appendChild(buy);
@@ -29640,10 +29767,11 @@
         var contractGrid = el('div', 'asset-tree-life-grid');
         contractGrid.appendChild(planField(t('lifeContractor'), contractor));
         contractGrid.appendChild(planField(t('lifeContractNo'), contractNo));
+        contractGrid.appendChild(lifeDocs(asset, 'contract', true));
         contractGrid.appendChild(planField(t('lifeContractFrom'), contractFrom));
         contractGrid.appendChild(planField(t('lifeContractUntil'), contractUntil));
         contractPanel.appendChild(contractGrid);
-        var contractOpen = lifeContractPresent(life) || !!state.lifeContractOpen[asset.id];
+        var contractOpen = lifeContractPresent(life) || !!state.lifeContractOpen[asset.id] || lifeSlotFiles(asset, 'contract').length > 0;
         contractPanel.hidden = !contractOpen;
         form.appendChild(contractPanel);
         if (!contractOpen) {
