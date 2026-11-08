@@ -20,7 +20,17 @@ public final class EquipmentExchange {
     public static final int CHUNK_ROWS = 400;
 
     private static final Pattern NUMBER = Pattern.compile("^-?\\d{1,12}(\\.\\d{1,4})?$");
-    private static final String[] ROLES = {"key", "name", "type", "status", "place", "custodian", "issued", "description"};
+    private static final String[] ROLES = {
+            "key", "name", "type", "status", "place", "custodian", "issued", "description",
+            "serviceKind", "serviceName", "serviceDate", "serviceEvery", "serviceUnit", "serviceWho"
+    };
+    private static final int ROLE_KEY = 0;
+    private static final int ROLE_SERVICE_KIND = 8;
+    private static final int ROLE_SERVICE_NAME = 9;
+    private static final int ROLE_SERVICE_DATE = 10;
+    private static final int ROLE_SERVICE_EVERY = 11;
+    private static final int ROLE_SERVICE_UNIT = 12;
+    private static final int ROLE_SERVICE_WHO = 13;
 
     private EquipmentExchange() {
     }
@@ -226,10 +236,18 @@ public final class EquipmentExchange {
         private final boolean issuedPresent;
         private final String issuedKey;
         private final List<Value> attributes;
+        private final Service service;
 
         Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
                int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
                List<Value> attributes) {
+            this(row, existingId, name, description, typeKey, statusKey, parentId, custodianPresent, custodianKey,
+                    issuedPresent, issuedKey, attributes, null);
+        }
+
+        Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
+               int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
+               List<Value> attributes, Service service) {
             this.row = row;
             this.existingId = existingId;
             this.name = name;
@@ -242,6 +260,7 @@ public final class EquipmentExchange {
             this.issuedPresent = issuedPresent;
             this.issuedKey = issuedKey;
             this.attributes = attributes;
+            this.service = service;
         }
 
         public int getRow() {
@@ -291,6 +310,72 @@ public final class EquipmentExchange {
         public List<Value> getAttributes() {
             return attributes;
         }
+
+        public Service getService() {
+            return service;
+        }
+    }
+
+    /** One maintenance row from the object line or from the service sheet. */
+    public static final class Service {
+        private final int row;
+        private final String sheet;
+        private final String objectKey;
+        private final String kind;
+        private final String name;
+        private final String lastDone;
+        private final int everyCount;
+        private final String everyUnit;
+        private final String assigneeKey;
+
+        public Service(int row, String sheet, String objectKey, String kind, String name, String lastDone,
+                       int everyCount, String everyUnit, String assigneeKey) {
+            this.row = row;
+            this.sheet = sheet == null ? "" : sheet;
+            this.objectKey = objectKey == null ? "" : objectKey;
+            this.kind = kind == null ? "" : kind;
+            this.name = name == null ? "" : name;
+            this.lastDone = lastDone == null ? "" : lastDone;
+            this.everyCount = everyCount;
+            this.everyUnit = everyUnit == null ? "" : everyUnit;
+            this.assigneeKey = assigneeKey == null ? "" : assigneeKey;
+        }
+
+        public int getRow() {
+            return row;
+        }
+
+        public String getSheet() {
+            return sheet;
+        }
+
+        public String getObjectKey() {
+            return objectKey;
+        }
+
+        public String getKind() {
+            return kind;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getLastDone() {
+            return lastDone;
+        }
+
+        public int getEveryCount() {
+            return everyCount;
+        }
+
+        public String getEveryUnit() {
+            return everyUnit;
+        }
+
+        public String getAssigneeKey() {
+            return assigneeKey;
+        }
     }
 
     public static final class Issue {
@@ -330,10 +415,16 @@ public final class EquipmentExchange {
     public static final class Plan {
         private final List<Change> changes;
         private final List<Issue> issues;
+        private final List<Service> services;
 
         Plan(List<Change> changes, List<Issue> issues) {
+            this(changes, issues, new ArrayList<Service>());
+        }
+
+        Plan(List<Change> changes, List<Issue> issues, List<Service> services) {
             this.changes = changes;
             this.issues = issues;
+            this.services = services == null ? new ArrayList<Service>() : services;
         }
 
         public List<Change> getChanges() {
@@ -342,6 +433,10 @@ public final class EquipmentExchange {
 
         public List<Issue> getIssues() {
             return issues;
+        }
+
+        public List<Service> getServices() {
+            return services;
         }
     }
 
@@ -359,11 +454,25 @@ public final class EquipmentExchange {
      */
     public static Plan planBook(List<EquipmentSheet.Sheet> sheets, List<TypeRef> types, List<Named> statuses,
                                 List<Node> nodes, String defaultStatus, Map<String, String> labels, Directory people) {
+        return planBook(sheets, types, statuses, nodes, defaultStatus, labels, people, false, null);
+    }
+
+    /**
+     * Same as {@link #planBook(List, List, List, List, String, Map, Directory)}.
+     * When {@code service} is true, maintenance columns on an object row and a
+     * sheet that has a work-kind column and no name column become plans.
+     * When it is false those columns are ignored and that sheet is skipped,
+     * so a book saved while maintenance was on still loads.
+     */
+    public static Plan planBook(List<EquipmentSheet.Sheet> sheets, List<TypeRef> types, List<Named> statuses,
+                                List<Node> nodes, String defaultStatus, Map<String, String> labels, Directory people,
+                                boolean service, List<Named> kinds) {
         List<Change> changes = new ArrayList<Change>();
         List<Issue> issues = new ArrayList<Issue>();
+        List<Service> services = new ArrayList<Service>();
         if (sheets == null || sheets.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
-            return new Plan(changes, issues);
+            return new Plan(changes, issues, services);
         }
         int rows = 0;
         for (EquipmentSheet.Sheet sheet : sheets) {
@@ -373,12 +482,22 @@ public final class EquipmentExchange {
         }
         if (rows > MAX_ROWS) {
             issues.add(new Issue(1, "asset-tree.error.import.limit", String.valueOf(MAX_ROWS)));
-            return new Plan(changes, issues);
+            return new Plan(changes, issues, services);
         }
         Map<String, Integer> seenKeys = new LinkedHashMap<String, Integer>();
         boolean anyData = false;
         for (EquipmentSheet.Sheet sheet : sheets) {
             if (sheet == null || (sheet.getHeaders().isEmpty() && sheet.getRecords().isEmpty())) {
+                continue;
+            }
+            if (serviceSheet(sheet, labels)) {
+                if (!service || sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readServiceSheet(sheet, nodes, people, kinds, labels, services, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
                 continue;
             }
             TypeRef bound = uniqueSheetType(sheet.getName(), types);
@@ -387,19 +506,25 @@ public final class EquipmentExchange {
                 continue;
             }
             anyData = true;
-            Plan part = plan(prepared, types, statuses, nodes, defaultStatus, labels, people, seenKeys);
+            Plan part = plan(prepared, types, statuses, nodes, defaultStatus, labels, people, seenKeys, service, kinds);
             issues.addAll(stamp(sheet.getName(), part.getIssues()));
             changes.addAll(part.getChanges());
         }
         if (!anyData && issues.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
         }
-        return new Plan(changes, issues);
+        return new Plan(changes, issues, services);
     }
 
     public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
                             String defaultStatus, Map<String, String> labels, Directory people,
                             Map<String, Integer> seenKeys) {
+        return plan(sheet, types, statuses, nodes, defaultStatus, labels, people, seenKeys, false, null);
+    }
+
+    public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
+                            String defaultStatus, Map<String, String> labels, Directory people,
+                            Map<String, Integer> seenKeys, boolean service, List<Named> kinds) {
         List<Change> changes = new ArrayList<Change>();
         List<Issue> issues = new ArrayList<Issue>();
         if (sheet == null || sheet.getHeaders().isEmpty()) {
@@ -457,7 +582,7 @@ public final class EquipmentExchange {
         Map<String, Integer> keys = seenKeys == null ? new LinkedHashMap<String, Integer>() : seenKeys;
         for (EquipmentSheet.Record record : sheet.getRecords()) {
             Change change = readRow(record, roleColumn, fieldColumns, headers, types, statuses, places, parentById, byKey,
-                    keys, defaultStatus, people, issues);
+                    keys, defaultStatus, people, issues, service, kinds);
             if (change != null) {
                 changes.add(change);
             }
@@ -469,7 +594,7 @@ public final class EquipmentExchange {
                                   List<String> headers, List<TypeRef> types, List<Named> statuses,
                                   Map<String, List<Node>> places, Map<Integer, Integer> parentById,
                                   Map<String, Node> byKey, Map<String, Integer> seenKeys, String defaultStatus,
-                                  Directory people, List<Issue> issues) {
+                                  Directory people, List<Issue> issues, boolean service, List<Named> kinds) {
         int row = record.getRow();
         String key = text(record, roleColumn[0]);
         String name = text(record, roleColumn[1]);
@@ -481,7 +606,8 @@ public final class EquipmentExchange {
         boolean issuedPresent = roleColumn[6] >= 0;
         String issued = text(record, roleColumn[6]);
         String description = roleColumn[7] < 0 ? null : record.cell(roleColumn[7]);
-        if (name.isEmpty() && key.isEmpty() && typeName.isEmpty() && place.isEmpty()) {
+        if (name.isEmpty() && key.isEmpty() && typeName.isEmpty() && place.isEmpty()
+                && !(service && serviceTouched(record, roleColumn))) {
             return null;
         }
         if (name.isEmpty()) {
@@ -622,9 +748,16 @@ public final class EquipmentExchange {
             }
             attributes.add(new Value(field.getKey(), value));
         }
+        Service wish = null;
+        if (service && serviceTouched(record, roleColumn)) {
+            wish = readService(record, roleColumn, headers, byKey, people, kinds, false, issues);
+            if (wish == null) {
+                return null;
+            }
+        }
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
                 description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
-                issuedPresent, issuedKey, attributes);
+                issuedPresent, issuedKey, attributes, wish);
     }
 
     private static Map<String, List<Node>> indexPlaces(List<Node> nodes) {
@@ -877,6 +1010,12 @@ public final class EquipmentExchange {
         alias(roles, "custodian", "custodian", "ответственный", "мол");
         alias(roles, "issued", "issued", "issued to", "кому выдано", "выдано");
         alias(roles, "description", "description", "описание");
+        alias(roles, "serviceKind", "service: kind", "обслуживание: вид");
+        alias(roles, "serviceName", "service: work", "обслуживание: работа");
+        alias(roles, "serviceDate", "service: date", "обслуживание: дата");
+        alias(roles, "serviceEvery", "service: interval", "обслуживание: интервал");
+        alias(roles, "serviceUnit", "service: period", "обслуживание: период");
+        alias(roles, "serviceWho", "service: assignee", "обслуживание: исполнитель");
         if (labels != null) {
             for (Map.Entry<String, String> entry : labels.entrySet()) {
                 if (entry.getKey() != null && entry.getValue() != null && !entry.getValue().trim().isEmpty()) {
@@ -917,6 +1056,271 @@ public final class EquipmentExchange {
 
     private static boolean same(String left, String right) {
         return norm(left).equals(norm(right));
+    }
+
+    private static boolean serviceSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean kind = false;
+        boolean name = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String role = known.get(norm(headers.get(i)));
+            if ("serviceKind".equals(role)) {
+                kind = true;
+            }
+            if ("name".equals(role)) {
+                name = true;
+            }
+        }
+        return kind && !name;
+    }
+
+    private static void readServiceSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Directory people,
+                                         List<Named> kinds, Map<String, String> labels, List<Service> services,
+                                         List<Issue> issues) {
+        int[] roleColumn = roleColumns(sheet.getHeaders(), labels, issues);
+        if (roleColumn == null) {
+            return;
+        }
+        if (roleColumn[ROLE_KEY] < 0 || roleColumn[ROLE_SERVICE_KIND] < 0) {
+            issues.add(new Issue(1, "asset-tree.error.import.header", ""));
+            return;
+        }
+        Map<String, Node> byKey = new LinkedHashMap<String, Node>();
+        if (nodes != null) {
+            for (Node node : nodes) {
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+            }
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            if (!serviceTouched(record, roleColumn)) {
+                continue;
+            }
+            Service wish = readService(record, roleColumn, sheet.getHeaders(), byKey, people, kinds, true, issues);
+            if (wish != null) {
+                services.add(new Service(wish.getRow(), sheet.getName(), wish.getObjectKey(), wish.getKind(),
+                        wish.getName(), wish.getLastDone(), wish.getEveryCount(), wish.getEveryUnit(), wish.getAssigneeKey()));
+            }
+        }
+    }
+
+    private static int[] roleColumns(List<String> headers, Map<String, String> labels, List<Issue> issues) {
+        int[] roleColumn = new int[ROLES.length];
+        for (int i = 0; i < roleColumn.length; i++) {
+            roleColumn[i] = -1;
+        }
+        Map<String, String> known = roles(labels);
+        boolean broken = false;
+        for (int column = 0; column < headers.size(); column++) {
+            String header = headers.get(column);
+            String role = known.get(norm(header));
+            int slot = role == null ? -1 : roleSlot(role);
+            if (slot < 0) {
+                continue;
+            }
+            if (roleColumn[slot] >= 0) {
+                issues.add(new Issue(1, "asset-tree.error.import.column", header));
+                broken = true;
+            } else {
+                roleColumn[slot] = column;
+            }
+        }
+        return broken ? null : roleColumn;
+    }
+
+    private static boolean serviceTouched(EquipmentSheet.Record record, int[] roleColumn) {
+        return !text(record, roleColumn[ROLE_SERVICE_KIND]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_NAME]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_DATE]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_EVERY]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_UNIT]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_WHO]).isEmpty();
+    }
+
+    /**
+     * Reads one maintenance wish. Returns null when the row is incomplete;
+     * the reason is already in {@code issues}. A sheet row also needs an
+     * existing object key. An object row leaves the key empty.
+     */
+    private static Service readService(EquipmentSheet.Record record, int[] roleColumn, List<String> headers,
+                                       Map<String, Node> byKey, Directory people, List<Named> kinds,
+                                       boolean requireKey, List<Issue> issues) {
+        int row = record.getRow();
+        String kindRaw = text(record, roleColumn[ROLE_SERVICE_KIND]);
+        String nameRaw = text(record, roleColumn[ROLE_SERVICE_NAME]);
+        String dateRaw = text(record, roleColumn[ROLE_SERVICE_DATE]);
+        String everyRaw = text(record, roleColumn[ROLE_SERVICE_EVERY]);
+        String unitRaw = text(record, roleColumn[ROLE_SERVICE_UNIT]);
+        String whoRaw = text(record, roleColumn[ROLE_SERVICE_WHO]);
+        String objectKey = "";
+        if (requireKey) {
+            String key = text(record, roleColumn[ROLE_KEY]);
+            if (key.isEmpty()) {
+                issues.add(new Issue(row, "asset-tree.error.import.service.key", key));
+                return null;
+            }
+            Node node = byKey.get(norm(key));
+            if (node == null) {
+                issues.add(new Issue(row, "asset-tree.error.import.service.key", key));
+                return null;
+            }
+            if (node.isLocation()) {
+                issues.add(new Issue(row, "asset-tree.error.import.key.place", key));
+                return null;
+            }
+            objectKey = node.getObjectKey();
+        }
+        if (kindRaw.isEmpty() || dateRaw.isEmpty() || unitRaw.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String kind = serviceKind(kindRaw, kinds);
+        if (kind.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service.kind", kindRaw));
+            return null;
+        }
+        String unit = serviceUnit(unitRaw);
+        if (unit.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service.unit", unitRaw));
+            return null;
+        }
+        if (everyRaw.isEmpty() && !"once".equals(unit)) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        int count;
+        if (everyRaw.isEmpty()) {
+            count = 1;
+        } else {
+            try {
+                count = Integer.parseInt(everyRaw);
+            } catch (NumberFormatException ex) {
+                issues.add(new Issue(row, "asset-tree.error.import.number", headerAt(headers, roleColumn[ROLE_SERVICE_EVERY])));
+                return null;
+            }
+        }
+        if (!ServiceDue.countAllowed(count, unit)) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String lastDone = FieldDates.canonical(dateRaw);
+        if (lastDone == null) {
+            issues.add(new Issue(row, "asset-tree.error.import.date", headerAt(headers, roleColumn[ROLE_SERVICE_DATE])));
+            return null;
+        }
+        if (lastDone.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String work = nameRaw.isEmpty() ? kindRaw : nameRaw;
+        if (work.isEmpty() || work.length() > 80) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String assignee = "";
+        if (!whoRaw.isEmpty()) {
+            assignee = resolvePerson(whoRaw, people, row, issues);
+            if (assignee == null) {
+                return null;
+            }
+        }
+        return new Service(row, "", objectKey, kind, work, lastDone, count, unit, assignee);
+    }
+
+    private static String headerAt(List<String> headers, int column) {
+        if (headers == null || column < 0 || column >= headers.size() || headers.get(column) == null) {
+            return "";
+        }
+        return headers.get(column);
+    }
+
+    static String serviceKind(String raw, List<Named> kinds) {
+        String marker = norm(raw);
+        if (marker.isEmpty()) {
+            return "";
+        }
+        if (kinds != null) {
+            for (Named kind : kinds) {
+                if (kind == null) {
+                    continue;
+                }
+                if (marker.equals(norm(kind.getKey())) || marker.equals(norm(kind.getLabel()))) {
+                    return kind.getKey();
+                }
+            }
+        }
+        String alias = kindAlias(marker);
+        if (alias.isEmpty()) {
+            return "";
+        }
+        if (kinds == null || kinds.isEmpty()) {
+            return alias;
+        }
+        for (Named kind : kinds) {
+            if (kind != null && alias.equals(kind.getKey())) {
+                return alias;
+            }
+        }
+        return "";
+    }
+
+    private static String kindAlias(String marker) {
+        if (marker.equals("to") || marker.equals("то") || marker.equals("maintenance")) {
+            return "to";
+        }
+        if (marker.equals("kts") || marker.equals("ктс") || marker.equals("inspection")) {
+            return "kts";
+        }
+        if (marker.equals("verify") || marker.equals("поверка") || marker.equals("verification")) {
+            return "verify";
+        }
+        if (marker.equals("staff") || marker.equals("work") || marker.equals("работа")) {
+            return "staff";
+        }
+        if (marker.equals("event") || marker.equals("мероприятие")) {
+            return "event";
+        }
+        if (marker.equals("update") || marker.equals("обновление")) {
+            return "update";
+        }
+        return "";
+    }
+
+    static String serviceUnit(String raw) {
+        String marker = norm(raw);
+        while (marker.endsWith(".")) {
+            marker = marker.substring(0, marker.length() - 1).trim();
+        }
+        if (marker.isEmpty()) {
+            return "";
+        }
+        if (oneOf(marker, "once", "разово", "разовая", "разовое", "без повтора", "does not repeat", "one time")) {
+            return "once";
+        }
+        if (oneOf(marker, "day", "days", "дн", "день", "дня", "дней", "сут", "сутки")) {
+            return "day";
+        }
+        if (oneOf(marker, "week", "weeks", "wk", "wks", "нед", "неделя", "недели", "недель")) {
+            return "week";
+        }
+        if (oneOf(marker, "month", "months", "мес", "месяц", "месяца", "месяцев")) {
+            return "month";
+        }
+        if (oneOf(marker, "year", "years", "yr", "yrs", "г", "год", "года", "лет")) {
+            return "year";
+        }
+        return "";
+    }
+
+    private static boolean oneOf(String marker, String... words) {
+        for (String word : words) {
+            if (marker.equals(word)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static int countRows(List<EquipmentSheet.Sheet> sheets) {

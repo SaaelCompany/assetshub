@@ -3045,7 +3045,7 @@ public class AssetServiceImpl implements AssetService {
                 });
                 rememberProjectPeople(memory);
                 EquipmentExchange.Plan plan = EquipmentExchange.planBook(slice, prepared.types, prepared.statuses, prepared.nodes,
-                        Statuses.IN_USE, prepared.headerLabels, personDirectory(memory));
+                        Statuses.IN_USE, prepared.headerLabels, personDirectory(memory), prepared.service, prepared.kinds);
                 result = applyPlannedImport(user, storedKey, plan, memory);
             }
             result.setTotalRows(total);
@@ -4689,6 +4689,11 @@ public class AssetServiceImpl implements AssetService {
                 return leftKey.compareToIgnoreCase(rightKey);
             }
         };
+        boolean serviceOn = moduleOn(projectKey, ProjectModules.SERVICE);
+        List<String> serviceHeaders = serviceColumnLabels(labels);
+        Map<Integer, List<ServicePlanEntity>> plans = serviceOn
+                ? plansByAsset(byType) : new HashMap<Integer, List<ServicePlanEntity>>();
+        Map<String, String> kindLabels = serviceOn ? kindNames(projectKey) : new HashMap<String, String>();
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
         for (AssetTypeDto type : types) {
             if (type.isLocation()) {
@@ -4708,6 +4713,18 @@ public class AssetServiceImpl implements AssetService {
                     }
                     columns.add(field);
                     headers.add(field.getLabel());
+                }
+            }
+            List<Integer> addedService = new ArrayList<Integer>();
+            if (serviceOn) {
+                for (int slot = 0; slot < serviceHeaders.size(); slot++) {
+                    String header = serviceHeaders.get(slot);
+                    String marker = EquipmentExchange.norm(header);
+                    if (marker.isEmpty() || !taken.add(marker)) {
+                        continue;
+                    }
+                    addedService.add(Integer.valueOf(slot));
+                    headers.add(header);
                 }
             }
             List<AssetEntity> equipment = byType.get(type.getTypeKey());
@@ -4741,6 +4758,13 @@ public class AssetServiceImpl implements AssetService {
                     }
                     line.add(value == null ? "" : value);
                 }
+                if (serviceOn) {
+                    List<ServicePlanEntity> owned = plans.get(Integer.valueOf(row.getID()));
+                    ServicePlanEntity one = owned != null && owned.size() == 1 ? owned.get(0) : null;
+                    for (Integer slot : addedService) {
+                        line.add(one == null ? "" : serviceCell(one, slot.intValue(), kindLabels, labels, dayFirst));
+                    }
+                }
                 lines.add(line);
             }
             pages.add(new WorkbookSheet.Page(type.getLabel(), headers, lines));
@@ -4748,7 +4772,123 @@ public class AssetServiceImpl implements AssetService {
         if (pages.isEmpty()) {
             pages.add(new WorkbookSheet.Page("Equipment", common, new ArrayList<List<String>>()));
         }
+        if (serviceOn) {
+            pages.add(servicePage(types, byType, plans, serviceHeaders, kindLabels, labels, dayFirst));
+        }
         return WorkbookSheet.write(pages);
+    }
+
+    private List<String> serviceColumnLabels(I18nHelper labels) {
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.serviceColKind"));
+        headers.add(labels.getText("asset-tree.ui.serviceColWork"));
+        headers.add(labels.getText("asset-tree.ui.serviceColDate"));
+        headers.add(labels.getText("asset-tree.ui.serviceColEvery"));
+        headers.add(labels.getText("asset-tree.ui.serviceColUnit"));
+        headers.add(labels.getText("asset-tree.ui.serviceColWho"));
+        return headers;
+    }
+
+    private Map<Integer, List<ServicePlanEntity>> plansByAsset(Map<String, List<AssetEntity>> byType) {
+        Map<Integer, List<ServicePlanEntity>> grouped = new HashMap<Integer, List<ServicePlanEntity>>();
+        for (List<AssetEntity> bucket : byType.values()) {
+            for (AssetEntity asset : bucket) {
+                grouped.put(Integer.valueOf(asset.getID()), new ArrayList<ServicePlanEntity>());
+            }
+        }
+        ServicePlanEntity[] rows = ao().find(ServicePlanEntity.class);
+        if (rows != null) {
+            for (ServicePlanEntity row : rows) {
+                List<ServicePlanEntity> bucket = grouped.get(Integer.valueOf(row.getAssetId()));
+                if (bucket != null) {
+                    bucket.add(row);
+                }
+            }
+        }
+        Comparator<ServicePlanEntity> byId = new Comparator<ServicePlanEntity>() {
+            @Override
+            public int compare(ServicePlanEntity left, ServicePlanEntity right) {
+                return left.getID() - right.getID();
+            }
+        };
+        for (List<ServicePlanEntity> bucket : grouped.values()) {
+            Collections.sort(bucket, byId);
+        }
+        return grouped;
+    }
+
+    private String serviceCell(ServicePlanEntity plan, int index, Map<String, String> kindLabels, I18nHelper labels, boolean dayFirst) {
+        if (index == 0) {
+            return namedKind(plan.getKind(), kindLabels);
+        }
+        if (index == 1) {
+            return plan.getName() == null ? "" : plan.getName();
+        }
+        if (index == 2) {
+            return FieldDates.display(plan.getLastDone(), dayFirst);
+        }
+        if (index == 3) {
+            return String.valueOf(plan.getEveryCount());
+        }
+        if (index == 4) {
+            return serviceUnitWord(plan.getEveryUnit(), labels);
+        }
+        if (index == 5) {
+            return displayName(plan.getAssigneeKey());
+        }
+        return "";
+    }
+
+    private String serviceUnitWord(String unit, I18nHelper labels) {
+        if (ServiceDue.DAY.equals(unit)) {
+            return labels.getText("asset-tree.ui.serviceUnitDay");
+        }
+        if (ServiceDue.WEEK.equals(unit)) {
+            return labels.getText("asset-tree.ui.serviceUnitWeek");
+        }
+        if (ServiceDue.MONTH.equals(unit)) {
+            return labels.getText("asset-tree.ui.serviceUnitMonth");
+        }
+        if (ServiceDue.YEAR.equals(unit)) {
+            return labels.getText("asset-tree.ui.serviceUnitYear");
+        }
+        if (ServiceDue.ONCE.equals(unit)) {
+            return labels.getText("asset-tree.ui.schedulesOnce");
+        }
+        return unit == null ? "" : unit;
+    }
+
+    private WorkbookSheet.Page servicePage(List<AssetTypeDto> types, Map<String, List<AssetEntity>> byType,
+                                           Map<Integer, List<ServicePlanEntity>> plans, List<String> serviceHeaders,
+                                           Map<String, String> kindLabels, I18nHelper labels, boolean dayFirst) {
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+        headers.addAll(serviceHeaders);
+        List<List<String>> lines = new ArrayList<List<String>>();
+        for (AssetTypeDto type : types) {
+            if (type.isLocation()) {
+                continue;
+            }
+            List<AssetEntity> equipment = byType.get(type.getTypeKey());
+            if (equipment == null) {
+                continue;
+            }
+            for (AssetEntity asset : equipment) {
+                List<ServicePlanEntity> owned = plans.get(Integer.valueOf(asset.getID()));
+                if (owned == null || owned.size() < 2) {
+                    continue;
+                }
+                for (ServicePlanEntity plan : owned) {
+                    List<String> line = new ArrayList<String>();
+                    line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+                    for (int index = 0; index < serviceHeaders.size(); index++) {
+                        line.add(serviceCell(plan, index, kindLabels, labels, dayFirst));
+                    }
+                    lines.add(line);
+                }
+            }
+        }
+        return new WorkbookSheet.Page(labels.getText("asset-tree.ui.serviceSheet"), headers, lines);
     }
 
     private PreparedImport prepareEquipmentImport(String projectKey, ImportMemory memory) {
@@ -4802,7 +4942,23 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("custodian", labels.getText("asset-tree.ui.custodian"));
         headerLabels.put("issued", labels.getText("asset-tree.ui.issuedTo"));
         headerLabels.put("description", labels.getText("asset-tree.ui.description"));
-        return new PreparedImport(types, statuses, nodes, headerLabels);
+        headerLabels.put("serviceKind", labels.getText("asset-tree.ui.serviceColKind"));
+        headerLabels.put("serviceName", labels.getText("asset-tree.ui.serviceColWork"));
+        headerLabels.put("serviceDate", labels.getText("asset-tree.ui.serviceColDate"));
+        headerLabels.put("serviceEvery", labels.getText("asset-tree.ui.serviceColEvery"));
+        headerLabels.put("serviceUnit", labels.getText("asset-tree.ui.serviceColUnit"));
+        headerLabels.put("serviceWho", labels.getText("asset-tree.ui.serviceColWho"));
+        boolean service = moduleOn(projectKey, ProjectModules.SERVICE);
+        Map<String, String> named = kindNames(projectKey);
+        List<EquipmentExchange.Named> kinds = new ArrayList<EquipmentExchange.Named>();
+        for (Map.Entry<String, String> entry : named.entrySet()) {
+            String label = entry.getValue();
+            if (label == null || label.isEmpty()) {
+                label = namedKind(entry.getKey(), named);
+            }
+            kinds.add(new EquipmentExchange.Named(entry.getKey(), label));
+        }
+        return new PreparedImport(types, statuses, nodes, headerLabels, service, kinds);
     }
 
     private void rememberProjectPeople(ImportMemory memory) {
@@ -4857,6 +5013,17 @@ public class AssetServiceImpl implements AssetService {
                 }
             }
         }
+        for (EquipmentExchange.Service wish : plan.getServices()) {
+            try {
+                applyImportedService(projectKey, wish);
+                updated++;
+            } catch (AssetException ex) {
+                errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), exceptionText(labels, ex))));
+            } catch (RuntimeException ex) {
+                log.warn("Equipment import service row {} failed", Integer.valueOf(wish.getRow()), ex);
+                errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), labels.getText("asset-tree.error.unexpected"))));
+            }
+        }
         result.setCreated(created);
         result.setUpdated(updated);
         result.setErrors(errors);
@@ -4888,13 +5055,18 @@ public class AssetServiceImpl implements AssetService {
         private final List<EquipmentExchange.Named> statuses;
         private final List<EquipmentExchange.Node> nodes;
         private final Map<String, String> headerLabels;
+        private final boolean service;
+        private final List<EquipmentExchange.Named> kinds;
 
         private PreparedImport(List<EquipmentExchange.TypeRef> types, List<EquipmentExchange.Named> statuses,
-                               List<EquipmentExchange.Node> nodes, Map<String, String> headerLabels) {
+                               List<EquipmentExchange.Node> nodes, Map<String, String> headerLabels,
+                               boolean service, List<EquipmentExchange.Named> kinds) {
             this.types = types;
             this.statuses = statuses;
             this.nodes = nodes;
             this.headerLabels = headerLabels;
+            this.service = service;
+            this.kinds = kinds;
         }
     }
 
@@ -5206,6 +5378,80 @@ public class AssetServiceImpl implements AssetService {
         return text;
     }
 
+    private String sheetText(String sheet, String text) {
+        if (sheet == null || sheet.isEmpty()) {
+            return text;
+        }
+        return sheet + ": " + text;
+    }
+
+    private void applyImportedService(final String projectKey, final EquipmentExchange.Service wish) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = assetByKey(projectKey, wish.getObjectKey());
+                if (entity == null) {
+                    throw new AssetException(400, "asset-tree.error.import.service.key", wish.getObjectKey());
+                }
+                attachImportedPlan(entity, wish);
+                return null;
+            }
+        });
+    }
+
+    private AssetEntity assetByKey(String projectKey, String objectKey) {
+        if (objectKey == null || objectKey.isEmpty()) {
+            return null;
+        }
+        AssetEntity[] rows = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY = ?", objectKey));
+        if (rows == null) {
+            return null;
+        }
+        for (AssetEntity row : rows) {
+            if (ProjectKeys.same(row.getProjectKey(), projectKey)) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    private void attachImportedPlan(AssetEntity asset, EquipmentExchange.Service wish) {
+        if (asset == null || wish == null) {
+            return;
+        }
+        if (!moduleOn(asset.getProjectKey(), ProjectModules.SERVICE)) {
+            throw new AssetException(400, "asset-tree.error.module.off");
+        }
+        AssetTypeEntity type = findType(asset.getTypeKey());
+        if (type == null || !type.isService()) {
+            throw new AssetException(400, "asset-tree.error.service.type");
+        }
+        ServicePlanEntity match = null;
+        int count = 0;
+        for (ServicePlanEntity row : plansOf(asset.getID())) {
+            count++;
+            if (wish.getKind().equals(row.getKind())) {
+                match = row;
+            }
+        }
+        boolean creating = match == null;
+        if (creating && count >= MAX_PLANS) {
+            throw new AssetException(400, "asset-tree.error.service.limit");
+        }
+        ServicePlanEntity row = creating
+                ? ao().create(ServicePlanEntity.class, new DBParam("ASSET_ID", asset.getID()))
+                : match;
+        ServicePlanDraft draft = new ServicePlanDraft();
+        draft.setName(wish.getName());
+        draft.setLastDone(wish.getLastDone());
+        draft.setEveryCount(Integer.valueOf(wish.getEveryCount()));
+        draft.setEveryUnit(wish.getEveryUnit());
+        draft.setKind(wish.getKind());
+        draft.setAssigneeKey(wish.getAssigneeKey() == null ? "" : wish.getAssigneeKey());
+        fillPlan(row, asset, draft, creating);
+        row.save();
+    }
+
     private void createImported(ApplicationUser user, String projectKey, EquipmentExchange.Change change, ImportMemory memory) {
         Date now = new Date();
         Integer parentId = TreeLogic.normalizeParent(Integer.valueOf(change.getParentId()));
@@ -5232,6 +5478,7 @@ public class AssetServiceImpl implements AssetService {
         replaceAttributes(entity, drafts(change));
         logActivity(entity.getID(), user.getKey(), "created", "", "", entity.getName());
         logPlaceChange(user, memory.place(parentId), "place_add", entity);
+        attachImportedPlan(entity, change.getService());
     }
 
     private void updateImported(ApplicationUser user, EquipmentExchange.Change change, ImportMemory memory) {
@@ -5291,6 +5538,7 @@ public class AssetServiceImpl implements AssetService {
         }
         logAttributeChanges(id, user.getKey(), change.getTypeKey(), oldAttributes);
         memory.note(id);
+        attachImportedPlan(entity, change.getService());
     }
 
     private List<AttributeDraft> drafts(EquipmentExchange.Change change) {

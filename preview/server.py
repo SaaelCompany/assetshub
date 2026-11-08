@@ -6481,6 +6481,8 @@ def equipment_pages(project_key, text, day_first):
     common = equipment_headers(text)
     statuses = {row["statusKey"]: row["label"] for row in status_dtos(project_key, text)}
     kinds = [row for row in STATE["types"].values() if row["projectKey"] == project_key and not row.get("location")]
+    service_on = module_on(project_key, "service")
+    extra = service_headers(text) if service_on else []
     pages = []
     used = set()
     for kind in kinds:
@@ -6495,6 +6497,14 @@ def equipment_pages(project_key, text, day_first):
             seen.add(marker)
             fields.append((field, label))
             headers.append(label)
+        added_service = []
+        for index, header in enumerate(extra):
+            marker = header.strip().lower()
+            if not marker or marker in seen:
+                continue
+            seen.add(marker)
+            added_service.append(index)
+            headers.append(header)
         assets = [asset for asset in project_assets(project_key) if asset["typeKey"] == kind["typeKey"]]
         assets.sort(key=lambda item: item["objectKey"])
         lines = []
@@ -6517,10 +6527,27 @@ def equipment_pages(project_key, text, day_first):
                 if field.get("kind") == "date" and value:
                     value = display_date(value, day_first)
                 line.append(value)
+            owned = plan_rows(asset["id"])
+            one = owned[0] if len(owned) == 1 else None
+            for index in added_service:
+                line.append("" if one is None else service_cells(one, project_key, text, day_first)[index])
             lines.append(line)
         pages.append((sheet_title(kind.get("label") or kind["typeKey"], used), headers, lines))
     if not pages:
         pages.append(("Equipment", common, []))
+    if service_on:
+        sheet_rows = []
+        for kind in kinds:
+            assets = [asset for asset in project_assets(project_key) if asset["typeKey"] == kind["typeKey"]]
+            assets.sort(key=lambda item: item["objectKey"])
+            for asset in assets:
+                owned = plan_rows(asset["id"])
+                if len(owned) < 2:
+                    continue
+                for plan in owned:
+                    sheet_rows.append([asset.get("objectKey") or ""] + service_cells(plan, project_key, text, day_first))
+        title = text.get("asset-tree.ui.serviceSheet", "Service") if text else "Service"
+        pages.append((sheet_title(title, used), [text.get("asset-tree.ui.keyLabel", "Key") if text else "Key"] + extra, sheet_rows))
     return pages
 
 
@@ -7250,8 +7277,76 @@ def sheet_role(header):
         "custodian": "custodian", "ответственный": "custodian", "мол": "custodian",
         "issued": "issued", "issued to": "issued", "кому выдано": "issued", "выдано": "issued",
         "description": "description", "описание": "description",
+        "service: kind": "serviceKind", "обслуживание: вид": "serviceKind",
+        "service: work": "serviceName", "обслуживание: работа": "serviceName",
+        "service: date": "serviceDate", "обслуживание: дата": "serviceDate",
+        "service: interval": "serviceEvery", "обслуживание: интервал": "serviceEvery",
+        "service: period": "serviceUnit", "обслуживание: период": "serviceUnit",
+        "service: assignee": "serviceWho", "обслуживание: исполнитель": "serviceWho",
     }
     return roles.get(name)
+
+
+def service_headers(text):
+    text = text or {}
+    return [
+        text.get("asset-tree.ui.serviceColKind", "Service: kind"),
+        text.get("asset-tree.ui.serviceColWork", "Service: work"),
+        text.get("asset-tree.ui.serviceColDate", "Service: date"),
+        text.get("asset-tree.ui.serviceColEvery", "Service: interval"),
+        text.get("asset-tree.ui.serviceColUnit", "Service: period"),
+        text.get("asset-tree.ui.serviceColWho", "Service: assignee"),
+    ]
+
+
+def service_sheet(headers):
+    roles = [sheet_role(header) for header in headers or []]
+    return "serviceKind" in roles and "name" not in roles
+
+
+def service_unit_word(unit, text):
+    text = text or {}
+    if unit == "day":
+        return text.get("asset-tree.ui.serviceUnitDay", "days")
+    if unit == "week":
+        return text.get("asset-tree.ui.serviceUnitWeek", "wk")
+    if unit == "month":
+        return text.get("asset-tree.ui.serviceUnitMonth", "months")
+    if unit == "year":
+        return text.get("asset-tree.ui.serviceUnitYear", "yr")
+    if unit == "once":
+        return text.get("asset-tree.ui.schedulesOnce", "Does not repeat")
+    return unit or ""
+
+
+def preview_kind_name(project_key, kind, text):
+    label = kind_label(project_key, kind)
+    if label and label != kind:
+        return label
+    names = {
+        "to": "asset-tree.ui.kindTo",
+        "kts": "asset-tree.ui.kindKts",
+        "verify": "asset-tree.ui.kindVerify",
+        "staff": "asset-tree.ui.kindStaff",
+        "event": "asset-tree.ui.kindEvent",
+        "update": "asset-tree.ui.kindUpdate",
+    }
+    key = names.get(kind)
+    if key and text and text.get(key):
+        return text.get(key)
+    return label or kind or ""
+
+
+def service_cells(plan, project_key, text, day_first):
+    person = USERS.get(plan.get("assigneeKey") or "")
+    return [
+        preview_kind_name(project_key, plan.get("kind") or "to", text),
+        plan.get("name") or "",
+        display_date(plan.get("lastDone") or "", day_first) if plan.get("lastDone") else "",
+        str(plan.get("everyCount") or ""),
+        service_unit_word(plan.get("everyUnit"), text),
+        person["displayName"] if person else "",
+    ]
 
 
 def find_preview_user(raw):
@@ -7538,6 +7633,212 @@ def import_equipment(project_key, source, text):
     return import_rows(project_key, headers, records, text)
 
 
+def sheet_marker(value):
+    return " ".join((value or "").strip().lower().replace("ё", "е").split())
+
+
+def service_period(raw, text):
+    marker = sheet_marker(raw).rstrip(".")
+    if not marker:
+        return ""
+    words = {
+        "once": ["once", "разово", "разовая", "разовое", "без повтора", "does not repeat", "one time"],
+        "day": ["day", "days", "дн", "день", "дня", "дней", "сут", "сутки"],
+        "week": ["week", "weeks", "wk", "wks", "нед", "неделя", "недели", "недель"],
+        "month": ["month", "months", "мес", "месяц", "месяца", "месяцев"],
+        "year": ["year", "years", "yr", "yrs", "г", "год", "года", "лет"],
+    }
+    text = text or {}
+    words["once"].append(sheet_marker(text.get("asset-tree.ui.schedulesOnce", "")).rstrip("."))
+    words["day"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitDay", "")).rstrip("."))
+    words["week"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitWeek", "")).rstrip("."))
+    words["month"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitMonth", "")).rstrip("."))
+    words["year"].append(sheet_marker(text.get("asset-tree.ui.serviceUnitYear", "")).rstrip("."))
+    for unit, names in words.items():
+        if marker in {name for name in names if name}:
+            return unit
+    return ""
+
+
+def service_kind_id(project_key, raw, text):
+    marker = sheet_marker(raw)
+    if not marker:
+        return ""
+    stored = ((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}
+    kinds = parse_kinds(stored.get("scheduleKinds"))
+    text = text or {}
+    builtin = {
+        "to": ["to", "то", "maintenance", sheet_marker(text.get("asset-tree.ui.kindTo", ""))],
+        "kts": ["kts", "ктс", "inspection", sheet_marker(text.get("asset-tree.ui.kindKts", ""))],
+        "verify": ["verify", "поверка", "verification", sheet_marker(text.get("asset-tree.ui.kindVerify", ""))],
+        "staff": ["staff", "work", "работа", sheet_marker(text.get("asset-tree.ui.kindStaff", ""))],
+        "event": ["event", "мероприятие", sheet_marker(text.get("asset-tree.ui.kindEvent", ""))],
+        "update": ["update", "обновление", sheet_marker(text.get("asset-tree.ui.kindUpdate", ""))],
+    }
+    known = {ident for ident, _label in kinds}
+    for ident, label in kinds:
+        names = {ident, sheet_marker(label), sheet_marker(kind_label(project_key, ident))}
+        names.update(name for name in builtin.get(ident, []) if name)
+        if marker in names:
+            return ident
+    for ident, names in builtin.items():
+        if ident in known and marker in names:
+            return ident
+    return ""
+
+
+def service_count_allowed(count, unit):
+    if unit == "once":
+        return count == 1
+    if unit == "day":
+        return 1 <= count <= 3650
+    if unit == "week":
+        return 1 <= count <= 520
+    if unit == "month":
+        return 1 <= count <= 120
+    if unit == "year":
+        return 1 <= count <= 30
+    return False
+
+
+def service_wish(project_key, cells, roles, text, require_key):
+    def cell(role):
+        index = roles.get(role)
+        if index is None or index >= len(cells):
+            return ""
+        return cells[index].strip()
+
+    kind_raw = cell("serviceKind")
+    name_raw = cell("serviceName")
+    date_raw = cell("serviceDate")
+    every_raw = cell("serviceEvery")
+    unit_raw = cell("serviceUnit")
+    who_raw = cell("serviceWho")
+    if not any((kind_raw, name_raw, date_raw, every_raw, unit_raw, who_raw)):
+        return None, None
+    text = text or {}
+    object_key = ""
+    if require_key:
+        key = cell("key")
+        asset = None
+        if key:
+            for item in project_assets(project_key):
+                if (item.get("objectKey") or "").lower() == key.lower() and not is_location_id(item["id"]):
+                    asset = item
+                    break
+        if not asset:
+            return None, text.get("asset-tree.error.import.service.key", "Object").replace("{0}", key)
+        object_key = asset.get("objectKey") or ""
+    if not kind_raw or not date_raw or not unit_raw:
+        return None, text.get("asset-tree.error.import.service", "Service")
+    kind = service_kind_id(project_key, kind_raw, text)
+    if not kind:
+        return None, text.get("asset-tree.error.import.service.kind", "Kind").replace("{0}", kind_raw)
+    unit = service_period(unit_raw, text)
+    if not unit:
+        return None, text.get("asset-tree.error.import.service.unit", "Period").replace("{0}", unit_raw)
+    if not every_raw and unit != "once":
+        return None, text.get("asset-tree.error.import.service", "Service")
+    if not every_raw:
+        count = 1
+    else:
+        try:
+            count = int(every_raw)
+        except ValueError:
+            return None, text.get("asset-tree.error.import.number", "Number").replace("{0}", "interval")
+    if not service_count_allowed(count, unit):
+        return None, text.get("asset-tree.error.import.service", "Service")
+    last = parse_plan_date(date_raw)
+    if not last:
+        return None, text.get("asset-tree.error.import.date", "Date").replace("{0}", date_raw)
+    work = name_raw or kind_raw
+    if not work or len(work) > 80:
+        return None, text.get("asset-tree.error.import.service", "Service")
+    assignee = ""
+    if who_raw:
+        assignee = find_preview_user(who_raw)
+        if not assignee:
+            return None, text.get("asset-tree.error.import.user", "User").replace("{0}", who_raw)
+    return {
+        "objectKey": object_key,
+        "kind": kind,
+        "name": work,
+        "lastDone": last.isoformat(),
+        "everyCount": count,
+        "everyUnit": unit,
+        "assigneeKey": assignee,
+    }, None
+
+
+def apply_imported_plan(asset, wish, text):
+    if not asset or not wish:
+        return None
+    if not module_on(asset["projectKey"], "service"):
+        return text.get("asset-tree.error.module.off", "Module")
+    if not (STATE["types"].get(asset["typeKey"]) or {}).get("service"):
+        return text.get("asset-tree.error.service.type", "Type")
+    owned = plan_rows(asset["id"])
+    match = next((row for row in owned if row.get("kind") == wish["kind"]), None)
+    creating = match is None
+    if creating and len(owned) >= 12:
+        return text.get("asset-tree.error.service.limit", "Limit")
+    if creating:
+        plan_id = STATE["plan_seq"]
+        STATE["plan_seq"] += 1
+        row = {"id": plan_id, "assetId": asset["id"], "appliedFor": "", "notify": True}
+        STATE["plans"][plan_id] = row
+    else:
+        row = match
+    error = fill_plan(row, {
+        "name": wish["name"],
+        "lastDone": wish["lastDone"],
+        "everyCount": wish["everyCount"],
+        "everyUnit": wish["everyUnit"],
+        "kind": wish["kind"],
+        "assigneeKey": wish.get("assigneeKey") or "",
+    }, creating, asset["projectKey"], text)
+    if error and creating:
+        STATE["plans"].pop(row["id"], None)
+    return error
+
+
+def import_service_sheet(project_key, headers, records, text, sheet):
+    roles = {}
+    for index, header in enumerate(headers):
+        role = sheet_role(header)
+        if role and role not in roles:
+            roles[role] = index
+    updated = 0
+    errors = []
+    if "key" not in roles or "serviceKind" not in roles:
+        message = text.get("asset-tree.error.import.header", "Header")
+        if sheet:
+            message = "%s: %s" % (sheet, message)
+        return {"updated": 0, "errors": [{"row": 1, "message": message}]}
+    for row_number, cells in records:
+        wish, error = service_wish(project_key, cells, roles, text, True)
+        if error:
+            if sheet:
+                error = "%s: %s" % (sheet, error)
+            errors.append({"row": row_number, "message": error})
+            continue
+        if not wish:
+            continue
+        asset = None
+        for item in project_assets(project_key):
+            if (item.get("objectKey") or "").lower() == wish["objectKey"].lower():
+                asset = item
+                break
+        plan_error = apply_imported_plan(asset, wish, text)
+        if plan_error:
+            if sheet:
+                plan_error = "%s: %s" % (sheet, plan_error)
+            errors.append({"row": row_number, "message": plan_error})
+            continue
+        updated += 1
+    return {"updated": updated, "errors": errors}
+
+
 def import_book(project_key, pages, text):
     types = [row for row in STATE["types"].values() if row["projectKey"] == project_key and not row.get("location")]
     total = 0
@@ -7551,8 +7852,16 @@ def import_book(project_key, pages, text):
     errors = []
     seen = set()
     any_rows = False
+    service_on = module_on(project_key, "service")
     for name, headers, records in pages:
         if not headers and not records:
+            continue
+        if service_sheet(headers):
+            if service_on and records:
+                any_rows = True
+                result = import_service_sheet(project_key, headers, records, text, name)
+                updated += result["updated"]
+                errors.extend(result["errors"])
             continue
         bound = bound_sheet_type(name, types)
         headers, records, rejected = bind_sheet_type(name, headers, records, bound, text)
@@ -7560,7 +7869,7 @@ def import_book(project_key, pages, text):
         if not records:
             continue
         any_rows = True
-        result = import_rows(project_key, headers, records, text, seen, name)
+        result = import_rows(project_key, headers, records, text, seen, name, service_on)
         created += result["created"]
         updated += result["updated"]
         errors.extend(result["errors"])
@@ -7623,7 +7932,9 @@ def bind_sheet_type(name, headers, records, bound, text):
     return headers, prepared, errors
 
 
-def import_rows(project_key, headers, records, text, seen=None, sheet=""):
+def import_rows(project_key, headers, records, text, seen=None, sheet="", service_on=None):
+    if service_on is None:
+        service_on = module_on(project_key, "service")
     def finish(result):
         if sheet:
             for error in result["errors"]:
@@ -7674,6 +7985,12 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         if not name:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.name", "Name")})
             continue
+        wish = None
+        if service_on:
+            wish, wish_error = service_wish(project_key, cells, roles, text, False)
+            if wish_error:
+                errors.append({"row": row_number, "message": wish_error})
+                continue
         existing = None
         if key:
             marker = key.lower()
@@ -7693,6 +8010,14 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         if not kind:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.type", "Type").replace("{0}", type_name)})
             continue
+        if wish and not kind.get("service"):
+            errors.append({"row": row_number, "message": text.get("asset-tree.error.service.type", "Type")})
+            continue
+        if wish and existing:
+            owned = plan_rows(existing["id"])
+            if not any(row.get("kind") == wish["kind"] for row in owned) and len(owned) >= 12:
+                errors.append({"row": row_number, "message": text.get("asset-tree.error.service.limit", "Limit")})
+                continue
         status_key = ""
         if not status_name:
             status_key = "in_use"
@@ -7748,6 +8073,11 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
                     log_place(from_place, "place_out", existing)
                 if to_place and to_place != from_place:
                     log_place(to_place, "place_in", existing)
+            if wish:
+                plan_error = apply_imported_plan(existing, wish, text)
+                if plan_error:
+                    errors.append({"row": row_number, "message": plan_error})
+                    continue
             updated += 1
         else:
             if not asset_prefix(project_key):
@@ -7763,6 +8093,11 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
             by_key[STATE["assets"][asset_id]["objectKey"].lower()] = STATE["assets"][asset_id]
             log_activity(asset_id, "created", "", "", name)
             log_place(place_container(parent), "place_add", STATE["assets"][asset_id])
+            if wish:
+                plan_error = apply_imported_plan(STATE["assets"][asset_id], wish, text)
+                if plan_error:
+                    errors.append({"row": row_number, "message": plan_error})
+                    continue
             created += 1
     return finish({"created": created, "updated": updated, "errors": errors})
 
