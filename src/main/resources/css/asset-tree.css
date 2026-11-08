@@ -7773,6 +7773,17 @@ a.asset-tree-preview-icon:focus {
     border-top: 1px solid #dfe1e6;
 }
 
+#asset-tree-app .asset-tree-report-journal {
+    margin-top: 16px;
+    table-layout: auto;
+}
+
+#asset-tree-app .asset-tree-report-state.is-ontime { color: #00875a; }
+#asset-tree-app .asset-tree-report-state.is-late { color: #ff8b00; }
+#asset-tree-app .asset-tree-report-state.is-overdue { color: #de350b; }
+#asset-tree-app .asset-tree-report-state.is-expected { color: #0052cc; }
+#asset-tree-app .asset-tree-report-state.is-done { color: #6b778c; }
+
 #asset-tree-app .asset-tree-report-table th {
     height: 36px;
     background: #f7f8fa;

@@ -4330,9 +4330,181 @@ def delete_floor(project_key, floor_id, text):
     return 204, None
 
 
-REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work")
+REPORT_STANDARD = ("status", "type", "place", "holder", "issued", "receipts", "cost", "warranty", "age", "writeoff", "work", "done")
 REPORT_CHARTS = ("donut", "pie", "bar", "bars", "line", "area", "histogram", "scatter", "radar", "gantt", "venn")
-REPORT_GROUPS = ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind", "field")
+REPORT_GROUPS = ("status", "type", "place", "holder", "issued", "month", "age", "warranty", "writeoff", "kind", "done", "field")
+DONE_AXES = ("kind", "month", "place", "type", "who", "asset", "state")
+
+
+def done_report(group):
+    return group == "done" or str(group or "").startswith("done+")
+
+
+def clean_report_group(raw):
+    value = (raw or "").strip().lower()
+    if not value or len(value) > 16:
+        return ""
+    parts = value.split("+")
+    if len(parts) == 1:
+        if parts[0] == "who":
+            return ""
+        return parts[0] if parts[0] in REPORT_GROUPS else ""
+    if "done" in parts or "who" in parts:
+        if parts[0] != "done":
+            return ""
+        seen = []
+        for part in parts[1:]:
+            if part not in DONE_AXES or part in seen:
+                return ""
+            seen.append(part)
+        stored = "+".join(parts)
+        return stored if seen and len(stored) <= 16 else ""
+    seen = []
+    for part in parts:
+        if part not in REPORT_GROUPS or part in seen or part in ("done", "who"):
+            return ""
+        seen.append(part)
+    stored = "+".join(seen)
+    return stored if len(seen) >= 2 and len(stored) <= 16 else ""
+
+
+def report_axes(group):
+    if group == "done":
+        return ["kind"]
+    if done_report(group):
+        return [part for part in str(group)[5:].split("+") if part]
+    return None
+
+
+def done_day(piece):
+    text = str(piece or "").strip()
+    at = text.find(">")
+    if at < 1:
+        return ""
+    source = text[:at].strip()
+    flag = text[at + 1:].strip().split("@", 1)[0]
+    if flag != "done" or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", source):
+        return ""
+    return source
+
+
+def done_stamp(piece):
+    text = str(piece or "").strip()
+    at = text.find(">")
+    if at < 0:
+        return ""
+    target = text[at + 1:].strip()
+    if not target.startswith("done@"):
+        return ""
+    stamp = target[5:].strip()[:10]
+    return stamp if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp) else ""
+
+
+def work_state(day, stamp):
+    if not stamp:
+        return "done"
+    return "late" if stamp > day else "ontime"
+
+
+def finished_marks(plan):
+    stamps = {}
+    order = []
+    for part in str(plan.get("moves") or "").split(","):
+        day = done_day(part)
+        if not day or day in stamps:
+            continue
+        stamps[day] = done_stamp(part)
+        order.append(day)
+    unit = plan.get("everyUnit") or ""
+    last = str(plan.get("lastDone") or "")[:10]
+    marked = str(plan.get("completedOn") or "")[:10]
+    applied = plan.get("appliedFor") or ""
+    first = plan_next(plan)
+    completed = applied == "done" or (unit == "once" and first and applied == first.isoformat())
+    if unit != "once":
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", marked) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", last) and (last not in stamps or not stamps.get(last)):
+            stamps[last] = marked
+            if last not in order:
+                order.append(last)
+    elif completed:
+        anchor = last if re.fullmatch(r"\d{4}-\d{2}-\d{2}", last) else marked
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", anchor) and (anchor not in stamps or not stamps.get(anchor)):
+            stamps[anchor] = marked if re.fullmatch(r"\d{4}-\d{2}-\d{2}", marked) else ""
+            if anchor not in order:
+                order.append(anchor)
+    order.sort()
+    return [{"day": day, "state": work_state(day, stamps.get(day) or "")} for day in order]
+
+
+def finished_days(plan):
+    return [mark["day"] for mark in finished_marks(plan)]
+
+
+def expected_after(plan, today=None):
+    today = today or datetime.date.today()
+    unit = plan.get("everyUnit") or ""
+    if unit == "once":
+        return ""
+    cursor = plan_next(plan)
+    guard = 0
+    count = plan.get("everyCount")
+    while cursor and guard < 500:
+        if cursor > today:
+            return cursor.isoformat()
+        nxt = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        if not nxt or nxt <= cursor:
+            return ""
+        cursor = nxt
+        guard += 1
+    return ""
+
+
+STATE_ORDER = ("overdue", "late", "ontime", "done", "expected")
+STATE_COLOR = {"ontime": "#00875A", "late": "#FF8B00", "overdue": "#DE350B", "expected": "#0052CC", "done": "#6B778C"}
+
+
+def work_state_label(state, text):
+    keys = {
+        "ontime": "asset-tree.ui.reportStateOntime",
+        "late": "asset-tree.ui.reportStateLate",
+        "overdue": "asset-tree.ui.reportStateOverdue",
+        "expected": "asset-tree.ui.reportStateExpected",
+        "done": "asset-tree.ui.reportStateDone",
+    }
+    return text.get(keys.get(state or "", "asset-tree.ui.reportStateDone"), state or "")
+
+
+def work_clock(start, end):
+    begin = str(start or "").strip()
+    finish = str(end or "").strip()
+    if not begin:
+        return ""
+    return begin if not finish else begin + "–" + finish
+
+
+def work_line(slot, asset, name, equipment, kind_name, day, state, nxt, clock, bucket, text):
+    slot["count"] += 1
+    detail = "%s · %s · %s" % (kind_name, equipment, day)
+    if clock:
+        detail += " " + clock
+    detail += " · " + work_state_label(state, text)
+    if nxt and nxt != day:
+        detail += " · " + nxt
+    return {
+        "assetId": asset["id"] if asset else 0,
+        "objectKey": (asset.get("objectKey") if asset else "") or "",
+        "name": name,
+        "detail": detail,
+        "bucket": bucket,
+        "from": day,
+        "to": day,
+        "asset": equipment,
+        "kind": kind_name,
+        "when": day,
+        "state": state,
+        "next": nxt or "",
+        "clock": clock or "",
+    }
 
 
 def parse_money(raw):
@@ -4525,7 +4697,7 @@ def stored_report_chart(project_key, report_key, fallback):
 def report_group(key):
     if key in ("status", "type", "place", "holder", "issued"):
         return key
-    return {"cost": "type", "receipts": "month", "age": "age", "warranty": "warranty", "writeoff": "writeoff", "work": "kind"}.get(key, "")
+    return {"cost": "type", "receipts": "month", "age": "age", "warranty": "warranty", "writeoff": "writeoff", "work": "kind", "done": "done"}.get(key, "")
 
 
 def report_catalog(project_key, text):
@@ -4541,9 +4713,12 @@ def report_catalog(project_key, text):
         "age": text.get("asset-tree.ui.reportAge", "Age"),
         "writeoff": text.get("asset-tree.ui.reportWriteoffs", "Write-offs"),
         "work": text.get("asset-tree.ui.reportWork", "Work"),
+        "done": text.get("asset-tree.ui.reportDone", "Completed work"),
     }
-    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": stored_report_chart(project_key, key, "donut" if key == "status" else "bar"), "metric": "cost" if key == "cost" else "count", "standard": True, "filterField": "", "filterValue": ""} for key in REPORT_STANDARD]
-    own = [row for row in STATE.setdefault("saved_reports", {}).values() if row.get("projectKey") == project_key]
+    service = module_on(project_key, "service")
+    keys = [key for key in REPORT_STANDARD if key != "done" or service]
+    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": stored_report_chart(project_key, key, "donut" if key == "status" else "bar"), "metric": "cost" if key == "cost" else "count", "standard": True, "filterField": "", "filterValue": ""} for key in keys]
+    own = [row for row in STATE.setdefault("saved_reports", {}).values() if row.get("projectKey") == project_key and (service or not done_report(row.get("groupBy")))]
     own.sort(key=lambda item: item["id"])
     for row in own:
         items.append({"id": "s%s" % row["id"], "name": row["name"], "groupBy": row["groupBy"], "filterField": row.get("filterField") or "", "filterValue": row.get("filterValue") or "", "chart": row.get("chart") or "bar", "metric": row.get("metric") or "count", "standard": False, "fieldKey": row.get("fieldKey") or "", "attrKey": row.get("attrKey") or "", "attrValue": row.get("attrValue") or ""})
@@ -4611,15 +4786,17 @@ def create_saved_report(project_key, body, text):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     body = body or {}
     name = (body.get("name") or "").strip()
-    group = (body.get("groupBy") or "").strip().lower()
+    group = clean_report_group(body.get("groupBy"))
     filt = (body.get("filterField") or "").strip().lower()
     value = (body.get("filterValue") or "").strip()
     field_key = (body.get("fieldKey") or "").strip().lower()
     attr_key = (body.get("attrKey") or "").strip().lower()
     attr_value = (body.get("attrValue") or "").strip()
-    if group not in REPORT_GROUPS or not name or len(name) > 80:
+    if not group or not name or len(name) > 80:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
-    if group == "field" and not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", field_key):
+    if done_report(group) and not module_on(project_key, "service"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    if (group == "field" or group.startswith("field+") or "+field" in group) and not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", field_key):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if bool(attr_key) != bool(attr_value) or len(attr_value) > 80 or (attr_key and not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", attr_key)):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
@@ -4639,14 +4816,14 @@ def create_saved_report(project_key, body, text):
                 return 400, {"message": text.get("asset-tree.error.report", "Report")}
     chart = report_chart_list(body.get("chart")) or "bar"
     metric = (body.get("metric") or "count").strip().lower()
-    if metric not in ("count", "cost"):
+    if metric not in ("count", "cost") or done_report(group) or group == "kind":
         metric = "count"
     report_id = STATE["report_seq"]
     STATE["report_seq"] += 1
     STATE["saved_reports"][report_id] = {
         "id": report_id, "projectKey": project_key, "name": name, "groupBy": group,
         "filterField": filt, "filterValue": value, "chart": chart, "metric": metric,
-        "fieldKey": field_key if group == "field" else "",
+        "fieldKey": field_key if group == "field" or group.startswith("field+") or "+field" in group else "",
         "attrKey": attr_key,
         "attrValue": attr_value,
     }
@@ -4691,7 +4868,7 @@ def update_report_chart(project_key, report_key, body, text):
         STATE["report_seq"] -= 1
         row.update({
             "name": saved["name"], "groupBy": saved["groupBy"], "filterField": saved["filterField"],
-            "filterValue": saved["filterValue"], "chart": saved["chart"], "metric": "count" if saved["groupBy"] == "kind" else saved["metric"],
+            "filterValue": saved["filterValue"], "chart": saved["chart"], "metric": saved["metric"],
             "fieldKey": saved.get("fieldKey") or "", "attrKey": saved.get("attrKey") or "", "attrValue": saved.get("attrValue") or "",
         })
         return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False, "fieldKey": row["fieldKey"], "attrKey": row["attrKey"], "attrValue": row["attrValue"]}
@@ -4898,6 +5075,134 @@ def empty_reason(report_key, group, money, text, any_purchase=False):
     return ""
 
 
+def done_piece(axis, day, state, kind_key, plan, asset):
+    if axis == "month":
+        return day[:7]
+    if axis == "place":
+        if not asset:
+            return ""
+        place_id = place_root(asset["id"])
+        return str(place_id) if place_id else ""
+    if axis == "type":
+        return (asset or {}).get("typeKey") or ""
+    if axis == "who":
+        return (plan.get("assigneeKey") or "").strip()
+    if axis == "asset":
+        return "0" if not asset else str(asset.get("id") or 0)
+    if axis == "state":
+        return state or ""
+    return kind_key
+
+
+def done_piece_label(axis, piece, project_key, text):
+    if axis == "kind":
+        return kind_label(project_key, piece)
+    if axis == "month":
+        return month_label(piece, text)
+    if axis == "place":
+        if not piece:
+            return text.get("asset-tree.ui.reportNoAsset", "No object")
+        place = STATE["assets"].get(int(piece)) if str(piece).isdigit() else None
+        return (place or {}).get("name") or piece
+    if axis == "type":
+        if not piece:
+            return text.get("asset-tree.ui.reportNoAsset", "No object")
+        return (STATE["types"].get(piece) or {}).get("label") or piece
+    if axis == "who":
+        if not piece:
+            return text.get("asset-tree.ui.reportUnassigned", "None")
+        return (USERS.get(piece) or {}).get("displayName") or piece
+    if axis == "asset":
+        if not piece or piece == "0":
+            return text.get("asset-tree.ui.reportNoAsset", "No object")
+        equipment = STATE["assets"].get(int(piece)) if str(piece).isdigit() else None
+        return (equipment or {}).get("name") or piece
+    if axis == "state":
+        return work_state_label(piece, text)
+    return piece
+
+
+def done_report_view(project_key, report_key, spec, assets, filt, text, query):
+    plans = []
+    for asset in assets:
+        plans.extend(plan_rows(asset["id"]))
+    if not filt:
+        loose = [row for row in STATE["plans"].values() if row.get("assetId") == 0 and row.get("projectKey") == project_key]
+        loose.sort(key=lambda item: item["id"])
+        plans.extend(loose)
+    axes = report_axes(spec.get("groupBy") or "done") or ["kind"]
+    buckets = {}
+    lines = []
+    line_keys = []
+    place_sort = {}
+    for plan in plans:
+        asset = STATE["assets"].get(plan.get("assetId")) if plan.get("assetId") else None
+        if plan.get("assetId") and not asset:
+            continue
+        marks = finished_marks(plan)
+        if not marks:
+            continue
+        kind_key = plan.get("kind") or "to"
+        kind_name = kind_label(project_key, kind_key)
+        who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
+        name = (plan.get("name") or "").strip() or kind_name
+        clock = work_clock(plan.get("startTime"), plan.get("endTime"))
+        nxt = expected_after(plan)
+        for mark in marks:
+            day = mark["day"]
+            state = mark["state"]
+            pieces = []
+            labels = []
+            for axis in axes:
+                piece = done_piece(axis, day, state, kind_key, plan, asset)
+                pieces.append(piece)
+                labels.append(done_piece_label(axis, piece, project_key, text))
+                if axis == "place" and len(axes) == 1 and piece:
+                    place_sort[piece] = place_sort_key(piece)
+            bucket = "\u001f".join(pieces)
+            label = " · ".join(labels)
+            color = "#0052CC"
+            if axes == ["kind"]:
+                color = kind_color(kind_key)
+            elif axes == ["state"]:
+                color = STATE_COLOR.get(state, "#6B778C")
+            elif axes == ["type"] and bucket:
+                color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
+            slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
+            lines.append(work_line(slot, asset, name, who, kind_name, day, state, nxt, clock, bucket, text))
+            line_keys.append(bucket)
+    rows = list(buckets.values())
+    if axes == ["state"]:
+        rows.sort(key=lambda row: STATE_ORDER.index(row["key"]) if row["key"] in STATE_ORDER else len(STATE_ORDER))
+    elif axes == ["month"]:
+        rows.sort(key=lambda row: row["key"] if len(row["key"]) >= 7 and row["key"][4] == "-" else "9999-99")
+    elif axes == ["place"]:
+        rows.sort(key=lambda row: ((place_sort.get(row["key"]) or "").lower(), (row.get("label") or "").lower()))
+    else:
+        rows.sort(key=lambda row: ((row.get("label") or "").lower(), (row.get("key") or "").lower()))
+    if axes not in (["kind"], ["state"]):
+        distinct_report_colors(rows)
+    rank = {row["key"]: index for index, row in enumerate(rows)}
+    paired = list(zip(lines, line_keys))
+    paired.sort(key=lambda item: (rank.get(item[1], len(rows)), (item[0].get("name") or "").lower(), (item[0].get("objectKey") or "").lower()))
+    lines = [item[0] for item in paired]
+    keys = [item[1] for item in paired]
+    lines, filtered = lines_for_bucket(lines, keys, query)
+    overlap = report_venn(rows, lines)
+    page, line_total, capped, export_limited = report_line_page(lines, query, False if filtered else False)
+    chart = spec.get("chart") or "bar"
+    if spec.get("standard"):
+        chart = stored_report_chart(project_key, report_key, "bar")
+    return 200, {
+        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCountedDone", ""),
+        "total": sum(row["count"] for row in rows),
+        "sum": "", "standard": bool(spec.get("standard")), "groupBy": spec.get("groupBy") or "done", "chart": chart,
+        "capped": capped, "exportLimited": export_limited, "lineTotal": line_total,
+        "reason": "" if rows else text.get("asset-tree.ui.reportEmptyDone", ""),
+        "rows": rows, "lines": page, "venn": overlap,
+    }
+
+
 def work_report_view(project_key, report_key, spec, assets, filt, text, query):
     plans = []
     for asset in assets:
@@ -4923,15 +5228,16 @@ def work_report_view(project_key, report_key, spec, assets, filt, text, query):
         slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
         who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
         name = (plan.get("name") or "").strip() or label
+        nxt = expected_after(plan)
+        clock = work_clock(plan.get("startTime"), plan.get("endTime"))
+        seen_future = any(shown["day"] > datetime.date.today() for shown in days)
         for shown in days:
-            slot["count"] += 1
-            detail = "%s · %s · %s" % (label, who, shown["day"].isoformat())
-            if shown.get("start"):
-                detail += " " + shown["start"]
-                if shown.get("end"):
-                    detail += "–" + shown["end"]
             day = shown["day"].isoformat()
-            lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail, "bucket": bucket, "from": day, "to": day})
+            state = "overdue" if shown["day"] < datetime.date.today() else "expected"
+            lines.append(work_line(slot, asset, name, who, label, day, state, nxt, work_clock(shown.get("start"), shown.get("end")) or clock, bucket, text))
+            line_keys.append(bucket)
+        if nxt and not seen_future:
+            lines.append(work_line(slot, asset, name, who, label, nxt, "expected", nxt, clock, bucket, text))
             line_keys.append(bucket)
     rows = list(buckets.values())
     rank = {row["key"]: index for index, row in enumerate(rows)}
@@ -5067,9 +5373,11 @@ def report_view(project_key, report_key, text, query=None):
 
         assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset) and fields_hit(asset)]
     metric = spec.get("metric") or ("cost" if report_key == "cost" else "count")
-    if group == "kind":
+    if group == "kind" or done_report(group) or report_key == "done":
         metric = "count"
     money = report_key == "cost" or metric == "cost"
+    if done_report(group) or report_key == "done":
+        return done_report_view(project_key, report_key, spec, assets, filt, text, query or {})
     if report_key in ("service", "work") or group == "kind":
         return work_report_view(project_key, report_key, spec, assets, filt, text, query or {})
     status_names = {row["statusKey"]: row.get("label") or row["statusKey"] for row in ensure_statuses(project_key, text)}
@@ -5295,7 +5603,7 @@ def done_marks(raw):
     marks = []
     for part in str(raw or "").split(","):
         piece = part.strip()
-        if piece.endswith(">done") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", piece[:-5]) and piece not in marks:
+        if done_day(piece) and piece not in marks:
             marks.append(piece)
         if len(marks) >= 60:
             break
@@ -5310,11 +5618,24 @@ def keep_done(replacement, previous):
     return ",".join(parts)
 
 
-def remember_done(moves, day):
+def drop_done_day(moves, day):
+    kept = []
+    for part in str(moves or "").split(","):
+        piece = part.strip()
+        if piece and done_day(piece) != day:
+            kept.append(piece)
+    return ",".join(kept)
+
+
+def remember_done(moves, day, marked_on=""):
     text = str(day or "").strip()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         return moves or ""
-    return keep_done(moves, text + ">done")
+    stamp = str(marked_on or "").strip()[:10]
+    token = text + ">done"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp) and stamp > text:
+        token = text + ">done@" + stamp
+    return keep_done(drop_done_day(moves, text), token)
 
 
 def relation_rows():
@@ -5558,7 +5879,7 @@ def fill_plan(row, body, creating, project_key, text):
     if body.get("moves") is not None or creating:
         row["moves"] = keep_done(clean_moves(body.get("moves")), row.get("moves"))
     if body.get("done") is True and row.get("everyUnit") != "once":
-        row["moves"] = remember_done(row.get("moves"), row.get("lastDone"))
+        row["moves"] = remember_done(row.get("moves"), row.get("lastDone"), datetime.date.today().isoformat())
     if not row.get("name") or not row.get("lastDone") or not row.get("everyUnit"):
         return text.get("asset-tree.error.service", "Schedule")
     return None
@@ -6525,17 +6846,37 @@ def report_sheet(view, text, used):
         reason = view.get("reason") or text.get("asset-tree.ui.reportEmptyLines", "This report has no rows.")
         lines.append([reason])
     lines.append([])
-    lines.append([
-        text.get("asset-tree.ui.keyLabel", "Key"),
-        text.get("asset-tree.ui.name", "Name"),
-        text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
-    ])
-    for line in view.get("lines") or []:
-        detail = line.get("detail") or ""
-        if money:
-            minor = money_minor(detail)
-            detail = book_decimal(minor) if minor is not None else detail
-        lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
+    journal = any((line.get("state") or "") for line in (view.get("lines") or []))
+    if journal:
+        lines.append([
+            text.get("asset-tree.ui.keyLabel", "Key"),
+            text.get("asset-tree.ui.reportColAsset", "Equipment"),
+            text.get("asset-tree.ui.reportColWork", "Work"),
+            text.get("asset-tree.ui.reportColKind", "Kind"),
+            text.get("asset-tree.ui.reportColWhen", "Date"),
+            text.get("asset-tree.ui.reportColState", "Result"),
+            text.get("asset-tree.ui.reportColNext", "Next"),
+        ])
+        for line in view.get("lines") or []:
+            when = line.get("when") or ""
+            if line.get("clock"):
+                when = (when + " " + line["clock"]).strip()
+            lines.append([
+                line.get("objectKey") or "", line.get("asset") or "", line.get("name") or "", line.get("kind") or "",
+                when, work_state_label(line.get("state"), text), line.get("next") or "",
+            ])
+    else:
+        lines.append([
+            text.get("asset-tree.ui.keyLabel", "Key"),
+            text.get("asset-tree.ui.name", "Name"),
+            text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
+        ])
+        for line in view.get("lines") or []:
+            detail = line.get("detail") or ""
+            if money:
+                minor = money_minor(detail)
+                detail = book_decimal(minor) if minor is not None else detail
+            lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
     if view.get("exportLimited"):
         note = text.get("asset-tree.ui.reportExportCut", "The file keeps the first {0} rows.")
         lines.append([note.replace("{0}", str(REPORT_EXPORT_MAX))])
@@ -6678,6 +7019,8 @@ def queue_report_mail(project_key, text, force):
 
 
 def detail_word(group, text):
+    if report_axes(group):
+        return text.get("asset-tree.ui.reportDoneDetail", "Kind, object and date")
     if group == "field":
         return text.get("asset-tree.ui.reportField", "Field")
     if group == "kind":
@@ -6692,16 +7035,25 @@ def detail_word(group, text):
 
 
 def group_word(group, text):
+    axes = report_axes(group)
+    if axes:
+        return " · ".join(group_word("done-month" if part == "month" else part, text) for part in axes)
+    if group and "+" in group:
+        return " · ".join(group_word(part, text) for part in group.split("+"))
     keys = {
         "type": "asset-tree.ui.groupWordType",
         "place": "asset-tree.ui.groupWordPlace",
         "holder": "asset-tree.ui.groupWordHolder",
         "issued": "asset-tree.ui.issuedTo",
         "month": "asset-tree.ui.groupWordMonth",
+        "done-month": "asset-tree.ui.groupWordDoneMonth",
         "age": "asset-tree.ui.groupWordAge",
         "warranty": "asset-tree.ui.groupWordWarranty",
         "writeoff": "asset-tree.ui.groupWordWriteoff",
         "kind": "asset-tree.ui.groupWordKind",
+        "who": "asset-tree.ui.groupWordWho",
+        "asset": "asset-tree.ui.groupWordAsset",
+        "state": "asset-tree.ui.groupWordState",
         "field": "asset-tree.ui.reportField",
     }
     return text.get(keys.get(group or "", "asset-tree.ui.groupWordStatus"), group or "")
