@@ -305,6 +305,26 @@
         });
         tools.appendChild(scaleBtn);
         tools.appendChild(removeScan);
+        var imageFile = el('input');
+        imageFile.type = 'file';
+        imageFile.accept = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif';
+        imageFile.style.display = 'none';
+        var imageBtn = el('button', 'asset-tree-scheme-tool', api.t('schemeImage'));
+        imageBtn.type = 'button';
+        imageBtn.title = api.t('schemeImageHint');
+        imageBtn.disabled = !api.canEdit;
+        imageBtn.addEventListener('click', function () {
+            if (session.mode !== 'edit' || session.guest) return;
+            imageFile.click();
+        });
+        tools.appendChild(imageBtn);
+        tools.appendChild(imageFile);
+        imageFile.addEventListener('change', function () {
+            var picked = imageFile.files && imageFile.files[0];
+            imageFile.value = '';
+            if (!picked || session.mode !== 'edit' || session.guest) return;
+            readSchemeImage(picked);
+        });
         scanFile.addEventListener('change', function () {
             var picked = scanFile.files && scanFile.files[0];
             scanFile.value = '';
@@ -367,22 +387,24 @@
         head.appendChild(backBtn);
         head.appendChild(saveBtn);
         head.appendChild(shareBtn);
+        var windowsBtn = el('button', 'asset-tree-scheme-new', api.t('schemeWindows'));
+        windowsBtn.type = 'button';
         head.appendChild(deleteBtn);
+        head.appendChild(windowsBtn);
         bar.appendChild(head);
-        bar.appendChild(tools);
         var body = el('div', 'asset-tree-scheme-body');
         var side = el('div', 'asset-tree-scheme-side');
         var stage = el('div', 'asset-tree-scheme-stage');
         var props = el('div', 'asset-tree-scheme-props');
+        var windows = el('div', 'asset-tree-scheme-windows');
         var gridC = el('canvas', 'asset-tree-scheme-canvas');
         var sceneC = el('canvas', 'asset-tree-scheme-canvas');
         var overC = el('canvas', 'asset-tree-scheme-canvas');
         stage.appendChild(gridC);
         stage.appendChild(sceneC);
         stage.appendChild(overC);
-        body.appendChild(side);
         body.appendChild(stage);
-        body.appendChild(props);
+        body.appendChild(windows);
         var gallery = el('div', 'asset-tree-scheme-gallery');
         host.appendChild(bar);
         host.appendChild(body);
@@ -394,6 +416,167 @@
             body.style.display = 'none';
             status.style.display = 'none';
         }
+
+        var panelBodies = {};
+        var panelNodes = {};
+        var panelState = {};
+        try {
+            panelState = JSON.parse(global.localStorage.getItem('assetshub.schemeWindows') || '{}') || {};
+        } catch (error) {
+            panelState = {};
+        }
+        var bin = side;
+        function openPanel(id) {
+            bin = el('div', 'asset-tree-scheme-section');
+            bin.setAttribute('data-panel', id);
+            side.appendChild(bin);
+        }
+        function parkPanels() {
+            var boxes = side.querySelectorAll('[data-panel]');
+            var i;
+            for (i = 0; i < boxes.length; i++) {
+                var id = boxes[i].getAttribute('data-panel');
+                if (!panelBodies[id]) continue;
+                panelBodies[id].innerHTML = '';
+                panelBodies[id].appendChild(boxes[i]);
+            }
+        }
+        function savePanelState() {
+            var next = {};
+            var id;
+            for (id in panelNodes) {
+                var node = panelNodes[id];
+                next[id] = {
+                    x: parseInt(node.style.left, 10) || 8,
+                    y: parseInt(node.style.top, 10) || 8,
+                    open: !node.classList.contains('is-closed'),
+                    collapsed: node.classList.contains('is-collapsed')
+                };
+            }
+            try { global.localStorage.setItem('assetshub.schemeWindows', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
+        }
+        function defaultPanelBox(id) {
+            var width = stage.clientWidth || 1100;
+            var height = stage.clientHeight || 700;
+            var right = Math.max(8, width - 268);
+            var map = {
+                tools: { x: 12, y: 12, w: 230 },
+                symbols: { x: 12, y: 280, w: 250 },
+                assets: { x: 12, y: 520, w: 250 },
+                props: { x: right, y: 12, w: 250 },
+                floors: { x: right, y: 250, w: 250 },
+                layers: { x: right, y: 400, w: 250 },
+                rooms: { x: right, y: 550, w: 250 }
+            };
+            var box = map[id] || { x: 12, y: 12, w: 240 };
+            if (box.y > height - 80) box.y = Math.max(12, height - 200);
+            return box;
+        }
+        function makeWindow(id, title) {
+            var saved = panelState[id] || {};
+            var box = defaultPanelBox(id);
+            var node = el('div', 'asset-tree-scheme-window');
+            node.setAttribute('data-window', id);
+            node.style.left = (saved.x != null ? saved.x : box.x) + 'px';
+            node.style.top = (saved.y != null ? saved.y : box.y) + 'px';
+            node.style.width = box.w + 'px';
+            if (saved.collapsed) node.classList.add('is-collapsed');
+            if (saved.open === false) node.classList.add('is-closed');
+            var titleBar = el('div', 'asset-tree-scheme-window-bar');
+            titleBar.appendChild(el('span', 'asset-tree-scheme-window-title', title));
+            var fold = el('button', 'asset-tree-scheme-window-btn', '\u2013');
+            fold.type = 'button';
+            var close = el('button', 'asset-tree-scheme-window-btn', '\u00d7');
+            close.type = 'button';
+            fold.addEventListener('click', function (event) {
+                event.stopPropagation();
+                node.classList.toggle('is-collapsed');
+                savePanelState();
+            });
+            close.addEventListener('click', function (event) {
+                event.stopPropagation();
+                node.classList.add('is-closed');
+                savePanelState();
+            });
+            titleBar.appendChild(fold);
+            titleBar.appendChild(close);
+            var drag = null;
+            titleBar.addEventListener('mousedown', function (event) {
+                if (event.button !== 0 || event.target === fold || event.target === close) return;
+                drag = {
+                    x: event.clientX,
+                    y: event.clientY,
+                    left: parseInt(node.style.left, 10) || 0,
+                    top: parseInt(node.style.top, 10) || 0
+                };
+                event.preventDefault();
+                event.stopPropagation();
+            });
+            global.addEventListener('mousemove', function (event) {
+                if (!drag) return;
+                var maxX = Math.max(8, (windows.clientWidth || 400) - 80);
+                var maxY = Math.max(8, (windows.clientHeight || 400) - 32);
+                node.style.left = Math.min(maxX, Math.max(0, drag.left + event.clientX - drag.x)) + 'px';
+                node.style.top = Math.min(maxY, Math.max(0, drag.top + event.clientY - drag.y)) + 'px';
+            });
+            global.addEventListener('mouseup', function () {
+                if (!drag) return;
+                drag = null;
+                savePanelState();
+            });
+            var inner = el('div', 'asset-tree-scheme-window-body');
+            node.appendChild(titleBar);
+            node.appendChild(inner);
+            windows.appendChild(node);
+            panelBodies[id] = inner;
+            panelNodes[id] = node;
+        }
+        makeWindow('tools', api.t('schemeTools'));
+        makeWindow('symbols', api.t('schemeSymbols'));
+        makeWindow('assets', api.t('schemeAssets'));
+        makeWindow('props', api.t('schemeProps'));
+        makeWindow('floors', api.t('schemeFloors'));
+        makeWindow('layers', api.t('schemeLayers'));
+        makeWindow('rooms', api.t('schemeRooms'));
+        panelBodies.tools.appendChild(tools);
+        props = panelBodies.props;
+        var windowMenu = el('div', 'asset-tree-scheme-menu asset-tree-scheme-window-menu');
+        windowMenu.style.display = 'none';
+        function paintWindowMenu() {
+            windowMenu.innerHTML = '';
+            ['tools', 'props', 'floors', 'layers', 'rooms', 'symbols', 'assets'].forEach(function (id) {
+                var node = panelNodes[id];
+                var row = el('label', 'asset-tree-scheme-check');
+                var box = el('input');
+                box.type = 'checkbox';
+                box.checked = node && !node.classList.contains('is-closed');
+                box.addEventListener('change', function () {
+                    if (box.checked) node.classList.remove('is-closed');
+                    else node.classList.add('is-closed');
+                    savePanelState();
+                });
+                row.appendChild(box);
+                row.appendChild(document.createTextNode(' ' + node.querySelector('.asset-tree-scheme-window-title').textContent));
+                windowMenu.appendChild(row);
+            });
+        }
+        windowsBtn.addEventListener('click', function (event) {
+            event.stopPropagation();
+            if (windowMenu.style.display === 'none') {
+                paintWindowMenu();
+                var rect = windowsBtn.getBoundingClientRect();
+                var hostRect = host.getBoundingClientRect();
+                windowMenu.style.left = Math.max(8, rect.left - hostRect.left) + 'px';
+                windowMenu.style.top = Math.max(8, rect.bottom - hostRect.top + 4) + 'px';
+                windowMenu.style.display = '';
+            } else windowMenu.style.display = 'none';
+        });
+        host.addEventListener('mousedown', function (event) {
+            if (windowMenu.style.display === 'none') return;
+            if (windowMenu.contains(event.target) || event.target === windowsBtn) return;
+            windowMenu.style.display = 'none';
+        });
+        host.appendChild(windowMenu);
 
         function el(tag, cls, text) {
             var node = document.createElement(tag);
@@ -508,6 +691,15 @@
 
         function symbolDef(id) {
             if (session.doc.symbols && session.doc.symbols[id]) return session.doc.symbols[id];
+            var libs = allLibraries();
+            var n;
+            var k;
+            for (n = 0; n < libs.length; n++) {
+                var templates = libs[n].templates || [];
+                for (k = 0; k < templates.length; k++) {
+                    if (templates[k].id === id) return templates[k];
+                }
+            }
             var list = builtins(api.t);
             var i;
             for (i = 0; i < list.length; i++) {
@@ -805,7 +997,7 @@
             if (obj.type === 'line' || obj.type === 'dimension') {
                 return projectSeg(obj.x1, obj.y1, obj.x2, obj.y2, wx, wy).dist <= tol;
             }
-            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'symbol' || obj.type === 'asset' || obj.type === 'text') {
+            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'symbol' || obj.type === 'asset' || obj.type === 'text' || obj.type === 'image') {
                 var w = obj.w || 40;
                 var h = obj.h || 20;
                 return wx >= obj.x - tol && wy >= obj.y - tol && wx <= obj.x + w + tol && wy <= obj.y + h + tol;
@@ -1063,18 +1255,64 @@
             var url = URL.createObjectURL(blob);
             var image = new Image();
             image.onload = function () {
-                var limit = 1400;
-                var scale = Math.min(1, limit / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
                 var canvas = el('canvas');
-                canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
-                canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
-                canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+                var longest = Math.max(image.naturalWidth || 1, image.naturalHeight || 1);
+                var limit = 1400;
+                var quality = 0.72;
+                var data = '';
+                var guard = 0;
+                var scale = 1;
+                while (guard < 4) {
+                    scale = Math.min(1, limit / longest);
+                    canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+                    canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+                    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+                    data = canvas.toDataURL('image/jpeg', quality);
+                    if (data.length <= 450000) break;
+                    limit = Math.round(limit * 0.7);
+                    quality = 0.55;
+                    guard++;
+                }
                 URL.revokeObjectURL(url);
-                var data = canvas.toDataURL('image/jpeg', 0.72);
-                if (data.length > 800000) return;
-                done(data);
+                if (data && data.length <= 450000) done(data);
+                else status.textContent = api.t('schemeImageBig');
+            };
+            image.onerror = function () {
+                URL.revokeObjectURL(url);
+                status.textContent = api.t('schemeImageBig');
             };
             image.src = url;
+        }
+
+        function readSchemeImage(file) {
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function () {
+                shrinkSchemeScan(new Uint8Array(reader.result), file.type || 'image/jpeg', function (src) {
+                    var image = new Image();
+                    image.onload = function () {
+                        var w = Math.min(800, image.naturalWidth || 400);
+                        var h = Math.round(w * (image.naturalHeight || 1) / Math.max(1, image.naturalWidth || 1));
+                        remember();
+                        var obj = baseObject('image');
+                        obj.src = src;
+                        obj.w = Math.max(10, w);
+                        obj.h = Math.max(10, h);
+                        obj.x = roundCm((session.cam.x || 0) + 60);
+                        obj.y = roundCm((session.cam.y || 0) + 60);
+                        obj.opacity = 0.72;
+                        activeFloor().objects.unshift(obj);
+                        session.selection = [obj.id];
+                        session.tool = 'select';
+                        markTools();
+                        renderProps();
+                        refreshSide();
+                        paint();
+                    };
+                    image.src = src;
+                });
+            };
+            reader.readAsArrayBuffer(file);
         }
 
         function say(key) {
@@ -2234,9 +2472,41 @@
             ctx.fillText(formatLen(len), (obj.x1 + obj.x2) / 2 + ox, (obj.y1 + obj.y2) / 2 + oy - 2);
         }
 
+        var imageCache = {};
+
+        function cachedImage(src) {
+            if (!src) return null;
+            if (!imageCache[src]) {
+                var image = new Image();
+                image.onload = function () { paint(); };
+                image.src = src;
+                imageCache[src] = image;
+            }
+            var stored = imageCache[src];
+            if (!stored.complete || !stored.naturalWidth) return null;
+            return stored;
+        }
+
+        function drawSchemeImages(ctx, floor) {
+            var objects = (floor && floor.objects) || [];
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                var obj = objects[i];
+                if (obj.type !== 'image' || !layerVisible(obj.layerId)) continue;
+                var image = cachedImage(obj.src);
+                if (!image) continue;
+                ctx.save();
+                ctx.globalAlpha = obj.opacity == null ? 0.72 : obj.opacity;
+                if (obj.angle) rotateObj(ctx, obj);
+                ctx.drawImage(image, obj.x || 0, obj.y || 0, obj.w || 10, obj.h || 10);
+                ctx.restore();
+            }
+        }
+
         function drawFloor(ctx, floor, ghost) {
             ctx.save();
             if (!ghost) drawSchemeScan(ctx, floor);
+            if (!ghost) drawSchemeImages(ctx, floor);
             if (ghost) ctx.globalAlpha = 0.16;
             var rooms = floor.rooms || [];
             var i;
@@ -2262,7 +2532,7 @@
             ctx.globalAlpha = ghost ? 0.16 : 1;
             var objects = floor.objects || [];
             for (i = 0; i < objects.length; i++) {
-                if (objects[i].type === 'opening' || objects[i].type === 'wall') continue;
+                if (objects[i].type === 'opening' || objects[i].type === 'wall' || objects[i].type === 'image') continue;
                 drawObject(ctx, objects[i], floor);
             }
             drawWallLayer(ctx, floor);
@@ -2283,8 +2553,32 @@
             for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'hatch');
         }
 
+        function settleWindows() {
+            if (!windows.clientWidth || windows.clientWidth < 40) return;
+            var id;
+            for (id in panelNodes) {
+                var node = panelNodes[id];
+                if (!node.getAttribute('data-settled')) {
+                    var saved = panelState[id];
+                    if (!saved || saved.x == null) {
+                        var box = defaultPanelBox(id);
+                        node.style.left = box.x + 'px';
+                        node.style.top = box.y + 'px';
+                    }
+                    node.setAttribute('data-settled', '1');
+                }
+                var x = parseInt(node.style.left, 10) || 0;
+                var y = parseInt(node.style.top, 10) || 0;
+                var maxX = Math.max(0, windows.clientWidth - 80);
+                var maxY = Math.max(0, windows.clientHeight - 36);
+                if (x > maxX) node.style.left = maxX + 'px';
+                if (y > maxY) node.style.top = maxY + 'px';
+            }
+        }
+
         function paint() {
             if (!stage.clientWidth || !stage.clientHeight) return;
+            settleWindows();
             var width = stage.clientWidth;
             var height = stage.clientHeight;
             var dpr = global.devicePixelRatio || 1;
@@ -2582,8 +2876,9 @@
 
         function refreshSide() {
             side.innerHTML = '';
+            openPanel('floors');
             var floorTitle = el('div', 'asset-tree-scheme-label', api.t('schemeFloors'));
-            side.appendChild(floorTitle);
+            bin.appendChild(floorTitle);
             (session.doc.floors || []).forEach(function (floor) {
                 var row = el('button', 'asset-tree-scheme-row' + (floor.id === session.doc.activeFloorId ? ' is-on' : ''), floor.name + ' (' + ((floor.rooms || []).length) + ')');
                 row.type = 'button';
@@ -2607,7 +2902,7 @@
                         }
                     });
                 });
-                side.appendChild(row);
+                bin.appendChild(row);
             });
             var addFloor = el('button', 'asset-tree-scheme-add', api.t('schemeFloorNew'));
             addFloor.type = 'button';
@@ -2620,7 +2915,7 @@
                 refreshSide();
                 paint();
             });
-            side.appendChild(addFloor);
+            bin.appendChild(addFloor);
             var ghost = el('label', 'asset-tree-scheme-check');
             var ghostBox = el('input');
             ghostBox.type = 'checkbox';
@@ -2632,9 +2927,10 @@
             });
             ghost.appendChild(ghostBox);
             ghost.appendChild(document.createTextNode(' ' + api.t('schemeOtherFloors')));
-            side.appendChild(ghost);
+            bin.appendChild(ghost);
 
-            side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeLayers')));
+            openPanel('layers');
+            bin.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeLayers')));
             (session.doc.layers || []).forEach(function (layer) {
                 var hidden = layer.visible === false;
                 var row = el('div', 'asset-tree-scheme-layer' + (layer.id === session.doc.activeLayerId ? ' is-on' : ''));
@@ -2689,7 +2985,7 @@
                     dropLayer.addEventListener('click', function () { deleteLayer(layer); });
                     row.appendChild(dropLayer);
                 }
-                side.appendChild(row);
+                bin.appendChild(row);
             });
             var addLayer = el('button', 'asset-tree-scheme-add', api.t('schemeLayerNew'));
             addLayer.type = 'button';
@@ -2708,9 +3004,10 @@
                     }
                 });
             });
-            side.appendChild(addLayer);
+            bin.appendChild(addLayer);
 
-            side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeRooms')));
+            openPanel('rooms');
+            bin.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeRooms')));
             ((activeFloor() || {}).rooms || []).forEach(function (room) {
                 var row = el('button', 'asset-tree-scheme-row' + (session.selection.indexOf('room:' + room.id) >= 0 ? ' is-on' : ''), room.name + '  ' + ((room.area || 0) / 10000).toFixed(2) + ' m2');
                 row.type = 'button';
@@ -2723,10 +3020,11 @@
                 row.addEventListener('dblclick', function () {
                     renameRoom(room);
                 });
-                side.appendChild(row);
+                bin.appendChild(row);
             });
 
-            side.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeSymbols')));
+            openPanel('symbols');
+            bin.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeSymbols')));
             var symbolSearch = el('input', 'asset-tree-scheme-name');
             symbolSearch.placeholder = api.t('schemeSearch');
             symbolSearch.value = session.symbolQuery || '';
@@ -2736,7 +3034,7 @@
                 var query = String(symbolSearch.value || '').toLowerCase();
                 var count = 0;
                 libraryTemplates().forEach(function (current) {
-                    var name = current.name || '';
+                    var name = current.label || current.name || '';
                     if (query && name.toLowerCase().indexOf(query) < 0) return;
                     count++;
                     var armed = session.symbolId === current.id;
@@ -2775,10 +3073,150 @@
                 session.symbolQuery = symbolSearch.value;
                 paintSymbols();
             });
-            side.appendChild(symbolSearch);
-            side.appendChild(symbolList);
+            var libraryRow = el('div', 'asset-tree-scheme-library-row');
+            var libraryFile = el('input');
+            libraryFile.type = 'file';
+            libraryFile.accept = 'application/json,.json';
+            libraryFile.style.display = 'none';
+            var loadLibrary = el('button', 'asset-tree-scheme-mini', api.t('schemeLibraryLoad'));
+            loadLibrary.type = 'button';
+            loadLibrary.disabled = !api.canEdit || !!session.guest;
+            loadLibrary.addEventListener('click', function () { libraryFile.click(); });
+            libraryFile.addEventListener('change', function () {
+                var picked = libraryFile.files && libraryFile.files[0];
+                libraryFile.value = '';
+                if (picked) importLibraryFile(picked);
+            });
+            var saveLibrary = el('button', 'asset-tree-scheme-mini', api.t('schemeLibrarySave'));
+            saveLibrary.type = 'button';
+            saveLibrary.addEventListener('click', exportLibraryFile);
+            libraryRow.appendChild(loadLibrary);
+            libraryRow.appendChild(saveLibrary);
+            libraryRow.appendChild(libraryFile);
+            bin.appendChild(symbolSearch);
+            bin.appendChild(libraryRow);
+            bin.appendChild(symbolList);
             paintSymbols();
             renderAssetList();
+            parkPanels();
+        }
+
+        function libraryKey() {
+            return 'assetshub.schemeLibs.' + (api.projectKey || '');
+        }
+
+        function readStoredLibraries() {
+            try {
+                var raw = global.localStorage.getItem(libraryKey());
+                var list = raw ? JSON.parse(raw) : [];
+                return Array.isArray(list) ? list : [];
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function writeStoredLibraries(list) {
+            try { global.localStorage.setItem(libraryKey(), JSON.stringify((list || []).slice(0, 30))); } catch (error) { /* quota */ }
+        }
+
+        function stashLibrary(lib) {
+            if (!lib || !lib.id || !lib.templates || !lib.templates.length) return;
+            var stored = readStoredLibraries().filter(function (item) { return item.id !== lib.id; });
+            stored.unshift(lib);
+            writeStoredLibraries(stored);
+        }
+
+        function rememberLibrary(lib) {
+            stashLibrary(lib);
+            if (!session.doc.libraries) session.doc.libraries = [];
+            session.doc.libraries = session.doc.libraries.filter(function (item) { return item.id !== lib.id; });
+            session.doc.libraries.push(lib);
+            session.dirty = true;
+        }
+
+        function allLibraries() {
+            var out = [];
+            var seen = {};
+            function add(list) {
+                (list || []).forEach(function (lib) {
+                    if (!lib || !lib.id || seen[lib.id]) return;
+                    seen[lib.id] = true;
+                    out.push(lib);
+                });
+            }
+            add(session.doc && session.doc.libraries);
+            add(readStoredLibraries());
+            return out;
+        }
+
+        function cleanTemplate(item) {
+            if (!item || !item.parts || !item.parts.length) return null;
+            var id = String(item.id || nid('sym')).replace(/[^\w.-]/g, '').slice(0, 60);
+            return {
+                id: id || nid('sym'),
+                name: String(item.name || api.t('schemeTemplateNew')).slice(0, 80),
+                w: Math.max(1, Number(item.w) || 40),
+                h: Math.max(1, Number(item.h) || 40),
+                parts: item.parts.slice(0, 400)
+            };
+        }
+
+        function importLibraryFile(file) {
+            if (!file || !api.canEdit || session.guest) return;
+            if (file.size > 1500000) {
+                status.textContent = api.t('schemeLibraryBad');
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () {
+                var parsed;
+                try { parsed = JSON.parse(String(reader.result || '')); } catch (error) {
+                    status.textContent = api.t('schemeLibraryBad');
+                    return;
+                }
+                var list = Array.isArray(parsed) ? parsed : ((parsed && (parsed.templates || parsed.symbols)) || []);
+                var templates = [];
+                var i;
+                for (i = 0; i < list.length && templates.length < 200; i++) {
+                    var one = cleanTemplate(list[i]);
+                    if (one) templates.push(one);
+                }
+                if (!templates.length) {
+                    status.textContent = api.t('schemeLibraryBad');
+                    return;
+                }
+                remember();
+                rememberLibrary({
+                    id: nid('lib'),
+                    name: String((parsed && parsed.name) || file.name || api.t('schemeLibraryName')).replace(/\.json$/i, '').slice(0, 80),
+                    templates: templates
+                });
+                refreshSide();
+                status.textContent = api.t('schemeLibraryDone');
+            };
+            reader.readAsText(file);
+        }
+
+        function exportLibraryFile() {
+            var templates = [];
+            var seen = {};
+            function add(def) {
+                if (!def || !def.id || seen[def.id] || !def.parts) return;
+                seen[def.id] = true;
+                templates.push({ id: def.id, name: def.name || '', w: def.w, h: def.h, parts: def.parts });
+            }
+            var id;
+            for (id in (session.doc.symbols || {})) add(session.doc.symbols[id]);
+            allLibraries().forEach(function (pack) {
+                (pack.templates || []).forEach(add);
+            });
+            builtins(api.t).forEach(add);
+            var blob = new Blob([JSON.stringify({ name: (session.doc && session.doc.name) || api.t('schemeLibraryName'), templates: templates }, null, 2)], { type: 'application/json' });
+            var link = el('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = ((session.doc && session.doc.name) || 'templates') + '.json';
+            link.click();
+            global.setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
         }
 
         function libraryTemplates() {
@@ -2795,6 +3233,20 @@
             for (customId in (session.doc.symbols || {})) {
                 if (!seen[customId] && !hidden[customId]) library.push(session.doc.symbols[customId]);
             }
+            allLibraries().forEach(function (pack) {
+                (pack.templates || []).forEach(function (def) {
+                    if (!def || !def.id || hidden[def.id] || seen[def.id]) return;
+                    seen[def.id] = true;
+                    library.push({
+                        id: def.id,
+                        name: def.name,
+                        label: pack.name ? (pack.name + ' · ' + (def.name || '')) : (def.name || ''),
+                        w: def.w,
+                        h: def.h,
+                        parts: def.parts
+                    });
+                });
+            });
             library.sort(function (left, right) {
                 return String(left.name || '').localeCompare(String(right.name || ''));
             });
@@ -2966,6 +3418,7 @@
         }
 
         function renderAssetList() {
+            openPanel('assets');
             var head = el('div', 'asset-tree-scheme-list-head');
             head.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeAssets')));
             var only = el('button', 'asset-tree-scheme-filter' + (session.assetPlacedOnly ? ' is-on' : ''), api.t('schemeOnScheme'));
@@ -2975,7 +3428,7 @@
                 refreshSide();
             });
             head.appendChild(only);
-            side.appendChild(head);
+            bin.appendChild(head);
             var search = el('input', 'asset-tree-scheme-name');
             search.placeholder = api.t('schemeSearch');
             search.value = session.assetQuery || '';
@@ -3034,8 +3487,8 @@
                 session.assetQuery = search.value;
                 paintAssets();
             });
-            side.appendChild(search);
-            side.appendChild(list);
+            bin.appendChild(search);
+            bin.appendChild(list);
             paintAssets();
         }
 
@@ -3194,7 +3647,12 @@
                 orderWrap.appendChild(order);
                 props.appendChild(orderWrap);
             }
-            if (obj.type === 'symbol' || obj.type === 'asset') field(api.t('schemeAngle'), obj.angle || 0, function (value) { obj.angle = Math.round(Number(value) || 0); });
+            if (obj.type === 'symbol' || obj.type === 'asset' || obj.type === 'image') field(api.t('schemeAngle'), obj.angle || 0, function (value) { obj.angle = Math.round(Number(value) || 0); });
+            if (obj.type === 'image') field(api.t('schemeOpacity'), Math.round((obj.opacity == null ? 0.72 : obj.opacity) * 100), function (value) {
+                var next = Number(value);
+                if (!isFinite(next)) next = 72;
+                obj.opacity = Math.max(5, Math.min(100, next)) / 100;
+            });
             if (obj.type === 'line' || obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'text' || obj.type === 'dimension') {
                 var colorWrap = el('label', 'asset-tree-scheme-field', api.t('schemeColor'));
                 var color = el('input');
@@ -3755,6 +4213,7 @@
                 });
             });
             session.doc = doc;
+            (doc.libraries || []).forEach(stashLibrary);
             session.id = id || 0;
             session.past = [];
             session.future = [];
@@ -4003,17 +4462,17 @@
             var editing = session.mode === 'edit' || !!session.templateId;
             bar.style.display = browse ? 'none' : '';
             body.style.display = browse ? 'none' : '';
-            body.style.gridTemplateColumns = editing ? '' : 'minmax(0, 1fr)';
+            body.style.gridTemplateColumns = 'minmax(0, 1fr)';
             status.style.display = browse ? 'none' : '';
             gallery.style.display = browse ? '' : 'none';
-            tools.style.display = editing ? '' : 'none';
-            side.style.display = editing ? '' : 'none';
-            props.style.display = editing ? '' : 'none';
+            tools.style.display = '';
+            windows.style.display = editing ? '' : 'none';
+            windowsBtn.style.display = editing ? '' : 'none';
             editBtn.style.display = !browse && !editing && api.canEdit ? '' : 'none';
             backBtn.style.display = browse ? 'none' : '';
             saveBtn.style.display = editing ? '' : 'none';
             saveBtn.textContent = session.templateId ? api.t('schemeTemplateSave') : api.t('save');
-            newBtn.style.display = editing && !session.templateId ? '' : 'none';
+            newBtn.style.display = !browse && !session.templateId && api.canEdit ? '' : 'none';
             deleteBtn.style.display = editing && !session.templateId && !session.guest ? '' : 'none';
             shareBtn.style.display = editing && !session.templateId && !session.guest && session.id ? '' : 'none';
             guestNote.style.display = session.guest && !browse && !session.templateId ? '' : 'none';
@@ -4982,7 +5441,8 @@
                 ellipse: 'schemeToolEllipse',
                 polyline: 'schemeToolPen',
                 text: 'schemeToolText',
-                dimension: 'schemeToolDim'
+                dimension: 'schemeToolDim',
+                image: 'schemeImage'
             };
             return api.t(names[obj.type] || 'schemeProps');
         }
@@ -5087,6 +5547,19 @@
         });
 
         stage.addEventListener('contextmenu', function (event) { event.preventDefault(); });
+        stage.addEventListener('dragover', function (event) {
+            if (session.mode !== 'edit' || session.guest) return;
+            var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+            if (!file || String(file.type || '').indexOf('image/') !== 0) return;
+            event.preventDefault();
+        });
+        stage.addEventListener('drop', function (event) {
+            if (session.mode !== 'edit' || session.guest) return;
+            var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+            if (!file || String(file.type || '').indexOf('image/') !== 0) return;
+            event.preventDefault();
+            readSchemeImage(file);
+        });
 
         function onKey(event) {
             if (!host.parentNode) {
