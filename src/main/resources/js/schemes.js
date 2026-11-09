@@ -308,7 +308,7 @@
         scanFile.addEventListener('change', function () {
             var picked = scanFile.files && scanFile.files[0];
             scanFile.value = '';
-            if (!picked || session.mode !== 'edit') return;
+            if (!picked || session.mode !== 'edit' || session.guest) return;
             var reader = new FileReader();
             reader.onload = function () {
                 var bytes = new Uint8Array(reader.result);
@@ -349,8 +349,14 @@
         var deleteBtn = el('button', 'asset-tree-scheme-danger', api.t('schemeDelete'));
         deleteBtn.type = 'button';
         deleteBtn.disabled = !api.canEdit;
+        var shareBtn = el('button', 'asset-tree-scheme-new', api.t('schemeShare'));
+        shareBtn.type = 'button';
+        shareBtn.disabled = !api.canEdit;
+        var guestNote = el('div', 'asset-tree-scheme-note');
+        guestNote.style.display = 'none';
         var status = el('div', 'asset-tree-scheme-status', '');
         head.appendChild(templateNote);
+        head.appendChild(guestNote);
         head.appendChild(labeled(api.t('schemeList'), schemePick));
         head.appendChild(labeled(api.t('name'), nameInput));
         head.appendChild(labeled(api.t('schemePlace'), placePick));
@@ -360,6 +366,7 @@
         head.appendChild(editBtn);
         head.appendChild(backBtn);
         head.appendChild(saveBtn);
+        head.appendChild(shareBtn);
         head.appendChild(deleteBtn);
         bar.appendChild(head);
         bar.appendChild(tools);
@@ -511,12 +518,33 @@
         }
 
         function markTools() {
+            if (session.guest && session.tool && session.tool !== 'select') session.tool = 'select';
             var buttons = tools.querySelectorAll('button');
             var i;
             for (i = 0; i < buttons.length; i++) {
-                if (buttons[i].getAttribute('data-tool') === session.tool) buttons[i].className = 'asset-tree-scheme-tool is-on';
+                var tool = buttons[i].getAttribute('data-tool');
+                if (tool === session.tool) buttons[i].className = 'asset-tree-scheme-tool is-on';
                 else buttons[i].className = 'asset-tree-scheme-tool';
+                if (!tool) buttons[i].disabled = !api.canEdit || !!session.guest;
+                else buttons[i].disabled = tool !== 'select' && (!api.canEdit || !!session.guest);
             }
+        }
+
+        function ownPin(obj) {
+            var binding = obj && obj.assetBinding;
+            return !!(obj && obj.type === 'asset' && binding && String(binding.workspaceId || '') === String(api.projectKey));
+        }
+
+        function foreignPin(obj) {
+            var binding = obj && obj.assetBinding;
+            return !!(obj && obj.type === 'asset' && binding && binding.workspaceId && String(binding.workspaceId) !== String(api.projectKey));
+        }
+
+        function mutableObject(obj) {
+            if (!api.canEdit || session.mode !== 'edit' || !obj) return false;
+            if (foreignPin(obj)) return false;
+            if (session.guest) return ownPin(obj);
+            return true;
         }
 
         function worldFrom(sx, sy) {
@@ -1380,7 +1408,9 @@
 
         function duplicateSelection() {
             var objects = selectedObjects();
-            if (!objects.length || !api.canEdit) return;
+            if (!objects.length || !api.canEdit || session.guest) return;
+            objects = objects.filter(function (obj) { return !foreignPin(obj); });
+            if (!objects.length) return;
             remember();
             var ids = [];
             var groupMap = {};
@@ -1403,10 +1433,19 @@
 
         function removeSelection() {
             if (!session.selection.length || !api.canEdit) return;
-            remember();
             var floor = activeFloor();
+            var drop = {};
+            var any = false;
+            (floor.objects || []).forEach(function (obj) {
+                if (session.selection.indexOf(obj.id) >= 0 && mutableObject(obj)) {
+                    drop[obj.id] = true;
+                    any = true;
+                }
+            });
+            if (!any) return;
+            remember();
             floor.objects = (floor.objects || []).filter(function (obj) {
-                return session.selection.indexOf(obj.id) < 0;
+                return !drop[obj.id];
             });
             syncRooms(floor);
             session.selection = [];
@@ -2556,7 +2595,7 @@
                     paint();
                 });
                 row.addEventListener('dblclick', function () {
-                    if (!api.canEdit) return;
+                    if (!api.canEdit || session.guest) return;
                     askBox({
                         title: api.t('name'),
                         input: true,
@@ -2572,7 +2611,7 @@
             });
             var addFloor = el('button', 'asset-tree-scheme-add', api.t('schemeFloorNew'));
             addFloor.type = 'button';
-            addFloor.disabled = !api.canEdit;
+            addFloor.disabled = !api.canEdit || session.guest;
             addFloor.addEventListener('click', function () {
                 remember();
                 var floor = { id: nid('floor'), name: api.t('schemeFloor') + ' ' + (session.doc.floors.length + 1), elevation: session.doc.floors.length * 300, objects: [], rooms: [] };
@@ -2616,7 +2655,7 @@
                     refreshSide();
                 });
                 name.addEventListener('dblclick', function () {
-                    if (!api.canEdit) return;
+                    if (!api.canEdit || session.guest) return;
                     askBox({
                         title: api.t('name'),
                         input: true,
@@ -2632,7 +2671,7 @@
                 lock.type = 'button';
                 lock.title = layer.locked ? api.t('schemeUnlock') : api.t('schemeLock');
                 lock.innerHTML = toolIcon(layer.locked ? 'lock' : 'unlock');
-                lock.disabled = !api.canEdit;
+                lock.disabled = !api.canEdit || session.guest;
                 lock.addEventListener('click', function () {
                     layer.locked = !layer.locked;
                     session.dirty = true;
@@ -2646,7 +2685,7 @@
                     var dropLayer = el('button', 'asset-tree-scheme-icon', '×');
                     dropLayer.type = 'button';
                     dropLayer.title = api.t('schemeLayerDelete');
-                    dropLayer.disabled = !api.canEdit;
+                    dropLayer.disabled = !api.canEdit || session.guest;
                     dropLayer.addEventListener('click', function () { deleteLayer(layer); });
                     row.appendChild(dropLayer);
                 }
@@ -2654,7 +2693,7 @@
             });
             var addLayer = el('button', 'asset-tree-scheme-add', api.t('schemeLayerNew'));
             addLayer.type = 'button';
-            addLayer.disabled = !api.canEdit;
+            addLayer.disabled = !api.canEdit || session.guest;
             addLayer.addEventListener('click', function () {
                 askBox({
                     title: api.t('schemeLayerNew'),
@@ -2704,11 +2743,11 @@
                     var row = el('div', 'asset-tree-scheme-asset' + (armed ? ' is-on' : ''));
                     var card = el('button', 'asset-tree-scheme-asset-main');
                     card.type = 'button';
-                    card.disabled = !api.canEdit || session.mode !== 'edit';
+                    card.disabled = !api.canEdit || session.mode !== 'edit' || session.guest;
                     card.title = armed ? api.t('schemeTemplateOff') : name;
                     card.appendChild(el('strong', null, name));
                     card.addEventListener('click', function () {
-                        if (!api.canEdit || session.mode !== 'edit') return;
+                        if (!api.canEdit || session.mode !== 'edit' || session.guest) return;
                         if (session.symbolId === current.id) {
                             session.symbolId = '';
                             session.tool = 'select';
@@ -2724,6 +2763,7 @@
                     card.addEventListener('contextmenu', function (event) {
                         event.preventDefault();
                         event.stopPropagation();
+                        if (session.guest) return;
                         showLibraryMenu(event.clientX, event.clientY, current);
                     });
                     row.appendChild(card);
@@ -3028,8 +3068,18 @@
             return next;
         }
 
+        function selectionIsMutable() {
+            var objects = selectedObjects();
+            var i;
+            if (!objects.length) return false;
+            for (i = 0; i < objects.length; i++) {
+                if (!mutableObject(objects[i])) return false;
+            }
+            return true;
+        }
+
         function restack(where) {
-            if (!api.canEdit || session.mode !== 'edit' || !session.selection.length) return;
+            if (!api.canEdit || session.mode !== 'edit' || !session.selection.length || !selectionIsMutable()) return;
             remember();
             var floor = activeFloor();
             var objects = (floor.objects || []).slice();
@@ -3048,7 +3098,7 @@
 
         function groupSelection() {
             var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
-            if (objects.length < 2 || !api.canEdit || session.mode !== 'edit') return;
+            if (objects.length < 2 || !api.canEdit || session.mode !== 'edit' || !selectionIsMutable()) return;
             remember();
             var id = nid('grp');
             objects.forEach(function (obj) { obj.group = id; });
@@ -3058,7 +3108,7 @@
         }
 
         function ungroupSelection() {
-            if (!api.canEdit || session.mode !== 'edit') return;
+            if (!api.canEdit || session.mode !== 'edit' || !selectionIsMutable()) return;
             remember();
             selectedObjects().forEach(function (obj) { obj.group = ''; });
             renderProps();
@@ -3093,6 +3143,11 @@
                 return;
             }
             var obj = objects[0];
+            if (!mutableObject(obj) && (session.guest || foreignPin(obj))) {
+                if (obj.assetBinding || obj.type === 'asset') props.appendChild(assetCard(obj));
+                else props.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeGuestHint')));
+                return;
+            }
             function field(label, value, apply) {
                 var wrap = el('label', 'asset-tree-scheme-field', label);
                 var input = el('input');
@@ -3278,7 +3333,7 @@
                 }
                 var detach = el('button', 'asset-tree-scheme-mini', api.t('schemeUnbind'));
                 detach.type = 'button';
-                detach.disabled = !api.canEdit;
+                detach.disabled = !mutableObject(obj);
                 detach.addEventListener('click', function () {
                     remember();
                     obj.assetBinding = null;
@@ -3291,7 +3346,7 @@
             }
             var attach = el('button', 'asset-tree-scheme-save', api.t('schemeBind'));
             attach.type = 'button';
-            attach.disabled = !api.canEdit;
+            attach.disabled = !mutableObject(obj);
             attach.addEventListener('click', function () { openAssetPicker(obj); });
             box.appendChild(attach);
             return box;
@@ -3713,14 +3768,25 @@
                 if (session.catalog[i].id === row.id) {
                     session.catalog[i].name = row.name;
                     if (row.placeId != null) session.catalog[i].placeId = row.placeId;
+                    if (row.projectKey) session.catalog[i].projectKey = row.projectKey;
+                    if (row.shared != null) session.catalog[i].shared = !!row.shared;
+                    if (row.shares) session.catalog[i].shares = row.shares;
                     return;
                 }
             }
-            session.catalog.push({ id: row.id, name: row.name, placeId: row.placeId || 0 });
+            session.catalog.push({
+                id: row.id,
+                name: row.name,
+                placeId: row.placeId || 0,
+                projectKey: row.projectKey || '',
+                shared: !!row.shared,
+                shares: row.shares || []
+            });
         }
 
         function schemeLabel(row) {
             var name = (row && row.name) || api.t('schemeDefaultName');
+            if (row && row.shared && row.projectKey) name = name + ' · ' + row.projectKey;
             var same = 0;
             var i;
             for (i = 0; i < (session.catalog || []).length; i++) {
@@ -3806,7 +3872,18 @@
                     if (session.statusNode) session.statusNode.textContent = api.t('schemeSaveFailed');
                     return;
                 }
-                upsertCatalog({ id: payload.id, name: session.doc.name, placeId: session.doc.placeId || 0 });
+                session.guest = !!payload.shared;
+                session.ownerKey = payload.projectKey || api.projectKey;
+                session.shares = payload.shares || [];
+                if (session.guest) session.tool = 'select';
+                upsertCatalog({
+                    id: payload.id,
+                    name: session.doc.name,
+                    placeId: session.doc.placeId || 0,
+                    projectKey: session.ownerKey,
+                    shared: session.guest,
+                    shares: session.shares
+                });
                 session.mode = session.pendingMode || 'view';
                 session.needFit = session.mode !== 'edit';
                 if (session.repaint) session.repaint();
@@ -3824,9 +3901,20 @@
                 if (code >= 200 && code < 300 && payload && payload.id) {
                     session.id = payload.id;
                     session.dirty = false;
-                    upsertCatalog({ id: payload.id, name: session.doc.name, placeId: session.doc.placeId || 0 });
+                    if (payload.projectKey) session.ownerKey = payload.projectKey;
+                    if (payload.shared != null) session.guest = !!payload.shared;
+                    if (payload.shares) session.shares = payload.shares;
+                    upsertCatalog({
+                        id: payload.id,
+                        name: session.doc.name,
+                        placeId: session.doc.placeId || 0,
+                        projectKey: session.ownerKey || api.projectKey,
+                        shared: !!session.guest,
+                        shares: session.shares || []
+                    });
                     fillSchemePick();
-                    status.textContent = api.t('schemeSaved');
+                    if (!session.guest && !session.templateId) shareBtn.style.display = '';
+                    status.textContent = session.guest ? api.t('schemeGuestSaved') : api.t('schemeSaved');
                     if (done) done();
                 } else {
                     status.textContent = (payload && payload.message) || api.t('schemeSaveFailed');
@@ -3926,15 +4014,88 @@
             saveBtn.style.display = editing ? '' : 'none';
             saveBtn.textContent = session.templateId ? api.t('schemeTemplateSave') : api.t('save');
             newBtn.style.display = editing && !session.templateId ? '' : 'none';
-            deleteBtn.style.display = editing && !session.templateId ? '' : 'none';
+            deleteBtn.style.display = editing && !session.templateId && !session.guest ? '' : 'none';
+            shareBtn.style.display = editing && !session.templateId && !session.guest && session.id ? '' : 'none';
+            guestNote.style.display = session.guest && !browse && !session.templateId ? '' : 'none';
+            guestNote.textContent = session.guest ? api.t('schemeGuestHint', session.ownerKey || '') : '';
+            nameInput.disabled = !api.canEdit || !!session.guest;
+            placePick.disabled = !!session.guest;
+            unit.disabled = !!session.guest;
             if (schemePick.parentNode) schemePick.parentNode.style.display = session.templateId ? 'none' : '';
             if (nameInput.parentNode) nameInput.parentNode.style.display = editing ? '' : 'none';
-            if (placePick.parentNode) placePick.parentNode.style.display = editing && !session.templateId ? '' : 'none';
+            if (placePick.parentNode) placePick.parentNode.style.display = editing && !session.templateId && !session.guest ? '' : 'none';
             unit.style.display = editing ? '' : 'none';
             measureWrap.style.display = editing && !session.templateId ? '' : 'none';
             templateNote.style.display = session.templateId ? '' : 'none';
             templateNote.textContent = session.templateId ? (api.t('schemeTemplateEditing') + ': ' + (nameInput.value || session.templateName || '')) : '';
+            markTools();
             if (browse) renderGallery();
+        }
+
+        function openShare() {
+            if (!api.canEdit || session.guest || !session.id) return;
+            var back = el('div', 'asset-tree-scheme-modal');
+            var dialog = el('div', 'asset-tree-scheme-dialog asset-tree-scheme-ask');
+            dialog.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeShare')));
+            dialog.appendChild(el('p', 'asset-tree-scheme-ask-text', api.t('schemeShareHint')));
+            var list = el('div', 'asset-tree-scheme-share-list');
+            var boxes = [];
+            (api.projects || []).forEach(function (project) {
+                if (!project || !project.key || project.key === api.projectKey) return;
+                var label = el('label', 'asset-tree-scheme-check');
+                var box = el('input');
+                box.type = 'checkbox';
+                var on = false;
+                var i;
+                for (i = 0; i < (session.shares || []).length; i++) {
+                    if (String(session.shares[i]).toLowerCase() === String(project.key).toLowerCase()) on = true;
+                }
+                box.checked = on;
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(' ' + (project.name || project.key)));
+                list.appendChild(label);
+                boxes.push({ key: project.key, box: box });
+            });
+            if (!boxes.length) list.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeShareEmpty')));
+            var actions = el('div', 'asset-tree-scheme-head');
+            var ok = el('button', 'asset-tree-scheme-save', api.t('save'));
+            var cancel = el('button', 'asset-tree-scheme-new', api.t('cancel'));
+            ok.type = 'button';
+            cancel.type = 'button';
+            function close() {
+                if (back.parentNode) back.parentNode.removeChild(back);
+            }
+            ok.addEventListener('click', function () {
+                var projects = [];
+                boxes.forEach(function (item) {
+                    if (item.box.checked) projects.push(item.key);
+                });
+                api.ajax('PUT', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + session.id + '/shares', { shares: projects }, function (code, payload) {
+                    if (code >= 200 && code < 300) {
+                        session.shares = (payload && payload.shares) || projects;
+                        upsertCatalog({
+                            id: session.id,
+                            name: session.doc.name,
+                            placeId: session.doc.placeId || 0,
+                            projectKey: api.projectKey,
+                            shared: false,
+                            shares: session.shares
+                        });
+                        status.textContent = api.t('schemeShareSaved');
+                        close();
+                    } else status.textContent = (payload && payload.message) || api.t('schemeSaveFailed');
+                });
+            });
+            cancel.addEventListener('click', close);
+            dialog.appendChild(list);
+            actions.appendChild(ok);
+            actions.appendChild(cancel);
+            dialog.appendChild(actions);
+            back.addEventListener('mousedown', function (event) {
+                if (event.target === back) close();
+            });
+            back.appendChild(dialog);
+            host.appendChild(back);
         }
 
         function renderGallery() {
@@ -3958,7 +4119,14 @@
                 var body = el('div', 'asset-tree-scheme-card-body');
                 body.appendChild(el('div', 'asset-tree-scheme-card-name', schemeLabel(row)));
                 var bound = placeName(row.placeId || (row.doc && row.doc.placeId));
-                body.appendChild(el('div', 'asset-tree-scheme-muted', bound ? (api.t('schemePlace') + ': ' + bound) : api.t('schemePlaceNone')));
+                if (!row.shared) {
+                    body.appendChild(el('div', 'asset-tree-scheme-muted', bound ? (api.t('schemePlace') + ': ' + bound) : api.t('schemePlaceNone')));
+                }
+                if (row.shared && row.projectKey) {
+                    body.appendChild(el('div', 'asset-tree-scheme-muted', api.t('schemeSharedFrom', row.projectKey)));
+                } else if (row.shares && row.shares.length) {
+                    body.appendChild(el('div', 'asset-tree-scheme-muted', api.t('schemeShareWith', row.shares.join(', '))));
+                }
                 var actions = el('div', 'asset-tree-scheme-card-actions');
                 var open = el('button', 'asset-tree-scheme-new', api.t('schemeOpen'));
                 open.type = 'button';
@@ -4069,6 +4237,9 @@
             session.templateId = '';
             session.templateReturn = null;
             acceptDoc(fresh, 0);
+            session.guest = false;
+            session.ownerKey = api.projectKey;
+            session.shares = [];
             session.dirty = true;
             session.mode = 'edit';
             if (session.repaint) session.repaint();
@@ -4228,7 +4399,7 @@
             hideSchemeInfo();
             if (session.tool === 'select') {
                 var handle = handleAt(sx, sy);
-                if (handle && api.canEdit) {
+                if (handle && api.canEdit && !session.guest) {
                     remember();
                     drag = { mode: 'handle', handle: handle, moved: false };
                     return;
@@ -4241,7 +4412,7 @@
                         else session.selection.push(id);
                     } else if (session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
                     else session.selection = withGroup(session.selection);
-                    if (api.canEdit) {
+                    if (api.canEdit && selectedObjects().some(function (obj) { return mutableObject(obj); })) {
                         remember();
                         drag = { mode: 'move', x: pt.x, y: pt.y, lastX: pt.x, lastY: pt.y, moved: false };
                     }
@@ -4250,7 +4421,7 @@
                     return;
                 } else {
                     var scan = activeFloor().underlay;
-                    if (session.calibrate && scan) {
+                    if (session.calibrate && scan && !session.guest) {
                         session.calibrate.points.push({ x: pt.x, y: pt.y });
                         if (session.calibrate.points.length >= 2) {
                             var marks = session.calibrate.points.slice(0, 2);
@@ -4277,7 +4448,7 @@
                         paint();
                         return;
                     }
-                    if (scan && pt.x >= scan.x && pt.y >= scan.y && pt.x <= scan.x + scan.w && pt.y <= scan.y + scan.h && api.canEdit) {
+                    if (scan && pt.x >= scan.x && pt.y >= scan.y && pt.x <= scan.x + scan.w && pt.y <= scan.y + scan.h && api.canEdit && !session.guest) {
                         drag = { mode: 'underlay', x: pt.x, y: pt.y, ox: scan.x, oy: scan.y, moved: false };
                         return;
                     }
@@ -4290,7 +4461,7 @@
                 paint();
                 return;
             }
-            if (!api.canEdit) return;
+            if (!api.canEdit || session.guest) return;
             if (session.tool === 'text') {
                 var at = pt;
                 askBox({
@@ -4425,7 +4596,9 @@
                 drag.lastX = pt.x;
                 drag.lastY = pt.y;
                 drag.moved = true;
-                selectedObjects().forEach(function (obj) { translateObj(obj, dx, dy); });
+                selectedObjects().forEach(function (obj) {
+                    if (mutableObject(obj)) translateObj(obj, dx, dy);
+                });
                 var floor = activeFloor();
                 if ((floor.objects || []).some(function (obj) { return obj.type === 'wall' && session.selection.indexOf(obj.id) >= 0; })) syncRooms(floor);
                 paint();
@@ -4889,7 +5062,7 @@
                 finishPoly(false);
                 return;
             }
-            if (session.mode !== 'edit' || !api.canEdit) return;
+            if (session.mode !== 'edit' || !api.canEdit || session.guest) return;
             var pt = pointer(event);
             var id = hit(pt.x, pt.y);
             if (!id) return;
@@ -5003,6 +5176,7 @@
             }
             var hot = { v: 'select', l: 'line', r: 'rect', e: 'ellipse', p: 'polyline', w: 'wall', t: 'text', d: 'dimension' };
             if (!event.ctrlKey && !event.metaKey && !event.altKey && hot[event.key]) {
+                if (session.guest && hot[event.key] !== 'select') return;
                 session.tool = hot[event.key];
                 session.draft = null;
                 markTools();
@@ -5056,6 +5230,7 @@
             if (session.templateId) saveTemplate();
             else save();
         });
+        shareBtn.addEventListener('click', openShare);
         editBtn.addEventListener('click', function () {
             if (!api.canEdit || session.templateId) return;
             session.mode = 'edit';
