@@ -14903,7 +14903,11 @@ public class AssetServiceImpl implements AssetService {
         AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.VIEW);
         requireModule(asset.getProjectKey(), ProjectModules.TNI);
         rejectTniPlace(asset);
-        new TniBook().retitle(ao(), tniHost(), asset.getID());
+        try {
+            new TniBook().retitle(ao(), tniHost(), asset.getID());
+        } catch (RuntimeException ex) {
+            log.warn("TNI could not retitle asset {}", Integer.valueOf(asset.getID()), ex);
+        }
         AssetEntity fresh = ao().get(AssetEntity.class, asset.getID());
         String name = fresh == null || fresh.getName() == null ? asset.getName() : fresh.getName();
         TniWatchDto dto = tniWatchDto(tniWatchRow(asset.getID()), TniTarget.shown(tniTargets(asset.getID(), name)));
@@ -15002,7 +15006,11 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.tni.off");
         }
         rejectTniPlace(asset);
-        new TniBook().retitle(ao(), tniHost(), asset.getID());
+        try {
+            new TniBook().retitle(ao(), tniHost(), asset.getID());
+        } catch (RuntimeException ex) {
+            log.warn("TNI could not retitle asset {}", Integer.valueOf(asset.getID()), ex);
+        }
         AssetEntity fresh = ao().get(AssetEntity.class, asset.getID());
         final String assetName = fresh == null || fresh.getName() == null ? asset.getName() : fresh.getName();
         final List<String> targets = tniTargets(asset.getID(), assetName);

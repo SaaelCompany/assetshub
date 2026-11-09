@@ -9256,23 +9256,62 @@
         setBusy(true);
         ajax('POST', '/assets/' + asset.id + '/ping', {}, function (status, payload) {
             setBusy(false);
-            var ok = status >= 200 && status < 300 && payload && (payload.up === 1 || payload.up === 2);
-            if (ok) {
-                applyPing(asset, payload);
-                notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
-                selectAsset(asset.id, true);
+            if (payload && (payload.up === 1 || payload.up === 2)) {
+                showPingResult(asset, payload);
                 return;
             }
             ajax('GET', '/assets/' + asset.id + '/watch', null, function (watchStatus, watch) {
                 if (watchStatus === 200 && watch && (watch.up === 1 || watch.up === 2)) {
-                    applyPing(asset, watch);
-                    notify(watch.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
-                    selectAsset(asset.id, true);
+                    showPingResult(asset, watch);
                     return;
                 }
-                notify((payload && payload.message) || t('errorTitle'));
+                ajax('GET', '/assets/' + asset.id, null, function (assetStatus, fresh) {
+                    if (assetStatus === 200 && fresh && (fresh.pingUp === 1 || fresh.pingUp === 2)) {
+                        showPingResult(asset, {
+                            up: fresh.pingUp,
+                            address: '',
+                            report: '',
+                            name: fresh.name
+                        });
+                        return;
+                    }
+                    notify((payload && payload.message) || t('errorTitle'));
+                });
             });
         });
+    }
+
+    function showPingResult(asset, payload) {
+        applyPing(asset, payload);
+        var node = byId()[asset.id];
+        if (node) node.pingUp = payload.up;
+        var detail = state.detail && state.detail.id === asset.id ? state.detail : null;
+        if (detail && detail.activities && detail.comments) {
+            detail.pingUp = payload.up;
+            if (payload.name) detail.name = payload.name;
+            detail.activities.push({
+                id: Date.now(),
+                action: 'ping',
+                field: payload.address || (node && node.name) || asset.name || '',
+                oldValue: payload.report || '',
+                newValue: payload.up === 1 ? 'up' : 'down',
+                created: new Date().toISOString(),
+                author: { displayName: state.displayName || '' }
+            });
+            showDetail(detail, false);
+            notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
+            ajax('GET', '/assets/' + asset.id, null, function (status, fresh) {
+                if (status !== 200 || !fresh || state.selectedId !== asset.id || state.dirty) return;
+                if (fresh.pingUp !== 1 && fresh.pingUp !== 2) return;
+                if (!state.ping) state.ping = {};
+                state.ping[asset.id] = fresh.pingUp;
+                state.detail = fresh;
+                showDetail(fresh, false);
+            });
+            return;
+        }
+        notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
+        selectAsset(asset.id, true);
     }
 
     function applyPing(asset, payload) {

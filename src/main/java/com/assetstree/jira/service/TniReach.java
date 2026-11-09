@@ -345,7 +345,14 @@ public final class TniReach {
         if (text == null) {
             return "";
         }
-        return text.length() > 8000 ? text.substring(0, 8000) : text;
+        StringBuilder kept = new StringBuilder();
+        for (int i = 0; i < text.length() && kept.length() < 8000; i++) {
+            char ch = text.charAt(i);
+            if (ch == '\n' || ch == '\t' || ch >= ' ') {
+                kept.append(ch);
+            }
+        }
+        return kept.toString();
     }
 
     private static final class Echo {
