@@ -22257,6 +22257,7 @@
             tniAd: setup.tniAd !== false,
             tniSccm: setup.tniSccm !== false,
             tniPing: setup.tniPing !== false,
+            tniSites: setup.tniSites == null ? null : String(setup.tniSites),
             portalColumns: (function () {
                 var raw = setup.portalColumns;
                 if (raw == null || raw === '' || raw === '*') return 'key,type,status,location';
