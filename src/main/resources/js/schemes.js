@@ -397,8 +397,10 @@
         var stage = el('div', 'asset-tree-scheme-stage');
         var props = el('div', 'asset-tree-scheme-props');
         var windows = el('div', 'asset-tree-scheme-windows');
+        var dockTop = el('div', 'asset-tree-scheme-dock is-top');
         var dockLeft = el('div', 'asset-tree-scheme-dock is-left');
         var dockRight = el('div', 'asset-tree-scheme-dock is-right');
+        var dockBottom = el('div', 'asset-tree-scheme-dock is-bottom');
         var canvasWrap = el('div', 'asset-tree-scheme-canvas-wrap');
         var gridC = el('canvas', 'asset-tree-scheme-canvas');
         var sceneC = el('canvas', 'asset-tree-scheme-canvas');
@@ -408,9 +410,11 @@
         stage.appendChild(overC);
         canvasWrap.appendChild(stage);
         canvasWrap.appendChild(windows);
+        body.appendChild(dockTop);
         body.appendChild(dockLeft);
         body.appendChild(canvasWrap);
         body.appendChild(dockRight);
+        body.appendChild(dockBottom);
         var gallery = el('div', 'asset-tree-scheme-gallery');
         host.appendChild(bar);
         host.appendChild(body);
@@ -481,9 +485,33 @@
             return box;
         }
         var dockOrder = { tools: 0, symbols: 1, assets: 2, props: 3, floors: 4, layers: 5, rooms: 6 };
+        function dockBySide(side) {
+            if (side === 'left') return dockLeft;
+            if (side === 'top') return dockTop;
+            if (side === 'bottom') return dockBottom;
+            return dockRight;
+        }
+        function nearestSide(node) {
+            var area = windows.getBoundingClientRect();
+            var rect = node.getBoundingClientRect();
+            var cx = ((rect.left + rect.right) / 2) - area.left;
+            var cy = ((rect.top + rect.bottom) / 2) - area.top;
+            var width = area.width || windows.clientWidth || 1;
+            var height = area.height || windows.clientHeight || 1;
+            var dist = { left: cx, right: width - cx, top: cy, bottom: height - cy };
+            var side = 'left';
+            var best = dist.left;
+            ['right', 'top', 'bottom'].forEach(function (name) {
+                if (dist[name] < best) {
+                    best = dist[name];
+                    side = name;
+                }
+            });
+            return side;
+        }
         function syncDocks() {
             var editing = session.mode === 'edit' || !!session.templateId;
-            [dockLeft, dockRight].forEach(function (dock) {
+            [dockTop, dockLeft, dockRight, dockBottom].forEach(function (dock) {
                 if (!editing) {
                     dock.style.display = 'none';
                     return;
@@ -497,8 +525,10 @@
             });
         }
         function placePinned(node) {
-            var side = node.getAttribute('data-side') === 'left' ? 'left' : 'right';
-            var dock = side === 'left' ? dockLeft : dockRight;
+            var side = node.getAttribute('data-side');
+            if (side !== 'left' && side !== 'right' && side !== 'top' && side !== 'bottom') side = 'right';
+            node.setAttribute('data-side', side);
+            var dock = dockBySide(side);
             var rank = dockOrder[node.getAttribute('data-window')] || 0;
             var before = null;
             var i;
@@ -551,10 +581,7 @@
                 event.stopPropagation();
                 var next = !node.classList.contains('is-pinned');
                 if (next) {
-                    var mid = (windows.clientWidth || stage.clientWidth || 800) / 2;
-                    var x = parseInt(node.style.left, 10) || 0;
-                    var width = node.offsetWidth || box.w;
-                    node.setAttribute('data-side', x + width / 2 < mid ? 'left' : 'right');
+                    node.setAttribute('data-side', nearestSide(node));
                     placePinned(node);
                 } else placeFloating(node);
                 pin.classList.toggle('is-on', next);
@@ -607,7 +634,9 @@
             node.appendChild(inner);
             windows.appendChild(node);
             if (saved.pinned) {
-                node.setAttribute('data-side', saved.side === 'left' ? 'left' : 'right');
+                var kept = saved.side;
+                if (kept !== 'left' && kept !== 'right' && kept !== 'top' && kept !== 'bottom') kept = 'right';
+                node.setAttribute('data-side', kept);
                 placePinned(node);
             }
             panelBodies[id] = inner;
@@ -2643,7 +2672,8 @@
             for (id in panelNodes) {
                 var node = panelNodes[id];
                 if (node.classList.contains('is-pinned')) {
-                    if (node.parentNode !== dockLeft && node.parentNode !== dockRight) placePinned(node);
+                    var home = dockBySide(node.getAttribute('data-side'));
+                    if (node.parentNode !== home) placePinned(node);
                     continue;
                 }
                 if (!node.getAttribute('data-settled')) {

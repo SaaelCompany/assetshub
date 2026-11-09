@@ -13243,12 +13243,17 @@ button.asset-tree-attach-remove {
     min-height: 0;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "scheme-top scheme-top scheme-top"
+        "scheme-left scheme-canvas scheme-right"
+        "scheme-bottom scheme-bottom scheme-bottom";
     position: relative;
 }
 
 .asset-tree-scheme-canvas-wrap {
     position: relative;
+    grid-area: scheme-canvas;
     min-width: 0;
     min-height: 0;
 }
@@ -13263,12 +13268,39 @@ button.asset-tree-attach-remove {
 
 .asset-tree-scheme-dock {
     display: flex;
-    flex-direction: column;
     gap: 6px;
+    min-width: 0;
     min-height: 0;
     overflow: auto;
     padding: 6px;
     background: #f4f5f7;
+}
+
+.asset-tree-scheme-dock.is-left {
+    grid-area: scheme-left;
+    flex-direction: column;
+}
+
+.asset-tree-scheme-dock.is-right {
+    grid-area: scheme-right;
+    flex-direction: column;
+}
+
+.asset-tree-scheme-dock.is-top,
+.asset-tree-scheme-dock.is-bottom {
+    flex-direction: row;
+    align-items: stretch;
+    max-height: 42%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.asset-tree-scheme-dock.is-top {
+    grid-area: scheme-top;
+}
+
+.asset-tree-scheme-dock.is-bottom {
+    grid-area: scheme-bottom;
 }
 
 .asset-tree-scheme-windows {
@@ -13311,14 +13343,37 @@ button.asset-tree-attach-remove {
     left: auto !important;
     top: auto !important;
     width: 248px !important;
-    max-height: none;
-    flex: 1 1 160px;
+    max-height: 70%;
+    flex: 0 0 auto;
     min-height: 0;
     box-shadow: none;
 }
 
+.asset-tree-scheme-dock.is-top .asset-tree-scheme-window.is-pinned,
+.asset-tree-scheme-dock.is-bottom .asset-tree-scheme-window.is-pinned {
+    width: auto !important;
+    min-width: 220px;
+    max-width: 520px;
+    max-height: 220px;
+}
+
+.asset-tree-scheme-dock.is-top .asset-tree-scheme-window-body,
+.asset-tree-scheme-dock.is-bottom .asset-tree-scheme-window-body {
+    display: flex;
+    flex-flow: row wrap;
+    align-content: flex-start;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+#asset-tree-app .asset-tree-scheme-dock.is-top .asset-tree-scheme-tool,
+#asset-tree-app .asset-tree-scheme-dock.is-bottom .asset-tree-scheme-tool {
+    width: auto;
+}
+
 .asset-tree-scheme-window.is-pinned.is-collapsed {
     flex: 0 0 auto;
+    max-height: none;
 }
 
 .asset-tree-scheme-window.is-pinned .asset-tree-scheme-window-bar {
