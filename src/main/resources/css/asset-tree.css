@@ -13473,6 +13473,49 @@ button.asset-tree-attach-remove {
     width: 100%;
 }
 
+.asset-tree-scheme-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 100%;
+    align-items: center;
+    margin-top: 6px;
+}
+
+#asset-tree-app .asset-tree-scheme-swatch {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid rgba(9, 30, 66, 0.28);
+    border-radius: 3px;
+    box-shadow: none;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-scheme-swatch.is-on {
+    outline: 2px solid #0052cc;
+    outline-offset: 1px;
+}
+
+#asset-tree-app input.asset-tree-scheme-swatch {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: #fff;
+}
+
+.asset-tree-scheme-ink {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin: 4px 0 2px;
+    color: #42526e;
+    font-size: 12px;
+}
+
 .asset-tree-scheme-library-row {
     display: flex;
     flex-wrap: wrap;
