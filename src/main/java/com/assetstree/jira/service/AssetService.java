@@ -251,6 +251,9 @@ public interface AssetService {
     /** Equipment the signed-in customer is responsible for, for the portal profile. */
     PortalMineDto portalMine(ApplicationUser user);
 
+    /** The portal card layout used by every project. Only an administrator can change it. */
+    String savePortalLayout(ApplicationUser user, String projectKey, String layout);
+
     /** Request types the customer can raise for one piece of their equipment. */
     PortalRequestFormDto portalRequestForm(ApplicationUser user, int assetId);
 

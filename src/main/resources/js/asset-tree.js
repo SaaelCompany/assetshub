@@ -31017,8 +31017,50 @@
         saveProjectView({ setup: next }, null, true);
     }
 
+    function portalLayoutSettings() {
+        var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
+        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalLayoutTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('portalLayoutHint')));
+        var current = knownPortalLayout(state.portalLayout);
+        [
+            ['tiles', 'portalLayoutTiles'],
+            ['cards', 'portalLayoutCards'],
+            ['list', 'portalLayoutList']
+        ].forEach(function (item) {
+            var row = el('label', 'asset-tree-check');
+            var input = el('input');
+            input.type = 'radio';
+            input.name = 'asset-tree-portal-layout';
+            input.value = item[0];
+            input.checked = item[0] === current;
+            input.setAttribute('aria-label', t(item[1]));
+            input.addEventListener('change', function () {
+                if (!input.checked) return;
+                var want = item[0];
+                ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/portal-layout', { layout: want }, function (status, payload) {
+                    if (status >= 200 && status < 300 && payload && knownPortalLayout(payload.layout) === payload.layout) {
+                        state.portalLayout = payload.layout;
+                        return;
+                    }
+                    var radios = box.querySelectorAll('input');
+                    for (var i = 0; i < radios.length; i++) radios[i].checked = radios[i].value === knownPortalLayout(state.portalLayout);
+                    notify((payload && payload.message) || t('errorTitle'));
+                });
+            });
+            row.appendChild(input);
+            row.appendChild(el('span', null, t(item[1])));
+            box.appendChild(row);
+        });
+        return box;
+    }
+
+    function knownPortalLayout(value) {
+        return value === 'tiles' || value === 'cards' || value === 'list' ? value : 'tiles';
+    }
+
     function renderPortalSettings(panel) {
         panel.appendChild(el('p', 'asset-tree-hint', t('portalSectionHint')));
+        if (state.canAdmin) panel.appendChild(portalLayoutSettings());
         panel.appendChild(portalMineSettings());
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
         var fields = el('div', 'asset-tree-portal-fields');
@@ -32088,6 +32130,8 @@
             });
             state.canManage = payload.canConfigure === undefined ? !!payload.canEdit : manageable;
             state.projects = payload.projects || [];
+            state.portalLayout = payload.portalLayout === 'cards' || payload.portalLayout === 'list' || payload.portalLayout === 'tiles'
+                ? payload.portalLayout : 'tiles';
             state.locale = payload.locale || 'ru';
             state.userKey = payload.userKey || '';
             state.displayName = payload.displayName || '';

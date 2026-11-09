@@ -1269,13 +1269,20 @@
         ['list', 'Список']
     ];
 
+    function knownMineLayout(value) {
+        for (var i = 0; i < MINE_LAYOUTS.length; i++) {
+            if (MINE_LAYOUTS[i][0] === value) return value;
+        }
+        return '';
+    }
+
     function mineLayout() {
         var stored = '';
         try { stored = localStorage.getItem('asset-tree.portalMineLayout') || ''; } catch (error) { stored = ''; }
-        for (var i = 0; i < MINE_LAYOUTS.length; i++) {
-            if (MINE_LAYOUTS[i][0] === stored) return stored;
-        }
-        return 'tiles';
+        var chosen = knownMineLayout(stored);
+        if (chosen) return chosen;
+        var fallback = mineState.payload && mineState.payload.layout;
+        return knownMineLayout(fallback) || 'tiles';
     }
 
     function chooseMineLayout(layout) {

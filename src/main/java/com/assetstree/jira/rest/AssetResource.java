@@ -29,6 +29,7 @@ import com.assetstree.jira.model.IssueLinkDraft;
 import com.assetstree.jira.model.LinkDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.dto.PortalFieldsDto;
+import com.assetstree.jira.dto.PortalLayoutDto;
 import com.assetstree.jira.dto.PortalProjectDto;
 import com.assetstree.jira.dto.FlowBookDto;
 import com.assetstree.jira.model.FlowRuleDraft;
@@ -1382,6 +1383,19 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.portalMine(user())).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/portal-layout")
+    public Response savePortalLayout(@PathParam("projectKey") final String projectKey, final PortalLayoutDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                PortalLayoutDto saved = new PortalLayoutDto();
+                saved.setLayout(assetService.savePortalLayout(user(), projectKey, draft == null ? "" : draft.getLayout()));
+                return Response.ok(saved).build();
             }
         });
     }

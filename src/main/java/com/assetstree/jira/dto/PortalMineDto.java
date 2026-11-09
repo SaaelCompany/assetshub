@@ -12,6 +12,7 @@ public class PortalMineDto {
     private String title = "";
     private int total;
     private String totalLabel = "";
+    private String layout = "";
     private List<Group> projects = new ArrayList<Group>();
 
     public String getTitle() {
@@ -36,6 +37,14 @@ public class PortalMineDto {
 
     public void setTotalLabel(String totalLabel) {
         this.totalLabel = totalLabel == null ? "" : totalLabel;
+    }
+
+    public String getLayout() {
+        return layout;
+    }
+
+    public void setLayout(String layout) {
+        this.layout = layout == null ? "" : layout;
     }
 
     public List<Group> getProjects() {
