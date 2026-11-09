@@ -431,7 +431,7 @@
         var panelNodes = {};
         var panelState = {};
         try {
-            panelState = JSON.parse(global.localStorage.getItem('assetshub.schemeWindows') || '{}') || {};
+            panelState = JSON.parse(global.localStorage.getItem('assetshub.schemeWindows.v2') || '{}') || {};
         } catch (error) {
             panelState = {};
         }
@@ -465,7 +465,7 @@
                     side: node.getAttribute('data-side') || ''
                 };
             }
-            try { global.localStorage.setItem('assetshub.schemeWindows', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
+            try { global.localStorage.setItem('assetshub.schemeWindows.v2', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
         }
         function defaultPanelBox(id) {
             var width = stage.clientWidth || 1100;
@@ -633,11 +633,14 @@
             node.appendChild(titleBar);
             node.appendChild(inner);
             windows.appendChild(node);
-            if (saved.pinned) {
+            var homes = { tools: 'left', symbols: 'left', assets: 'left', props: 'right', floors: 'right', layers: 'right', rooms: 'right' };
+            if (saved.pinned !== false) {
                 var kept = saved.side;
-                if (kept !== 'left' && kept !== 'right' && kept !== 'top' && kept !== 'bottom') kept = 'right';
+                if (kept !== 'left' && kept !== 'right' && kept !== 'top' && kept !== 'bottom') kept = homes[id] || 'left';
                 node.setAttribute('data-side', kept);
                 placePinned(node);
+                pin.classList.add('is-on');
+                pin.title = api.t('schemeUnpin');
             }
             panelBodies[id] = inner;
             panelNodes[id] = node;
@@ -2685,12 +2688,14 @@
                     }
                     node.setAttribute('data-settled', '1');
                 }
-                var x = parseInt(node.style.left, 10) || 0;
-                var y = parseInt(node.style.top, 10) || 0;
-                var maxX = Math.max(0, windows.clientWidth - 80);
-                var maxY = Math.max(0, windows.clientHeight - 36);
-                if (x > maxX) node.style.left = maxX + 'px';
-                if (y > maxY) node.style.top = maxY + 'px';
+                var x = parseInt(node.style.left, 10);
+                var y = parseInt(node.style.top, 10);
+                if (!isFinite(x)) x = 12;
+                if (!isFinite(y)) y = 12;
+                var maxX = Math.max(8, windows.clientWidth - 80);
+                var maxY = Math.max(8, windows.clientHeight - 36);
+                if (x < 0 || x > maxX) node.style.left = Math.min(maxX, Math.max(8, x)) + 'px';
+                if (y < 0 || y > maxY) node.style.top = Math.min(maxY, Math.max(8, y)) + 'px';
             }
         }
 
@@ -4580,7 +4585,7 @@
             var editing = session.mode === 'edit' || !!session.templateId;
             bar.style.display = browse ? 'none' : '';
             body.style.display = browse ? 'none' : '';
-            body.style.gridTemplateColumns = 'minmax(0, 1fr)';
+            body.style.gridTemplateColumns = '';
             status.style.display = browse ? 'none' : '';
             gallery.style.display = browse ? '' : 'none';
             tools.style.display = '';
