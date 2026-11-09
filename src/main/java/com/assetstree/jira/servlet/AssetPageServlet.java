@@ -37,12 +37,13 @@ public class AssetPageServlet extends HttpServlet {
         String css = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/asset-tree.css?v=" + PluginInfo.VERSION;
         String qr = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/qr-code.js?v=" + PluginInfo.VERSION;
         String plan = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/plan-exchange.js?v=" + PluginInfo.VERSION;
+        String library = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/scheme-library.js?v=" + PluginInfo.VERSION;
         String scheme = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/schemes.js?v=" + PluginInfo.VERSION;
         String js = contextPath + "/download/resources/" + PluginInfo.KEY + ":asset-tree-web/asset-tree.js?v=" + PluginInfo.VERSION;
         String rest = contextPath + "/rest/asset-tree/1.0";
         String project = request.getParameter("project");
         String view = viewOf(request.getParameter("view"));
-        String html = fill(template(), language, title, css, qr, plan, scheme, js, rest, project, view);
+        String html = fill(template(), language, title, css, qr, plan, library, scheme, js, rest, project, view);
         response.setCharacterEncoding("UTF-8");
         response.setContentType("text/html; charset=UTF-8");
         response.setHeader("X-Content-Type-Options", "nosniff");
@@ -82,13 +83,14 @@ public class AssetPageServlet extends HttpServlet {
     }
 
     static String fill(String template, String language, String title, String css, String qr, String plan,
-                        String scheme, String js, String rest, String project, String view) {
+                        String library, String scheme, String js, String rest, String project, String view) {
         return template
                 .replace("@@LANG@@", escape(language))
                 .replace("@@TITLE@@", escape(title))
                 .replace("@@CSS@@", escape(css))
                 .replace("@@QR@@", escape(qr))
                 .replace("@@PLAN@@", escape(plan))
+                .replace("@@LIB@@", escape(library))
                 .replace("@@SCHEME@@", escape(scheme))
                 .replace("@@JS@@", escape(js))
                 .replace("@@REST@@", escape(rest))

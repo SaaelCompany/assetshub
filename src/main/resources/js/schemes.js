@@ -1977,6 +1977,8 @@
                 ctx.strokeStyle = part.c || '#172b4d';
                 ctx.fillStyle = part.f || 'transparent';
                 ctx.lineWidth = part.s || 1;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
                 if (part.t === 'r' || part.t === 'e') {
                     ctx.beginPath();
                     if (part.t === 'e') ctx.ellipse(part.x + part.w / 2, part.y + part.h / 2, Math.abs(part.w) / 2, Math.abs(part.h) / 2, 0, 0, Math.PI * 2);
@@ -1998,6 +2000,24 @@
                 }
                 ctx.restore();
             }
+        }
+
+        function symbolMark(def) {
+            var canvas = el('canvas', 'asset-tree-scheme-symbol-mark');
+            canvas.width = 72;
+            canvas.height = 56;
+            var ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#f7f8f9';
+            ctx.fillRect(0, 0, 72, 56);
+            var dw = def.w || 1;
+            var dh = def.h || 1;
+            var scale = Math.min(64 / dw, 48 / dh);
+            ctx.save();
+            ctx.translate((72 - dw * scale) / 2, (56 - dh * scale) / 2);
+            ctx.scale(scale, scale);
+            drawParts(ctx, def, 0, 0, dw, dh);
+            ctx.restore();
+            return canvas;
         }
 
         function pathOf(ctx, points, closed) {
@@ -3368,6 +3388,7 @@
                     card.type = 'button';
                     card.disabled = !api.canEdit || session.mode !== 'edit' || session.guest;
                     card.title = armed ? api.t('schemeTemplateOff') : name;
+                    card.appendChild(symbolMark(current));
                     card.appendChild(el('strong', null, name));
                     card.addEventListener('click', function () {
                         if (!api.canEdit || session.mode !== 'edit' || session.guest) return;
@@ -3475,7 +3496,14 @@
             }
             add(session.doc && session.doc.libraries);
             add(readStoredLibraries());
+            add(builtinLibraries());
             return out;
+        }
+
+        function builtinLibraries() {
+            if (!global.AssetTreeSchemeLibrary) return [];
+            var packs = global.AssetTreeSchemeLibrary();
+            return Array.isArray(packs) ? packs : [];
         }
 
         function cleanTemplate(item) {
