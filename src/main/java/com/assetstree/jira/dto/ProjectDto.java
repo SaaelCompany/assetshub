@@ -28,6 +28,8 @@ public class ProjectDto {
     private boolean canView = true;
     private boolean canReports = true;
     private boolean canMap = true;
+    private boolean canScheme = true;
+    private boolean canSchemeEdit;
     private String assetKey;
     private boolean treeObjects;
     private List<String> columns = new ArrayList<String>();
@@ -169,6 +171,10 @@ public class ProjectDto {
     public void setCanReports(boolean canReports) { this.canReports = canReports; }
     public boolean isCanMap() { return canMap; }
     public void setCanMap(boolean canMap) { this.canMap = canMap; }
+    public boolean isCanScheme() { return canScheme; }
+    public void setCanScheme(boolean canScheme) { this.canScheme = canScheme; }
+    public boolean isCanSchemeEdit() { return canSchemeEdit; }
+    public void setCanSchemeEdit(boolean canSchemeEdit) { this.canSchemeEdit = canSchemeEdit; }
 
     public String getAssetKey() {
         return assetKey;

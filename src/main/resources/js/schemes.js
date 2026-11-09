@@ -931,11 +931,21 @@
             return !!(obj && obj.type === 'asset' && binding && binding.workspaceId && String(binding.workspaceId) !== String(api.projectKey));
         }
 
+        function maySaveScheme() {
+            return !!api.canEdit || (!!session.guest && !!api.canPlace);
+        }
+
+        function mayPlacePins() {
+            if (session.mode !== 'edit') return false;
+            if (session.guest) return !!api.canPlace;
+            return !!api.canEdit;
+        }
+
         function mutableObject(obj) {
-            if (!api.canEdit || session.mode !== 'edit' || !obj) return false;
+            if (session.mode !== 'edit' || !obj) return false;
             if (foreignPin(obj)) return false;
-            if (session.guest) return ownPin(obj);
-            return true;
+            if (session.guest) return !!api.canPlace && ownPin(obj);
+            return !!api.canEdit;
         }
 
         function worldFrom(sx, sy) {
@@ -1932,7 +1942,7 @@
         }
 
         function removeSelection() {
-            if (!session.selection.length || !api.canEdit) return;
+            if (!session.selection.length || !mayPlacePins()) return;
             var floor = activeFloor();
             var drop = {};
             var any = false;
@@ -3676,7 +3686,9 @@
         }
 
         function removePlacedAsset(id) {
-            if (!api.canEdit || session.mode !== 'edit') return;
+            if (!mayPlacePins()) return;
+            var placed = placedAssetObject(id);
+            if (placed && !mutableObject(placed)) return;
             remember();
             (session.doc.floors || []).forEach(function (floor) {
                 floor.objects = (floor.objects || []).filter(function (obj) {
@@ -3691,7 +3703,8 @@
 
         function placeAsset(pt) {
             var asset = assetById(session.assetId);
-            if (!asset || !api.canEdit) return;
+            if (!asset || !mayPlacePins()) return;
+            if (session.guest && !ownPin({ type: 'asset', assetBinding: bindingOf(asset) })) return;
             remember();
             if (placedAssetObject(asset.id)) movePlacedAsset(asset.id, pt);
             else {
@@ -3768,7 +3781,7 @@
                     var row = el('div', 'asset-tree-scheme-asset' + (armed ? ' is-on' : ''));
                     var main = el('button', 'asset-tree-scheme-asset-main');
                     main.type = 'button';
-                    main.disabled = !api.canEdit || session.mode !== 'edit';
+                    main.disabled = !mayPlacePins();
                     main.title = armed ? api.t('schemeTemplateOff') : name;
                     var mark = typeMark(asset);
                     if (mark) main.appendChild(mark);
@@ -3791,7 +3804,7 @@
                         var drop = el('button', 'asset-tree-scheme-icon', '×');
                         drop.type = 'button';
                         drop.title = api.t('schemeAssetRemove');
-                        drop.disabled = !api.canEdit || session.mode !== 'edit';
+                        drop.disabled = !mayPlacePins();
                         drop.addEventListener('click', function (event) {
                             event.stopPropagation();
                             removePlacedAsset(asset.id);
@@ -4691,7 +4704,7 @@
 
         function save(done) {
             if (session.templateId) return;
-            if (!api.canEdit) return;
+            if (!maySaveScheme()) return;
             session.doc.name = nameInput.value || session.doc.name;
             var path = '/projects/' + encodeURIComponent(api.projectKey) + '/schemes';
             var method = session.id ? 'PUT' : 'POST';
@@ -4805,13 +4818,15 @@
             windows.style.display = editing ? '' : 'none';
             windowsBtn.style.display = editing ? '' : 'none';
             syncDocks();
-            editBtn.style.display = !browse && !editing && api.canEdit ? '' : 'none';
+            var mayEnter = !!api.canEdit || (!!session.guest && !!api.canPlace);
+            editBtn.style.display = !browse && !editing && mayEnter ? '' : 'none';
+            saveBtn.disabled = !mayEnter;
             backBtn.style.display = browse ? 'none' : '';
-            saveBtn.style.display = editing ? '' : 'none';
+            saveBtn.style.display = editing && mayEnter ? '' : 'none';
             saveBtn.textContent = session.templateId ? api.t('schemeTemplateSave') : api.t('save');
             newBtn.style.display = !browse && !session.templateId && api.canEdit ? '' : 'none';
-            deleteBtn.style.display = editing && !session.templateId && !session.guest ? '' : 'none';
-            shareBtn.style.display = editing && !session.templateId && !session.guest && session.id ? '' : 'none';
+            deleteBtn.style.display = editing && api.canEdit && !session.templateId && !session.guest ? '' : 'none';
+            shareBtn.style.display = editing && api.canEdit && !session.templateId && !session.guest && session.id ? '' : 'none';
             guestNote.style.display = session.guest && !browse && !session.templateId ? '' : 'none';
             guestNote.textContent = session.guest ? api.t('schemeGuestHint', session.ownerKey || '') : '';
             nameInput.disabled = !api.canEdit || !!session.guest;
@@ -4939,7 +4954,7 @@
                 });
                 var edit = el('button', 'asset-tree-scheme-save', api.t('schemeEdit'));
                 edit.type = 'button';
-                edit.disabled = !api.canEdit;
+                edit.disabled = row.shared ? !api.canPlace : !api.canEdit;
                 edit.addEventListener('click', function (event) {
                     event.stopPropagation();
                     openScheme(row.id, 'edit');
@@ -5221,11 +5236,11 @@
                         else session.selection.push(id);
                     } else if (session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
                     else session.selection = withGroup(session.selection);
-                    if (api.canEdit && selectedObjects().some(function (obj) { return mutableObject(obj); })) {
+                    if (selectedObjects().some(function (obj) { return mutableObject(obj); })) {
                         remember();
                         drag = { mode: 'move', x: pt.x, y: pt.y, lastX: pt.x, lastY: pt.y, moved: false };
                     }
-                } else if (session.assetId && api.canEdit) {
+                } else if (session.assetId && mayPlacePins()) {
                     placeAsset(pt);
                     return;
                 } else {
@@ -6095,7 +6110,7 @@
             if (!next || next === session.id) return;
             var target = next;
             var nextMode = session.mode === 'edit' ? 'edit' : 'view';
-            if (session.dirty && api.canEdit) save(function () { openScheme(target, nextMode); });
+            if (session.dirty && maySaveScheme()) save(function () { openScheme(target, nextMode); });
             else openScheme(target, nextMode);
         });
         saveBtn.addEventListener('click', function () {
@@ -6104,7 +6119,8 @@
         });
         shareBtn.addEventListener('click', openShare);
         editBtn.addEventListener('click', function () {
-            if (!api.canEdit || session.templateId) return;
+            if (session.templateId) return;
+            if (!maySaveScheme()) return;
             session.mode = 'edit';
             showMode();
             renderProps();
@@ -6119,8 +6135,8 @@
                 session.mode = 'browse';
                 showMode();
             };
-            if (session.dirty && api.canEdit && session.id) save(leave);
-            else if (session.dirty && api.canEdit && !session.id) save(leave);
+            if (session.dirty && maySaveScheme() && session.id) save(leave);
+            else if (session.dirty && maySaveScheme() && !session.id) save(leave);
             else leave();
         });
         deleteBtn.addEventListener('click', function () {
@@ -6145,7 +6161,7 @@
                 return;
             }
             if (session.templateId || session.mode === 'browse') return;
-            if (session.dirty && api.canEdit && session.loaded) save();
+            if (session.dirty && session.loaded && maySaveScheme()) save();
         }, 30000);
         global.addEventListener('resize', paint);
         session.repaint = function () {

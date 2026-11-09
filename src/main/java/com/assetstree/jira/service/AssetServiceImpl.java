@@ -6612,6 +6612,8 @@ public class AssetServiceImpl implements AssetService {
         dto.setCanView(open);
         dto.setCanReports(open || hasCap(user, project, GrantCaps.REPORTS));
         dto.setCanMap(open || hasCap(user, project, GrantCaps.MAP));
+        dto.setCanScheme(open || hasCap(user, project, GrantCaps.SCHEME));
+        dto.setCanSchemeEdit(hasCap(user, project, GrantCaps.SCHEME_EDIT));
     }
 
     private boolean canArrangeTypes(ApplicationUser user, Project project) {
@@ -6639,6 +6641,12 @@ public class AssetServiceImpl implements AssetService {
         }
         if (GrantCaps.ADMIN.equals(cap)) {
             return false;
+        }
+        if (GrantCaps.SCHEME_EDIT.equals(cap)) {
+            if (permissionManager().hasPermission(ProjectPermissions.ADMINISTER_PROJECTS, project, user)) {
+                return true;
+            }
+            return canOpen(user, project) && hasGlobalManage(user);
         }
         if (permissionManager().hasPermission(ProjectPermissions.ADMINISTER_PROJECTS, project, user)) {
             return true;
@@ -9901,7 +9909,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public List<SchemeDocumentDto> schemes(ApplicationUser user, String projectKey) {
-        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.MAP);
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.SCHEME);
         requireModule(project.getKey(), ProjectModules.MAP);
         return ao().executeInTransaction(new TransactionCallback<List<SchemeDocumentDto>>() {
             @Override
@@ -9939,7 +9947,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public SchemeDocumentDto scheme(ApplicationUser user, String projectKey, final int schemeId) {
-        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.MAP);
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.SCHEME);
         requireModule(project.getKey(), ProjectModules.MAP);
         return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
             @Override
@@ -9951,7 +9959,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public SchemeDocumentDto createScheme(ApplicationUser user, String projectKey, final SchemeDocumentDto draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.SCHEME_EDIT);
         requireModule(project.getKey(), ProjectModules.MAP);
         return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
             @Override
@@ -9965,7 +9973,14 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public SchemeDocumentDto saveScheme(ApplicationUser user, String projectKey, final int schemeId, final SchemeDocumentDto draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireUser(user);
+        if (projectKey == null || projectKey.trim().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.project.required");
+        }
+        final Project project = project(projectKey.trim());
+        if (project == null) {
+            throw new AssetException(404, "asset-tree.error.project.notFound");
+        }
         requireModule(project.getKey(), ProjectModules.MAP);
         return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
             @Override
@@ -9975,6 +9990,9 @@ public class AssetServiceImpl implements AssetService {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
                 if (ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    if (!hasCap(user, project, GrantCaps.SCHEME_EDIT)) {
+                        throw new AssetException(403, "asset-tree.error.forbidden");
+                    }
                     SchemeDocumentDto stored = new SchemeDocumentDto();
                     stored.setName(draft == null ? null : draft.getName());
                     stored.setBody(SchemeDocuments.stripGuestAssets(draft == null ? null : draft.getBody(), project.getKey()));
@@ -9985,8 +10003,11 @@ public class AssetServiceImpl implements AssetService {
                 if (!sharedWith(schemeId, project.getKey())) {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
+                if (!canOpen(user, project) && !hasCap(user, project, GrantCaps.SCHEME)) {
+                    throw new AssetException(403, "asset-tree.error.forbidden");
+                }
                 String pins = SchemeDocuments.takeProjectAssets(draft == null ? null : draft.getBody(), project.getKey());
-                writePlacements(schemeId, project.getKey(), ownedPlacements(project.getKey(), pins));
+                writePlacements(schemeId, project.getKey(), ownedPlacements(user, project, pins));
                 SchemeDocumentDto saved = new SchemeDocumentDto();
                 saved.setId(row.getID());
                 saved.setName(row.getName());
@@ -10000,7 +10021,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public SchemeDocumentDto shareScheme(ApplicationUser user, String projectKey, final int schemeId, final SchemeDocumentDto draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.SCHEME_EDIT);
         requireModule(project.getKey(), ProjectModules.MAP);
         return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
             @Override
@@ -10040,7 +10061,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteScheme(ApplicationUser user, String projectKey, final int schemeId) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.SCHEME_EDIT);
         requireModule(project.getKey(), ProjectModules.MAP);
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
@@ -10156,7 +10177,8 @@ public class AssetServiceImpl implements AssetService {
         row.save();
     }
 
-    private String ownedPlacements(String projectKey, String placements) {
+    private String ownedPlacements(ApplicationUser user, Project project, String placements) {
+        String projectKey = project.getKey();
         try {
             JSONArray source = new JSONArray(placements == null || placements.trim().isEmpty() ? "[]" : placements);
             JSONArray kept = new JSONArray();
@@ -10168,7 +10190,7 @@ public class AssetServiceImpl implements AssetService {
                 }
                 JSONObject binding = object.optJSONObject("assetBinding");
                 int assetId = bindingAssetId(binding);
-                if (!equipmentInProject(projectKey, assetId)) {
+                if (!mayPlaceAsset(user, project, assetId)) {
                     continue;
                 }
                 binding.put("workspaceId", projectKey);
@@ -10204,6 +10226,33 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         return value;
+    }
+
+    private boolean mayPlaceAsset(ApplicationUser user, Project project, int assetId) {
+        if (project == null || !equipmentInProject(project.getKey(), assetId)) {
+            return false;
+        }
+        if (hasCap(user, project, GrantCaps.OBJECT) || hasCap(user, project, GrantCaps.SCHEME_EDIT)) {
+            return true;
+        }
+        AssetEntity asset = ao().get(AssetEntity.class, assetId);
+        if (asset == null || user == null || user.getKey() == null) {
+            return false;
+        }
+        String key = user.getKey();
+        if (key.equals(asset.getCustodianKey()) || key.equals(asset.getIssuedKey())) {
+            return true;
+        }
+        AssetShareEntity[] shares = ao().find(AssetShareEntity.class, "ASSET_ID = ?", Integer.valueOf(assetId));
+        if (shares == null) {
+            return false;
+        }
+        for (int i = 0; i < shares.length; i++) {
+            if (key.equals(shares[i].getUserKey())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean equipmentInProject(String projectKey, int assetId) {

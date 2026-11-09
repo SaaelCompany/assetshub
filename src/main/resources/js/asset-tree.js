@@ -916,7 +916,7 @@
         return trigger;
     }
 
-    var CAP_KEYS = ['view', 'places', 'types', 'object', 'assets', 'admin', 'reports', 'map'];
+    var CAP_KEYS = ['view', 'places', 'types', 'object', 'assets', 'admin', 'reports', 'map', 'scheme', 'schemeEdit'];
     var CAP_CHOICES = CAP_KEYS;
 
     function applyRights(project) {
@@ -941,6 +941,8 @@
         state.canView = present('canView') ? !!project.canView : true;
         state.canReports = present('canReports') ? !!project.canReports : state.canView;
         state.canMap = present('canMap') ? !!project.canMap : state.canView;
+        state.canScheme = present('canScheme') ? !!project.canScheme : !!(state.canView || state.canMap);
+        state.canSchemeEdit = present('canSchemeEdit') ? !!project.canSchemeEdit : false;
     }
 
     function mayEdit(asset) {
@@ -950,15 +952,23 @@
 
     function grantCaps(grant) {
         if (grant && grant.caps) {
-            return String(grant.caps).split(',').map(function (item) { return item.trim(); }).filter(function (item) {
+            var listed = String(grant.caps).split(',').map(function (item) { return item.trim(); }).filter(function (item) {
                 return CAP_KEYS.indexOf(item) >= 0;
             });
+            if (listed.indexOf('admin') >= 0 || listed.indexOf('assets') >= 0) {
+                if (listed.indexOf('scheme') < 0) listed.push('scheme');
+                if (listed.indexOf('schemeEdit') < 0) listed.push('schemeEdit');
+            }
+            if (listed.indexOf('schemeEdit') >= 0 && listed.indexOf('scheme') < 0) listed.push('scheme');
+            return listed;
         }
         if (grant && grant.level === 'admin') return CAP_KEYS.slice();
-        if (grant && grant.level === 'assets' || grant && grant.level === 'manage') return ['view', 'places', 'types', 'object', 'assets'];
+        if (grant && grant.level === 'assets' || grant && grant.level === 'manage') return ['view', 'places', 'types', 'object', 'assets', 'scheme', 'schemeEdit'];
         if (grant && grant.level === 'edit') return ['view', 'places', 'object'];
         if (grant && grant.level === 'reports') return ['reports'];
         if (grant && grant.level === 'map') return ['map'];
+        if (grant && grant.level === 'schemeEdit') return ['scheme', 'schemeEdit'];
+        if (grant && grant.level === 'scheme') return ['scheme'];
         return ['view'];
     }
 
@@ -971,7 +981,9 @@
             assets: 'roleAssets',
             admin: 'roleAdmin',
             reports: 'roleReports',
-            map: 'roleMap'
+            map: 'roleMap',
+            scheme: 'roleScheme',
+            schemeEdit: 'roleSchemeEdit'
         };
         return t(names[key] || 'roleView');
     }
@@ -985,7 +997,9 @@
             assets: 'roleAssetsHint',
             admin: 'roleAdminHint',
             reports: 'roleReportsHint',
-            map: 'roleMapHint'
+            map: 'roleMapHint',
+            scheme: 'roleSchemeHint',
+            schemeEdit: 'roleSchemeEditHint'
         };
         return t(names[key] || 'roleViewHint');
     }
@@ -993,7 +1007,10 @@
     function roleOn(chosen, key, checked) {
         if (checked) {
             chosen[key] = true;
-            if (key === 'reports' || key === 'map') return;
+            if (key === 'reports' || key === 'map' || key === 'scheme' || key === 'schemeEdit') {
+                if (key === 'schemeEdit') chosen.scheme = true;
+                return;
+            }
             chosen.view = true;
             if (key === 'assets' || key === 'admin') {
                 chosen.places = true;
@@ -1013,6 +1030,11 @@
             chosen.admin = false;
             return;
         }
+        if (key === 'scheme') {
+            chosen.schemeEdit = false;
+            return;
+        }
+        if (key === 'schemeEdit') return;
         if (key !== 'admin') chosen.assets = false;
         chosen.admin = false;
     }
@@ -1028,7 +1050,10 @@
             present.types = true;
             present.object = true;
             present.assets = true;
+            present.scheme = true;
+            present.schemeEdit = true;
         }
+        if (present.schemeEdit) present.scheme = true;
         if (present.admin) present.admin = true;
         if (present.places || present.types || present.object) present.view = true;
         var visible = CAP_KEYS.filter(function (key) {
@@ -2229,7 +2254,7 @@
         if (moduleOn('reports') && (state.canView !== false || state.canReports)) {
             items.push({ view: 'reports', label: t('menuReports'), group: 'tools' });
         }
-        if (moduleOn('map') && (state.canView !== false || state.canMap)) {
+        if (moduleOn('map') && (state.canScheme || state.canView !== false || state.canMap)) {
             items.push({ view: 'map', label: t('menuMap'), group: 'tools' });
         }
         if (state.canManage && state.canView !== false) {
@@ -14517,6 +14542,23 @@
         selectAsset(asset.id, true);
     }
 
+    function schemeAssetAllowed(asset) {
+        if (!asset || isFolder(asset)) return false;
+        if (state.canSchemeEdit || state.canObjects) return true;
+        var key = state.userKey || '';
+        if (!key) return false;
+        function person(value) {
+            return value && value.userKey === key;
+        }
+        if (person(asset.custodian) || person(asset.issued)) return true;
+        var shares = asset.shares || [];
+        var i;
+        for (i = 0; i < shares.length; i++) {
+            if (person(shares[i])) return true;
+        }
+        return false;
+    }
+
     function equipmentAssets() {
         return (state.assets || []).filter(function (asset) {
             return asset && !isFolder(asset);
@@ -23754,7 +23796,7 @@
             host.appendChild(el('p', null, t('schemeMissing')));
             return host;
         }
-        var assets = equipmentAssets().map(function (asset) {
+        var assets = equipmentAssets().filter(schemeAssetAllowed).map(function (asset) {
             var attributes = {};
             var list = asset.attributes || [];
             var i;
@@ -23791,7 +23833,8 @@
             t: t,
             ajax: ajax,
             projectKey: state.projectKey,
-            canEdit: !!state.canEdit,
+            canEdit: !!state.canSchemeEdit,
+            canPlace: !!state.canSchemeEdit || !!state.canObjects || equipmentAssets().some(schemeAssetAllowed),
             say: notify,
             assets: assets,
             places: places,
