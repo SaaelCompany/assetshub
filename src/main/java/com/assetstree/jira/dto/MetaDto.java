@@ -22,6 +22,7 @@ public class MetaDto {
     private List<String> mineColumns;
     private String mineSortKey;
     private String mineSortDir;
+    private String portalLayout;
     private Map<String, String> i18n = new LinkedHashMap<String, String>();
     private List<ProjectDto> projects = new ArrayList<ProjectDto>();
 
@@ -135,5 +136,13 @@ public class MetaDto {
 
     public void setMineSortDir(String mineSortDir) {
         this.mineSortDir = mineSortDir;
+    }
+
+    public String getPortalLayout() {
+        return portalLayout;
+    }
+
+    public void setPortalLayout(String portalLayout) {
+        this.portalLayout = portalLayout;
     }
 }

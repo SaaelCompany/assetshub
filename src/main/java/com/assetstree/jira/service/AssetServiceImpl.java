@@ -78,6 +78,7 @@ import com.assetstree.jira.ao.PortalRuleEntity;
 import com.assetstree.jira.ao.ProjectAssetKeyEntity;
 import com.assetstree.jira.ao.ProjectGrantEntity;
 import com.assetstree.jira.ao.ProjectStatusEntity;
+import com.assetstree.jira.ao.PortalLayoutEntity;
 import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.ao.FloorEntity;
 import com.assetstree.jira.ao.IdempotencyEntity;
@@ -200,6 +201,7 @@ import com.assetstree.jira.model.PlaceHistory;
 import com.assetstree.jira.model.PortalConditionDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.model.StatusDraft;
+import com.assetstree.jira.model.PortalLayouts;
 import com.assetstree.jira.model.ProjectKeys;
 import com.assetstree.jira.model.StatusCategories;
 import com.assetstree.jira.model.AccessScope;
@@ -465,8 +467,59 @@ public class AssetServiceImpl implements AssetService {
         attachAssetKeys(projects);
         attachViews(projects);
         attachMine(meta, user);
+        meta.setPortalLayout(readPortalLayoutOutside());
         meta.setProjects(projects);
         return meta;
+    }
+
+    @Override
+    public String savePortalLayout(ApplicationUser user, String projectKey, final String layout) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
+        requireModule(project.getKey(), ProjectModules.PORTAL);
+        if (!PortalLayouts.known(layout)) {
+            throw new AssetException(400, "asset-tree.error.portalLayout");
+        }
+        final String clean = PortalLayouts.canonical(layout);
+        return ao().executeInTransaction(new TransactionCallback<String>() {
+            @Override
+            public String doInTransaction() {
+                PortalLayoutEntity[] rows = ao().find(PortalLayoutEntity.class);
+                PortalLayoutEntity row;
+                if (rows == null || rows.length == 0) {
+                    row = ao().create(PortalLayoutEntity.class, new DBParam("LAYOUT", clean));
+                } else {
+                    row = rows[0];
+                    for (int i = 1; i < rows.length; i++) {
+                        ao().delete(rows[i]);
+                    }
+                }
+                row.setLayout(clean);
+                row.save();
+                return clean;
+            }
+        });
+    }
+
+    private String readPortalLayoutOutside() {
+        try {
+            return ao().executeInTransaction(new TransactionCallback<String>() {
+                @Override
+                public String doInTransaction() {
+                    return readPortalLayout();
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.warn("Portal layout was not loaded", ex);
+            return PortalLayouts.TILES;
+        }
+    }
+
+    private String readPortalLayout() {
+        PortalLayoutEntity[] rows = ao().find(PortalLayoutEntity.class);
+        if (rows == null || rows.length == 0) {
+            return PortalLayouts.TILES;
+        }
+        return PortalLayouts.canonical(rows[0].getLayout());
     }
 
     /** One broken pattern must not hide every label and block the asset screen. */
@@ -4556,6 +4609,7 @@ public class AssetServiceImpl implements AssetService {
                 page.setProjects(groups);
                 page.setTotal(total);
                 page.setTotalLabel(portalCount(total));
+                page.setLayout(readPortalLayout());
                 return page;
             }
         });
