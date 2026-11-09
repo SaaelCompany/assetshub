@@ -11131,21 +11131,7 @@
             if (mark === state.treeMark) return;
             state.treeMark = mark;
             if (state.busy || state.dirty || state.loading) return;
-            var known = {};
-            (state.assets || []).forEach(function (asset) { known[asset.id] = true; });
             reloadTree(function () {
-                var index = byId();
-                (state.assets || []).forEach(function (asset) {
-                    if (known[asset.id]) return;
-                    var parent = asset.parentId;
-                    var guard = 0;
-                    while (parent && guard < 40) {
-                        state.expanded[parent] = true;
-                        var node = index[parent];
-                        parent = node ? node.parentId : null;
-                        guard++;
-                    }
-                });
                 if (state.view === 'all' || state.view === 'mine') renderFrame();
             });
         });
