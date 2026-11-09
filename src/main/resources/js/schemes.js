@@ -3351,8 +3351,10 @@
             libraryFile.type = 'file';
             libraryFile.accept = 'application/json,.json';
             libraryFile.style.display = 'none';
-            var loadLibrary = el('button', 'asset-tree-scheme-mini', api.t('schemeLibraryLoad'));
+            var loadLibrary = el('button', 'asset-tree-scheme-mini');
             loadLibrary.type = 'button';
+            loadLibrary.title = api.t('schemeLibraryLoad');
+            loadLibrary.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12V4M5 7l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
             loadLibrary.disabled = !api.canEdit || !!session.guest;
             loadLibrary.addEventListener('click', function () { libraryFile.click(); });
             libraryFile.addEventListener('change', function () {
@@ -3360,13 +3362,15 @@
                 libraryFile.value = '';
                 if (picked) importLibraryFile(picked);
             });
-            var saveLibrary = el('button', 'asset-tree-scheme-mini', api.t('schemeLibrarySave'));
+            var saveLibrary = el('button', 'asset-tree-scheme-mini');
             saveLibrary.type = 'button';
+            saveLibrary.title = api.t('schemeLibrarySave');
+            saveLibrary.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4v8M5 9l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
             saveLibrary.addEventListener('click', exportLibraryFile);
+            libraryRow.appendChild(symbolSearch);
             libraryRow.appendChild(loadLibrary);
             libraryRow.appendChild(saveLibrary);
             libraryRow.appendChild(libraryFile);
-            bin.appendChild(symbolSearch);
             bin.appendChild(libraryRow);
             bin.appendChild(symbolList);
             paintSymbols();
