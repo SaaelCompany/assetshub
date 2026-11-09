@@ -494,11 +494,14 @@
         function nearestSide(node) {
             var area = windows.getBoundingClientRect();
             var rect = node.getBoundingClientRect();
-            var cx = ((rect.left + rect.right) / 2) - area.left;
-            var cy = ((rect.top + rect.bottom) / 2) - area.top;
             var width = area.width || windows.clientWidth || 1;
             var height = area.height || windows.clientHeight || 1;
-            var dist = { left: cx, right: width - cx, top: cy, bottom: height - cy };
+            var dist = {
+                left: rect.left - area.left,
+                right: area.right - rect.right,
+                top: rect.top - area.top,
+                bottom: area.bottom - rect.bottom
+            };
             var side = 'left';
             var best = dist.left;
             ['right', 'top', 'bottom'].forEach(function (name) {
@@ -507,6 +510,8 @@
                     side = name;
                 }
             });
+            var reach = (side === 'left' || side === 'right') ? Math.min(160, width * 0.28) : Math.min(120, height * 0.28);
+            if (best > reach) return 'free';
             return side;
         }
         function syncDocks() {
@@ -526,6 +531,11 @@
         }
         function placePinned(node) {
             var side = node.getAttribute('data-side');
+            if (side === 'free') {
+                if (node.parentNode !== windows) windows.appendChild(node);
+                node.classList.add('is-pinned');
+                return;
+            }
             if (side !== 'left' && side !== 'right' && side !== 'top' && side !== 'bottom') side = 'right';
             node.setAttribute('data-side', side);
             var dock = dockBySide(side);
@@ -636,7 +646,7 @@
             var homes = { tools: 'left', symbols: 'left', assets: 'left', props: 'right', floors: 'right', layers: 'right', rooms: 'right' };
             if (saved.pinned !== false) {
                 var kept = saved.side;
-                if (kept !== 'left' && kept !== 'right' && kept !== 'top' && kept !== 'bottom') kept = homes[id] || 'left';
+                if (kept !== 'left' && kept !== 'right' && kept !== 'top' && kept !== 'bottom' && kept !== 'free') kept = homes[id] || 'left';
                 node.setAttribute('data-side', kept);
                 placePinned(node);
                 pin.classList.add('is-on');
@@ -2675,8 +2685,13 @@
             for (id in panelNodes) {
                 var node = panelNodes[id];
                 if (node.classList.contains('is-pinned')) {
-                    var home = dockBySide(node.getAttribute('data-side'));
-                    if (node.parentNode !== home) placePinned(node);
+                    var side = node.getAttribute('data-side');
+                    if (side === 'free') {
+                        if (node.parentNode !== windows) windows.appendChild(node);
+                    } else {
+                        var home = dockBySide(side);
+                        if (node.parentNode !== home) placePinned(node);
+                    }
                     continue;
                 }
                 if (!node.getAttribute('data-settled')) {
