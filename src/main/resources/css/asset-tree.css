@@ -13269,31 +13269,32 @@ button.asset-tree-attach-remove {
 
 .asset-tree-scheme-dock {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
     min-height: 0;
-    overflow: auto;
-    padding: 6px;
+    overflow: hidden;
+    padding: 8px;
     background: #f4f5f7;
 }
 
 .asset-tree-scheme-dock.is-left {
     grid-area: scheme-left;
     flex-direction: column;
+    width: 268px;
 }
 
 .asset-tree-scheme-dock.is-right {
     grid-area: scheme-right;
     flex-direction: column;
+    width: 268px;
 }
 
 .asset-tree-scheme-dock.is-top,
 .asset-tree-scheme-dock.is-bottom {
     flex-direction: row;
     align-items: stretch;
-    max-height: 42%;
-    overflow-x: auto;
-    overflow-y: hidden;
+    max-height: 196px;
+    overflow: hidden;
 }
 
 .asset-tree-scheme-dock.is-top {
@@ -13339,40 +13340,54 @@ button.asset-tree-attach-remove {
     display: none;
 }
 
-.asset-tree-scheme-window.is-pinned {
+.asset-tree-scheme-dock .asset-tree-scheme-window.is-pinned {
     position: relative;
     left: auto !important;
     top: auto !important;
-    width: 248px !important;
-    max-height: 70%;
-    flex: 0 0 auto;
+    width: auto !important;
+    max-width: none;
+    max-height: none;
+    flex: 0 1 auto;
+    max-height: 100%;
+    min-width: 0;
     min-height: 0;
     box-shadow: none;
 }
 
 .asset-tree-scheme-dock.is-top .asset-tree-scheme-window.is-pinned,
 .asset-tree-scheme-dock.is-bottom .asset-tree-scheme-window.is-pinned {
-    width: auto !important;
-    min-width: 220px;
-    max-width: 520px;
-    max-height: 220px;
+    flex: 1 1 auto;
+    max-height: 180px;
 }
 
 .asset-tree-scheme-dock.is-top .asset-tree-scheme-window-body,
 .asset-tree-scheme-dock.is-bottom .asset-tree-scheme-window-body {
+    max-height: 148px;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.asset-tree-scheme-dock.is-top .asset-tree-scheme-tools,
+.asset-tree-scheme-dock.is-bottom .asset-tree-scheme-tools {
     display: flex;
     flex-flow: row wrap;
-    align-content: flex-start;
-    align-items: flex-start;
-    gap: 4px;
+    width: 100%;
+    min-width: 0;
+    gap: 2px;
 }
 
 #asset-tree-app .asset-tree-scheme-dock.is-top .asset-tree-scheme-tool,
 #asset-tree-app .asset-tree-scheme-dock.is-bottom .asset-tree-scheme-tool {
     width: auto;
+    flex: 0 0 auto;
 }
 
-.asset-tree-scheme-window.is-pinned.is-collapsed {
+.asset-tree-scheme-windows > .asset-tree-scheme-window.is-pinned {
+    position: absolute;
+    box-shadow: 0 8px 24px rgba(9, 30, 66, 0.18);
+}
+
+.asset-tree-scheme-dock .asset-tree-scheme-window.is-pinned.is-collapsed {
     flex: 0 0 auto;
     max-height: none;
 }
@@ -13440,8 +13455,14 @@ button.asset-tree-attach-remove {
 
 .asset-tree-scheme-window-body {
     min-height: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding: 8px;
+    scrollbar-width: thin;
+}
+
+.asset-tree-scheme-dock .asset-tree-scheme-window.is-pinned .asset-tree-scheme-window-body {
+    flex: 1 1 auto;
 }
 
 .asset-tree-scheme-window-body .asset-tree-scheme-tools {
