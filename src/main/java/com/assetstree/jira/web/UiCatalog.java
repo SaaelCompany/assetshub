@@ -1196,6 +1196,8 @@ public final class UiCatalog {
             "schemeToolWindow",
             "schemeToolMarker",
             "schemeMarkerHint",
+            "schemeToolDropper",
+            "schemeDropperHint",
             "schemeNew",
             "schemeReadout",
             "schemeGrid",

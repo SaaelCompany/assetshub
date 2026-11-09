@@ -246,7 +246,8 @@
             ['dimension', 'D', 'schemeToolDim'],
             ['door', '', 'schemeToolDoor'],
             ['window', '', 'schemeToolWindow'],
-            ['marker', 'M', 'schemeToolMarker']
+            ['marker', 'M', 'schemeToolMarker'],
+            ['dropper', 'I', 'schemeToolDropper']
         ];
         toolDefs.forEach(function (item) {
             var button = el('button', 'asset-tree-scheme-tool');
@@ -289,12 +290,19 @@
                 chips[i].classList.toggle('is-on', chips[i].getAttribute('data-ink') === (session.ink || ''));
             }
         }
-        function chooseInk(color) {
+        function chooseInk(color, custom) {
             session.ink = color;
             rememberInk();
             markSwatches();
+            if (custom) showCustom(color);
             if (selectedObjects().length) paintSelection(color);
             else paint();
+        }
+        function showCustom(color) {
+            if (!/^#[0-9a-fA-F]{6}$/.test(color || '')) return;
+            customChip.classList.add('is-set');
+            customChip.style.background = color;
+            customInk.value = color;
         }
         inkColors.forEach(function (color) {
             var chip = el('span', 'asset-tree-scheme-swatch');
@@ -308,11 +316,9 @@
         customChip.title = api.t('schemeColor');
         var customInk = el('input', 'asset-tree-scheme-swatch-input');
         customInk.type = 'color';
-        customInk.value = /^#[0-9a-fA-F]{6}$/.test(session.ink || '') ? session.ink : '#ffe380';
-        customChip.style.background = customInk.value;
+        customInk.value = '#ff5630';
         customInk.addEventListener('input', function () {
-            customChip.style.background = customInk.value;
-            chooseInk(customInk.value);
+            chooseInk(customInk.value, true);
         });
         customChip.appendChild(customInk);
         swatches.appendChild(customChip);
@@ -795,6 +801,7 @@
                 door: '<path d="M8 19V6h5a7 7 0 0 1 0 13"/>',
                 window: '<rect x="5" y="6" width="14" height="12"/><path d="M12 6v12M5 12h14"/>',
                 marker: '<path d="M4 18l8-8 3 3-8 8H4z"/><path d="M12 10l3-3 2 2-3 3"/><path d="M15 5l3-2 3 3-2 3"/>',
+                dropper: '<path d="M14 4l4 4-1.5 1.5-4-4z"/><path d="M11.2 8.3l-6.4 6.4a1.6 1.6 0 0 0 2.3 2.3l6.4-6.4"/>',
                 eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/>',
                 eyeOff: '<path d="M4 5l16 14M9.5 9.7A4 4 0 0 0 14.3 14.5M6.1 6.8C3.7 8.4 2 12 2 12s3.5 6 10 6c1.7 0 3.2-.4 4.5-1.1M10.1 6.2C10.7 6.1 11.3 6 12 6c6.5 0 10 6 10 6a18 18 0 0 1-2.4 3"/>',
                 lock: '<rect x="6" y="11" width="12" height="8" rx="1"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
@@ -902,6 +909,7 @@
 
         function markTools() {
             if (session.guest && session.tool && session.tool !== 'select') session.tool = 'select';
+            if (stage) stage.style.cursor = session.tool === 'dropper' ? 'crosshair' : '';
             var buttons = tools.querySelectorAll('button');
             var i;
             for (i = 0; i < buttons.length; i++) {
@@ -1179,6 +1187,34 @@
                 if (rooms[i].points && pointInPoly(wx, wy, rooms[i].points)) return 'room:' + rooms[i].id;
             }
             return '';
+        }
+
+        function objectById(id) {
+            var floor = activeFloor();
+            var list = (floor.objects || []).concat(floor.rooms || []);
+            var i;
+            for (i = 0; i < list.length; i++) {
+                if (list[i].id === id || ('room:' + list[i].id) === id) return list[i];
+            }
+            return null;
+        }
+
+        function sampleInk(sx, sy, point) {
+            var obj = objectById(hit(point.x, point.y));
+            if (obj && obj.fill && /^#[0-9a-fA-F]{6}$/.test(obj.fill)) return obj.fill;
+            if (obj && obj.color && /^#[0-9a-fA-F]{6}$/.test(obj.color)) return obj.color;
+            try {
+                var ratio = global.devicePixelRatio || 1;
+                var pixel = sceneC.getContext('2d').getImageData(Math.max(0, Math.floor(sx * ratio)), Math.max(0, Math.floor(sy * ratio)), 1, 1).data;
+                if (pixel[3] < 24) return '';
+                function hex(n) {
+                    var text = n.toString(16);
+                    return text.length < 2 ? '0' + text : text;
+                }
+                return '#' + hex(pixel[0]) + hex(pixel[1]) + hex(pixel[2]);
+            } catch (error) {
+                return '';
+            }
         }
 
         function hitsObject(obj, wx, wy, tol) {
@@ -3020,6 +3056,7 @@
                 (session.typed ? '   ' + session.typed : '');
             if (session.tool === 'wall') status.textContent += '   ' + api.t('schemeWallOne');
             if (session.tool === 'marker') status.textContent += '   ' + api.t('schemeMarkerHint');
+            if (session.tool === 'dropper') status.textContent += '   ' + api.t('schemeDropperHint');
         }
 
         function liveLength() {
@@ -5258,6 +5295,11 @@
                 placeOpening(session.tool, pt);
                 return;
             }
+            if (session.tool === 'dropper') {
+                var picked = sampleInk(sx, sy, pt);
+                if (picked) chooseInk(picked, true);
+                return;
+            }
             if (session.tool === 'marker') {
                 var raw = worldFrom(sx, sy);
                 session.draft = { tool: 'marker', points: [{ x: raw.x, y: raw.y }] };
@@ -5997,7 +6039,7 @@
                 session.osnapIndex = (session.osnapIndex + 1) % session.osnapList.length;
                 return;
             }
-            var hot = { v: 'select', l: 'line', r: 'rect', e: 'ellipse', p: 'polyline', w: 'wall', t: 'text', d: 'dimension', m: 'marker' };
+            var hot = { v: 'select', l: 'line', r: 'rect', e: 'ellipse', p: 'polyline', w: 'wall', t: 'text', d: 'dimension', m: 'marker', i: 'dropper' };
             if (!event.ctrlKey && !event.metaKey && !event.altKey && hot[event.key]) {
                 if (session.guest && hot[event.key] !== 'select') return;
                 session.tool = hot[event.key];
