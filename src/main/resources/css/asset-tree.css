@@ -13365,7 +13365,9 @@ button.asset-tree-attach-remove {
 .asset-tree-scheme-dock.is-left .asset-tree-scheme-window.is-pinned,
 .asset-tree-scheme-dock.is-right .asset-tree-scheme-window.is-pinned {
     width: 100% !important;
-    min-height: 36px;
+    min-height: 0;
+    flex: 1 1 0;
+    overflow: hidden;
 }
 
 .asset-tree-scheme-dock.is-left .asset-tree-scheme-window.is-pinned.is-sized,
@@ -13541,11 +13543,32 @@ button.asset-tree-attach-remove {
 }
 
 .asset-tree-scheme-window-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
     min-height: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
+    overflow: hidden;
     padding: 8px;
     scrollbar-width: thin;
+}
+
+.asset-tree-scheme-window-body > .asset-tree-scheme-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.asset-tree-scheme-window-body .asset-tree-scheme-asset-list,
+.asset-tree-scheme-window-body .asset-tree-scheme-template-list {
+    flex: 1 1 auto;
+    align-self: stretch;
+    width: auto;
+    max-height: none;
+    min-height: 72px;
+    margin-bottom: 0;
+    overflow: auto;
 }
 
 .asset-tree-scheme-dock .asset-tree-scheme-window.is-pinned .asset-tree-scheme-window-body {
