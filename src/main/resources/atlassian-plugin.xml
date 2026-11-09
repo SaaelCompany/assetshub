@@ -90,15 +90,15 @@
 
     <web-section key="asset-tree-menu" name="Asset Tree Menu" location="asset-tree-nav-link" weight="10"/>
 
-    <web-item key="asset-tree-mine" name="My Assets" section="asset-tree-nav-link/asset-tree-menu" weight="10">
-        <label key="asset-tree.nav.mine"/>
-        <link linkId="asset-tree-nav-mine">/plugins/servlet/asset-tree?view=mine</link>
+    <web-item key="asset-tree-all" name="All Assets" section="asset-tree-nav-link/asset-tree-menu" weight="10">
+        <label key="asset-tree.nav.all"/>
+        <link linkId="asset-tree-nav-all">/plugins/servlet/asset-tree?view=all</link>
         <condition class="com.atlassian.jira.plugin.webfragment.conditions.UserLoggedInCondition"/>
     </web-item>
 
-    <web-item key="asset-tree-all" name="All Assets" section="asset-tree-nav-link/asset-tree-menu" weight="20">
-        <label key="asset-tree.nav.all"/>
-        <link linkId="asset-tree-nav-all">/plugins/servlet/asset-tree?view=all</link>
+    <web-item key="asset-tree-mine" name="My Assets" section="asset-tree-nav-link/asset-tree-menu" weight="20">
+        <label key="asset-tree.nav.mine"/>
+        <link linkId="asset-tree-nav-mine">/plugins/servlet/asset-tree?view=mine</link>
         <condition class="com.atlassian.jira.plugin.webfragment.conditions.UserLoggedInCondition"/>
     </web-item>
 
