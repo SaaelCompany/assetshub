@@ -47,20 +47,26 @@
 
     function screw(parts, x, y) {
         parts.push(oval(x, y, 0.7, 0.7, METAL, '#ffffff', 0.12));
-        parts.push(line(x + 0.15, y + 0.35, x + 0.55, y + 0.35, METAL, 0.08));
+        parts.push(line(x + 0.14, y + 0.35, x + 0.56, y + 0.35, METAL, 0.08));
+        parts.push(line(x + 0.35, y + 0.14, x + 0.35, y + 0.56, METAL, 0.08));
     }
 
     function chassis(units, fill) {
         var height = uHeight(units);
         var parts = [
             rect(0, 0, RU, height, INK, fill || FACE, 0.4),
+            rect(1.95, 0.28, RU - 3.9, Math.max(0.5, height - 0.56), METAL, '', 0.1),
             rect(0, 0, 1.7, height, METAL, EAR, 0.18),
             rect(RU - 1.7, 0, 1.7, height, METAL, EAR, 0.18)
         ];
-        screw(parts, 0.45, 0.45);
-        screw(parts, 0.45, height - 1.15);
-        screw(parts, RU - 1.2, 0.45);
-        screw(parts, RU - 1.2, height - 1.15);
+        screw(parts, 0.45, 0.4);
+        screw(parts, 0.45, height - 1.1);
+        screw(parts, RU - 1.2, 0.4);
+        screw(parts, RU - 1.2, height - 1.1);
+        if (units >= 2) {
+            screw(parts, 0.45, height / 2 - 0.35);
+            screw(parts, RU - 1.2, height / 2 - 0.35);
+        }
         return { w: RU, h: height, parts: parts };
     }
 
@@ -75,11 +81,16 @@
 
     function ports(parts, x, y, width, height, count, rows, color) {
         var used = rows || (count > 12 ? 2 : 1);
+        if (used < 1) used = 1;
         var cols = Math.ceil(count / used);
-        var gapX = 0.22;
+        var gapX = count > 24 ? 0.14 : 0.26;
         var gapY = 0.16;
-        var portH = Math.min(1.35, (height - gapY * (used - 1)) / used);
-        var portW = Math.min(1.6, (width - gapX * (cols - 1)) / cols);
+        var portH = Math.min(count > 24 ? 1.2 : 1.7, (height - gapY * (used - 1)) / used);
+        var portW = Math.min(count > 24 ? 1.35 : 2.05, (width - gapX * Math.max(0, cols - 1)) / cols);
+        if (!(portW > 0.35)) portW = 0.35;
+        if (!(portH > 0.3)) portH = 0.3;
+        var pins = count <= 16 && portW >= 1.2 && portH >= 0.95;
+        var led = !pins && count <= 32 && portW >= 0.7;
         var row;
         var col;
         var drawn = 0;
@@ -87,8 +98,17 @@
             for (col = 0; col < cols && drawn < count; col++) {
                 var px = x + col * (portW + gapX);
                 var py = y + row * (portH + gapY);
-                parts.push(rect(px, py, portW, portH, color, '#ffffff', 0.1));
-                parts.push(rect(px + 0.18, py + portH * 0.22, portW - 0.36, portH * 0.42, color, color, 0.04));
+                parts.push(rect(px, py, portW, portH, color, '#fafbfc', 0.1));
+                parts.push(rect(px + portW * 0.12, py + portH * 0.16, portW * 0.76, portH * 0.5, color, '#172b4d', 0.04));
+                parts.push(rect(px + portW * 0.3, py + portH * 0.74, portW * 0.4, Math.max(0.08, portH * 0.14), color, color, 0.03));
+                if (pins) {
+                    var pin;
+                    for (pin = 0; pin < 4; pin++) {
+                        parts.push(line(px + portW * (0.24 + pin * 0.15), py + portH * 0.26, px + portW * (0.24 + pin * 0.15), py + portH * 0.56, '#ffab00', 0.04));
+                    }
+                } else if (led) {
+                    parts.push(oval(px + portW * 0.72, py + portH * 0.08, Math.min(0.28, portW * 0.2), Math.min(0.28, portH * 0.2), '#36b37e', '#36b37e', 0.02));
+                }
                 drawn++;
             }
         }
@@ -96,11 +116,13 @@
 
     function cages(parts, x, y, count, tall) {
         var i;
-        var cageH = tall ? 2.4 : 1.25;
+        var cageH = tall ? 2.6 : 1.35;
         for (i = 0; i < count; i++) {
             var px = x + i * 2.35;
             parts.push(rect(px, y, 2.1, cageH, DARK, '#253858', 0.12));
-            parts.push(rect(px + 0.35, y + 0.28, 1.4, cageH - 0.55, '#ffab00', '#fff7e6', 0.06));
+            parts.push(rect(px + 0.28, y + 0.22, 1.54, cageH * 0.42, '#ffab00', '#fff7e6', 0.05));
+            parts.push(line(px + 0.35, y + cageH - 0.28, px + 1.75, y + cageH - 0.28, METAL, 0.08));
+            parts.push(line(px + 1.55, y + cageH * 0.55, px + 1.55, y + cageH - 0.18, '#c1c7d0', 0.06));
         }
     }
 
@@ -114,8 +136,10 @@
 
     function bay(parts, x, y, width, height) {
         parts.push(rect(x, y, width, height, INK, '#253858', 0.16));
-        parts.push(rect(x + 0.25, y + 0.3, width - 0.5, height * 0.5, METAL, '#7a869a', 0.08));
-        parts.push(oval(x + width - 1.05, y + height - 0.95, 0.5, 0.5, '#36b37e', '#36b37e', 0.04));
+        parts.push(rect(x + 0.22, y + 0.28, width - 0.44, height * 0.46, METAL, '#7a869a', 0.08));
+        parts.push(oval(x + width * 0.28, y + height * 0.22, width * 0.38, height * 0.34, INK, '#505f79', 0.06));
+        parts.push(rect(x + width * 0.18, y + height * 0.72, width * 0.46, Math.max(0.2, height * 0.12), METAL, EAR, 0.05));
+        parts.push(oval(x + width - Math.min(1.05, width * 0.28), y + height - Math.min(0.95, height * 0.28), Math.min(0.5, width * 0.16), Math.min(0.5, height * 0.16), '#36b37e', '#36b37e', 0.04));
     }
 
     function bays(parts, x, y, width, height, count, cols) {
@@ -132,7 +156,9 @@
 
     function display(parts, x, y, width, height) {
         parts.push(rect(x, y, width, height, DARK, '#071426', 0.12));
-        parts.push(line(x + 0.4, y + height * 0.65, x + width * 0.7, y + height * 0.35, '#4c9aff', 0.1));
+        parts.push(rect(x + 0.25, y + 0.25, width - 0.5, height - 0.5, '#4c9aff', '', 0.06));
+        parts.push(line(x + 0.5, y + height * 0.68, x + width * 0.55, y + height * 0.32, '#4c9aff', 0.1));
+        parts.push(line(x + width * 0.4, y + height * 0.72, x + width * 0.82, y + height * 0.46, '#36b37e', 0.08));
     }
 
     function power(parts, x, y) {
@@ -146,10 +172,17 @@
     }
 
     function fan(parts, x, y, size) {
+        var cx = x + size / 2;
+        var cy = y + size / 2;
+        var blade;
         parts.push(oval(x, y, size, size, METAL, '#ebecf0', 0.16));
-        parts.push(oval(x + size * 0.28, y + size * 0.28, size * 0.44, size * 0.44, BLUE, BLUEF, 0.1));
-        parts.push(line(x + size / 2, y + size * 0.18, x + size / 2, y + size * 0.82, METAL, 0.08));
-        parts.push(line(x + size * 0.18, y + size / 2, x + size * 0.82, y + size / 2, METAL, 0.08));
+        parts.push(oval(x + size * 0.07, y + size * 0.07, size * 0.86, size * 0.86, METAL, '#f7f8f9', 0.08));
+        for (blade = 0; blade < 5; blade++) {
+            var angle = blade * Math.PI * 2 / 5 - 0.4;
+            parts.push(line(cx, cy, cx + Math.cos(angle) * size * 0.36, cy + Math.sin(angle) * size * 0.36, BLUE, Math.max(0.06, size * 0.015)));
+        }
+        parts.push(oval(cx - size * 0.12, cy - size * 0.12, size * 0.24, size * 0.24, BLUE, BLUEF, 0.08));
+        screw(parts, x + size * 0.08, y + size * 0.08);
     }
 
     function unit(id, name, units, fill, draw) {
@@ -182,6 +215,79 @@
             parts.push(line(railX, y, railX + railW, y, '#c1c7d0', 0.12));
         }
         return parts;
+    }
+
+    function portWord(count) {
+        var ten = count % 10;
+        var hundred = count % 100;
+        if (ten === 1 && hundred !== 11) return 'порт';
+        if (ten >= 2 && ten <= 4 && (hundred < 12 || hundred > 14)) return 'порта';
+        return 'портов';
+    }
+
+    function clampPorts(count) {
+        var next = Math.round(Number(count) || 0);
+        if (next < 2) next = 2;
+        if (next > 48) next = 48;
+        return next;
+    }
+
+    function drawSwitchFace(parts, w, h, count, face) {
+        var color = (face === 'poe' || face === 'cam') ? AMBER : BLUE;
+        var rows = count > 12 ? 2 : 1;
+        var sfp = 0;
+        if (face === 'agg' || face === 'core') sfp = count >= 24 ? 4 : 2;
+        else if (face !== 'cam' && face !== 'ind') sfp = count >= 12 ? 4 : (count >= 8 ? 2 : 0);
+        if (face === 'core') {
+            var cards = Math.max(1, Math.min(4, Math.ceil(count / 12)));
+            var per = Math.ceil(count / cards);
+            var cardH = (h - 1.4) / cards;
+            var card;
+            for (card = 0; card < cards; card++) {
+                var left = count - card * per;
+                var n = left > per ? per : left;
+                if (n < 1) break;
+                parts.push(rect(2.2, 0.5 + card * cardH, w - 4.4, cardH - 0.3, INK, FACE, 0.1));
+                parts.push(rect(2.5, 0.7 + card * cardH, 0.35, cardH - 0.7, color, color, 0.04));
+                ports(parts, 3.2, 0.75 + card * cardH, w - 16, cardH - 1, n, n > 8 ? 2 : 1, color);
+                cages(parts, w - 11.2, 0.85 + card * cardH, 2, cardH > 4);
+            }
+            return;
+        }
+        if (h >= 2.4) leds(parts, 2.4, 0.32, h >= 6 ? 5 : 3, face === 'poe' || face === 'cam' ? [AMBER, '#36b37e', '#36b37e'] : null);
+        var portY = h > 3 ? 1.15 : 0.55;
+        var sfpW = sfp ? sfp * 2.4 + 0.6 : 0;
+        ports(parts, 2.4, portY, Math.max(4, w - 4.6 - sfpW), Math.max(0.8, h - portY - 0.4), count, rows, color);
+        if (sfp) cages(parts, w - 2.1 - sfpW, portY + 0.1, sfp, h >= 6);
+        if (face === 'poe' || face === 'cam') parts.push(rect(w - 7.2, 0.28, 3.6, 0.5, AMBER, AMBER, 0.04));
+        if (face === 'access') parts.push(rect(w - 7.2, 0.28, 3.2, 0.45, BLUE, BLUE, 0.04));
+    }
+
+    function buildSwitch(id, name, count, face) {
+        count = clampPorts(count);
+        face = face || 'rack';
+        if (face === 'ind') {
+            var width = count > 16 ? 32 : 18;
+            var depth = count > 24 ? 16 : 12;
+            var body = [rect(0, 0, width, depth, INK, '#253858', 0.35), rect(0, 0, width, 1.5, AMBER, AMBER, 0.08)];
+            screw(body, 0.6, 0.4);
+            screw(body, width - 1.4, 0.4);
+            ports(body, 1, 2.4, width - 2, depth - 3.4, count, count > 8 ? 2 : 1, AMBER);
+            var symbol = plan(id, name, width, depth, body);
+            symbol.ports = count;
+            symbol.face = face;
+            return symbol;
+        }
+        var units = 1;
+        if (face === 'core') units = Math.max(2, Math.min(6, Math.ceil(count / 8)));
+        else if (face === 'agg' && count > 16) units = 2;
+        var fill = (face === 'poe' || face === 'cam') ? '#fff7e6' : BLUEF;
+        var symbolUnit = unit(id, name, units, fill, function (parts, w, h) {
+            drawSwitchFace(parts, w, h, count, face);
+        });
+        symbolUnit.ports = count;
+        symbolUnit.face = face;
+        return symbolUnit;
     }
 
     function racks() {
@@ -219,12 +325,13 @@
         fan(roof, 10, 62, 22);
         fan(roof, 48, 62, 22);
         roof.push(rect(30, 96, 20, 8, INK, DARK, 0.16));
-        var sides = [rect(0, 0, 80, 110, INK, '', 0.3), rect(0, 0, 2.4, 110, INK, EAR, 0.2), rect(77.6, 0, 2.4, 110, INK, EAR, 0.2)];
+        var sides = [rect(0, 0, 80, 110, INK, FACE, 0.45), rect(0, 0, 3, 110, INK, DARK, 0.16), rect(77, 0, 3, 110, INK, DARK, 0.16)];
         var i;
-        for (i = 0; i < 14; i++) {
-            sides.push(line(0.3, 6 + i * 7, 2.1, 6 + i * 7, METAL, 0.08));
-            sides.push(line(77.9, 6 + i * 7, 79.7, 6 + i * 7, METAL, 0.08));
-        }
+        for (i = 0; i < 16; i++) sides.push(rect(8, 4 + i * 6.4, 64, 1.3, METAL, EAR, 0.08));
+        screw(sides, 3.4, 3);
+        screw(sides, 74.5, 3);
+        screw(sides, 3.4, 105);
+        screw(sides, 74.5, 105);
         var doors = [
             rect(0, 0, 80, 200, INK, FACE, 0.6),
             line(40, 2, 40, 198, METAL, 0.25),
@@ -236,6 +343,12 @@
         for (i = 0; i < 6; i++) {
             doors.push(oval(2.2, 20 + i * 28, 2.2, 2.2, METAL, EAR, 0.1));
             doors.push(oval(75.6, 20 + i * 28, 2.2, 2.2, METAL, EAR, 0.1));
+        }
+        for (i = 0; i < 7; i++) {
+            doors.push(line(8, 28 + i * 18, 32, 28 + i * 18, BLUE, 0.08));
+            doors.push(line(48, 28 + i * 18, 72, 28 + i * 18, BLUE, 0.08));
+            doors.push(line(12 + i * 3, 20, 12 + i * 3, 160, BLUE, 0.06));
+            doors.push(line(52 + i * 3, 20, 52 + i * 3, 160, BLUE, 0.06));
         }
         var floor = [];
         var tile;
@@ -249,11 +362,13 @@
         floor.push(rect(68, 68, 16, 16, BLUE, '#ffffff', 0.2));
         var gland = [rect(0, 0, 36, 10, INK, FACE, 0.35), rect(2, 2, 32, 6, METAL, DARK, 0.15)];
         for (i = 0; i < 16; i++) gland.push(line(3 + i * 2, 2.4, 3 + i * 2, 7.6, '#c1c7d0', 0.08));
-        var vertical = [rect(0, 0, 12, 186.9, INK, FACE, 0.4)];
-        for (i = 0; i < 21; i++) {
-            var fy = 4 + i * 8.6;
-            vertical.push(line(1.2, fy, 5.2, fy - 2.2, METAL, 0.16));
-            vertical.push(line(10.8, fy, 6.8, fy - 2.2, METAL, 0.16));
+        var vertical = [rect(0, 0, 12, 186.9, INK, FACE, 0.4), rect(5.4, 0, 1.2, 186.9, METAL, EAR, 0.12)];
+        for (i = 0; i < 16; i++) {
+            var fy = 3 + i * 11.4;
+            vertical.push(rect(0.5, fy, 4.4, 7.2, INK, '#ffffff', 0.1));
+            vertical.push(rect(7.1, fy, 4.4, 7.2, INK, '#ffffff', 0.1));
+            vertical.push(line(0.8, fy + 1.2, 4.4, fy + 5.6, METAL, 0.1));
+            vertical.push(line(11.2, fy + 1.2, 7.6, fy + 5.6, METAL, 0.1));
         }
         return [
             plan('rack-dyn', 'Динамический блок стойки', 60, 110, open),
@@ -460,39 +575,24 @@
         ];
     }
 
+    function numberedSwitches() {
+        var list = [];
+        var count;
+        for (count = 2; count <= 48; count++) {
+            list.push(buildSwitch('sw-' + count, 'Коммутатор ' + count + ' ' + portWord(count), count, 'rack'));
+        }
+        return list;
+    }
+
     function network() {
         return [
-            unit('sw-access', 'Коммутатор доступа', 1, BLUEF, function (parts, w, h) {
-                leds(parts, 3, 0.45, 4);
-                ports(parts, 3, 1.35, 32, h - 1.7, 24, 2, BLUE);
-                cages(parts, 37, 1.7, 4, false);
-            }),
-            unit('sw-agg', 'Коммутатор агрегации', 2, BLUEF, function (parts, w, h) {
-                ports(parts, 3, 1, 24, h - 2, 24, 2, BLUE);
-                cages(parts, 29, 2.2, 6, true);
-            }),
-            unit('sw-core', 'Ядро сети', 6, BLUEF, function (parts, w, h) {
-                var card;
-                for (card = 0; card < 4; card++) {
-                    parts.push(rect(2.4, 1 + card * 6.2, w - 4.8, 5.6, INK, FACE, 0.14));
-                    ports(parts, 3.2, 1.5 + card * 6.2, 28, 4.4, 12, 1, BLUE);
-                    cages(parts, 33, 2.2 + card * 6.2, 4, false);
-                }
-            }),
-            unit('sw-poe', 'PoE-коммутатор', 1, '#fff7e6', function (parts, w, h) {
-                parts.push(rect(3, 0.4, 7, 0.7, AMBER, AMBER, 0.05));
-                ports(parts, 3, 1.4, 34, h - 1.8, 24, 2, AMBER);
-                cages(parts, 39, 1.7, 2, false);
-            }),
-            unit('sw-poe-cam', 'PoE-коммутатор для камер', 1, '#fff7e6', function (parts, w, h) {
-                parts.push(rect(3, 0.4, 2, 0.7, RED, RED, 0.05));
-                ports(parts, 3, 1.4, 40, h - 1.8, 16, 2, AMBER);
-            }),
-            plan('sw-ind', 'Промышленный коммутатор', 16, 12, (function () {
-                var parts = [rect(0, 0, 16, 12, INK, '#253858', 0.35), rect(0, 0, 16, 1.4, AMBER, AMBER, 0.08)];
-                ports(parts, 1, 2.4, 14, 8, 8, 2, AMBER);
-                return parts;
-            })()),
+            buildSwitch('sw-access', 'Коммутатор доступа', 24, 'access'),
+            buildSwitch('sw-agg', 'Коммутатор агрегации', 24, 'agg'),
+            buildSwitch('sw-core', 'Ядро сети', 48, 'core'),
+            buildSwitch('sw-poe', 'PoE-коммутатор', 24, 'poe'),
+            buildSwitch('sw-poe-cam', 'PoE-коммутатор для камер', 16, 'cam'),
+            buildSwitch('sw-ind', 'Промышленный коммутатор', 8, 'ind')
+        ].concat(numberedSwitches()).concat([
             unit('router', 'Маршрутизатор', 1, GREENF, function (parts, w, h) {
                 ports(parts, 3, 1.3, 18, h - 1.8, 8, 2, GREEN);
                 cages(parts, 24, 1.6, 4, false);
@@ -606,34 +706,53 @@
                     parts.push(oval(2.6 + pair * 1.85, 1.5, 1.2, 1.2, pair % 2 ? GREEN : BLUE, '#ffffff', 0.08));
                 }
             })
-        ];
+        ]);
+    }
+
+    function irRing(parts, cx, cy, radius) {
+        var i;
+        for (i = 0; i < 8; i++) {
+            var angle = i * Math.PI / 4;
+            parts.push(oval(cx + Math.cos(angle) * radius - 0.35, cy + Math.sin(angle) * radius - 0.35, 0.7, 0.7, RED, '#ffbdad', 0.04));
+        }
     }
 
     function camera(kind) {
         if (kind === 'dome') {
-            return [oval(0.4, 0.4, 13.2, 13.2, INK, FACE, 0.35), oval(3.2, 3.2, 7.6, 7.6, DARK, '#071426', 0.16), oval(5.4, 5.4, 3.2, 3.2, BLUE, BLUEF, 0.1)];
+            var dome = [oval(0.3, 0.3, 13.4, 13.4, INK, FACE, 0.35), oval(1.2, 1.2, 11.6, 11.6, METAL, EAR, 0.12), oval(3.2, 3.2, 7.6, 7.6, DARK, '#071426', 0.16), oval(5.2, 5.2, 3.6, 3.6, BLUE, '#4c9aff', 0.1), oval(6.2, 6.2, 1.4, 1.4, '#ffffff', '#ffffff', 0.04)];
+            irRing(dome, 7, 7, 4.6);
+            return dome;
         }
         if (kind === 'ptz') {
-            return [oval(0.3, 0.3, 17.4, 17.4, INK, EAR, 0.4), oval(3, 3, 12, 12, DARK, '#253858', 0.18), oval(6.2, 5.4, 5.6, 5.6, BLUE, '#4c9aff', 0.12), rect(8.2, 14.5, 1.6, 3, METAL, DARK, 0.1)];
+            var ptz = [oval(0.2, 0.2, 17.6, 17.6, INK, EAR, 0.4), rect(7.4, 0, 3.2, 2.2, METAL, DARK, 0.12), oval(2.4, 2.4, 13.2, 13.2, DARK, '#253858', 0.18), oval(5.6, 5.2, 6.8, 6.8, BLUE, '#4c9aff', 0.12), oval(7.6, 7.2, 2.6, 2.6, '#ffffff', BLUEF, 0.06), rect(8.2, 15.2, 1.6, 2.4, METAL, DARK, 0.1)];
+            irRing(ptz, 9, 8.6, 5.2);
+            return ptz;
         }
         if (kind === 'bullet') {
-            return [rect(0, 3, 16, 8, INK, FACE, 0.3), oval(13, 3.4, 7, 7.2, DARK, '#071426', 0.16), oval(15.2, 5.2, 3.2, 3.2, BLUE, BLUEF, 0.1), rect(1, 5.6, 3, 2.8, METAL, EAR, 0.1)];
+            var bullet = [rect(0, 3.2, 14, 7.6, INK, FACE, 0.3), rect(0, 4.6, 3.2, 4.8, METAL, DARK, 0.12), oval(11, 2.6, 9, 8.8, DARK, '#071426', 0.16), oval(13.4, 4.6, 4.4, 4.4, BLUE, '#4c9aff', 0.1), oval(14.6, 5.8, 1.8, 1.8, '#ffffff', BLUEF, 0.05), rect(2, 11.2, 6, 1.6, METAL, EAR, 0.1)];
+            irRing(bullet, 15.6, 6.8, 3.2);
+            return bullet;
         }
         if (kind === 'outdoor') {
-            return [rect(0, 4, 18, 8, INK, EAR, 0.3), rect(0, 2.2, 16, 3, METAL, DARK, 0.12), oval(14, 4.2, 7.2, 7.2, DARK, '#071426', 0.16), rect(2, 11.2, 4, 2, METAL, DARK, 0.1)];
+            var outdoor = [rect(0, 4.2, 16, 8, INK, EAR, 0.3), rect(0, 1.6, 18, 3.2, METAL, DARK, 0.14), rect(0, 1.6, 18, 0.6, INK, '#ffffff', 0.06), oval(12.5, 3.6, 9, 8.8, DARK, '#071426', 0.16), oval(14.8, 5.6, 4.2, 4.2, BLUE, '#4c9aff', 0.1), rect(1.2, 12.4, 5, 2.2, METAL, DARK, 0.1), line(1.2, 13.5, 6.2, 13.5, '#ffab00', 0.08)];
+            irRing(outdoor, 17, 8, 3.3);
+            return outdoor;
         }
         if (kind === 'thermal') {
-            return [rect(0, 3, 16, 8, INK, '#253858', 0.3), oval(13, 3.2, 7.4, 7.4, RED, '#ffbdad', 0.16), rect(1.2, 5.4, 3, 3, AMBER, AMBER, 0.08)];
+            return [rect(0, 3, 15, 8, INK, '#253858', 0.3), rect(0, 4.4, 3, 5, AMBER, DARK, 0.1), oval(12, 2.6, 9.2, 8.8, RED, '#ffbdad', 0.16), oval(14.6, 5, 4, 4, AMBER, '#fff7e6', 0.1), line(15.4, 5.6, 17.6, 8.4, RED, 0.12), line(17.6, 5.6, 15.4, 8.4, RED, 0.12), rect(1.4, 11.4, 4.5, 1.8, METAL, DARK, 0.1)];
         }
         if (kind === 'multi') {
-            var parts = [rect(0, 0, 22, 22, INK, FACE, 0.4)];
-            [[2, 2], [12, 2], [2, 12], [12, 12]].forEach(function (at) {
-                parts.push(oval(at[0], at[1], 8, 8, DARK, '#071426', 0.14));
-                parts.push(oval(at[0] + 2.4, at[1] + 2.4, 3.2, 3.2, BLUE, BLUEF, 0.08));
+            var parts = [rect(0, 0, 22, 22, INK, FACE, 0.4), rect(9.4, 0, 3.2, 22, METAL, EAR, 0.1), rect(0, 9.4, 22, 3.2, METAL, EAR, 0.1)];
+            [[1.2, 1.2], [11.6, 1.2], [1.2, 11.6], [11.6, 11.6]].forEach(function (at) {
+                parts.push(oval(at[0], at[1], 9.2, 9.2, DARK, '#071426', 0.14));
+                parts.push(oval(at[0] + 2.6, at[1] + 2.6, 4, 4, BLUE, '#4c9aff', 0.08));
+                parts.push(oval(at[0] + 3.8, at[1] + 3.8, 1.6, 1.6, '#ffffff', BLUEF, 0.04));
             });
             return parts;
         }
-        return [oval(0.5, 0.5, 11, 11, INK, FACE, 0.3), oval(3.4, 3.4, 5.2, 5.2, DARK, '#071426', 0.14)];
+        var plain = [oval(0.4, 0.4, 11.2, 11.2, INK, FACE, 0.3), oval(3.2, 3.2, 5.6, 5.6, DARK, '#071426', 0.14), oval(4.6, 4.6, 2.6, 2.6, BLUE, BLUEF, 0.08)];
+        irRing(plain, 6, 6, 3.6);
+        return plain;
     }
 
     function video() {
@@ -654,13 +773,13 @@
                 ports(parts, 3, 4.2, 22, 3.4, 8, 1, BLUE);
                 display(parts, 30, 1.4, 14, h - 2.8);
             }),
-            plan('cam-ip', 'IP-камера', 12, 12, camera('dome').concat([oval(9.2, 9.2, 1.6, 1.6, BLUE, BLUE, 0.05)])),
-            plan('cam-analog', 'Аналоговая камера', 12, 12, camera('dome').concat([rect(5, 10.6, 2, 1.2, INK, DARK, 0.08)])),
+            plan('cam-ip', 'IP-камера', 14, 14, camera('dome').concat([oval(10.4, 10.4, 1.8, 1.8, BLUE, BLUE, 0.05)])),
+            plan('cam-analog', 'Аналоговая камера', 14, 14, camera('dome').concat([rect(5.4, 11.6, 3.2, 1.4, INK, DARK, 0.08)])),
             plan('cam-dome', 'Купольная камера', 14, 14, camera('dome')),
             plan('cam-ptz', 'PTZ-камера', 18, 18, camera('ptz')),
             plan('cam-fixed', 'Фиксированная камера', 22, 14, camera('bullet')),
             plan('cam-out', 'Уличная камера', 24, 16, camera('outdoor')),
-            plan('cam-in', 'Внутренняя камера', 12, 12, camera('dome')),
+            plan('cam-in', 'Внутренняя камера', 14, 14, camera('dome')),
             plan('cam-thermal', 'Тепловизионная камера', 24, 14, camera('thermal')),
             plan('cam-multi', 'Мультисенсорная камера', 22, 22, camera('multi')),
             unit('decoder', 'Видеодекодер', 1, FACE, function (parts, w, h) {
@@ -833,20 +952,29 @@
                 ports(parts, 3, 1.3, 16, h - 2, 8, 2, GREEN);
                 ports(parts, 22, 1.3, 16, h - 2, 4, 1, BLUE);
             }),
-            plan('voip-phone', 'VoIP-телефон', 22, 18, [
-                rect(0, 4, 22, 14, INK, FACE, 0.35),
-                rect(2, 0, 6, 8, METAL, EAR, 0.16),
-                rect(10, 6, 9, 5, DARK, '#071426', 0.12),
-                rect(11, 12.4, 2, 1.4, METAL, EAR, 0.08),
-                rect(14, 12.4, 2, 1.4, METAL, EAR, 0.08),
-                rect(17, 12.4, 2, 1.4, METAL, EAR, 0.08)
-            ]),
-            plan('ip-phone', 'IP-телефон', 22, 18, [
-                rect(0, 4, 22, 14, INK, BLUEF, 0.35),
-                rect(2, 0, 6, 8, METAL, EAR, 0.16),
-                rect(9, 6, 11, 5.2, DARK, '#071426', 0.12),
-                oval(18.4, 12.6, 1.6, 1.6, BLUE, BLUE, 0.06)
-            ]),
+            plan('voip-phone', 'VoIP-телефон', 22, 18, (function () {
+                var parts = [
+                    rect(0, 4, 22, 14, INK, FACE, 0.35),
+                    rect(2, 0, 7, 9, METAL, EAR, 0.16),
+                    oval(4.2, 1.2, 2.6, 2.6, DARK, '#071426', 0.1),
+                    rect(10, 5.6, 10, 4.6, DARK, '#071426', 0.12)
+                ];
+                var key;
+                for (key = 0; key < 12; key++) parts.push(rect(10.4 + (key % 4) * 2.6, 11 + Math.floor(key / 4) * 2.1, 2.1, 1.6, METAL, EAR, 0.06));
+                return parts;
+            })()),
+            plan('ip-phone', 'IP-телефон', 22, 18, (function () {
+                var parts = [
+                    rect(0, 4, 22, 14, INK, BLUEF, 0.35),
+                    rect(2, 0, 7, 9, METAL, EAR, 0.16),
+                    oval(4.2, 1.2, 2.6, 2.6, BLUE, BLUEF, 0.1),
+                    rect(9.2, 5.4, 11, 5, DARK, '#071426', 0.12),
+                    line(10.4, 8.4, 18.6, 6.6, '#4c9aff', 0.1)
+                ];
+                var key;
+                for (key = 0; key < 6; key++) parts.push(oval(10 + (key % 3) * 2.4, 11.4 + Math.floor(key / 3) * 2.4, 1.8, 1.8, BLUE, '#ffffff', 0.08));
+                return parts;
+            })()),
             plan('dect-base', 'DECT-базовая станция', 14, 14, [
                 oval(0.4, 0.4, 13.2, 13.2, INK, FACE, 0.3),
                 oval(4, 4, 6, 6, GREEN, GREENF, 0.14),
@@ -926,6 +1054,8 @@
         return symbol;
     }
 
+    var switchCache = {};
+
     root.AssetTreeSchemeLibrary = function () {
         return [
             { id: 'lib-rack', name: 'Стойки и конструктив', templates: racks().map(tidy) },
@@ -935,5 +1065,19 @@
             { id: 'lib-acs', name: 'СКУД', templates: access().map(tidy) },
             { id: 'lib-voice', name: 'АТС и терминалы', templates: voice().map(tidy) }
         ];
+    };
+
+    root.AssetTreeSchemeSwitch = function (symbol, count) {
+        if (!symbol || !symbol.face) return symbol;
+        count = clampPorts(count);
+        if (count === symbol.ports) return symbol;
+        var key = symbol.face + ':' + count;
+        if (!switchCache[key]) {
+            var built = tidy(buildSwitch('tmp', symbol.name, count, symbol.face));
+            built.id = symbol.id;
+            switchCache[key] = built;
+        }
+        var cached = switchCache[key];
+        return { id: symbol.id, name: symbol.name, w: cached.w, h: cached.h, parts: cached.parts, ports: count, face: symbol.face };
     };
 })(typeof window !== 'undefined' ? window : global);

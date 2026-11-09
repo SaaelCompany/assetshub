@@ -13293,7 +13293,7 @@ button.asset-tree-attach-remove {
 .asset-tree-scheme-dock.is-bottom {
     flex-direction: row;
     align-items: stretch;
-    max-height: 196px;
+    max-height: 220px;
     overflow: hidden;
 }
 
@@ -13332,8 +13332,18 @@ button.asset-tree-attach-remove {
     display: none;
 }
 
-.asset-tree-scheme-window.is-collapsed {
+.asset-tree-scheme-window.is-collapsed,
+.asset-tree-scheme-window.is-collapsed.is-sized {
+    height: auto !important;
     max-height: none;
+}
+
+.asset-tree-scheme-window.is-sized {
+    max-height: none;
+}
+
+.asset-tree-scheme-window.is-sized .asset-tree-scheme-window-body {
+    flex: 1 1 auto;
 }
 
 .asset-tree-scheme-window.is-collapsed .asset-tree-scheme-window-body {
@@ -13344,27 +13354,44 @@ button.asset-tree-attach-remove {
     position: relative;
     left: auto !important;
     top: auto !important;
-    width: auto !important;
     max-width: none;
     max-height: none;
     flex: 0 1 auto;
-    max-height: 100%;
     min-width: 0;
     min-height: 0;
     box-shadow: none;
 }
 
+.asset-tree-scheme-dock.is-left .asset-tree-scheme-window.is-pinned,
+.asset-tree-scheme-dock.is-right .asset-tree-scheme-window.is-pinned {
+    width: 100% !important;
+    min-height: 36px;
+}
+
+.asset-tree-scheme-dock.is-left .asset-tree-scheme-window.is-pinned.is-sized,
+.asset-tree-scheme-dock.is-right .asset-tree-scheme-window.is-pinned.is-sized {
+    flex: 0 0 auto;
+}
+
 .asset-tree-scheme-dock.is-top .asset-tree-scheme-window.is-pinned,
 .asset-tree-scheme-dock.is-bottom .asset-tree-scheme-window.is-pinned {
-    flex: 1 1 auto;
-    max-height: 180px;
+    flex: 1 1 0;
+    width: auto;
+    max-height: 100%;
+    min-width: 160px;
+    min-height: 0;
+}
+
+.asset-tree-scheme-dock.is-top .asset-tree-scheme-window.is-pinned.is-wide,
+.asset-tree-scheme-dock.is-bottom .asset-tree-scheme-window.is-pinned.is-wide {
+    flex: 0 0 auto;
 }
 
 .asset-tree-scheme-dock.is-top .asset-tree-scheme-window-body,
 .asset-tree-scheme-dock.is-bottom .asset-tree-scheme-window-body {
-    max-height: 148px;
-    overflow-x: hidden;
-    overflow-y: auto;
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .asset-tree-scheme-dock.is-top .asset-tree-scheme-tools,
@@ -13451,6 +13478,66 @@ button.asset-tree-attach-remove {
     display: block;
     width: 14px;
     height: 14px;
+}
+
+.asset-tree-scheme-resize {
+    position: absolute;
+    z-index: 4;
+}
+
+.asset-tree-scheme-resize.is-n,
+.asset-tree-scheme-resize.is-s {
+    left: 8px;
+    right: 8px;
+    height: 7px;
+    cursor: ns-resize;
+}
+
+.asset-tree-scheme-resize.is-n { top: 0; }
+.asset-tree-scheme-resize.is-s { bottom: 0; }
+
+.asset-tree-scheme-resize.is-e,
+.asset-tree-scheme-resize.is-w {
+    top: 8px;
+    bottom: 8px;
+    width: 7px;
+    cursor: ew-resize;
+}
+
+.asset-tree-scheme-resize.is-e { right: 0; }
+.asset-tree-scheme-resize.is-w { left: 0; }
+
+.asset-tree-scheme-resize.is-ne,
+.asset-tree-scheme-resize.is-nw,
+.asset-tree-scheme-resize.is-se,
+.asset-tree-scheme-resize.is-sw {
+    width: 14px;
+    height: 14px;
+}
+
+.asset-tree-scheme-resize.is-se { right: 0; bottom: 0; cursor: nwse-resize; }
+.asset-tree-scheme-resize.is-sw { left: 0; bottom: 0; cursor: nesw-resize; }
+.asset-tree-scheme-resize.is-ne { right: 0; top: 0; cursor: nesw-resize; }
+.asset-tree-scheme-resize.is-nw { left: 0; top: 0; cursor: nwse-resize; }
+
+.asset-tree-scheme-resize.is-se::after {
+    content: '';
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid #97a0af;
+    border-bottom: 2px solid #97a0af;
+}
+
+.asset-tree-scheme-window.is-collapsed .asset-tree-scheme-resize.is-n,
+.asset-tree-scheme-window.is-collapsed .asset-tree-scheme-resize.is-s,
+.asset-tree-scheme-window.is-collapsed .asset-tree-scheme-resize.is-ne,
+.asset-tree-scheme-window.is-collapsed .asset-tree-scheme-resize.is-nw,
+.asset-tree-scheme-window.is-collapsed .asset-tree-scheme-resize.is-se,
+.asset-tree-scheme-window.is-collapsed .asset-tree-scheme-resize.is-sw {
+    display: none;
 }
 
 .asset-tree-scheme-window-body {
