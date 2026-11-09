@@ -21051,7 +21051,7 @@
         var host = document.createElement('input');
         host.type = 'text';
         host.id = 'asset-tree-tni-host';
-        host.placeholder = 'dc.corp.local';
+        host.placeholder = 'dc.budzdorov.ru';
         var port = document.createElement('input');
         port.type = 'number';
         port.id = 'asset-tree-tni-port';
@@ -21061,7 +21061,7 @@
         var account = document.createElement('input');
         account.type = 'text';
         account.id = 'asset-tree-tni-account';
-        account.placeholder = 'CORP\\user';
+        account.placeholder = 'BUDZDOROV\\user';
         var password = document.createElement('input');
         password.type = 'password';
         password.id = 'asset-tree-tni-password';
@@ -21069,7 +21069,7 @@
         var base = document.createElement('input');
         base.type = 'text';
         base.id = 'asset-tree-tni-base';
-        base.placeholder = 'DC=corp,DC=local';
+        base.placeholder = 'budzdorov.ru';
         var grid = el('div', 'asset-tree-tni-grid');
         grid.appendChild(planField(t('tniDirHost'), host));
         grid.appendChild(planField(t('tniDirPort'), port));
@@ -21166,7 +21166,7 @@
         var host = document.createElement('input');
         host.type = 'text';
         host.id = 'asset-tree-tni-sccm-host';
-        host.placeholder = 'sccm.corp.local';
+        host.placeholder = 'sccm.budzdorov.ru';
         var port = document.createElement('input');
         port.type = 'number';
         port.id = 'asset-tree-tni-sccm-port';
@@ -21176,7 +21176,7 @@
         var account = document.createElement('input');
         account.type = 'text';
         account.id = 'asset-tree-tni-sccm-account';
-        account.placeholder = 'CORP\\user';
+        account.placeholder = 'BUDZDOROV\\user';
         var password = document.createElement('input');
         password.type = 'password';
         password.id = 'asset-tree-tni-sccm-password';
@@ -29859,7 +29859,7 @@
         label.appendChild(armed);
         label.appendChild(document.createTextNode(t('tniWatchOn')));
         body.appendChild(label);
-        body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + (asset.name || '')));
+        body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + ((row && row.address) || asset.name || '')));
         body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
         if (mayEdit(asset)) {
             body.appendChild(button(t('tniWatchSave'), 'asset-tree-btn', function () {
@@ -29868,6 +29868,11 @@
                 }, function (status, payload) {
                     if (status >= 200 && status < 300 && payload) {
                         state.tniWatch[asset.id] = payload;
+                        if (payload.name) {
+                            var named = byId()[asset.id];
+                            if (named) named.name = payload.name;
+                            if (state.detail && state.detail.id === asset.id) state.detail.name = payload.name;
+                        }
                         if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
                     } else {
                         notify((payload && payload.message) || t('errorTitle'));
@@ -29898,8 +29903,16 @@
         ajax('GET', '/assets/' + assetId + '/watch', null, function (status, payload) {
             if (state.tniWatchToken[assetId] !== token) return;
             state.tniWatchLoading[assetId] = false;
-            if (status === 200 && payload) state.tniWatch[assetId] = payload;
-            else state.tniWatch[assetId] = { armed: false, missing: true };
+            if (status === 200 && payload) {
+                state.tniWatch[assetId] = payload;
+                if (payload.name) {
+                    var named = byId()[assetId];
+                    if (named && named.name !== payload.name) named.name = payload.name;
+                    if (state.detail && state.detail.id === assetId && state.detail.name !== payload.name) {
+                        state.detail.name = payload.name;
+                    }
+                }
+            } else state.tniWatch[assetId] = { armed: false, missing: true };
             if (state.detail && state.detail.id === assetId && document.getElementById('asset-tree-detail')) {
                 showDetail(state.detail, false);
             }

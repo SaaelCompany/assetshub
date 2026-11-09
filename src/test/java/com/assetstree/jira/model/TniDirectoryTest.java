@@ -47,6 +47,7 @@ public class TniDirectoryTest {
         List<TniComputer> rows = TniDirectory.parseSheet(csv);
         assertEquals(2, rows.size());
         assertEquals("ad:11111111-1111-1111-1111-111111111111", rows.get(0).externalKey());
+        assertEquals("pc-03.corp.local", rows.get(0).getHost());
         assertFalse(rows.get(0).isDisabled());
         assertEquals("ad:old.corp.local", rows.get(1).externalKey());
         assertTrue(rows.get(1).isDisabled());
@@ -71,7 +72,7 @@ public class TniDirectoryTest {
             assertEquals(TniDirectory.CONNECT, ex.getMessageKey());
         }
         try {
-            TniDirectory.base("corp");
+            TniDirectory.base("corp local");
             fail("base");
         } catch (AssetException ex) {
             assertEquals(TniDirectory.BASE, ex.getMessageKey());
@@ -100,6 +101,9 @@ public class TniDirectoryTest {
         assertEquals(636, TniDirectory.port(Integer.valueOf(0), true));
         assertEquals("dc-01.corp.local", TniDirectory.host(" dc-01.corp.local "));
         assertEquals("DC=corp,DC=local", TniDirectory.base("DC=corp,DC=local"));
+        assertEquals("DC=budzdorov,DC=ru", TniDirectory.base("budzdorov.ru"));
+        assertEquals("", TniDirectory.base("BUDZDOROV"));
+        assertEquals("", TniDirectory.base(""));
     }
 
     @Test

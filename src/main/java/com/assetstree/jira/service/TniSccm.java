@@ -157,12 +157,14 @@ public final class TniSccm {
         if (id == null || id.isEmpty() || name == null || name.isEmpty()) {
             return null;
         }
+        String domain = fields.get("resourcedomainorworkgroup");
+        String host = domain != null && domain.indexOf('.') > 0 ? name + "." + domain : "";
         return TniDirectory.computer("sccm", id, name,
                 fields.get("operatingsystemnameandversion"), "",
                 fields.get("username"), "", "", "", "",
-                fields.get("resourcedomainorworkgroup"),
+                domain,
                 fields.get("distinguishedname"),
-                fields.get("clientversion"), false);
+                fields.get("clientversion"), false, host);
     }
 
     private static Map<String, String> fields(String object) {
