@@ -13477,11 +13477,11 @@ button.asset-tree-attach-remove {
     display: inline-flex;
     flex: 0 0 auto;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     width: auto;
     max-width: 100%;
-    margin: 2px 2px 2px 6px;
-    padding: 3px 8px;
+    margin: 0 2px 0 6px;
+    padding: 2px 6px;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     background: #fff;
@@ -13512,15 +13512,22 @@ button.asset-tree-attach-remove {
     flex-wrap: wrap;
 }
 
-#asset-tree-app .asset-tree-scheme-swatch {
-    width: 16px;
-    height: 16px;
-    min-width: 16px;
+#asset-tree-app button.asset-tree-scheme-swatch,
+#asset-tree-app input.asset-tree-scheme-swatch {
+    box-sizing: border-box;
+    width: 14px;
+    height: 14px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+    flex: 0 0 14px;
     margin: 0;
     padding: 0;
     border: 1px solid rgba(9, 30, 66, 0.28);
     border-radius: 2px;
     box-shadow: none;
+    line-height: 0;
     cursor: pointer;
     vertical-align: middle;
 }
@@ -13531,10 +13538,18 @@ button.asset-tree-attach-remove {
 }
 
 #asset-tree-app input.asset-tree-scheme-swatch {
-    width: 16px;
-    height: 16px;
-    padding: 0;
     background: #fff;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+#asset-tree-app input.asset-tree-scheme-swatch::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+#asset-tree-app input.asset-tree-scheme-swatch::-webkit-color-swatch {
+    border: 0;
+    border-radius: 1px;
 }
 
 .asset-tree-scheme-ink {
@@ -13830,6 +13845,40 @@ button.asset-tree-attach-remove {
     width: 100%;
     box-sizing: border-box;
     margin-bottom: 6px;
+}
+
+#asset-tree-app .asset-tree-scheme-library-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    margin: 0 0 6px;
+}
+
+#asset-tree-app .asset-tree-scheme-library-row .asset-tree-scheme-name {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-scheme-library-row .asset-tree-scheme-mini {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-scheme-library-row .asset-tree-scheme-mini svg {
+    display: block;
+    width: 14px;
+    height: 14px;
 }
 
 #asset-tree-app .asset-tree-scheme-fill {
