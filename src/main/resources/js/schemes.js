@@ -84,6 +84,36 @@
         return Math.round(value * 100) / 100;
     }
 
+    function snapShift1D(origin, size, objectAnchors, gridAnchors, tol, lock) {
+        var probes = [0, 0.5, 1];
+        if (lock && lock.anchor != null) {
+            var held = origin + size * lock.probe;
+            if (Math.abs(held - lock.anchor) <= tol * 1.35) {
+                return { shift: lock.anchor - held, lock: lock };
+            }
+        }
+        var best = null;
+        function consider(anchor, probe) {
+            var value = origin + size * probe;
+            var raw = Math.abs(anchor - value);
+            if (raw > tol) return;
+            if (!best || raw < best.raw - 0.05) {
+                best = { raw: raw, shift: anchor - value, lock: { anchor: anchor, probe: probe } };
+            }
+        }
+        var a;
+        var p;
+        for (a = 0; a < objectAnchors.length; a++) {
+            for (p = 0; p < probes.length; p++) consider(objectAnchors[a], probes[p]);
+        }
+        if (best) return { shift: best.shift, lock: best.lock };
+        for (a = 0; a < gridAnchors.length; a++) {
+            for (p = 0; p < probes.length; p++) consider(gridAnchors[a], probes[p]);
+        }
+        if (!best) return { shift: 0, lock: null };
+        return { shift: best.shift, lock: best.lock };
+    }
+
     function dist(ax, ay, bx, by) {
         var dx = ax - bx;
         var dy = ay - by;
@@ -1165,10 +1195,12 @@
         function segmentsOf(floor) {
             var segs = [];
             var objects = floor.objects || [];
+            var skip = session.snapSkip || null;
             var i;
             var k;
             for (i = 0; i < objects.length; i++) {
                 var obj = objects[i];
+                if (skip && skip[obj.id]) continue;
                 if (!layerVisible(obj.layerId)) continue;
                 if (obj.type === 'line' || obj.type === 'dimension') {
                     segs.push({ x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 });
@@ -1222,7 +1254,7 @@
                 add('endpoint', seg.x2, seg.y2);
                 add('midpoint', (seg.x1 + seg.x2) / 2, (seg.y1 + seg.y2) / 2);
                 var near = projectSeg(seg.x1, seg.y1, seg.x2, seg.y2, raw.x, raw.y);
-                if (near.t > 0.02 && near.t < 0.98) add('nearest', near.x, near.y);
+                if (from && near.t > 0.02 && near.t < 0.98) add('nearest', near.x, near.y);
                 if (from) {
                     var foot = projectSeg(seg.x1, seg.y1, seg.x2, seg.y2, from.x, from.y);
                     if (foot.t > 0 && foot.t < 1) add('perpendicular', foot.x, foot.y);
@@ -1231,8 +1263,9 @@
             var objects = floor.objects || [];
             for (i = 0; i < objects.length; i++) {
                 var obj = objects[i];
-                if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'symbol') {
-                    add('center', obj.x + obj.w / 2, obj.y + obj.h / 2);
+                if (session.snapSkip && session.snapSkip[obj.id]) continue;
+                if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'symbol' || obj.type === 'asset') {
+                    add('center', obj.x + obj.w / 2, obj.y + (obj.h || 0) / 2);
                 }
             }
             var nearSegs = [];
@@ -1266,6 +1299,61 @@
             if (session.osnapIndex >= found.length) session.osnapIndex = 0;
             session.osnap = found[session.osnapIndex];
             return { x: session.osnap.x, y: session.osnap.y };
+        }
+
+        function gridLines(origin, size, step) {
+            var probes = [0, 0.5, 1];
+            var out = [];
+            var i;
+            for (i = 0; i < probes.length; i++) out.push(Math.round((origin + (size || 0) * probes[i]) / step) * step);
+            return out;
+        }
+
+        function axisAnchors(skip) {
+            var xs = [];
+            var ys = [];
+            function add(x, y) {
+                if (isFinite(x)) xs.push(x);
+                if (isFinite(y)) ys.push(y);
+            }
+            var objects = (activeFloor().objects || []);
+            var i;
+            var k;
+            for (i = 0; i < objects.length; i++) {
+                var obj = objects[i];
+                if (skip && skip[obj.id]) continue;
+                if (!layerVisible(obj.layerId)) continue;
+                if (obj.x != null && obj.w != null) {
+                    var h = obj.h || 0;
+                    add(obj.x, obj.y);
+                    add(obj.x + obj.w, obj.y + h);
+                    add(obj.x + obj.w / 2, obj.y + h / 2);
+                } else if (obj.x1 != null) {
+                    add(obj.x1, obj.y1);
+                    add(obj.x2, obj.y2);
+                    add((obj.x1 + obj.x2) / 2, (obj.y1 + obj.y2) / 2);
+                } else if (obj.points) {
+                    for (k = 0; k < obj.points.length; k++) add(obj.points[k].x, obj.points[k].y);
+                }
+            }
+            return { xs: xs, ys: ys };
+        }
+
+        function snapBox(x, y, w, h, skip, hold) {
+            var tol = 12 / (session.cam.z || 1);
+            var anchors = axisAnchors(skip);
+            var step = session.snapOn ? gridStep() : 0;
+            var sx = snapShift1D(x, w || 0.01, session.osnapOn ? anchors.xs : [], step ? gridLines(x, w, step) : [], tol, hold && hold.x);
+            var sy = snapShift1D(y, h || 0.01, session.osnapOn ? anchors.ys : [], step ? gridLines(y, h, step) : [], tol, hold && hold.y);
+            return { x: roundCm(x + sx.shift), y: roundCm(y + sy.shift), hold: { x: sx.lock, y: sy.lock } };
+        }
+
+        function symbolSnap(raw) {
+            var def = symbolDef(session.symbolId);
+            if (!def) return { x: raw.x, y: raw.y, origin: null };
+            var placed = snapBox(raw.x - def.w / 2, raw.y - def.h / 2, def.w, def.h, {}, session.symbolHold);
+            session.symbolHold = placed.hold;
+            return { x: placed.x + def.w / 2, y: placed.y + def.h / 2, origin: { x: placed.x, y: placed.y } };
         }
 
         function intersect(a, b) {
@@ -1331,7 +1419,12 @@
                 if (!layerVisible(obj.layerId)) continue;
                 var layer = layerById(obj.layerId);
                 if (layer && layer.locked) continue;
-                if (hitsObject(obj, wx, wy, tol)) return obj.id;
+                if (!hitsObject(obj, wx, wy, tol)) continue;
+                if (obj.type === 'wall') {
+                    var door = openingAt(obj.id, wx, wy, tol);
+                    if (door) return door;
+                }
+                return obj.id;
             }
             var rooms = floor.rooms || [];
             for (i = rooms.length - 1; i >= 0; i--) {
@@ -1399,8 +1492,125 @@
                     if ((obj.fill || obj.text) && pointInPoly(wx, wy, obj.points)) return true;
                 }
             }
-            if (obj.type === 'opening') return false;
+            if (obj.type === 'opening') return hitsOpening(obj, wx, wy, tol);
             return false;
+        }
+
+        function wallSegment(wall, index) {
+            var pts = wall && wall.points;
+            if (!pts || !pts.length) return null;
+            if (index >= 0 && index < pts.length - 1) return { a: pts[index], b: pts[index + 1] };
+            if (wall.closed && pts.length > 2 && index === pts.length - 1) return { a: pts[pts.length - 1], b: pts[0] };
+            return null;
+        }
+
+        function openingHostAt(pt, tol) {
+            var best = null;
+            var objects = (activeFloor().objects || []);
+            var i;
+            var k;
+            for (i = 0; i < objects.length; i++) {
+                var wall = objects[i];
+                if (wall.type !== 'wall' || !wall.points) continue;
+                var count = wall.points.length - 1;
+                if (wall.closed && wall.points.length > 2) count += 1;
+                for (k = 0; k < count; k++) {
+                    var seg = wallSegment(wall, k);
+                    if (!seg) continue;
+                    var hitSeg = projectSeg(seg.a.x, seg.a.y, seg.b.x, seg.b.y, pt.x, pt.y);
+                    if (hitSeg.dist <= tol && (!best || hitSeg.dist < best.dist)) {
+                        best = { wall: wall, index: k, t: hitSeg.t, len: hitSeg.len, dist: hitSeg.dist };
+                    }
+                }
+            }
+            return best;
+        }
+
+        function openingSpan(opening) {
+            if (!opening) return null;
+            var wall = objectById(opening.wallId);
+            if (!wall || wall.type !== 'wall') return null;
+            var seg = wallSegment(wall, opening.index || 0);
+            if (!seg) return null;
+            var len = dist(seg.a.x, seg.a.y, seg.b.x, seg.b.y) || 1;
+            var half = (opening.width || 90) / 2 / len;
+            var t0 = (opening.t || 0.5) - half;
+            var t1 = (opening.t || 0.5) + half;
+            function at(t) {
+                return { x: seg.a.x + (seg.b.x - seg.a.x) * t, y: seg.a.y + (seg.b.y - seg.a.y) * t };
+            }
+            var a = at(t0);
+            var b = at(t1);
+            return { a: a, b: b, thickness: wall.thickness || 15, len: dist(a.x, a.y, b.x, b.y) };
+        }
+
+        function openingLeaf(span, opening) {
+            if (!span || !opening || opening.kind === 'window') return null;
+            var len = dist(span.a.x, span.a.y, span.b.x, span.b.y);
+            if (len < 1) return null;
+            var normal = leftNorm(span.a, span.b);
+            if (opening.swing === 'right') normal = { x: -normal.x, y: -normal.y };
+            return { x: span.b.x + normal.x * len, y: span.b.y + normal.y * len, len: len };
+        }
+
+        function openingAt(wallId, wx, wy, tol) {
+            var objects = (activeFloor().objects || []);
+            var i;
+            for (i = objects.length - 1; i >= 0; i--) {
+                var obj = objects[i];
+                if (obj.type !== 'opening' || obj.wallId !== wallId) continue;
+                if (!layerVisible(obj.layerId)) continue;
+                if (hitsOpening(obj, wx, wy, tol)) return obj.id;
+            }
+            return '';
+        }
+
+        function hitsOpening(obj, wx, wy, tol) {
+            var span = openingSpan(obj);
+            if (!span) return false;
+            var reach = Math.max(tol, (span.thickness || 15) / 2 + 1);
+            if (projectSeg(span.a.x, span.a.y, span.b.x, span.b.y, wx, wy).dist <= reach) return true;
+            var leaf = openingLeaf(span, obj);
+            if (!leaf) return false;
+            if (projectSeg(span.b.x, span.b.y, leaf.x, leaf.y, wx, wy).dist <= tol) return true;
+            var wallAng = Math.atan2(span.a.y - span.b.y, span.a.x - span.b.x);
+            var leafAng = Math.atan2(leaf.y - span.b.y, leaf.x - span.b.x);
+            var sweep = leafAng - wallAng;
+            while (sweep <= -Math.PI) sweep += Math.PI * 2;
+            while (sweep > Math.PI) sweep -= Math.PI * 2;
+            var steps = 8;
+            var prev = { x: span.b.x + Math.cos(wallAng) * leaf.len, y: span.b.y + Math.sin(wallAng) * leaf.len };
+            var s;
+            for (s = 1; s <= steps; s++) {
+                var ang = wallAng + sweep * (s / steps);
+                var next = { x: span.b.x + Math.cos(ang) * leaf.len, y: span.b.y + Math.sin(ang) * leaf.len };
+                if (projectSeg(prev.x, prev.y, next.x, next.y, wx, wy).dist <= tol) return true;
+                prev = next;
+            }
+            return false;
+        }
+
+        function moveOpeningTo(opening, pt) {
+            var reach = Math.max(40, 80 / (session.cam.z || 1));
+            var best = openingHostAt(pt, reach);
+            var current = objectById(opening.wallId);
+            var seg = current && current.type === 'wall' ? wallSegment(current, opening.index || 0) : null;
+            if (seg) {
+                var on = projectSeg(seg.a.x, seg.a.y, seg.b.x, seg.b.y, pt.x, pt.y);
+                var band = Math.max(opening.width || 90, 80);
+                if (on.dist <= band && (!best || best.wall.id === current.id || on.dist <= best.dist + 8)) {
+                    best = { wall: current, index: opening.index || 0, t: on.t, len: on.len, dist: on.dist };
+                }
+            }
+            if (!best) return;
+            var len = best.len || 1;
+            var half = (opening.width || 90) / 2 / len;
+            var t = best.t;
+            if (half < 0.49) t = Math.max(half, Math.min(1 - half, t));
+            opening.wallId = best.wall.id;
+            opening.index = best.index;
+            opening.t = Math.round(t * 10000) / 10000;
+            opening.layerId = best.wall.layerId;
         }
 
         function handleAt(sx, sy) {
@@ -1566,11 +1776,18 @@
             paint();
         }
 
-        function placeSymbol(pt) {
+        function placeSymbol(pt, origin) {
             var def = symbolDef(session.symbolId);
             if (session.assetId && placedAssetObject(session.assetId)) {
                 remember();
                 movePlacedAsset(session.assetId, pt);
+                if (origin) {
+                    var moved = placedAssetObject(session.assetId);
+                    if (moved && moved.type !== 'asset') {
+                        moved.x = origin.x;
+                        moved.y = origin.y;
+                    }
+                }
                 session.assetId = 0;
                 markTools();
                 renderProps();
@@ -1581,8 +1798,8 @@
             remember();
             var obj = baseObject('symbol');
             obj.symbolId = def.id;
-            obj.x = roundCm(pt.x - def.w / 2);
-            obj.y = roundCm(pt.y - def.h / 2);
+            obj.x = origin ? origin.x : roundCm(pt.x - def.w / 2);
+            obj.y = origin ? origin.y : roundCm(pt.y - def.h / 2);
             obj.w = def.w;
             obj.h = def.h;
             if (def.ports) obj.ports = def.ports;
@@ -1604,29 +1821,7 @@
 
         function placeOpening(kind, pt) {
             var floor = activeFloor();
-            var best = null;
-            var objects = floor.objects || [];
-            var i;
-            var k;
-            var tol = Math.max(12, 16 / session.cam.z);
-            for (i = 0; i < objects.length; i++) {
-                var wall = objects[i];
-                if (wall.type !== 'wall' || !wall.points) continue;
-                for (k = 1; k < wall.points.length; k++) {
-                    var hitSeg = projectSeg(wall.points[k - 1].x, wall.points[k - 1].y, wall.points[k].x, wall.points[k].y, pt.x, pt.y);
-                    if (hitSeg.dist <= tol && (!best || hitSeg.dist < best.dist)) {
-                        best = { wall: wall, index: k - 1, t: hitSeg.t, len: hitSeg.len, dist: hitSeg.dist };
-                    }
-                }
-                if (wall.closed && wall.points.length > 2) {
-                    var start = wall.points[0];
-                    var end = wall.points[wall.points.length - 1];
-                    var closeSeg = projectSeg(end.x, end.y, start.x, start.y, pt.x, pt.y);
-                    if (closeSeg.dist <= tol && (!best || closeSeg.dist < best.dist)) {
-                        best = { wall: wall, index: wall.points.length - 1, t: closeSeg.t, len: closeSeg.len, dist: closeSeg.dist };
-                    }
-                }
-            }
+            var best = openingHostAt(pt, Math.max(12, 16 / session.cam.z));
             if (!best) return;
             remember();
             var opening = baseObject('opening');
@@ -3155,6 +3350,22 @@
                 objects.forEach(function (obj) {
                     ctx.save();
                     if (obj.angle && obj.x != null && obj.w != null) rotateObj(ctx, obj);
+                    if (obj.type === 'opening') {
+                        var span = openingSpan(obj);
+                        if (span) {
+                            ctx.beginPath();
+                            ctx.moveTo(span.a.x, span.a.y);
+                            ctx.lineTo(span.b.x, span.b.y);
+                            var leaf = openingLeaf(span, obj);
+                            if (leaf) {
+                                ctx.moveTo(span.b.x, span.b.y);
+                                ctx.lineTo(leaf.x, leaf.y);
+                            }
+                            ctx.stroke();
+                        }
+                        ctx.restore();
+                        return;
+                    }
                     if (obj.type === 'polyline') pathCurve(ctx, obj.points, !!obj.closed);
                     else if (obj.points) pathOf(ctx, obj.points, !!obj.closed);
                     else if (obj.x1 != null) {
@@ -5419,6 +5630,120 @@
             status.textContent = api.t('schemeTemplateSaved');
         }
 
+        function shiftedBox(item, dx, dy) {
+            if (item.opening) return null;
+            if (item.x != null && item.w != null) return { x: item.x + dx, y: item.y + dy, w: item.w, h: item.h || 0.01 };
+            if (item.x1 != null) {
+                return {
+                    x: Math.min(item.x1, item.x2) + dx,
+                    y: Math.min(item.y1, item.y2) + dy,
+                    w: Math.abs(item.x2 - item.x1),
+                    h: Math.abs(item.y2 - item.y1)
+                };
+            }
+            if (item.points && item.points.length) {
+                var minX = item.points[0].x;
+                var minY = item.points[0].y;
+                var maxX = minX;
+                var maxY = minY;
+                item.points.forEach(function (p) {
+                    minX = Math.min(minX, p.x);
+                    minY = Math.min(minY, p.y);
+                    maxX = Math.max(maxX, p.x);
+                    maxY = Math.max(maxY, p.y);
+                });
+                return { x: minX + dx, y: minY + dy, w: maxX - minX, h: maxY - minY };
+            }
+            return null;
+        }
+
+        function moveItems() {
+            var items = [];
+            selectedObjects().forEach(function (obj) {
+                if (!mutableObject(obj)) return;
+                var item = { id: obj.id };
+                if (obj.type === 'opening') item.opening = true;
+                else if (obj.points) item.points = clone(obj.points);
+                else if (obj.x1 != null) {
+                    item.x1 = obj.x1;
+                    item.y1 = obj.y1;
+                    item.x2 = obj.x2;
+                    item.y2 = obj.y2;
+                } else if (obj.x != null) {
+                    item.x = obj.x;
+                    item.y = obj.y;
+                    item.w = obj.w;
+                    item.h = obj.h;
+                }
+                items.push(item);
+            });
+            return items;
+        }
+
+        function slideSelection(drag, raw) {
+            var dx = raw.x - drag.rawX;
+            var dy = raw.y - drag.rawY;
+            if (Math.abs(dx) + Math.abs(dy) <= 3 / (session.cam.z || 1)) {
+                drag.moved = false;
+                return;
+            }
+            var skip = {};
+            var i;
+            for (i = 0; i < drag.items.length; i++) skip[drag.items[i].id] = true;
+            var box = null;
+            for (i = 0; i < drag.items.length; i++) {
+                var one = shiftedBox(drag.items[i], dx, dy);
+                if (!one) continue;
+                if (!box) box = { x: one.x, y: one.y, r: one.x + one.w, b: one.y + one.h };
+                else {
+                    box.x = Math.min(box.x, one.x);
+                    box.y = Math.min(box.y, one.y);
+                    box.r = Math.max(box.r, one.x + one.w);
+                    box.b = Math.max(box.b, one.y + one.h);
+                }
+            }
+            var shiftX = dx;
+            var shiftY = dy;
+            if (box) {
+                var snapped = snapBox(box.x, box.y, Math.max(0.01, box.r - box.x), Math.max(0.01, box.b - box.y), skip, drag.hold);
+                shiftX = dx + (snapped.x - box.x);
+                shiftY = dy + (snapped.y - box.y);
+                drag.hold = snapped.hold;
+            }
+            for (i = 0; i < drag.items.length; i++) {
+                var item = drag.items[i];
+                var obj = objectById(item.id);
+                if (!obj || !mutableObject(obj)) continue;
+                if (item.opening) {
+                    moveOpeningTo(obj, raw);
+                    continue;
+                }
+                if (item.points) {
+                    obj.points = item.points.map(function (p) {
+                        var next = { x: roundCm(p.x + shiftX), y: roundCm(p.y + shiftY) };
+                        if (p.inx != null) {
+                            next.inx = roundCm(p.inx + shiftX);
+                            next.iny = roundCm(p.iny + shiftY);
+                        }
+                        if (p.outx != null) {
+                            next.outx = roundCm(p.outx + shiftX);
+                            next.outy = roundCm(p.outy + shiftY);
+                        }
+                        return next;
+                    });
+                } else if (item.x1 != null) {
+                    obj.x1 = roundCm(item.x1 + shiftX);
+                    obj.y1 = roundCm(item.y1 + shiftY);
+                    obj.x2 = roundCm(item.x2 + shiftX);
+                    obj.y2 = roundCm(item.y2 + shiftY);
+                } else if (item.x != null) {
+                    obj.x = roundCm(item.x + shiftX);
+                    obj.y = roundCm(item.y + shiftY);
+                }
+            }
+            drag.moved = Math.abs(dx) + Math.abs(dy) > 0.2;
+        }
+
         var drag = null;
         stage.addEventListener('mousedown', function (event) {
             if (event.button !== 2) hideTemplateMenu();
@@ -5437,9 +5762,10 @@
                 return;
             }
             if (event.button !== 0) return;
+            var raw = worldFrom(sx, sy);
             var pt = pointer(event);
             if (session.mode !== 'edit') {
-                var viewId = hit(pt.x, pt.y);
+                var viewId = hit(raw.x, raw.y);
                 session.selection = viewId ? withGroup([viewId]) : [];
                 if (viewId) showSchemeInfo(event.clientX, event.clientY, viewId);
                 else hideSchemeInfo();
@@ -5453,10 +5779,12 @@
                 var handle = handleAt(sx, sy);
                 if (handle && api.canEdit && !session.guest) {
                     remember();
+                    session.snapSkip = {};
+                    session.snapSkip[handle.id] = true;
                     drag = { mode: 'handle', handle: handle, moved: false };
                     return;
                 }
-                var id = hit(pt.x, pt.y);
+                var id = hit(raw.x, raw.y);
                 if (id) {
                     if (event.shiftKey) {
                         var at = session.selection.indexOf(id);
@@ -5466,7 +5794,7 @@
                     else session.selection = withGroup(session.selection);
                     if (selectedObjects().some(function (obj) { return mutableObject(obj); })) {
                         remember();
-                        drag = { mode: 'move', x: pt.x, y: pt.y, lastX: pt.x, lastY: pt.y, moved: false };
+                        drag = { mode: 'move', rawX: raw.x, rawY: raw.y, items: moveItems(), hold: null, moved: false };
                     }
                 } else if (session.assetId && mayPlacePins()) {
                     placeAsset(pt);
@@ -5505,8 +5833,8 @@
                         return;
                     }
                     if (!event.shiftKey) session.selection = [];
-                    drag = { mode: 'marquee', x: pt.x, y: pt.y };
-                    session.marquee = { x: pt.x, y: pt.y, w: 0, h: 0 };
+                    drag = { mode: 'marquee', x: raw.x, y: raw.y };
+                    session.marquee = { x: raw.x, y: raw.y, w: 0, h: 0 };
                 }
                 renderProps();
                 refreshSide();
@@ -5538,15 +5866,16 @@
                 return;
             }
             if (session.tool === 'symbol') {
-                placeSymbol(pt);
+                var aim = symbolSnap(raw);
+                placeSymbol(aim, aim.origin);
                 return;
             }
             if (session.tool === 'door' || session.tool === 'window') {
-                placeOpening(session.tool, pt);
+                placeOpening(session.tool, raw);
                 return;
             }
             if (session.tool === 'dropper') {
-                var picked = sampleInk(sx, sy, pt);
+                var picked = sampleInk(sx, sy, raw);
                 if (picked) chooseInk(picked, true);
                 return;
             }
@@ -5601,8 +5930,23 @@
         });
 
         stage.addEventListener('mousemove', function (event) {
-            var pt = pointer(event);
-            session.hover = pt;
+            var moveRect = overC.getBoundingClientRect();
+            var raw = worldFrom(event.clientX - moveRect.left, event.clientY - moveRect.top);
+            var tracking = drag && (drag.mode === 'move' || drag.mode === 'marquee');
+            var aimSymbol = !drag && session.tool === 'symbol' && session.symbolId;
+            var pt = (tracking || aimSymbol) ? raw : pointer(event);
+            if (aimSymbol) {
+                var aim = symbolSnap(raw);
+                session.hover = { x: aim.x, y: aim.y };
+                session.osnap = { kind: 'center', x: aim.x, y: aim.y };
+            } else if (session.tool === 'select' && !drag) {
+                session.hover = raw;
+                session.osnap = null;
+                session.symbolHold = null;
+            } else {
+                session.hover = pt;
+                if (session.tool !== 'symbol') session.symbolHold = null;
+            }
             if (!drag) {
                 if (session.draft && session.draft.points) {
                     session.draft.points[session.draft.points.length - 1] = pt;
@@ -5665,14 +6009,7 @@
                 return;
             }
             if (drag.mode === 'move') {
-                var dx = pt.x - drag.lastX;
-                var dy = pt.y - drag.lastY;
-                drag.lastX = pt.x;
-                drag.lastY = pt.y;
-                drag.moved = true;
-                selectedObjects().forEach(function (obj) {
-                    if (mutableObject(obj)) translateObj(obj, dx, dy);
-                });
+                slideSelection(drag, raw);
                 var floor = activeFloor();
                 if ((floor.objects || []).some(function (obj) { return obj.type === 'wall' && session.selection.indexOf(obj.id) >= 0; })) syncRooms(floor);
                 paint();
@@ -5726,10 +6063,10 @@
             }
             if (drag.mode === 'marquee') {
                 session.marquee = {
-                    x: Math.min(drag.x, pt.x),
-                    y: Math.min(drag.y, pt.y),
-                    w: Math.abs(pt.x - drag.x),
-                    h: Math.abs(pt.y - drag.y)
+                    x: Math.min(drag.x, raw.x),
+                    y: Math.min(drag.y, raw.y),
+                    w: Math.abs(raw.x - drag.x),
+                    h: Math.abs(raw.y - drag.y)
                 };
                 paint();
             }
@@ -5737,6 +6074,7 @@
 
         global.addEventListener('mouseup', onUp);
         function onUp(event) {
+            session.snapSkip = null;
             if (!drag) return;
             if (drag.mode === 'marker') {
                 var stroke = session.draft && session.draft.points;
@@ -5782,8 +6120,9 @@
                 return;
             }
             if (drag.mode === 'rmb') {
-                var pt = pointer(event);
-                var id = hit(pt.x, pt.y);
+                var upRect = overC.getBoundingClientRect();
+                var rawUp = worldFrom(event.clientX - upRect.left, event.clientY - upRect.top);
+                var id = hit(rawUp.x, rawUp.y);
                 if (id && session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
                 drag = null;
                 renderProps();
@@ -5809,6 +6148,22 @@
         }
 
         function bounds(obj) {
+            if (obj.type === 'opening') {
+                var span = openingSpan(obj);
+                if (!span) return null;
+                var minX = Math.min(span.a.x, span.b.x);
+                var minY = Math.min(span.a.y, span.b.y);
+                var maxX = Math.max(span.a.x, span.b.x);
+                var maxY = Math.max(span.a.y, span.b.y);
+                var leaf = openingLeaf(span, obj);
+                if (leaf) {
+                    minX = Math.min(minX, leaf.x);
+                    minY = Math.min(minY, leaf.y);
+                    maxX = Math.max(maxX, leaf.x);
+                    maxY = Math.max(maxY, leaf.y);
+                }
+                return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+            }
             if (obj.x != null && obj.w != null) return { x: obj.x, y: obj.y, w: obj.w, h: obj.h || 10 };
             if (obj.x1 != null) return { x: Math.min(obj.x1, obj.x2), y: Math.min(obj.y1, obj.y2), w: Math.abs(obj.x2 - obj.x1), h: Math.abs(obj.y2 - obj.y1) };
             if (obj.points && obj.points.length) {
