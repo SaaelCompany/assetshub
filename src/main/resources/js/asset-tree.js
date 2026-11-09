@@ -2205,22 +2205,29 @@
         bar.setAttribute('role', 'tablist');
         var items = [];
         if (state.canView !== false) {
-            items.push({ view: 'mine', label: t('menuMine') });
-            items.push({ view: 'all', label: t('tabAssets') });
-            if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules') });
+            items.push({ view: 'all', label: t('tabAssets'), group: 'catalog' });
+            items.push({ view: 'mine', label: t('menuMine'), group: 'catalog' });
+            if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules'), group: 'tools' });
         }
         if (moduleOn('reports') && (state.canView !== false || state.canReports)) {
-            items.push({ view: 'reports', label: t('menuReports') });
+            items.push({ view: 'reports', label: t('menuReports'), group: 'tools' });
         }
         if (moduleOn('map') && (state.canView !== false || state.canMap)) {
-            items.push({ view: 'map', label: t('menuMap') });
+            items.push({ view: 'map', label: t('menuMap'), group: 'tools' });
         }
         if (state.canManage && state.canView !== false) {
-            items.push({ view: 'settings', label: t('menuSettings') });
+            items.push({ view: 'settings', label: t('menuSettings'), group: 'end' });
         }
+        var grouped = false;
         items.forEach(function (item) {
             var active = state.view === item.view;
-            var tab = button(item.label, 'asset-tree-viewtab' + (active ? ' is-active' : ''), function () {
+            var extra = '';
+            if (item.group === 'tools' && !grouped) {
+                extra += ' is-group';
+                grouped = true;
+            }
+            if (item.group === 'end') extra += ' is-aside';
+            var tab = button(item.label, 'asset-tree-viewtab' + extra + (active ? ' is-active' : ''), function () {
                 showView(item.view);
             });
             tab.setAttribute('role', 'tab');
@@ -14027,13 +14034,13 @@
         if (state.canConfigure) {
             sections.push(['project', t('projectSection'), null]);
         }
+        if (state.canConfigure) {
+            sections.push(['types', t('typesSection'), state.types.length]);
+            sections.push(['statuses', t('statusSection'), (state.statuses || []).length]);
+            if (moduleOn('portal')) sections.push(['portal', t('portalSection'), null]);
+        }
         if (state.canObjects) {
             sections.push(['exchange', t('exchangeSection'), null]);
-        }
-        if (state.canConfigure) {
-            sections.push(['statuses', t('statusSection'), (state.statuses || []).length]);
-            sections.push(['types', t('typesSection'), state.types.length]);
-            if (moduleOn('portal')) sections.push(['portal', t('portalSection'), null]);
         }
         if (state.canGrant) {
             sections.push(['access', t('accessSection'), state.grants ? state.grants.length : null]);
