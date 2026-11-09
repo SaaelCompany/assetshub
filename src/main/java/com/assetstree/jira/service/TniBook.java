@@ -16,6 +16,7 @@ import com.assetstree.jira.model.Statuses;
 import com.assetstree.jira.model.TniClock;
 import com.assetstree.jira.model.TniFacts;
 import com.assetstree.jira.model.TniPolicy;
+import com.assetstree.jira.model.TniSame;
 import com.assetstree.jira.model.TniTarget;
 import com.assetstree.jira.model.TniText;
 import net.java.ao.DBParam;
@@ -27,7 +28,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Stores a browser sighting, turns it into an asset when a request is created,
@@ -77,7 +80,7 @@ public final class TniBook {
     }
 
     public void attach(ActiveObjects ao, TniHost host, String projectKey, String userKey, long issueId, String issueKey,
-                       Integer parentId, long now) {
+                       Integer parentId, Integer pickedId, long now) {
         if (ao == null || host == null || blank(projectKey) || blank(userKey) || issueId <= 0) {
             return;
         }
@@ -92,10 +95,11 @@ public final class TniBook {
             return;
         }
         final Integer placeId = parentId;
+        final Integer chosenId = pickedId;
         final Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
             @Override
             public Outcome doInTransaction() {
-                return writeAsset(ao, host, prepared, projectKey, userKey, issueId, issueKey, placeId, now);
+                return writeAsset(ao, host, prepared, projectKey, userKey, issueId, issueKey, placeId, chosenId, now);
             }
         });
         if (outcome != null) {
@@ -673,7 +677,7 @@ public final class TniBook {
     }
 
     private Outcome writeAsset(ActiveObjects ao, TniHost host, Prepared prepared, String projectKey, String userKey,
-                               long issueId, String issueKey, Integer parentId, long now) {
+                               long issueId, String issueKey, Integer parentId, Integer pickedId, long now) {
         TniDeviceEntity row = ao.get(TniDeviceEntity.class, prepared.rowId);
         if (row == null) {
             return null;
@@ -699,7 +703,11 @@ public final class TniBook {
         if (asset == null) {
             asset = findExternal(ao, projectKey, row.getIdentity());
         }
+        if (asset == null) {
+            asset = findTwin(ao, projectKey, pickedId, facts.host, facts.address);
+        }
         boolean created = asset == null;
+        boolean claimed = !created && TniSame.claimed(asset.getExternalKey(), row.getIdentity());
         Integer place = placeParent(ao, projectKey, parentId);
         if (created) {
             String objectKey;
@@ -734,7 +742,7 @@ public final class TniBook {
                 }
             }
             asset.save();
-        } else {
+        } else if (claimed) {
             String chosen = TniText.preferred(asset.getName(), row.getLabel(), kindLabel, person, facts.address, facts.host);
             if (!chosen.equals(asset.getName() == null ? "" : asset.getName())) {
                 asset.setName(chosen);
@@ -769,13 +777,32 @@ public final class TniBook {
             asset.setUpdated(new Date(now));
             asset.setUpdatedBy(clip(userKey, 255));
             asset.save();
+        } else {
+            name = asset.getName() == null ? "" : asset.getName();
+            if (blank(asset.getCustodianKey())) {
+                asset.setCustodianKey(clip(userKey, 255));
+            }
+            if (blank(asset.getIssuedKey())) {
+                asset.setIssuedKey(clip(userKey, 255));
+            }
+            if (place != null && (asset.getParentId() == null || asset.getParentId().intValue() <= 0)) {
+                asset.setParentId(place);
+            } else if (asset.getParentId() == null || asset.getParentId().intValue() <= 0) {
+                String site = TniSeat.move(ao, asset, setup.getTniSites(), facts.host);
+                if (!site.isEmpty()) {
+                    host.note(asset.getID(), userKey, "move", "", site);
+                }
+            }
+            asset.setUpdated(new Date(now));
+            asset.setUpdatedBy(clip(userKey, 255));
+            asset.save();
         }
         link(ao, asset, issueId);
         row.setAssetId(asset.getID());
         row.setUserKey(clip(userKey, 255));
         row.setIssueKey(clip(issueKey, 64));
         String station = TniText.shortHost(facts.host);
-        if (created || (!station.isEmpty() && station.equals(name))) {
+        if (created || (claimed && !station.isEmpty() && station.equals(name))) {
             row.setLabel(clip(name, 255));
         }
         row.setSeenAt(now);
@@ -847,6 +874,52 @@ public final class TniBook {
             return null;
         }
         return Integer.valueOf(parent.getID());
+    }
+
+    private AssetEntity findTwin(ActiveObjects ao, String projectKey, Integer picked, String host, String address) {
+        Map<String, Boolean> locations = new HashMap<String, Boolean>();
+        AssetTypeEntity[] types = ao.find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (types != null) {
+            for (int i = 0; i < types.length; i++) {
+                AssetTypeEntity type = types[i];
+                if (type != null && type.getTypeKey() != null) {
+                    locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+                }
+            }
+        }
+        Map<Integer, String> watches = new HashMap<Integer, String>();
+        TniWatchEntity[] marks = ao.find(TniWatchEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (marks != null) {
+            for (int i = 0; i < marks.length; i++) {
+                TniWatchEntity mark = marks[i];
+                if (mark != null && mark.getAssetId() > 0 && !blank(mark.getAddress())) {
+                    watches.put(Integer.valueOf(mark.getAssetId()), mark.getAddress());
+                }
+            }
+        }
+        List<TniSame.Card> cards = new ArrayList<TniSame.Card>();
+        AssetEntity[] rows = ao.find(AssetEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                AssetEntity row = rows[i];
+                if (row == null) {
+                    continue;
+                }
+                boolean location = Boolean.TRUE.equals(locations.get(row.getTypeKey()));
+                String watch = watches.containsKey(Integer.valueOf(row.getID())) ? watches.get(Integer.valueOf(row.getID())) : "";
+                cards.add(new TniSame.Card(row.getID(), row.getName(), location, row.getExternalKey(), watch));
+            }
+        }
+        int pointed = picked == null ? 0 : picked.intValue();
+        int id = TniSame.pick(cards, pointed, host, address);
+        if (id <= 0) {
+            return null;
+        }
+        AssetEntity found = ao.get(AssetEntity.class, id);
+        if (found == null || !ProjectKeys.same(found.getProjectKey(), projectKey)) {
+            return null;
+        }
+        return found;
     }
 
     private AssetEntity findExternal(ActiveObjects ao, String projectKey, String identity) {

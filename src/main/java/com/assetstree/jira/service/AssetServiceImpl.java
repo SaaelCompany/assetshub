@@ -14302,14 +14302,16 @@ public class AssetServiceImpl implements AssetService {
         String projectKey = issue.getProjectObject().getKey();
         catchSight(user, reporter, projectKey);
         Integer parent = null;
+        Integer picked = null;
         try {
             parent = tniParent(issue);
+            picked = tniPickedAsset(issue);
         } catch (RuntimeException ex) {
             log.debug("TNI did not resolve a site for {}", issue.getKey(), ex);
         }
         try {
             new TniBook().attach(ao(), tniHost(), projectKey, reporter.getKey(),
-                    issueId, issueKey, parent, System.currentTimeMillis());
+                    issueId, issueKey, parent, picked, System.currentTimeMillis());
         } catch (RuntimeException ex) {
             log.warn("TNI did not record a device for {}", issue.getKey(), ex);
         }

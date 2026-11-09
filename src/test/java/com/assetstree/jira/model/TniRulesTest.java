@@ -233,6 +233,26 @@ public class TniRulesTest {
         assertTrue(added.indexOf("tni-portal.js") < added.indexOf("</body>"));
     }
 
+    @Test
+    public void portalSightingReusesTheComputerAlreadyInTheTree() {
+        TniSame.Card manual = new TniSame.Card(4, "KRUL-IT", false, "", "");
+        TniSame.Card cabinet = new TniSame.Card(2, "KRUL-IT", true, "", "");
+        TniSame.Card other = new TniSame.Card(8, "Касса", false, "", "");
+        TniSame.Card born = new TniSame.Card(9, "KRUL-IT", false, "tni:abc", "");
+        assertEquals(4, TniSame.pick(Arrays.asList(cabinet, other, manual), 0, "krul-it.budzdorov.ru", "10.8.0.4"));
+        assertEquals(4, TniSame.pick(Arrays.asList(born, manual), 0, "KRUL-IT", ""));
+        assertEquals(9, TniSame.pick(Arrays.asList(born), 0, "krul-it.budzdorov.ru", ""));
+        assertEquals(0, TniSame.pick(Arrays.asList(other), 8, "krul-it.budzdorov.ru", ""));
+        assertEquals(4, TniSame.pick(Arrays.asList(other, manual), 8, "krul-it.budzdorov.ru", ""));
+        TniSame.Card watched = new TniSame.Card(6, "Касса", false, "", "10.8.0.4");
+        assertEquals(6, TniSame.pick(Arrays.asList(watched, other), 0, "", "10.8.0.4"));
+        assertEquals(0, TniSame.pick(Arrays.asList(other), 0, "", ""));
+        assertEquals(0, TniSame.pick(Arrays.asList(cabinet), 0, "krul-it.budzdorov.ru", ""));
+        assertTrue(TniSame.claimed("tni:abc", "abc"));
+        assertFalse(TniSame.claimed("", "abc"));
+        assertFalse(TniSame.claimed("ad:krul-it", "abc"));
+    }
+
     private static TniClock.Mark look(long seen, long probeFrom, int fails, long lastProbe, boolean address, long now) {
         return TniClock.look(seen, probeFrom, fails, lastProbe, 90, 3, 3, address, now);
     }
