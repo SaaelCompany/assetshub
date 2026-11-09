@@ -13264,6 +13264,7 @@ button.asset-tree-attach-remove {
     top: 0;
     right: 0;
     bottom: 0;
+    z-index: 0;
 }
 
 .asset-tree-scheme-dock {
@@ -13309,7 +13310,7 @@ button.asset-tree-attach-remove {
     top: 0;
     right: 0;
     bottom: 0;
-    z-index: 4;
+    z-index: 30;
     overflow: hidden;
     pointer-events: none;
 }
@@ -13464,7 +13465,7 @@ button.asset-tree-attach-remove {
 }
 
 .asset-tree-scheme-window-menu {
-    z-index: 8;
+    z-index: 40;
     display: flex;
     flex-direction: column;
     gap: 4px;
