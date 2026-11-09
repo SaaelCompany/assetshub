@@ -1194,6 +1194,8 @@ public final class UiCatalog {
             "schemeToolDim",
             "schemeToolDoor",
             "schemeToolWindow",
+            "schemeToolMarker",
+            "schemeMarkerHint",
             "schemeNew",
             "schemeReadout",
             "schemeGrid",

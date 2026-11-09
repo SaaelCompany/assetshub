@@ -245,7 +245,8 @@
             ['text', 'T', 'schemeToolText'],
             ['dimension', 'D', 'schemeToolDim'],
             ['door', '', 'schemeToolDoor'],
-            ['window', '', 'schemeToolWindow']
+            ['window', '', 'schemeToolWindow'],
+            ['marker', 'M', 'schemeToolMarker']
         ];
         toolDefs.forEach(function (item) {
             var button = el('button', 'asset-tree-scheme-tool');
@@ -265,6 +266,62 @@
             });
             tools.appendChild(button);
         });
+        if (!session.ink) {
+            try {
+                var savedInk = JSON.parse(global.localStorage.getItem('assetshub.schemeInk') || '{}') || {};
+                if (savedInk.color) session.ink = savedInk.color;
+                if (savedInk.fill != null) session.inkFill = !!savedInk.fill;
+            } catch (error) { /* the default ink still works */ }
+        }
+        if (session.inkFill == null) session.inkFill = true;
+        var swatches = el('div', 'asset-tree-scheme-swatches');
+        var inkColors = ['#172b4d', '#de350b', '#ff8b00', '#ffab00', '#36b37e', '#00b8d9', '#0052cc', '#6554c0', '#ffe380'];
+        function rememberInk() {
+            try {
+                global.localStorage.setItem('assetshub.schemeInk', JSON.stringify({ color: session.ink || '', fill: !!session.inkFill }));
+            } catch (error) { /* the choice still applies in this tab */ }
+        }
+        function markSwatches() {
+            var chips = swatches.querySelectorAll('.asset-tree-scheme-swatch');
+            var i;
+            for (i = 0; i < chips.length; i++) {
+                if (chips[i].tagName === 'BUTTON') chips[i].classList.toggle('is-on', chips[i].getAttribute('data-ink') === (session.ink || ''));
+            }
+        }
+        function chooseInk(color) {
+            session.ink = color;
+            rememberInk();
+            markSwatches();
+            if (selectedObjects().length) paintSelection(color);
+            else paint();
+        }
+        inkColors.forEach(function (color) {
+            var chip = el('button', 'asset-tree-scheme-swatch');
+            chip.type = 'button';
+            chip.title = api.t('schemeColor');
+            chip.setAttribute('data-ink', color);
+            chip.style.background = color;
+            chip.addEventListener('click', function () { chooseInk(color); });
+            swatches.appendChild(chip);
+        });
+        var customInk = el('input', 'asset-tree-scheme-swatch');
+        customInk.type = 'color';
+        customInk.title = api.t('schemeColor');
+        customInk.value = /^#[0-9a-fA-F]{6}$/.test(session.ink || '') ? session.ink : '#ffe380';
+        customInk.addEventListener('input', function () { chooseInk(customInk.value); });
+        swatches.appendChild(customInk);
+        var fillInk = el('label', 'asset-tree-scheme-ink');
+        var fillBox = el('input');
+        fillBox.type = 'checkbox';
+        fillBox.checked = !!session.inkFill;
+        fillBox.addEventListener('change', function () {
+            session.inkFill = fillBox.checked;
+            rememberInk();
+        });
+        fillInk.appendChild(fillBox);
+        fillInk.appendChild(document.createTextNode(api.t('schemeFill')));
+        tools.appendChild(swatches);
+        tools.appendChild(fillInk);
         var scanFile = el('input');
         scanFile.type = 'file';
         scanFile.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
@@ -730,6 +787,7 @@
                 dimension: '<path d="M4 12h16M6 9L4 12l2 3M18 9l2 3-2 3"/>',
                 door: '<path d="M8 19V6h5a7 7 0 0 1 0 13"/>',
                 window: '<rect x="5" y="6" width="14" height="12"/><path d="M12 6v12M5 12h14"/>',
+                marker: '<path d="M4 18l8-8 3 3-8 8H4z"/><path d="M12 10l3-3 2 2-3 3"/><path d="M15 5l3-2 3 3-2 3"/>',
                 eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/>',
                 eyeOff: '<path d="M4 5l16 14M9.5 9.7A4 4 0 0 0 14.3 14.5M6.1 6.8C3.7 8.4 2 12 2 12s3.5 6 10 6c1.7 0 3.2-.4 4.5-1.1M10.1 6.2C10.7 6.1 11.3 6 12 6c6.5 0 10 6 10 6a18 18 0 0 1-2.4 3"/>',
                 lock: '<rect x="6" y="11" width="12" height="8" rx="1"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
@@ -1128,6 +1186,14 @@
                 var h = obj.h || 20;
                 return wx >= obj.x - tol && wy >= obj.y - tol && wx <= obj.x + w + tol && wy <= obj.y + h + tol;
             }
+            if (obj.type === 'marker' && obj.points) {
+                var reach = Math.max(tol, (obj.thickness || 18) / 2);
+                var m;
+                for (m = 1; m < obj.points.length; m++) {
+                    if (projectSeg(obj.points[m - 1].x, obj.points[m - 1].y, obj.points[m].x, obj.points[m].y, wx, wy).dist <= reach) return true;
+                }
+                return false;
+            }
             if ((obj.type === 'polyline' || obj.type === 'wall') && obj.points) {
                 var i;
                 for (i = 1; i < obj.points.length; i++) {
@@ -1175,12 +1241,32 @@
             return null;
         }
 
+        function paintSelection(color) {
+            var objects = selectedObjects().filter(function (obj) { return mutableObject(obj); });
+            if (!objects.length || !/^#[0-9a-fA-F]{6}$/.test(color || '')) return;
+            remember();
+            objects.forEach(function (obj) {
+                if (!obj.type && obj.points) {
+                    obj.color = color;
+                    return;
+                }
+                obj.color = color;
+                if (obj.type === 'wall' || obj.type === 'symbol' || obj.type === 'asset') obj.fill = color;
+                else if (session.inkFill && (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline')) {
+                    obj.fill = color;
+                    if (obj.type === 'polyline') obj.closed = true;
+                }
+            });
+            renderProps();
+            paint();
+        }
+
         function baseObject(type) {
             return {
                 id: nid(type),
                 type: type,
                 layerId: session.doc.activeLayerId || 'walls',
-                color: (layerById(session.doc.activeLayerId) || {}).color || '#172b4d',
+                color: session.ink || (layerById(session.doc.activeLayerId) || {}).color || '#172b4d',
                 thickness: type === 'wall' ? 15 : 1,
                 opacity: 1
             };
@@ -1216,6 +1302,11 @@
                 obj.alignment = 'center';
                 obj.hatch = 'diagonal';
                 obj.height = 300;
+                if (session.inkFill && session.ink) obj.fill = session.ink;
+            }
+            if (session.inkFill && session.ink && obj.type === 'polyline') {
+                obj.fill = session.ink;
+                obj.closed = true;
             }
             activeFloor().objects.push(obj);
             if (obj.type === 'wall') syncRooms(activeFloor());
@@ -1245,6 +1336,7 @@
             obj.alignment = 'center';
             obj.hatch = 'diagonal';
             obj.height = 300;
+            if (session.inkFill && session.ink) obj.fill = session.ink;
             activeFloor().objects.push(obj);
             syncRooms(activeFloor());
             session.selection = [obj.id];
@@ -1270,6 +1362,7 @@
                 obj.h = roundCm(Math.abs(y2 - y1));
                 if (obj.w < 1) obj.w = 1;
                 if (obj.h < 1) obj.h = 1;
+                if (session.inkFill && session.ink && (kind === 'rect' || kind === 'ellipse')) obj.fill = session.ink;
             }
             activeFloor().objects.push(obj);
             session.selection = [obj.id];
@@ -2253,10 +2346,9 @@
             });
             ctx.save();
             ctx.globalAlpha = wall.opacity == null ? 1 : wall.opacity;
-            ctx.fillStyle = '#f4f5f7';
             ctx.strokeStyle = wall.color || '#172b4d';
             ctx.lineWidth = 1.2;
-            ctx.fillStyle = '#eef2f6';
+            ctx.fillStyle = wall.fill || '#eef2f6';
             var closed = !!wall.closed && points.length > 2;
             var leftEdge = offsetPoints(points, closed, half);
             var rightEdge = offsetPoints(points, closed, -half);
@@ -2459,7 +2551,7 @@
             var glyph = assetGlyph(obj);
             ctx.save();
             ctx.translate(x, y);
-            ctx.fillStyle = glyph ? glyph.color : '#ffffff';
+            ctx.fillStyle = obj.fill || (glyph ? glyph.color : '#ffffff');
             ctx.strokeStyle = glyph ? glyph.color : (obj.color || '#0052cc');
             ctx.lineWidth = 1.2;
             ctx.beginPath();
@@ -2558,6 +2650,13 @@
             } else if (obj.type === 'asset') {
                 drawAssetMark(ctx, obj);
             } else if (obj.type === 'symbol') {
+                if (obj.fill) {
+                    ctx.save();
+                    ctx.globalAlpha *= 0.4;
+                    ctx.fillStyle = obj.fill;
+                    ctx.fillRect(obj.x, obj.y, obj.w || 40, obj.h || 40);
+                    ctx.restore();
+                }
                 drawParts(ctx, symbolDef(obj.symbolId), obj.x, obj.y, obj.w, obj.h);
                 if (obj.assetBinding) {
                     ctx.fillStyle = '#0052cc';
@@ -2658,11 +2757,37 @@
             ctx.globalAlpha = ghost ? 0.16 : 1;
             var objects = floor.objects || [];
             for (i = 0; i < objects.length; i++) {
-                if (objects[i].type === 'opening' || objects[i].type === 'wall' || objects[i].type === 'image') continue;
+                if (objects[i].type === 'opening' || objects[i].type === 'wall' || objects[i].type === 'image' || objects[i].type === 'marker') continue;
                 drawObject(ctx, objects[i], floor);
             }
             drawWallLayer(ctx, floor);
+            drawMarkers(ctx, floor);
             ctx.restore();
+        }
+
+        function drawMarkerStroke(ctx, obj) {
+            var points = obj.points || [];
+            if (points.length < 2) return;
+            ctx.save();
+            ctx.globalAlpha = obj.opacity == null ? 0.45 : obj.opacity;
+            ctx.strokeStyle = obj.color || '#ffe380';
+            ctx.lineWidth = obj.thickness || 18;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            var i;
+            for (i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawMarkers(ctx, floor) {
+            var objects = (floor && floor.objects) || [];
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                if (objects[i].type === 'marker' && layerVisible(objects[i].layerId)) drawMarkerStroke(ctx, objects[i]);
+            }
         }
 
         function drawWallLayer(ctx, floor) {
@@ -2817,7 +2942,14 @@
                     ctx.fill();
                 }
                 if (session.draft && session.draft.points) {
-                    if (session.draft.tool === 'wall') {
+                    if (session.draft.tool === 'marker') {
+                        drawMarkerStroke(ctx, {
+                            points: session.draft.points,
+                            color: session.ink || '#ffe380',
+                            thickness: Math.max(8, 22 / (session.cam.z || 1)),
+                            opacity: 0.45
+                        });
+                    } else if (session.draft.tool === 'wall') {
                         drawWall(ctx, {
                             points: session.draft.points,
                             thickness: 15,
@@ -2880,6 +3012,7 @@
                 (live ? '   ' + api.t('schemeLength') + ' ' + live.text : '') +
                 (session.typed ? '   ' + session.typed : '');
             if (session.tool === 'wall') status.textContent += '   ' + api.t('schemeWallOne');
+            if (session.tool === 'marker') status.textContent += '   ' + api.t('schemeMarkerHint');
         }
 
         function liveLength() {
@@ -3791,7 +3924,30 @@
                 if (!isFinite(next)) next = 72;
                 obj.opacity = Math.max(5, Math.min(100, next)) / 100;
             });
-            if (obj.type === 'line' || obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'text' || obj.type === 'dimension') {
+            if (!obj.type && obj.points) {
+                var roomColorWrap = el('label', 'asset-tree-scheme-field', api.t('schemeColor'));
+                var roomColor = el('input');
+                roomColor.type = 'color';
+                roomColor.disabled = !api.canEdit || session.mode !== 'edit';
+                roomColor.value = /^#[0-9a-fA-F]{6}$/.test(obj.color || '') ? obj.color : '#e3fcef';
+                roomColor.addEventListener('change', function () {
+                    if (!api.canEdit || session.mode !== 'edit') return;
+                    remember();
+                    obj.color = roomColor.value;
+                    paint();
+                });
+                roomColorWrap.appendChild(roomColor);
+                props.appendChild(roomColorWrap);
+            }
+            if (obj.type === 'marker') {
+                field(api.t('schemeThickness'), obj.thickness || 18, function (value) { obj.thickness = Math.max(4, roundCm(Number(value) || 18)); });
+                field(api.t('schemeOpacity'), Math.round((obj.opacity == null ? 0.45 : obj.opacity) * 100), function (value) {
+                    var next = Number(value);
+                    if (!isFinite(next)) next = 45;
+                    obj.opacity = Math.max(10, Math.min(90, next)) / 100;
+                });
+            }
+            if (obj.type === 'line' || obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'text' || obj.type === 'dimension' || obj.type === 'marker' || obj.type === 'symbol' || obj.type === 'asset') {
                 var colorWrap = el('label', 'asset-tree-scheme-field', api.t('schemeColor'));
                 var color = el('input');
                 color.type = 'color';
@@ -3806,7 +3962,7 @@
                 colorWrap.appendChild(color);
                 props.appendChild(colorWrap);
             }
-            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline') {
+            if (obj.type === 'rect' || obj.type === 'ellipse' || obj.type === 'polyline' || obj.type === 'wall' || obj.type === 'symbol' || obj.type === 'asset') {
                 var fillWrap = el('label', 'asset-tree-scheme-field', api.t('schemeFill'));
                 var fillRow = el('div', 'asset-tree-scheme-fill');
                 var fillOn = el('input');
@@ -5091,6 +5247,13 @@
                 placeOpening(session.tool, pt);
                 return;
             }
+            if (session.tool === 'marker') {
+                var raw = worldFrom(sx, sy);
+                session.draft = { tool: 'marker', points: [{ x: raw.x, y: raw.y }] };
+                drag = { mode: 'marker', moved: false };
+                paint();
+                return;
+            }
             if (session.tool === 'polyline') {
                 if (!session.draft) {
                     session.draft = { tool: 'polyline', points: [{ x: pt.x, y: pt.y }] };
@@ -5150,6 +5313,16 @@
                     }
                     session.draft.x2 = x2;
                     session.draft.y2 = y2;
+                }
+                paint();
+                return;
+            }
+            if (drag.mode === 'marker' && session.draft && session.draft.points) {
+                var mark = worldFrom(event.clientX - overC.getBoundingClientRect().left, event.clientY - overC.getBoundingClientRect().top);
+                var lastMark = session.draft.points[session.draft.points.length - 1];
+                if (dist(lastMark.x, lastMark.y, mark.x, mark.y) >= 1.5) {
+                    session.draft.points.push({ x: mark.x, y: mark.y });
+                    drag.moved = true;
                 }
                 paint();
                 return;
@@ -5262,6 +5435,33 @@
         global.addEventListener('mouseup', onUp);
         function onUp(event) {
             if (!drag) return;
+            if (drag.mode === 'marker') {
+                var stroke = session.draft && session.draft.points;
+                var painted = drag.moved && stroke && stroke.length >= 2;
+                var spot = stroke && stroke.length ? stroke[0] : null;
+                session.draft = null;
+                drag = null;
+                if (painted) {
+                    remember();
+                    var markObj = baseObject('marker');
+                    markObj.points = stroke.map(function (p) { return { x: roundCm(p.x), y: roundCm(p.y) }; });
+                    markObj.color = session.ink || '#ffe380';
+                    markObj.thickness = Math.max(8, roundCm(22 / (session.cam.z || 1)));
+                    markObj.opacity = 0.45;
+                    markObj.layerId = layerOr('notes');
+                    activeFloor().objects.push(markObj);
+                    session.selection = [markObj.id];
+                    renderProps();
+                } else if (spot) {
+                    var markId = hit(spot.x, spot.y);
+                    if (markId) {
+                        session.selection = withGroup([markId]);
+                        paintSelection(session.ink || '#ffe380');
+                    }
+                }
+                paint();
+                return;
+            }
             if (drag.mode === 'pen') {
                 var pts = session.draft && session.draft.points;
                 if (pts && pts[drag.index]) {
@@ -5786,7 +5986,7 @@
                 session.osnapIndex = (session.osnapIndex + 1) % session.osnapList.length;
                 return;
             }
-            var hot = { v: 'select', l: 'line', r: 'rect', e: 'ellipse', p: 'polyline', w: 'wall', t: 'text', d: 'dimension' };
+            var hot = { v: 'select', l: 'line', r: 'rect', e: 'ellipse', p: 'polyline', w: 'wall', t: 'text', d: 'dimension', m: 'marker' };
             if (!event.ctrlKey && !event.metaKey && !event.altKey && hot[event.key]) {
                 if (session.guest && hot[event.key] !== 'select') return;
                 session.tool = hot[event.key];
