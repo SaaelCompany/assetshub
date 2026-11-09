@@ -178,6 +178,29 @@
     transform: none;
 }
 
+.asset-tree-work {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(9, 30, 66, 0.35);
+}
+
+.asset-tree-work p {
+    margin: 0;
+    padding: 16px 22px;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font-size: 14px;
+    box-shadow: 0 8px 16px rgba(9, 30, 66, 0.25);
+}
+
 .asset-tree-dashboard {
     margin: 12px 0;
     padding: 10px 12px 12px;

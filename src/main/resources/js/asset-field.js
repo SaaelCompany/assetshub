@@ -1359,12 +1359,15 @@
             var hit = !needle || (cards[i].getAttribute('data-hay') || '').indexOf(needle) !== -1;
             if (hit) cards[i].classList.remove('is-hidden');
             else cards[i].classList.add('is-hidden');
+            cards[i].style.display = hit ? '' : 'none';
             if (hit) shown++;
         }
         var groups = root.querySelectorAll('.asset-tree-portal-mine-group');
         for (var g = 0; g < groups.length; g++) {
-            if (groups[g].querySelector('.asset-tree-portal-mine-card:not(.is-hidden)')) groups[g].classList.remove('is-hidden');
+            var visible = groups[g].querySelector('.asset-tree-portal-mine-card:not(.is-hidden)');
+            if (visible) groups[g].classList.remove('is-hidden');
             else groups[g].classList.add('is-hidden');
+            groups[g].style.display = visible ? '' : 'none';
         }
         var empty = root.querySelector('.asset-tree-portal-mine-empty');
         if (empty) empty.hidden = shown > 0;

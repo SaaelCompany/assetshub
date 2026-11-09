@@ -87,6 +87,8 @@ public interface AssetService {
 
     AssetListDto listAssets(ApplicationUser user, String projectKey, String query);
 
+    String treeMark(ApplicationUser user, String projectKey);
+
     AssetDto getAsset(ApplicationUser user, int id);
 
     AssetDto createAsset(ApplicationUser user, AssetDraft draft);
