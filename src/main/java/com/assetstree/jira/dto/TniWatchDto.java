@@ -7,6 +7,8 @@ public class TniWatchDto {
     private String suggestion;
     private Integer up;
     private long checkedAt;
+    private String name;
+    private String report;
 
     public Boolean getArmed() { return armed; }
     public void setArmed(Boolean armed) { this.armed = armed; }
@@ -18,4 +20,8 @@ public class TniWatchDto {
     public void setUp(Integer up) { this.up = up; }
     public long getCheckedAt() { return checkedAt; }
     public void setCheckedAt(long checkedAt) { this.checkedAt = checkedAt; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public String getReport() { return report; }
+    public void setReport(String report) { this.report = report; }
 }

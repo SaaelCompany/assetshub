@@ -6555,6 +6555,7 @@
             var pingChange = el('div', 'asset-tree-history-change');
             var pingWord = item.newValue === 'up' ? t('tniWatchUp') : t('tniWatchDown');
             pingChange.appendChild(el('span', null, item.field ? (item.field + ' · ' + pingWord) : pingWord));
+            if (item.oldValue) pingChange.appendChild(el('pre', 'asset-tree-ping-log', item.oldValue));
             row.appendChild(pingChange);
             return row;
         }
@@ -9229,15 +9230,42 @@
         setBusy(true);
         ajax('POST', '/assets/' + asset.id + '/ping', {}, function (status, payload) {
             setBusy(false);
-            if (status < 200 || status >= 300 || !payload || (payload.up !== 1 && payload.up !== 2)) {
-                notify((payload && payload.message) || t('errorTitle'));
+            var ok = status >= 200 && status < 300 && payload && (payload.up === 1 || payload.up === 2);
+            if (ok) {
+                applyPing(asset, payload);
+                notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
+                selectAsset(asset.id, true);
                 return;
             }
-            if (!state.ping) state.ping = {};
-            state.ping[asset.id] = payload.up;
-            notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
-            selectAsset(asset.id, true);
+            ajax('GET', '/assets/' + asset.id + '/watch', null, function (watchStatus, watch) {
+                if (watchStatus === 200 && watch && (watch.up === 1 || watch.up === 2)) {
+                    applyPing(asset, watch);
+                    notify(watch.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
+                    selectAsset(asset.id, true);
+                    return;
+                }
+                notify((payload && payload.message) || t('errorTitle'));
+            });
         });
+    }
+
+    function applyPing(asset, payload) {
+        if (!state.ping) state.ping = {};
+        state.ping[asset.id] = payload.up;
+        var row = state.tniWatch[asset.id] || {};
+        row.up = payload.up;
+        row.checkedAt = payload.checkedAt || row.checkedAt || Date.now();
+        if (payload.address) row.address = payload.address;
+        if (payload.armed != null) row.armed = payload.armed;
+        if (payload.report) row.report = payload.report;
+        if (payload.name) {
+            row.name = payload.name;
+            var named = byId()[asset.id];
+            if (named) named.name = payload.name;
+            if (state.detail && state.detail.id === asset.id) state.detail.name = payload.name;
+        }
+        state.tniWatch[asset.id] = row;
+        if (state.detail && state.detail.id === asset.id) state.detail.pingUp = payload.up;
     }
 
     function finishSave(id, message, typeMoved) {
@@ -21051,7 +21079,7 @@
         var host = document.createElement('input');
         host.type = 'text';
         host.id = 'asset-tree-tni-host';
-        host.placeholder = 'dc.corp.local';
+        host.placeholder = 'dc.budzdorov.ru';
         var port = document.createElement('input');
         port.type = 'number';
         port.id = 'asset-tree-tni-port';
@@ -21061,7 +21089,7 @@
         var account = document.createElement('input');
         account.type = 'text';
         account.id = 'asset-tree-tni-account';
-        account.placeholder = 'CORP\\user';
+        account.placeholder = 'BUDZDOROV\\user';
         var password = document.createElement('input');
         password.type = 'password';
         password.id = 'asset-tree-tni-password';
@@ -21069,7 +21097,7 @@
         var base = document.createElement('input');
         base.type = 'text';
         base.id = 'asset-tree-tni-base';
-        base.placeholder = 'DC=corp,DC=local';
+        base.placeholder = 'budzdorov.ru';
         var grid = el('div', 'asset-tree-tni-grid');
         grid.appendChild(planField(t('tniDirHost'), host));
         grid.appendChild(planField(t('tniDirPort'), port));
@@ -21166,7 +21194,7 @@
         var host = document.createElement('input');
         host.type = 'text';
         host.id = 'asset-tree-tni-sccm-host';
-        host.placeholder = 'sccm.corp.local';
+        host.placeholder = 'sccm.budzdorov.ru';
         var port = document.createElement('input');
         port.type = 'number';
         port.id = 'asset-tree-tni-sccm-port';
@@ -21176,7 +21204,7 @@
         var account = document.createElement('input');
         account.type = 'text';
         account.id = 'asset-tree-tni-sccm-account';
-        account.placeholder = 'CORP\\user';
+        account.placeholder = 'BUDZDOROV\\user';
         var password = document.createElement('input');
         password.type = 'password';
         password.id = 'asset-tree-tni-sccm-password';
@@ -22229,6 +22257,7 @@
             tniAd: setup.tniAd !== false,
             tniSccm: setup.tniSccm !== false,
             tniPing: setup.tniPing !== false,
+            tniSites: setup.tniSites == null ? null : String(setup.tniSites),
             portalColumns: (function () {
                 var raw = setup.portalColumns;
                 if (raw == null || raw === '' || raw === '*') return 'key,type,status,location';
@@ -29859,19 +29888,39 @@
         label.appendChild(armed);
         label.appendChild(document.createTextNode(t('tniWatchOn')));
         body.appendChild(label);
-        body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + (asset.name || '')));
+        body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + ((row && row.address) || asset.name || '')));
         body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
+        if (row.report) body.appendChild(el('pre', 'asset-tree-ping-log', row.report));
         if (mayEdit(asset)) {
             body.appendChild(button(t('tniWatchSave'), 'asset-tree-btn', function () {
                 ajax('PUT', '/assets/' + asset.id + '/watch', {
                     armed: armed.checked
                 }, function (status, payload) {
-                    if (status >= 200 && status < 300 && payload) {
+                    var ok = status >= 200 && status < 300 && payload;
+                    if (ok) {
                         state.tniWatch[asset.id] = payload;
+                        if (payload.name) {
+                            var named = byId()[asset.id];
+                            if (named) named.name = payload.name;
+                            if (state.detail && state.detail.id === asset.id) state.detail.name = payload.name;
+                        }
+                        if (payload.up === 1 || payload.up === 2) {
+                            if (!state.ping) state.ping = {};
+                            state.ping[asset.id] = payload.up;
+                            if (state.detail && state.detail.id === asset.id) state.detail.pingUp = payload.up;
+                        }
                         if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
-                    } else {
-                        notify((payload && payload.message) || t('errorTitle'));
+                        selectAsset(asset.id, true);
+                        return;
                     }
+                    ajax('GET', '/assets/' + asset.id + '/watch', null, function (watchStatus, watch) {
+                        if (watchStatus === 200 && watch) {
+                            state.tniWatch[asset.id] = watch;
+                            if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
+                            return;
+                        }
+                        notify((payload && payload.message) || t('errorTitle'));
+                    });
                 });
             }));
         }
@@ -29898,8 +29947,16 @@
         ajax('GET', '/assets/' + assetId + '/watch', null, function (status, payload) {
             if (state.tniWatchToken[assetId] !== token) return;
             state.tniWatchLoading[assetId] = false;
-            if (status === 200 && payload) state.tniWatch[assetId] = payload;
-            else state.tniWatch[assetId] = { armed: false, missing: true };
+            if (status === 200 && payload) {
+                state.tniWatch[assetId] = payload;
+                if (payload.name) {
+                    var named = byId()[assetId];
+                    if (named && named.name !== payload.name) named.name = payload.name;
+                    if (state.detail && state.detail.id === assetId && state.detail.name !== payload.name) {
+                        state.detail.name = payload.name;
+                    }
+                }
+            } else state.tniWatch[assetId] = { armed: false, missing: true };
             if (state.detail && state.detail.id === assetId && document.getElementById('asset-tree-detail')) {
                 showDetail(state.detail, false);
             }
@@ -30269,7 +30326,10 @@
             }
         }
         stack.appendChild(block);
-        if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniImportCard());
+        if (state.canAdmin && moduleOn('tni')) {
+            stack.appendChild(tniImportCard());
+            stack.appendChild(tniSitesCard());
+        }
         panel.appendChild(stack);
     }
 
@@ -30299,6 +30359,182 @@
             }));
         }
         if (state.canAdmin) appendTniTools(card);
+        return card;
+    }
+
+    function readSiteRules(text) {
+        return String(text || '').split(/\r?\n/).map(function (line) {
+            var mark = line.indexOf('=');
+            if (mark < 0) mark = line.indexOf('~');
+            if (mark <= 0) return null;
+            var code = line.slice(0, mark).replace(/^\s+|\s+$/g, '').toUpperCase();
+            var place = line.slice(mark + 1).replace(/^\s+|\s+$/g, '');
+            if (!/^[A-Z0-9][A-Z0-9-]{0,31}$/.test(code) || !place) return null;
+            return { code: code, place: place };
+        }).filter(Boolean);
+    }
+
+    function writeSiteRules(rows) {
+        var seen = {};
+        var lines = [];
+        rows.forEach(function (row) {
+            var code = String(row.code || '').toUpperCase();
+            var place = String(row.place || '').replace(/^\s+|\s+$/g, '');
+            if (!/^[A-Z0-9][A-Z0-9-]{0,31}$/.test(code) || !place || seen[code]) return;
+            seen[code] = true;
+            lines.push(code + ' = ' + place);
+        });
+        return lines.join('\n');
+    }
+
+    function sitePlaces() {
+        return (state.assets || []).filter(function (asset) {
+            return isFolder(asset);
+        }).map(function (asset) {
+            return {
+                id: asset.id,
+                name: asset.name || '',
+                key: asset.objectKey || '',
+                path: crumbs(asset)
+            };
+        }).sort(function (left, right) {
+            return compareNames(left.path, right.path);
+        });
+    }
+
+    function sitePlaceToken(place) {
+        return place.key || place.name;
+    }
+
+    function findSitePlace(token) {
+        var wanted = String(token || '').toLowerCase();
+        var found = null;
+        sitePlaces().some(function (place) {
+            if (wanted && (place.name.toLowerCase() === wanted || place.key.toLowerCase() === wanted)) {
+                found = place;
+                return true;
+            }
+            return false;
+        });
+        return found;
+    }
+
+    function computersForCode(code) {
+        var prefix = String(code || '').toUpperCase();
+        if (!prefix) return 0;
+        var count = 0;
+        (state.assets || []).forEach(function (asset) {
+            if (!asset || isFolder(asset)) return;
+            var name = String(asset.name || '').toUpperCase();
+            if (name === prefix || name.indexOf(prefix + '-') === 0) count += 1;
+        });
+        return count;
+    }
+
+    function tniSitesCard() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('tniSites')));
+        card.appendChild(el('p', 'asset-tree-hint', t('tniSitesHint')));
+        var locked = !state.canArrange;
+        var rows = readSiteRules(moduleSetup().tniSites);
+        var list = el('div', 'asset-tree-site-rules');
+        var places = sitePlaces();
+
+        function paint() {
+            list.innerHTML = '';
+            if (!rows.length) {
+                list.appendChild(el('p', 'asset-tree-empty-note', places.length ? t('tniSitesEmpty') : t('tniSitesNone')));
+                return;
+            }
+            var codes = {};
+            rows.forEach(function (row) {
+                if (!row.code) return;
+                codes[row.code] = (codes[row.code] || 0) + 1;
+            });
+            rows.forEach(function (row, index) {
+                var line = el('div', 'asset-tree-site-rule' + (row.code && codes[row.code] > 1 ? ' is-duplicate' : ''));
+                var code = document.createElement('input');
+                code.type = 'text';
+                code.maxLength = 32;
+                code.value = row.code || '';
+                code.placeholder = 'KRUL';
+                code.disabled = locked;
+                code.setAttribute('aria-label', t('tniSitesCode'));
+                code.addEventListener('input', function () {
+                    row.code = code.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+                    if (code.value !== row.code) code.value = row.code;
+                });
+                code.addEventListener('change', function () { paint(); });
+                var select = document.createElement('select');
+                select.disabled = locked;
+                select.setAttribute('aria-label', t('tniSitesPlace'));
+                var empty = document.createElement('option');
+                empty.value = '';
+                empty.textContent = t('tniSitesPick');
+                select.appendChild(empty);
+                var chosen = findSitePlace(row.place);
+                places.forEach(function (place) {
+                    var option = document.createElement('option');
+                    option.value = String(place.id);
+                    option.textContent = place.path || place.name;
+                    select.appendChild(option);
+                });
+                if (chosen) {
+                    select.value = String(chosen.id);
+                } else if (row.place) {
+                    var missing = document.createElement('option');
+                    missing.value = 'keep';
+                    missing.textContent = t('tniSitesMissing') + ': ' + row.place;
+                    select.appendChild(missing);
+                    select.value = 'keep';
+                }
+                select.addEventListener('change', function () {
+                    if (select.value === 'keep') return;
+                    var place = null;
+                    places.forEach(function (item) {
+                        if (String(item.id) === select.value) place = item;
+                    });
+                    row.place = place ? sitePlaceToken(place) : '';
+                });
+                var count = el('span', 'asset-tree-site-count', row.code ? t('tniSitesCount', computersForCode(row.code)) : '');
+                var remove = button('\u00d7', 'asset-tree-btn slim', function () {
+                    rows.splice(index, 1);
+                    paint();
+                });
+                remove.disabled = locked;
+                remove.title = t('delete');
+                remove.setAttribute('aria-label', t('delete'));
+                line.appendChild(code);
+                line.appendChild(el('span', 'asset-tree-site-arrow', '\u2192'));
+                line.appendChild(select);
+                line.appendChild(count);
+                line.appendChild(remove);
+                list.appendChild(line);
+            });
+        }
+
+        paint();
+        card.appendChild(list);
+        if (!locked) {
+            var actions = el('div', 'asset-tree-tni-actions');
+            if (places.length) {
+                actions.appendChild(button(t('tniSitesAdd'), 'asset-tree-btn', function () {
+                    if (rows.length >= 40) return;
+                    rows.push({ code: '', place: '' });
+                    paint();
+                    var inputs = list.querySelectorAll('input');
+                    if (inputs.length) inputs[inputs.length - 1].focus();
+                }));
+            }
+            actions.appendChild(button(t('setupSave'), 'asset-tree-btn primary', function () {
+                var next = moduleSetup();
+                next.tniSites = writeSiteRules(rows);
+                saveProjectView({ setup: next }, function (ok) {
+                    if (ok) renderFrame();
+                });
+            }));
+            card.appendChild(actions);
+        }
         return card;
     }
 

@@ -254,6 +254,45 @@ public class ProductRulesTest {
         assertEquals("asset-tree.error.import.service.kind", bad.getIssues().get(0).getMessageKey());
     }
 
+    @Test
+    public void importKeepsOneComputerWhenTheHostAlreadyExists() {
+        List<EquipmentExchange.TypeRef> types = Arrays.asList(
+                new EquipmentExchange.TypeRef("laptop", "Laptop", false, Collections.<EquipmentExchange.FieldRef>emptyList()),
+                new EquipmentExchange.TypeRef("server", "Server", false, Collections.<EquipmentExchange.FieldRef>emptyList()),
+                new EquipmentExchange.TypeRef("room", "Room", true, Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(new EquipmentExchange.Named("in_use", "In use"));
+        List<EquipmentExchange.Node> nodes = Arrays.asList(
+                new EquipmentExchange.Node(1, null, "Room", "STP-1", true, "room"),
+                new EquipmentExchange.Node(4, Integer.valueOf(1), "KRUL-IT", "ATD-4", false, "server"));
+        List<String> headers = Arrays.asList("Name", "Type", "Place");
+        EquipmentSheet.Record row = new EquipmentSheet.Record(2, Arrays.asList("krul-it.budzdorov.ru", "Laptop", "Room"));
+        EquipmentSheet.Sheet sheet = new EquipmentSheet.Sheet("Equipment", headers, Collections.singletonList(row));
+        EquipmentExchange.Plan plan = EquipmentExchange.plan(sheet, types, statuses, nodes, "in_use",
+                new HashMap<String, String>(), blankPeople());
+        assertTrue(plan.getIssues().toString(), plan.getIssues().isEmpty());
+        assertEquals(1, plan.getChanges().size());
+        assertEquals(Integer.valueOf(4), plan.getChanges().get(0).getExistingId());
+        assertEquals("server", plan.getChanges().get(0).getTypeKey());
+
+        EquipmentSheet.Sheet twice = new EquipmentSheet.Sheet("Equipment", headers, Arrays.asList(
+                row, new EquipmentSheet.Record(3, Arrays.asList("KRUL-IT", "Laptop", "Room"))));
+        EquipmentExchange.Plan again = EquipmentExchange.plan(twice, types, statuses, nodes, "in_use",
+                new HashMap<String, String>(), blankPeople());
+        assertEquals(1, again.getChanges().size());
+        assertEquals("asset-tree.error.import.host", again.getIssues().get(0).getMessageKey());
+
+        JsonImport.Item item = new JsonImport.Item("", "", "krul-it.budzdorov.ru", "laptop", "", "Room",
+                "", "", "", false, Collections.<String, String>emptyMap());
+        JsonImport.Existing computer = new JsonImport.Existing(4, "ATD-4", "", "KRUL-IT", "", "server",
+                "in_use", 1, "", "");
+        JsonImport.Plan json = JsonImport.plan(Collections.singletonList(item), Collections.singletonList(computer),
+                Collections.singletonList(new EquipmentExchange.Node(1, null, "Room", "STP-1", true, "room")),
+                types, statuses, "in_use", true, blankPeople());
+        assertTrue(json.getIssues().toString(), json.getIssues().isEmpty());
+        assertEquals(Integer.valueOf(4), json.getChanges().get(0).getChange().getExistingId());
+        assertEquals("server", json.getChanges().get(0).getChange().getTypeKey());
+    }
+
     private static EquipmentExchange.Directory servicePeople() {
         return new EquipmentExchange.Directory() {
             @Override

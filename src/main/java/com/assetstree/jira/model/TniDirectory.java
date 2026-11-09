@@ -50,9 +50,31 @@ public final class TniDirectory {
         return port;
     }
 
+    /**
+     * A search base is an LDAP distinguished name, not a SQL database and not the short domain
+     * name. {@code budzdorov.ru} becomes {@code DC=budzdorov,DC=ru}. {@code BUDZDOROV} is left
+     * empty so the controller can supply {@code defaultNamingContext}.
+     */
     public static String base(String raw) {
-        String base = raw == null ? "" : raw.trim();
-        if (base.length() < 3 || base.length() > 400 || base.indexOf('=') < 0) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) {
+            return "";
+        }
+        if (text.indexOf('=') >= 0) {
+            return distinguished(text);
+        }
+        String dns = fromDns(text);
+        if (!dns.isEmpty()) {
+            return dns;
+        }
+        if (netbios(text)) {
+            return "";
+        }
+        throw new AssetException(400, BASE);
+    }
+
+    private static String distinguished(String base) {
+        if (base.length() < 3 || base.length() > 400) {
             throw new AssetException(400, BASE);
         }
         for (int i = 0; i < base.length(); i++) {
@@ -62,6 +84,70 @@ public final class TniDirectory {
             }
         }
         return base;
+    }
+
+    private static String fromDns(String raw) {
+        String text = raw.toLowerCase(Locale.ROOT);
+        if (text.endsWith(".")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        if (text.indexOf('.') < 1 || text.indexOf("..") >= 0 || text.length() > 253) {
+            return "";
+        }
+        boolean letter = false;
+        String[] parts = text.split("\\.");
+        if (parts.length < 2) {
+            return "";
+        }
+        StringBuilder dn = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i];
+            if (!dnsLabel(part)) {
+                return "";
+            }
+            for (int c = 0; c < part.length(); c++) {
+                char ch = part.charAt(c);
+                if (ch >= 'a' && ch <= 'z') {
+                    letter = true;
+                }
+            }
+            if (dn.length() > 0) {
+                dn.append(',');
+            }
+            dn.append("DC=").append(part);
+        }
+        if (!letter || dn.length() > 400) {
+            return "";
+        }
+        return dn.toString();
+    }
+
+    private static boolean dnsLabel(String part) {
+        if (part.isEmpty() || part.length() > 63 || part.charAt(0) == '-' || part.charAt(part.length() - 1) == '-') {
+            return false;
+        }
+        for (int i = 0; i < part.length(); i++) {
+            char c = part.charAt(i);
+            boolean ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean netbios(String text) {
+        if (text.length() < 1 || text.length() > 15) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            boolean ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static String account(String raw) {
@@ -112,8 +198,19 @@ public final class TniDirectory {
     public static TniComputer computer(String source, String identity, String name, String os, String version,
                                        String user, String ip, String mac, String maker, String model,
                                        String domain, String dn, String description, boolean disabled) {
+        return computer(source, identity, name, os, version, user, ip, mac, maker, model,
+                domain, dn, description, disabled, "");
+    }
+
+    public static TniComputer computer(String source, String identity, String name, String os, String version,
+                                       String user, String ip, String mac, String maker, String model,
+                                       String domain, String dn, String description, boolean disabled, String host) {
         String id = clip(plain(identity), 100);
         String label = clip(plain(name), 255);
+        String station = TniText.shortHost(label);
+        if (!station.isEmpty()) {
+            label = station;
+        }
         if (label.isEmpty()) {
             label = clip(id, 255);
         }
@@ -137,7 +234,7 @@ public final class TniDirectory {
         if (text.length() > 4000) {
             text = text.substring(0, 4000);
         }
-        return new TniComputer(kind, id, label, text, disabled);
+        return new TniComputer(kind, id, label, text, disabled, TniName.clean(host));
     }
 
     public static List<TniComputer> parseSheet(String csv) {
@@ -220,7 +317,8 @@ public final class TniDirectory {
                 cell(row, cols, "os"), cell(row, cols, "version"), cell(row, cols, "user"),
                 cell(row, cols, "ip"), cell(row, cols, "mac"), cell(row, cols, "maker"),
                 cell(row, cols, "model"), cell(row, cols, "domain"), cell(row, cols, "dn"),
-                cell(row, cols, "description"), disabled(cell(row, cols, "enabled")));
+                cell(row, cols, "description"), disabled(cell(row, cols, "enabled")),
+                cell(row, cols, "dns"));
     }
 
     private static Map<String, Integer> header(List<String> row) {

@@ -35,16 +35,33 @@ public final class TniLdap {
     }
 
     public static List<TniComputer> read(String host, int port, boolean ssl, String base, String account, String password) {
-        Hashtable<String, String> env = new Hashtable<String, String>();
-        env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
-        env.put(Context.PROVIDER_URL, (ssl ? "ldaps://" : "ldap://") + host + ":" + port);
-        env.put(Context.SECURITY_AUTHENTICATION, "simple");
-        env.put(Context.SECURITY_PRINCIPAL, account);
-        env.put(Context.SECURITY_CREDENTIALS, password);
-        env.put(Context.REFERRAL, "ignore");
-        env.put("com.sun.jndi.ldap.connect.timeout", "8000");
-        env.put("com.sun.jndi.ldap.read.timeout", "20000");
-        env.put("java.naming.ldap.attributes.binary", "objectGUID");
+        return open(host, port, ssl, account, password, new DirectoryCall<List<TniComputer>>() {
+            @Override
+            public List<TniComputer> apply(LdapContext context) throws NamingException {
+                String dn = base == null ? "" : base.trim();
+                if (dn.isEmpty()) {
+                    dn = namingContext(context);
+                }
+                return pages(context, dn);
+            }
+        });
+    }
+
+    /** The domain partition published by the controller, for example {@code DC=budzdorov,DC=ru}. */
+    public static String domainBase(String host, int port, boolean ssl, String account, String password) {
+        return open(host, port, ssl, account, password, new DirectoryCall<String>() {
+            @Override
+            public String apply(LdapContext context) throws NamingException {
+                return namingContext(context);
+            }
+        });
+    }
+
+    private interface DirectoryCall<T> {
+        T apply(LdapContext context) throws NamingException;
+    }
+
+    private static <T> T open(String host, int port, boolean ssl, String account, String password, DirectoryCall<T> call) {
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         ClassLoader system = ClassLoader.getSystemClassLoader();
         if (system != null) {
@@ -52,21 +69,14 @@ public final class TniLdap {
         }
         LdapContext context = null;
         try {
-            context = new InitialLdapContext(env, null);
-            return pages(context, base);
+            context = new InitialLdapContext(environment(host, port, ssl, account, password), null);
+            return call.apply(context);
         } catch (AuthenticationException ex) {
             throw new AssetException(401, TniDirectory.AUTH);
         } catch (CommunicationException ex) {
             throw new AssetException(502, TniDirectory.CONNECT);
         } catch (NamingException ex) {
-            String message = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase();
-            if (message.indexOf("error code 49") >= 0) {
-                throw new AssetException(401, TniDirectory.AUTH);
-            }
-            if (message.indexOf("error code 32") >= 0 || message.indexOf("name not found") >= 0) {
-                throw new AssetException(400, TniDirectory.BASE);
-            }
-            throw new AssetException(502, TniDirectory.CONNECT);
+            throw naming(ex);
         } finally {
             Thread.currentThread().setContextClassLoader(previous);
             if (context != null) {
@@ -77,6 +87,44 @@ public final class TniLdap {
                 }
             }
         }
+    }
+
+    private static Hashtable<String, String> environment(String host, int port, boolean ssl, String account, String password) {
+        Hashtable<String, String> env = new Hashtable<String, String>();
+        env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
+        env.put(Context.PROVIDER_URL, (ssl ? "ldaps://" : "ldap://") + host + ":" + port);
+        env.put(Context.SECURITY_AUTHENTICATION, "simple");
+        env.put(Context.SECURITY_PRINCIPAL, account);
+        env.put(Context.SECURITY_CREDENTIALS, password);
+        env.put(Context.REFERRAL, "ignore");
+        env.put("com.sun.jndi.ldap.connect.timeout", "8000");
+        env.put("com.sun.jndi.ldap.read.timeout", "20000");
+        env.put("java.naming.ldap.attributes.binary", "objectGUID");
+        return env;
+    }
+
+    private static String namingContext(LdapContext context) throws NamingException {
+        javax.naming.directory.Attributes attrs = context.getAttributes("", new String[]{"defaultNamingContext"});
+        Attribute attr = attrs == null ? null : attrs.get("defaultNamingContext");
+        if (attr == null || attr.get() == null) {
+            throw new AssetException(400, TniDirectory.BASE);
+        }
+        String dn = TniDirectory.base(String.valueOf(attr.get()));
+        if (dn.isEmpty()) {
+            throw new AssetException(400, TniDirectory.BASE);
+        }
+        return dn;
+    }
+
+    private static AssetException naming(NamingException ex) {
+        String message = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase();
+        if (message.indexOf("error code 49") >= 0) {
+            return new AssetException(401, TniDirectory.AUTH);
+        }
+        if (message.indexOf("error code 32") >= 0 || message.indexOf("name not found") >= 0) {
+            return new AssetException(400, TniDirectory.BASE);
+        }
+        return new AssetException(502, TniDirectory.CONNECT);
     }
 
     private static List<TniComputer> pages(LdapContext context, String base) throws NamingException {
@@ -146,7 +194,7 @@ public final class TniLdap {
         return TniDirectory.computer("ad", identity, name,
                 text(result, "operatingSystem"), text(result, "operatingSystemVersion"),
                 "", "", "", "", "", "", text(result, "distinguishedName"), text(result, "description"),
-                (uac & 2) == 2);
+                (uac & 2) == 2, dns);
     }
 
     private static String text(SearchResult result, String name) throws NamingException {

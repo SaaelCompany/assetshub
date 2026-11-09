@@ -1,16 +1,19 @@
 package com.assetstree.jira.model;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Turns a CMDB payload into the same creates and updates the workbook uses.
  * A blank field is left as it is when {@code skipBlank} is set. A value is
  * written only when the caller sent it. Matching is the object key, then the
- * external id.
+ * external id, then a host name such as KRUL-IT. A host match keeps the type
+ * already on the card.
  */
 public final class JsonImport {
     public static final int MAX_ITEMS = 2000;
@@ -141,11 +144,24 @@ public final class JsonImport {
         }
         Map<String, Existing> byKey = new LinkedHashMap<String, Existing>();
         Map<String, Existing> byExternal = new LinkedHashMap<String, Existing>();
+        Map<Integer, Existing> byId = new LinkedHashMap<Integer, Existing>();
+        List<TniSame.Card> hosts = new ArrayList<TniSame.Card>();
+        Set<String> places = new HashSet<String>();
+        if (types != null) {
+            for (int i = 0; i < types.size(); i++) {
+                EquipmentExchange.TypeRef type = types.get(i);
+                if (type != null && type.isLocation() && type.getKey() != null) {
+                    places.add(type.getKey());
+                }
+            }
+        }
         if (existing != null) {
             for (Existing row : existing) {
                 if (row == null) {
                     continue;
                 }
+                byId.put(Integer.valueOf(row.id), row);
+                hosts.add(new TniSame.Card(row.id, row.name, places.contains(row.typeKey), row.externalKey, ""));
                 if (!row.objectKey.isEmpty()) {
                     byKey.put(row.objectKey.toLowerCase(Locale.ROOT), row);
                 }
@@ -154,6 +170,8 @@ public final class JsonImport {
                 }
             }
         }
+        Set<Integer> taken = new HashSet<Integer>();
+        int[] synthetic = new int[] { -1 };
         int rowNumber = 1;
         for (Item item : items) {
             rowNumber++;
@@ -163,6 +181,23 @@ public final class JsonImport {
             int before = issues.size();
             Existing match = match(item, byKey, byExternal, rowNumber, issues);
             if (issues.size() > before) {
+                continue;
+            }
+            if (match == null && item.key.isEmpty() && item.externalId.isEmpty()) {
+                int same = TniSame.pick(hosts, 0, item.name, "");
+                if (same < 0 || (same > 0 && taken.contains(Integer.valueOf(same)))) {
+                    issues.add(new EquipmentExchange.Issue(rowNumber, "asset-tree.error.import.host", item.name));
+                    continue;
+                }
+                if (same > 0) {
+                    match = byId.get(Integer.valueOf(same));
+                }
+            }
+            if (match != null && !taken.add(Integer.valueOf(match.id))) {
+                boolean named = item.key.isEmpty() && item.externalId.isEmpty();
+                String argument = !item.key.isEmpty() ? item.key : (!item.externalId.isEmpty() ? item.externalId : item.name);
+                issues.add(new EquipmentExchange.Issue(rowNumber,
+                        named ? "asset-tree.error.import.host" : "asset-tree.error.import.key.duplicate", argument));
                 continue;
             }
             if (match != null && match.id < 0) {
@@ -178,6 +213,13 @@ public final class JsonImport {
             if (type == null || type.isLocation()) {
                 issues.add(new EquipmentExchange.Issue(rowNumber, "asset-tree.error.import.type", item.type));
                 continue;
+            }
+            boolean hostMatch = item.key.isEmpty() && item.externalId.isEmpty() && match != null && match.id > 0;
+            if (hostMatch && !match.typeKey.isEmpty()) {
+                EquipmentExchange.TypeRef kept = typeByKey(match.typeKey, types);
+                if (kept != null && !kept.isLocation()) {
+                    type = kept;
+                }
             }
             String statusKey = resolveStatus(item.status, statuses);
             if (statusKey == null) {
@@ -286,6 +328,9 @@ public final class JsonImport {
             changes.add(new Planned(change, externalId));
             if (match == null && !externalId.isEmpty()) {
                 byExternal.put(externalId.toLowerCase(Locale.ROOT), new Existing(-1, "", externalId, name, "", type.getKey(), statusKey, parentId, "", ""));
+            }
+            if (match == null && !TniText.shortHost(name).isEmpty()) {
+                hosts.add(new TniSame.Card(synthetic[0]--, name, false, "", ""));
             }
         }
         return new Plan(changes, issues);

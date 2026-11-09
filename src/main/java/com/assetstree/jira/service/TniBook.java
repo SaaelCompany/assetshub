@@ -13,10 +13,11 @@ import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.ProjectKeys;
 import com.assetstree.jira.model.ProjectModules;
 import com.assetstree.jira.model.Statuses;
-import com.assetstree.jira.model.TniAddress;
 import com.assetstree.jira.model.TniClock;
 import com.assetstree.jira.model.TniFacts;
 import com.assetstree.jira.model.TniPolicy;
+import com.assetstree.jira.model.TniSame;
+import com.assetstree.jira.model.TniTarget;
 import com.assetstree.jira.model.TniText;
 import net.java.ao.DBParam;
 import net.java.ao.Query;
@@ -27,7 +28,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Stores a browser sighting, turns it into an asset when a request is created,
@@ -77,7 +80,7 @@ public final class TniBook {
     }
 
     public void attach(ActiveObjects ao, TniHost host, String projectKey, String userKey, long issueId, String issueKey,
-                       Integer parentId, long now) {
+                       Integer parentId, Integer pickedId, long now) {
         if (ao == null || host == null || blank(projectKey) || blank(userKey) || issueId <= 0) {
             return;
         }
@@ -92,10 +95,11 @@ public final class TniBook {
             return;
         }
         final Integer placeId = parentId;
+        final Integer chosenId = pickedId;
         final Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
             @Override
             public Outcome doInTransaction() {
-                return writeAsset(ao, host, prepared, projectKey, userKey, issueId, issueKey, placeId, now);
+                return writeAsset(ao, host, prepared, projectKey, userKey, issueId, issueKey, placeId, chosenId, now);
             }
         });
         if (outcome != null) {
@@ -108,6 +112,8 @@ public final class TniBook {
             return;
         }
         TniReach.Probe check = probe == null ? TniReach.LIVE : probe;
+        retitleAll(ao, host);
+        sweepWatches(ao, host, now, check);
         List<Integer> ids = ao.executeInTransaction(new TransactionCallback<List<Integer>>() {
             @Override
             public List<Integer> doInTransaction() {
@@ -143,19 +149,22 @@ public final class TniBook {
                     continue;
                 }
                 pings++;
-                boolean up = false;
-                try {
-                    up = check.up(look.address);
-                } catch (RuntimeException ex) {
-                    log.warn("TNI could not reach {}", look.address, ex);
-                }
-                final boolean reached = up;
+                final TniReach.Report report = reachReport(check, look);
+                final boolean reached = report.up();
+                final int assetId = look.assetId;
+                final String hostName = look.address;
+                final String printed = report.output();
                 Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
                     @Override
                     public Outcome doInTransaction() {
                         return finishProbe(ao, host, id.intValue(), reached, now);
                     }
                 });
+                try {
+                    host.notePing(assetId, "", hostName, reached, printed);
+                } catch (RuntimeException ex) {
+                    log.warn("TNI could not record a ping for {}", Integer.valueOf(assetId), ex);
+                }
                 after(ao, host, outcome);
                 continue;
             }
@@ -167,14 +176,14 @@ public final class TniBook {
             });
             after(ao, host, outcome);
         }
-        sweepTyped(ao, host, now);
+        sweepTyped(ao, host, now, check);
     }
 
     public static boolean watchDue(long checkedAt, long now) {
         return checkedAt <= 0L || now - checkedAt >= TniClock.MIN_GAP;
     }
 
-    private void sweepWatches(ActiveObjects ao, final long now) {
+    private void sweepWatches(ActiveObjects ao, final TniHost host, final long now, final TniReach.Probe probe) {
         List<long[]> due = ao.executeInTransaction(new TransactionCallback<List<long[]>>() {
             @Override
             public List<long[]> doInTransaction() {
@@ -204,23 +213,20 @@ public final class TniBook {
                 break;
             }
             final int rowId = (int) due.get(i)[0];
-            String address = ao.executeInTransaction(new TransactionCallback<String>() {
+            Glance look = ao.executeInTransaction(new TransactionCallback<Glance>() {
                 @Override
-                public String doInTransaction() {
-                    return watchAddress(ao, rowId);
+                public Glance doInTransaction() {
+                    return watchGlance(ao, rowId);
                 }
             });
-            if (address == null || address.isEmpty()) {
+            if (look == null || look.targets.isEmpty()) {
                 continue;
             }
             pings++;
-            boolean up = false;
-            try {
-                up = TniReach.station(address);
-            } catch (RuntimeException ex) {
-                log.warn("TNI could not reach {}", address, ex);
-            }
-            final boolean reached = up;
+            final TniReach.Report report = reachReport(probe, look);
+            final boolean reached = report.up();
+            final String address = look.address;
+            final int watched = look.assetId;
             ao.executeInTransaction(new TransactionCallback<Void>() {
                 @Override
                 public Void doInTransaction() {
@@ -234,10 +240,15 @@ public final class TniBook {
                     return null;
                 }
             });
+            try {
+                host.notePing(watched, "", address, reached, report.output());
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not record a ping for {}", Integer.valueOf(watched), ex);
+            }
         }
     }
 
-    private void sweepTyped(ActiveObjects ao, TniHost host, final long now) {
+    private void sweepTyped(ActiveObjects ao, TniHost host, final long now, final TniReach.Probe probe) {
         List<Integer> due = ao.executeInTransaction(new TransactionCallback<List<Integer>>() {
             @Override
             public List<Integer> doInTransaction() {
@@ -269,15 +280,11 @@ public final class TniBook {
                 continue;
             }
             pings++;
-            boolean up = false;
-            try {
-                up = TniReach.station(look.address);
-            } catch (RuntimeException ex) {
-                log.warn("TNI could not reach {}", look.address, ex);
-            }
-            final boolean reached = up;
+            final TniReach.Report report = reachReport(probe, look);
+            final boolean reached = report.up();
             final int assetId = look.assetId;
             final String hostName = look.address;
+            final String printed = report.output();
             Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
                 @Override
                 public Outcome doInTransaction() {
@@ -285,7 +292,7 @@ public final class TniBook {
                 }
             });
             try {
-                host.note(assetId, "", "ping", hostName, reached ? "up" : "down");
+                host.notePing(assetId, "", hostName, reached, printed);
             } catch (RuntimeException ex) {
                 log.warn("TNI could not record a ping for {}", Integer.valueOf(assetId), ex);
             }
@@ -389,17 +396,18 @@ public final class TniBook {
         if (Boolean.FALSE.equals(setup.getTniPing())) {
             return null;
         }
-        String hostName = TniAddress.station(asset.getName());
+        List<String> targets = targetsOf(ao, asset, row.getAddress());
         TniClock.Mark mark = TniClock.look(row.getSeenAt(), row.getProbeFrom(), row.getProbeFails(), row.getLastProbe(),
                 TniPolicy.keepDays(days(setup.getTniKeep())), TniPolicy.probeDays(days(setup.getTniProbeDays())),
-                TniPolicy.probeTries(days(setup.getTniProbeTries())), !hostName.isEmpty(), now);
+                TniPolicy.probeTries(days(setup.getTniProbeTries())), !targets.isEmpty(), now);
         if (mark.action == TniClock.Action.PING && mark.probeFrom != row.getProbeFrom()) {
             row.setProbeFrom(mark.probeFrom);
             row.save();
         }
         Glance glance = new Glance();
         glance.action = mark.action;
-        glance.address = hostName;
+        glance.targets = targets;
+        glance.address = TniTarget.shown(targets);
         glance.assetId = asset.getID();
         return glance;
     }
@@ -507,24 +515,28 @@ public final class TniBook {
         }
     }
 
-    private String watchAddress(ActiveObjects ao, int rowId) {
+    private Glance watchGlance(ActiveObjects ao, int rowId) {
         TniWatchEntity row = ao.get(TniWatchEntity.class, rowId);
         if (row == null || row.getArmed() == 0) {
-            return "";
+            return null;
         }
         if (!moduleOn(ao, row.getProjectKey())) {
-            return "";
+            return null;
+        }
+        ModuleSetupDto setup = setup(ao, row.getProjectKey());
+        if (Boolean.FALSE.equals(setup.getTniPing())) {
+            return null;
         }
         AssetEntity asset = ao.get(AssetEntity.class, row.getAssetId());
         if (asset == null) {
             ao.delete(row);
-            return "";
+            return null;
         }
-        String address = TniAddress.station(asset.getName());
-        if (address.isEmpty()) {
-            return "";
-        }
-        return address;
+        Glance glance = new Glance();
+        glance.targets = targetsOf(ao, asset, row.getAddress());
+        glance.address = TniTarget.shown(glance.targets);
+        glance.assetId = asset.getID();
+        return glance;
     }
 
     private void after(ActiveObjects ao, TniHost host, Outcome outcome) {
@@ -581,17 +593,20 @@ public final class TniBook {
         if (Boolean.FALSE.equals(setup.getTniPing())) {
             return null;
         }
-        boolean hasAddress = TniAddressAllowed(row.getAddress());
+        TniFacts facts = TniFacts.parse(row.getSummary());
+        List<String> targets = TniTarget.list(asset.getName(), row.getAddress(), facts.host, "");
         TniClock.Mark mark = TniClock.look(row.getSeenAt(), row.getProbeFrom(), row.getProbeFails(), row.getLastProbe(),
                 TniPolicy.keepDays(days(setup.getTniKeep())), TniPolicy.probeDays(days(setup.getTniProbeDays())),
-                TniPolicy.probeTries(days(setup.getTniProbeTries())), hasAddress, now);
+                TniPolicy.probeTries(days(setup.getTniProbeTries())), !targets.isEmpty(), now);
         if (mark.action == TniClock.Action.PING && mark.probeFrom != row.getProbeFrom()) {
             row.setProbeFrom(mark.probeFrom);
             row.save();
         }
         Glance glance = new Glance();
         glance.action = mark.action;
-        glance.address = row.getAddress() == null ? "" : row.getAddress();
+        glance.assetId = asset.getID();
+        glance.targets = targets;
+        glance.address = TniTarget.shown(targets);
         return glance;
     }
 
@@ -662,7 +677,7 @@ public final class TniBook {
     }
 
     private Outcome writeAsset(ActiveObjects ao, TniHost host, Prepared prepared, String projectKey, String userKey,
-                               long issueId, String issueKey, Integer parentId, long now) {
+                               long issueId, String issueKey, Integer parentId, Integer pickedId, long now) {
         TniDeviceEntity row = ao.get(TniDeviceEntity.class, prepared.rowId);
         if (row == null) {
             return null;
@@ -677,7 +692,7 @@ public final class TniBook {
         }
         String kindLabel = kindLabel(host, facts.kind);
         String person = host.personName(userKey);
-        String name = TniText.name(kindLabel, person, facts.address);
+        String name = TniText.name(kindLabel, person, facts.address, facts.host);
         String description = TniText.describe(facts, host.text("asset-tree.ui.tniIntro"),
                 host.text("asset-tree.ui.tniSeen"), host.text("asset-tree.ui.tniHost"),
                 host.text("asset-tree.ui.tniAddress"), host.text("asset-tree.ui.tniSystem"),
@@ -688,7 +703,11 @@ public final class TniBook {
         if (asset == null) {
             asset = findExternal(ao, projectKey, row.getIdentity());
         }
+        if (asset == null) {
+            asset = findTwin(ao, projectKey, pickedId, facts.host, facts.address);
+        }
         boolean created = asset == null;
+        boolean claimed = !created && TniSame.claimed(asset.getExternalKey(), row.getIdentity());
         Integer place = placeParent(ao, projectKey, parentId);
         if (created) {
             String objectKey;
@@ -716,14 +735,21 @@ public final class TniBook {
             asset.setExternalKey(external(row.getIdentity()));
             if (place != null) {
                 asset.setParentId(place);
+            } else {
+                String site = TniSeat.move(ao, asset, setup.getTniSites(), facts.host);
+                if (!site.isEmpty()) {
+                    host.note(asset.getID(), userKey, "move", "", site);
+                }
             }
             asset.save();
-        } else {
+        } else if (claimed) {
+            String chosen = TniText.preferred(asset.getName(), row.getLabel(), kindLabel, person, facts.address, facts.host);
+            if (!chosen.equals(asset.getName() == null ? "" : asset.getName())) {
+                asset.setName(chosen);
+            }
+            name = chosen;
             if (TniText.owned(asset.getDescription())) {
                 asset.setDescription(clip(description, 10000));
-            }
-            if (!type.getTypeKey().equals(asset.getTypeKey())) {
-                asset.setTypeKey(type.getTypeKey());
             }
             if (blank(asset.getCustodianKey())) {
                 asset.setCustodianKey(clip(userKey, 255));
@@ -739,6 +765,30 @@ public final class TniBook {
             }
             if (place != null && (asset.getParentId() == null || asset.getParentId().intValue() <= 0)) {
                 asset.setParentId(place);
+            } else if (asset.getParentId() == null || asset.getParentId().intValue() <= 0) {
+                String site = TniSeat.move(ao, asset, setup.getTniSites(), facts.host);
+                if (!site.isEmpty()) {
+                    host.note(asset.getID(), userKey, "move", "", site);
+                }
+            }
+            asset.setUpdated(new Date(now));
+            asset.setUpdatedBy(clip(userKey, 255));
+            asset.save();
+        } else {
+            name = asset.getName() == null ? "" : asset.getName();
+            if (blank(asset.getCustodianKey())) {
+                asset.setCustodianKey(clip(userKey, 255));
+            }
+            if (blank(asset.getIssuedKey())) {
+                asset.setIssuedKey(clip(userKey, 255));
+            }
+            if (place != null && (asset.getParentId() == null || asset.getParentId().intValue() <= 0)) {
+                asset.setParentId(place);
+            } else if (asset.getParentId() == null || asset.getParentId().intValue() <= 0) {
+                String site = TniSeat.move(ao, asset, setup.getTniSites(), facts.host);
+                if (!site.isEmpty()) {
+                    host.note(asset.getID(), userKey, "move", "", site);
+                }
             }
             asset.setUpdated(new Date(now));
             asset.setUpdatedBy(clip(userKey, 255));
@@ -748,7 +798,10 @@ public final class TniBook {
         row.setAssetId(asset.getID());
         row.setUserKey(clip(userKey, 255));
         row.setIssueKey(clip(issueKey, 64));
-        row.setLabel(clip(name, 255));
+        String station = TniText.shortHost(facts.host);
+        if (created || (claimed && !station.isEmpty() && station.equals(name))) {
+            row.setLabel(clip(name, 255));
+        }
         row.setSeenAt(now);
         row.setProbeFrom(0L);
         row.setProbeFails(0);
@@ -820,6 +873,52 @@ public final class TniBook {
         return Integer.valueOf(parent.getID());
     }
 
+    private AssetEntity findTwin(ActiveObjects ao, String projectKey, Integer picked, String host, String address) {
+        Map<String, Boolean> locations = new HashMap<String, Boolean>();
+        AssetTypeEntity[] types = ao.find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (types != null) {
+            for (int i = 0; i < types.length; i++) {
+                AssetTypeEntity type = types[i];
+                if (type != null && type.getTypeKey() != null) {
+                    locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+                }
+            }
+        }
+        Map<Integer, String> watches = new HashMap<Integer, String>();
+        TniWatchEntity[] marks = ao.find(TniWatchEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (marks != null) {
+            for (int i = 0; i < marks.length; i++) {
+                TniWatchEntity mark = marks[i];
+                if (mark != null && mark.getAssetId() > 0 && !blank(mark.getAddress())) {
+                    watches.put(Integer.valueOf(mark.getAssetId()), mark.getAddress());
+                }
+            }
+        }
+        List<TniSame.Card> cards = new ArrayList<TniSame.Card>();
+        AssetEntity[] rows = ao.find(AssetEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                AssetEntity row = rows[i];
+                if (row == null) {
+                    continue;
+                }
+                boolean location = Boolean.TRUE.equals(locations.get(row.getTypeKey()));
+                String watch = watches.containsKey(Integer.valueOf(row.getID())) ? watches.get(Integer.valueOf(row.getID())) : "";
+                cards.add(new TniSame.Card(row.getID(), row.getName(), location, row.getExternalKey(), watch));
+            }
+        }
+        int pointed = picked == null ? 0 : picked.intValue();
+        int id = TniSame.pick(cards, pointed, host, address);
+        if (id <= 0) {
+            return null;
+        }
+        AssetEntity found = ao.get(AssetEntity.class, id);
+        if (found == null || !ProjectKeys.same(found.getProjectKey(), projectKey)) {
+            return null;
+        }
+        return found;
+    }
+
     private AssetEntity findExternal(ActiveObjects ao, String projectKey, String identity) {
         String key = external(identity);
         AssetEntity[] rows = ao.find(AssetEntity.class,
@@ -881,10 +980,6 @@ public final class TniBook {
         return "tni:" + (identity == null ? "" : identity);
     }
 
-    private static boolean TniAddressAllowed(String address) {
-        return com.assetstree.jira.model.TniAddress.allowed(address);
-    }
-
     private static int days(Integer raw) {
         return raw == null ? 0 : raw.intValue();
     }
@@ -902,9 +997,131 @@ public final class TniBook {
         private int rowId;
     }
 
+    public String retitle(ActiveObjects ao, final TniHost host, final int assetId) {
+        if (ao == null || host == null || assetId <= 0) {
+            return "";
+        }
+        String titled = ao.executeInTransaction(new TransactionCallback<String>() {
+            @Override
+            public String doInTransaction() {
+                return retitleRow(ao, host, assetId);
+            }
+        });
+        return titled == null ? "" : titled;
+    }
+
+    private void retitleAll(ActiveObjects ao, final TniHost host) {
+        List<Integer> ids = ao.executeInTransaction(new TransactionCallback<List<Integer>>() {
+            @Override
+            public List<Integer> doInTransaction() {
+                List<Integer> found = new ArrayList<Integer>();
+                TniDeviceEntity[] rows = ao.find(TniDeviceEntity.class);
+                if (rows == null) {
+                    return found;
+                }
+                for (int i = 0; i < rows.length; i++) {
+                    TniDeviceEntity row = rows[i];
+                    if (row != null && row.getAssetId() > 0 && row.getRetired() == 0) {
+                        found.add(Integer.valueOf(row.getAssetId()));
+                    }
+                }
+                return found;
+            }
+        });
+        for (int i = 0; i < ids.size(); i++) {
+            try {
+                retitle(ao, host, ids.get(i).intValue());
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not rename asset {}", ids.get(i), ex);
+            }
+        }
+    }
+
+    private String retitleRow(ActiveObjects ao, TniHost host, int assetId) {
+        TniDeviceEntity row = deviceByAsset(ao, assetId);
+        AssetEntity asset = ao.get(AssetEntity.class, assetId);
+        if (row == null || asset == null) {
+            return asset == null || asset.getName() == null ? "" : asset.getName();
+        }
+        TniFacts facts = TniFacts.parse(row.getSummary());
+        String kindLabel = kindLabel(host, facts.kind);
+        String person = host.personName(blank(row.getUserKey()) ? asset.getCustodianKey() : row.getUserKey());
+        String next = TniText.preferred(asset.getName(), row.getLabel(), kindLabel, person, facts.address, facts.host);
+        String current = asset.getName() == null ? "" : asset.getName();
+        if (!next.equals(current)) {
+            asset.setName(next);
+            asset.setUpdated(new Date());
+            asset.save();
+        }
+        String station = TniText.shortHost(facts.host);
+        if (!station.isEmpty() && station.equals(next) && !station.equals(row.getLabel() == null ? "" : row.getLabel())) {
+            row.setLabel(clip(next, 255));
+            row.save();
+        }
+        return next;
+    }
+
+    private TniReach.Report reachReport(TniReach.Probe check, Glance look) {
+        List<String> targets = look == null || look.targets == null || look.targets.isEmpty()
+                ? (look == null || look.address == null || look.address.isEmpty()
+                ? Collections.<String>emptyList() : Collections.singletonList(look.address))
+                : look.targets;
+        if (check == TniReach.LIVE) {
+            return TniReach.askAll(targets);
+        }
+        for (int i = 0; i < targets.size(); i++) {
+            String address = targets.get(i);
+            try {
+                if (check != null && check.up(address)) {
+                    return TniReach.Report.up("");
+                }
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not reach {}", address, ex);
+            }
+        }
+        return TniReach.Report.down("");
+    }
+
+    private List<String> targetsOf(ActiveObjects ao, AssetEntity asset, String saved) {
+        String ip = "";
+        String host = "";
+        TniDeviceEntity device = deviceByAsset(ao, asset.getID());
+        if (device != null) {
+            ip = device.getAddress() == null ? "" : device.getAddress();
+            host = TniFacts.parse(device.getSummary()).host;
+        }
+        return TniTarget.list(asset.getName(), ip, host, saved);
+    }
+
+    private TniDeviceEntity deviceByAsset(ActiveObjects ao, int assetId) {
+        TniDeviceEntity[] rows = ao.find(TniDeviceEntity.class, Query.select().where("ASSET_ID = ?", Integer.valueOf(assetId)));
+        if (rows == null) {
+            return null;
+        }
+        TniDeviceEntity fallback = null;
+        for (int i = 0; i < rows.length; i++) {
+            TniDeviceEntity row = rows[i];
+            if (row == null) {
+                continue;
+            }
+            if (row.getRetired() != 0) {
+                if (fallback == null) {
+                    fallback = row;
+                }
+                continue;
+            }
+            if (!TniFacts.parse(row.getSummary()).host.isEmpty()) {
+                return row;
+            }
+            fallback = row;
+        }
+        return fallback;
+    }
+
     private static final class Glance {
         private TniClock.Action action = TniClock.Action.WAIT;
         private String address = "";
+        private List<String> targets = new ArrayList<String>();
         private int assetId;
     }
 

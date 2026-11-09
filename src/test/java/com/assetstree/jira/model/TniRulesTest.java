@@ -94,6 +94,31 @@ public class TniRulesTest {
         assertEquals("", bridge.seen);
         assertEquals("", bridge.address);
         assertEquals("Phone Ivanov", TniText.name("Phone", "Ivanov", "10.8.0.4"));
+        assertEquals("KRUL-IT", TniText.name("Компьютер", "пользователь Бондаренко Олег Сергеевич",
+                "10.8.0.4", "krul-it.budzdorov.ru"));
+        assertEquals("KRUL-IT", TniText.preferred(
+                "Компьютер пользователь Бондаренко Олег Сергеевич",
+                "Компьютер пользователь Бондаренко Олег Сергеевич",
+                "Компьютер", "пользователь Бондаренко Олег Сергеевич", "10.8.0.4", "KRUL-IT.budzdorov.ru"));
+        assertEquals("KRUL-IT", TniText.preferred("krul-it", "krul-it", "Компьютер", "Иванов",
+                "10.8.0.4", "krul-it.budzdorov.ru"));
+        assertEquals("Касса", TniText.preferred("Касса", "Компьютер Иванов", "Компьютер", "Иванов",
+                "10.8.0.4", "krul-it.budzdorov.ru"));
+        assertEquals(java.util.Arrays.asList("krul-it.budzdorov.ru", "KRUL-IT", "10.8.0.4"),
+                TniTarget.list("Компьютер Иванов", "10.8.0.4", "krul-it.budzdorov.ru", ""));
+        assertEquals(java.util.Collections.singletonList("KRUL-IT"),
+                TniTarget.list("KRUL-IT", "", "", ""));
+        assertEquals("KRUL-IT", TniTarget.shown(
+                TniTarget.list("KRUL-IT", "10.8.0.4", "krul-it.budzdorov.ru", "")));
+        assertEquals("krul-it.budzdorov.ru", TniTarget.shown(
+                TniTarget.list("Компьютер", "10.8.0.4", "krul-it.budzdorov.ru", "")));
+        String sites = TniSites.store("KRUL = Крулево\nMSK=Москва\nKRUL-IT = Кабинет");
+        assertEquals("KRUL = Крулево\nMSK = Москва\nKRUL-IT = Кабинет", TniSites.text(sites));
+        assertEquals("Кабинет", TniSites.match(sites, "krul-it.budzdorov.ru", "KRUL-IT"));
+        assertEquals("Крулево", TniSites.match(sites, "", "KRUL-BUH"));
+        assertEquals("Москва", TniSites.match(sites, "msk-01.budzdorov.ru", ""));
+        assertEquals("", TniSites.match(sites, "", "KRULIT"));
+        assertEquals("", TniSites.match("", "", "KRUL-IT"));
         assertTrue(TniText.owned(card));
         assertFalse(TniText.owned("A note written by a person"));
     }
@@ -206,6 +231,26 @@ public class TniRulesTest {
         String added = new String(PortalPageMarkup.insertTni(already, PortalPageMarkup.tniScript("/jira")), StandardCharsets.UTF_8);
         assertTrue(added.contains("tni-portal.js"));
         assertTrue(added.indexOf("tni-portal.js") < added.indexOf("</body>"));
+    }
+
+    @Test
+    public void portalSightingReusesTheComputerAlreadyInTheTree() {
+        TniSame.Card manual = new TniSame.Card(4, "KRUL-IT", false, "", "");
+        TniSame.Card cabinet = new TniSame.Card(2, "KRUL-IT", true, "", "");
+        TniSame.Card other = new TniSame.Card(8, "Касса", false, "", "");
+        TniSame.Card born = new TniSame.Card(9, "KRUL-IT", false, "tni:abc", "");
+        assertEquals(4, TniSame.pick(Arrays.asList(cabinet, other, manual), 0, "krul-it.budzdorov.ru", "10.8.0.4"));
+        assertEquals(4, TniSame.pick(Arrays.asList(born, manual), 0, "KRUL-IT", ""));
+        assertEquals(9, TniSame.pick(Arrays.asList(born), 0, "krul-it.budzdorov.ru", ""));
+        assertEquals(0, TniSame.pick(Arrays.asList(other), 8, "krul-it.budzdorov.ru", ""));
+        assertEquals(4, TniSame.pick(Arrays.asList(other, manual), 8, "krul-it.budzdorov.ru", ""));
+        TniSame.Card watched = new TniSame.Card(6, "Касса", false, "", "10.8.0.4");
+        assertEquals(6, TniSame.pick(Arrays.asList(watched, other), 0, "", "10.8.0.4"));
+        assertEquals(0, TniSame.pick(Arrays.asList(other), 0, "", ""));
+        assertEquals(0, TniSame.pick(Arrays.asList(cabinet), 0, "krul-it.budzdorov.ru", ""));
+        assertTrue(TniSame.claimed("tni:abc", "abc"));
+        assertFalse(TniSame.claimed("", "abc"));
+        assertFalse(TniSame.claimed("ad:krul-it", "abc"));
     }
 
     private static TniClock.Mark look(long seen, long probeFrom, int fails, long lastProbe, boolean address, long now) {

@@ -1,20 +1,68 @@
 package com.assetstree.jira.model;
 
+import java.util.Locale;
+
 /** Readable name and description for an asset created from a portal device. */
 public final class TniText {
     private TniText() {
     }
 
     public static String name(String kindLabel, String person, String address) {
+        return name(kindLabel, person, address, "");
+    }
+
+    /**
+     * A network name such as {@code krul-it.budzdorov.ru} becomes the object name {@code KRUL-IT}.
+     * Without one, the card keeps the kind and the person.
+     */
+    public static String name(String kindLabel, String person, String address, String host) {
+        String station = shortHost(host);
+        if (!station.isEmpty()) {
+            return clip(station);
+        }
         String who = clean(person);
         if (who.isEmpty()) {
             who = clean(address);
         }
         String title = (clean(kindLabel) + " " + who).trim();
-        if (title.length() > 255) {
-            title = title.substring(0, 255).trim();
+        return title.isEmpty() ? "TNI" : clip(title);
+    }
+
+    /** First label of a DNS name, in capitals. {@code krul-it.budzdorov.ru} is {@code KRUL-IT}. */
+    public static String shortHost(String host) {
+        String clean = TniName.clean(host);
+        if (clean.isEmpty()) {
+            return "";
         }
-        return title.isEmpty() ? "TNI" : title;
+        int dot = clean.indexOf('.');
+        String label = dot < 0 ? clean : clean.substring(0, dot);
+        if (label.isEmpty() || label.length() > 63) {
+            return "";
+        }
+        return label.toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * Keeps a name a person typed. Replaces the automatic kind-and-person title, the stored
+     * automatic title, or the full DNS name with the short host.
+     */
+    public static String preferred(String current, String stamped, String kindLabel, String person,
+                                   String address, String host) {
+        String station = shortHost(host);
+        String now = clean(current);
+        if (station.isEmpty()) {
+            return now.isEmpty() ? name(kindLabel, person, address) : now;
+        }
+        if (now.isEmpty() || now.equalsIgnoreCase(station)) {
+            return station;
+        }
+        String stamp = clean(stamped);
+        String auto = name(kindLabel, person, address);
+        String fqdn = TniName.clean(host);
+        if (now.equals(stamp) || now.equals(auto) || (!fqdn.isEmpty() && now.equalsIgnoreCase(fqdn))) {
+            return station;
+        }
+        return now;
     }
 
     /** An empty card, or one this module already wrote, can be refreshed. */
@@ -65,6 +113,13 @@ public final class TniText {
             body.append(caption).append(": ");
         }
         body.append(item);
+    }
+
+    private static String clip(String title) {
+        if (title.length() > 255) {
+            return title.substring(0, 255).trim();
+        }
+        return title;
     }
 
     private static String clean(String raw) {
