@@ -248,6 +248,7 @@ import com.assetstree.jira.model.TniComputer;
 import com.assetstree.jira.model.TniAddress;
 import com.assetstree.jira.model.TniDirectory;
 import com.assetstree.jira.model.TniRange;
+import com.assetstree.jira.model.PlaceMol;
 import com.assetstree.jira.model.TniSame;
 import com.assetstree.jira.model.TniText;
 import com.assetstree.jira.model.TniSheetDraft;
@@ -752,6 +753,12 @@ public class AssetServiceImpl implements AssetService {
                     throw new AssetException(400, "asset-tree.error.depth");
                 }
                 String custodian = normalizeCustodian(draft.getCustodianKey());
+                if (!type.isLocation() && draft.getCustodianKey() == null && parentId != null) {
+                    String inherited = placeCustodian(project.getKey(), parentId);
+                    if (inherited != null) {
+                        custodian = inherited;
+                    }
+                }
                 String issued = type.isLocation() ? null : normalizeCustodian(draft.getIssuedKey());
                 Date now = new Date();
                 AssetEntity entity = ao().create(AssetEntity.class,
@@ -6004,6 +6011,28 @@ public class AssetServiceImpl implements AssetService {
                     new DBParam("ATTR_POSITION", position));
             position++;
         }
+    }
+
+    /** Custodian of the nearest place at or above the parent. A place with nobody set is skipped. */
+    private String placeCustodian(String projectKey, Integer parentId) {
+        List<PlaceMol.Node> nodes = new ArrayList<PlaceMol.Node>();
+        Integer current = parentId;
+        Set<Integer> seen = new HashSet<Integer>();
+        while (current != null && current.intValue() > 0 && seen.add(current)) {
+            AssetEntity row = ao().get(AssetEntity.class, current.intValue());
+            if (row == null || !ProjectKeys.same(row.getProjectKey(), projectKey)) {
+                break;
+            }
+            AssetTypeEntity type = findType(row.getTypeKey());
+            nodes.add(new PlaceMol.Node(row.getID(), row.getParentId(), type != null && type.isLocation(), row.getCustodianKey()));
+            current = row.getParentId();
+        }
+        String key = PlaceMol.of(nodes, parentId);
+        if (key.isEmpty()) {
+            return null;
+        }
+        ApplicationUser holder = userManager().getUserByKey(key);
+        return holder == null ? null : holder.getKey();
     }
 
     private String normalizeCustodian(String userKey) {
