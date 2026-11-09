@@ -423,6 +423,13 @@ input.asset-tree-portal-mine-search:focus {
     border-color: #4c9aff;
 }
 
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine-group.is-hidden {
+    display: none !important;
+}
+
 .asset-tree-portal-mine-icon {
     display: flex;
     align-items: center;

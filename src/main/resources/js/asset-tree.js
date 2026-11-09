@@ -2200,6 +2200,23 @@
         }
     }
 
+    function showWork(text) {
+        var node = document.getElementById('asset-tree-work');
+        if (!node) {
+            node = document.createElement('div');
+            node.id = 'asset-tree-work';
+            node.appendChild(document.createElement('p'));
+            document.body.appendChild(node);
+        }
+        node.className = 'asset-tree-work is-visible';
+        node.firstChild.textContent = text || t('loading');
+    }
+
+    function hideWork() {
+        var node = document.getElementById('asset-tree-work');
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+    }
+
     function viewTabs() {
         var bar = el('div', 'asset-tree-viewtabs');
         bar.setAttribute('role', 'tablist');
@@ -5627,6 +5644,8 @@
         var projects = Object.keys(groups);
         var combined = { done: 0, errors: [] };
         var index = 0;
+        var workText = action === 'move' ? t('bulkMoving') : (action === 'delete' ? t('bulkDeleting') : t('bulkWorking'));
+        showWork(workText);
         setBusy(true);
         function next() {
             if (index >= projects.length) {
@@ -5638,11 +5657,17 @@
                 if (combined.errors.length) note += ' ' + t('bulkFailed', combined.errors.length);
                 notify(note);
                 assetsChanged();
+                showWork(t('bulkLoading'));
                 if (state.view === 'mine') {
                     loadMine();
+                    hideWork();
                     return;
                 }
-                reloadTree(function () { renderFrame(); });
+                reloadTree(function () {
+                    renderFrame();
+                    hideWork();
+                });
+                setTimeout(hideWork, 60000);
             } else {
                 var project = projects[index];
                 index += 1;
@@ -5667,7 +5692,7 @@
                 });
             }
         }
-        next();
+        setTimeout(next, 40);
     }
 
     function openBulkStatus() {
@@ -11074,6 +11099,7 @@
             state.assets = payload.assets || [];
             state.types = payload.types || [];
             state.statuses = payload.statuses || [];
+            if (payload.mark != null && payload.mark !== '') state.treeMark = String(payload.mark);
             invalidate();
             ensureExpandedDefaults();
             if (done) {
@@ -11081,6 +11107,33 @@
             } else {
                 renderFrame();
             }
+        });
+    }
+
+    function watchTree() {
+        if (watchTree.started) return;
+        watchTree.started = true;
+        setInterval(pullTreeStamp, 12000);
+    }
+
+    function pullTreeStamp() {
+        if (!state.projectKey || state.busy || state.dirty || state.loading || document.hidden) return;
+        if (document.querySelector('.asset-tree-backdrop')) return;
+        var key = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/tree-stamp', null, function (status, payload) {
+            if (status !== 200 || !payload || key !== state.projectKey) return;
+            var mark = payload.message == null ? '' : String(payload.message);
+            if (!mark) return;
+            if (!state.treeMark) {
+                state.treeMark = mark;
+                return;
+            }
+            if (mark === state.treeMark) return;
+            state.treeMark = mark;
+            if (state.busy || state.dirty || state.loading) return;
+            reloadTree(function () {
+                if (state.view === 'all' || state.view === 'mine') renderFrame();
+            });
         });
     }
 
@@ -11264,6 +11317,7 @@
         state.pane = 'list';
         state.loading = true;
         mount();
+        watchTree();
         reloadTree(function () {
             state.loading = false;
             renderFrame();

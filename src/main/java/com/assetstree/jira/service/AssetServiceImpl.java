@@ -651,6 +651,7 @@ public class AssetServiceImpl implements AssetService {
                 list.setAssets(assets);
                 list.setTypes(visibleTypes(types));
                 list.setStatuses(statusDtos(key, rows));
+                list.setMark(treeMark(rows));
                 return list;
             }
         };
@@ -666,6 +667,33 @@ public class AssetServiceImpl implements AssetService {
         } finally {
             clearScope();
         }
+    }
+
+    @Override
+    public String treeMark(ApplicationUser user, String projectKey) {
+        final Project project = requireReadableProject(user, projectKey);
+        return ao().executeInTransaction(new TransactionCallback<String>() {
+            @Override
+            public String doInTransaction() {
+                return treeMark(assetsIn(project.getKey()));
+            }
+        });
+    }
+
+    private String treeMark(AssetEntity[] rows) {
+        long mark = 0L;
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                AssetEntity row = rows[i];
+                if (row == null) {
+                    continue;
+                }
+                long when = row.getUpdated() == null ? 0L : row.getUpdated().getTime();
+                mark = mark * 1315423911L + row.getID() * 31L + when;
+            }
+            mark = mark * 31L + rows.length;
+        }
+        return Long.toString(mark);
     }
 
     @Override
@@ -3872,9 +3900,6 @@ public class AssetServiceImpl implements AssetService {
                 if (draft != null && draft.getSetup() != null) {
                     ModuleSetupDto current = ModuleSetup.read(row.getOptionList());
                     row.setOptionList(ModuleSetup.write(ModuleSetup.merge(current, draft.getSetup())));
-                    if (draft.getSetup().getTniSites() != null) {
-                        seatProject(project.getKey(), ModuleSetup.read(row.getOptionList()).getTniSites(), user.getKey());
-                    }
                 }
                 row.save();
                 return viewDto(row);
@@ -5423,6 +5448,9 @@ public class AssetServiceImpl implements AssetService {
         Map<Integer, Integer> parents = parentMap(rows);
         boolean outermost = "move".equals(action) || ("delete".equals(action) && draft.isCascade());
         List<Integer> order = outermost ? BulkSelection.keepRoots(ids, parents) : BulkSelection.deepestFirst(ids, parents);
+        if ("move".equals(action)) {
+            return moveAssets(user, project, ids, order, draft);
+        }
         Set<Integer> selected = new HashSet<Integer>(ids);
         Set<Integer> covered = new HashSet<Integer>();
         BulkResultDto result = new BulkResultDto();
@@ -5443,10 +5471,6 @@ public class AssetServiceImpl implements AssetService {
                 }
                 if ("delete".equals(action)) {
                     deleteAsset(user, id.intValue(), draft.isCascade());
-                } else if ("move".equals(action)) {
-                    MoveDraft move = new MoveDraft();
-                    move.setParentId(draft.isToRoot() ? null : draft.getParentId());
-                    moveAsset(user, id.intValue(), move);
                 } else if ("status".equals(action)) {
                     patchStatus(user, id.intValue(), draft.getStatus());
                 } else if ("copy".equals(action)) {
@@ -5469,6 +5493,128 @@ public class AssetServiceImpl implements AssetService {
         result.setDone(covered.size());
         result.setErrors(errors);
         return result;
+    }
+
+    /** One read of the tree, then every selected object changes parent together. */
+    private BulkResultDto moveAssets(final ApplicationUser user, final Project project, final List<Integer> ids,
+                                     final List<Integer> order, final BulkDraft draft) {
+        final Integer parentId = draft.isToRoot() ? null : TreeLogic.normalizeParent(draft.getParentId());
+        if (parentId != null) {
+            AssetEntity parent = requireReadable(user, parentId.intValue());
+            if (!ProjectKeys.same(parent.getProjectKey(), project.getKey())) {
+                throw new AssetException(400, "asset-tree.error.project.mismatch");
+            }
+        }
+        return ao().executeInTransaction(new TransactionCallback<BulkResultDto>() {
+            @Override
+            public BulkResultDto doInTransaction() {
+                AssetEntity[] rows = assetsIn(project.getKey());
+                Map<Integer, Integer> parents = parentMap(rows);
+                Map<Integer, AssetEntity> index = indexAssets(rows);
+                Map<Integer, List<Integer>> children = childrenMap(rows);
+                if (parentId != null && !parents.containsKey(parentId)) {
+                    throw new AssetException(400, "asset-tree.error.parent");
+                }
+                BulkResultDto result = new BulkResultDto();
+                List<BulkIssueDto> errors = new ArrayList<BulkIssueDto>();
+                Set<Integer> covered = new HashSet<Integer>();
+                Set<Integer> selected = new HashSet<Integer>(ids);
+                Set<Integer> touched = new HashSet<Integer>();
+                boolean touchRoot = false;
+                I18nHelper labels = i18n();
+                for (Integer id : order) {
+                    AssetEntity entity = index.get(id);
+                    if (entity == null) {
+                        covered.add(id);
+                        continue;
+                    }
+                    try {
+                        requireAssetCap(user, id.intValue(), kindCap(entity));
+                        if (!ProjectKeys.same(entity.getProjectKey(), project.getKey())) {
+                            throw new AssetException(400, "asset-tree.error.project.mismatch");
+                        }
+                        if (TreeLogic.wouldCycle(parents, id.intValue(), parentId)) {
+                            throw new AssetException(400, "asset-tree.error.cycle");
+                        }
+                        int baseDepth = parentId == null ? 0 : TreeLogic.depth(parents, parentId.intValue()) + 1;
+                        int extra = TreeLogic.subtreeHeight(children, id.intValue());
+                        if (baseDepth >= TreeLogic.MAX_DEPTH || baseDepth + extra >= TreeLogic.MAX_DEPTH) {
+                            throw new AssetException(400, "asset-tree.error.depth");
+                        }
+                        Integer previous = TreeLogic.normalizeParent(entity.getParentId());
+                        List<Integer> below = TreeLogic.descendants(children, id.intValue());
+                        if (!TreeLogic.sameParent(previous, parentId)) {
+                            Integer fromPlace = placeContainer(previous, rows, null);
+                            Integer toPlace = placeContainer(parentId, rows, null);
+                            entity.setParentId(parentId);
+                            entity.setSortOrder(Integer.MAX_VALUE / 2);
+                            entity.setUpdated(new Date());
+                            entity.setUpdatedBy(user.getKey());
+                            entity.save();
+                            logActivity(id.intValue(), user.getKey(), "move", "", parentName(previous), parentName(parentId));
+                            if (fromPlace != null && !fromPlace.equals(toPlace)) {
+                                logPlaceChange(user, fromPlace, "place_out", entity);
+                            }
+                            if (toPlace != null && !toPlace.equals(fromPlace)) {
+                                logPlaceChange(user, toPlace, "place_in", entity);
+                            }
+                            parents.put(id, parentId);
+                            if (previous == null) {
+                                touchRoot = true;
+                            } else {
+                                touched.add(previous);
+                            }
+                            if (parentId == null) {
+                                touchRoot = true;
+                            } else {
+                                touched.add(parentId);
+                            }
+                        }
+                        covered.add(id);
+                        if (below != null) {
+                            for (int i = 0; i < below.size(); i++) {
+                                Integer child = below.get(i);
+                                if (selected.contains(child)) {
+                                    covered.add(child);
+                                }
+                            }
+                        }
+                    } catch (AssetException ex) {
+                        errors.add(new BulkIssueDto(entity.getName() == null ? String.valueOf(id) : entity.getName(), exceptionText(labels, ex)));
+                    }
+                }
+                if (touchRoot) {
+                    rewriteSiblings(rows, null);
+                }
+                for (Integer place : touched) {
+                    rewriteSiblings(rows, place);
+                }
+                result.setDone(covered.size());
+                result.setErrors(errors);
+                return result;
+            }
+        });
+    }
+
+    private void rewriteSiblings(AssetEntity[] rows, Integer parentId) {
+        List<AssetEntity> siblings = new ArrayList<AssetEntity>();
+        if (rows == null) {
+            return;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            AssetEntity candidate = rows[i];
+            if (candidate != null && TreeLogic.sameParent(candidate.getParentId(), parentId)) {
+                siblings.add(candidate);
+            }
+        }
+        Collections.sort(siblings, SIBLING_ORDER);
+        for (int i = 0; i < siblings.size(); i++) {
+            AssetEntity sibling = siblings.get(i);
+            if (sibling.getSortOrder() != i) {
+                sibling.setSortOrder(i);
+                sibling.save();
+            }
+        }
     }
 
     private void patchStatus(ApplicationUser user, final int id, final String status) {
@@ -7518,34 +7664,30 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private void seatProject(String projectKey, String rules, String actorKey) {
-        if (rules == null || rules.trim().isEmpty()) {
+    /** Puts one newly created host on its site. An object that already exists stays where it is. */
+    private void seatFresh(final String projectKey, final int assetId, final String rules, final String host, final String actorKey) {
+        if (rules == null || rules.trim().isEmpty() || assetId <= 0) {
             return;
         }
-        AssetEntity[] rows = assetsIn(projectKey);
-        if (rows == null) {
-            return;
-        }
-        java.util.Map<Integer, String> before = new java.util.HashMap<Integer, String>();
-        for (int i = 0; i < rows.length; i++) {
-            AssetEntity row = rows[i];
-            if (row != null) {
-                before.put(Integer.valueOf(row.getID()), parentName(row.getParentId()));
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity asset = ao().get(AssetEntity.class, assetId);
+                if (asset == null || !ProjectKeys.same(asset.getProjectKey(), projectKey)) {
+                    return null;
+                }
+                String was = parentName(asset.getParentId());
+                if (TniSeat.move(ao(), asset, rules, host).isEmpty()) {
+                    return null;
+                }
+                asset.save();
+                String now = parentName(asset.getParentId());
+                if (!now.equals(was)) {
+                    recordActivity(asset.getID(), actorKey, "move", "", was, now);
+                }
+                return null;
             }
-        }
-        TniSeat.apply(ao(), rows, projectKey, rules);
-        for (int i = 0; i < rows.length; i++) {
-            AssetEntity row = rows[i];
-            if (row == null) {
-                continue;
-            }
-            String was = before.get(Integer.valueOf(row.getID()));
-            String now = parentName(row.getParentId());
-            if (now.equals(was == null ? "" : was)) {
-                continue;
-            }
-            recordActivity(row.getID(), actorKey, "move", "", was, now);
-        }
+        });
     }
 
     private String clip(String value) {
@@ -15006,10 +15148,10 @@ public class AssetServiceImpl implements AssetService {
                 rememberTniHost(made.getId(), projectKey, host, true);
                 index.cards.add(new TniSame.Card(made.getId(), computer.getName(), false, link, host));
                 index.byExternal.put(link, Integer.valueOf(made.getId()));
+                seatFresh(projectKey, made.getId(), rules, host, user == null || user.getKey() == null ? "" : user.getKey());
             }
             created++;
         }
-        seatProject(projectKey, rules, user == null || user.getKey() == null ? "" : user.getKey());
         ImportResultDto result = new ImportResultDto();
         result.setCreated(created);
         result.setUpdated(updated);
@@ -15263,7 +15405,10 @@ public class AssetServiceImpl implements AssetService {
         draft.setName(station.isEmpty() ? address : station);
         String pattern = found == null || found.isEmpty() || found.startsWith("asset-tree.") ? address : found;
         draft.setDescription(pattern.indexOf("{0}") >= 0 ? pattern.replace("{0}", address) : pattern);
-        createAsset(user, draft);
+        AssetDto made = createAsset(user, draft);
+        if (made != null && made.getId() > 0) {
+            seatFresh(projectKey, made.getId(), rules, looked, user == null || user.getKey() == null ? "" : user.getKey());
+        }
         return true;
     }
 

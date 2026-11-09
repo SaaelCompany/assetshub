@@ -320,6 +320,18 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/tree-stamp")
+    public Response treeStamp(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                MessageDto mark = new MessageDto(assetService.treeMark(user(), projectKey));
+                return Response.ok(mark).build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/inventory")
     public Response inventory(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
