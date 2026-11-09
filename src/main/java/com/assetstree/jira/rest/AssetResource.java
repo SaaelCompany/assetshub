@@ -701,6 +701,17 @@ public class AssetResource {
         });
     }
 
+    @PUT
+    @Path("projects/{projectKey}/schemes/{schemeId}/shares")
+    public Response shareScheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId, final SchemeDocumentDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.shareScheme(user(), projectKey, schemeId, draft)).build();
+            }
+        });
+    }
+
     @DELETE
     @Path("projects/{projectKey}/schemes/{schemeId}")
     public Response deleteScheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId) {

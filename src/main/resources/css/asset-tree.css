@@ -13469,6 +13469,15 @@ button.asset-tree-attach-remove {
     border-radius: 3px;
 }
 
+.asset-tree-scheme-share-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 240px;
+    margin: 8px 0 12px;
+    overflow: auto;
+}
+
 .asset-tree-scheme-editor-dialog {
     width: 980px;
 }

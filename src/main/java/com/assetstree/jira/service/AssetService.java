@@ -322,6 +322,8 @@ public interface AssetService {
 
     SchemeDocumentDto saveScheme(ApplicationUser user, String projectKey, int schemeId, SchemeDocumentDto draft);
 
+    SchemeDocumentDto shareScheme(ApplicationUser user, String projectKey, int schemeId, SchemeDocumentDto draft);
+
     void deleteScheme(ApplicationUser user, String projectKey, int schemeId);
 
     List<SavedReportDto> reports(ApplicationUser user, String projectKey);

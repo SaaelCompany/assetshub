@@ -46,6 +46,8 @@ import com.atlassian.jira.web.ExecutingHttpRequest;
 import com.atlassian.jira.user.UserPropertyManager;
 import com.atlassian.jira.user.util.UserManager;
 import com.atlassian.jira.util.I18nHelper;
+import com.atlassian.jira.util.json.JSONArray;
+import com.atlassian.jira.util.json.JSONException;
 import com.atlassian.jira.util.json.JSONObject;
 import com.atlassian.mail.Email;
 import com.atlassian.mail.queue.MailQueue;
@@ -85,6 +87,9 @@ import com.assetstree.jira.ao.WebhookEntity;
 import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.RoomEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
+import com.assetstree.jira.ao.SchemeEntity;
+import com.assetstree.jira.ao.SchemePlacementEntity;
+import com.assetstree.jira.ao.SchemeShareEntity;
 import com.assetstree.jira.ao.TniSourceEntity;
 import com.assetstree.jira.ao.TniWatchEntity;
 import com.assetstree.jira.ao.TniSubnetEntity;
@@ -9613,7 +9618,33 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<List<SchemeDocumentDto>>() {
             @Override
             public List<SchemeDocumentDto> doInTransaction() {
-                return SchemeDocuments.list(ao(), project.getKey());
+                List<SchemeDocumentDto> found = SchemeDocuments.list(ao(), project.getKey());
+                for (int i = 0; i < found.size(); i++) {
+                    markScheme(found.get(i), project.getKey(), false, sharesOf(found.get(i).getId()));
+                }
+                SchemeShareEntity[] incoming = ao().find(SchemeShareEntity.class, "PROJECT_KEY = ?", project.getKey());
+                if (incoming != null) {
+                    for (int i = 0; i < incoming.length; i++) {
+                        SchemeEntity row = SchemeDocuments.find(ao(), incoming[i].getSchemeId());
+                        if (row == null || ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                            continue;
+                        }
+                        SchemeDocumentDto dto = new SchemeDocumentDto();
+                        dto.setId(row.getID());
+                        dto.setName(row.getName());
+                        dto.setUpdatedAt(row.getUpdatedAt());
+                        dto.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
+                        markScheme(dto, row.getProjectKey(), true, null);
+                        found.add(dto);
+                    }
+                }
+                Collections.sort(found, new Comparator<SchemeDocumentDto>() {
+                    @Override
+                    public int compare(SchemeDocumentDto left, SchemeDocumentDto right) {
+                        return left.getId() - right.getId();
+                    }
+                });
+                return found;
             }
         });
     }
@@ -9625,7 +9656,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
             @Override
             public SchemeDocumentDto doInTransaction() {
-                return SchemeDocuments.one(ao(), project.getKey(), schemeId);
+                return presentScheme(project.getKey(), schemeId, true);
             }
         });
     }
@@ -9637,7 +9668,9 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
             @Override
             public SchemeDocumentDto doInTransaction() {
-                return SchemeDocuments.create(ao(), project.getKey(), draft);
+                SchemeDocumentDto created = SchemeDocuments.create(ao(), project.getKey(), draft);
+                markScheme(created, project.getKey(), false, new ArrayList<String>());
+                return created;
             }
         });
     }
@@ -9649,7 +9682,70 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
             @Override
             public SchemeDocumentDto doInTransaction() {
-                return SchemeDocuments.save(ao(), project.getKey(), schemeId, draft);
+                SchemeEntity row = SchemeDocuments.find(ao(), schemeId);
+                if (row == null) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                if (ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    SchemeDocumentDto stored = new SchemeDocumentDto();
+                    stored.setName(draft == null ? null : draft.getName());
+                    stored.setBody(SchemeDocuments.stripGuestAssets(draft == null ? null : draft.getBody(), project.getKey()));
+                    SchemeDocumentDto saved = SchemeDocuments.save(ao(), project.getKey(), schemeId, stored);
+                    markScheme(saved, project.getKey(), false, sharesOf(schemeId));
+                    return saved;
+                }
+                if (!sharedWith(schemeId, project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                String pins = SchemeDocuments.takeProjectAssets(draft == null ? null : draft.getBody(), project.getKey());
+                writePlacements(schemeId, project.getKey(), ownedPlacements(project.getKey(), pins));
+                SchemeDocumentDto saved = new SchemeDocumentDto();
+                saved.setId(row.getID());
+                saved.setName(row.getName());
+                saved.setUpdatedAt(row.getUpdatedAt());
+                saved.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
+                markScheme(saved, row.getProjectKey(), true, null);
+                return saved;
+            }
+        });
+    }
+
+    @Override
+    public SchemeDocumentDto shareScheme(ApplicationUser user, String projectKey, final int schemeId, final SchemeDocumentDto draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.MAP);
+        return ao().executeInTransaction(new TransactionCallback<SchemeDocumentDto>() {
+            @Override
+            public SchemeDocumentDto doInTransaction() {
+                SchemeEntity row = SchemeDocuments.find(ao(), schemeId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                List<String> wanted = SchemeDocuments.shareKeys(project.getKey(), draft == null ? null : draft.getShares());
+                List<String> stored = new ArrayList<String>();
+                for (int i = 0; i < wanted.size(); i++) {
+                    Project target = project(wanted.get(i));
+                    if (target == null || ProjectKeys.same(target.getKey(), project.getKey()) || !canSee(user, target)) {
+                        throw new AssetException(400, "asset-tree.error.scheme");
+                    }
+                    stored.add(target.getKey());
+                }
+                SchemeShareEntity[] existing = ao().find(SchemeShareEntity.class, "SCHEME_ID = ?", Integer.valueOf(schemeId));
+                if (existing != null) {
+                    for (int i = 0; i < existing.length; i++) {
+                        ao().delete(existing[i]);
+                    }
+                }
+                for (int i = 0; i < stored.size(); i++) {
+                    ao().create(SchemeShareEntity.class, new DBParam("SCHEME_ID", Integer.valueOf(schemeId)), new DBParam("PROJECT_KEY", stored.get(i)));
+                }
+                SchemeDocumentDto saved = new SchemeDocumentDto();
+                saved.setId(row.getID());
+                saved.setName(row.getName());
+                saved.setUpdatedAt(row.getUpdatedAt());
+                saved.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
+                markScheme(saved, project.getKey(), false, stored);
+                return saved;
             }
         });
     }
@@ -9662,9 +9758,172 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public Void doInTransaction() {
                 SchemeDocuments.delete(ao(), project.getKey(), schemeId);
+                ao().deleteWithSQL(SchemeShareEntity.class, "SCHEME_ID = ?", Integer.valueOf(schemeId));
+                ao().deleteWithSQL(SchemePlacementEntity.class, "SCHEME_ID = ?", Integer.valueOf(schemeId));
                 return null;
             }
         });
+    }
+
+    private SchemeDocumentDto presentScheme(String viewerKey, int schemeId, boolean withBody) {
+        SchemeEntity row = SchemeDocuments.find(ao(), schemeId);
+        if (row == null) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        boolean owner = ProjectKeys.same(row.getProjectKey(), viewerKey);
+        if (!owner && !sharedWith(schemeId, viewerKey)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        SchemeDocumentDto dto = withBody ? SchemeDocuments.one(ao(), row.getProjectKey(), schemeId) : new SchemeDocumentDto();
+        if (!withBody) {
+            dto.setId(row.getID());
+            dto.setName(row.getName());
+        }
+        if (withBody) {
+            dto.setBody(SchemeDocuments.mergePlacements(dto.getBody(), placementBodies(schemeId)));
+            dto.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
+        }
+        markScheme(dto, row.getProjectKey(), !owner, owner ? sharesOf(schemeId) : null);
+        return dto;
+    }
+
+    private void markScheme(SchemeDocumentDto dto, String ownerKey, boolean shared, List<String> shares) {
+        dto.setProjectKey(ownerKey);
+        dto.setShared(shared);
+        if (!shared) {
+            dto.setShares(shares == null ? new ArrayList<String>() : shares);
+        }
+    }
+
+    private List<String> sharesOf(int schemeId) {
+        List<String> keys = new ArrayList<String>();
+        SchemeShareEntity[] rows = ao().find(SchemeShareEntity.class, "SCHEME_ID = ?", Integer.valueOf(schemeId));
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                if (rows[i].getProjectKey() != null && !rows[i].getProjectKey().isEmpty()) {
+                    keys.add(rows[i].getProjectKey());
+                }
+            }
+        }
+        return keys;
+    }
+
+    private boolean sharedWith(int schemeId, String projectKey) {
+        List<String> keys = sharesOf(schemeId);
+        for (int i = 0; i < keys.size(); i++) {
+            if (ProjectKeys.same(keys.get(i), projectKey)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> placementBodies(int schemeId) {
+        List<String> bodies = new ArrayList<String>();
+        List<String> shares = sharesOf(schemeId);
+        SchemePlacementEntity[] rows = ao().find(SchemePlacementEntity.class, "SCHEME_ID = ?", Integer.valueOf(schemeId));
+        if (rows == null) {
+            return bodies;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            boolean allowed = false;
+            for (int k = 0; k < shares.size(); k++) {
+                if (ProjectKeys.same(shares.get(k), rows[i].getProjectKey())) {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (allowed && rows[i].getBody() != null) {
+                bodies.add(rows[i].getBody());
+            }
+        }
+        return bodies;
+    }
+
+    private void writePlacements(int schemeId, String projectKey, String body) {
+        SchemePlacementEntity[] rows = ao().find(SchemePlacementEntity.class, "SCHEME_ID = ? AND PROJECT_KEY = ?", Integer.valueOf(schemeId), projectKey);
+        boolean empty = body == null || body.trim().isEmpty() || "[]".equals(body.trim());
+        if (empty) {
+            if (rows != null) {
+                for (int i = 0; i < rows.length; i++) {
+                    ao().delete(rows[i]);
+                }
+            }
+            return;
+        }
+        if (body.length() > 400000) {
+            throw new AssetException(400, "asset-tree.error.scheme");
+        }
+        SchemePlacementEntity row;
+        if (rows == null || rows.length == 0) {
+            row = ao().create(SchemePlacementEntity.class, new DBParam("SCHEME_ID", Integer.valueOf(schemeId)), new DBParam("PROJECT_KEY", projectKey));
+        } else {
+            row = rows[0];
+            for (int i = 1; i < rows.length; i++) {
+                ao().delete(rows[i]);
+            }
+        }
+        row.setBody(body);
+        row.setUpdatedAt(System.currentTimeMillis());
+        row.save();
+    }
+
+    private String ownedPlacements(String projectKey, String placements) {
+        try {
+            JSONArray source = new JSONArray(placements == null || placements.trim().isEmpty() ? "[]" : placements);
+            JSONArray kept = new JSONArray();
+            for (int i = 0; i < source.length() && kept.length() < SchemeDocuments.MAX_PLACEMENTS; i++) {
+                JSONObject row = source.optJSONObject(i);
+                JSONObject object = row == null ? null : row.optJSONObject("object");
+                if (object == null || !"asset".equals(object.optString("type", ""))) {
+                    continue;
+                }
+                JSONObject binding = object.optJSONObject("assetBinding");
+                int assetId = bindingAssetId(binding);
+                if (!equipmentInProject(projectKey, assetId)) {
+                    continue;
+                }
+                binding.put("workspaceId", projectKey);
+                binding.put("objectId", String.valueOf(assetId));
+                object.put("assetBinding", binding);
+                object.put("type", "asset");
+                row.put("object", object);
+                kept.put(row);
+            }
+            return kept.toString();
+        } catch (JSONException ex) {
+            throw new AssetException(400, "asset-tree.error.scheme");
+        }
+    }
+
+    private int bindingAssetId(JSONObject binding) {
+        if (binding == null) {
+            return 0;
+        }
+        String raw = binding.optString("objectId", "").trim();
+        if (raw.isEmpty()) {
+            return 0;
+        }
+        int value = 0;
+        for (int i = 0; i < raw.length(); i++) {
+            char current = raw.charAt(i);
+            if (current < '0' || current > '9') {
+                return 0;
+            }
+            value = value * 10 + (current - '0');
+            if (value > 100000000) {
+                return 0;
+            }
+        }
+        return value;
+    }
+
+    private boolean equipmentInProject(String projectKey, int assetId) {
+        if (assetId <= 0) {
+            return false;
+        }
+        AssetEntity asset = ao().get(AssetEntity.class, assetId);
+        return asset != null && ProjectKeys.same(asset.getProjectKey(), projectKey) && !isLocation(asset);
     }
 
     private String roomName(String raw, String kind, String points) {

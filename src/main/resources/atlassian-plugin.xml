@@ -39,6 +39,8 @@
         <entity>com.assetstree.jira.ao.RoomEntity</entity>
         <entity>com.assetstree.jira.ao.PinEntity</entity>
         <entity>com.assetstree.jira.ao.SchemeEntity</entity>
+        <entity>com.assetstree.jira.ao.SchemeShareEntity</entity>
+        <entity>com.assetstree.jira.ao.SchemePlacementEntity</entity>
         <entity>com.assetstree.jira.ao.SavedReportEntity</entity>
         <entity>com.assetstree.jira.ao.LifecycleEntity</entity>
         <entity>com.assetstree.jira.ao.CardTemplateEntity</entity>

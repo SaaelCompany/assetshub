@@ -23635,6 +23635,9 @@
             say: notify,
             assets: assets,
             places: places,
+            projects: (state.projects || []).map(function (project) {
+                return { key: project.key, name: project.name || project.key };
+            }),
             focusId: focusId
         });
         return host;
