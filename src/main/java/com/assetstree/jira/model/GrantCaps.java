@@ -22,6 +22,10 @@ public final class GrantCaps {
     public static final String REPORTS = "reports";
     /** Opens the floor plan and nothing else when it is the only kind. */
     public static final String MAP = "map";
+    /** Opens schemes and leaves the drawing unchanged. */
+    public static final String SCHEME = "scheme";
+    /** Creates schemes and changes the drawing, including delete. */
+    public static final String SCHEME_EDIT = "schemeEdit";
     public static final String ALL_PROJECTS = "*";
 
     public static final String CREATE = "create";
@@ -33,7 +37,7 @@ public final class GrantCaps {
     public static final String ACCESS = "access";
 
     private static final String[] ORDER = new String[] {
-            VIEW, PLACES, TYPES, OBJECT, ASSETS, ADMIN, REPORTS, MAP
+            VIEW, PLACES, TYPES, OBJECT, ASSETS, ADMIN, REPORTS, MAP, SCHEME, SCHEME_EDIT
     };
 
     private GrantCaps() {
@@ -54,6 +58,12 @@ public final class GrantCaps {
         }
         if (MAP.equals(level)) {
             return MAP;
+        }
+        if (SCHEME.equals(level)) {
+            return SCHEME;
+        }
+        if (SCHEME_EDIT.equals(level) || "schemeedit".equals(level)) {
+            return normalize(SCHEME_EDIT);
         }
         return "";
     }
@@ -76,6 +86,11 @@ public final class GrantCaps {
             chosen.add(PLACES);
             chosen.add(TYPES);
             chosen.add(OBJECT);
+            chosen.add(SCHEME);
+            chosen.add(SCHEME_EDIT);
+        }
+        if (chosen.contains(SCHEME_EDIT)) {
+            chosen.add(SCHEME);
         }
         if (chosen.contains(PLACES) || chosen.contains(TYPES) || chosen.contains(OBJECT)
                 || chosen.contains(ASSETS) || chosen.contains(ADMIN)) {
@@ -114,6 +129,14 @@ public final class GrantCaps {
         if (MAP.equals(cap)) {
             return contains(normalized, MAP) || contains(normalized, VIEW);
         }
+        if (SCHEME.equals(cap)) {
+            return contains(normalized, SCHEME) || contains(normalized, SCHEME_EDIT)
+                    || contains(normalized, VIEW) || contains(normalized, MAP)
+                    || contains(normalized, ASSETS) || contains(normalized, ADMIN);
+        }
+        if (SCHEME_EDIT.equals(cap)) {
+            return contains(normalized, SCHEME_EDIT) || contains(normalized, ASSETS) || contains(normalized, ADMIN);
+        }
         return contains(normalized, cap);
     }
 
@@ -136,13 +159,20 @@ public final class GrantCaps {
         if (contains(normalize(caps), MAP)) {
             return MAP;
         }
+        if (contains(normalize(caps), SCHEME_EDIT)) {
+            return SCHEME_EDIT;
+        }
+        if (contains(normalize(caps), SCHEME)) {
+            return SCHEME;
+        }
         return VIEW;
     }
 
     private static void addToken(Set<String> chosen, String token) {
         if (VIEW.equals(token) || PLACES.equals(token) || TYPES.equals(token)
                 || OBJECT.equals(token) || ASSETS.equals(token) || ADMIN.equals(token)
-                || REPORTS.equals(token) || MAP.equals(token)) {
+                || REPORTS.equals(token) || MAP.equals(token)
+                || SCHEME.equals(token) || SCHEME_EDIT.equals(token)) {
             chosen.add(token);
             return;
         }

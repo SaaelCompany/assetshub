@@ -26,6 +26,15 @@ public class ScaleRulesTest {
         assertEquals(GrantCaps.REPORTS, GrantCaps.levelOf(caps));
         assertTrue(GrantCaps.has("view", GrantCaps.REPORTS));
         assertTrue(GrantCaps.has("view", GrantCaps.MAP));
+        assertTrue(GrantCaps.has("view", GrantCaps.SCHEME));
+        assertFalse(GrantCaps.has("view", GrantCaps.SCHEME_EDIT));
+        assertFalse(GrantCaps.has("object", GrantCaps.SCHEME_EDIT));
+        assertTrue(GrantCaps.has("assets", GrantCaps.SCHEME_EDIT));
+        assertTrue(GrantCaps.has("scheme", GrantCaps.SCHEME));
+        assertFalse(GrantCaps.has("scheme", GrantCaps.SCHEME_EDIT));
+        assertTrue(GrantCaps.has("schemeEdit", GrantCaps.SCHEME));
+        assertTrue(GrantCaps.normalize("schemeEdit").contains("scheme"));
+        assertFalse(GrantCaps.has("scheme", GrantCaps.VIEW));
         assertTrue(GrantCaps.normalize("object").contains("view"));
     }
 
