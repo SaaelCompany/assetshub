@@ -119,6 +119,12 @@ public class TniRulesTest {
         assertEquals("Москва", TniSites.match(sites, "msk-01.budzdorov.ru", ""));
         assertEquals("", TniSites.match(sites, "", "KRULIT"));
         assertEquals("", TniSites.match("", "", "KRUL-IT"));
+        String listed = TniSites.store("KRUL = Крулево");
+        assertTrue(TniSites.admits("", "", "Компьютер Иванов"));
+        assertTrue(TniSites.admits(listed, "krul-it.budzdorov.ru", "Компьютер Иванов"));
+        assertTrue(TniSites.admits(listed, "", "KRUL-BUH"));
+        assertFalse(TniSites.admits(listed, "", "Компьютер Иванов Иван Иванович"));
+        assertFalse(TniSites.admits(listed, "other-pc.budzdorov.ru", "OTHER-PC"));
         assertTrue(TniText.owned(card));
         assertFalse(TniText.owned("A note written by a person"));
     }

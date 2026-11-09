@@ -250,6 +250,7 @@ import com.assetstree.jira.model.TniDirectory;
 import com.assetstree.jira.model.TniRange;
 import com.assetstree.jira.model.PlaceMol;
 import com.assetstree.jira.model.TniSame;
+import com.assetstree.jira.model.TniSites;
 import com.assetstree.jira.model.TniText;
 import com.assetstree.jira.model.TniSheetDraft;
 import com.assetstree.jira.model.TniSourceDraft;
@@ -14935,6 +14936,8 @@ public class AssetServiceImpl implements AssetService {
         }
         final String disabledWord = off;
         final TniIndex index = tniIndex(projectKey);
+        ProjectViewEntity view = viewRow(projectKey);
+        final String rules = view == null ? "" : ModuleSetup.read(view.getOptionList()).getTniSites();
         int created = 0;
         int updated = 0;
         for (int i = 0; i < computers.size(); i++) {
@@ -14988,6 +14991,9 @@ public class AssetServiceImpl implements AssetService {
                 updated++;
                 continue;
             }
+            if (!TniSites.admits(rules, host, computer.getName())) {
+                continue;
+            }
             AssetDraft draft = new AssetDraft();
             draft.setProjectKey(projectKey);
             draft.setTypeKey(typeKey);
@@ -15003,8 +15009,6 @@ public class AssetServiceImpl implements AssetService {
             }
             created++;
         }
-        ProjectViewEntity view = viewRow(projectKey);
-        String rules = view == null ? "" : ModuleSetup.read(view.getOptionList()).getTniSites();
         seatProject(projectKey, rules, user == null || user.getKey() == null ? "" : user.getKey());
         ImportResultDto result = new ImportResultDto();
         result.setCreated(created);
@@ -15246,6 +15250,11 @@ public class AssetServiceImpl implements AssetService {
             return false;
         }
         String station = TniText.shortHost(looked);
+        ProjectViewEntity view = viewRow(projectKey);
+        String rules = view == null ? "" : ModuleSetup.read(view.getOptionList()).getTniSites();
+        if (!TniSites.admits(rules, looked, station)) {
+            return false;
+        }
         AssetDraft draft = new AssetDraft();
         draft.setProjectKey(projectKey);
         draft.setTypeKey(typeKey);
