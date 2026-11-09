@@ -90,7 +90,7 @@ public final class TniSame {
     }
 
     private static boolean same(Card card, String station, String fqdn, String ip) {
-        if (card == null || card.location || card.id <= 0) {
+        if (card == null || card.location || card.id == 0) {
             return false;
         }
         return named(card.name, station, fqdn) || named(card.watch, station, fqdn) || addressHit(card, ip);

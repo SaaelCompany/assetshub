@@ -248,6 +248,8 @@ import com.assetstree.jira.model.TniComputer;
 import com.assetstree.jira.model.TniAddress;
 import com.assetstree.jira.model.TniDirectory;
 import com.assetstree.jira.model.TniRange;
+import com.assetstree.jira.model.TniSame;
+import com.assetstree.jira.model.TniText;
 import com.assetstree.jira.model.TniSheetDraft;
 import com.assetstree.jira.model.TniSourceDraft;
 import com.assetstree.jira.dto.TniWatchDraft;
@@ -5121,7 +5123,8 @@ public class AssetServiceImpl implements AssetService {
             boolean place = location != null && location.booleanValue();
             Integer id = Integer.valueOf(row.getID());
             Integer parentId = TreeLogic.normalizeParent(row.getParentId());
-            nodes.add(new EquipmentExchange.Node(row.getID(), parentId, row.getName(), row.getObjectKey(), place));
+            nodes.add(new EquipmentExchange.Node(row.getID(), parentId, row.getName(), row.getObjectKey(), place,
+                    row.getTypeKey()));
             memory.locations.put(id, Boolean.valueOf(place));
             memory.parents.put(id, parentId);
             memory.names.put(id, row.getName() == null ? "" : row.getName());
@@ -14902,16 +14905,7 @@ public class AssetServiceImpl implements AssetService {
             off = "";
         }
         final String disabledWord = off;
-        Map<String, AssetEntity> known = new HashMap<String, AssetEntity>();
-        AssetEntity[] rows = assetsIn(projectKey);
-        if (rows != null) {
-            for (int i = 0; i < rows.length; i++) {
-                AssetEntity row = rows[i];
-                if (row != null && row.getExternalKey() != null && !row.getExternalKey().isEmpty()) {
-                    known.put(row.getExternalKey(), row);
-                }
-            }
-        }
+        final TniIndex index = tniIndex(projectKey);
         int created = 0;
         int updated = 0;
         for (int i = 0; i < computers.size(); i++) {
@@ -14924,9 +14918,19 @@ public class AssetServiceImpl implements AssetService {
                 detail = detail.isEmpty() ? disabledWord : detail + " · " + disabledWord;
             }
             final String description = detail;
-            AssetEntity existing = known.get(computer.externalKey());
-            if (existing != null) {
-                final int id = existing.getID();
+            final String link = computer.externalKey();
+            Integer found = index.byExternal.get(link);
+            final boolean owned = found != null;
+            final String host = computer.getHost() == null || computer.getHost().isEmpty()
+                    ? computer.getName() : computer.getHost();
+            if (found == null) {
+                int same = TniSame.pick(index.cards, 0, host, "");
+                if (same > 0) {
+                    found = Integer.valueOf(same);
+                }
+            }
+            if (found != null) {
+                final int id = found.intValue();
                 ao().executeInTransaction(new TransactionCallback<Void>() {
                     @Override
                     public Void doInTransaction() {
@@ -14934,13 +14938,24 @@ public class AssetServiceImpl implements AssetService {
                         if (row == null || !ProjectKeys.same(row.getProjectKey(), projectKey)) {
                             return null;
                         }
-                        row.setName(computer.getName());
-                        row.setDescription(description);
+                        String chosen = TniText.preferred(row.getName(), "", "", "", "", host);
+                        if (!chosen.isEmpty()) {
+                            row.setName(chosen);
+                        }
+                        if (owned || row.getDescription() == null || row.getDescription().trim().isEmpty()) {
+                            row.setDescription(description);
+                        }
+                        if (row.getExternalKey() == null || row.getExternalKey().trim().isEmpty()) {
+                            row.setExternalKey(link);
+                        }
                         row.save();
                         return null;
                     }
                 });
-                rememberTniHost(existing.getID(), projectKey, computer.getHost());
+                rememberTniHost(id, projectKey, host, owned);
+                if (!index.byExternal.containsKey(link)) {
+                    index.byExternal.put(link, Integer.valueOf(id));
+                }
                 updated++;
                 continue;
             }
@@ -14948,12 +14963,14 @@ public class AssetServiceImpl implements AssetService {
             draft.setProjectKey(projectKey);
             draft.setTypeKey(typeKey);
             draft.setStatus(Statuses.IN_USE);
-            draft.setExternalId(computer.externalKey());
+            draft.setExternalId(link);
             draft.setName(computer.getName());
             draft.setDescription(description);
             AssetDto made = createAsset(user, draft);
             if (made != null) {
-                rememberTniHost(made.getId(), projectKey, computer.getHost());
+                rememberTniHost(made.getId(), projectKey, host, true);
+                index.cards.add(new TniSame.Card(made.getId(), computer.getName(), false, link, host));
+                index.byExternal.put(link, Integer.valueOf(made.getId()));
             }
             created++;
         }
@@ -15002,20 +15019,23 @@ public class AssetServiceImpl implements AssetService {
         return TniTarget.list(assetName, ip, host, saved);
     }
 
-    private void rememberTniHost(final int assetId, final String projectKey, String host) {
+    private void rememberTniHost(int assetId, String projectKey, String host, boolean replace) {
         final String station = TniAddress.station(host);
         if (assetId <= 0 || station.isEmpty()) {
             return;
         }
+        final int id = assetId;
+        final String key = projectKey;
+        final boolean overwrite = replace;
         final long now = System.currentTimeMillis();
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
-                TniWatchEntity row = tniWatchRow(assetId);
+                TniWatchEntity row = tniWatchRow(id);
                 if (row == null) {
                     ao().create(TniWatchEntity.class,
-                            new DBParam("ASSET_ID", Integer.valueOf(assetId)),
-                            new DBParam("PROJECT_KEY", projectKey),
+                            new DBParam("ASSET_ID", Integer.valueOf(id)),
+                            new DBParam("PROJECT_KEY", key),
                             new DBParam("ADDRESS", station),
                             new DBParam("ARMED", Integer.valueOf(0)),
                             new DBParam("CHECKED_AT", Long.valueOf(0L)),
@@ -15027,11 +15047,59 @@ public class AssetServiceImpl implements AssetService {
                             new DBParam("LAST_PROBE", Long.valueOf(0L)));
                     return null;
                 }
-                row.setAddress(station);
-                row.save();
+                if (overwrite || row.getAddress() == null || row.getAddress().trim().isEmpty()) {
+                    row.setAddress(station);
+                    row.save();
+                }
                 return null;
             }
         });
+    }
+
+    private static final class TniIndex {
+        private final Map<String, Integer> byExternal = new HashMap<String, Integer>();
+        private final List<TniSame.Card> cards = new ArrayList<TniSame.Card>();
+    }
+
+    private TniIndex tniIndex(String projectKey) {
+        Map<String, Boolean> locations = new HashMap<String, Boolean>();
+        AssetTypeEntity[] types = ao().find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (types != null) {
+            for (int i = 0; i < types.length; i++) {
+                AssetTypeEntity type = types[i];
+                if (type != null && type.getTypeKey() != null) {
+                    locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+                }
+            }
+        }
+        Map<Integer, String> watches = new HashMap<Integer, String>();
+        TniWatchEntity[] marks = ao().find(TniWatchEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (marks != null) {
+            for (int i = 0; i < marks.length; i++) {
+                TniWatchEntity mark = marks[i];
+                if (mark != null && mark.getAssetId() > 0 && mark.getAddress() != null && !mark.getAddress().isEmpty()) {
+                    watches.put(Integer.valueOf(mark.getAssetId()), mark.getAddress());
+                }
+            }
+        }
+        TniIndex index = new TniIndex();
+        AssetEntity[] rows = assetsIn(projectKey);
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                AssetEntity row = rows[i];
+                if (row == null) {
+                    continue;
+                }
+                String external = row.getExternalKey() == null ? "" : row.getExternalKey();
+                if (!external.isEmpty()) {
+                    index.byExternal.put(external, Integer.valueOf(row.getID()));
+                }
+                boolean location = Boolean.TRUE.equals(locations.get(row.getTypeKey()));
+                String watch = watches.containsKey(Integer.valueOf(row.getID())) ? watches.get(Integer.valueOf(row.getID())) : "";
+                index.cards.add(new TniSame.Card(row.getID(), row.getName(), location, external, watch));
+            }
+        }
+        return index;
     }
 
     private TniWatchEntity tniWatchRow(int assetId) {
@@ -15134,26 +15202,27 @@ public class AssetServiceImpl implements AssetService {
     private synchronized boolean tniKeepHost(ApplicationUser user, final String projectKey, String typeKey,
                                              final String address, String hostName, String found) {
         final String external = "tni:" + address;
-        Boolean known = ao().executeInTransaction(new TransactionCallback<Boolean>() {
-            @Override
-            public Boolean doInTransaction() {
-                for (AssetEntity row : assetsIn(projectKey)) {
-                    if (row != null && external.equals(row.getExternalKey())) {
-                        return Boolean.TRUE;
-                    }
-                }
-                return Boolean.FALSE;
+        String looked = hostName == null ? "" : hostName.trim();
+        TniIndex index = tniIndex(projectKey);
+        Integer known = index.byExternal.get(external);
+        if (known == null) {
+            int same = TniSame.pick(index.cards, 0, looked.isEmpty() ? address : looked, address);
+            if (same > 0) {
+                known = Integer.valueOf(same);
             }
-        });
-        if (Boolean.TRUE.equals(known)) {
+        }
+        if (known != null) {
+            String station = TniText.shortHost(looked);
+            rememberTniHost(known.intValue(), projectKey, station.isEmpty() ? address : station, false);
             return false;
         }
+        String station = TniText.shortHost(looked);
         AssetDraft draft = new AssetDraft();
         draft.setProjectKey(projectKey);
         draft.setTypeKey(typeKey);
         draft.setStatus(Statuses.IN_USE);
         draft.setExternalId(external);
-        draft.setName(hostName == null || hostName.trim().isEmpty() ? address : hostName.trim());
+        draft.setName(station.isEmpty() ? address : station);
         String pattern = found == null || found.isEmpty() || found.startsWith("asset-tree.") ? address : found;
         draft.setDescription(pattern.indexOf("{0}") >= 0 ? pattern.replace("{0}", address) : pattern);
         createAsset(user, draft);

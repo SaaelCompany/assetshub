@@ -751,9 +751,6 @@ public final class TniBook {
             if (TniText.owned(asset.getDescription())) {
                 asset.setDescription(clip(description, 10000));
             }
-            if (!type.getTypeKey().equals(asset.getTypeKey())) {
-                asset.setTypeKey(type.getTypeKey());
-            }
             if (blank(asset.getCustodianKey())) {
                 asset.setCustodianKey(clip(userKey, 255));
             }

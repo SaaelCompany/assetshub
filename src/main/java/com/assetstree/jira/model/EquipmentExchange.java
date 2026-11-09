@@ -2,15 +2,18 @@ package com.assetstree.jira.model;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
  * Turns a spreadsheet of equipment into creates and updates.
  * A blank key creates an object. A key already in the project updates it.
+ * A host name such as KRUL-IT updates the computer that already has that name.
  * Places and types must already exist: the file does not invent the tree.
  */
 public final class EquipmentExchange {
@@ -176,12 +179,19 @@ public final class EquipmentExchange {
         private final String objectKey;
         private final boolean location;
 
+        private final String typeKey;
+
         public Node(int id, Integer parentId, String name, String objectKey, boolean location) {
+            this(id, parentId, name, objectKey, location, "");
+        }
+
+        public Node(int id, Integer parentId, String name, String objectKey, boolean location, String typeKey) {
             this.id = id;
             this.parentId = parentId;
             this.name = name;
             this.objectKey = objectKey;
             this.location = location;
+            this.typeKey = typeKey == null ? "" : typeKey;
         }
 
         public int getId() {
@@ -202,6 +212,10 @@ public final class EquipmentExchange {
 
         public boolean isLocation() {
             return location;
+        }
+
+        public String getTypeKey() {
+            return typeKey;
         }
     }
 
@@ -485,6 +499,11 @@ public final class EquipmentExchange {
             return new Plan(changes, issues, services);
         }
         Map<String, Integer> seenKeys = new LinkedHashMap<String, Integer>();
+        List<Node> known = new ArrayList<Node>();
+        if (nodes != null) {
+            known.addAll(nodes);
+        }
+        int[] made = new int[] { -1 };
         boolean anyData = false;
         for (EquipmentSheet.Sheet sheet : sheets) {
             if (sheet == null || (sheet.getHeaders().isEmpty() && sheet.getRecords().isEmpty())) {
@@ -496,7 +515,7 @@ public final class EquipmentExchange {
                 }
                 anyData = true;
                 List<Issue> partIssues = new ArrayList<Issue>();
-                readServiceSheet(sheet, nodes, people, kinds, labels, services, partIssues);
+                readServiceSheet(sheet, known, people, kinds, labels, services, partIssues);
                 issues.addAll(stamp(sheet.getName(), partIssues));
                 continue;
             }
@@ -506,9 +525,15 @@ public final class EquipmentExchange {
                 continue;
             }
             anyData = true;
-            Plan part = plan(prepared, types, statuses, nodes, defaultStatus, labels, people, seenKeys, service, kinds);
+            Plan part = plan(prepared, types, statuses, known, defaultStatus, labels, people, seenKeys, service, kinds);
             issues.addAll(stamp(sheet.getName(), part.getIssues()));
             changes.addAll(part.getChanges());
+            for (int i = 0; i < part.getChanges().size(); i++) {
+                Change change = part.getChanges().get(i);
+                if (change.getExistingId() == null && !TniText.shortHost(change.getName()).isEmpty()) {
+                    known.add(new Node(made[0]--, change.getParentId(), change.getName(), "", false, change.getTypeKey()));
+                }
+            }
         }
         if (!anyData && issues.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
@@ -580,9 +605,32 @@ public final class EquipmentExchange {
         Map<String, List<Node>> places = indexPlaces(nodes);
         Map<Integer, Integer> parentById = parents(nodes);
         Map<String, Integer> keys = seenKeys == null ? new LinkedHashMap<String, Integer>() : seenKeys;
+        List<TniSame.Card> hosts = new ArrayList<TniSame.Card>();
+        Map<Integer, Node> byId = new HashMap<Integer, Node>();
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node == null) {
+                    continue;
+                }
+                byId.put(Integer.valueOf(node.getId()), node);
+                hosts.add(new TniSame.Card(node.getId(), node.getName(), node.isLocation(), "", ""));
+            }
+        }
+        Set<Integer> taken = new HashSet<Integer>();
+        int low = 0;
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node != null && node.getId() < low) {
+                    low = node.getId();
+                }
+            }
+        }
+        int[] synthetic = new int[] { low - 1 };
         for (EquipmentSheet.Record record : sheet.getRecords()) {
             Change change = readRow(record, roleColumn, fieldColumns, headers, types, statuses, places, parentById, byKey,
-                    keys, defaultStatus, people, issues, service, kinds);
+                    keys, defaultStatus, people, issues, service, kinds, hosts, byId, taken, synthetic);
             if (change != null) {
                 changes.add(change);
             }
@@ -594,7 +642,8 @@ public final class EquipmentExchange {
                                   List<String> headers, List<TypeRef> types, List<Named> statuses,
                                   Map<String, List<Node>> places, Map<Integer, Integer> parentById,
                                   Map<String, Node> byKey, Map<String, Integer> seenKeys, String defaultStatus,
-                                  Directory people, List<Issue> issues, boolean service, List<Named> kinds) {
+                                  Directory people, List<Issue> issues, boolean service, List<Named> kinds,
+                                  List<TniSame.Card> hosts, Map<Integer, Node> byId, Set<Integer> taken, int[] synthetic) {
         int row = record.getRow();
         String key = text(record, roleColumn[0]);
         String name = text(record, roleColumn[1]);
@@ -623,6 +672,7 @@ public final class EquipmentExchange {
             return null;
         }
         Node existing = null;
+        boolean keepType = false;
         if (!key.isEmpty()) {
             String marker = norm(key);
             if (seenKeys.containsKey(marker)) {
@@ -639,6 +689,27 @@ public final class EquipmentExchange {
                 issues.add(new Issue(row, "asset-tree.error.import.key.place", key));
                 return null;
             }
+        } else if (hosts != null) {
+            int same = TniSame.pick(hosts, 0, name, "");
+            if (same < 0 || (same > 0 && taken != null && taken.contains(Integer.valueOf(same)))) {
+                issues.add(new Issue(row, "asset-tree.error.import.host", name));
+                return null;
+            }
+            if (same > 0 && byId != null) {
+                existing = byId.get(Integer.valueOf(same));
+                keepType = existing != null && !existing.getTypeKey().isEmpty();
+                if (existing != null && !existing.getObjectKey().isEmpty()) {
+                    String marker = norm(existing.getObjectKey());
+                    if (seenKeys.containsKey(marker)) {
+                        issues.add(new Issue(row, "asset-tree.error.import.host", name));
+                        return null;
+                    }
+                    seenKeys.put(marker, Integer.valueOf(row));
+                }
+            }
+        }
+        if (existing != null && taken != null) {
+            taken.add(Integer.valueOf(existing.getId()));
         }
         TypeRef type = matchType(typeName, types);
         if (type == null) {
@@ -652,6 +723,12 @@ public final class EquipmentExchange {
         if (countTypes(typeName, types) > 1) {
             issues.add(new Issue(row, "asset-tree.error.import.type.ambiguous", typeName));
             return null;
+        }
+        if (keepType) {
+            TypeRef kept = typeByKey(existing.getTypeKey(), types);
+            if (kept != null && !kept.isLocation()) {
+                type = kept;
+            }
         }
         String statusKey = matchStatus(statusName, statuses, defaultStatus);
         if (statusKey == null) {
@@ -685,7 +762,7 @@ public final class EquipmentExchange {
             String raw = record.cell(column.intValue());
             FieldRef field = matchField(header, type);
             if (field == null) {
-                if (!raw.trim().isEmpty()) {
+                if (!raw.trim().isEmpty() && !keepType) {
                     issues.add(new Issue(row, "asset-tree.error.import.field", header));
                     return null;
                 }
@@ -754,6 +831,9 @@ public final class EquipmentExchange {
             if (wish == null) {
                 return null;
             }
+        }
+        if (existing == null && hosts != null && synthetic != null && !TniText.shortHost(name).isEmpty()) {
+            hosts.add(new TniSame.Card(synthetic[0]--, name.trim(), false, "", ""));
         }
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
                 description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
@@ -898,6 +978,19 @@ public final class EquipmentExchange {
             }
         }
         return stamped;
+    }
+
+    private static TypeRef typeByKey(String key, List<TypeRef> types) {
+        if (key == null || key.isEmpty() || types == null) {
+            return null;
+        }
+        for (int i = 0; i < types.size(); i++) {
+            TypeRef type = types.get(i);
+            if (type != null && key.equals(type.getKey())) {
+                return type;
+            }
+        }
+        return null;
     }
 
     private static TypeRef matchType(String typeName, List<TypeRef> types) {
