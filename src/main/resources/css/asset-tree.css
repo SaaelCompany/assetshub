@@ -12833,6 +12833,66 @@ button.asset-tree-attach-remove {
     margin: 8px 0 12px;
 }
 
+#asset-tree-app .asset-tree-site-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-site-rule {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-site-rule input {
+    width: 140px;
+    box-sizing: border-box;
+    height: 32px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-site-rule select {
+    flex: 1 1 220px;
+    min-width: 180px;
+    height: 32px;
+}
+
+#asset-tree-app .asset-tree-site-arrow {
+    color: #6b778c;
+}
+
+#asset-tree-app .asset-tree-site-count {
+    color: #6b778c;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-site-rule.is-duplicate input {
+    border-color: #de350b;
+}
+
+#asset-tree-app .asset-tree-site-rule .asset-tree-btn.slim {
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-project-card .asset-tree-tni-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
 #asset-tree-app .asset-tree-tni-sources {
     display: flex;
     flex-direction: column;

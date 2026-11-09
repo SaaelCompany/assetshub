@@ -30325,7 +30325,10 @@
             }
         }
         stack.appendChild(block);
-        if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniImportCard());
+        if (state.canAdmin && moduleOn('tni')) {
+            stack.appendChild(tniImportCard());
+            stack.appendChild(tniSitesCard());
+        }
         panel.appendChild(stack);
     }
 
@@ -30337,14 +30340,6 @@
         var locked = !state.canArrange;
         var boxes = tniSourceFields(card, setup, locked);
         var kinds = tniTypeFields(card, setup, locked);
-        var sites = document.createElement('textarea');
-        sites.rows = 5;
-        sites.value = setup.tniSites || '';
-        sites.disabled = !!locked;
-        sites.placeholder = 'KRUL = Крулево';
-        sites.setAttribute('aria-label', t('tniSites'));
-        card.appendChild(planField(t('tniSites'), sites));
-        card.appendChild(el('p', 'asset-tree-hint', t('tniSitesHint')));
         if (!locked) {
             card.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
@@ -30353,7 +30348,6 @@
                 next.tniAd = boxes.tniAd.checked;
                 next.tniSccm = boxes.tniSccm.checked;
                 next.tniPing = boxes.tniPing.checked;
-                next.tniSites = sites.value;
                 next.tniComputer = kinds.computer.value;
                 next.tniLaptop = kinds.laptop.value;
                 next.tniPhone = kinds.phone.value;
@@ -30364,6 +30358,182 @@
             }));
         }
         if (state.canAdmin) appendTniTools(card);
+        return card;
+    }
+
+    function readSiteRules(text) {
+        return String(text || '').split(/\r?\n/).map(function (line) {
+            var mark = line.indexOf('=');
+            if (mark < 0) mark = line.indexOf('~');
+            if (mark <= 0) return null;
+            var code = line.slice(0, mark).replace(/^\s+|\s+$/g, '').toUpperCase();
+            var place = line.slice(mark + 1).replace(/^\s+|\s+$/g, '');
+            if (!/^[A-Z0-9][A-Z0-9-]{0,31}$/.test(code) || !place) return null;
+            return { code: code, place: place };
+        }).filter(Boolean);
+    }
+
+    function writeSiteRules(rows) {
+        var seen = {};
+        var lines = [];
+        rows.forEach(function (row) {
+            var code = String(row.code || '').toUpperCase();
+            var place = String(row.place || '').replace(/^\s+|\s+$/g, '');
+            if (!/^[A-Z0-9][A-Z0-9-]{0,31}$/.test(code) || !place || seen[code]) return;
+            seen[code] = true;
+            lines.push(code + ' = ' + place);
+        });
+        return lines.join('\n');
+    }
+
+    function sitePlaces() {
+        return (state.assets || []).filter(function (asset) {
+            return isFolder(asset);
+        }).map(function (asset) {
+            return {
+                id: asset.id,
+                name: asset.name || '',
+                key: asset.objectKey || '',
+                path: crumbs(asset)
+            };
+        }).sort(function (left, right) {
+            return compareNames(left.path, right.path);
+        });
+    }
+
+    function sitePlaceToken(place) {
+        return place.key || place.name;
+    }
+
+    function findSitePlace(token) {
+        var wanted = String(token || '').toLowerCase();
+        var found = null;
+        sitePlaces().some(function (place) {
+            if (wanted && (place.name.toLowerCase() === wanted || place.key.toLowerCase() === wanted)) {
+                found = place;
+                return true;
+            }
+            return false;
+        });
+        return found;
+    }
+
+    function computersForCode(code) {
+        var prefix = String(code || '').toUpperCase();
+        if (!prefix) return 0;
+        var count = 0;
+        (state.assets || []).forEach(function (asset) {
+            if (!asset || isFolder(asset)) return;
+            var name = String(asset.name || '').toUpperCase();
+            if (name === prefix || name.indexOf(prefix + '-') === 0) count += 1;
+        });
+        return count;
+    }
+
+    function tniSitesCard() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('tniSites')));
+        card.appendChild(el('p', 'asset-tree-hint', t('tniSitesHint')));
+        var locked = !state.canArrange;
+        var rows = readSiteRules(moduleSetup().tniSites);
+        var list = el('div', 'asset-tree-site-rules');
+        var places = sitePlaces();
+
+        function paint() {
+            list.innerHTML = '';
+            if (!rows.length) {
+                list.appendChild(el('p', 'asset-tree-empty-note', places.length ? t('tniSitesEmpty') : t('tniSitesNone')));
+                return;
+            }
+            var codes = {};
+            rows.forEach(function (row) {
+                if (!row.code) return;
+                codes[row.code] = (codes[row.code] || 0) + 1;
+            });
+            rows.forEach(function (row, index) {
+                var line = el('div', 'asset-tree-site-rule' + (row.code && codes[row.code] > 1 ? ' is-duplicate' : ''));
+                var code = document.createElement('input');
+                code.type = 'text';
+                code.maxLength = 32;
+                code.value = row.code || '';
+                code.placeholder = 'KRUL';
+                code.disabled = locked;
+                code.setAttribute('aria-label', t('tniSitesCode'));
+                code.addEventListener('input', function () {
+                    row.code = code.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+                    if (code.value !== row.code) code.value = row.code;
+                });
+                code.addEventListener('change', function () { paint(); });
+                var select = document.createElement('select');
+                select.disabled = locked;
+                select.setAttribute('aria-label', t('tniSitesPlace'));
+                var empty = document.createElement('option');
+                empty.value = '';
+                empty.textContent = t('tniSitesPick');
+                select.appendChild(empty);
+                var chosen = findSitePlace(row.place);
+                places.forEach(function (place) {
+                    var option = document.createElement('option');
+                    option.value = String(place.id);
+                    option.textContent = place.path || place.name;
+                    select.appendChild(option);
+                });
+                if (chosen) {
+                    select.value = String(chosen.id);
+                } else if (row.place) {
+                    var missing = document.createElement('option');
+                    missing.value = 'keep';
+                    missing.textContent = t('tniSitesMissing') + ': ' + row.place;
+                    select.appendChild(missing);
+                    select.value = 'keep';
+                }
+                select.addEventListener('change', function () {
+                    if (select.value === 'keep') return;
+                    var place = null;
+                    places.forEach(function (item) {
+                        if (String(item.id) === select.value) place = item;
+                    });
+                    row.place = place ? sitePlaceToken(place) : '';
+                });
+                var count = el('span', 'asset-tree-site-count', row.code ? t('tniSitesCount', computersForCode(row.code)) : '');
+                var remove = button('\u00d7', 'asset-tree-btn slim', function () {
+                    rows.splice(index, 1);
+                    paint();
+                });
+                remove.disabled = locked;
+                remove.title = t('delete');
+                remove.setAttribute('aria-label', t('delete'));
+                line.appendChild(code);
+                line.appendChild(el('span', 'asset-tree-site-arrow', '\u2192'));
+                line.appendChild(select);
+                line.appendChild(count);
+                line.appendChild(remove);
+                list.appendChild(line);
+            });
+        }
+
+        paint();
+        card.appendChild(list);
+        if (!locked) {
+            var actions = el('div', 'asset-tree-tni-actions');
+            if (places.length) {
+                actions.appendChild(button(t('tniSitesAdd'), 'asset-tree-btn', function () {
+                    if (rows.length >= 40) return;
+                    rows.push({ code: '', place: '' });
+                    paint();
+                    var inputs = list.querySelectorAll('input');
+                    if (inputs.length) inputs[inputs.length - 1].focus();
+                }));
+            }
+            actions.appendChild(button(t('setupSave'), 'asset-tree-btn primary', function () {
+                var next = moduleSetup();
+                next.tniSites = writeSiteRules(rows);
+                saveProjectView({ setup: next }, function (ok) {
+                    if (ok) renderFrame();
+                });
+            }));
+            card.appendChild(actions);
+        }
         return card;
     }
 
