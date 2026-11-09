@@ -13242,8 +13242,33 @@ button.asset-tree-attach-remove {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
     position: relative;
+}
+
+.asset-tree-scheme-canvas-wrap {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+}
+
+.asset-tree-scheme-canvas-wrap > .asset-tree-scheme-stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.asset-tree-scheme-dock {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    overflow: auto;
+    padding: 6px;
+    background: #f4f5f7;
 }
 
 .asset-tree-scheme-windows {
@@ -13279,6 +13304,25 @@ button.asset-tree-attach-remove {
 
 .asset-tree-scheme-window.is-collapsed .asset-tree-scheme-window-body {
     display: none;
+}
+
+.asset-tree-scheme-window.is-pinned {
+    position: relative;
+    left: auto !important;
+    top: auto !important;
+    width: 248px !important;
+    max-height: none;
+    flex: 1 1 160px;
+    min-height: 0;
+    box-shadow: none;
+}
+
+.asset-tree-scheme-window.is-pinned.is-collapsed {
+    flex: 0 0 auto;
+}
+
+.asset-tree-scheme-window.is-pinned .asset-tree-scheme-window-bar {
+    cursor: default;
 }
 
 .asset-tree-scheme-window-bar {
@@ -13326,9 +13370,16 @@ button.asset-tree-attach-remove {
     box-shadow: none;
 }
 
-#asset-tree-app .asset-tree-scheme-window-btn:hover {
-    background: #ebecf0;
-    color: #172b4d;
+#asset-tree-app .asset-tree-scheme-window-btn:hover,
+#asset-tree-app .asset-tree-scheme-window-btn.is-on {
+    background: #deebff;
+    color: #0052cc;
+}
+
+#asset-tree-app .asset-tree-scheme-window-btn svg {
+    display: block;
+    width: 14px;
+    height: 14px;
 }
 
 .asset-tree-scheme-window-body {

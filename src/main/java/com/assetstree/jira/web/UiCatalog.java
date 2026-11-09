@@ -1208,6 +1208,8 @@ public final class UiCatalog {
             "schemeProps",
             "schemeTools",
             "schemeWindows",
+            "schemePin",
+            "schemeUnpin",
             "schemeImage",
             "schemeImageHint",
             "schemeImageBig",
