@@ -283,10 +283,10 @@
             } catch (error) { /* the choice still applies in this tab */ }
         }
         function markSwatches() {
-            var chips = swatches.querySelectorAll('.asset-tree-scheme-swatch');
+            var chips = swatches.querySelectorAll('[data-ink]');
             var i;
             for (i = 0; i < chips.length; i++) {
-                if (chips[i].tagName === 'BUTTON') chips[i].classList.toggle('is-on', chips[i].getAttribute('data-ink') === (session.ink || ''));
+                chips[i].classList.toggle('is-on', chips[i].getAttribute('data-ink') === (session.ink || ''));
             }
         }
         function chooseInk(color) {
@@ -297,20 +297,25 @@
             else paint();
         }
         inkColors.forEach(function (color) {
-            var chip = el('button', 'asset-tree-scheme-swatch');
-            chip.type = 'button';
+            var chip = el('span', 'asset-tree-scheme-swatch');
             chip.title = api.t('schemeColor');
             chip.setAttribute('data-ink', color);
             chip.style.background = color;
             chip.addEventListener('click', function () { chooseInk(color); });
             swatches.appendChild(chip);
         });
-        var customInk = el('input', 'asset-tree-scheme-swatch');
+        var customChip = el('span', 'asset-tree-scheme-swatch is-custom');
+        customChip.title = api.t('schemeColor');
+        var customInk = el('input', 'asset-tree-scheme-swatch-input');
         customInk.type = 'color';
-        customInk.title = api.t('schemeColor');
         customInk.value = /^#[0-9a-fA-F]{6}$/.test(session.ink || '') ? session.ink : '#ffe380';
-        customInk.addEventListener('input', function () { chooseInk(customInk.value); });
-        swatches.appendChild(customInk);
+        customChip.style.background = customInk.value;
+        customInk.addEventListener('input', function () {
+            customChip.style.background = customInk.value;
+            chooseInk(customInk.value);
+        });
+        customChip.appendChild(customInk);
+        swatches.appendChild(customChip);
         var fillInk = el('label', 'asset-tree-scheme-ink');
         var fillBox = el('input');
         fillBox.type = 'checkbox';

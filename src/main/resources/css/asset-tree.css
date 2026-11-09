@@ -13512,44 +13512,50 @@ button.asset-tree-attach-remove {
     flex-wrap: wrap;
 }
 
-#asset-tree-app button.asset-tree-scheme-swatch,
-#asset-tree-app input.asset-tree-scheme-swatch {
-    box-sizing: border-box;
-    width: 14px;
-    height: 14px;
-    min-width: 14px;
-    max-width: 14px;
-    min-height: 14px;
-    max-height: 14px;
-    flex: 0 0 14px;
-    margin: 0;
-    padding: 0;
-    border: 1px solid rgba(9, 30, 66, 0.28);
-    border-radius: 2px;
-    box-shadow: none;
-    line-height: 0;
+#asset-tree-app .asset-tree-scheme-swatch {
+    position: relative !important;
+    display: inline-block !important;
+    box-sizing: border-box !important;
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 14px !important;
+    max-width: 14px !important;
+    min-height: 14px !important;
+    max-height: 14px !important;
+    flex: 0 0 14px !important;
+    align-self: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid rgba(9, 30, 66, 0.35) !important;
+    border-radius: 2px !important;
+    box-shadow: none !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    overflow: hidden !important;
     cursor: pointer;
     vertical-align: middle;
 }
 
-#asset-tree-app button.asset-tree-scheme-swatch.is-on {
+#asset-tree-app .asset-tree-scheme-swatch.is-on {
     outline: 2px solid #0052cc;
     outline-offset: 1px;
 }
 
-#asset-tree-app input.asset-tree-scheme-swatch {
-    background: #fff;
-    appearance: none;
-    -webkit-appearance: none;
-}
-
-#asset-tree-app input.asset-tree-scheme-swatch::-webkit-color-swatch-wrapper {
-    padding: 0;
-}
-
-#asset-tree-app input.asset-tree-scheme-swatch::-webkit-color-swatch {
-    border: 0;
-    border-radius: 1px;
+#asset-tree-app .asset-tree-scheme-swatch-input {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 0 !important;
+    max-width: 14px !important;
+    min-height: 0 !important;
+    max-height: 14px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    opacity: 0 !important;
+    cursor: pointer;
 }
 
 .asset-tree-scheme-ink {
