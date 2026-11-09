@@ -9756,9 +9756,46 @@
             form.appendChild(field(t('type'), typeControl, true));
 
             var equipment = el('div');
-        equipment.appendChild(field(t('status'), selectBox('create-status', statusChoices(), 'in_use', false), true));
-        equipment.appendChild(custodianField('create-custodian', null));
-        equipment.appendChild(issuedField('create-issued', null));
+            equipment.appendChild(field(t('status'), selectBox('create-status', statusChoices(), 'in_use', false), true));
+            var molManual = false;
+            var custodianNode = null;
+            function placeMol(placeId) {
+                var seen = {};
+                var current = placeId ? byId()[placeId] : null;
+                while (current && !seen[current.id]) {
+                    seen[current.id] = true;
+                    if (isFolder(current) && current.custodian && current.custodian.userKey) {
+                        return current.custodian;
+                    }
+                    current = current.parentId ? byId()[current.parentId] : null;
+                }
+                return null;
+            }
+            function createPlaceId() {
+                if (typeof placeSelect !== 'undefined' && placeSelect && placeSelect.value) return parseInt(placeSelect.value, 10);
+                if (parentId && byId()[parentId] && isFolder(byId()[parentId])) return parentId;
+                return null;
+            }
+            function mountCustodian() {
+                var profile = kind === 'place' ? null : placeMol(createPlaceId());
+                var next = custodianField('create-custodian', profile);
+                if (custodianNode && custodianNode.parentNode) custodianNode.parentNode.replaceChild(next, custodianNode);
+                else equipment.appendChild(next);
+                custodianNode = next;
+                var text = next.querySelector('input[type="search"]');
+                if (text) text.addEventListener('input', function () { molManual = true; });
+                next.addEventListener('click', function (event) {
+                    var target = event.target;
+                    if (target && String(target.className || '').indexOf('asset-tree-user-hit') >= 0) molManual = true;
+                });
+            }
+            mountCustodian();
+            equipment.appendChild(issuedField('create-issued', null));
+            if (typeof placeSelect !== 'undefined' && placeSelect) {
+                placeSelect.addEventListener('change', function () {
+                    if (!molManual) mountCustodian();
+                });
+            }
             form.appendChild(equipment);
 
             var schema = el('div');

@@ -730,8 +730,6 @@ public final class TniBook {
                     new DBParam("CREATED_BY", clip(userKey, 255)),
                     new DBParam("UPDATED_BY", clip(userKey, 255)),
                     new DBParam("PROJECT_KEY", projectKey));
-            asset.setCustodianKey(clip(userKey, 255));
-            asset.setIssuedKey(clip(userKey, 255));
             asset.setExternalKey(external(row.getIdentity()));
             if (place != null) {
                 asset.setParentId(place);
@@ -750,12 +748,6 @@ public final class TniBook {
             name = chosen;
             if (TniText.owned(asset.getDescription())) {
                 asset.setDescription(clip(description, 10000));
-            }
-            if (blank(asset.getCustodianKey())) {
-                asset.setCustodianKey(clip(userKey, 255));
-            }
-            if (blank(asset.getIssuedKey())) {
-                asset.setIssuedKey(clip(userKey, 255));
             }
             if (blank(asset.getExternalKey())) {
                 asset.setExternalKey(external(row.getIdentity()));
@@ -776,12 +768,6 @@ public final class TniBook {
             asset.save();
         } else {
             name = asset.getName() == null ? "" : asset.getName();
-            if (blank(asset.getCustodianKey())) {
-                asset.setCustodianKey(clip(userKey, 255));
-            }
-            if (blank(asset.getIssuedKey())) {
-                asset.setIssuedKey(clip(userKey, 255));
-            }
             if (place != null && (asset.getParentId() == null || asset.getParentId().intValue() <= 0)) {
                 asset.setParentId(place);
             } else if (asset.getParentId() == null || asset.getParentId().intValue() <= 0) {
