@@ -4633,13 +4633,11 @@
         function dropScheme(id) {
             session.catalog = (session.catalog || []).filter(function (row) { return row.id !== id; });
             session.dirty = false;
-            if (session.catalog.length) {
-                openScheme(session.catalog[0].id, 'view');
-                return;
+            if (session.id === id) {
+                var fresh = blankDoc(api.t);
+                fresh.activeFloorId = fresh.floors[0].id;
+                acceptDoc(fresh, 0);
             }
-            var fresh = blankDoc(api.t);
-            fresh.activeFloorId = fresh.floors[0].id;
-            acceptDoc(fresh, 0);
             session.mode = 'browse';
             if (session.repaint) session.repaint();
         }
@@ -4751,10 +4749,6 @@
                 session.pendingFocus = 0;
                 if (focus) {
                     openScheme(focus, 'view');
-                    return;
-                }
-                if (session.catalog.length) {
-                    openScheme(session.catalog[0].id, 'view');
                     return;
                 }
                 session.mode = 'browse';
@@ -4918,6 +4912,13 @@
             session.catalog.forEach(function (row) {
                 var card = el('div', 'asset-tree-scheme-card');
                 card.addEventListener('click', function () { openScheme(row.id, 'view'); });
+                var thumb = el('canvas', 'asset-tree-scheme-thumb');
+                thumb.width = 640;
+                thumb.height = 320;
+                if (row.doc) {
+                    try { paintThumb(thumb, row.doc); } catch (error) { /* keep the empty preview */ }
+                }
+                card.appendChild(thumb);
                 var body = el('div', 'asset-tree-scheme-card-body');
                 body.appendChild(el('div', 'asset-tree-scheme-card-name', schemeLabel(row)));
                 var bound = placeName(row.placeId || (row.doc && row.doc.placeId));
@@ -4932,11 +4933,17 @@
                 var actions = el('div', 'asset-tree-scheme-card-actions');
                 var open = el('button', 'asset-tree-scheme-new', api.t('schemeOpen'));
                 open.type = 'button';
-                open.addEventListener('click', function () { openScheme(row.id, 'view'); });
+                open.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    openScheme(row.id, 'view');
+                });
                 var edit = el('button', 'asset-tree-scheme-save', api.t('schemeEdit'));
                 edit.type = 'button';
                 edit.disabled = !api.canEdit;
-                edit.addEventListener('click', function () { openScheme(row.id, 'edit'); });
+                edit.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    openScheme(row.id, 'edit');
+                });
                 actions.appendChild(open);
                 actions.appendChild(edit);
                 body.appendChild(actions);
@@ -6109,12 +6116,6 @@
                 return;
             }
             var leave = function () {
-                if (session.id) {
-                    session.mode = 'view';
-                    session.needFit = true;
-                    if (session.repaint) session.repaint();
-                    return;
-                }
                 session.mode = 'browse';
                 showMode();
             };
