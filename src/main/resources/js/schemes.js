@@ -397,14 +397,20 @@
         var stage = el('div', 'asset-tree-scheme-stage');
         var props = el('div', 'asset-tree-scheme-props');
         var windows = el('div', 'asset-tree-scheme-windows');
+        var dockLeft = el('div', 'asset-tree-scheme-dock is-left');
+        var dockRight = el('div', 'asset-tree-scheme-dock is-right');
+        var canvasWrap = el('div', 'asset-tree-scheme-canvas-wrap');
         var gridC = el('canvas', 'asset-tree-scheme-canvas');
         var sceneC = el('canvas', 'asset-tree-scheme-canvas');
         var overC = el('canvas', 'asset-tree-scheme-canvas');
         stage.appendChild(gridC);
         stage.appendChild(sceneC);
         stage.appendChild(overC);
-        body.appendChild(stage);
-        body.appendChild(windows);
+        canvasWrap.appendChild(stage);
+        canvasWrap.appendChild(windows);
+        body.appendChild(dockLeft);
+        body.appendChild(canvasWrap);
+        body.appendChild(dockRight);
         var gallery = el('div', 'asset-tree-scheme-gallery');
         host.appendChild(bar);
         host.appendChild(body);
@@ -450,7 +456,9 @@
                     x: parseInt(node.style.left, 10) || 8,
                     y: parseInt(node.style.top, 10) || 8,
                     open: !node.classList.contains('is-closed'),
-                    collapsed: node.classList.contains('is-collapsed')
+                    collapsed: node.classList.contains('is-collapsed'),
+                    pinned: node.classList.contains('is-pinned'),
+                    side: node.getAttribute('data-side') || ''
                 };
             }
             try { global.localStorage.setItem('assetshub.schemeWindows', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
@@ -472,6 +480,44 @@
             if (box.y > height - 80) box.y = Math.max(12, height - 200);
             return box;
         }
+        var dockOrder = { tools: 0, symbols: 1, assets: 2, props: 3, floors: 4, layers: 5, rooms: 6 };
+        function syncDocks() {
+            var editing = session.mode === 'edit' || !!session.templateId;
+            [dockLeft, dockRight].forEach(function (dock) {
+                if (!editing) {
+                    dock.style.display = 'none';
+                    return;
+                }
+                var visible = false;
+                var i;
+                for (i = 0; i < dock.children.length; i++) {
+                    if (!dock.children[i].classList.contains('is-closed')) visible = true;
+                }
+                dock.style.display = visible ? '' : 'none';
+            });
+        }
+        function placePinned(node) {
+            var side = node.getAttribute('data-side') === 'left' ? 'left' : 'right';
+            var dock = side === 'left' ? dockLeft : dockRight;
+            var rank = dockOrder[node.getAttribute('data-window')] || 0;
+            var before = null;
+            var i;
+            for (i = 0; i < dock.children.length; i++) {
+                var other = dock.children[i];
+                if (other === node) continue;
+                if ((dockOrder[other.getAttribute('data-window')] || 0) > rank) {
+                    before = other;
+                    break;
+                }
+            }
+            if (before) dock.insertBefore(node, before);
+            else dock.appendChild(node);
+            node.classList.add('is-pinned');
+        }
+        function placeFloating(node) {
+            if (node.parentNode !== windows) windows.appendChild(node);
+            node.classList.remove('is-pinned');
+        }
         function makeWindow(id, title) {
             var saved = panelState[id] || {};
             var box = defaultPanelBox(id);
@@ -484,10 +530,39 @@
             if (saved.open === false) node.classList.add('is-closed');
             var titleBar = el('div', 'asset-tree-scheme-window-bar');
             titleBar.appendChild(el('span', 'asset-tree-scheme-window-title', title));
+            var pin = el('button', 'asset-tree-scheme-window-btn');
+            pin.type = 'button';
+            pin.title = api.t(saved.pinned ? 'schemeUnpin' : 'schemePin');
+            pin.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 1.5h3.6v4.1l2.4 2.2v1.6H8.7V14h-1.4V9.4H3.8V7.8l2.4-2.2z" fill="currentColor"/></svg>';
+            if (saved.pinned) pin.classList.add('is-on');
             var fold = el('button', 'asset-tree-scheme-window-btn', '\u2013');
             fold.type = 'button';
             var close = el('button', 'asset-tree-scheme-window-btn', '\u00d7');
             close.type = 'button';
+            function isChrome(target) {
+                var hit = target;
+                while (hit && hit !== titleBar) {
+                    if (hit === pin || hit === fold || hit === close) return true;
+                    hit = hit.parentNode;
+                }
+                return false;
+            }
+            pin.addEventListener('click', function (event) {
+                event.stopPropagation();
+                var next = !node.classList.contains('is-pinned');
+                if (next) {
+                    var mid = (windows.clientWidth || stage.clientWidth || 800) / 2;
+                    var x = parseInt(node.style.left, 10) || 0;
+                    var width = node.offsetWidth || box.w;
+                    node.setAttribute('data-side', x + width / 2 < mid ? 'left' : 'right');
+                    placePinned(node);
+                } else placeFloating(node);
+                pin.classList.toggle('is-on', next);
+                pin.title = api.t(next ? 'schemeUnpin' : 'schemePin');
+                syncDocks();
+                savePanelState();
+                paint();
+            });
             fold.addEventListener('click', function (event) {
                 event.stopPropagation();
                 node.classList.toggle('is-collapsed');
@@ -496,13 +571,16 @@
             close.addEventListener('click', function (event) {
                 event.stopPropagation();
                 node.classList.add('is-closed');
+                syncDocks();
                 savePanelState();
+                paint();
             });
+            titleBar.appendChild(pin);
             titleBar.appendChild(fold);
             titleBar.appendChild(close);
             var drag = null;
             titleBar.addEventListener('mousedown', function (event) {
-                if (event.button !== 0 || event.target === fold || event.target === close) return;
+                if (event.button !== 0 || isChrome(event.target) || node.classList.contains('is-pinned')) return;
                 drag = {
                     x: event.clientX,
                     y: event.clientY,
@@ -528,6 +606,10 @@
             node.appendChild(titleBar);
             node.appendChild(inner);
             windows.appendChild(node);
+            if (saved.pinned) {
+                node.setAttribute('data-side', saved.side === 'left' ? 'left' : 'right');
+                placePinned(node);
+            }
             panelBodies[id] = inner;
             panelNodes[id] = node;
         }
@@ -553,7 +635,9 @@
                 box.addEventListener('change', function () {
                     if (box.checked) node.classList.remove('is-closed');
                     else node.classList.add('is-closed');
+                    syncDocks();
                     savePanelState();
+                    paint();
                 });
                 row.appendChild(box);
                 row.appendChild(document.createTextNode(' ' + node.querySelector('.asset-tree-scheme-window-title').textContent));
@@ -2558,6 +2642,10 @@
             var id;
             for (id in panelNodes) {
                 var node = panelNodes[id];
+                if (node.classList.contains('is-pinned')) {
+                    if (node.parentNode !== dockLeft && node.parentNode !== dockRight) placePinned(node);
+                    continue;
+                }
                 if (!node.getAttribute('data-settled')) {
                     var saved = panelState[id];
                     if (!saved || saved.x == null) {
@@ -4468,6 +4556,7 @@
             tools.style.display = '';
             windows.style.display = editing ? '' : 'none';
             windowsBtn.style.display = editing ? '' : 'none';
+            syncDocks();
             editBtn.style.display = !browse && !editing && api.canEdit ? '' : 'none';
             backBtn.style.display = browse ? 'none' : '';
             saveBtn.style.display = editing ? '' : 'none';
