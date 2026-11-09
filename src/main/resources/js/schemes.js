@@ -505,6 +505,26 @@
         } catch (error) {
             panelState = {};
         }
+        var savedDocks = panelState._docks || {};
+        function dockSpan(value, min, max) {
+            var next = Math.round(Number(value));
+            if (!isFinite(next) || next <= 0) return 0;
+            return Math.max(min, Math.min(max, next));
+        }
+        var leftDock = dockSpan(savedDocks.left, 180, 560);
+        var rightDock = dockSpan(savedDocks.right, 180, 560);
+        var topDock = dockSpan(savedDocks.top, 96, 480);
+        var bottomDock = dockSpan(savedDocks.bottom, 96, 480);
+        if (leftDock) dockLeft.style.width = leftDock + 'px';
+        if (rightDock) dockRight.style.width = rightDock + 'px';
+        if (topDock) {
+            dockTop.style.height = topDock + 'px';
+            dockTop.style.maxHeight = topDock + 'px';
+        }
+        if (bottomDock) {
+            dockBottom.style.height = bottomDock + 'px';
+            dockBottom.style.maxHeight = bottomDock + 'px';
+        }
         var bin = side;
         function openPanel(id) {
             bin = el('div', 'asset-tree-scheme-section');
@@ -529,12 +549,21 @@
                 next[id] = {
                     x: parseInt(node.style.left, 10) || 8,
                     y: parseInt(node.style.top, 10) || 8,
+                    w: node.offsetWidth || 0,
+                    h: node.classList.contains('is-sized') ? (node.offsetHeight || 0) : 0,
+                    wide: node.classList.contains('is-wide'),
                     open: !node.classList.contains('is-closed'),
                     collapsed: node.classList.contains('is-collapsed'),
                     pinned: node.classList.contains('is-pinned'),
                     side: node.getAttribute('data-side') || ''
                 };
             }
+            next._docks = {
+                left: parseInt(dockLeft.style.width, 10) || dockLeft.offsetWidth || 268,
+                right: parseInt(dockRight.style.width, 10) || dockRight.offsetWidth || 268,
+                top: parseInt(dockTop.style.height, 10) || 0,
+                bottom: parseInt(dockBottom.style.height, 10) || 0
+            };
             try { global.localStorage.setItem('assetshub.schemeWindows.v2', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
         }
         function defaultPanelBox(id) {
@@ -623,10 +652,25 @@
             if (before) dock.insertBefore(node, before);
             else dock.appendChild(node);
             node.classList.add('is-pinned');
+            if ((side === 'top' || side === 'bottom') && !node.classList.contains('is-wide')) node.style.width = '';
         }
         function placeFloating(node) {
+            if (!parseInt(node.style.width, 10)) node.style.width = Math.max(180, node.offsetWidth || 240) + 'px';
             if (node.parentNode !== windows) windows.appendChild(node);
             node.classList.remove('is-pinned');
+        }
+        var windowSizing = null;
+        function windowHost(node) {
+            if (node.parentNode === dockLeft) return 'left';
+            if (node.parentNode === dockRight) return 'right';
+            if (node.parentNode === dockTop) return 'top';
+            if (node.parentNode === dockBottom) return 'bottom';
+            return 'float';
+        }
+        function sizeWindow(node, width, height) {
+            node.style.width = Math.round(width) + 'px';
+            node.style.height = Math.round(height) + 'px';
+            node.classList.add('is-sized');
         }
         function makeWindow(id, title) {
             var saved = panelState[id] || {};
@@ -635,7 +679,14 @@
             node.setAttribute('data-window', id);
             node.style.left = (saved.x != null ? saved.x : box.x) + 'px';
             node.style.top = (saved.y != null ? saved.y : box.y) + 'px';
-            node.style.width = box.w + 'px';
+            var width = dockSpan(saved.w, 180, 720) || box.w;
+            node.style.width = width + 'px';
+            var height = dockSpan(saved.h, 72, 900);
+            if (height) {
+                node.style.height = height + 'px';
+                node.classList.add('is-sized');
+            }
+            if (saved.wide) node.classList.add('is-wide');
             if (saved.collapsed) node.classList.add('is-collapsed');
             if (saved.open === false) node.classList.add('is-closed');
             var titleBar = el('div', 'asset-tree-scheme-window-bar');
@@ -722,9 +773,91 @@
                 pin.classList.add('is-on');
                 pin.title = api.t('schemeUnpin');
             }
+            ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].forEach(function (dir) {
+                var grip = el('div', 'asset-tree-scheme-resize is-' + dir);
+                grip.addEventListener('mousedown', function (event) {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    windowSizing = {
+                        node: node,
+                        dir: dir,
+                        host: windowHost(node),
+                        x: event.clientX,
+                        y: event.clientY,
+                        left: parseInt(node.style.left, 10) || 0,
+                        top: parseInt(node.style.top, 10) || 0,
+                        w: node.offsetWidth,
+                        h: node.offsetHeight,
+                        dockW: windowHost(node) === 'left' ? dockLeft.offsetWidth : dockRight.offsetWidth,
+                        dockH: windowHost(node) === 'top' ? dockTop.offsetHeight : dockBottom.offsetHeight
+                    };
+                });
+                node.appendChild(grip);
+            });
             panelBodies[id] = inner;
             panelNodes[id] = node;
         }
+        function moveWindowSize(event) {
+            if (!windowSizing) return;
+            var drag = windowSizing;
+            var dx = event.clientX - drag.x;
+            var dy = event.clientY - drag.y;
+            var dir = drag.dir;
+            var node = drag.node;
+            var host = drag.host;
+            if (host === 'left' || host === 'right') {
+                if (dir.indexOf('e') >= 0 || dir.indexOf('w') >= 0) {
+                    var grown = host === 'left' ? dx : -dx;
+                    var dockWidth = Math.max(180, Math.min(560, drag.dockW + grown));
+                    (host === 'left' ? dockLeft : dockRight).style.width = dockWidth + 'px';
+                }
+                if (dir.indexOf('n') >= 0 || dir.indexOf('s') >= 0) {
+                    var grownH = dir.indexOf('s') >= 0 ? dy : -dy;
+                    var room = Math.max(120, (host === 'left' ? dockLeft.clientHeight : dockRight.clientHeight) - 24);
+                    sizeWindow(node, node.offsetWidth, Math.max(72, Math.min(room, drag.h + grownH)));
+                }
+            } else if (host === 'top' || host === 'bottom') {
+                if (dir.indexOf('n') >= 0 || dir.indexOf('s') >= 0) {
+                    var band = host === 'top' ? dy : -dy;
+                    var dockHeight = Math.max(96, Math.min(480, drag.dockH + band));
+                    var dock = host === 'top' ? dockTop : dockBottom;
+                    dock.style.height = dockHeight + 'px';
+                    dock.style.maxHeight = dockHeight + 'px';
+                }
+                if (dir.indexOf('e') >= 0 || dir.indexOf('w') >= 0) {
+                    var wide = dir.indexOf('e') >= 0 ? dx : -dx;
+                    node.classList.add('is-wide');
+                    node.style.width = Math.max(180, Math.min(640, drag.w + wide)) + 'px';
+                }
+            } else {
+                var left = drag.left;
+                var top = drag.top;
+                var w = drag.w;
+                var h = drag.h;
+                if (dir.indexOf('e') >= 0) w = drag.w + dx;
+                if (dir.indexOf('s') >= 0) h = drag.h + dy;
+                if (dir.indexOf('w') >= 0) w = drag.w - dx;
+                if (dir.indexOf('n') >= 0) h = drag.h - dy;
+                w = Math.max(180, Math.min((windows.clientWidth || 800) - 16, w));
+                h = Math.max(96, Math.min((windows.clientHeight || 640) - 16, h));
+                if (dir.indexOf('w') >= 0) left = drag.left + drag.w - w;
+                if (dir.indexOf('n') >= 0) top = drag.top + drag.h - h;
+                var maxX = Math.max(0, (windows.clientWidth || 400) - 80);
+                var maxY = Math.max(0, (windows.clientHeight || 400) - 32);
+                node.style.left = Math.max(0, Math.min(maxX, left)) + 'px';
+                node.style.top = Math.max(0, Math.min(maxY, top)) + 'px';
+                sizeWindow(node, w, h);
+            }
+            if (host !== 'float') paint();
+        }
+        global.addEventListener('mousemove', moveWindowSize);
+        global.addEventListener('mouseup', function () {
+            if (!windowSizing) return;
+            windowSizing = null;
+            savePanelState();
+            paint();
+        });
         makeWindow('tools', api.t('schemeTools'));
         makeWindow('symbols', api.t('schemeSymbols'));
         makeWindow('assets', api.t('schemeAssets'));
@@ -905,6 +1038,14 @@
             }
             if (id) return { id: id, name: '', w: 40, h: 40, parts: [] };
             return list[0];
+        }
+
+        function appearance(obj) {
+            var def = symbolDef(obj && obj.symbolId);
+            if (!def || !def.face || !global.AssetTreeSchemeSwitch) return def;
+            var count = obj && obj.ports ? obj.ports : def.ports;
+            if (!count || count === def.ports) return def;
+            return global.AssetTreeSchemeSwitch(def, count) || def;
         }
 
         function markTools() {
@@ -1444,6 +1585,7 @@
             obj.y = roundCm(pt.y - def.h / 2);
             obj.w = def.w;
             obj.h = def.h;
+            if (def.ports) obj.ports = def.ports;
             obj.angle = 0;
             obj.assetBinding = null;
             if (session.assetId) {
@@ -2730,7 +2872,7 @@
                     ctx.fillRect(obj.x, obj.y, obj.w || 40, obj.h || 40);
                     ctx.restore();
                 }
-                drawParts(ctx, symbolDef(obj.symbolId), obj.x, obj.y, obj.w, obj.h);
+                drawParts(ctx, appearance(obj), obj.x, obj.y, obj.w, obj.h);
                 if (obj.assetBinding) {
                     ctx.fillStyle = '#0052cc';
                     ctx.beginPath();
@@ -3509,13 +3651,17 @@
         function cleanTemplate(item) {
             if (!item || !item.parts || !item.parts.length) return null;
             var id = String(item.id || nid('sym')).replace(/[^\w.-]/g, '').slice(0, 60);
-            return {
+            var cleaned = {
                 id: id || nid('sym'),
                 name: String(item.name || api.t('schemeTemplateNew')).slice(0, 80),
                 w: Math.max(1, Number(item.w) || 40),
                 h: Math.max(1, Number(item.h) || 40),
                 parts: item.parts.slice(0, 400)
             };
+            var ports = Math.round(Number(item.ports));
+            if (ports >= 2 && ports <= 48) cleaned.ports = ports;
+            if (/^(rack|access|agg|core|poe|cam|ind)$/.test(String(item.face || ''))) cleaned.face = String(item.face);
+            return cleaned;
         }
 
         function importLibraryFile(file) {
@@ -3980,6 +4126,21 @@
             if (obj.y != null) field('Y', obj.y, function (value) { obj.y = roundCm(Number(value) || 0); });
             if (obj.w != null) field('W', obj.w, function (value) { obj.w = Math.max(1, roundCm(Number(value) || 1)); });
             if (obj.h != null && obj.type !== 'text') field('H', obj.h, function (value) { obj.h = Math.max(1, roundCm(Number(value) || 1)); });
+            if (obj.type === 'symbol') {
+                var portDef = symbolDef(obj.symbolId);
+                if (portDef && portDef.face) {
+                    field(api.t('schemePorts'), obj.ports || portDef.ports || 24, function (value) {
+                        var count = Math.round(Number(value) || 0);
+                        if (count < 2) count = 2;
+                        if (count > 48) count = 48;
+                        var next = global.AssetTreeSchemeSwitch ? global.AssetTreeSchemeSwitch(portDef, count) : null;
+                        if (next && Math.abs((obj.w || 0) - (portDef.w || 0)) < 0.8) obj.w = next.w;
+                        if (next && Math.abs((obj.h || 0) - (portDef.h || 0)) < 0.8) obj.h = next.h;
+                        obj.ports = count;
+                        renderProps();
+                    });
+                }
+            }
             if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || 15, function (value) { obj.thickness = Math.max(1, roundCm(Number(value) || 15)); });
             if (obj.type === 'opening') {
                 var openingMax = obj.custom ? 2000 : 600;
@@ -5657,7 +5818,7 @@
                 return [{ t: 'p', points: points, c: obj.color || '#172b4d', s: obj.type === 'wall' ? (obj.thickness || 15) : (obj.thickness || 1) }];
             }
             if (obj.type === 'symbol') {
-                var def = symbolDef(obj.symbolId);
+                var def = appearance(obj);
                 var sx = (obj.w || def.w || 1) / (def.w || 1);
                 var sy = (obj.h || def.h || 1) / (def.h || 1);
                 return (def.parts || []).map(function (part) {

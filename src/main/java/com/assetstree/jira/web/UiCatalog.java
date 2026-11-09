@@ -1218,6 +1218,7 @@ public final class UiCatalog {
             "schemeWindows",
             "schemePin",
             "schemeUnpin",
+            "schemePorts",
             "schemeImage",
             "schemeImageHint",
             "schemeImageBig",
