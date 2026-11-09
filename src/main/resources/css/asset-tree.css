@@ -13541,6 +13541,14 @@ button.asset-tree-attach-remove {
     outline-offset: 1px;
 }
 
+#asset-tree-app .asset-tree-scheme-swatch.is-custom {
+    border-radius: 50% !important;
+}
+
+#asset-tree-app .asset-tree-scheme-swatch.is-custom:not(.is-set) {
+    background: conic-gradient(#de350b, #ffab00, #36b37e, #00b8d9, #0052cc, #6554c0, #de350b) !important;
+}
+
 #asset-tree-app .asset-tree-scheme-swatch-input {
     position: absolute !important;
     left: 0 !important;
