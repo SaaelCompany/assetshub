@@ -2218,15 +2218,9 @@
         if (state.canManage && state.canView !== false) {
             items.push({ view: 'settings', label: t('menuSettings'), group: 'end' });
         }
-        var grouped = false;
         items.forEach(function (item) {
             var active = state.view === item.view;
-            var extra = '';
-            if (item.group === 'tools' && !grouped) {
-                extra += ' is-group';
-                grouped = true;
-            }
-            if (item.group === 'end') extra += ' is-aside';
+            var extra = item.group === 'end' ? ' is-aside' : '';
             var tab = button(item.label, 'asset-tree-viewtab' + extra + (active ? ' is-active' : ''), function () {
                 showView(item.view);
             });

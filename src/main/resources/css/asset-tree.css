@@ -5237,16 +5237,11 @@ a.asset-tree-preview-icon:focus {
     font-weight: 600 !important;
 }
 
-#asset-tree-app button.asset-tree-viewtab.is-group {
-    margin-left: 28px;
-}
-
 #asset-tree-app button.asset-tree-viewtab.is-aside {
     margin-left: auto;
 }
 
 @media (max-width: 720px) {
-    #asset-tree-app button.asset-tree-viewtab.is-group,
     #asset-tree-app button.asset-tree-viewtab.is-aside {
         margin-left: 0;
     }
