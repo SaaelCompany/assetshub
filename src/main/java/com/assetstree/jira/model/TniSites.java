@@ -63,6 +63,17 @@ public final class TniSites {
         return place;
     }
 
+    /**
+     * A project with no rules still accepts every host. Once a rule exists, only a short
+     * name that fits a code is added, so a fallback title such as "Computer Person" is skipped.
+     */
+    public static boolean admits(String rules, String host, String name) {
+        if (parse(rules).isEmpty()) {
+            return true;
+        }
+        return !match(rules, host, name).isEmpty();
+    }
+
     private static boolean fits(String station, String code) {
         return station.equals(code) || station.startsWith(code + "-");
     }

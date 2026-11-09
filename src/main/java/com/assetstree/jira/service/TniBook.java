@@ -17,6 +17,7 @@ import com.assetstree.jira.model.TniClock;
 import com.assetstree.jira.model.TniFacts;
 import com.assetstree.jira.model.TniPolicy;
 import com.assetstree.jira.model.TniSame;
+import com.assetstree.jira.model.TniSites;
 import com.assetstree.jira.model.TniTarget;
 import com.assetstree.jira.model.TniText;
 import net.java.ao.DBParam;
@@ -708,6 +709,10 @@ public final class TniBook {
         }
         boolean created = asset == null;
         boolean claimed = !created && TniSame.claimed(asset.getExternalKey(), row.getIdentity());
+        if (created && !TniSites.admits(setup.getTniSites(), facts.host, name)) {
+            log.info("TNI skipped {} in {}: the host is not in the site rules", name, projectKey);
+            return null;
+        }
         Integer place = placeParent(ao, projectKey, parentId);
         if (created) {
             String objectKey;
