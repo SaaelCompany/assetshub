@@ -2153,7 +2153,8 @@
             ctx.fillRect(0, 0, 72, 56);
             var dw = def.w || 1;
             var dh = def.h || 1;
-            var scale = Math.min(64 / dw, 48 / dh);
+            var scale = 64 / 48.3;
+            if (dw * scale > 64 || dh * scale > 48) scale = Math.min(64 / dw, 48 / dh);
             ctx.save();
             ctx.translate((72 - dw * scale) / 2, (56 - dh * scale) / 2);
             ctx.scale(scale, scale);
@@ -2723,7 +2724,9 @@
         function drawOpening(ctx, a, b, opening) {
             ctx.save();
             ctx.strokeStyle = '#172b4d';
-            ctx.lineWidth = 0.8;
+            ctx.lineWidth = 1.2 / (session.cam.z || 1);
+            ctx.lineJoin = 'miter';
+            ctx.lineCap = 'butt';
             if (opening.kind === 'window') {
                 var n = leftNorm(a, b);
                 ctx.beginPath();
@@ -2733,18 +2736,38 @@
                 ctx.lineTo(b.x - n.x * 2, b.y - n.y * 2);
                 ctx.stroke();
             } else {
-                var len = dist(a.x, a.y, b.x, b.y);
+                var hinge = b;
+                var latch = a;
+                var len = dist(hinge.x, hinge.y, latch.x, latch.y);
+                var wall = Math.atan2(latch.y - hinge.y, latch.x - hinge.x);
                 var normal = leftNorm(a, b);
-                if (opening.swing === 'right') {
-                    normal = { x: -normal.x, y: -normal.y };
-                }
+                if (opening.swing === 'right') normal = { x: -normal.x, y: -normal.y };
+                var leaf = Math.atan2(normal.y, normal.x);
+                var frame = Math.max(3.5, Math.min(len * 0.08, 9));
                 ctx.beginPath();
-                ctx.moveTo(a.x, a.y);
-                ctx.lineTo(a.x + normal.x * len, a.y + normal.y * len);
-                var start = Math.atan2(b.y - a.y, b.x - a.x);
-                var end = Math.atan2(normal.y, normal.x);
-                ctx.moveTo(a.x, a.y);
-                ctx.arc(a.x, a.y, len, start, end, opening.swing === 'right');
+                ctx.moveTo(hinge.x, hinge.y);
+                ctx.lineTo(hinge.x + normal.x * len, hinge.y + normal.y * len);
+                ctx.stroke();
+                var sweep = leaf - wall;
+                while (sweep <= -Math.PI) sweep += Math.PI * 2;
+                while (sweep > Math.PI) sweep -= Math.PI * 2;
+                ctx.beginPath();
+                ctx.arc(hinge.x, hinge.y, len, wall, leaf, sweep < 0);
+                ctx.stroke();
+                var backX = hinge.x - Math.cos(wall) * frame;
+                var backY = hinge.y - Math.sin(wall) * frame;
+                var outX = -normal.x;
+                var outY = -normal.y;
+                ctx.beginPath();
+                ctx.moveTo(backX, backY);
+                ctx.lineTo(hinge.x, hinge.y);
+                ctx.lineTo(hinge.x + outX * frame, hinge.y + outY * frame);
+                ctx.lineTo(backX + outX * frame, backY + outY * frame);
+                ctx.closePath();
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(latch.x, latch.y);
+                ctx.lineTo(latch.x + outX * frame, latch.y + outY * frame);
                 ctx.stroke();
             }
             ctx.restore();
@@ -3659,7 +3682,7 @@
                 parts: item.parts.slice(0, 400)
             };
             var ports = Math.round(Number(item.ports));
-            if (ports >= 2 && ports <= 48) cleaned.ports = ports;
+            if (ports >= 2 && ports <= 52) cleaned.ports = ports;
             if (/^(rack|access|agg|core|poe|cam|ind)$/.test(String(item.face || ''))) cleaned.face = String(item.face);
             return cleaned;
         }
@@ -4129,16 +4152,32 @@
             if (obj.type === 'symbol') {
                 var portDef = symbolDef(obj.symbolId);
                 if (portDef && portDef.face) {
-                    field(api.t('schemePorts'), obj.ports || portDef.ports || 24, function (value) {
-                        var count = Math.round(Number(value) || 0);
-                        if (count < 2) count = 2;
-                        if (count > 48) count = 48;
+                    var portWrap = el('label', 'asset-tree-scheme-field', api.t('schemePorts'));
+                    var portPick = el('select');
+                    portPick.disabled = !api.canEdit || session.mode !== 'edit';
+                    var portChoices = [2, 4, 5, 8, 12, 16, 24, 48, 52];
+                    var portNow = Math.round(obj.ports || portDef.ports || 24);
+                    if (portChoices.indexOf(portNow) < 0) portChoices.push(portNow);
+                    portChoices.sort(function (left, right) { return left - right; });
+                    portChoices.forEach(function (count) {
+                        var option = el('option', null, String(count));
+                        option.value = String(count);
+                        portPick.appendChild(option);
+                    });
+                    portPick.value = String(portNow);
+                    portPick.addEventListener('change', function () {
+                        if (!api.canEdit || session.mode !== 'edit') return;
+                        var count = Math.round(Number(portPick.value) || portNow);
+                        remember();
                         var next = global.AssetTreeSchemeSwitch ? global.AssetTreeSchemeSwitch(portDef, count) : null;
                         if (next && Math.abs((obj.w || 0) - (portDef.w || 0)) < 0.8) obj.w = next.w;
                         if (next && Math.abs((obj.h || 0) - (portDef.h || 0)) < 0.8) obj.h = next.h;
                         obj.ports = count;
                         renderProps();
+                        paint();
                     });
+                    portWrap.appendChild(portPick);
+                    props.appendChild(portWrap);
                 }
             }
             if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || 15, function (value) { obj.thickness = Math.max(1, roundCm(Number(value) || 15)); });

@@ -228,7 +228,7 @@
     function clampPorts(count) {
         var next = Math.round(Number(count) || 0);
         if (next < 2) next = 2;
-        if (next > 48) next = 48;
+        if (next > 52) next = 52;
         return next;
     }
 
@@ -576,12 +576,9 @@
     }
 
     function numberedSwitches() {
-        var list = [];
-        var count;
-        for (count = 2; count <= 48; count++) {
-            list.push(buildSwitch('sw-' + count, 'Коммутатор ' + count + ' ' + portWord(count), count, 'rack'));
-        }
-        return list;
+        return [2, 4, 5, 8, 12, 16, 24, 48, 52].map(function (count) {
+            return buildSwitch('sw-' + count, 'Коммутатор ' + count + ' ' + portWord(count), count, 'rack');
+        });
     }
 
     function network() {
@@ -626,38 +623,38 @@
                 fan(parts, 26, 0.5, h - 1);
                 display(parts, 34, 0.7, 10, h - 1.4);
             }),
-            plan('ap', 'Точка доступа', 18, 18, [
-                oval(0.6, 0.6, 16.8, 16.8, INK, FACE, 0.4),
-                oval(4, 4, 10, 10, BLUE, BLUEF, 0.2),
-                line(9, 2.2, 9, 15.8, BLUE, 0.16),
-                line(2.2, 9, 15.8, 9, BLUE, 0.16)
+            plan('ap', 'Точка доступа', 15, 15, [
+                oval(0.5, 0.5, 14, 14, INK, FACE, 0.35),
+                oval(3.4, 3.4, 8.2, 8.2, BLUE, BLUEF, 0.16),
+                line(7.5, 1.8, 7.5, 13.2, BLUE, 0.14),
+                line(1.8, 7.5, 13.2, 7.5, BLUE, 0.14)
             ]),
-            plan('ap-out', 'Уличная точка доступа', 16, 28, [
-                rect(2, 4, 12, 22, INK, FACE, 0.35),
-                rect(4, 0, 1.2, 6, METAL, DARK, 0.12),
-                rect(10.8, 0, 1.2, 6, METAL, DARK, 0.12),
-                oval(5, 8, 6, 6, BLUE, BLUEF, 0.16),
-                rect(4, 17, 8, 6, METAL, EAR, 0.12)
+            plan('ap-out', 'Уличная точка доступа', 9, 18, [
+                rect(1.2, 2.6, 6.6, 14, INK, FACE, 0.28),
+                rect(2.4, 0, 0.8, 3.4, METAL, DARK, 0.1),
+                rect(5.8, 0, 0.8, 3.4, METAL, DARK, 0.1),
+                oval(2.2, 5, 4.6, 4.6, BLUE, BLUEF, 0.14),
+                rect(2, 11.2, 5, 3.6, METAL, EAR, 0.1)
             ]),
-            plan('ap-ceiling', 'Потолочная точка доступа', 20, 20, [
-                oval(0.4, 0.4, 19.2, 19.2, INK, FACE, 0.35),
-                oval(3, 3, 14, 14, BLUE, '#ffffff', 0.2),
-                oval(7, 7, 6, 6, BLUE, BLUEF, 0.14)
+            plan('ap-ceiling', 'Потолочная точка доступа', 16, 16, [
+                oval(0.35, 0.35, 15.3, 15.3, INK, FACE, 0.3),
+                oval(2.6, 2.6, 10.8, 10.8, BLUE, '#ffffff', 0.16),
+                oval(5.4, 5.4, 5.2, 5.2, BLUE, BLUEF, 0.12)
             ]),
-            plan('ap-wall', 'Настенная точка доступа', 14, 18, (function () {
+            plan('ap-wall', 'Настенная точка доступа', 8, 12, (function () {
                 var parts = [
-                    rect(0, 2, 14, 16, INK, FACE, 0.35),
-                    rect(6.2, 0, 1.6, 4, METAL, DARK, 0.12),
-                    oval(3, 5, 8, 8, BLUE, BLUEF, 0.16)
+                    rect(0, 1.4, 8, 10.6, INK, FACE, 0.28),
+                    rect(3.3, 0, 1.4, 2.6, METAL, DARK, 0.1),
+                    oval(1.6, 3.2, 4.8, 4.8, BLUE, BLUEF, 0.14)
                 ];
-                ports(parts, 1.2, 14.2, 11.6, 2.4, 3, 1, BLUE);
+                ports(parts, 0.6, 9.2, 6.8, 2, 2, 1, BLUE);
                 return parts;
             })()),
-            plan('wifi-ant', 'Антенна Wi-Fi', 14, 22, [
-                line(7, 4, 7, 21, INK, 0.35),
-                rect(5.6, 18, 2.8, 4, INK, DARK, 0.12),
-                arc(7, 8, 3, Math.PI * 1.15, Math.PI * 1.85, 8, BLUE, 0.16),
-                arc(7, 8, 5.2, Math.PI * 1.15, Math.PI * 1.85, 10, BLUE, 0.14)
+            plan('wifi-ant', 'Антенна Wi-Fi', 8, 16, [
+                line(4, 3, 4, 15.2, INK, 0.28),
+                rect(3.1, 13, 1.8, 3, INK, DARK, 0.1),
+                arc(4, 5.5, 2.1, Math.PI * 1.15, Math.PI * 1.85, 8, BLUE, 0.14),
+                arc(4, 5.5, 3.4, Math.PI * 1.15, Math.PI * 1.85, 10, BLUE, 0.12)
             ]),
             plan('sfp', 'SFP-модуль', 1.4, 5.6, [
                 rect(0, 0, 1.4, 5.6, INK, '#253858', 0.12),
