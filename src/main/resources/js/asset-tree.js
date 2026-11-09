@@ -6555,6 +6555,7 @@
             var pingChange = el('div', 'asset-tree-history-change');
             var pingWord = item.newValue === 'up' ? t('tniWatchUp') : t('tniWatchDown');
             pingChange.appendChild(el('span', null, item.field ? (item.field + ' · ' + pingWord) : pingWord));
+            if (item.oldValue) pingChange.appendChild(el('pre', 'asset-tree-ping-log', item.oldValue));
             row.appendChild(pingChange);
             return row;
         }
@@ -9229,15 +9230,42 @@
         setBusy(true);
         ajax('POST', '/assets/' + asset.id + '/ping', {}, function (status, payload) {
             setBusy(false);
-            if (status < 200 || status >= 300 || !payload || (payload.up !== 1 && payload.up !== 2)) {
-                notify((payload && payload.message) || t('errorTitle'));
+            var ok = status >= 200 && status < 300 && payload && (payload.up === 1 || payload.up === 2);
+            if (ok) {
+                applyPing(asset, payload);
+                notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
+                selectAsset(asset.id, true);
                 return;
             }
-            if (!state.ping) state.ping = {};
-            state.ping[asset.id] = payload.up;
-            notify(payload.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
-            selectAsset(asset.id, true);
+            ajax('GET', '/assets/' + asset.id + '/watch', null, function (watchStatus, watch) {
+                if (watchStatus === 200 && watch && (watch.up === 1 || watch.up === 2)) {
+                    applyPing(asset, watch);
+                    notify(watch.up === 1 ? t('tniWatchUp') : t('tniWatchDown'));
+                    selectAsset(asset.id, true);
+                    return;
+                }
+                notify((payload && payload.message) || t('errorTitle'));
+            });
         });
+    }
+
+    function applyPing(asset, payload) {
+        if (!state.ping) state.ping = {};
+        state.ping[asset.id] = payload.up;
+        var row = state.tniWatch[asset.id] || {};
+        row.up = payload.up;
+        row.checkedAt = payload.checkedAt || row.checkedAt || Date.now();
+        if (payload.address) row.address = payload.address;
+        if (payload.armed != null) row.armed = payload.armed;
+        if (payload.report) row.report = payload.report;
+        if (payload.name) {
+            row.name = payload.name;
+            var named = byId()[asset.id];
+            if (named) named.name = payload.name;
+            if (state.detail && state.detail.id === asset.id) state.detail.name = payload.name;
+        }
+        state.tniWatch[asset.id] = row;
+        if (state.detail && state.detail.id === asset.id) state.detail.pingUp = payload.up;
     }
 
     function finishSave(id, message, typeMoved) {
@@ -29861,22 +29889,37 @@
         body.appendChild(label);
         body.appendChild(el('p', 'asset-tree-watch-host', t('tniWatchAddress') + ': ' + ((row && row.address) || asset.name || '')));
         body.appendChild(el('p', 'asset-tree-hint', watchStatus(row)));
+        if (row.report) body.appendChild(el('pre', 'asset-tree-ping-log', row.report));
         if (mayEdit(asset)) {
             body.appendChild(button(t('tniWatchSave'), 'asset-tree-btn', function () {
                 ajax('PUT', '/assets/' + asset.id + '/watch', {
                     armed: armed.checked
                 }, function (status, payload) {
-                    if (status >= 200 && status < 300 && payload) {
+                    var ok = status >= 200 && status < 300 && payload;
+                    if (ok) {
                         state.tniWatch[asset.id] = payload;
                         if (payload.name) {
                             var named = byId()[asset.id];
                             if (named) named.name = payload.name;
                             if (state.detail && state.detail.id === asset.id) state.detail.name = payload.name;
                         }
+                        if (payload.up === 1 || payload.up === 2) {
+                            if (!state.ping) state.ping = {};
+                            state.ping[asset.id] = payload.up;
+                            if (state.detail && state.detail.id === asset.id) state.detail.pingUp = payload.up;
+                        }
                         if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
-                    } else {
-                        notify((payload && payload.message) || t('errorTitle'));
+                        selectAsset(asset.id, true);
+                        return;
                     }
+                    ajax('GET', '/assets/' + asset.id + '/watch', null, function (watchStatus, watch) {
+                        if (watchStatus === 200 && watch) {
+                            state.tniWatch[asset.id] = watch;
+                            if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
+                            return;
+                        }
+                        notify((payload && payload.message) || t('errorTitle'));
+                    });
                 });
             }));
         }
@@ -30294,6 +30337,14 @@
         var locked = !state.canArrange;
         var boxes = tniSourceFields(card, setup, locked);
         var kinds = tniTypeFields(card, setup, locked);
+        var sites = document.createElement('textarea');
+        sites.rows = 5;
+        sites.value = setup.tniSites || '';
+        sites.disabled = !!locked;
+        sites.placeholder = 'KRUL = Крулево';
+        sites.setAttribute('aria-label', t('tniSites'));
+        card.appendChild(planField(t('tniSites'), sites));
+        card.appendChild(el('p', 'asset-tree-hint', t('tniSitesHint')));
         if (!locked) {
             card.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var next = moduleSetup();
@@ -30302,6 +30353,7 @@
                 next.tniAd = boxes.tniAd.checked;
                 next.tniSccm = boxes.tniSccm.checked;
                 next.tniPing = boxes.tniPing.checked;
+                next.tniSites = sites.value;
                 next.tniComputer = kinds.computer.value;
                 next.tniLaptop = kinds.laptop.value;
                 next.tniPhone = kinds.phone.value;

@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import java.net.InetAddress;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -14,5 +15,9 @@ public class TniReachTest {
         assertTrue(TniReach.officeName(new InetAddress[0]));
         assertTrue(TniReach.officeName(new InetAddress[]{InetAddress.getByName("10.8.0.4")}));
         assertFalse(TniReach.officeName(new InetAddress[]{InetAddress.getByName("8.8.8.8")}));
+        assertFalse(TniReach.ask("").up());
+        assertFalse(TniReach.ask("bad host").up());
+        assertFalse(TniReach.askAll(null).up());
+        assertEquals("", TniReach.askAll(java.util.Collections.<String>emptyList()).output());
     }
 }

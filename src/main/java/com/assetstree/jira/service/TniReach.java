@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -17,6 +18,33 @@ public final class TniReach {
         boolean up(String address);
     }
 
+    /** Whether the host answered, and the text the ping command printed. */
+    public static final class Report {
+        private final boolean up;
+        private final String output;
+
+        private Report(boolean up, String output) {
+            this.up = up;
+            this.output = output == null ? "" : output;
+        }
+
+        public boolean up() {
+            return up;
+        }
+
+        public String output() {
+            return output;
+        }
+
+        static Report up(String output) {
+            return new Report(true, output);
+        }
+
+        static Report down(String output) {
+            return new Report(false, output);
+        }
+    }
+
     public static final Probe LIVE = new Probe() {
         @Override
         public boolean up(String address) {
@@ -25,6 +53,7 @@ public final class TniReach {
     };
 
     private static final int[] PORTS = {445, 135, 22, 3389, 80, 443};
+    private static final long BUDGET_MS = 7000L;
 
     private TniReach() {
     }
@@ -36,27 +65,41 @@ public final class TniReach {
      * resolves only to a public address is not contacted.
      */
     public static boolean station(String name) {
+        return ask(name).up();
+    }
+
+    /** One target, including the command text. */
+    public static Report ask(String name) {
         String host = TniAddress.station(name);
         if (host.isEmpty()) {
-            return false;
+            return Report.down("");
         }
         if (!TniAddress.local(host).isEmpty()) {
-            return reachable(host);
+            return address(host);
         }
         boolean shortName = host.indexOf('.') < 0;
-        if (shortName && ping(host)) {
-            return true;
+        Echo first = null;
+        if (shortName) {
+            first = ping(host);
+            if (first.up) {
+                return Report.up(first.text);
+            }
         }
         InetAddress[] found = lookup(host);
         if (!officeName(found)) {
-            return false;
+            return Report.down(join(first == null ? "" : first.text, "Not contacted: the name points outside the office network."));
         }
-        if (!shortName && ping(host)) {
-            return true;
+        Echo second = first;
+        if (!shortName) {
+            second = ping(host);
+            if (second.up) {
+                return Report.up(second.text);
+            }
         }
         if (found == null) {
-            return false;
+            return Report.down(second == null ? "" : second.text);
         }
+        String text = second == null ? "" : second.text;
         int seen = 0;
         for (int i = 0; i < found.length; i++) {
             if (seen >= 4) {
@@ -71,11 +114,41 @@ public final class TniReach {
             if (literal.isEmpty() || !literal.equals(ip.getHostAddress())) {
                 continue;
             }
-            if (ports(ip)) {
-                return true;
+            String open = ports(ip);
+            if (!open.isEmpty()) {
+                return Report.up(join(text, open));
             }
         }
-        return false;
+        return Report.down(text);
+    }
+
+    /**
+     * Tries the names in order and stops at the first answer.
+     * The wait is capped so the page that started the check still receives the result.
+     */
+    public static Report askAll(List<String> targets) {
+        if (targets == null || targets.isEmpty()) {
+            return Report.down("");
+        }
+        long start = System.currentTimeMillis();
+        String text = "";
+        int tried = 0;
+        for (int i = 0; i < targets.size(); i++) {
+            if (tried >= 2 || System.currentTimeMillis() - start > BUDGET_MS) {
+                break;
+            }
+            String target = targets.get(i);
+            if (target == null || target.isEmpty()) {
+                continue;
+            }
+            tried++;
+            Report one = ask(target);
+            text = join(text, one.output());
+            if (one.up()) {
+                return Report.up(clip(text));
+            }
+        }
+        return Report.down(clip(text));
     }
 
     /** Java did not find the name, or at least one answer is on the office network. */
@@ -92,6 +165,28 @@ public final class TniReach {
         return false;
     }
 
+    private static Report address(String literal) {
+        Echo echo = ping(literal);
+        if (echo.up) {
+            return Report.up(echo.text);
+        }
+        try {
+            InetAddress ip = InetAddress.getByName(literal);
+            if (ip == null || !literal.equals(ip.getHostAddress())) {
+                return Report.down(echo.text);
+            }
+            String open = ports(ip);
+            if (!open.isEmpty()) {
+                return Report.up(join(echo.text, open));
+            }
+        } catch (IOException ex) {
+            return Report.down(echo.text);
+        } catch (SecurityException ex) {
+            return Report.down(echo.text);
+        }
+        return Report.down(echo.text);
+    }
+
     private static InetAddress[] lookup(String host) {
         try {
             return InetAddress.getAllByName(host);
@@ -103,38 +198,19 @@ public final class TniReach {
     }
 
     static boolean reachable(String address) {
-        if (!TniAddress.allowed(address)) {
-            return false;
-        }
-        try {
-            InetAddress ip = InetAddress.getByName(address);
-            if (ip == null || !address.equals(ip.getHostAddress())) {
-                return false;
-            }
-            if (ip.isLoopbackAddress() || ip.isAnyLocalAddress() || ip.isLinkLocalAddress() || ip.isMulticastAddress()) {
-                return false;
-            }
-            return probe(ip);
-        } catch (IOException ex) {
-            return false;
-        } catch (SecurityException ex) {
-            return false;
-        }
+        return address(address).up();
     }
 
-    private static boolean probe(InetAddress ip) {
-        if (icmp(ip)) {
-            return true;
+    /** The first open workstation port, as one line, or an empty string. */
+    private static String ports(InetAddress ip) {
+        if (ip == null) {
+            return "";
         }
-        return ports(ip);
-    }
-
-    private static boolean ports(InetAddress ip) {
         for (int port : PORTS) {
             Socket socket = new Socket();
             try {
-                socket.connect(new InetSocketAddress(ip, port), 500);
-                return true;
+                socket.connect(new InetSocketAddress(ip, port), 400);
+                return "TCP " + port + ": open";
             } catch (IOException ignored) {
                 // This port is closed. Another common workstation port may still answer.
             } finally {
@@ -145,7 +221,7 @@ public final class TniReach {
                 }
             }
         }
-        return false;
+        return "";
     }
 
     /**
@@ -161,11 +237,18 @@ public final class TniReach {
         if (literal.isEmpty()) {
             return false;
         }
-        return ping(literal);
+        return ping(literal).up;
     }
 
     /** One ICMP echo. {@code target} is a private address or a host name already checked by {@link TniAddress#station}. */
-    private static boolean ping(String target) {
+    private static Echo ping(String target) {
+        String host = TniAddress.local(target);
+        if (host.isEmpty()) {
+            host = TniAddress.station(target);
+        }
+        if (host.isEmpty()) {
+            return new Echo(false, "");
+        }
         String os = System.getProperty("os.name", "");
         boolean windows = os.toLowerCase(Locale.ROOT).indexOf("win") >= 0;
         List<String> command = new ArrayList<String>();
@@ -181,20 +264,32 @@ public final class TniReach {
             command.add("-W");
             command.add("2");
         }
-        command.add(target);
+        command.add(host);
+        StringBuilder line = new StringBuilder();
+        for (int i = 0; i < command.size(); i++) {
+            if (i > 0) {
+                line.append(' ');
+            }
+            line.append(command.get(i));
+        }
         Process process = null;
+        final StringBuilder captured = new StringBuilder();
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.redirectErrorStream(true);
             process = builder.start();
             final java.io.InputStream output = process.getInputStream();
+            final Charset charset = pingCharset(windows);
             Thread drain = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    byte[] buffer = new byte[256];
+                    byte[] buffer = new byte[512];
                     try {
-                        while (output.read(buffer) >= 0) {
-                            // Ping writes a few lines. Leaving them unread would stall the process.
+                        int read;
+                        while ((read = output.read(buffer)) >= 0) {
+                            if (read > 0) {
+                                captured.append(new String(buffer, 0, read, charset));
+                            }
                         }
                     } catch (IOException ignored) {
                         // The process has already finished.
@@ -203,23 +298,63 @@ public final class TniReach {
             }, "tni-ping");
             drain.setDaemon(true);
             drain.start();
-            boolean done = process.waitFor(3000L, TimeUnit.MILLISECONDS);
+            boolean done = process.waitFor(2500L, TimeUnit.MILLISECONDS);
             if (!done) {
                 process.destroy();
-                return false;
             }
-            return process.exitValue() == 0;
+            drain.join(500L);
+            String body = captured.toString().replace("\r\n", "\n").replace('\r', '\n').trim();
+            String text = body.isEmpty() ? line.toString() : line + "\n" + body;
+            return new Echo(done && process.exitValue() == 0, text);
         } catch (IOException ex) {
-            return false;
+            return new Echo(false, line.toString());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            return false;
+            return new Echo(false, line.toString());
         } catch (SecurityException ex) {
-            return false;
+            return new Echo(false, line.toString());
         } finally {
             if (process != null) {
                 process.destroy();
             }
+        }
+    }
+
+    private static Charset pingCharset(boolean windows) {
+        if (windows) {
+            try {
+                return Charset.forName("Cp866");
+            } catch (RuntimeException ignored) {
+                // The console page is missing. The platform charset still prints ASCII.
+            }
+        }
+        return Charset.defaultCharset();
+    }
+
+    private static String join(String left, String right) {
+        if (left == null || left.isEmpty()) {
+            return right == null ? "" : right;
+        }
+        if (right == null || right.isEmpty()) {
+            return left;
+        }
+        return left + "\n" + right;
+    }
+
+    private static String clip(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.length() > 8000 ? text.substring(0, 8000) : text;
+    }
+
+    private static final class Echo {
+        private final boolean up;
+        private final String text;
+
+        private Echo(boolean up, String text) {
+            this.up = up;
+            this.text = text == null ? "" : text;
         }
     }
 }

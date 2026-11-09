@@ -53,6 +53,8 @@ public class ModuleSetupDto {
     private Boolean tniAd;
     private Boolean tniSccm;
     private Boolean tniPing;
+    /** Lines {@code KRUL = Крулево}: a host starting with that code is placed on that site. */
+    private String tniSites;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -144,4 +146,6 @@ public class ModuleSetupDto {
     public void setTniSccm(Boolean tniSccm) { this.tniSccm = tniSccm; }
     public Boolean getTniPing() { return tniPing; }
     public void setTniPing(Boolean tniPing) { this.tniPing = tniPing; }
+    public String getTniSites() { return tniSites; }
+    public void setTniSites(String tniSites) { this.tniSites = tniSites; }
 }

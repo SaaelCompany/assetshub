@@ -19,4 +19,7 @@ public interface TniHost {
     void discard(int assetId, String actorKey);
 
     void note(int assetId, String actorKey, String kind, String field, String value);
+
+    /** Writes one reachability check, including the text the ping command printed. */
+    void notePing(int assetId, String actorKey, String host, boolean up, String output);
 }

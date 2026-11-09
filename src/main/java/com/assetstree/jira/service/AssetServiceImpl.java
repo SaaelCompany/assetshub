@@ -3862,6 +3862,9 @@ public class AssetServiceImpl implements AssetService {
                 if (draft != null && draft.getSetup() != null) {
                     ModuleSetupDto current = ModuleSetup.read(row.getOptionList());
                     row.setOptionList(ModuleSetup.write(ModuleSetup.merge(current, draft.getSetup())));
+                    if (draft.getSetup().getTniSites() != null) {
+                        seatProject(project.getKey(), ModuleSetup.read(row.getOptionList()).getTniSites(), user.getKey());
+                    }
                 }
                 row.save();
                 return viewDto(row);
@@ -7456,6 +7459,60 @@ public class AssetServiceImpl implements AssetService {
                 new DBParam("OLD_VALUE", clip(oldValue)),
                 new DBParam("NEW_VALUE", clip(newValue)),
                 new DBParam("CREATED", new Date()));
+    }
+
+    /** The ping text is kept whole. A failure to write it does not hide the check result. */
+    private void recordPing(final int assetId, final String authorKey, final String host, final boolean up, final String output) {
+        final String text = output == null ? "" : (output.length() > 8000 ? output.substring(0, 8000) : output);
+        final String where = host == null ? "" : (host.length() > 255 ? host.substring(0, 255) : host);
+        try {
+            ao().executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    ao().create(AssetActivityEntity.class,
+                            new DBParam("ASSET_ID", Integer.valueOf(assetId)),
+                            new DBParam("AUTHOR_KEY", authorKey == null ? "" : authorKey),
+                            new DBParam("KIND", "ping"),
+                            new DBParam("FIELD_NAME", where),
+                            new DBParam("OLD_VALUE", text),
+                            new DBParam("NEW_VALUE", up ? "up" : "down"),
+                            new DBParam("CREATED", new Date()));
+                    return null;
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.warn("TNI could not record a ping for {}", Integer.valueOf(assetId), ex);
+        }
+    }
+
+    private void seatProject(String projectKey, String rules, String actorKey) {
+        if (rules == null || rules.trim().isEmpty()) {
+            return;
+        }
+        AssetEntity[] rows = assetsIn(projectKey);
+        if (rows == null) {
+            return;
+        }
+        java.util.Map<Integer, String> before = new java.util.HashMap<Integer, String>();
+        for (int i = 0; i < rows.length; i++) {
+            AssetEntity row = rows[i];
+            if (row != null) {
+                before.put(Integer.valueOf(row.getID()), parentName(row.getParentId()));
+            }
+        }
+        TniSeat.apply(ao(), rows, projectKey, rules);
+        for (int i = 0; i < rows.length; i++) {
+            AssetEntity row = rows[i];
+            if (row == null) {
+                continue;
+            }
+            String was = before.get(Integer.valueOf(row.getID()));
+            String now = parentName(row.getParentId());
+            if (now.equals(was == null ? "" : was)) {
+                continue;
+            }
+            recordActivity(row.getID(), actorKey, "move", "", was, now);
+        }
     }
 
     private String clip(String value) {
@@ -14696,20 +14753,15 @@ public class AssetServiceImpl implements AssetService {
         final String shown = TniTarget.shown(targets);
         boolean reached = false;
         boolean checked = false;
+        String printed = "";
         if (touchArmed && armed && !exempt && tniSource(asset.getProjectKey(), "ping") && !targets.isEmpty()) {
             checked = true;
-            for (int i = 0; i < targets.size(); i++) {
-                try {
-                    if (TniReach.station(targets.get(i))) {
-                        reached = true;
-                        break;
-                    }
-                } catch (RuntimeException ex) {
-                    log.warn("TNI could not reach {}", targets.get(i), ex);
-                }
-            }
+            TniReach.Report report = TniReach.askAll(targets);
+            reached = report.up();
+            printed = report.output();
         }
         final boolean up = reached;
+        final String output = printed;
         final boolean didCheck = checked;
         final int id = asset.getID();
         final String projectKey = asset.getProjectKey();
@@ -14757,10 +14809,11 @@ public class AssetServiceImpl implements AssetService {
             }
         });
         if (didCheck) {
-            recordActivity(id, user.getKey(), "ping", shown.isEmpty() ? assetName : shown, "", up ? "up" : "down");
+            recordPing(id, user.getKey(), shown.isEmpty() ? assetName : shown, up, output);
         }
         TniWatchDto dto = tniWatchDto(stored, shown.isEmpty() ? assetName : shown);
         dto.setName(assetName);
+        dto.setReport(output);
         return dto;
     }
 
@@ -14777,18 +14830,9 @@ public class AssetServiceImpl implements AssetService {
         final String assetName = fresh == null || fresh.getName() == null ? asset.getName() : fresh.getName();
         final List<String> targets = tniTargets(asset.getID(), assetName);
         final String shown = TniTarget.shown(targets);
-        boolean reached = false;
-        for (int i = 0; i < targets.size(); i++) {
-            try {
-                if (TniReach.station(targets.get(i))) {
-                    reached = true;
-                    break;
-                }
-            } catch (RuntimeException ex) {
-                log.warn("TNI could not reach {}", targets.get(i), ex);
-            }
-        }
-        final boolean up = reached;
+        TniReach.Report report = TniReach.askAll(targets);
+        final boolean up = report.up();
+        final String output = report.output();
         final int id = asset.getID();
         final String projectKey = asset.getProjectKey();
         final long now = System.currentTimeMillis();
@@ -14828,9 +14872,10 @@ public class AssetServiceImpl implements AssetService {
                 return row;
             }
         });
-        recordActivity(id, user.getKey(), "ping", shown.isEmpty() ? assetName : shown, "", up ? "up" : "down");
+        recordPing(id, user.getKey(), shown.isEmpty() ? assetName : shown, up, output);
         TniWatchDto dto = tniWatchDto(stored, shown.isEmpty() ? assetName : shown);
         dto.setName(assetName);
+        dto.setReport(output);
         return dto;
     }
 
@@ -14910,6 +14955,9 @@ public class AssetServiceImpl implements AssetService {
             }
             created++;
         }
+        ProjectViewEntity view = viewRow(projectKey);
+        String rules = view == null ? "" : ModuleSetup.read(view.getOptionList()).getTniSites();
+        seatProject(projectKey, rules, user == null || user.getKey() == null ? "" : user.getKey());
         ImportResultDto result = new ImportResultDto();
         result.setCreated(created);
         result.setUpdated(updated);
@@ -15433,6 +15481,11 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public void note(int assetId, String actorKey, String kind, String field, String value) {
                 recordActivity(assetId, actorKey, kind, field, "", value);
+            }
+
+            @Override
+            public void notePing(int assetId, String actorKey, String host, boolean up, String output) {
+                recordPing(assetId, actorKey, host, up, output);
             }
 
             @Override

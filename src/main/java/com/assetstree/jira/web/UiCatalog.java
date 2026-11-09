@@ -1146,6 +1146,8 @@ public final class UiCatalog {
             "tniPingExemptHint",
             "actPing",
             "tniWatchHint",
+            "tniSites",
+            "tniSitesHint",
             "tniWatchOn",
             "tniWatchAddress",
             "tniWatchSave",

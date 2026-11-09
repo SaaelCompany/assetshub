@@ -12,7 +12,7 @@ public final class TniText {
     }
 
     /**
-     * A network name such as {@code krul-it.budzdorov.ru} becomes the object name {@code krul-it}.
+     * A network name such as {@code krul-it.budzdorov.ru} becomes the object name {@code KRUL-IT}.
      * Without one, the card keeps the kind and the person.
      */
     public static String name(String kindLabel, String person, String address, String host) {
@@ -28,7 +28,7 @@ public final class TniText {
         return title.isEmpty() ? "TNI" : clip(title);
     }
 
-    /** First label of a DNS name, in lower case. {@code krul-it.budzdorov.ru} is {@code krul-it}. */
+    /** First label of a DNS name, in capitals. {@code krul-it.budzdorov.ru} is {@code KRUL-IT}. */
     public static String shortHost(String host) {
         String clean = TniName.clean(host);
         if (clean.isEmpty()) {
@@ -39,7 +39,7 @@ public final class TniText {
         if (label.isEmpty() || label.length() > 63) {
             return "";
         }
-        return label.toLowerCase(Locale.ROOT);
+        return label.toUpperCase(Locale.ROOT);
     }
 
     /**

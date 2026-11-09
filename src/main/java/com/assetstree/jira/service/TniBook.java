@@ -109,7 +109,7 @@ public final class TniBook {
         }
         TniReach.Probe check = probe == null ? TniReach.LIVE : probe;
         retitleAll(ao, host);
-        sweepWatches(ao, now, check);
+        sweepWatches(ao, host, now, check);
         List<Integer> ids = ao.executeInTransaction(new TransactionCallback<List<Integer>>() {
             @Override
             public List<Integer> doInTransaction() {
@@ -145,13 +145,22 @@ public final class TniBook {
                     continue;
                 }
                 pings++;
-                final boolean reached = reach(check, look);
+                final TniReach.Report report = reachReport(check, look);
+                final boolean reached = report.up();
+                final int assetId = look.assetId;
+                final String hostName = look.address;
+                final String printed = report.output();
                 Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
                     @Override
                     public Outcome doInTransaction() {
                         return finishProbe(ao, host, id.intValue(), reached, now);
                     }
                 });
+                try {
+                    host.notePing(assetId, "", hostName, reached, printed);
+                } catch (RuntimeException ex) {
+                    log.warn("TNI could not record a ping for {}", Integer.valueOf(assetId), ex);
+                }
                 after(ao, host, outcome);
                 continue;
             }
@@ -170,7 +179,7 @@ public final class TniBook {
         return checkedAt <= 0L || now - checkedAt >= TniClock.MIN_GAP;
     }
 
-    private void sweepWatches(ActiveObjects ao, final long now, final TniReach.Probe probe) {
+    private void sweepWatches(ActiveObjects ao, final TniHost host, final long now, final TniReach.Probe probe) {
         List<long[]> due = ao.executeInTransaction(new TransactionCallback<List<long[]>>() {
             @Override
             public List<long[]> doInTransaction() {
@@ -210,8 +219,10 @@ public final class TniBook {
                 continue;
             }
             pings++;
-            final boolean reached = reach(probe, look);
+            final TniReach.Report report = reachReport(probe, look);
+            final boolean reached = report.up();
             final String address = look.address;
+            final int watched = look.assetId;
             ao.executeInTransaction(new TransactionCallback<Void>() {
                 @Override
                 public Void doInTransaction() {
@@ -225,6 +236,11 @@ public final class TniBook {
                     return null;
                 }
             });
+            try {
+                host.notePing(watched, "", address, reached, report.output());
+            } catch (RuntimeException ex) {
+                log.warn("TNI could not record a ping for {}", Integer.valueOf(watched), ex);
+            }
         }
     }
 
@@ -260,9 +276,11 @@ public final class TniBook {
                 continue;
             }
             pings++;
-            final boolean reached = reach(probe, look);
+            final TniReach.Report report = reachReport(probe, look);
+            final boolean reached = report.up();
             final int assetId = look.assetId;
             final String hostName = look.address;
+            final String printed = report.output();
             Outcome outcome = ao.executeInTransaction(new TransactionCallback<Outcome>() {
                 @Override
                 public Outcome doInTransaction() {
@@ -270,7 +288,7 @@ public final class TniBook {
                 }
             });
             try {
-                host.note(assetId, "", "ping", hostName, reached ? "up" : "down");
+                host.notePing(assetId, "", hostName, reached, printed);
             } catch (RuntimeException ex) {
                 log.warn("TNI could not record a ping for {}", Integer.valueOf(assetId), ex);
             }
@@ -582,6 +600,7 @@ public final class TniBook {
         }
         Glance glance = new Glance();
         glance.action = mark.action;
+        glance.assetId = asset.getID();
         glance.targets = targets;
         glance.address = TniTarget.shown(targets);
         return glance;
@@ -708,6 +727,11 @@ public final class TniBook {
             asset.setExternalKey(external(row.getIdentity()));
             if (place != null) {
                 asset.setParentId(place);
+            } else {
+                String site = TniSeat.move(ao, asset, setup.getTniSites(), facts.host);
+                if (!site.isEmpty()) {
+                    host.note(asset.getID(), userKey, "move", "", site);
+                }
             }
             asset.save();
         } else {
@@ -736,6 +760,11 @@ public final class TniBook {
             }
             if (place != null && (asset.getParentId() == null || asset.getParentId().intValue() <= 0)) {
                 asset.setParentId(place);
+            } else if (asset.getParentId() == null || asset.getParentId().intValue() <= 0) {
+                String site = TniSeat.move(ao, asset, setup.getTniSites(), facts.host);
+                if (!site.isEmpty()) {
+                    host.note(asset.getID(), userKey, "move", "", site);
+                }
             }
             asset.setUpdated(new Date(now));
             asset.setUpdatedBy(clip(userKey, 255));
@@ -962,22 +991,25 @@ public final class TniBook {
         return next;
     }
 
-    private boolean reach(TniReach.Probe check, Glance look) {
+    private TniReach.Report reachReport(TniReach.Probe check, Glance look) {
         List<String> targets = look == null || look.targets == null || look.targets.isEmpty()
                 ? (look == null || look.address == null || look.address.isEmpty()
                 ? Collections.<String>emptyList() : Collections.singletonList(look.address))
                 : look.targets;
+        if (check == TniReach.LIVE) {
+            return TniReach.askAll(targets);
+        }
         for (int i = 0; i < targets.size(); i++) {
             String address = targets.get(i);
             try {
                 if (check != null && check.up(address)) {
-                    return true;
+                    return TniReach.Report.up("");
                 }
             } catch (RuntimeException ex) {
                 log.warn("TNI could not reach {}", address, ex);
             }
         }
-        return false;
+        return TniReach.Report.down("");
     }
 
     private List<String> targetsOf(ActiveObjects ao, AssetEntity asset, String saved) {

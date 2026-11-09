@@ -94,22 +94,31 @@ public class TniRulesTest {
         assertEquals("", bridge.seen);
         assertEquals("", bridge.address);
         assertEquals("Phone Ivanov", TniText.name("Phone", "Ivanov", "10.8.0.4"));
-        assertEquals("krul-it", TniText.name("Компьютер", "пользователь Бондаренко Олег Сергеевич",
+        assertEquals("KRUL-IT", TniText.name("Компьютер", "пользователь Бондаренко Олег Сергеевич",
                 "10.8.0.4", "krul-it.budzdorov.ru"));
-        assertEquals("krul-it", TniText.preferred(
+        assertEquals("KRUL-IT", TniText.preferred(
                 "Компьютер пользователь Бондаренко Олег Сергеевич",
                 "Компьютер пользователь Бондаренко Олег Сергеевич",
                 "Компьютер", "пользователь Бондаренко Олег Сергеевич", "10.8.0.4", "KRUL-IT.budzdorov.ru"));
+        assertEquals("KRUL-IT", TniText.preferred("krul-it", "krul-it", "Компьютер", "Иванов",
+                "10.8.0.4", "krul-it.budzdorov.ru"));
         assertEquals("Касса", TniText.preferred("Касса", "Компьютер Иванов", "Компьютер", "Иванов",
                 "10.8.0.4", "krul-it.budzdorov.ru"));
-        assertEquals(java.util.Arrays.asList("krul-it.budzdorov.ru", "krul-it", "10.8.0.4"),
+        assertEquals(java.util.Arrays.asList("krul-it.budzdorov.ru", "KRUL-IT", "10.8.0.4"),
                 TniTarget.list("Компьютер Иванов", "10.8.0.4", "krul-it.budzdorov.ru", ""));
         assertEquals(java.util.Collections.singletonList("KRUL-IT"),
                 TniTarget.list("KRUL-IT", "", "", ""));
-        assertEquals("krul-it", TniTarget.shown(
-                TniTarget.list("krul-it", "10.8.0.4", "krul-it.budzdorov.ru", "")));
+        assertEquals("KRUL-IT", TniTarget.shown(
+                TniTarget.list("KRUL-IT", "10.8.0.4", "krul-it.budzdorov.ru", "")));
         assertEquals("krul-it.budzdorov.ru", TniTarget.shown(
                 TniTarget.list("Компьютер", "10.8.0.4", "krul-it.budzdorov.ru", "")));
+        String sites = TniSites.store("KRUL = Крулево\nMSK=Москва\nKRUL-IT = Кабинет");
+        assertEquals("KRUL = Крулево\nMSK = Москва\nKRUL-IT = Кабинет", TniSites.text(sites));
+        assertEquals("Кабинет", TniSites.match(sites, "krul-it.budzdorov.ru", "KRUL-IT"));
+        assertEquals("Крулево", TniSites.match(sites, "", "KRUL-BUH"));
+        assertEquals("Москва", TniSites.match(sites, "msk-01.budzdorov.ru", ""));
+        assertEquals("", TniSites.match(sites, "", "KRULIT"));
+        assertEquals("", TniSites.match("", "", "KRUL-IT"));
         assertTrue(TniText.owned(card));
         assertFalse(TniText.owned("A note written by a person"));
     }

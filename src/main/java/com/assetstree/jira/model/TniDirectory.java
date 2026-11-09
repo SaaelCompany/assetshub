@@ -207,6 +207,10 @@ public final class TniDirectory {
                                        String domain, String dn, String description, boolean disabled, String host) {
         String id = clip(plain(identity), 100);
         String label = clip(plain(name), 255);
+        String station = TniText.shortHost(label);
+        if (!station.isEmpty()) {
+            label = station;
+        }
         if (label.isEmpty()) {
             label = clip(id, 255);
         }

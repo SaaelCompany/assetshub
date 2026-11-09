@@ -70,6 +70,7 @@ public final class ModuleSetup {
         setup.setTniAd(Boolean.valueOf(flag(values.get("tad"))));
         setup.setTniSccm(Boolean.valueOf(flag(values.get("tscc"))));
         setup.setTniPing(Boolean.valueOf(flag(values.get("tping"))));
+        setup.setTniSites(TniSites.text(values.get("tsite")));
         return setup;
     }
 
@@ -124,6 +125,7 @@ public final class ModuleSetup {
         append(stored, "tad", on(value.getTniAd()));
         append(stored, "tscc", on(value.getTniSccm()));
         append(stored, "tping", on(value.getTniPing()));
+        append(stored, "tsite", TniSites.store(value.getTniSites()));
         return stored.toString();
     }
 
@@ -364,6 +366,7 @@ public final class ModuleSetup {
         merged.setTniAd(incoming.getTniAd() != null ? incoming.getTniAd() : base.getTniAd());
         merged.setTniSccm(incoming.getTniSccm() != null ? incoming.getTniSccm() : base.getTniSccm());
         merged.setTniPing(incoming.getTniPing() != null ? incoming.getTniPing() : base.getTniPing());
+        merged.setTniSites(incoming.getTniSites() != null ? incoming.getTniSites() : base.getTniSites());
         return merged;
     }
 
