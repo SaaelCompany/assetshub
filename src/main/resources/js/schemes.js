@@ -274,6 +274,7 @@
             } catch (error) { /* the default ink still works */ }
         }
         if (session.inkFill == null) session.inkFill = true;
+        var palette = el('div', 'asset-tree-scheme-palette');
         var swatches = el('div', 'asset-tree-scheme-swatches');
         var inkColors = ['#172b4d', '#de350b', '#ff8b00', '#ffab00', '#36b37e', '#00b8d9', '#0052cc', '#6554c0', '#ffe380'];
         function rememberInk() {
@@ -320,8 +321,9 @@
         });
         fillInk.appendChild(fillBox);
         fillInk.appendChild(document.createTextNode(api.t('schemeFill')));
-        tools.appendChild(swatches);
-        tools.appendChild(fillInk);
+        palette.appendChild(swatches);
+        palette.appendChild(fillInk);
+        tools.appendChild(palette);
         var scanFile = el('input');
         scanFile.type = 'file';
         scanFile.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';

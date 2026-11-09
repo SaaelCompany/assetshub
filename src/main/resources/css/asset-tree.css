@@ -13473,25 +13473,56 @@ button.asset-tree-attach-remove {
     width: 100%;
 }
 
-.asset-tree-scheme-swatches {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    width: 100%;
+.asset-tree-scheme-palette {
+    display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
-    margin-top: 6px;
+    gap: 8px;
+    width: auto;
+    max-width: 100%;
+    margin: 2px 2px 2px 6px;
+    padding: 3px 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+.asset-tree-scheme-swatches {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 3px;
+    width: auto;
+    align-items: center;
+    margin: 0;
+}
+
+.asset-tree-scheme-dock.is-left .asset-tree-scheme-palette,
+.asset-tree-scheme-dock.is-right .asset-tree-scheme-palette {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    margin: 6px 0 2px;
+    box-sizing: border-box;
+}
+
+.asset-tree-scheme-dock.is-left .asset-tree-scheme-swatches,
+.asset-tree-scheme-dock.is-right .asset-tree-scheme-swatches {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
 }
 
 #asset-tree-app .asset-tree-scheme-swatch {
-    width: 18px;
-    height: 18px;
-    min-width: 18px;
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
     margin: 0;
     padding: 0;
     border: 1px solid rgba(9, 30, 66, 0.28);
-    border-radius: 3px;
+    border-radius: 2px;
     box-shadow: none;
     cursor: pointer;
+    vertical-align: middle;
 }
 
 #asset-tree-app button.asset-tree-scheme-swatch.is-on {
@@ -13500,20 +13531,26 @@ button.asset-tree-attach-remove {
 }
 
 #asset-tree-app input.asset-tree-scheme-swatch {
-    width: 22px;
-    height: 22px;
+    width: 16px;
+    height: 16px;
     padding: 0;
     background: #fff;
 }
 
 .asset-tree-scheme-ink {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    width: 100%;
-    margin: 4px 0 2px;
+    gap: 4px;
+    width: auto;
+    margin: 0;
     color: #42526e;
     font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.asset-tree-scheme-ink input {
+    margin: 0;
 }
 
 .asset-tree-scheme-library-row {
