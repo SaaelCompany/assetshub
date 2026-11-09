@@ -102,10 +102,14 @@ public class TniRulesTest {
                 "Компьютер", "пользователь Бондаренко Олег Сергеевич", "10.8.0.4", "KRUL-IT.budzdorov.ru"));
         assertEquals("Касса", TniText.preferred("Касса", "Компьютер Иванов", "Компьютер", "Иванов",
                 "10.8.0.4", "krul-it.budzdorov.ru"));
-        assertEquals(java.util.Arrays.asList("10.8.0.4", "krul-it.budzdorov.ru", "krul-it"),
+        assertEquals(java.util.Arrays.asList("krul-it.budzdorov.ru", "krul-it", "10.8.0.4"),
                 TniTarget.list("Компьютер Иванов", "10.8.0.4", "krul-it.budzdorov.ru", ""));
-        assertEquals("krul-it.budzdorov.ru", TniTarget.shown(
+        assertEquals(java.util.Collections.singletonList("KRUL-IT"),
+                TniTarget.list("KRUL-IT", "", "", ""));
+        assertEquals("krul-it", TniTarget.shown(
                 TniTarget.list("krul-it", "10.8.0.4", "krul-it.budzdorov.ru", "")));
+        assertEquals("krul-it.budzdorov.ru", TniTarget.shown(
+                TniTarget.list("Компьютер", "10.8.0.4", "krul-it.budzdorov.ru", "")));
         assertTrue(TniText.owned(card));
         assertFalse(TniText.owned("A note written by a person"));
     }

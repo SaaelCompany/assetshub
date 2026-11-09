@@ -12,12 +12,14 @@ public final class TniTarget {
 
     public static List<String> list(String assetName, String address, String host, String saved) {
         LinkedHashSet<String> found = new LinkedHashSet<String>();
-        add(found, TniAddress.local(address));
-        add(found, TniAddress.local(saved));
+        add(found, TniAddress.station(assetName));
         add(found, TniAddress.station(host));
         add(found, TniAddress.station(TniText.shortHost(host)));
-        add(found, TniAddress.station(saved));
-        add(found, TniAddress.station(assetName));
+        if (TniAddress.local(saved).isEmpty()) {
+            add(found, TniAddress.station(saved));
+        }
+        add(found, TniAddress.local(address));
+        add(found, TniAddress.local(saved));
         List<String> targets = new ArrayList<String>();
         for (String item : found) {
             if (targets.size() >= 4) {

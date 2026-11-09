@@ -20,7 +20,7 @@ public final class TniReach {
     public static final Probe LIVE = new Probe() {
         @Override
         public boolean up(String address) {
-            return reachable(address);
+            return station(address);
         }
     };
 
@@ -30,8 +30,10 @@ public final class TniReach {
     }
 
     /**
-     * Checks a host name or a private address. DNS is asked on every check.
-     * A name that resolves outside the local ranges is not contacted.
+     * Checks a host name or a private address. A short name such as {@code KRUL-IT}
+     * is handed to the operating-system ping, which uses the server DNS suffix and
+     * NetBIOS. Java often cannot resolve that name by itself. A name that Java
+     * resolves only to a public address is not contacted.
      */
     public static boolean station(String name) {
         String host = TniAddress.station(name);
@@ -41,13 +43,16 @@ public final class TniReach {
         if (!TniAddress.local(host).isEmpty()) {
             return reachable(host);
         }
-        InetAddress[] found;
-        try {
-            found = InetAddress.getAllByName(host);
-        } catch (IOException ex) {
+        boolean shortName = host.indexOf('.') < 0;
+        if (shortName && ping(host)) {
+            return true;
+        }
+        InetAddress[] found = lookup(host);
+        if (!officeName(found)) {
             return false;
-        } catch (SecurityException ex) {
-            return false;
+        }
+        if (!shortName && ping(host)) {
+            return true;
         }
         if (found == null) {
             return false;
@@ -66,11 +71,35 @@ public final class TniReach {
             if (literal.isEmpty() || !literal.equals(ip.getHostAddress())) {
                 continue;
             }
-            if (probe(ip)) {
+            if (ports(ip)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Java did not find the name, or at least one answer is on the office network. */
+    static boolean officeName(InetAddress[] found) {
+        if (found == null || found.length == 0) {
+            return true;
+        }
+        for (int i = 0; i < found.length; i++) {
+            InetAddress ip = found[i];
+            if (ip != null && !TniAddress.local(ip.getHostAddress()).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static InetAddress[] lookup(String host) {
+        try {
+            return InetAddress.getAllByName(host);
+        } catch (IOException ex) {
+            return null;
+        } catch (SecurityException ex) {
+            return null;
+        }
     }
 
     static boolean reachable(String address) {
@@ -97,6 +126,10 @@ public final class TniReach {
         if (icmp(ip)) {
             return true;
         }
+        return ports(ip);
+    }
+
+    private static boolean ports(InetAddress ip) {
         for (int port : PORTS) {
             Socket socket = new Socket();
             try {
@@ -128,6 +161,11 @@ public final class TniReach {
         if (literal.isEmpty()) {
             return false;
         }
+        return ping(literal);
+    }
+
+    /** One ICMP echo. {@code target} is a private address or a host name already checked by {@link TniAddress#station}. */
+    private static boolean ping(String target) {
         String os = System.getProperty("os.name", "");
         boolean windows = os.toLowerCase(Locale.ROOT).indexOf("win") >= 0;
         List<String> command = new ArrayList<String>();
@@ -136,14 +174,14 @@ public final class TniReach {
             command.add("-n");
             command.add("1");
             command.add("-w");
-            command.add("1000");
+            command.add("2000");
         } else {
             command.add("-c");
             command.add("1");
             command.add("-W");
-            command.add("1");
+            command.add("2");
         }
-        command.add(literal);
+        command.add(target);
         Process process = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
@@ -165,7 +203,7 @@ public final class TniReach {
             }, "tni-ping");
             drain.setDaemon(true);
             drain.start();
-            boolean done = process.waitFor(1500L, TimeUnit.MILLISECONDS);
+            boolean done = process.waitFor(3000L, TimeUnit.MILLISECONDS);
             if (!done) {
                 process.destroy();
                 return false;
