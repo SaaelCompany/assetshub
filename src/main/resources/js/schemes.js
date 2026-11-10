@@ -3995,6 +3995,7 @@
             var sections = [
                 { id: 'own', title: api.t('schemeLibOwn'), packs: [] },
                 { id: 'net', title: api.t('schemeLibNet'), packs: [] },
+                { id: 'plant', title: api.t('schemeLibPlant'), packs: [] },
                 { id: 'fur', title: api.t('schemeLibFur'), packs: [] },
                 { id: 'base', title: api.t('schemeLibBasic'), packs: [] }
             ];
@@ -4028,7 +4029,7 @@
             readStoredLibraries().forEach(function (pack) { addPack('own', pack); });
             builtinLibraries().forEach(function (pack) {
                 var id = String(pack && pack.id || '');
-                addPack(id.indexOf('lib-fur') === 0 ? 'fur' : (id.indexOf('lib-') === 0 ? 'net' : 'own'), pack);
+                addPack(id.indexOf('lib-fur') === 0 ? 'fur' : (id.indexOf('lib-heat') === 0 || id.indexOf('lib-scs') === 0 || id.indexOf('lib-el') === 0 ? 'plant' : (id.indexOf('lib-') === 0 ? 'net' : 'own')), pack);
             });
             var loose = [];
             var customId;

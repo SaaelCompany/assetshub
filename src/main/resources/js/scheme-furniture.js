@@ -90,7 +90,8 @@
         parts.push(rect(x, y, w, h, INK, WOODF, 0.35));
         for (i = 0; i < count; i++) {
             if (i) parts.push(line(x, y + i * row, x + w, y + i * row, INK, 0.22));
-            parts.push(oval(x + w / 2 - 2.2, y + i * row + row / 2 - 1.5, 4.4, 3, MET, STEEL, 0.12));
+            if (row > 8) parts.push(rect(x + 2.4, y + i * row + 1.8, w - 4.8, row - 3.6, WOOD, '', 0.12));
+            parts.push(rect(x + w / 2 - 5, y + i * row + row / 2 - 1.2, 10, 2.4, INK, STEEL, 0.18));
         }
     }
 
@@ -149,8 +150,13 @@
     function quilt(parts, x, y, w, h) {
         var i;
         parts.push(rect(x, y, w, h, INK, WHITE, 0.16));
+        parts.push(rect(x + 1.4, y + 1.4, w - 2.8, h - 2.8, MET, '', 0.12));
         for (i = 1; i < 4; i++) parts.push(line(x + 1, y + h * i / 4, x + w - 1, y + h * i / 4, MET, 0.45));
         for (i = 1; i < 3; i++) parts.push(line(x + w * i / 3, y + 1, x + w * i / 3, y + h - 1, MET, 0.45));
+        var j;
+        for (i = 1; i < 4; i++) {
+            for (j = 1; j < 3; j++) parts.push(oval(x + w * j / 3 - 1.2, y + h * i / 4 - 1.2, 2.4, 2.4, MET, FAB2, 0.08));
+        }
     }
 
     function buttons(parts, x, y, w, h, cols, rows) {
@@ -192,10 +198,15 @@
             parts.push(line(x + cw * 0.35, 4, x + cw * 0.35, back - 4, FAB2, 0.12));
             parts.push(line(x + cw * 0.65, 4, x + cw * 0.65, back - 4, FAB2, 0.12));
             parts.push(rect(x, back + 4, cw, d - back - 8, INK, WHITE, 0.22));
-            parts.push(line(x + 2, back + (d - back) * 0.62, x + cw - 2, back + (d - back) * 0.62, MET, 0.12));
-            parts.push(line(x + 3, d - 7, x + cw - 3, d - 7, FAB2, 0.18));
+            parts.push(rect(x + 2.2, back + 6.4, Math.max(4, cw - 4.4), Math.max(4, d - back - 16), FAB2, '', 0.18));
+            parts.push(line(x + 2, back + (d - back) * 0.62, x + cw - 2, back + (d - back) * 0.62, MET, 0.16));
+            parts.push(rect(x + 3, d - 9, Math.max(4, cw - 6), 3, INK, WOOD2, 0.14));
             buttons(parts, x + 4, back + 8, cw - 8, Math.max(10, (d - back) * 0.42), 2, 2);
         }
+        parts.push(oval(2, back + 2, arm - 4, 12, INK, WHITE, 0.14));
+        parts.push(oval(w - arm + 2, back + 2, arm - 4, 12, INK, WHITE, 0.14));
+        parts.push(rect(2, d - 5, 6, 4, INK, WOOD, 0.16));
+        parts.push(rect(w - 8, d - 5, 6, 4, INK, WOOD, 0.16));
         return box(w, d, parts);
     }
 
@@ -272,9 +283,10 @@
             parts.push(rect(0, 0, w, d, INK, WOODF, 0.85));
             parts.push(rect(3, 3, w - 6, d - 6, WOOD, '', 0.22));
             if (w > 40) {
-                parts.push(line(w * 0.33, 6, w * 0.33, d - 6, WOOD, 0.12));
-                parts.push(line(w * 0.66, 6, w * 0.66, d - 6, WOOD, 0.12));
+                parts.push(line(w * 0.33, 6, w * 0.33, d - 6, WOOD, 0.16));
+                parts.push(line(w * 0.66, 6, w * 0.66, d - 6, WOOD, 0.16));
             }
+            if (w > 50 && d > 28) parts.push(rect(w / 2 - 2.4, 8, 4.8, d - 16, INK, WOOD2, 0.16));
         }
         if (shape === 'leaf') {
             parts.push(line(w * 0.33, 4, w * 0.33, d - 4, AMBER, 0.28));
@@ -339,7 +351,9 @@
             var x = i * leaf;
             if (i) parts.push(line(x, 3, x, d - 2, INK, 0.28));
             panel(parts, x + 4, 4, leaf - 8, d - 8);
-            parts.push(oval(i % 2 === 0 ? x + leaf - 7 : x + 4, d * 0.55, 2.6, 5, MET, STEEL, 0.14));
+            parts.push(rect(i % 2 === 0 ? x + 3 : x + leaf - 5, 8, 2.2, 6, MET, STEEL, 0.1));
+            parts.push(rect(i % 2 === 0 ? x + 3 : x + leaf - 5, d - 16, 2.2, 6, MET, STEEL, 0.1));
+            parts.push(rect(i % 2 === 0 ? x + leaf - 8 : x + 4, d * 0.52, 4, 8, INK, STEEL, 0.16));
             if (i % 2 === 0) swing(parts, x, d, leaf - 0.8, 0, Math.PI / 2);
             else swing(parts, x + leaf, d, leaf - 0.8, Math.PI, Math.PI / 2);
         }
@@ -404,10 +418,11 @@
     function mirror(w, d, tilt) {
         var parts = [];
         if (tilt) {
-            parts.push(line(0, d, w, d * 0.42, INK, 0.7));
-            parts.push(line(w, d * 0.42, w, d, INK, 0.7));
-            parts.push(line(0, d, w, d, INK, 0.7));
-            parts.push(rect(4, d * 0.5, w - 8, d * 0.42, INK, GLASS, 0.3));
+            wallLine(parts, w);
+            parts.push(rect(2, 4, w - 4, 5, INK, GLASS, 0.4));
+            parts.push(line(8, 0.6, 8, 4, MET, 0.3));
+            parts.push(line(w - 8, 0.6, w - 8, 4, MET, 0.3));
+            parts.push(rect(w / 2 - 8, d - 7, 16, 7, INK, MET, 0.22));
         } else {
             parts.push(rect(0, 0, w, d, INK, GLASS, 0.55));
             parts.push(line(3, 3, w - 6, d - 3, '#4c9aff', 0.16));
@@ -417,9 +432,10 @@
     }
 
     function floorMirror(w, d) {
-        var parts = [rect(w * 0.28, 0, w * 0.44, d, INK, GLASS, 0.5)];
-        parts.push(line(w * 0.34, 4, w * 0.66, d - 8, '#4c9aff', 0.16));
-        parts.push(rect(0, d - 8, w, 8, INK, WOODF, 0.35));
+        var parts = [rect(w * 0.2, d - 12, w * 0.6, 12, INK, WOODF, 0.3)];
+        parts.push(rect(w / 2 - 3, 6, 6, Math.max(4, d - 18), INK, MET, 0.22));
+        parts.push(rect(2, 0, w - 4, 5, INK, GLASS, 0.4));
+        parts.push(line(6, 2.4, w - 6, 2.4, '#4c9aff', 0.16));
         return box(w, d, parts);
     }
 
@@ -464,10 +480,15 @@
         var w = 146;
         var d = 78;
         var parts = [];
-        parts.push(rect(0, 28, w, 50, INK, TILE, 0.45));
-        parts.push(rect(12, 0, w - 24, 52, INK, '#4a342c', 0.6));
-        parts.push(rect(32, 12, w - 64, 32, INK, '#2c211c', 0.35));
-        parts.push(oval(w / 2 - 10, 30, 20, 12, AMBER, FIRE, 0.16));
+        var i;
+        wallLine(parts, w);
+        parts.push(rect(0, 8, w, d - 8, INK, TILE, 0.5));
+        parts.push(rect(18, 8, w - 36, 28, INK, '#4a342c', 0.45));
+        parts.push(rect(28, 14, w - 56, 16, INK, '#2c211c', 0.3));
+        parts.push(oval(w / 2 - 16, 16, 14, 8, AMBER, FIRE, 0.14));
+        parts.push(oval(w / 2 + 2, 18, 12, 7, AMBER, FIRE, 0.12));
+        parts.push(line(24, 36, w - 24, 36, MET, 0.25));
+        for (i = 0; i < 5; i++) parts.push(line(30 + i * 18, 32, 30 + i * 18, 40, MET, 0.16));
         return box(w, d, parts);
     }
 
@@ -743,7 +764,9 @@
         var parts = [rect(0, 0, w, d, INK, WOODF, 0.85)];
         parts.push(rect(3, 3, w - 6, d - 6, WOOD, '', 0.2));
         parts.push(rect(10, d - 12, w - 20, 6, WOOD, WOOD2, 0.14));
-        if (w > 70) parts.push(line(w * 0.5, 8, w * 0.5, d - 16, WOOD, 0.1));
+        parts.push(rect(8, d * 0.38, Math.min(36, w * 0.28), 7, INK, STEEL, 0.12));
+        parts.push(oval(w * 0.62, 5, 7, 7, INK, DARK, 0.14));
+        if (w > 70) parts.push(line(w * 0.5, 8, w * 0.5, d - 16, WOOD, 0.14));
         legs(parts, 0, 0, w, d, 5, 5);
         return box(w, d, parts);
     }
@@ -876,6 +899,7 @@
 
     function sideChair(w, d, arms, tablet) {
         var parts = [rect(w * 0.14, 10, w * 0.72, d - 18, INK, arms ? FABF : WHITE, 0.55)];
+        parts.push(rect(w * 0.22, 14, w * 0.56, Math.max(6, d - 30), FAB2, '', 0.16));
         parts.push(rect(w * 0.12, 0, w * 0.76, 9, INK, FAB2, 0.4));
         parts.push(line(w * 0.32, 1, w * 0.32, 8, WOOD, 0.16));
         parts.push(line(w * 0.5, 1, w * 0.5, 8, WOOD, 0.16));
@@ -921,41 +945,45 @@
             parts.push(oval(w * 0.55, d * 0.5, 3, 3, '#0747a6', '#0747a6', 0.08));
         }
         if (kind === 'interactive') {
-            parts.push(rect(8, 3, w - 16, d - 8, '#4c9aff', '', 0.16));
-            parts.push(rect(w / 2 - 16, d + 2, 8, 18, INK, MET, 0.2));
-            parts.push(rect(w / 2 + 8, d + 2, 8, 18, INK, MET, 0.2));
-            return box(w, d + 20, parts);
+            parts.push(rect(4, 2, w - 8, d - 6, '#4c9aff', '', 0.18));
+            parts.push(oval(w - 8, d / 2 - 1.5, 3, 3, INK, GREEN, 0.1));
         }
         return box(w, d + 1, parts);
     }
 
     function flipchart() {
         var w = 78;
-        var d = 96;
-        var parts = [rect(8, 0, 62, 58, INK, WHITE, 0.5)];
-        parts.push(line(14, 10, 64, 10, MET, 0.16));
-        parts.push(line(14, 18, 50, 18, MET, 0.14));
-        parts.push(line(39, 58, 18, d - 4, MET, 0.35));
-        parts.push(line(39, 58, 60, d - 4, MET, 0.35));
-        parts.push(line(39, 58, 39, d - 2, MET, 0.35));
-        parts.push(rect(12, 54, 54, 4, INK, WOOD2, 0.16));
+        var d = 70;
+        var parts = [rect(8, 0, 62, 7, INK, WHITE, 0.5)];
+        parts.push(line(14, 2, 64, 2, MET, 0.2));
+        parts.push(line(14, 5, 48, 5, MET, 0.14));
+        parts.push(oval(6, 58, 10, 10, INK, DARK, 0.2));
+        parts.push(oval(62, 58, 10, 10, INK, DARK, 0.2));
+        parts.push(oval(34, 16, 10, 10, INK, DARK, 0.2));
+        parts.push(line(39, 7, 11, 62, MET, 0.32));
+        parts.push(line(39, 7, 67, 62, MET, 0.32));
+        parts.push(line(39, 7, 39, 20, MET, 0.32));
         return box(w, d, parts);
     }
 
     function easel() {
-        var w = 70;
-        var d = 84;
-        var parts = [rect(14, 0, 42, 50, INK, WHITE, 0.45)];
-        parts.push(line(35, 50, 10, d - 2, WOOD, 0.35));
-        parts.push(line(35, 50, 60, d - 2, WOOD, 0.35));
-        parts.push(line(35, 40, 35, d - 6, WOOD, 0.3));
+        var w = 64;
+        var d = 70;
+        var parts = [rect(12, 0, 40, 6, INK, WHITE, 0.45)];
+        parts.push(oval(4, 58, 10, 10, INK, WOOD, 0.2));
+        parts.push(oval(50, 58, 10, 10, INK, WOOD, 0.2));
+        parts.push(oval(27, 14, 10, 10, INK, WOOD, 0.2));
+        parts.push(line(32, 6, 9, 62, WOOD, 0.32));
+        parts.push(line(32, 6, 55, 62, WOOD, 0.32));
+        parts.push(line(32, 6, 32, 18, WOOD, 0.3));
         return box(w, d, parts);
     }
 
     function projScreen(w) {
-        var d = 28;
-        var parts = [rect(0, 0, w, 10, INK, STEEL, 0.45)];
-        parts.push(rect(6, 10, w - 12, 16, INK, WHITE, 0.25));
+        var d = 14;
+        var parts = [rect(0, 0, w, 6, INK, STEEL, 0.45)];
+        parts.push(rect(4, 6, w - 8, 4, INK, WHITE, 0.25));
+        parts.push(line(8, 8, w - 8, 8, MET, 0.14));
         return box(w, d, parts);
     }
 
@@ -1216,11 +1244,12 @@
     }
 
     function mannequin() {
-        var parts = [oval(14, 0, 18, 16, INK, FAB2, 0.35)];
-        parts.push(oval(6, 14, 34, 18, INK, FABF, 0.4));
-        parts.push(line(8, 22, 0, 32, INK, 0.3));
-        parts.push(line(38, 22, 46, 32, INK, 0.3));
-        return box(46, 36, parts);
+        var parts = [oval(15, 0, 16, 16, INK, FAB2, 0.3)];
+        parts.push(oval(8, 14, 30, 14, INK, FABF, 0.35));
+        parts.push(oval(16, 26, 14, 8, INK, FAB2, 0.2));
+        parts.push(oval(12, 34, 6, 8, INK, DARK, 0.14));
+        parts.push(oval(28, 34, 6, 8, INK, DARK, 0.14));
+        return box(46, 42, parts);
     }
 
     function gymBench(w, d) {
@@ -1279,9 +1308,8 @@
         var w = 150;
         var d = 96;
         var parts = [rect(0, 20, w, 16, INK, DARK, 0.4)];
-        parts.push(rect(w - 36, 0, 28, 70, INK, STEEL, 0.4));
-        var i;
-        for (i = 0; i < 5; i++) parts.push(rect(w - 30, 8 + i * 10, 16, 6, INK, DARK, 0.12));
+        parts.push(rect(w - 36, 4, 28, 28, INK, STEEL, 0.4));
+        parts.push(rect(w - 30, 10, 16, 16, INK, DARK, 0.16));
         parts.push(rect(24, 40, 36, 28, INK, FABF, 0.3));
         parts.push(oval(70, 28, 22, 22, INK, STEEL, 0.25));
         return box(w, d, parts);
@@ -1347,18 +1375,98 @@
         return box(42, 42, parts);
     }
 
+    function toiletPlan(kind) {
+        var wall = kind === 'wall';
+        var compact = kind === 'compact';
+        var w = wall ? 38 : 40;
+        var d = wall ? 58 : (compact ? 76 : 70);
+        var bowlY = wall ? 6 : (compact ? 20 : 16);
+        var bowlH = wall ? 42 : 44;
+        var tank = compact ? 20 : 18;
+        var parts = [];
+        wallLine(parts, w);
+        if (wall) {
+            parts.push(rect(6, 1, 26, 6, INK, STEEL, 0.4));
+            parts.push(oval(10, 2, 4, 3, INK, MET, 0.12));
+            parts.push(oval(24, 2, 4, 3, INK, MET, 0.12));
+        } else {
+            parts.push(rect(3, 1, 34, tank, INK, WHITE, 0.7));
+            parts.push(rect(6, 3, 28, tank - 6, MET, STEEL, 0.14));
+            parts.push(line(8, 8, 32, 8, MET, 0.22));
+            parts.push(oval(17, 4, 6, 5, INK, MET, 0.16));
+            parts.push(oval(8, 14, 3.4, 3.4, INK, MET, 0.1));
+            parts.push(oval(28.6, 14, 3.4, 3.4, INK, MET, 0.1));
+        }
+        parts.push(oval(2, bowlY, w - 4, bowlH, INK, WHITE, 0.75));
+        parts.push(oval(7, bowlY + 6, w - 14, bowlH - 14, INK, '', 0.5));
+        parts.push(oval(11, bowlY + 12, w - 22, bowlH - 24, INK, GLASS, 0.28));
+        parts.push(oval(w / 2 - 3, bowlY + bowlH * 0.42, 6, 8, MET, '', 0.16));
+        parts.push(rect(w / 2 - 5, bowlY + bowlH - 4, 10, 7, INK, WHITE, 0.16));
+        parts.push(oval(w / 2 - 3, d - 7, 6, 5, INK, STEEL, 0.14));
+        return box(w, d, parts);
+    }
+
     function toilet() {
-        var w = 40;
-        var d = 72;
-        var parts = [rect(3, 0, 34, 18, INK, WHITE, 0.55)];
-        parts.push(oval(2, 16, 36, 50, INK, WHITE, 0.6));
-        parts.push(oval(8, 28, 24, 30, INK, GLASS, 0.2));
-        parts.push(oval(16, 38, 8, 10, MET, '', 0.12));
-        parts.push(line(8, 7, 32, 7, MET, 0.12));
-        parts.push(oval(17, 2, 6, 4, MET, STEEL, 0.1));
-        parts.push(line(10, 20, 15, 26, MET, 0.14));
-        parts.push(line(30, 20, 25, 26, MET, 0.14));
-        parts.push(rect(12, 62, 16, 7, INK, WHITE, 0.18));
+        return toiletPlan('floor');
+    }
+
+    function faucet(kind) {
+        var parts = [];
+        var w;
+        var d;
+        if (kind === 'kitchen') {
+            w = 18;
+            d = 30;
+            parts.push(oval(3, 14, 12, 12, INK, STEEL, 0.35));
+            parts.push(oval(6, 17, 6, 6, MET, '', 0.16));
+            parts.push(rect(7, 2, 4, 16, INK, MET, 0.28));
+            parts.push(oval(5, 0, 8, 7, INK, STEEL, 0.22));
+            parts.push(oval(1, 16, 5, 5, INK, MET, 0.14));
+            parts.push(oval(12, 16, 5, 5, INK, MET, 0.14));
+        } else if (kind === 'bath') {
+            w = 36;
+            d = 16;
+            parts.push(rect(0, 4, w, 8, INK, STEEL, 0.45));
+            parts.push(oval(4, 5, 6, 6, INK, MET, 0.16));
+            parts.push(oval(w - 10, 5, 6, 6, INK, MET, 0.16));
+            parts.push(rect(w / 2 - 3, 0, 6, 8, INK, MET, 0.28));
+            parts.push(oval(w / 2 - 4, 0, 8, 5, INK, STEEL, 0.16));
+        } else if (kind === 'shower') {
+            w = 16;
+            d = 24;
+            parts.push(oval(2, 4, 12, 12, INK, STEEL, 0.35));
+            parts.push(rect(6, 0, 4, 8, INK, MET, 0.22));
+            parts.push(oval(5, 7, 6, 6, MET, '', 0.16));
+            parts.push(arc(8, 14, 6, 0.3, Math.PI - 0.3, 8, MET, 0.24));
+            parts.push(oval(2, 16, 5, 5, INK, STEEL, 0.14));
+        } else if (kind === 'hose') {
+            w = 18;
+            d = 28;
+            parts.push(rect(2, 6, 14, 8, INK, STEEL, 0.32));
+            parts.push(oval(4, 7, 5, 6, INK, MET, 0.14));
+            parts.push(oval(10, 7, 5, 6, INK, MET, 0.14));
+            parts.push(rect(7, 0, 4, 8, INK, MET, 0.24));
+            parts.push(oval(4, 14, 10, 8, INK, STEEL, 0.2));
+            parts.push(line(9, 18, 9, 24, MET, 0.22));
+            parts.push(oval(5, 21, 8, 6, INK, MET, 0.14));
+        } else if (kind === 'wall') {
+            w = 14;
+            d = 22;
+            wallLine(parts, w);
+            parts.push(rect(3, 2, 8, 8, INK, STEEL, 0.32));
+            parts.push(oval(4, 3, 6, 5, INK, MET, 0.14));
+            parts.push(rect(5, 8, 4, 9, INK, MET, 0.26));
+            parts.push(oval(3, 15, 8, 5, INK, STEEL, 0.16));
+        } else {
+            w = 20;
+            d = 24;
+            parts.push(oval(4, 8, 12, 12, INK, STEEL, 0.35));
+            parts.push(oval(7, 11, 6, 6, MET, '', 0.14));
+            parts.push(oval(1, 10, 5, 5, INK, MET, 0.16));
+            parts.push(oval(14, 10, 5, 5, INK, MET, 0.16));
+            parts.push(rect(8, 1, 4, 12, INK, MET, 0.28));
+            parts.push(oval(6, 0, 8, 5, INK, STEEL, 0.18));
+        }
         return box(w, d, parts);
     }
 
@@ -1375,9 +1483,10 @@
         var parts = [rect(0, 0, w, d, INK, WHITE, 0.65)];
         wallLine(parts, w);
         parts.push(oval(8, 12, w - 16, d - 22, INK, GLASS, 0.25));
-        parts.push(oval(w / 2 - 5, 4, 10, 8, MET, STEEL, 0.14));
-        parts.push(line(w / 2 - 12, 7, w / 2 - 6, 7, MET, 0.16));
-        parts.push(line(w / 2 + 6, 7, w / 2 + 12, 7, MET, 0.16));
+        parts.push(rect(w / 2 - 2, 1, 4, 12, INK, MET, 0.24));
+        parts.push(oval(w / 2 - 3.5, 10, 7, 5, INK, STEEL, 0.16));
+        parts.push(oval(w / 2 - 9, 2, 5, 5, INK, MET, 0.16));
+        parts.push(oval(w / 2 + 4, 2, 5, 5, INK, MET, 0.16));
         parts.push(oval(w / 2 - 3, d / 2, 6, 6, MET, '', 0.12));
         parts.push(oval(w / 2 + w * 0.16, d * 0.42, 3, 5, MET, '', 0.1));
         return box(w, d, parts);
@@ -1848,17 +1957,18 @@
     }
 
     function infoStand(w, d) {
-        var parts = [rect(w / 2 - 4, 16, 8, d - 16, INK, MET, 0.3)];
-        parts.push(rect(0, 0, w, 22, INK, WHITE, 0.4));
-        parts.push(line(6, 8, w - 6, 8, MET, 0.14));
-        parts.push(rect(w / 2 - 12, d - 8, 24, 8, INK, DARK, 0.2));
+        var parts = [rect(w / 2 - 10, d - 14, 20, 14, INK, DARK, 0.25)];
+        parts.push(rect(w / 2 - 3, 7, 6, Math.max(4, d - 22), INK, MET, 0.25));
+        parts.push(rect(2, 0, w - 4, 6, INK, WHITE, 0.4));
+        parts.push(line(6, 3, w - 6, 3, MET, 0.16));
         return box(w, d, parts);
     }
 
     function waySign() {
-        var parts = [rect(8, 8, 6, 40, INK, MET, 0.3)];
-        parts.push(rect(0, 0, 36, 14, INK, GREENF, 0.35));
-        parts.push(line(8, 7, 28, 7, GREEN, 0.3));
+        var parts = [oval(11, 30, 14, 14, INK, MET, 0.25)];
+        parts.push(rect(2, 6, 32, 6, INK, GREENF, 0.35));
+        parts.push(line(6, 9, 28, 9, GREEN, 0.28));
+        parts.push(line(18, 12, 18, 32, MET, 0.25));
         return box(36, 48, parts);
     }
 
@@ -2193,6 +2303,21 @@
 
     function furniture() {
         return [
+            pack('lib-fur-plumb', 'Сантехника', [
+                row('fur-plumb-wc', 'Унитаз напольный', toiletPlan('floor')),
+                row('fur-plumb-wall', 'Унитаз подвесной', toiletPlan('wall')),
+                row('fur-plumb-compact', 'Унитаз компакт', toiletPlan('compact')),
+                row('fur-plumb-bidet', 'Биде', bidet()),
+                row('fur-plumb-urin', 'Писсуар', urinal()),
+                row('fur-plumb-tap', 'Кран для раковины', faucet('basin')),
+                row('fur-plumb-tap-kit', 'Кран кухонный', faucet('kitchen')),
+                row('fur-plumb-tap-bath', 'Кран для ванны', faucet('bath')),
+                row('fur-plumb-tap-shower', 'Смеситель душевой', faucet('shower')),
+                row('fur-plumb-tap-hose', 'Кран с душевой лейкой', faucet('hose')),
+                row('fur-plumb-tap-wall', 'Кран водоразборный', faucet('wall')),
+                row('fur-plumb-sink', 'Раковина со смесителем', basin(62, 48)),
+                row('fur-plumb-tub', 'Ванна со смесителем', bathtub(170, 75))
+            ]),
             pack('lib-fur-live', 'Жилые комнаты', [
                 row('fur-live-sofa', 'Диван прямой', sofa(210, 94, 3)),
                 row('fur-live-corner', 'Диван угловой', cornerSofa(250, 176, 94)),
