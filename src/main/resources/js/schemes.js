@@ -2463,7 +2463,132 @@
             paint();
         }
 
+        function wallSegmentCount(wall) {
+            if (!wall || wall.type !== 'wall' || !wall.points || wall.points.length < 2) return 0;
+            return wall.points.length - 1 + (wall.closed && wall.points.length > 2 ? 1 : 0);
+        }
+
+        function segmentIndexAt(wall, wx, wy) {
+            if (!wall || wall.type !== 'wall' || !wall.points) return -1;
+            var best = -1;
+            var bestDist = Infinity;
+            var count = wall.points.length - 1;
+            var limit = Math.max(8, (wall.thickness || 15) / 2 + 2);
+            var i;
+            function consider(index, a, b) {
+                var hit = projectSeg(a.x, a.y, b.x, b.y, wx, wy);
+                if (hit.dist <= limit && hit.dist < bestDist) {
+                    bestDist = hit.dist;
+                    best = index;
+                }
+            }
+            for (i = 0; i < count; i++) consider(i, wall.points[i], wall.points[i + 1]);
+            if (wall.closed && wall.points.length > 2) consider(count, wall.points[wall.points.length - 1], wall.points[0]);
+            return best;
+        }
+
+        function copyWallPoints(points) {
+            return (points || []).map(function (p) { return { x: p.x, y: p.y }; });
+        }
+
+        function spawnWall(wall, points) {
+            var copy = baseObject('wall');
+            copy.points = copyWallPoints(points);
+            copy.closed = false;
+            copy.thickness = wall.thickness;
+            copy.alignment = wall.alignment;
+            copy.hatch = wall.hatch;
+            copy.height = wall.height;
+            copy.color = wall.color;
+            copy.fill = wall.fill || '';
+            copy.material = wall.material || '';
+            copy.layerId = wall.layerId;
+            copy.opacity = wall.opacity;
+            return copy;
+        }
+
+        function deleteWallSegment(wall, index) {
+            var floor = activeFloor();
+            var points = wall.points || [];
+            var n = points.length;
+            var closed = !!(wall.closed && n > 2);
+            var count = n - 1 + (closed ? 1 : 0);
+            if (index < 0 || index >= count) return;
+            var openings = (floor.objects || []).filter(function (obj) {
+                return obj.type === 'opening' && obj.wallId === wall.id;
+            });
+            function dropOpening(obj) {
+                floor.objects = (floor.objects || []).filter(function (item) { return item.id !== obj.id; });
+            }
+            if (count <= 1) {
+                openings.forEach(dropOpening);
+                floor.objects = (floor.objects || []).filter(function (item) { return item.id !== wall.id; });
+                return;
+            }
+            if (closed && index === n - 1) {
+                wall.closed = false;
+                openings.forEach(function (obj) {
+                    if ((obj.index || 0) === index) dropOpening(obj);
+                });
+                return;
+            }
+            if (closed) {
+                var seq = [];
+                var i;
+                for (i = index + 1; i < n; i++) seq.push(points[i]);
+                for (i = 0; i <= index; i++) seq.push(points[i]);
+                wall.points = copyWallPoints(seq);
+                wall.closed = false;
+                openings.forEach(function (obj) {
+                    var at = obj.index || 0;
+                    if (at === index) dropOpening(obj);
+                    else if (at > index) obj.index = at - (index + 1);
+                    else obj.index = at + (n - 1 - index);
+                });
+                return;
+            }
+            var left = points.slice(0, index + 1);
+            var right = points.slice(index + 1);
+            var keepLeft = left.length >= 2;
+            var keepRight = right.length >= 2;
+            var rightWall = null;
+            if (keepLeft) wall.points = copyWallPoints(left);
+            if (keepRight && keepLeft) {
+                rightWall = spawnWall(wall, right);
+                floor.objects.push(rightWall);
+            } else if (keepRight) wall.points = copyWallPoints(right);
+            wall.closed = false;
+            openings.forEach(function (obj) {
+                var at = obj.index || 0;
+                if (at === index) dropOpening(obj);
+                else if (at < index) {
+                    if (!keepLeft) dropOpening(obj);
+                } else if (rightWall) {
+                    obj.wallId = rightWall.id;
+                    obj.index = at - (index + 1);
+                } else if (keepRight) obj.index = at - (index + 1);
+                else dropOpening(obj);
+            });
+        }
+
+        function removePickedSegment() {
+            if (session.selection.length !== 1 || !session.wallPick || session.wallPick.id !== session.selection[0]) return false;
+            var wall = objectById(session.wallPick.id);
+            if (!wall || wall.type !== 'wall' || !mutableObject(wall)) return false;
+            if (wallSegmentCount(wall) > 1 && session.wallPick.index < 0) return false;
+            remember();
+            deleteWallSegment(wall, wallSegmentCount(wall) <= 1 ? 0 : session.wallPick.index);
+            session.wallPick = null;
+            session.selection = [];
+            syncRooms(activeFloor());
+            refreshSide();
+            renderProps();
+            paint();
+            return true;
+        }
+
         function removeSelection() {
+            if (removePickedSegment()) return;
             if (!session.selection.length || !mayPlacePins()) return;
             var floor = activeFloor();
             var drop = {};
@@ -2477,8 +2602,10 @@
             if (!any) return;
             remember();
             floor.objects = (floor.objects || []).filter(function (obj) {
-                return !drop[obj.id];
+                if (drop[obj.id]) return false;
+                return !(obj.type === 'opening' && drop[obj.wallId]);
             });
+            session.wallPick = null;
             syncRooms(floor);
             session.selection = [];
             refreshSide();
@@ -3588,6 +3715,20 @@
                         ctx.lineTo(obj.x2, obj.y2);
                     } else if (obj.w != null) ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
                     ctx.stroke();
+                    if (obj.type === 'wall' && session.wallPick && session.wallPick.id === obj.id) {
+                        var picked = wallSegment(obj, session.wallPick.index);
+                        if (picked) {
+                            ctx.save();
+                            ctx.setLineDash([]);
+                            ctx.strokeStyle = '#0052cc';
+                            ctx.lineWidth = 3 / session.cam.z;
+                            ctx.beginPath();
+                            ctx.moveTo(picked.a.x, picked.a.y);
+                            ctx.lineTo(picked.b.x, picked.b.y);
+                            ctx.stroke();
+                            ctx.restore();
+                        }
+                    }
                     if (obj.type === 'image' && obj.w != null) drawCorners(ctx, obj.x, obj.y, obj.w, obj.h || 10);
                     ctx.restore();
                 });
@@ -4788,6 +4929,18 @@
                 }
             }
             if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || 15, function (value) { obj.thickness = Math.max(1, roundCm(Number(value) || 15)); });
+            if (obj.type === 'wall') {
+                var dropSeg = el('button', 'asset-tree-scheme-add', api.t('schemeDeleteSegment'));
+                dropSeg.type = 'button';
+                dropSeg.disabled = !api.canEdit || session.mode !== 'edit';
+                dropSeg.addEventListener('click', function () {
+                    if (!api.canEdit || session.mode !== 'edit') return;
+                    if (!session.wallPick || session.wallPick.id !== obj.id) session.wallPick = { id: obj.id, index: 0 };
+                    session.selection = [obj.id];
+                    removePickedSegment();
+                });
+                props.appendChild(dropSeg);
+            }
             if (obj.type === 'opening') {
                 var openingMax = obj.custom ? 2000 : 600;
                 field(api.t('schemeLength'), obj.width || 90, function (value) {
@@ -6221,6 +6374,9 @@
                 }
                 var id = hit(raw.x, raw.y);
                 if (id) {
+                    var pickedWall = objectById(id);
+                    if (pickedWall && pickedWall.type === 'wall') session.wallPick = { id: pickedWall.id, index: segmentIndexAt(pickedWall, raw.x, raw.y) };
+                    else session.wallPick = null;
                     if (event.shiftKey) {
                         var at = session.selection.indexOf(id);
                         if (at >= 0) session.selection.splice(at, 1);
@@ -6268,6 +6424,7 @@
                         return;
                     }
                     if (!event.shiftKey) session.selection = [];
+                    session.wallPick = null;
                     drag = { mode: 'marquee', x: raw.x, y: raw.y };
                     session.marquee = { x: raw.x, y: raw.y, w: 0, h: 0 };
                 }
@@ -6589,6 +6746,8 @@
                 var rawUp = worldFrom(event.clientX - upRect.left, event.clientY - upRect.top);
                 var id = hit(rawUp.x, rawUp.y);
                 if (id && session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
+                var menuWall = objectById(id);
+                if (menuWall && menuWall.type === 'wall') session.wallPick = { id: menuWall.id, index: segmentIndexAt(menuWall, rawUp.x, rawUp.y) };
                 drag = null;
                 renderProps();
                 paint();
@@ -6821,6 +6980,12 @@
             if (session.selection.length) {
                 menuAction(menu, api.t('schemeToFront'), function () { restack('front'); });
                 menuAction(menu, api.t('schemeToBack'), function () { restack('back'); });
+            }
+            if (session.wallPick && session.selection.length === 1 && session.selection[0] === session.wallPick.id) {
+                var segmentWall = objectById(session.wallPick.id);
+                if (segmentWall && segmentWall.type === 'wall' && mutableObject(segmentWall)) {
+                    menuAction(menu, api.t('schemeDeleteSegment'), function () { removePickedSegment(); });
+                }
             }
             var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
             var field = null;
