@@ -113,6 +113,7 @@ import com.assetstree.jira.dto.PortalRequestCreatedDto;
 import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
+import com.assetstree.jira.model.AssetFieldText;
 import com.assetstree.jira.model.PortalAssetHold;
 import com.assetstree.jira.model.PortalAssetMark;
 import com.assetstree.jira.model.ProjectModules;
@@ -1322,10 +1323,7 @@ public class AssetServiceImpl implements AssetService {
         Integer picked = storedAssetId(issue);
         if (picked != null) {
             ApplicationUser actor = user != null ? user : issue.getReporter();
-            if (attachPortalIssue(actor, issue, picked.intValue(), false)) {
-                settlePortalAsset(issue.getReporter(), picked.intValue());
-                settlePortalAsset(user, picked.intValue());
-            }
+            ensureRequestLink(actor, issue, picked.intValue());
             return;
         }
         ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : issue.getCreator();
@@ -1346,8 +1344,13 @@ public class AssetServiceImpl implements AssetService {
         if (pending == null || pending.intValue() <= 0) {
             Integer chosenOnForm = chosenAssetId(issue);
             if (chosenOnForm != null) {
-                attachPortalIssue(user != null ? user : reporter, issue, chosenOnForm.intValue(), false);
+                ensureRequestLink(user != null ? user : reporter, issue, chosenOnForm.intValue());
             }
+            return;
+        }
+        boolean onThisRequest = carried != null && carried.intValue() == pending.intValue();
+        if (onThisRequest) {
+            ensureRequestLink(user != null ? user : reporter, issue, pending.intValue());
             return;
         }
         AssetEntity asset;
@@ -1365,8 +1368,7 @@ public class AssetServiceImpl implements AssetService {
         if (!moduleOn(asset.getProjectKey(), ProjectModules.PORTAL)) {
             return;
         }
-        boolean onThisRequest = carried != null && carried.intValue() == pending.intValue();
-        if (!onThisRequest && !portalCustomer(reporter, user, pending.intValue())) {
+        if (!portalCustomer(reporter, user, pending.intValue())) {
             log.warn("Portal asset {} was not linked to {}: the customer is not on this asset", pending, issue.getKey());
             settlePortalAsset(reporter, pending.intValue());
             settlePortalAsset(user, pending.intValue());
@@ -1378,13 +1380,9 @@ public class AssetServiceImpl implements AssetService {
         Integer chosen = chosenAssetId(issue);
         int target = chosen == null ? pending.intValue() : chosen.intValue();
         ApplicationUser actor = user != null ? user : reporter;
-        boolean linked = attachPortalIssue(actor, issue, target, true);
+        ensureRequestLink(actor, issue, target);
         if (chosen == null) {
             writeAssetField(actor, issue, target);
-        }
-        if (linked) {
-            settlePortalAsset(reporter, pending.intValue());
-            settlePortalAsset(user, pending.intValue());
         }
     }
 
@@ -1578,12 +1576,89 @@ public class AssetServiceImpl implements AssetService {
             if (text.isEmpty() || "-1".equals(text)) {
                 continue;
             }
-            Integer parsed = parseId(text);
-            if (parsed != null) {
-                return parsed;
+            Integer resolved = resolveFieldAsset(issue, text);
+            if (resolved != null) {
+                return resolved;
             }
         }
         return null;
+    }
+
+    /** A numeric id, an object key, or the visible path shown in the field. */
+    private Integer resolveFieldAsset(Issue issue, String text) {
+        if (text == null) {
+            return null;
+        }
+        String raw = text.trim();
+        if (raw.isEmpty() || "-1".equals(raw)) {
+            return null;
+        }
+        Integer parsed = parseId(raw);
+        if (parsed != null) {
+            return parsed;
+        }
+        if (issue == null || issue.getProjectObject() == null) {
+            return null;
+        }
+        return assetIdByLabel(issue.getProjectObject().getKey(), raw);
+    }
+
+    private Integer assetIdByLabel(String projectKey, String text) {
+        try {
+            List<String> hints = AssetFieldText.lookupHints(text);
+            for (int i = 0; i < hints.size(); i++) {
+                AssetEntity byKey = assetByKey(projectKey, hints.get(i));
+                if (byKey != null) {
+                    return Integer.valueOf(byKey.getID());
+                }
+            }
+            for (int i = 0; i < hints.size(); i++) {
+                Integer byName = assetIdByName(projectKey, hints.get(i));
+                if (byName != null) {
+                    return byName;
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.debug("Asset field text was not matched", ex);
+        }
+        return null;
+    }
+
+    private Integer assetIdByName(String projectKey, String name) {
+        if (projectKey == null || name == null || name.trim().isEmpty()) {
+            return null;
+        }
+        AssetEntity[] rows = assetsIn(projectKey);
+        if (rows == null) {
+            return null;
+        }
+        String wanted = name.trim();
+        Integer equipment = null;
+        int equipmentCount = 0;
+        Integer place = null;
+        int placeCount = 0;
+        for (AssetEntity row : rows) {
+            if (row == null || row.getName() == null || !wanted.equalsIgnoreCase(row.getName().trim())) {
+                continue;
+            }
+            if (!ProjectKeys.same(row.getProjectKey(), projectKey)) {
+                continue;
+            }
+            if (isLocation(row)) {
+                placeCount++;
+                place = Integer.valueOf(row.getID());
+            } else {
+                equipmentCount++;
+                equipment = Integer.valueOf(row.getID());
+            }
+        }
+        if (equipmentCount == 1) {
+            return equipment;
+        }
+        if (equipmentCount > 1) {
+            return null;
+        }
+        return placeCount == 1 ? place : null;
     }
 
     private Integer chosenAssetId(Issue issue) {
@@ -1698,6 +1773,53 @@ public class AssetServiceImpl implements AssetService {
             log.warn("Could not attach asset {} to {}", assetId, issue.getKey(), ex);
         }
         return false;
+    }
+
+    /**
+     * The asset chosen on the request form. A different asset project is
+     * allowed: the person picked this object. If the link cannot be written
+     * while Jira is still creating the request, one later attempt runs after
+     * that save has finished.
+     */
+    private void ensureRequestLink(ApplicationUser actor, Issue issue, int assetId) {
+        if (assetId <= 0 || issue == null || issue.getId() == null) {
+            return;
+        }
+        if (attachPortalIssue(actor, issue, assetId, true)) {
+            settlePortalAsset(issue.getReporter(), assetId);
+            settlePortalAsset(actor, assetId);
+            return;
+        }
+        final Long issueId = issue.getId();
+        final ClassLoader loader = AssetServiceImpl.class.getClassLoader();
+        Thread retry = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                if (loader != null) {
+                    Thread.currentThread().setContextClassLoader(loader);
+                }
+                try {
+                    Thread.sleep(2000L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                try {
+                    Issue loaded = issueManager().getIssueObject(issueId);
+                    if (loaded == null) {
+                        return;
+                    }
+                    if (attachPortalIssue(actor, loaded, assetId, true)) {
+                        settlePortalAsset(loaded.getReporter(), assetId);
+                        settlePortalAsset(actor, assetId);
+                    }
+                } catch (RuntimeException ex) {
+                    log.warn("Could not attach asset {} after the request was saved", Integer.valueOf(assetId), ex);
+                }
+            }
+        }, "assethub-link-" + issueId);
+        retry.setDaemon(true);
+        retry.start();
     }
 
     private void writeAssetField(ApplicationUser user, Issue issue, int assetId) {
@@ -4800,19 +4922,6 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
-    private static AssetException assetCause(Throwable failure) {
-        Throwable current = failure;
-        int guard = 0;
-        while (current != null && guard < 8) {
-            if (current instanceof AssetException) {
-                return (AssetException) current;
-            }
-            current = current.getCause();
-            guard++;
-        }
-        return null;
-    }
-
     @Override
     public void syncRequestAsset(ApplicationUser user, Issue incoming, String previousAssetId, String nextAssetId) {
         final Issue issue = resolvedIssue(incoming);
@@ -4820,32 +4929,17 @@ public class AssetServiceImpl implements AssetService {
             return;
         }
         ApplicationUser actor = user != null ? user : issue.getReporter();
-        Integer previous = parseId(previousAssetId);
-        Integer next = parseId(nextAssetId);
-        if (actor == null || !canBrowse(actor, issue)) {
-            if (previous != null && (next == null || previous.intValue() != next.intValue())) {
-                try {
-                    String before = dropLink(previous.intValue(), issue.getId().longValue());
-                    if (before != null) {
-                        applyRemovedFlow(actor, ao().get(AssetEntity.class, previous.intValue()), issue, before);
-                    }
-                } catch (RuntimeException ex) {
-                    log.warn("Could not drop the previous asset link {}", previous, ex);
-                }
-            }
-            if (next != null) {
-                attachPortalIssue(actor, issue, next.intValue(), false);
-            }
-            return;
-        }
+        Integer previous = resolveFieldAsset(issue, previousAssetId);
+        final Integer next = resolveFieldAsset(issue, nextAssetId);
         if (previous != null && (next == null || previous.intValue() != next.intValue())) {
+            final Integer dropped = previous;
             try {
                 ao().executeInTransaction(new TransactionCallback<Void>() {
                     @Override
                     public Void doInTransaction() {
-                        String before = dropLink(previous.intValue(), issue.getId().longValue());
+                        String before = dropLink(dropped.intValue(), issue.getId().longValue());
                         if (before != null) {
-                            applyRemovedFlow(actor, ao().get(AssetEntity.class, previous.intValue()), issue, before);
+                            applyRemovedFlow(actor, ao().get(AssetEntity.class, dropped.intValue()), issue, before);
                         }
                         return null;
                     }
@@ -4857,28 +4951,7 @@ public class AssetServiceImpl implements AssetService {
         if (next == null) {
             return;
         }
-        boolean fresh = previous == null || previous.intValue() != next.intValue();
-        try {
-            link(actor, next.intValue(), issue, false);
-        } catch (RuntimeException ex) {
-            AssetException cause = assetCause(ex);
-            if (cause != null && (cause.getStatus() == 404 || cause.getStatus() == 403)) {
-                attachPortalIssue(actor, issue, next.intValue(), false);
-                return;
-            }
-            if (cause == null || cause.getStatus() != 409) {
-                log.warn("Could not link asset {} to {}", next, issue.getKey(), ex);
-            }
-            return;
-        }
-        if (!fresh) {
-            return;
-        }
-        try {
-            applyRequestFlow(actor, next.intValue(), issue);
-        } catch (RuntimeException ex) {
-            log.warn("Could not apply the equipment flow for {}", next, ex);
-        }
+        ensureRequestLink(actor, issue, next.intValue());
     }
 
     @Override
