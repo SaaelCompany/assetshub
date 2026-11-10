@@ -22,6 +22,8 @@ import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.issue.IssueInputParameters;
 import com.atlassian.jira.issue.IssueManager;
 import com.atlassian.jira.issue.customfields.option.Option;
+import com.atlassian.jira.issue.customfields.persistence.CustomFieldValuePersister;
+import com.atlassian.jira.issue.customfields.persistence.PersistenceFieldType;
 import com.atlassian.jira.issue.fields.CustomField;
 import com.atlassian.jira.issue.ModifiedValue;
 import com.atlassian.jira.issue.util.DefaultIssueChangeHolder;
@@ -1313,7 +1315,17 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void attachPortalAsset(ApplicationUser user, Issue issue) {
+        issue = resolvedIssue(issue);
         if (issue == null || issue.getProjectObject() == null || issue.getId() == null || !freshRequest(issue)) {
+            return;
+        }
+        Integer picked = storedAssetId(issue);
+        if (picked != null) {
+            ApplicationUser actor = user != null ? user : issue.getReporter();
+            if (attachPortalIssue(actor, issue, picked.intValue(), false)) {
+                settlePortalAsset(issue.getReporter(), picked.intValue());
+                settlePortalAsset(user, picked.intValue());
+            }
             return;
         }
         ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : issue.getCreator();
@@ -1503,18 +1515,66 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private Integer chosenAssetId(Issue issue) {
+    /** The issue passed to a create event can still lack its project. */
+    private Issue resolvedIssue(Issue issue) {
+        if (issue == null || issue.getId() == null || issue.getProjectObject() != null) {
+            return issue;
+        }
+        try {
+            Issue loaded = issueManager().getIssueObject(issue.getId());
+            return loaded == null ? issue : loaded;
+        } catch (RuntimeException ex) {
+            log.debug("Issue {} was not reloaded", issue.getId(), ex);
+            return issue;
+        }
+    }
+
+    /**
+     * The id stored in the asset field. The create event's issue often keeps an
+     * empty custom-field cache, so a miss falls through to the value table.
+     */
+    private Integer storedAssetId(Issue issue) {
         CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
         if (manager == null || issue == null) {
             return null;
+        }
+        CustomFieldValuePersister persister = null;
+        try {
+            persister = ComponentAccessor.getComponent(CustomFieldValuePersister.class);
+        } catch (RuntimeException ex) {
+            persister = null;
         }
         for (String id : PortalLookup.assetFieldIds()) {
             CustomField field = manager.getCustomFieldObject(id);
             if (field == null) {
                 continue;
             }
-            Object raw = issue.getCustomFieldValue(field);
-            String text = raw == null ? "" : String.valueOf(raw).trim();
+            String text = "";
+            try {
+                Object raw = issue.getCustomFieldValue(field);
+                text = raw == null ? "" : String.valueOf(raw).trim();
+            } catch (RuntimeException ex) {
+                text = "";
+            }
+            if ((text.isEmpty() || "-1".equals(text)) && persister != null && issue.getId() != null) {
+                try {
+                    List<Object> values = persister.getValues(field, issue.getId(), PersistenceFieldType.TYPE_LIMITED_TEXT);
+                    if (values != null) {
+                        for (Object value : values) {
+                            if (value == null) {
+                                continue;
+                            }
+                            String candidate = String.valueOf(value).trim();
+                            if (!candidate.isEmpty() && !"-1".equals(candidate)) {
+                                text = candidate;
+                                break;
+                            }
+                        }
+                    }
+                } catch (RuntimeException ex) {
+                    log.debug("Asset field {} was not read for {}", id, issue.getKey(), ex);
+                }
+            }
             if (text.isEmpty() || "-1".equals(text)) {
                 continue;
             }
@@ -1524,6 +1584,10 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         return null;
+    }
+
+    private Integer chosenAssetId(Issue issue) {
+        return storedAssetId(issue);
     }
 
     private Project requirePortalProject(AssetEntity asset) {
@@ -4737,7 +4801,8 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId) {
+    public void syncRequestAsset(ApplicationUser user, Issue incoming, String previousAssetId, String nextAssetId) {
+        final Issue issue = resolvedIssue(incoming);
         if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
             return;
         }
@@ -4783,6 +4848,10 @@ public class AssetServiceImpl implements AssetService {
         try {
             link(actor, next.intValue(), issue, false);
         } catch (AssetException ex) {
+            if (ex.getStatus() == 404 || ex.getStatus() == 403) {
+                attachPortalIssue(actor, issue, next.intValue(), false);
+                return;
+            }
             if (ex.getStatus() != 409) {
                 log.warn("Could not link asset {} to {}", next, issue.getKey());
             }
