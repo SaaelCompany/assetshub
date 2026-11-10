@@ -1281,6 +1281,8 @@ public final class UiCatalog {
             "schemeHatch",
             "schemeHatchDiagonal",
             "schemeOpeningHeight",
+            "schemeDoorSide",
+            "schemeDoorHinge",
             "schemeMadeToOrder",
             "schemeShow",
             "schemeHide",
