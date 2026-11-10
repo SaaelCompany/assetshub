@@ -1249,6 +1249,7 @@ public final class UiCatalog {
             "schemeAssetTitle",
             "schemeSearch",
             "schemeDeletePart",
+            "schemeDeleteSegment",
             "schemeDelete",
             "schemeFill",
             "schemeMaterial",

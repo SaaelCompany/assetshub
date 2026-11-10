@@ -975,8 +975,28 @@ var AssetTreePlan = (function () {
         if (Math.abs(den) < 1) return null;
         var t = ((right.x1 - left.x1) * sy - (right.y1 - left.y1) * sx) / den;
         var u = ((right.x1 - left.x1) * ry - (right.y1 - left.y1) * rx) / den;
-        if (t <= 0.04 || t >= 0.96 || u <= 0.04 || u >= 0.96) return null;
+        var leftLen = Math.sqrt(rx * rx + ry * ry) || 1;
+        var rightLen = Math.sqrt(sx * sx + sy * sy) || 1;
+        if (t <= 2 / leftLen || t >= 1 - 2 / leftLen || u <= 2 / rightLen || u >= 1 - 2 / rightLen) return null;
         return { t: t, u: u, x: left.x1 + t * rx, y: left.y1 + t * ry };
+    }
+
+    function lineCross(a, b) {
+        var rx = a.x2 - a.x1;
+        var ry = a.y2 - a.y1;
+        var sx = b.x2 - b.x1;
+        var sy = b.y2 - b.y1;
+        var den = rx * sy - ry * sx;
+        if (Math.abs(den) < 1) return null;
+        var t = ((b.x1 - a.x1) * sy - (b.y1 - a.y1) * sx) / den;
+        var u = ((b.x1 - a.x1) * ry - (b.y1 - a.y1) * rx) / den;
+        return { t: t, u: u, x: a.x1 + t * rx, y: a.y1 + t * ry };
+    }
+
+    function segLen(seg) {
+        var dx = seg.x2 - seg.x1;
+        var dy = seg.y2 - seg.y1;
+        return Math.sqrt(dx * dx + dy * dy) || 1;
     }
 
     function cutTees(segments) {
@@ -997,11 +1017,15 @@ var AssetTreePlan = (function () {
             var snaps = [];
             var cuts = {};
             function addCut(index, t, x, y) {
-                if (index < 0 || t < 0.04 || t > 0.96) return;
+                if (index < 0 || !list[index]) return;
+                var host = list[index];
+                var span = Math.sqrt((host.x2 - host.x1) * (host.x2 - host.x1) + (host.y2 - host.y1) * (host.y2 - host.y1)) || 1;
+                var edge = 2 / span;
+                if (t <= edge || t >= 1 - edge) return;
                 var bucket = cuts[index] || (cuts[index] = []);
                 var n;
                 for (n = 0; n < bucket.length; n++) {
-                    if (Math.abs(bucket[n].t - t) < 0.02) return;
+                    if (Math.abs(bucket[n].t - t) * span < 2) return;
                 }
                 bucket.push({ t: t, x: x, y: y });
             }
@@ -1011,20 +1035,47 @@ var AssetTreePlan = (function () {
                 for (j = i + 1; j < list.length; j++) {
                     var left = list[i];
                     var right = list[j];
-                    var parallel = teeTurn(left, right) < 20;
                     [[right, left, i], [left, right, j]].forEach(function (pair) {
                         var stem = pair[0];
                         var bar = pair[1];
                         var barIndex = pair[2];
-                        [[stem.x1, stem.y1, 0], [stem.x2, stem.y2, 1]].forEach(function (end) {
-                            var hit = teeProject(bar.x1, bar.y1, bar.x2, bar.y2, end[0], end[1]);
-                            if (!hit || hit.t <= 0.02 || hit.t >= 0.98) return;
-                            if (hit.dist <= 0.8) addCut(barIndex, hit.t, hit.x, hit.y);
-                            else if (!parallel && hit.dist <= 18) {
-                                snaps.push({ seg: stem, end: end[2], x: hit.x, y: hit.y });
-                                addCut(barIndex, hit.t, hit.x, hit.y);
-                            }
-                        });
+                        var parallel = teeTurn(stem, bar) < 18;
+                        if (parallel) {
+                            var linked = function (ax, ay, bx, by) {
+                                return (ax - bx) * (ax - bx) + (ay - by) * (ay - by) <= 1;
+                            };
+                            if (linked(stem.x1, stem.y1, bar.x1, bar.y1) || linked(stem.x1, stem.y1, bar.x2, bar.y2) || linked(stem.x2, stem.y2, bar.x1, bar.y1) || linked(stem.x2, stem.y2, bar.x2, bar.y2)) return;
+                            [[stem.x1, stem.y1, 0], [stem.x2, stem.y2, 1]].forEach(function (end) {
+                                var hit = teeProject(bar.x1, bar.y1, bar.x2, bar.y2, end[0], end[1]);
+                                if (!hit || hit.dist > 5 || (hit.t >= 0.08 && hit.t <= 0.92)) return;
+                                var d1 = Math.sqrt((end[0] - bar.x1) * (end[0] - bar.x1) + (end[1] - bar.y1) * (end[1] - bar.y1));
+                                var d2 = Math.sqrt((end[0] - bar.x2) * (end[0] - bar.x2) + (end[1] - bar.y2) * (end[1] - bar.y2));
+                                if (Math.min(d1, d2) > 22) return;
+                                var tx = d1 < d2 ? bar.x1 : bar.x2;
+                                var ty = d1 < d2 ? bar.y1 : bar.y2;
+                                var mx = (end[0] + tx) / 2;
+                                var my = (end[1] + ty) / 2;
+                                snaps.push({ seg: stem, end: end[2], x: mx, y: my });
+                                snaps.push({ seg: bar, end: d1 < d2 ? 0 : 1, x: mx, y: my });
+                            });
+                            return;
+                        }
+                        var meet = lineCross(stem, bar);
+                        if (!meet) return;
+                        var stemLen = segLen(stem);
+                        var barLen = segLen(bar);
+                        var stemPast = meet.t < 0 || meet.t > 1;
+                        var stemGap = stemPast ? (meet.t < 0 ? -meet.t : meet.t - 1) * stemLen : 0;
+                        var barInterior = meet.u > 2 / barLen && meet.u < 1 - 2 / barLen;
+                        if (barInterior && stemGap <= 22 && (stemPast || meet.t <= 0.001 || meet.t >= 0.999)) {
+                            if (stemPast) snaps.push({ seg: stem, end: meet.t < 0 ? 0 : 1, x: meet.x, y: meet.y });
+                            addCut(barIndex, meet.u, meet.x, meet.y);
+                            return;
+                        }
+                        if (stemPast && stemGap <= 22) {
+                            var barGap = meet.u < 0 ? -meet.u * barLen : (meet.u > 1 ? (meet.u - 1) * barLen : 0);
+                            if (barGap <= 22) snaps.push({ seg: stem, end: meet.t < 0 ? 0 : 1, x: meet.x, y: meet.y });
+                        }
                     });
                     var cross = teeCross(left, right);
                     if (cross) {
@@ -1062,7 +1113,7 @@ var AssetTreePlan = (function () {
                     var ay = points[k].y;
                     var bx = points[k + 1].x;
                     var by = points[k + 1].y;
-                    if ((ax - bx) * (ax - bx) + (ay - by) * (ay - by) < 64) continue;
+                    if ((ax - bx) * (ax - bx) + (ay - by) * (ay - by) < 4) continue;
                     pieces.push({
                         x1: ax, y1: ay, x2: bx, y2: by,
                         kind: seg.kind, thick: seg.thick, name: seg.name, color: seg.color, source: seg.source
@@ -1116,7 +1167,7 @@ var AssetTreePlan = (function () {
             for (i = 0; i < nodes.length; i++) {
                 var dx = nodes[i].x - x;
                 var dy = nodes[i].y - y;
-                if (dx * dx + dy * dy <= 100) return i;
+                if (dx * dx + dy * dy <= 16 * 16) return i;
             }
             nodes.push({ x: x, y: y });
             adj.push([]);
@@ -1177,7 +1228,7 @@ var AssetTreePlan = (function () {
             }
             if (!closed || loop.length < 3) return;
             var pts = loop.map(function (nid) { return { x: nodes[nid].x, y: nodes[nid].y }; });
-            if (planSigned(pts) > 2500 && faceBreadth(pts) >= 35) faces.push(pts);
+            if (planSigned(pts) > 2500 && faceBreadth(pts) >= 24) faces.push(pts);
         });
         return faces.filter(function (face, index) {
             var area = planArea(face);
