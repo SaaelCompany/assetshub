@@ -20,6 +20,8 @@
         return /\/portal\//.test(location.pathname || '') || !!document.getElementById('asset-tree-portal-boot');
     }
 
+    var signalingField = false;
+
     function signalField(input) {
         if (!input) return;
         var next = input.value;
@@ -27,21 +29,26 @@
         var descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, 'value');
         if (descriptor && descriptor.set) descriptor.set.call(input, next);
         else input.value = next;
+        signalingField = true;
         try {
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        } catch (error) {
             try {
-                var typed = document.createEvent('Event');
-                typed.initEvent('input', true, true);
-                input.dispatchEvent(typed);
-                var changed = document.createEvent('Event');
-                changed.initEvent('change', true, true);
-                input.dispatchEvent(changed);
-            } catch (older) { /* the form still submits the input value */ }
-        }
-        if (window.AJS && AJS.$) {
-            try { AJS.$(input).trigger('input').trigger('change'); } catch (error) {}
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (error) {
+                try {
+                    var typed = document.createEvent('Event');
+                    typed.initEvent('input', true, true);
+                    input.dispatchEvent(typed);
+                    var changed = document.createEvent('Event');
+                    changed.initEvent('change', true, true);
+                    input.dispatchEvent(changed);
+                } catch (older) { /* the form still submits the input value */ }
+            }
+            if (window.AJS && AJS.$) {
+                try { AJS.$(input).trigger('input').trigger('change'); } catch (error) {}
+            }
+        } finally {
+            signalingField = false;
         }
     }
 
@@ -51,13 +58,11 @@
             var picker = pickers[i];
             var hidden = picker.valueInput || picker.querySelector('.asset-tree-picker-value');
             if (!hidden) continue;
-            var select = picker.portalSelect || picker.querySelector('select');
-            var next = select && select.value ? select.value : hidden.value;
-            if (!next || next === '-1') continue;
-            if (hidden.value !== next) hidden.value = next;
-            if (hidden.getAttribute('data-asset-signaled') === next) continue;
-            signalField(hidden);
-            hidden.setAttribute('data-asset-signaled', next);
+            var select = picker.portalSelect;
+            if (!select || !select.parentNode) select = picker.querySelector('select');
+            var next = select && select.value ? select.value : '';
+            if (!/^\d+$/.test(next) || next === hidden.value) continue;
+            hidden.value = next;
         }
     }
 
@@ -2490,16 +2495,12 @@
         }
     }
 
-    document.addEventListener('click', function (event) {
-        var target = event.target;
-        if (!target || insidePicker(target)) return;
-        flushPickers();
-    }, true);
     document.addEventListener('submit', function () {
         flushPickers();
     }, true);
 
     document.addEventListener('change', function (event) {
+        if (signalingField) return;
         var target = event.target;
         if (!target || insidePicker(target)) return;
         var tag = target.tagName ? target.tagName.toLowerCase() : '';

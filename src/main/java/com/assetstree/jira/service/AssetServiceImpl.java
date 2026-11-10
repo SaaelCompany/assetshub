@@ -4800,6 +4800,19 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
+    private static AssetException assetCause(Throwable failure) {
+        Throwable current = failure;
+        int guard = 0;
+        while (current != null && guard < 8) {
+            if (current instanceof AssetException) {
+                return (AssetException) current;
+            }
+            current = current.getCause();
+            guard++;
+        }
+        return null;
+    }
+
     @Override
     public void syncRequestAsset(ApplicationUser user, Issue incoming, String previousAssetId, String nextAssetId) {
         final Issue issue = resolvedIssue(incoming);
@@ -4847,13 +4860,14 @@ public class AssetServiceImpl implements AssetService {
         boolean fresh = previous == null || previous.intValue() != next.intValue();
         try {
             link(actor, next.intValue(), issue, false);
-        } catch (AssetException ex) {
-            if (ex.getStatus() == 404 || ex.getStatus() == 403) {
+        } catch (RuntimeException ex) {
+            AssetException cause = assetCause(ex);
+            if (cause != null && (cause.getStatus() == 404 || cause.getStatus() == 403)) {
                 attachPortalIssue(actor, issue, next.intValue(), false);
                 return;
             }
-            if (ex.getStatus() != 409) {
-                log.warn("Could not link asset {} to {}", next, issue.getKey());
+            if (cause == null || cause.getStatus() != 409) {
+                log.warn("Could not link asset {} to {}", next, issue.getKey(), ex);
             }
             return;
         }
