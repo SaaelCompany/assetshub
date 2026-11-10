@@ -390,6 +390,11 @@ public final class ModuleSetup {
         return calendar ? "calendar" : "roster";
     }
 
+    /** The schedule calendar. A timesheet-only board list leaves it off. An empty list keeps both boards. */
+    public static boolean calendarOn(String boards) {
+        return boards(boards).indexOf("calendar") >= 0;
+    }
+
     private static String openBoard(String raw, String layer) {
         String id = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
         if ("calendar".equals(id) || "roster".equals(id)) {
