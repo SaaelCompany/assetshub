@@ -1306,17 +1306,83 @@
             return segs;
         }
 
-        function snapPoint(raw, from) {
-            var point = { x: roundCm(raw.x), y: roundCm(raw.y) };
-            if (session.orthoOn && from) {
-                if (Math.abs(point.x - from.x) >= Math.abs(point.y - from.y)) point.y = from.y;
-                else point.x = from.x;
+        function snapStep() {
+            return 1;
+        }
+
+        function angleDelta(a, b) {
+            var d = Math.abs(a - b) % 360;
+            if (d > 180) d = 360 - d;
+            return d;
+        }
+
+        function nearestAngle(deg, guides, limit) {
+            var best = null;
+            var bestDelta = limit;
+            var i;
+            for (i = 0; i < guides.length; i++) {
+                var delta = angleDelta(deg, guides[i]);
+                if (delta <= bestDelta) {
+                    bestDelta = delta;
+                    best = guides[i];
+                }
             }
-            if (session.snapOn) {
-                var step = gridStep();
+            return best;
+        }
+
+        function alignRightAngle(point, from, limit, useSegments) {
+            if (!from) return { point: point, locked: false };
+            var dx = point.x - from.x;
+            var dy = point.y - from.y;
+            var len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 1) return { point: point, locked: false };
+            var deg = Math.atan2(dy, dx) * 180 / Math.PI;
+            var best = nearestAngle(deg, [0, 90, 180, -90], limit);
+            if (best == null && useSegments) {
+                var extra = [];
+                var segs = segmentsOf(activeFloor());
+                var i;
+                for (i = 0; i < segs.length; i++) {
+                    var seg = segs[i];
+                    if (dist(seg.x1, seg.y1, from.x, from.y) > 1.2 && dist(seg.x2, seg.y2, from.x, from.y) > 1.2) continue;
+                    var base = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1) * 180 / Math.PI;
+                    extra.push(base, base + 90, base - 90, base + 180);
+                }
+                var pts = session.draft && session.draft.points;
+                if (pts && pts.length >= 2) {
+                    var prev = pts[pts.length - 2];
+                    if (Math.abs(prev.x - from.x) + Math.abs(prev.y - from.y) > 0.5) {
+                        var chain = Math.atan2(from.y - prev.y, from.x - prev.x) * 180 / Math.PI;
+                        extra.push(chain, chain + 90, chain - 90, chain + 180);
+                    }
+                }
+                best = nearestAngle(deg, extra, limit);
+            }
+            if (best == null) return { point: point, locked: false };
+            var rad = best * Math.PI / 180;
+            var span = len;
+            if (session.snapOn) span = Math.max(snapStep(), Math.round(len / snapStep()) * snapStep());
+            var next = { x: from.x + Math.cos(rad) * span, y: from.y + Math.sin(rad) * span };
+            if (angleDelta(best, 0) < 0.01 || angleDelta(best, 180) < 0.01) next.y = from.y;
+            if (angleDelta(best, 90) < 0.01 || angleDelta(best, -90) < 0.01) next.x = from.x;
+            return { point: next, locked: true };
+        }
+
+        function snapPoint(raw, from) {
+            var point = { x: raw.x, y: raw.y };
+            var drawingWall = session.tool === 'wall' || (session.draft && session.draft.tool === 'wall');
+            var aligned = null;
+            if (from && (session.orthoOn || drawingWall)) {
+                aligned = alignRightAngle(point, from, session.orthoOn ? 45 : 6, !session.orthoOn);
+                if (aligned.locked) point = aligned.point;
+            }
+            if (session.snapOn && !(aligned && aligned.locked)) {
+                var step = snapStep();
                 point.x = Math.round(point.x / step) * step;
                 point.y = Math.round(point.y / step) * step;
             }
+            point.x = roundCm(point.x);
+            point.y = roundCm(point.y);
             session.osnap = null;
             if (!session.osnapOn) return point;
             var tol = 12 / session.cam.z;
@@ -1422,7 +1488,7 @@
         function snapBox(x, y, w, h, skip, hold) {
             var tol = 12 / (session.cam.z || 1);
             var anchors = axisAnchors(skip);
-            var step = session.snapOn ? gridStep() : 0;
+            var step = session.snapOn ? snapStep() : 0;
             var sx = snapShift1D(x, w || 0.01, session.osnapOn ? anchors.xs : [], step ? gridLines(x, w, step) : [], tol, hold && hold.x);
             var sy = snapShift1D(y, h || 0.01, session.osnapOn ? anchors.ys : [], step ? gridLines(y, h, step) : [], tol, hold && hold.y);
             return { x: roundCm(x + sx.shift), y: roundCm(y + sy.shift), hold: { x: sx.lock, y: sy.lock } };
@@ -3928,7 +3994,7 @@
             var live = measuresOn() ? liveLength() : null;
             if (live) badge(over, live.x, live.y, live.text);
             status.textContent = api.t('schemeReadout') + '  ' + (session.hover ? (roundCm(session.hover.x) + ', ' + roundCm(session.hover.y) + ' ' + (session.doc.settings.unit || 'cm')) : '') +
-                '   ' + api.t('schemeGrid') + ' ' + formatLen(gridStep()) +
+                '   ' + api.t('schemeGrid') + ' ' + formatLen(session.snapOn ? snapStep() : gridStep()) +
                 (live ? '   ' + api.t('schemeLength') + ' ' + live.text : '') +
                 (session.typed ? '   ' + session.typed : '');
             if (session.tool === 'wall') status.textContent += '   ' + api.t('schemeWallOne');
@@ -6769,6 +6835,14 @@
                     var point = target.points[drag.handle.index];
                     var nextX = roundCm(pt.x);
                     var nextY = roundCm(pt.y);
+                    if (target.type === 'wall') {
+                        var neighbor = drag.handle.index > 0 ? target.points[drag.handle.index - 1] : target.points[1];
+                        var straightened = alignRightAngle({ x: pt.x, y: pt.y }, neighbor, 6, true);
+                        if (straightened.locked) {
+                            nextX = roundCm(straightened.point.x);
+                            nextY = roundCm(straightened.point.y);
+                        }
+                    }
                     var shiftX = nextX - point.x;
                     var shiftY = nextY - point.y;
                     point.x = nextX;
