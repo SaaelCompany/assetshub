@@ -2683,12 +2683,30 @@
 
         function layerOr(id) {
             var layers = (session.doc && session.doc.layers) || [];
+            var active = session.doc && session.doc.activeLayerId;
             var i;
-            for (i = 0; i < layers.length; i++) {
-                if (layers[i].id === id) return id;
+            if (active) {
+                for (i = 0; i < layers.length; i++) if (layers[i].id === active) return active;
             }
-            if (session.doc && session.doc.activeLayerId) return session.doc.activeLayerId;
+            for (i = 0; i < layers.length; i++) if (layers[i].id === id) return id;
             return layers.length ? layers[0].id : id;
+        }
+
+        function moveObjectsToLayer(objects, layerId) {
+            var layers = (session.doc && session.doc.layers) || [];
+            var known = false;
+            var i;
+            for (i = 0; i < layers.length; i++) if (layers[i].id === layerId) known = true;
+            if (!known) return;
+            var wallIds = {};
+            (objects || []).forEach(function (obj) {
+                if (!obj || !obj.type || !mutableObject(obj)) return;
+                obj.layerId = layerId;
+                if (obj.type === 'wall' && obj.id) wallIds[obj.id] = true;
+            });
+            ((activeFloor() || {}).objects || []).forEach(function (obj) {
+                if (obj.type === 'opening' && wallIds[obj.wallId]) obj.layerId = layerId;
+            });
         }
 
         function drawMeasures(ctx, obj) {
@@ -3832,6 +3850,25 @@
                 });
                 row.appendChild(eye);
                 row.appendChild(name);
+                var movable = selectedObjects().filter(function (obj) { return obj && obj.type && mutableObject(obj); });
+                var elsewhere = false;
+                movable.forEach(function (obj) { if (obj.layerId !== layer.id) elsewhere = true; });
+                if (elsewhere) {
+                    var send = el('button', 'asset-tree-scheme-icon', '\u2192');
+                    send.type = 'button';
+                    send.title = api.t('schemeLayerMove');
+                    send.disabled = session.mode !== 'edit';
+                    send.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        remember();
+                        moveObjectsToLayer(movable, layer.id);
+                        session.doc.activeLayerId = layer.id;
+                        renderProps();
+                        refreshSide();
+                        paint();
+                    });
+                    row.appendChild(send);
+                }
                 row.appendChild(lock);
                 if ((session.doc.layers || []).length > 1) {
                     var dropLayer = el('button', 'asset-tree-scheme-icon', '×');
@@ -4543,11 +4580,53 @@
             props.appendChild(row);
         }
 
+        function paintLayerField(list) {
+            var layers = (session.doc && session.doc.layers) || [];
+            var movable = [];
+            (list || []).forEach(function (obj) {
+                if (obj && obj.type && mutableObject(obj)) movable.push(obj);
+            });
+            if (!layers.length || !movable.length) return;
+            var wrap = el('label', 'asset-tree-scheme-field', api.t('schemeObjectLayer'));
+            var pick = el('select');
+            pick.disabled = session.mode !== 'edit';
+            var current = movable[0].layerId || '';
+            var mixed = false;
+            var i;
+            for (i = 1; i < movable.length; i++) {
+                if ((movable[i].layerId || '') !== current) mixed = true;
+            }
+            if (mixed) {
+                var blank = el('option', null, '\u2014');
+                blank.value = '';
+                pick.appendChild(blank);
+            }
+            layers.forEach(function (layer) {
+                var option = el('option', null, layer.name || layer.id);
+                option.value = layer.id;
+                pick.appendChild(option);
+            });
+            var known = false;
+            for (i = 0; i < layers.length; i++) if (layers[i].id === current) known = true;
+            pick.value = mixed || !known ? '' : current;
+            pick.addEventListener('change', function () {
+                if (!pick.value || !api.canEdit || session.mode !== 'edit') return;
+                remember();
+                moveObjectsToLayer(movable, pick.value);
+                renderProps();
+                refreshSide();
+                paint();
+            });
+            wrap.appendChild(pick);
+            props.appendChild(wrap);
+        }
+
         function renderProps() {
             props.innerHTML = '';
             props.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeProps')));
             arrangeBar();
             var objects = selectedObjects();
+            paintLayerField(objects);
             if (objects.length !== 1) {
                 if (!objects.length) props.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeHint')));
                 return;
