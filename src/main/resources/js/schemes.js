@@ -365,6 +365,28 @@
         palette.appendChild(swatches);
         palette.appendChild(fillInk);
         tools.appendChild(palette);
+        var thickWrap = el('label', 'asset-tree-scheme-tool-field', api.t('schemeThickness'));
+        var thickInput = el('input');
+        thickInput.type = 'number';
+        thickInput.min = '1';
+        thickInput.step = '1';
+        thickInput.value = String(wallDefaults().thickness);
+        thickInput.title = api.t('schemeThickness');
+        thickInput.disabled = !api.canEdit;
+        thickInput.addEventListener('change', function () {
+            var next = Math.max(1, roundCm(Number(thickInput.value) || wallDefaults().thickness));
+            thickInput.value = String(next);
+            wallDefaults().thickness = next;
+            rememberWall();
+            var walls = selectedObjects().filter(function (obj) { return obj.type === 'wall' && mutableObject(obj); });
+            if (!walls.length) return;
+            remember();
+            walls.forEach(function (wall) { wall.thickness = next; });
+            renderProps();
+            paint();
+        });
+        thickWrap.appendChild(thickInput);
+        tools.appendChild(thickWrap);
         var scanFile = el('input');
         scanFile.type = 'file';
         scanFile.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
@@ -405,15 +427,13 @@
         });
         tools.appendChild(scaleBtn);
         tools.appendChild(removeScan);
-        var scanWidth = el('input', 'asset-tree-scheme-unit');
+        var scanWrap = el('label', 'asset-tree-scheme-tool-field', api.t('mapScanWidth'));
+        scanWrap.style.display = 'none';
+        var scanWidth = el('input');
         scanWidth.type = 'number';
         scanWidth.min = '10';
         scanWidth.title = api.t('mapScanWidth');
         scanWidth.setAttribute('aria-label', api.t('mapScanWidth'));
-        scanWidth.addEventListener('focus', function () {
-            var scan = activeFloor().underlay;
-            scanWidth.value = scan ? String(Math.round(scan.w || 0)) : '';
-        });
         scanWidth.addEventListener('change', function () {
             var scan = activeFloor().underlay;
             var next = Number(scanWidth.value);
@@ -424,7 +444,8 @@
             session.dirty = true;
             paint();
         });
-        tools.appendChild(scanWidth);
+        scanWrap.appendChild(scanWidth);
+        tools.appendChild(scanWrap);
         var imageFile = el('input');
         imageFile.type = 'file';
         imageFile.accept = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif';
@@ -1065,9 +1086,48 @@
             return layers[0];
         }
 
+        function layerRecord(id) {
+            var layers = (session.doc && session.doc.layers) || [];
+            var i;
+            for (i = 0; i < layers.length; i++) if (layers[i].id === id) return layers[i];
+            return null;
+        }
+
         function layerVisible(id) {
-            var layer = layerById(id);
-            return !layer || layer.visible !== false;
+            var layer = layerRecord(id);
+            if (!layer) return true;
+            return layer.visible !== false;
+        }
+
+        function layerLocked(id) {
+            var layer = layerRecord(id);
+            return !!(layer && layer.locked);
+        }
+
+        function wallDefaults() {
+            if (!session.wallStyle) {
+                var stored = {};
+                try { stored = JSON.parse(global.localStorage.getItem('assetshub.schemeWall') || '{}') || {}; } catch (error) { stored = {}; }
+                var settings = session.doc && session.doc.settings;
+                var thick = settings && Number(settings.wallThickness) > 0 ? Number(settings.wallThickness) : Number(stored.thickness);
+                session.wallStyle = { thickness: thick > 0 ? thick : 15 };
+            }
+            return session.wallStyle;
+        }
+
+        function rememberWall() {
+            var style = wallDefaults();
+            if (!session.doc.settings) session.doc.settings = { showOtherFloors: true, unit: 'cm' };
+            session.doc.settings.wallThickness = style.thickness;
+            session.dirty = true;
+            try { global.localStorage.setItem('assetshub.schemeWall', JSON.stringify({ thickness: style.thickness })); } catch (error) { /* keep the drawing */ }
+        }
+
+        function syncWallField() {
+            if (!thickInput || document.activeElement === thickInput) return;
+            var walls = selectedObjects().filter(function (obj) { return obj.type === 'wall'; });
+            var value = walls.length === 1 ? (walls[0].thickness || wallDefaults().thickness) : wallDefaults().thickness;
+            thickInput.value = String(value);
         }
 
         function symbolDef(id) {
@@ -1436,9 +1496,7 @@
             var i;
             for (i = objects.length - 1; i >= 0; i--) {
                 var obj = objects[i];
-                if (!layerVisible(obj.layerId)) continue;
-                var layer = layerById(obj.layerId);
-                if (layer && layer.locked) continue;
+                if (!layerVisible(obj.layerId) || layerLocked(obj.layerId)) continue;
                 if (!hitsObject(obj, wx, wy, tol)) continue;
                 if (obj.type === 'wall') {
                     var door = openingAt(obj.id, wx, wy, tol);
@@ -1731,7 +1789,7 @@
 
         function underlayHandleAt(sx, sy) {
             var scan = activeFloor().underlay;
-            if (!scan || !scan.src || session.mode !== 'edit') return null;
+            if (!scan || !scan.src || session.mode !== 'edit' || !layerVisible(scan.layerId) || layerLocked(scan.layerId)) return null;
             var corners = [
                 { x: scan.x, y: scan.y, index: 0 },
                 { x: scan.x + scan.w, y: scan.y, index: 1 },
@@ -1762,10 +1820,17 @@
             ctx.restore();
         }
 
+        function pointOnUnderlay(wx, wy) {
+            var scan = activeFloor() && activeFloor().underlay;
+            if (!scan || !scan.src || !layerVisible(scan.layerId)) return false;
+            return wx >= scan.x && wy >= scan.y && wx <= scan.x + scan.w && wy <= scan.y + scan.h;
+        }
+
         function handleAt(sx, sy) {
             var objects = selectedObjects();
             if (objects.length !== 1) return null;
             var obj = objects[0];
+            if (obj.type && (!layerVisible(obj.layerId) || layerLocked(obj.layerId))) return null;
             var points = [];
             if (obj.type === 'line' || obj.type === 'dimension') {
                 points = [{ x: obj.x1, y: obj.y1, index: 0 }, { x: obj.x2, y: obj.y2, index: 1 }];
@@ -1820,7 +1885,7 @@
                 type: type,
                 layerId: session.doc.activeLayerId || 'walls',
                 color: session.ink || (layerById(session.doc.activeLayerId) || {}).color || '#172b4d',
-                thickness: type === 'wall' ? 15 : 1,
+                thickness: type === 'wall' ? wallDefaults().thickness : 1,
                 opacity: 1
             };
         }
@@ -1851,7 +1916,7 @@
             remember();
             obj.closed = !!closed;
             if (obj.type === 'wall') {
-                obj.thickness = 15;
+                obj.thickness = wallDefaults().thickness;
                 obj.alignment = 'center';
                 obj.hatch = 'diagonal';
                 obj.height = 300;
@@ -1885,7 +1950,7 @@
                 { x: roundCm(x2), y: roundCm(y2) }
             ];
             obj.closed = false;
-            obj.thickness = 15;
+            obj.thickness = wallDefaults().thickness;
             obj.alignment = 'center';
             obj.hatch = 'diagonal';
             obj.height = 300;
@@ -2010,7 +2075,7 @@
                 var floor = activeFloor();
                 var w = Math.min(1000, image.naturalWidth || 400);
                 var h = Math.round(w * (image.naturalHeight || 1) / Math.max(1, image.naturalWidth || 1));
-                floor.underlay = { src: src, x: 40, y: 40, w: Math.max(10, w), h: Math.max(10, h) };
+                floor.underlay = { src: src, x: 40, y: 40, w: Math.max(10, w), h: Math.max(10, h), layerId: session.doc.activeLayerId || 'walls' };
                 session.dirty = true;
                 paint();
             };
@@ -2199,7 +2264,7 @@
 
         function drawSchemeScan(ctx, floor) {
             var scan = floor && floor.underlay;
-            if (!scan || !scan.src) return;
+            if (!scan || !scan.src || !layerVisible(scan.layerId)) return;
             if (scanCache.src !== scan.src) {
                 scanCache.src = scan.src;
                 scanCache.image = new Image();
@@ -2594,7 +2659,7 @@
             var drop = {};
             var any = false;
             (floor.objects || []).forEach(function (obj) {
-                if (session.selection.indexOf(obj.id) >= 0 && mutableObject(obj)) {
+                if (session.selection.indexOf(obj.id) >= 0 && mutableObject(obj) && !layerLocked(obj.layerId)) {
                     drop[obj.id] = true;
                     any = true;
                 }
@@ -2954,7 +3019,7 @@
                 points = [{ x: draft.x1, y: draft.y1 }, { x: draft.x2, y: draft.y2 }];
             }
             if (!points) return { objects: objects };
-            objects.push({ type: 'wall', points: points, thickness: 15, closed: false, draft: true });
+            objects.push({ type: 'wall', points: points, thickness: wallDefaults().thickness, closed: false, draft: true });
             return { objects: objects };
         }
 
@@ -3504,12 +3569,24 @@
             }
         }
 
+        function floorWallsShown(floor) {
+            var objects = (floor && floor.objects) || [];
+            var any = false;
+            var i;
+            for (i = 0; i < objects.length; i++) {
+                if (objects[i].type !== 'wall') continue;
+                any = true;
+                if (layerVisible(objects[i].layerId)) return true;
+            }
+            return !any;
+        }
+
         function drawFloor(ctx, floor, ghost) {
             ctx.save();
             if (!ghost) drawSchemeScan(ctx, floor);
             if (!ghost) drawSchemeImages(ctx, floor);
             if (ghost) ctx.globalAlpha = 0.16;
-            var rooms = floor.rooms || [];
+            var rooms = floorWallsShown(floor) ? (floor.rooms || []) : [];
             var i;
             for (i = 0; i < rooms.length; i++) {
                 var room = rooms[i];
@@ -3574,10 +3651,11 @@
                 if (objects[i].type === 'wall') walls.push(objects[i]);
             }
             if (!walls.length) return;
-            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'body');
-            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'stroke');
-            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'cover');
-            for (i = 0; i < walls.length; i++) drawWall(ctx, walls[i], floor, 'hatch');
+            var shown = walls.filter(function (wall) { return layerVisible(wall.layerId); });
+            for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'body');
+            for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'stroke');
+            for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'cover');
+            for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'hatch');
         }
 
         function settleWindows() {
@@ -3615,8 +3693,16 @@
             }
         }
 
+        function syncScanField() {
+            var scan = activeFloor() && activeFloor().underlay;
+            if (!scanWrap) return;
+            scanWrap.style.display = scan && scan.src ? '' : 'none';
+            if (scan && scan.src && document.activeElement !== scanWidth) scanWidth.value = String(Math.round(scan.w || 0));
+        }
+
         function paint() {
             if (!stage.clientWidth || !stage.clientHeight) return;
+            syncScanField();
             settleWindows();
             var width = stage.clientWidth;
             var height = stage.clientHeight;
@@ -3691,6 +3777,7 @@
                 ctx.lineWidth = 1 / session.cam.z;
                 ctx.setLineDash([6 / session.cam.z, 4 / session.cam.z]);
                 objects.forEach(function (obj) {
+                    if (obj.type && !layerVisible(obj.layerId)) return;
                     ctx.save();
                     if (obj.angle && obj.x != null && obj.w != null) rotateObj(ctx, obj);
                     if (obj.type === 'opening') {
@@ -3737,7 +3824,7 @@
                 ctx.setLineDash([]);
                 if (session.mode === 'edit' && !session.guest && api.canEdit) {
                     var scanSheet = activeFloor().underlay;
-                    if (scanSheet && scanSheet.src) drawCorners(ctx, scanSheet.x || 0, scanSheet.y || 0, scanSheet.w || 10, scanSheet.h || 10);
+                    if (scanSheet && scanSheet.src && layerVisible(scanSheet.layerId)) drawCorners(ctx, scanSheet.x || 0, scanSheet.y || 0, scanSheet.w || 10, scanSheet.h || 10);
                 }
                 if (session.mode === 'edit' && objects.length === 1 && objects[0].type === 'opening' && objects[0].kind !== 'window' && mutableObject(objects[0])) {
                     var marks = doorMarks(objects[0]);
@@ -3785,7 +3872,7 @@
                     } else if (session.draft.tool === 'wall') {
                         drawWall(ctx, {
                             points: session.draft.points,
-                            thickness: 15,
+                            thickness: wallDefaults().thickness,
                             color: '#172b4d',
                             hatch: 'diagonal',
                             opacity: 1
@@ -3814,7 +3901,7 @@
                                 { x: session.draft.x1, y: session.draft.y1 },
                                 { x: session.draft.x2, y: session.draft.y2 }
                             ],
-                            thickness: 15,
+                            thickness: wallDefaults().thickness,
                             color: '#172b4d',
                             hatch: 'diagonal',
                             opacity: 1
@@ -4043,8 +4130,22 @@
                 eye.type = 'button';
                 eye.title = hidden ? api.t('schemeShow') : api.t('schemeHide');
                 eye.innerHTML = toolIcon(hidden ? 'eyeOff' : 'eye');
-                eye.addEventListener('click', function () {
-                    layer.visible = hidden;
+                eye.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    layer.visible = layer.visible === false;
+                    if (layer.visible === false) {
+                        session.selection = session.selection.filter(function (id) {
+                            var found = objectById(id);
+                            if (!found) return false;
+                            if (found.layerId === layer.id) return false;
+                            if (found.type === 'opening') {
+                                var hostWall = objectById(found.wallId);
+                                if (hostWall && hostWall.layerId === layer.id) return false;
+                            }
+                            return true;
+                        });
+                        renderProps();
+                    }
                     session.dirty = true;
                     refreshSide();
                     paint();
@@ -4854,6 +4955,7 @@
 
         function renderProps() {
             props.innerHTML = '';
+            syncWallField();
             props.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeProps')));
             arrangeBar();
             var objects = selectedObjects();
@@ -4930,7 +5032,12 @@
                     props.appendChild(portWrap);
                 }
             }
-            if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || 15, function (value) { obj.thickness = Math.max(1, roundCm(Number(value) || 15)); });
+            if (obj.type === 'wall') field(api.t('schemeThickness'), obj.thickness || wallDefaults().thickness, function (value) {
+                obj.thickness = Math.max(1, roundCm(Number(value) || wallDefaults().thickness));
+                wallDefaults().thickness = obj.thickness;
+                rememberWall();
+                syncWallField();
+            });
             if (obj.type === 'wall') {
                 var dropSeg = el('button', 'asset-tree-scheme-add', api.t('schemeDeleteSegment'));
                 dropSeg.type = 'button';
@@ -5562,9 +5669,13 @@
             if (!doc.layers) doc.layers = blankDoc(api.t).layers;
             if (!doc.symbols) doc.symbols = {};
             if (!doc.activeFloorId) doc.activeFloorId = doc.floors[0].id;
+            if (!doc.activeLayerId) doc.activeLayerId = (doc.layers[0] && doc.layers[0].id) || 'walls';
             if (!doc.placeId) doc.placeId = 0;
+            session.wallStyle = null;
             (doc.floors || []).forEach(function (floor) {
+                if (floor.underlay && !floor.underlay.layerId) floor.underlay.layerId = doc.activeLayerId || 'walls';
                 (floor.objects || []).forEach(function (obj) {
+                    if (obj.type && !obj.layerId) obj.layerId = doc.activeLayerId || 'walls';
                     if (obj.type !== 'asset') return;
                     obj.w = 36;
                     obj.h = 36;
@@ -5578,6 +5689,7 @@
             session.future = [];
             session.selection = [];
             session.draft = null;
+            syncWallField();
         }
 
         function upsertCatalog(row) {
@@ -6225,7 +6337,7 @@
         function moveItems() {
             var items = [];
             selectedObjects().forEach(function (obj) {
-                if (!mutableObject(obj)) return;
+                if (!mutableObject(obj) || layerLocked(obj.layerId) || (obj.type && !layerVisible(obj.layerId))) return;
                 var item = { id: obj.id };
                 if (obj.type === 'opening') item.opening = true;
                 else if (obj.points) item.points = clone(obj.points);
@@ -6421,7 +6533,7 @@
                         paint();
                         return;
                     }
-                    if (scan && pt.x >= scan.x && pt.y >= scan.y && pt.x <= scan.x + scan.w && pt.y <= scan.y + scan.h && api.canEdit && !session.guest) {
+                    if (scan && layerVisible(scan.layerId) && !layerLocked(scan.layerId) && pt.x >= scan.x && pt.y >= scan.y && pt.x <= scan.x + scan.w && pt.y <= scan.y + scan.h && api.canEdit && !session.guest) {
                         drag = { mode: 'underlay', x: pt.x, y: pt.y, ox: scan.x, oy: scan.y, moved: false };
                         return;
                     }
@@ -6747,7 +6859,9 @@
                 var upRect = overC.getBoundingClientRect();
                 var rawUp = worldFrom(event.clientX - upRect.left, event.clientY - upRect.top);
                 var id = hit(rawUp.x, rawUp.y);
-                if (id && session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
+                session.menuUnderlay = !id && pointOnUnderlay(rawUp.x, rawUp.y);
+                if (session.menuUnderlay) session.selection = [];
+                else if (id && session.selection.indexOf(id) < 0) session.selection = withGroup([id]);
                 var menuWall = objectById(id);
                 if (menuWall && menuWall.type === 'wall') session.wallPick = { id: menuWall.id, index: segmentIndexAt(menuWall, rawUp.x, rawUp.y) };
                 drag = null;
@@ -6760,6 +6874,7 @@
                 var box = session.marquee;
                 var ids = [];
                 (activeFloor().objects || []).forEach(function (obj) {
+                    if (!layerVisible(obj.layerId) || layerLocked(obj.layerId)) return;
                     var boxObj = bounds(obj);
                     if (!boxObj) return;
                     if (boxObj.x < box.x + box.w && boxObj.x + boxObj.w > box.x && boxObj.y < box.y + box.h && boxObj.y + boxObj.h > box.y) ids.push(obj.id);
@@ -6990,22 +7105,25 @@
                 }
             }
             var layerTargets = selectedObjects().filter(function (obj) { return obj && obj.type && mutableObject(obj); });
-            if (layerTargets.length) {
+            var scanTarget = !layerTargets.length && session.menuUnderlay ? activeFloor().underlay : null;
+            if ((layerTargets.length || scanTarget) && (session.doc.layers || []).length) {
+                menu.appendChild(el('div', 'asset-tree-scheme-label', api.t('schemeObjectLayer')));
                 (session.doc.layers || []).forEach(function (layer) {
-                    var elsewhere = false;
-                    layerTargets.forEach(function (obj) { if (obj.layerId !== layer.id) elsewhere = true; });
-                    if (!elsewhere) return;
-                    menuAction(menu, api.t('schemeObjectLayer') + ': ' + (layer.name || layer.id), function () {
+                    var here = layerTargets.length ? layerTargets.every(function (obj) { return obj.layerId === layer.id; }) : scanTarget.layerId === layer.id;
+                    menuAction(menu, (here ? '\u2713 ' : '') + (layer.name || layer.id), function () {
                         remember();
-                        moveObjectsToLayer(layerTargets, layer.id);
+                        if (scanTarget) scanTarget.layerId = layer.id;
+                        else moveObjectsToLayer(layerTargets, layer.id);
                         session.doc.activeLayerId = layer.id;
+                        session.dirty = true;
                         renderProps();
                         refreshSide();
                         paint();
-                    });
+                    }, here);
                 });
             }
-            var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
+            session.menuUnderlay = false;
+            var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening' && obj.type !== 'image'; });
             var field = null;
             if (objects.length) {
                 var suggested = objects.length === 1 && objects[0].type === 'symbol' ? (symbolDef(objects[0].symbolId).name || '') : api.t('schemeTemplateNew');
