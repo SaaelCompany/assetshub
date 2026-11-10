@@ -2313,7 +2313,12 @@
                 ctx.scale(sx, sy);
                 ctx.strokeStyle = part.c || '#172b4d';
                 ctx.fillStyle = part.f || 'transparent';
-                ctx.lineWidth = part.s || 1;
+                var pix = 1;
+                if (ctx.getTransform) {
+                    var matrix = ctx.getTransform();
+                    pix = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b) || 1;
+                }
+                ctx.lineWidth = Math.max(part.s || 1, 1.05 / pix);
                 ctx.lineJoin = 'round';
                 ctx.lineCap = 'round';
                 if (part.t === 'r' || part.t === 'e') {
@@ -3754,42 +3759,69 @@
                 symbolList.innerHTML = '';
                 var query = String(symbolSearch.value || '').toLowerCase();
                 var count = 0;
-                libraryTemplates().forEach(function (current) {
-                    var name = current.label || current.name || '';
-                    if (query && name.toLowerCase().indexOf(query) < 0) return;
-                    count++;
-                    var armed = session.symbolId === current.id;
-                    var row = el('div', 'asset-tree-scheme-asset' + (armed ? ' is-on' : ''));
-                    var card = el('button', 'asset-tree-scheme-asset-main');
-                    card.type = 'button';
-                    card.disabled = !api.canEdit || session.mode !== 'edit' || session.guest;
-                    card.title = armed ? api.t('schemeTemplateOff') : name;
-                    card.appendChild(symbolMark(current));
-                    card.appendChild(el('strong', null, name));
-                    card.addEventListener('click', function () {
-                        if (!api.canEdit || session.mode !== 'edit' || session.guest) return;
-                        if (session.symbolId === current.id) {
-                            session.symbolId = '';
-                            session.tool = 'select';
-                        } else {
-                            session.symbolId = current.id;
-                            session.assetId = 0;
-                            session.tool = 'symbol';
-                        }
-                        markTools();
-                        refreshSide();
-                        paint();
+                librarySections().forEach(function (section) {
+                    var shownPacks = [];
+                    section.packs.forEach(function (pack) {
+                        var packHit = query && String(pack.name || '').toLowerCase().indexOf(query) >= 0;
+                        var items = pack.templates.filter(function (current) {
+                            if (!query || packHit) return true;
+                            var blob = (pack.name + ' ' + (current.name || '') + ' ' + (current.label || '')).toLowerCase();
+                            return blob.indexOf(query) >= 0;
+                        });
+                        if (items.length) shownPacks.push({ pack: pack, items: items, packHit: packHit });
                     });
-                    card.addEventListener('contextmenu', function (event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (session.guest) return;
-                        showLibraryMenu(event.clientX, event.clientY, current);
+                    if (!shownPacks.length) return;
+                    var head = el('div', 'asset-tree-scheme-lib-section', section.title);
+                    symbolList.appendChild(head);
+                    shownPacks.forEach(function (entry) {
+                        var pack = entry.pack;
+                        var open = query ? true : !!(session.packOpen && session.packOpen[pack.id]);
+                        var toggle = el('button', 'asset-tree-scheme-lib-pack', (open ? '\u25be ' : '\u25b8 ') + pack.name + '  ' + entry.items.length);
+                        toggle.type = 'button';
+                        toggle.addEventListener('click', function () {
+                            if (!session.packOpen) session.packOpen = {};
+                            session.packOpen[pack.id] = !session.packOpen[pack.id];
+                            paintSymbols();
+                        });
+                        symbolList.appendChild(toggle);
+                        if (!open) return;
+                        entry.items.forEach(function (current) {
+                            count++;
+                            var name = current.name || current.label || '';
+                            var armed = session.symbolId === current.id;
+                            var row = el('div', 'asset-tree-scheme-asset' + (armed ? ' is-on' : ''));
+                            var card = el('button', 'asset-tree-scheme-asset-main');
+                            card.type = 'button';
+                            card.disabled = !api.canEdit || session.mode !== 'edit' || session.guest;
+                            card.title = armed ? api.t('schemeTemplateOff') : (current.label || name);
+                            card.appendChild(symbolMark(current));
+                            card.appendChild(el('strong', null, name));
+                            card.addEventListener('click', function () {
+                                if (!api.canEdit || session.mode !== 'edit' || session.guest) return;
+                                if (session.symbolId === current.id) {
+                                    session.symbolId = '';
+                                    session.tool = 'select';
+                                } else {
+                                    session.symbolId = current.id;
+                                    session.assetId = 0;
+                                    session.tool = 'symbol';
+                                }
+                                markTools();
+                                refreshSide();
+                                paint();
+                            });
+                            card.addEventListener('contextmenu', function (event) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (session.guest) return;
+                                showLibraryMenu(event.clientX, event.clientY, current);
+                            });
+                            row.appendChild(card);
+                            symbolList.appendChild(row);
+                        });
                     });
-                    row.appendChild(card);
-                    symbolList.appendChild(row);
                 });
-                if (!count) symbolList.appendChild(el('p', 'asset-tree-scheme-muted', api.t('noResults')));
+                if (!count && query) symbolList.appendChild(el('p', 'asset-tree-scheme-muted', api.t('noResults')));
             };
             symbolSearch.addEventListener('input', function () {
                 session.symbolQuery = symbolSearch.value;
@@ -3954,6 +3986,60 @@
             link.download = ((session.doc && session.doc.name) || 'templates') + '.json';
             link.click();
             global.setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+        }
+
+        function librarySections() {
+            var hidden = {};
+            (session.doc.hiddenSymbols || []).forEach(function (id) { hidden[id] = true; });
+            var seen = {};
+            var sections = [
+                { id: 'own', title: api.t('schemeLibOwn'), packs: [] },
+                { id: 'net', title: api.t('schemeLibNet'), packs: [] },
+                { id: 'fur', title: api.t('schemeLibFur'), packs: [] },
+                { id: 'base', title: api.t('schemeLibBasic'), packs: [] }
+            ];
+            function sectionBy(id) {
+                var i;
+                for (i = 0; i < sections.length; i++) if (sections[i].id === id) return sections[i];
+                return sections[0];
+            }
+            function addPack(sectionId, pack) {
+                if (!pack || !pack.templates || !pack.templates.length) return;
+                var items = [];
+                pack.templates.forEach(function (def) {
+                    if (!def || !def.id || hidden[def.id] || seen[def.id]) return;
+                    seen[def.id] = true;
+                    var use = (session.doc.symbols && session.doc.symbols[def.id]) || def;
+                    items.push({
+                        id: use.id,
+                        name: use.name || def.name || '',
+                        label: pack.name ? (pack.name + ' \u00b7 ' + (use.name || def.name || '')) : (use.name || def.name || ''),
+                        w: use.w,
+                        h: use.h,
+                        parts: use.parts,
+                        ports: use.ports,
+                        face: use.face
+                    });
+                });
+                if (!items.length) return;
+                sectionBy(sectionId).packs.push({ id: pack.id || nid('pack'), name: pack.name || api.t('schemeLibraryName'), templates: items });
+            }
+            (session.doc.libraries || []).forEach(function (pack) { addPack('own', pack); });
+            readStoredLibraries().forEach(function (pack) { addPack('own', pack); });
+            builtinLibraries().forEach(function (pack) {
+                var id = String(pack && pack.id || '');
+                addPack(id.indexOf('lib-fur') === 0 ? 'fur' : (id.indexOf('lib-') === 0 ? 'net' : 'own'), pack);
+            });
+            var loose = [];
+            var customId;
+            for (customId in (session.doc.symbols || {})) {
+                if (!seen[customId] && !hidden[customId]) loose.push(session.doc.symbols[customId]);
+            }
+            builtins(api.t).forEach(function (def) {
+                if (!seen[def.id] && !hidden[def.id]) loose.push((session.doc.symbols && session.doc.symbols[def.id]) || def);
+            });
+            if (loose.length) addPack('base', { id: 'lib-basic', name: api.t('schemeLibBasic'), templates: loose });
+            return sections.filter(function (section) { return section.packs.length; });
         }
 
         function libraryTemplates() {

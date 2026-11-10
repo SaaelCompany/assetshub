@@ -141,6 +141,40 @@
         }
     }
 
+    function panel(parts, x, y, w, h) {
+        if (w < 8 || h < 8) return;
+        parts.push(rect(x, y, w, h, WOOD, '', 0.14));
+    }
+
+    function quilt(parts, x, y, w, h) {
+        var i;
+        parts.push(rect(x, y, w, h, INK, WHITE, 0.16));
+        for (i = 1; i < 4; i++) parts.push(line(x + 1, y + h * i / 4, x + w - 1, y + h * i / 4, MET, 0.45));
+        for (i = 1; i < 3; i++) parts.push(line(x + w * i / 3, y + 1, x + w * i / 3, y + h - 1, MET, 0.45));
+    }
+
+    function buttons(parts, x, y, w, h, cols, rows) {
+        var i;
+        var j;
+        if (w < 8 || h < 8) return;
+        for (i = 0; i < cols; i++) {
+            for (j = 0; j < rows; j++) {
+                parts.push(oval(x + w * (i + 0.5) / cols - 2.2, y + h * (j + 0.5) / rows - 2.2, 4.4, 4.4, MET, FAB2, 0.2));
+            }
+        }
+    }
+
+    function unitWalls(parts, w, d, gapX, gapW) {
+        var t = 8;
+        parts.push(rect(0, 0, w, t, INK, TILE, 0.4));
+        parts.push(rect(0, 0, t, d, INK, TILE, 0.4));
+        parts.push(rect(w - t, 0, t, d, INK, TILE, 0.4));
+        if (gapX > 0) parts.push(rect(0, d - t, gapX, t, INK, TILE, 0.4));
+        if (gapX + gapW < w) parts.push(rect(gapX + gapW, d - t, w - gapX - gapW, t, INK, TILE, 0.4));
+        parts.push(line(gapX, d - t, gapX, d - t - gapW, INK, 0.4));
+        parts.push(arc(gapX, d - t, gapW, 0, -Math.PI / 2, 10, MET, 0.26));
+    }
+
     function sofa(w, d, seats) {
         var arm = Math.max(12, Math.min(16, w * 0.08));
         var back = Math.max(16, Math.min(22, d * 0.24));
@@ -155,8 +189,12 @@
         for (i = 0; i < seats; i++) {
             var x = arm + 2 + i * (cw + gap);
             parts.push(oval(x + 2, 3, Math.max(8, cw - 6), back - 6, INK, WHITE, 0.16));
+            parts.push(line(x + cw * 0.35, 4, x + cw * 0.35, back - 4, FAB2, 0.12));
+            parts.push(line(x + cw * 0.65, 4, x + cw * 0.65, back - 4, FAB2, 0.12));
             parts.push(rect(x, back + 4, cw, d - back - 8, INK, WHITE, 0.22));
             parts.push(line(x + 2, back + (d - back) * 0.62, x + cw - 2, back + (d - back) * 0.62, MET, 0.12));
+            parts.push(line(x + 3, d - 7, x + cw - 3, d - 7, FAB2, 0.18));
+            buttons(parts, x + 4, back + 8, cw - 8, Math.max(10, (d - back) * 0.42), 2, 2);
         }
         return box(w, d, parts);
     }
@@ -233,6 +271,10 @@
         } else {
             parts.push(rect(0, 0, w, d, INK, WOODF, 0.85));
             parts.push(rect(3, 3, w - 6, d - 6, WOOD, '', 0.22));
+            if (w > 40) {
+                parts.push(line(w * 0.33, 6, w * 0.33, d - 6, WOOD, 0.12));
+                parts.push(line(w * 0.66, 6, w * 0.66, d - 6, WOOD, 0.12));
+            }
         }
         if (shape === 'leaf') {
             parts.push(line(w * 0.33, 4, w * 0.33, d - 4, AMBER, 0.28));
@@ -296,6 +338,7 @@
         for (i = 0; i < doors; i++) {
             var x = i * leaf;
             if (i) parts.push(line(x, 3, x, d - 2, INK, 0.28));
+            panel(parts, x + 4, 4, leaf - 8, d - 8);
             parts.push(oval(i % 2 === 0 ? x + leaf - 7 : x + 4, d * 0.55, 2.6, 5, MET, STEEL, 0.14));
             if (i % 2 === 0) swing(parts, x, d, leaf - 0.8, 0, Math.PI / 2);
             else swing(parts, x + leaf, d, leaf - 0.8, Math.PI, Math.PI / 2);
@@ -439,10 +482,15 @@
     function bed(w, d, pillows) {
         var parts = [rect(0, 0, w, d, INK, WOODF, 0.8)];
         parts.push(rect(0, 0, w, 12, INK, WOOD2, 0.4));
-        parts.push(rect(5, 16, w - 10, d - 26, INK, WHITE, 0.3));
+        parts.push(rect(2, 0, 6, 18, INK, WOOD, 0.25));
+        parts.push(rect(w - 8, 0, 6, 18, INK, WOOD, 0.25));
+        quilt(parts, 5, 16, w - 10, d - 26);
         var i;
         var pw = (w - 16 - (pillows - 1) * 3) / pillows;
-        for (i = 0; i < pillows; i++) parts.push(oval(8 + i * (pw + 3), 18, pw, 22, INK, FABF, 0.18));
+        for (i = 0; i < pillows; i++) {
+            parts.push(oval(8 + i * (pw + 3), 18, pw, 22, INK, FABF, 0.18));
+            parts.push(line(12 + i * (pw + 3), 24, 4 + i * (pw + 3) + pw, 34, FAB2, 0.12));
+        }
         parts.push(line(8, d * 0.62, w - 8, d * 0.62, MET, 0.16));
         parts.push(rect(0, d - 8, w, 8, INK, WOOD2, 0.3));
         return box(w, d, parts);
@@ -570,6 +618,7 @@
             for (i = 0; i < doors; i++) {
                 var x = i * leaf;
                 if (i) parts.push(line(x, 2, x, d - 2, INK, 0.24));
+                panel(parts, x + 3, 4, leaf - 6, d - 8);
                 parts.push(oval(i % 2 === 0 ? x + leaf - 6 : x + 3.5, d * 0.5, 2.4, 4.2, MET, STEEL, 0.12));
                 if (i % 2 === 0) swing(parts, x, d, swingH - 0.6, 0, Math.PI / 2);
                 else swing(parts, x + leaf, d, swingH - 0.6, Math.PI, Math.PI / 2);
@@ -693,6 +742,8 @@
     function desk(w, d) {
         var parts = [rect(0, 0, w, d, INK, WOODF, 0.85)];
         parts.push(rect(3, 3, w - 6, d - 6, WOOD, '', 0.2));
+        parts.push(rect(10, d - 12, w - 20, 6, WOOD, WOOD2, 0.14));
+        if (w > 70) parts.push(line(w * 0.5, 8, w * 0.5, d - 16, WOOD, 0.1));
         legs(parts, 0, 0, w, d, 5, 5);
         return box(w, d, parts);
     }
@@ -807,6 +858,7 @@
         var a;
         parts.push(rect(w * 0.18, 0, w * 0.64, backH, INK, FAB2, 0.45));
         parts.push(oval(w * 0.16, backH, w * 0.68, d * 0.4, INK, FABF, 0.5));
+        parts.push(oval(w * 0.34, backH + d * 0.1, w * 0.32, d * 0.16, MET, '', 0.12));
         if (tall) {
             parts.push(rect(w * 0.08, backH, w * 0.1, d * 0.34, INK, FAB2, 0.28));
             parts.push(rect(w * 0.82, backH, w * 0.1, d * 0.34, INK, FAB2, 0.28));
@@ -825,6 +877,10 @@
     function sideChair(w, d, arms, tablet) {
         var parts = [rect(w * 0.14, 10, w * 0.72, d - 18, INK, arms ? FABF : WHITE, 0.55)];
         parts.push(rect(w * 0.12, 0, w * 0.76, 9, INK, FAB2, 0.4));
+        parts.push(line(w * 0.32, 1, w * 0.32, 8, WOOD, 0.16));
+        parts.push(line(w * 0.5, 1, w * 0.5, 8, WOOD, 0.16));
+        parts.push(line(w * 0.68, 1, w * 0.68, 8, WOOD, 0.16));
+        parts.push(oval(w * 0.38, d * 0.38, w * 0.24, d * 0.16, MET, '', 0.12));
         if (arms) {
             parts.push(rect(0, 10, w * 0.14, d * 0.62, INK, FAB2, 0.28));
             parts.push(rect(w * 0.86, 10, w * 0.14, d * 0.62, INK, FAB2, 0.28));
@@ -1298,6 +1354,11 @@
         parts.push(oval(2, 16, 36, 50, INK, WHITE, 0.6));
         parts.push(oval(8, 28, 24, 30, INK, GLASS, 0.2));
         parts.push(oval(16, 38, 8, 10, MET, '', 0.12));
+        parts.push(line(8, 7, 32, 7, MET, 0.12));
+        parts.push(oval(17, 2, 6, 4, MET, STEEL, 0.1));
+        parts.push(line(10, 20, 15, 26, MET, 0.14));
+        parts.push(line(30, 20, 25, 26, MET, 0.14));
+        parts.push(rect(12, 62, 16, 7, INK, WHITE, 0.18));
         return box(w, d, parts);
     }
 
@@ -1315,7 +1376,10 @@
         wallLine(parts, w);
         parts.push(oval(8, 12, w - 16, d - 22, INK, GLASS, 0.25));
         parts.push(oval(w / 2 - 5, 4, 10, 8, MET, STEEL, 0.14));
+        parts.push(line(w / 2 - 12, 7, w / 2 - 6, 7, MET, 0.16));
+        parts.push(line(w / 2 + 6, 7, w / 2 + 12, 7, MET, 0.16));
         parts.push(oval(w / 2 - 3, d / 2, 6, 6, MET, '', 0.12));
+        parts.push(oval(w / 2 + w * 0.16, d * 0.42, 3, 5, MET, '', 0.1));
         return box(w, d, parts);
     }
 
@@ -1329,9 +1393,12 @@
 
     function bathtub(w, d) {
         var parts = [rect(0, 0, w, d, INK, WHITE, 0.8)];
+        parts.push(rect(5, 4, w - 10, d - 8, MET, '', 0.16));
         parts.push(oval(8, 6, w - 16, d - 12, INK, GLASS, 0.28));
         parts.push(oval(w - 24, 8, 12, 10, MET, STEEL, 0.16));
+        parts.push(line(w - 28, 14, w - 16, 14, MET, 0.14));
         parts.push(oval(16, d / 2 - 4, 8, 8, MET, '', 0.12));
+        parts.push(oval(w * 0.42, d - 14, 5, 7, MET, '', 0.1));
         return box(w, d, parts);
     }
 
@@ -1343,8 +1410,11 @@
         parts.push(line(0, 0, 0, s, INK, 1.1));
         parts.push(line(s, 0, s, s, INK, 1.1));
         parts.push(line(0, s, s - door, s, INK, 1.1));
+        parts.push(line(18, 18, s - 18, s - 18, MET, 0.1));
+        parts.push(line(s - 18, 18, 18, s - 18, MET, 0.1));
         parts.push(oval(s / 2 - 5, s / 2 - 5, 10, 10, MET, STEEL, 0.16));
         parts.push(oval(12, 8, 8, 8, INK, MET, 0.14));
+        parts.push(line(16, 12, 16, s * 0.4, MET, 0.16));
         swing(parts, s - door, s, door - 1, 0, Math.PI / 2);
         return box(s, s + door, parts);
     }
@@ -2003,6 +2073,116 @@
         return drawn;
     }
 
+    function wcCombined() {
+        var w = 210;
+        var d = 260;
+        var parts = [];
+        unitWalls(parts, w, d, 70, 80);
+        parts = parts.concat(moved(bathtub(170, 75).parts, 20, 16));
+        parts = parts.concat(moved(toilet().parts, 22, 96));
+        parts = parts.concat(moved(basin(70, 48).parts, 112, 104));
+        parts.push(rect(118, 96, 70, 6, INK, GLASS, 0.16));
+        return box(w, d, parts);
+    }
+
+    function wcBath() {
+        var w = 180;
+        var d = 240;
+        var parts = [];
+        unitWalls(parts, w, d, 54, 70);
+        parts = parts.concat(moved(bathtub(160, 75).parts, 10, 16));
+        parts = parts.concat(moved(basin(64, 46).parts, 96, 108));
+        parts = parts.concat(moved(towelRail().parts, 16, 100));
+        return box(w, d, parts);
+    }
+
+    function wcShower() {
+        var w = 200;
+        var d = 230;
+        var parts = [];
+        unitWalls(parts, w, d, 50, 70);
+        parts = parts.concat(moved(showerCabin().parts, 16, 16));
+        parts = parts.concat(moved(basin(62, 46).parts, 124, 168));
+        return box(w, d, parts);
+    }
+
+    function wcSplit() {
+        var w = 150;
+        var d = 190;
+        var parts = [];
+        unitWalls(parts, w, d, 28, 70);
+        parts = parts.concat(moved(toilet().parts, 22, 18));
+        parts = parts.concat(moved(basin(60, 42).parts, 74, 22));
+        return box(w, d, parts);
+    }
+
+    function wcStall() {
+        var w = 90;
+        var d = 150;
+        var parts = [];
+        unitWalls(parts, w, d, 12, 66);
+        parts = parts.concat(moved(toilet().parts, 25, 18));
+        parts.push(line(10, 16, 10, 100, MET, 0.2));
+        parts.push(line(w - 10, 16, w - 10, 100, MET, 0.2));
+        return box(w, d, parts);
+    }
+
+    function wcPublic() {
+        var w = 340;
+        var d = 220;
+        var parts = [];
+        var i;
+        unitWalls(parts, w, d, 250, 70);
+        for (i = 0; i < 3; i++) {
+            var x = 14 + i * 78;
+            parts.push(rect(x, 14, 4, 108, INK, TILE, 0.25));
+            parts.push(rect(x + 70, 14, 4, 108, INK, TILE, 0.25));
+            parts.push(rect(x, 14, 74, 4, INK, TILE, 0.25));
+            parts = parts.concat(moved(toilet().parts, x + 18, 24));
+            parts.push(line(x + 8, 122, x + 8, 174, INK, 0.35));
+            parts.push(arc(x + 8, 122, 52, 0, Math.PI / 2, 8, MET, 0.22));
+        }
+        parts = parts.concat(moved(urinal().parts, 250, 16));
+        parts = parts.concat(moved(urinal().parts, 292, 16));
+        parts = parts.concat(moved(basin(70, 42).parts, 248, 110));
+        return box(w, d, parts);
+    }
+
+    function washroom() {
+        var w = 250;
+        var d = 150;
+        var parts = [];
+        var i;
+        unitWalls(parts, w, d, 90, 70);
+        for (i = 0; i < 3; i++) parts = parts.concat(moved(basin(64, 46).parts, 16 + i * 74, 18));
+        parts.push(rect(16, 70, 210, 6, INK, GLASS, 0.16));
+        return box(w, d, parts);
+    }
+
+    function showerRoom() {
+        var w = 210;
+        var d = 240;
+        var parts = [];
+        unitWalls(parts, w, d, 70, 70);
+        parts = parts.concat(moved(showerTray().parts, 16, 16));
+        parts = parts.concat(moved(showerTray().parts, 104, 16));
+        parts = parts.concat(moved(showerBench().parts, 16, 120));
+        return box(w, d, parts);
+    }
+
+    function wcAccess() {
+        var w = 220;
+        var d = 220;
+        var parts = [];
+        unitWalls(parts, w, d, 16, 90);
+        parts = parts.concat(moved(toilet().parts, 28, 36));
+        parts = parts.concat(moved(basin(64, 46).parts, 130, 20));
+        parts = parts.concat(moved(grabBar(70, false).parts, 24, 24));
+        parts = parts.concat(moved(grabBar(76, true).parts, 78, 70));
+        parts.push(oval(40, 90, 150, 100, MET, '', 0.16));
+        return box(w, d, parts);
+    }
+
     function row(id, name, drawn) {
         return { id: id, name: name, w: drawn.w, h: drawn.h, parts: drawn.parts };
     }
@@ -2344,6 +2524,17 @@
                 row('fur-sport-bells', 'Стойка для гантелей', dumbbellRack()),
                 row('fur-sport-mirror', 'Зеркало', mirror(180, 8, false)),
                 row('fur-sport-bin', 'Урна', bin(36, false))
+            ]),
+            pack('lib-fur-wc', 'Санузлы', [
+                row('fur-wc-comb', 'Санузел совмещённый', wcCombined()),
+                row('fur-wc-bath', 'Санузел с ванной', wcBath()),
+                row('fur-wc-shower', 'Санузел с душем', wcShower()),
+                row('fur-wc-split', 'Санузел раздельный', wcSplit()),
+                row('fur-wc-stall', 'Туалетная кабина', wcStall()),
+                row('fur-wc-public', 'Туалет общественный', wcPublic()),
+                row('fur-wc-wash', 'Умывальная', washroom()),
+                row('fur-wc-showers', 'Душевая', showerRoom()),
+                row('fur-wc-access', 'Санузел для МГН', wcAccess())
             ]),
             pack('lib-fur-bath', 'Санузлы и МГН', [
                 row('fur-bath-wc', 'Унитаз', toilet()),
