@@ -1039,25 +1039,41 @@ var AssetTreePlan = (function () {
                         var stem = pair[0];
                         var bar = pair[1];
                         var barIndex = pair[2];
-                        var parallel = teeTurn(stem, bar) < 18;
+                        var parallel = teeTurn(stem, bar) < 12;
                         if (parallel) {
-                            var linked = function (ax, ay, bx, by) {
-                                return (ax - bx) * (ax - bx) + (ay - by) * (ay - by) <= 1;
+                            if (segLen(stem) + 0.01 < segLen(bar)) return;
+                            if (Math.abs(segLen(stem) - segLen(bar)) <= 0.01 && barIndex !== i) return;
+                            var axis = stem;
+                            var other = bar;
+                            var project = function (x, y) {
+                                return teeProject(axis.x1, axis.y1, axis.x2, axis.y2, x, y);
                             };
-                            if (linked(stem.x1, stem.y1, bar.x1, bar.y1) || linked(stem.x1, stem.y1, bar.x2, bar.y2) || linked(stem.x2, stem.y2, bar.x1, bar.y1) || linked(stem.x2, stem.y2, bar.x2, bar.y2)) return;
-                            [[stem.x1, stem.y1, 0], [stem.x2, stem.y2, 1]].forEach(function (end) {
-                                var hit = teeProject(bar.x1, bar.y1, bar.x2, bar.y2, end[0], end[1]);
-                                if (!hit || hit.dist > 5 || (hit.t >= 0.08 && hit.t <= 0.92)) return;
-                                var d1 = Math.sqrt((end[0] - bar.x1) * (end[0] - bar.x1) + (end[1] - bar.y1) * (end[1] - bar.y1));
-                                var d2 = Math.sqrt((end[0] - bar.x2) * (end[0] - bar.x2) + (end[1] - bar.y2) * (end[1] - bar.y2));
-                                if (Math.min(d1, d2) > 22) return;
-                                var tx = d1 < d2 ? bar.x1 : bar.x2;
-                                var ty = d1 < d2 ? bar.y1 : bar.y2;
-                                var mx = (end[0] + tx) / 2;
-                                var my = (end[1] + ty) / 2;
-                                snaps.push({ seg: stem, end: end[2], x: mx, y: my });
-                                snaps.push({ seg: bar, end: d1 < d2 ? 0 : 1, x: mx, y: my });
-                            });
+                            var p1 = project(other.x1, other.y1);
+                            var p2 = project(other.x2, other.y2);
+                            if (!p1 || !p2 || p1.dist > 4 || p2.dist > 4) return;
+                            var choices = [
+                                { aEnd: 0, oEnd: 0, ax: axis.x1, ay: axis.y1, ox: p1.x, oy: p1.y },
+                                { aEnd: 0, oEnd: 1, ax: axis.x1, ay: axis.y1, ox: p2.x, oy: p2.y },
+                                { aEnd: 1, oEnd: 0, ax: axis.x2, ay: axis.y2, ox: p1.x, oy: p1.y },
+                                { aEnd: 1, oEnd: 1, ax: axis.x2, ay: axis.y2, ox: p2.x, oy: p2.y }
+                            ];
+                            var best = choices[0];
+                            var n;
+                            var bestD = (best.ax - best.ox) * (best.ax - best.ox) + (best.ay - best.oy) * (best.ay - best.oy);
+                            for (n = 1; n < choices.length; n++) {
+                                var pick = choices[n];
+                                var pickD = (pick.ax - pick.ox) * (pick.ax - pick.ox) + (pick.ay - pick.oy) * (pick.ay - pick.oy);
+                                if (pickD < bestD) {
+                                    best = pick;
+                                    bestD = pickD;
+                                }
+                            }
+                            if (bestD > 22 * 22) return;
+                            var mx = (best.ax + best.ox) / 2;
+                            var my = (best.ay + best.oy) / 2;
+                            snaps.push({ seg: other, end: 0, x: best.oEnd === 0 ? mx : p1.x, y: best.oEnd === 0 ? my : p1.y });
+                            snaps.push({ seg: other, end: 1, x: best.oEnd === 1 ? mx : p2.x, y: best.oEnd === 1 ? my : p2.y });
+                            snaps.push({ seg: axis, end: best.aEnd, x: mx, y: my });
                             return;
                         }
                         var meet = lineCross(stem, bar);
@@ -1069,7 +1085,11 @@ var AssetTreePlan = (function () {
                         var barInterior = meet.u > 2 / barLen && meet.u < 1 - 2 / barLen;
                         if (barInterior && stemGap <= 22 && (stemPast || meet.t <= 0.001 || meet.t >= 0.999)) {
                             if (stemPast) snaps.push({ seg: stem, end: meet.t < 0 ? 0 : 1, x: meet.x, y: meet.y });
-                            addCut(barIndex, meet.u, meet.x, meet.y);
+                            var fromStart = meet.u * barLen;
+                            var fromEnd = (1 - meet.u) * barLen;
+                            if (stemPast && (fromStart <= 22 || fromEnd <= 22)) {
+                                snaps.push({ seg: bar, end: fromStart < fromEnd ? 0 : 1, x: meet.x, y: meet.y });
+                            } else addCut(barIndex, meet.u, meet.x, meet.y);
                             return;
                         }
                         if (stemPast && stemGap <= 22) {

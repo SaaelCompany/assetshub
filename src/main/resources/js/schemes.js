@@ -2934,7 +2934,9 @@
                     var prev = pts[(idx - 1 + pts.length) % pts.length];
                     var cur = pts[idx];
                     var next = pts[(idx + 1) % pts.length];
-                    label(cur.x, cur.y - 9 / session.cam.z, cornerDegrees(prev, cur, next) + '°');
+                    var turn = cornerDegrees(prev, cur, next);
+                    if (turn >= 170) continue;
+                    label(cur.x, cur.y - 9 / session.cam.z, turn + '°');
                 }
             }
             ctx.restore();
@@ -3039,7 +3041,7 @@
             var angled = [];
             ends.forEach(function (end) {
                 var deg = meetAngle(toward, wallVec(p, end.other));
-                if (deg < 12 || deg > 168) straight.push(end);
+                if (deg < 20 || deg > 160) straight.push(end);
                 else angled.push(end);
             });
             if (straight.length) return { cap: false };
@@ -6986,6 +6988,22 @@
                 if (segmentWall && segmentWall.type === 'wall' && mutableObject(segmentWall)) {
                     menuAction(menu, api.t('schemeDeleteSegment'), function () { removePickedSegment(); });
                 }
+            }
+            var layerTargets = selectedObjects().filter(function (obj) { return obj && obj.type && mutableObject(obj); });
+            if (layerTargets.length) {
+                (session.doc.layers || []).forEach(function (layer) {
+                    var elsewhere = false;
+                    layerTargets.forEach(function (obj) { if (obj.layerId !== layer.id) elsewhere = true; });
+                    if (!elsewhere) return;
+                    menuAction(menu, api.t('schemeObjectLayer') + ': ' + (layer.name || layer.id), function () {
+                        remember();
+                        moveObjectsToLayer(layerTargets, layer.id);
+                        session.doc.activeLayerId = layer.id;
+                        renderProps();
+                        refreshSide();
+                        paint();
+                    });
+                });
             }
             var objects = selectedObjects().filter(function (obj) { return obj.type && obj.type !== 'opening'; });
             var field = null;
