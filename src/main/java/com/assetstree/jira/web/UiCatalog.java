@@ -1210,6 +1210,8 @@ public final class UiCatalog {
             "schemeOtherFloors",
             "schemeLayers",
             "schemeLayerNew",
+            "schemeObjectLayer",
+            "schemeLayerMove",
             "schemeRooms",
             "schemeList",
             "schemeSymbols",
