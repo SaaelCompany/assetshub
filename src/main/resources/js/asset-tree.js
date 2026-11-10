@@ -916,7 +916,7 @@
         return trigger;
     }
 
-    var CAP_KEYS = ['view', 'places', 'types', 'object', 'assets', 'admin', 'reports', 'map', 'scheme', 'schemeEdit'];
+    var CAP_KEYS = ['view', 'places', 'types', 'object', 'assets', 'projectAdmin', 'admin', 'reports', 'map', 'scheme', 'schemeEdit'];
     var CAP_CHOICES = CAP_KEYS;
 
     function applyRights(project) {
@@ -955,7 +955,7 @@
             var listed = String(grant.caps).split(',').map(function (item) { return item.trim(); }).filter(function (item) {
                 return CAP_KEYS.indexOf(item) >= 0;
             });
-            if (listed.indexOf('admin') >= 0 || listed.indexOf('assets') >= 0) {
+            if (listed.indexOf('admin') >= 0 || listed.indexOf('assets') >= 0 || listed.indexOf('projectAdmin') >= 0) {
                 if (listed.indexOf('scheme') < 0) listed.push('scheme');
                 if (listed.indexOf('schemeEdit') < 0) listed.push('schemeEdit');
             }
@@ -963,6 +963,7 @@
             return listed;
         }
         if (grant && grant.level === 'admin') return CAP_KEYS.slice();
+        if (grant && grant.level === 'projectAdmin') return ['view', 'places', 'types', 'object', 'assets', 'projectAdmin', 'scheme', 'schemeEdit'];
         if (grant && grant.level === 'assets' || grant && grant.level === 'manage') return ['view', 'places', 'types', 'object', 'assets', 'scheme', 'schemeEdit'];
         if (grant && grant.level === 'edit') return ['view', 'places', 'object'];
         if (grant && grant.level === 'reports') return ['reports'];
@@ -979,6 +980,7 @@
             types: 'roleTypes',
             object: 'roleObject',
             assets: 'roleAssets',
+            projectAdmin: 'roleProjectAdmin',
             admin: 'roleAdmin',
             reports: 'roleReports',
             map: 'roleMap',
@@ -995,6 +997,7 @@
             types: 'roleTypesHint',
             object: 'roleObjectHint',
             assets: 'roleAssetsHint',
+            projectAdmin: 'roleProjectAdminHint',
             admin: 'roleAdminHint',
             reports: 'roleReportsHint',
             map: 'roleMapHint',
@@ -1012,13 +1015,16 @@
                 return;
             }
             chosen.view = true;
-            if (key === 'assets' || key === 'admin') {
+            if (key === 'assets' || key === 'admin' || key === 'projectAdmin') {
                 chosen.places = true;
                 chosen.types = true;
                 chosen.object = true;
                 chosen.assets = true;
+                chosen.scheme = true;
+                chosen.schemeEdit = true;
             }
             if (key === 'admin') chosen.admin = true;
+            if (key === 'projectAdmin') chosen.projectAdmin = true;
             return;
         }
         chosen[key] = false;
@@ -1028,6 +1034,7 @@
             chosen.object = false;
             chosen.assets = false;
             chosen.admin = false;
+            chosen.projectAdmin = false;
             return;
         }
         if (key === 'scheme') {
@@ -1035,8 +1042,11 @@
             return;
         }
         if (key === 'schemeEdit') return;
-        if (key !== 'admin') chosen.assets = false;
+        if (key === 'admin') return;
+        if (key === 'projectAdmin') return;
+        chosen.assets = false;
         chosen.admin = false;
+        chosen.projectAdmin = false;
     }
 
     function capsJoined(keys) {
@@ -1044,7 +1054,7 @@
         (keys || []).forEach(function (key) {
             if (CAP_KEYS.indexOf(key) >= 0) present[key] = true;
         });
-        if (present.admin || present.assets) {
+        if (present.admin || present.assets || present.projectAdmin) {
             present.view = true;
             present.places = true;
             present.types = true;
@@ -30283,14 +30293,16 @@
         contractPanel.appendChild(contractGrid);
         var contractOpen = lifeContractPresent(life) || !!state.lifeContractOpen[asset.id] || lifeSlotFiles(asset, 'contract').length > 0;
         contractPanel.hidden = !contractOpen;
-        form.appendChild(contractPanel);
         if (!contractOpen) {
-            form.appendChild(button(t('lifeContractAdd'), 'asset-tree-btn', function () {
+            var contractBar = el('div', 'asset-tree-life-contract-bar');
+            contractBar.appendChild(button(t('lifeContractAdd'), 'asset-tree-btn', function () {
                 state.lifeContractOpen[asset.id] = true;
                 contractPanel.hidden = false;
-                this.hidden = true;
+                contractBar.hidden = true;
             }));
+            form.appendChild(contractBar);
         }
+        form.appendChild(contractPanel);
         var methodPanel = el('section', 'asset-tree-life-panel');
         methodPanel.appendChild(el('h4', null, t('lifeSectionMethod')));
         var method = el('div', 'asset-tree-life-grid is-three');

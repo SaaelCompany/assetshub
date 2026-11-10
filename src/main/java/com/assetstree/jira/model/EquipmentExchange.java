@@ -25,8 +25,17 @@ public final class EquipmentExchange {
     private static final Pattern NUMBER = Pattern.compile("^-?\\d{1,12}(\\.\\d{1,4})?$");
     private static final String[] ROLES = {
             "key", "name", "type", "status", "place", "custodian", "issued", "description",
-            "serviceKind", "serviceName", "serviceDate", "serviceEvery", "serviceUnit", "serviceWho"
+            "serviceKind", "serviceName", "serviceDate", "serviceEvery", "serviceUnit", "serviceWho",
+            "lifePurchased", "lifeSupplier", "lifeDocument", "lifePrice", "lifeCurrency", "lifeCommissioned",
+            "lifeWarranty", "lifeWarrantyService", "lifeContractor", "lifeContractNo", "lifeContractFrom",
+            "lifeContractUntil", "lifeMonths", "lifeResidual"
     };
+    private static final String[] LIFE_FIELDS = {
+            "purchased", "supplier", "document", "price", "currency", "commissioned",
+            "warrantyUntil", "warrantyService", "contractor", "contractNo", "contractFrom",
+            "contractUntil", "lifeMonths", "residual"
+    };
+    private static final int LIFE_FIRST = 14;
     private static final int ROLE_KEY = 0;
     private static final int ROLE_SERVICE_KIND = 8;
     private static final int ROLE_SERVICE_NAME = 9;
@@ -251,17 +260,25 @@ public final class EquipmentExchange {
         private final String issuedKey;
         private final List<Value> attributes;
         private final Service service;
+        private final LifeBook.Change lifecycle;
 
         Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
                int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
                List<Value> attributes) {
             this(row, existingId, name, description, typeKey, statusKey, parentId, custodianPresent, custodianKey,
-                    issuedPresent, issuedKey, attributes, null);
+                    issuedPresent, issuedKey, attributes, null, null);
         }
 
         Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
                int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
                List<Value> attributes, Service service) {
+            this(row, existingId, name, description, typeKey, statusKey, parentId, custodianPresent, custodianKey,
+                    issuedPresent, issuedKey, attributes, service, null);
+        }
+
+        Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
+               int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
+               List<Value> attributes, Service service, LifeBook.Change lifecycle) {
             this.row = row;
             this.existingId = existingId;
             this.name = name;
@@ -275,6 +292,7 @@ public final class EquipmentExchange {
             this.issuedKey = issuedKey;
             this.attributes = attributes;
             this.service = service;
+            this.lifecycle = lifecycle;
         }
 
         public int getRow() {
@@ -327,6 +345,10 @@ public final class EquipmentExchange {
 
         public Service getService() {
             return service;
+        }
+
+        public LifeBook.Change getLifecycle() {
+            return lifecycle;
         }
     }
 
@@ -430,15 +452,21 @@ public final class EquipmentExchange {
         private final List<Change> changes;
         private final List<Issue> issues;
         private final List<Service> services;
+        private final List<LifeBook.Change> lifecycles;
 
         Plan(List<Change> changes, List<Issue> issues) {
             this(changes, issues, new ArrayList<Service>());
         }
 
         Plan(List<Change> changes, List<Issue> issues, List<Service> services) {
+            this(changes, issues, services, new ArrayList<LifeBook.Change>());
+        }
+
+        Plan(List<Change> changes, List<Issue> issues, List<Service> services, List<LifeBook.Change> lifecycles) {
             this.changes = changes;
             this.issues = issues;
             this.services = services == null ? new ArrayList<Service>() : services;
+            this.lifecycles = lifecycles == null ? new ArrayList<LifeBook.Change>() : lifecycles;
         }
 
         public List<Change> getChanges() {
@@ -451,6 +479,10 @@ public final class EquipmentExchange {
 
         public List<Service> getServices() {
             return services;
+        }
+
+        public List<LifeBook.Change> getLifecycles() {
+            return lifecycles;
         }
     }
 
@@ -477,13 +509,21 @@ public final class EquipmentExchange {
      * sheet that has a work-kind column and no name column become plans.
      * When it is false those columns are ignored and that sheet is skipped,
      * so a book saved while maintenance was on still loads.
+     * Lifecycle columns follow the same rule when {@code life} is true.
      */
     public static Plan planBook(List<EquipmentSheet.Sheet> sheets, List<TypeRef> types, List<Named> statuses,
                                 List<Node> nodes, String defaultStatus, Map<String, String> labels, Directory people,
                                 boolean service, List<Named> kinds) {
+        return planBook(sheets, types, statuses, nodes, defaultStatus, labels, people, service, kinds, false);
+    }
+
+    public static Plan planBook(List<EquipmentSheet.Sheet> sheets, List<TypeRef> types, List<Named> statuses,
+                                List<Node> nodes, String defaultStatus, Map<String, String> labels, Directory people,
+                                boolean service, List<Named> kinds, boolean life) {
         List<Change> changes = new ArrayList<Change>();
         List<Issue> issues = new ArrayList<Issue>();
         List<Service> services = new ArrayList<Service>();
+        List<LifeBook.Change> lifecycles = new ArrayList<LifeBook.Change>();
         if (sheets == null || sheets.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
             return new Plan(changes, issues, services);
@@ -519,15 +559,26 @@ public final class EquipmentExchange {
                 issues.addAll(stamp(sheet.getName(), partIssues));
                 continue;
             }
+            if (lifeSheet(sheet, labels)) {
+                if (!life || sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readLifeSheet(sheet, known, labels, lifecycles, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
+                continue;
+            }
             TypeRef bound = uniqueSheetType(sheet.getName(), types);
             EquipmentSheet.Sheet prepared = bound == null ? sheet : withSheetType(sheet, bound, labels, issues);
             if (prepared.getRecords().isEmpty()) {
                 continue;
             }
             anyData = true;
-            Plan part = plan(prepared, types, statuses, known, defaultStatus, labels, people, seenKeys, service, kinds);
+            Plan part = plan(prepared, types, statuses, known, defaultStatus, labels, people, seenKeys, service, kinds, life);
             issues.addAll(stamp(sheet.getName(), part.getIssues()));
             changes.addAll(part.getChanges());
+            lifecycles.addAll(part.getLifecycles());
             for (int i = 0; i < part.getChanges().size(); i++) {
                 Change change = part.getChanges().get(i);
                 if (change.getExistingId() == null && !TniText.shortHost(change.getName()).isEmpty()) {
@@ -538,7 +589,7 @@ public final class EquipmentExchange {
         if (!anyData && issues.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
         }
-        return new Plan(changes, issues, services);
+        return new Plan(changes, issues, services, lifecycles);
     }
 
     public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
@@ -550,6 +601,12 @@ public final class EquipmentExchange {
     public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
                             String defaultStatus, Map<String, String> labels, Directory people,
                             Map<String, Integer> seenKeys, boolean service, List<Named> kinds) {
+        return plan(sheet, types, statuses, nodes, defaultStatus, labels, people, seenKeys, service, kinds, false);
+    }
+
+    public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
+                            String defaultStatus, Map<String, String> labels, Directory people,
+                            Map<String, Integer> seenKeys, boolean service, List<Named> kinds, boolean life) {
         List<Change> changes = new ArrayList<Change>();
         List<Issue> issues = new ArrayList<Issue>();
         if (sheet == null || sheet.getHeaders().isEmpty()) {
@@ -630,7 +687,7 @@ public final class EquipmentExchange {
         int[] synthetic = new int[] { low - 1 };
         for (EquipmentSheet.Record record : sheet.getRecords()) {
             Change change = readRow(record, roleColumn, fieldColumns, headers, types, statuses, places, parentById, byKey,
-                    keys, defaultStatus, people, issues, service, kinds, hosts, byId, taken, synthetic);
+                    keys, defaultStatus, people, issues, service, kinds, hosts, byId, taken, synthetic, life);
             if (change != null) {
                 changes.add(change);
             }
@@ -643,7 +700,8 @@ public final class EquipmentExchange {
                                   Map<String, List<Node>> places, Map<Integer, Integer> parentById,
                                   Map<String, Node> byKey, Map<String, Integer> seenKeys, String defaultStatus,
                                   Directory people, List<Issue> issues, boolean service, List<Named> kinds,
-                                  List<TniSame.Card> hosts, Map<Integer, Node> byId, Set<Integer> taken, int[] synthetic) {
+                                  List<TniSame.Card> hosts, Map<Integer, Node> byId, Set<Integer> taken, int[] synthetic,
+                                  boolean life) {
         int row = record.getRow();
         String key = text(record, roleColumn[0]);
         String name = text(record, roleColumn[1]);
@@ -832,12 +890,13 @@ public final class EquipmentExchange {
                 return null;
             }
         }
+        LifeBook.Change lifecycle = life ? readLifecycle(record, roleColumn, key) : null;
         if (existing == null && hosts != null && synthetic != null && !TniText.shortHost(name).isEmpty()) {
             hosts.add(new TniSame.Card(synthetic[0]--, name.trim(), false, "", ""));
         }
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
                 description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
-                issuedPresent, issuedKey, attributes, wish);
+                issuedPresent, issuedKey, attributes, wish, lifecycle);
     }
 
     private static Map<String, List<Node>> indexPlaces(List<Node> nodes) {
@@ -1109,6 +1168,20 @@ public final class EquipmentExchange {
         alias(roles, "serviceEvery", "service: interval", "обслуживание: интервал");
         alias(roles, "serviceUnit", "service: period", "обслуживание: период");
         alias(roles, "serviceWho", "service: assignee", "обслуживание: исполнитель");
+        alias(roles, "lifePurchased", "lifecycle: purchase date", "жизненный цикл: дата покупки");
+        alias(roles, "lifeSupplier", "lifecycle: supplier", "жизненный цикл: поставщик");
+        alias(roles, "lifeDocument", "lifecycle: document", "жизненный цикл: документ");
+        alias(roles, "lifePrice", "lifecycle: cost", "жизненный цикл: цена");
+        alias(roles, "lifeCurrency", "lifecycle: currency", "жизненный цикл: валюта");
+        alias(roles, "lifeCommissioned", "lifecycle: commissioning", "жизненный цикл: дата ввода");
+        alias(roles, "lifeWarranty", "lifecycle: warranty until", "жизненный цикл: гарантия до");
+        alias(roles, "lifeWarrantyService", "lifecycle: warranty service", "жизненный цикл: гарантийный сервис");
+        alias(roles, "lifeContractor", "lifecycle: contractor", "жизненный цикл: подрядчик");
+        alias(roles, "lifeContractNo", "lifecycle: contract number", "жизненный цикл: номер договора");
+        alias(roles, "lifeContractFrom", "lifecycle: contract starts", "жизненный цикл: начало договора");
+        alias(roles, "lifeContractUntil", "lifecycle: contract ends", "жизненный цикл: окончание договора");
+        alias(roles, "lifeMonths", "lifecycle: useful life", "жизненный цикл: срок службы");
+        alias(roles, "lifeResidual", "lifecycle: residual value", "жизненный цикл: остаточная стоимость");
         if (labels != null) {
             for (Map.Entry<String, String> entry : labels.entrySet()) {
                 if (entry.getKey() != null && entry.getValue() != null && !entry.getValue().trim().isEmpty()) {
@@ -1149,6 +1222,77 @@ public final class EquipmentExchange {
 
     private static boolean same(String left, String right) {
         return norm(left).equals(norm(right));
+    }
+
+    private static boolean lifeSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean life = false;
+        boolean name = false;
+        boolean key = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String role = known.get(norm(headers.get(i)));
+            if (role != null && role.startsWith("life")) {
+                life = true;
+            }
+            if ("name".equals(role)) {
+                name = true;
+            }
+            if ("key".equals(role)) {
+                key = true;
+            }
+        }
+        return life && key && !name;
+    }
+
+    private static void readLifeSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
+                                      List<LifeBook.Change> lifecycles, List<Issue> issues) {
+        int[] roleColumn = roleColumns(sheet.getHeaders(), labels, issues);
+        if (roleColumn == null) {
+            return;
+        }
+        if (roleColumn[ROLE_KEY] < 0) {
+            issues.add(new Issue(1, "asset-tree.error.import.header", ""));
+            return;
+        }
+        Map<String, Node> byKey = new LinkedHashMap<String, Node>();
+        if (nodes != null) {
+            for (Node node : nodes) {
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+            }
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, roleColumn[ROLE_KEY]);
+            LifeBook.Change change = readLifecycle(record, roleColumn, key);
+            if (change == null) {
+                continue;
+            }
+            if (key.isEmpty() || byKey.get(norm(key)) == null || byKey.get(norm(key)).isLocation()) {
+                issues.add(new Issue(record.getRow(), "asset-tree.error.import.key", key));
+                continue;
+            }
+            lifecycles.add(change);
+        }
+    }
+
+    private static LifeBook.Change readLifecycle(EquipmentSheet.Record record, int[] roleColumn, String key) {
+        Map<String, String> fields = new LinkedHashMap<String, String>();
+        for (int i = 0; i < LIFE_FIELDS.length; i++) {
+            int column = LIFE_FIRST + i;
+            if (column >= roleColumn.length) {
+                break;
+            }
+            String value = text(record, roleColumn[column]);
+            if (!value.isEmpty()) {
+                fields.put(LIFE_FIELDS[i], value);
+            }
+        }
+        if (fields.isEmpty()) {
+            return null;
+        }
+        return new LifeBook.Change(record.getRow(), key == null ? "" : key, fields);
     }
 
     private static boolean serviceSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {

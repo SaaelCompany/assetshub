@@ -242,6 +242,10 @@
                 symbolId: '',
                 assetId: 0,
                 catalog: [],
+                guest: false,
+                shareEdit: false,
+                shares: [],
+                ownerKey: '',
                 dirty: false,
                 past: [],
                 future: [],
@@ -1194,6 +1198,7 @@
 
         function mutableObject(obj) {
             if (session.mode !== 'edit' || !obj) return false;
+            if (session.shareEdit) return !!api.canEdit;
             if (foreignPin(obj)) return false;
             if (session.guest) return !!api.canPlace && ownPin(obj);
             return !!api.canEdit;
@@ -2572,7 +2577,7 @@
         function duplicateSelection() {
             var objects = selectedObjects();
             if (!objects.length || !api.canEdit || session.guest) return;
-            objects = objects.filter(function (obj) { return !foreignPin(obj); });
+            objects = objects.filter(function (obj) { return session.shareEdit || !foreignPin(obj); });
             if (!objects.length) return;
             remember();
             var ids = [];
@@ -5767,6 +5772,8 @@
                     if (row.projectKey) session.catalog[i].projectKey = row.projectKey;
                     if (row.shared != null) session.catalog[i].shared = !!row.shared;
                     if (row.shares) session.catalog[i].shares = row.shares;
+                    if (row.shareEdits) session.catalog[i].shareEdits = row.shareEdits;
+                    if (row.canEditShared != null) session.catalog[i].canEditShared = !!row.canEditShared;
                     return;
                 }
             }
@@ -5776,7 +5783,9 @@
                 placeId: row.placeId || 0,
                 projectKey: row.projectKey || '',
                 shared: !!row.shared,
-                shares: row.shares || []
+                shares: row.shares || [],
+                shareEdits: row.shareEdits || [],
+                canEditShared: !!row.canEditShared
             });
         }
 
@@ -5866,17 +5875,22 @@
                     if (session.statusNode) session.statusNode.textContent = api.t('schemeSaveFailed');
                     return;
                 }
-                session.guest = !!payload.shared;
+                var sharedEdit = !!payload.shared && !!payload.canEditShared && !!api.canEdit;
+                session.shareEdit = sharedEdit;
+                session.guest = !!payload.shared && !sharedEdit;
                 session.ownerKey = payload.projectKey || api.projectKey;
                 session.shares = payload.shares || [];
+                session.shareEdits = payload.shareEdits || [];
                 if (session.guest) session.tool = 'select';
                 upsertCatalog({
                     id: payload.id,
                     name: session.doc.name,
                     placeId: session.doc.placeId || 0,
                     projectKey: session.ownerKey,
-                    shared: session.guest,
-                    shares: session.shares
+                    shared: !!payload.shared,
+                    shares: session.shares,
+                    shareEdits: session.shareEdits,
+                    canEditShared: !!payload.canEditShared
                 });
                 session.mode = session.pendingMode || 'view';
                 session.needFit = session.mode !== 'edit';
@@ -5896,18 +5910,25 @@
                     session.id = payload.id;
                     session.dirty = false;
                     if (payload.projectKey) session.ownerKey = payload.projectKey;
-                    if (payload.shared != null) session.guest = !!payload.shared;
+                    if (payload.shared != null) {
+                        var sharedEdit = !!payload.shared && !!payload.canEditShared && !!api.canEdit;
+                        session.shareEdit = sharedEdit;
+                        session.guest = !!payload.shared && !sharedEdit;
+                    }
                     if (payload.shares) session.shares = payload.shares;
+                    if (payload.shareEdits) session.shareEdits = payload.shareEdits;
                     upsertCatalog({
                         id: payload.id,
                         name: session.doc.name,
                         placeId: session.doc.placeId || 0,
                         projectKey: session.ownerKey || api.projectKey,
-                        shared: !!session.guest,
-                        shares: session.shares || []
+                        shared: !!payload.shared,
+                        shares: session.shares || [],
+                        shareEdits: session.shareEdits || [],
+                        canEditShared: !!session.shareEdit
                     });
                     fillSchemePick();
-                    if (!session.guest && !session.templateId) shareBtn.style.display = '';
+                    if (!session.guest && !session.shareEdit && !session.templateId) shareBtn.style.display = '';
                     status.textContent = session.guest ? api.t('schemeGuestSaved') : api.t('schemeSaved');
                     if (done) done();
                 } else {
@@ -6007,8 +6028,8 @@
             saveBtn.style.display = editing && mayEnter ? '' : 'none';
             saveBtn.textContent = session.templateId ? api.t('schemeTemplateSave') : api.t('save');
             newBtn.style.display = !browse && !session.templateId && api.canEdit ? '' : 'none';
-            deleteBtn.style.display = editing && api.canEdit && !session.templateId && !session.guest ? '' : 'none';
-            shareBtn.style.display = editing && api.canEdit && !session.templateId && !session.guest && session.id ? '' : 'none';
+            deleteBtn.style.display = editing && api.canEdit && !session.templateId && !session.guest && !session.shareEdit ? '' : 'none';
+            shareBtn.style.display = editing && api.canEdit && !session.templateId && !session.guest && !session.shareEdit && session.id ? '' : 'none';
             guestNote.style.display = session.guest && !browse && !session.templateId ? '' : 'none';
             guestNote.textContent = session.guest ? api.t('schemeGuestHint', session.ownerKey || '') : '';
             nameInput.disabled = !api.canEdit || !!session.guest;
@@ -6035,19 +6056,43 @@
             var boxes = [];
             (api.projects || []).forEach(function (project) {
                 if (!project || !project.key || project.key === api.projectKey) return;
+                var row = el('div', 'asset-tree-scheme-share-row');
                 var label = el('label', 'asset-tree-scheme-check');
                 var box = el('input');
                 box.type = 'checkbox';
+                var editBox = el('input');
+                editBox.type = 'checkbox';
                 var on = false;
+                var editOn = false;
                 var i;
                 for (i = 0; i < (session.shares || []).length; i++) {
                     if (String(session.shares[i]).toLowerCase() === String(project.key).toLowerCase()) on = true;
                 }
-                box.checked = on;
+                for (i = 0; i < (session.shareEdits || []).length; i++) {
+                    if (String(session.shareEdits[i]).toLowerCase() === String(project.key).toLowerCase()) editOn = true;
+                }
+                box.checked = on || editOn;
+                editBox.checked = editOn;
+                editBox.disabled = !box.checked;
+                box.addEventListener('change', function () {
+                    if (!box.checked) editBox.checked = false;
+                    editBox.disabled = !box.checked;
+                });
+                editBox.addEventListener('change', function () {
+                    if (editBox.checked) {
+                        box.checked = true;
+                        editBox.disabled = false;
+                    }
+                });
                 label.appendChild(box);
                 label.appendChild(document.createTextNode(' ' + (project.name || project.key)));
-                list.appendChild(label);
-                boxes.push({ key: project.key, box: box });
+                var editLabel = el('label', 'asset-tree-scheme-check');
+                editLabel.appendChild(editBox);
+                editLabel.appendChild(document.createTextNode(' ' + api.t('schemeShareEdit')));
+                row.appendChild(label);
+                row.appendChild(editLabel);
+                list.appendChild(row);
+                boxes.push({ key: project.key, box: box, edit: editBox });
             });
             if (!boxes.length) list.appendChild(el('p', 'asset-tree-scheme-muted', api.t('schemeShareEmpty')));
             var actions = el('div', 'asset-tree-scheme-head');
@@ -6060,19 +6105,23 @@
             }
             ok.addEventListener('click', function () {
                 var projects = [];
+                var edits = [];
                 boxes.forEach(function (item) {
                     if (item.box.checked) projects.push(item.key);
+                    if (item.edit.checked) edits.push(item.key);
                 });
-                api.ajax('PUT', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + session.id + '/shares', { shares: projects }, function (code, payload) {
+                api.ajax('PUT', '/projects/' + encodeURIComponent(api.projectKey) + '/schemes/' + session.id + '/shares', { shares: projects, shareEdits: edits }, function (code, payload) {
                     if (code >= 200 && code < 300) {
                         session.shares = (payload && payload.shares) || projects;
+                        session.shareEdits = (payload && payload.shareEdits) || edits;
                         upsertCatalog({
                             id: session.id,
                             name: session.doc.name,
                             placeId: session.doc.placeId || 0,
                             projectKey: api.projectKey,
                             shared: false,
-                            shares: session.shares
+                            shares: session.shares,
+                            shareEdits: session.shareEdits
                         });
                         status.textContent = api.t('schemeShareSaved');
                         close();
@@ -6136,7 +6185,7 @@
                 });
                 var edit = el('button', 'asset-tree-scheme-save', api.t('schemeEdit'));
                 edit.type = 'button';
-                edit.disabled = row.shared ? !api.canPlace : !api.canEdit;
+                edit.disabled = row.shared ? (row.canEditShared ? !api.canEdit : !api.canPlace) : !api.canEdit;
                 edit.addEventListener('click', function (event) {
                     event.stopPropagation();
                     openScheme(row.id, 'edit');
@@ -6244,8 +6293,10 @@
             session.templateReturn = null;
             acceptDoc(fresh, 0);
             session.guest = false;
+            session.shareEdit = false;
             session.ownerKey = api.projectKey;
             session.shares = [];
+            session.shareEdits = [];
             session.dirty = true;
             session.mode = 'edit';
             if (session.repaint) session.repaint();

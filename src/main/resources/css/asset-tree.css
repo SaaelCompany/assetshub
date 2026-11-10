@@ -8372,6 +8372,39 @@ a.asset-tree-preview-icon:focus {
     margin-top: 4px;
 }
 
+#asset-tree-app .asset-tree-life-form {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+#asset-tree-app .asset-tree-life-contract-bar {
+    display: flex;
+    width: 100%;
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-life-import {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 8px;
+}
+
+#asset-tree-app .asset-tree-life-import > .asset-tree-hint {
+    flex: 1 0 100%;
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-life-import > a.asset-tree-btn {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+}
+
 #asset-tree-app .asset-tree-life-form .asset-tree-inline-actions {
     justify-content: flex-start;
 }
@@ -14110,9 +14143,21 @@ button.asset-tree-attach-remove {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 240px;
+    max-height: 280px;
     margin: 8px 0 12px;
     overflow: auto;
+}
+
+.asset-tree-scheme-share-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+}
+
+.asset-tree-scheme-share-row .asset-tree-scheme-check {
+    margin: 0;
 }
 
 .asset-tree-scheme-editor-dialog {
