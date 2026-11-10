@@ -14,7 +14,9 @@ public class SchemeDocumentDto {
     private int placeId;
     private String projectKey;
     private boolean shared;
+    private boolean canEditShared;
     private List<String> shares = new ArrayList<String>();
+    private List<String> shareEdits = new ArrayList<String>();
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
@@ -33,5 +35,11 @@ public class SchemeDocumentDto {
     public List<String> getShares() { return shares; }
     public void setShares(List<String> shares) {
         this.shares = shares == null ? new ArrayList<String>() : shares;
+    }
+    public boolean isCanEditShared() { return canEditShared; }
+    public void setCanEditShared(boolean canEditShared) { this.canEditShared = canEditShared; }
+    public List<String> getShareEdits() { return shareEdits; }
+    public void setShareEdits(List<String> shareEdits) {
+        this.shareEdits = shareEdits == null ? new ArrayList<String>() : shareEdits;
     }
 }

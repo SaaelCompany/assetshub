@@ -3,6 +3,7 @@ package com.assetstree.jira.model;
 import org.junit.Test;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -36,6 +37,48 @@ public class ScaleRulesTest {
         assertTrue(GrantCaps.normalize("schemeEdit").contains("scheme"));
         assertFalse(GrantCaps.has("scheme", GrantCaps.VIEW));
         assertTrue(GrantCaps.normalize("object").contains("view"));
+    }
+
+    @Test
+    public void projectAdminStaysInsideOneProject() {
+        String caps = GrantCaps.normalize("projectAdmin");
+        assertTrue(GrantCaps.has(caps, GrantCaps.PROJECT_ADMIN));
+        assertTrue(GrantCaps.has(caps, GrantCaps.ASSETS));
+        assertTrue(GrantCaps.has(caps, GrantCaps.SCHEME_EDIT));
+        assertTrue(GrantCaps.has(caps, GrantCaps.TYPES));
+        assertFalse(GrantCaps.has(caps, GrantCaps.ADMIN));
+        assertEquals(GrantCaps.PROJECT_ADMIN, GrantCaps.levelOf(caps));
+        assertEquals(GrantCaps.ADMIN, GrantCaps.levelOf("admin"));
+    }
+
+    @Test
+    public void lifeBookFillsOnlyTheCellsThatArePresent() {
+        assertTrue(LifeBook.template().length > 100);
+        List<String> headers = Arrays.asList("Key", "Contractor", "Contract", "Contract from", "Price");
+        List<List<String>> rows = new ArrayList<List<String>>();
+        rows.add(Arrays.asList("KRUL-1", "North", "R-14", "01.02.2026", "1500"));
+        rows.add(Arrays.asList("", "Skip", "", "", ""));
+        byte[] filled = WorkbookSheet.write(Collections.singletonList(
+                new WorkbookSheet.Page("Lifecycle", headers, rows)));
+        List<LifeBook.Change> changes = LifeBook.read(WorkbookSheet.readAll(filled));
+        assertEquals(1, changes.size());
+        assertEquals("KRUL-1", changes.get(0).getKey());
+        LifeBook.Stored stored = new LifeBook.Stored();
+        stored.priceMinor = 100L;
+        stored.supplier = "Kept";
+        assertNull(LifeBook.apply(stored, changes.get(0)));
+        assertEquals("North", stored.contractor);
+        assertEquals("R-14", stored.contractNo);
+        assertEquals("2026-02-01", stored.contractFrom);
+        assertEquals(150000L, stored.priceMinor);
+        assertEquals("Kept", stored.supplier);
+        LifeBook.Stored rich = new LifeBook.Stored();
+        rich.priceMinor = 100L;
+        LifeBook.Change over = changes.get(0);
+        assertNull(LifeBook.apply(rich, over));
+        rich.residualMinor = rich.priceMinor + 1L;
+        LifeBook.Change residual = new LifeBook.Change(2, "KRUL-1", Collections.singletonMap("residual", "999999"));
+        assertEquals("asset-tree.error.life", LifeBook.apply(rich, residual));
     }
 
     @Test

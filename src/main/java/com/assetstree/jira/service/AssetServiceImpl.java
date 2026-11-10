@@ -220,6 +220,7 @@ import com.assetstree.jira.model.LifeApprovers;
 import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.PlanUnderlay;
 import com.assetstree.jira.model.ContractorContract;
+import com.assetstree.jira.model.LifeBook;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
 import com.assetstree.jira.model.ReportCatalog;
@@ -2768,7 +2769,7 @@ public class AssetServiceImpl implements AssetService {
                 if (assetId == otherId) {
                     throw new AssetException(400, "asset-tree.error.peer.self");
                 }
-                AssetEntity target = requireVisible(user, otherId);
+                AssetEntity target = requireAsset(otherId);
                 if (isLocation(target)) {
                     throw new AssetException(400, "asset-tree.error.peer.place");
                 }
@@ -2833,7 +2834,7 @@ public class AssetServiceImpl implements AssetService {
                 if (assetId == otherId) {
                     throw new AssetException(400, "asset-tree.error.peer.self");
                 }
-                AssetEntity target = requireVisible(user, otherId);
+                AssetEntity target = requireAsset(otherId);
                 if (isLocation(target)) {
                     throw new AssetException(400, "asset-tree.error.peer.place");
                 }
@@ -3018,31 +3019,46 @@ public class AssetServiceImpl implements AssetService {
         }
         Set<Integer> linked = linkedPeerIds(assetId);
         List<AssetPeerDto> found = new ArrayList<AssetPeerDto>();
+        Set<String> scanned = new java.util.HashSet<String>();
         for (ProjectDto visible : visibleProjects(user)) {
             if (visible == null || visible.getKey() == null) {
                 continue;
             }
-            AssetEntity[] rows = assetsIn(visible.getKey());
-            if (rows == null) {
-                continue;
-            }
-            for (AssetEntity row : rows) {
-                if (row == null || row.getID() == assetId || linked.contains(Integer.valueOf(row.getID()))) {
-                    continue;
-                }
-                if (isLocation(row) || !peerMatches(row, visible, needle)) {
-                    continue;
-                }
-                found.add(peerDto(user, row));
-                if (found.size() >= 80) {
-                    break;
-                }
-            }
+            scanned.add(visible.getKey());
+            collectPeers(user, assetId, needle, visible, linked, found, false);
             if (found.size() >= 80) {
                 break;
             }
         }
+        int foreign = 0;
+        for (Project project : projectManager().getProjects()) {
+            if (project == null || project.getKey() == null || scanned.contains(project.getKey())) {
+                continue;
+            }
+            int before = found.size();
+            ProjectDto hidden = new ProjectDto();
+            hidden.setKey(project.getKey());
+            hidden.setName(project.getName());
+            collectPeers(user, assetId, needle, hidden, linked, found, true);
+            foreign += found.size() - before;
+            if (foreign >= 15 || found.size() >= 80) {
+                break;
+            }
+        }
         sortPeers(found);
+        List<AssetPeerDto> exact = new ArrayList<AssetPeerDto>();
+        List<AssetPeerDto> rest = new ArrayList<AssetPeerDto>();
+        for (int i = 0; i < found.size(); i++) {
+            String key = found.get(i).getObjectKey();
+            if (key != null && key.toLowerCase(Locale.ROOT).equals(needle)) {
+                exact.add(found.get(i));
+            } else {
+                rest.add(found.get(i));
+            }
+        }
+        found.clear();
+        found.addAll(exact);
+        found.addAll(rest);
         if (found.size() > 15) {
             return new ArrayList<AssetPeerDto>(found.subList(0, 15));
         }
@@ -3213,6 +3229,96 @@ public class AssetServiceImpl implements AssetService {
                 return buildEquipmentBook(project.getKey());
             }
         });
+    }
+
+    @Override
+    public byte[] lifecycleBook(ApplicationUser user, String projectKey) {
+        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.LIFE);
+        return LifeBook.template();
+    }
+
+    @Override
+    public ImportResultDto importLifecycle(ApplicationUser user, String projectKey, ImportDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.LIFE);
+        final List<LifeBook.Change> changes = LifeBook.read(equipmentSheets(draft));
+        final I18nHelper labels = i18n();
+        return ao().executeInTransaction(new TransactionCallback<ImportResultDto>() {
+            @Override
+            public ImportResultDto doInTransaction() {
+                ImportResultDto result = new ImportResultDto();
+                List<ImportIssueDto> errors = new ArrayList<ImportIssueDto>();
+                int updated = 0;
+                for (int i = 0; i < changes.size(); i++) {
+                    LifeBook.Change change = changes.get(i);
+                    AssetEntity asset = assetByKey(project.getKey(), change.getKey().trim());
+                    if (asset == null || isLocation(asset)) {
+                        errors.add(new ImportIssueDto(change.getRow(),
+                                labels.getText("asset-tree.error.life.key", change.getKey())));
+                        continue;
+                    }
+                    LifecycleEntity row = ensureLife(asset.getID());
+                    if ("approved".equals(row.getWriteoffState())) {
+                        errors.add(new ImportIssueDto(change.getRow(), labels.getText("asset-tree.error.writeoff.closed")));
+                        continue;
+                    }
+                    LifeBook.Stored stored = lifeStored(row);
+                    String error = LifeBook.apply(stored, change);
+                    if (error != null) {
+                        errors.add(new ImportIssueDto(change.getRow(), labels.getText(error)));
+                        continue;
+                    }
+                    writeLife(row, stored);
+                    stampBook(row);
+                    updated++;
+                }
+                result.setUpdated(updated);
+                result.setErrors(errors);
+                result.setTotalRows(changes.size());
+                result.setDone(true);
+                return result;
+            }
+        });
+    }
+
+    private LifeBook.Stored lifeStored(LifecycleEntity row) {
+        LifeBook.Stored stored = new LifeBook.Stored();
+        if (row == null) {
+            return stored;
+        }
+        stored.purchased = row.getPurchased() == null ? "" : row.getPurchased();
+        stored.supplier = row.getSupplier() == null ? "" : row.getSupplier();
+        stored.document = row.getDocument() == null ? "" : row.getDocument();
+        stored.currency = row.getCurrency() == null || row.getCurrency().isEmpty() ? "RUB" : row.getCurrency();
+        stored.commissioned = row.getCommissioned() == null ? "" : row.getCommissioned();
+        stored.warrantyUntil = row.getWarrantyUntil() == null ? "" : row.getWarrantyUntil();
+        stored.warrantyService = row.getWarrantyService() == null ? "" : row.getWarrantyService();
+        stored.contractor = row.getContractor() == null ? "" : row.getContractor();
+        stored.contractNo = row.getContractNo() == null ? "" : row.getContractNo();
+        stored.contractFrom = row.getContractFrom() == null ? "" : row.getContractFrom();
+        stored.contractUntil = row.getContractUntil() == null ? "" : row.getContractUntil();
+        stored.priceMinor = row.getPriceMinor();
+        stored.residualMinor = row.getResidualMinor();
+        stored.lifeMonths = row.getLifeMonths();
+        return stored;
+    }
+
+    private void writeLife(LifecycleEntity row, LifeBook.Stored stored) {
+        row.setPurchased(stored.purchased == null ? "" : stored.purchased);
+        row.setSupplier(stored.supplier == null ? "" : stored.supplier);
+        row.setDocument(stored.document == null ? "" : stored.document);
+        row.setCurrency(stored.currency == null || stored.currency.isEmpty() ? "RUB" : stored.currency);
+        row.setCommissioned(stored.commissioned == null ? "" : stored.commissioned);
+        row.setWarrantyUntil(stored.warrantyUntil == null ? "" : stored.warrantyUntil);
+        row.setWarrantyService(stored.warrantyService == null ? "" : stored.warrantyService);
+        row.setContractor(stored.contractor == null ? "" : stored.contractor);
+        row.setContractNo(stored.contractNo == null ? "" : stored.contractNo);
+        row.setContractFrom(stored.contractFrom == null ? "" : stored.contractFrom);
+        row.setContractUntil(stored.contractUntil == null ? "" : stored.contractUntil);
+        row.setPriceMinor(stored.priceMinor);
+        row.setResidualMinor(stored.residualMinor);
+        row.setLifeMonths(stored.lifeMonths);
     }
 
     @Override
@@ -3878,7 +3984,7 @@ public class AssetServiceImpl implements AssetService {
         final Project project = requireArrangeProject(user, projectKey);
         final Boolean tree = draft == null ? null : draft.getTreeObjects();
         final List<String> columns = draft == null || draft.getColumns() == null ? null : ViewColumns.clean(draft.getColumns());
-        final List<String> modules = draft == null ? null : draft.getModules();
+        final List<String> modules = lockTni(user, project, draft == null ? null : draft.getModules());
         return ao().executeInTransaction(new TransactionCallback<ProjectViewDto>() {
             @Override
             public ProjectViewDto doInTransaction() {
@@ -3914,6 +4020,32 @@ public class AssetServiceImpl implements AssetService {
         saved.setModules(row == null ? new ArrayList<String>() : ProjectModules.split(row.getModuleList()));
         saved.setSetup(ModuleSetup.read(row == null ? "" : row.getOptionList()));
         return saved;
+    }
+
+    /** A project administrator keeps the TNI bit that is already stored. */
+    private List<String> lockTni(ApplicationUser user, Project project, List<String> modules) {
+        if (modules == null || mayToggleTni(user, project)) {
+            return modules;
+        }
+        List<String> locked = new ArrayList<String>();
+        for (int i = 0; i < modules.size(); i++) {
+            String item = modules.get(i);
+            if (item == null || ProjectModules.TNI.equals(item.trim())) {
+                continue;
+            }
+            locked.add(item);
+        }
+        if (moduleOn(project.getKey(), ProjectModules.TNI)) {
+            locked.add(ProjectModules.TNI);
+        }
+        return locked;
+    }
+
+    private boolean mayToggleTni(ApplicationUser user, Project project) {
+        if (isAdmin(user) || hasGlobalManage(user)) {
+            return true;
+        }
+        return grantHas(user, project, GrantCaps.ADMIN);
     }
 
     private boolean moduleOn(String projectKey, String module) {
@@ -6626,7 +6758,7 @@ public class AssetServiceImpl implements AssetService {
         if (permissionManager().hasPermission(ProjectPermissions.ADMINISTER_PROJECTS, project, user)) {
             return true;
         }
-        return grantHas(user, project, GrantCaps.ADMIN);
+        return grantHas(user, project, GrantCaps.ADMIN) || grantHas(user, project, GrantCaps.PROJECT_ADMIN);
     }
 
     private boolean hasCap(ApplicationUser user, Project project, String cap) {
@@ -8100,6 +8232,27 @@ public class AssetServiceImpl implements AssetService {
             guard++;
         }
         return location(entity, index);
+    }
+
+    private void collectPeers(ApplicationUser user, int assetId, String needle, ProjectDto visible,
+            Set<Integer> linked, List<AssetPeerDto> found, boolean keyOnly) {
+        AssetEntity[] rows = assetsIn(visible.getKey());
+        if (rows == null) {
+            return;
+        }
+        for (AssetEntity row : rows) {
+            if (row == null || row.getID() == assetId || linked.contains(Integer.valueOf(row.getID())) || isLocation(row)) {
+                continue;
+            }
+            boolean match = keyOnly ? contains(row.getObjectKey(), needle) : peerMatches(row, visible, needle);
+            if (!match) {
+                continue;
+            }
+            found.add(peerDto(user, row));
+            if (found.size() >= 80) {
+                return;
+            }
+        }
     }
 
     private boolean peerMatches(AssetEntity row, ProjectDto visible, String needle) {
@@ -9916,7 +10069,7 @@ public class AssetServiceImpl implements AssetService {
             public List<SchemeDocumentDto> doInTransaction() {
                 List<SchemeDocumentDto> found = SchemeDocuments.list(ao(), project.getKey());
                 for (int i = 0; i < found.size(); i++) {
-                    markScheme(found.get(i), project.getKey(), false, sharesOf(found.get(i).getId()));
+                    markScheme(found.get(i), project.getKey(), false, sharesOf(found.get(i).getId()), null);
                 }
                 SchemeShareEntity[] incoming = ao().find(SchemeShareEntity.class, "PROJECT_KEY = ?", project.getKey());
                 if (incoming != null) {
@@ -9930,7 +10083,7 @@ public class AssetServiceImpl implements AssetService {
                         dto.setName(row.getName());
                         dto.setUpdatedAt(row.getUpdatedAt());
                         dto.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
-                        markScheme(dto, row.getProjectKey(), true, null);
+                        markScheme(dto, row.getProjectKey(), true, null, project.getKey());
                         found.add(dto);
                     }
                 }
@@ -9965,7 +10118,7 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public SchemeDocumentDto doInTransaction() {
                 SchemeDocumentDto created = SchemeDocuments.create(ao(), project.getKey(), draft);
-                markScheme(created, project.getKey(), false, new ArrayList<String>());
+                markScheme(created, project.getKey(), false, new ArrayList<String>(), null);
                 return created;
             }
         });
@@ -9997,7 +10150,7 @@ public class AssetServiceImpl implements AssetService {
                     stored.setName(draft == null ? null : draft.getName());
                     stored.setBody(SchemeDocuments.stripGuestAssets(draft == null ? null : draft.getBody(), project.getKey()));
                     SchemeDocumentDto saved = SchemeDocuments.save(ao(), project.getKey(), schemeId, stored);
-                    markScheme(saved, project.getKey(), false, sharesOf(schemeId));
+                    markScheme(saved, project.getKey(), false, sharesOf(schemeId), null);
                     return saved;
                 }
                 if (!sharedWith(schemeId, project.getKey())) {
@@ -10006,6 +10159,15 @@ public class AssetServiceImpl implements AssetService {
                 if (!canOpen(user, project) && !hasCap(user, project, GrantCaps.SCHEME)) {
                     throw new AssetException(403, "asset-tree.error.forbidden");
                 }
+                if (shareCanEdit(schemeId, project.getKey()) && hasCap(user, project, GrantCaps.SCHEME_EDIT)) {
+                    SchemeDocumentDto edited = new SchemeDocumentDto();
+                    edited.setName(draft == null ? null : draft.getName());
+                    edited.setBody(draft == null ? null : draft.getBody());
+                    SchemeDocumentDto written = SchemeDocuments.save(ao(), row.getProjectKey(), schemeId, edited);
+                    ao().deleteWithSQL(SchemePlacementEntity.class, "SCHEME_ID = ?", Integer.valueOf(schemeId));
+                    markScheme(written, row.getProjectKey(), true, null, project.getKey());
+                    return written;
+                }
                 String pins = SchemeDocuments.takeProjectAssets(draft == null ? null : draft.getBody(), project.getKey());
                 writePlacements(schemeId, project.getKey(), ownedPlacements(user, project, pins));
                 SchemeDocumentDto saved = new SchemeDocumentDto();
@@ -10013,7 +10175,7 @@ public class AssetServiceImpl implements AssetService {
                 saved.setName(row.getName());
                 saved.setUpdatedAt(row.getUpdatedAt());
                 saved.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
-                markScheme(saved, row.getProjectKey(), true, null);
+                markScheme(saved, row.getProjectKey(), true, null, project.getKey());
                 return saved;
             }
         });
@@ -10030,7 +10192,20 @@ public class AssetServiceImpl implements AssetService {
                 if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
+                List<String> edits = SchemeDocuments.shareKeys(project.getKey(), draft == null ? null : draft.getShareEdits());
                 List<String> wanted = SchemeDocuments.shareKeys(project.getKey(), draft == null ? null : draft.getShares());
+                for (int i = 0; i < edits.size(); i++) {
+                    boolean listed = false;
+                    for (int k = 0; k < wanted.size(); k++) {
+                        if (ProjectKeys.same(wanted.get(k), edits.get(i))) {
+                            listed = true;
+                            break;
+                        }
+                    }
+                    if (!listed) {
+                        wanted.add(edits.get(i));
+                    }
+                }
                 List<String> stored = new ArrayList<String>();
                 for (int i = 0; i < wanted.size(); i++) {
                     Project target = project(wanted.get(i));
@@ -10046,14 +10221,25 @@ public class AssetServiceImpl implements AssetService {
                     }
                 }
                 for (int i = 0; i < stored.size(); i++) {
-                    ao().create(SchemeShareEntity.class, new DBParam("SCHEME_ID", Integer.valueOf(schemeId)), new DBParam("PROJECT_KEY", stored.get(i)));
+                    SchemeShareEntity share = ao().create(SchemeShareEntity.class,
+                            new DBParam("SCHEME_ID", Integer.valueOf(schemeId)),
+                            new DBParam("PROJECT_KEY", stored.get(i)));
+                    boolean edit = false;
+                    for (int k = 0; k < edits.size(); k++) {
+                        if (ProjectKeys.same(edits.get(k), stored.get(i))) {
+                            edit = true;
+                            break;
+                        }
+                    }
+                    share.setCanEdit(edit ? 1 : 0);
+                    share.save();
                 }
                 SchemeDocumentDto saved = new SchemeDocumentDto();
                 saved.setId(row.getID());
                 saved.setName(row.getName());
                 saved.setUpdatedAt(row.getUpdatedAt());
                 saved.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
-                markScheme(saved, project.getKey(), false, stored);
+                markScheme(saved, project.getKey(), false, stored, null);
                 return saved;
             }
         });
@@ -10092,16 +10278,22 @@ public class AssetServiceImpl implements AssetService {
             dto.setBody(SchemeDocuments.mergePlacements(dto.getBody(), placementBodies(schemeId)));
             dto.setPlaceId(SchemeDocuments.placeIdOf(row.getBody()));
         }
-        markScheme(dto, row.getProjectKey(), !owner, owner ? sharesOf(schemeId) : null);
+        markScheme(dto, row.getProjectKey(), !owner, owner ? sharesOf(schemeId) : null, viewerKey);
         return dto;
     }
 
-    private void markScheme(SchemeDocumentDto dto, String ownerKey, boolean shared, List<String> shares) {
+    private void markScheme(SchemeDocumentDto dto, String ownerKey, boolean shared, List<String> shares, String viewerKey) {
         dto.setProjectKey(ownerKey);
         dto.setShared(shared);
         if (!shared) {
             dto.setShares(shares == null ? new ArrayList<String>() : shares);
+            dto.setShareEdits(shareEditsOf(dto.getId()));
+            dto.setCanEditShared(false);
+            return;
         }
+        dto.setShares(new ArrayList<String>());
+        dto.setShareEdits(new ArrayList<String>());
+        dto.setCanEditShared(viewerKey != null && shareCanEdit(dto.getId(), viewerKey));
     }
 
     private List<String> sharesOf(int schemeId) {
@@ -10115,6 +10307,29 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         return keys;
+    }
+
+    private List<String> shareEditsOf(int schemeId) {
+        List<String> keys = new ArrayList<String>();
+        SchemeShareEntity[] rows = ao().find(SchemeShareEntity.class, "SCHEME_ID = ?", Integer.valueOf(schemeId));
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                if (rows[i].getCanEdit() == 1 && rows[i].getProjectKey() != null && !rows[i].getProjectKey().isEmpty()) {
+                    keys.add(rows[i].getProjectKey());
+                }
+            }
+        }
+        return keys;
+    }
+
+    private boolean shareCanEdit(int schemeId, String projectKey) {
+        List<String> keys = shareEditsOf(schemeId);
+        for (int i = 0; i < keys.size(); i++) {
+            if (ProjectKeys.same(keys.get(i), projectKey)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean sharedWith(int schemeId, String projectKey) {

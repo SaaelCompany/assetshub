@@ -7,6 +7,8 @@ import java.util.Set;
  * Access kinds stored on a project group.
  * A place is a branch, department, or room. A type is an object type.
  * An object is the equipment itself. Assets is every kind inside one project.
+ * Project administrator has that full access, including settings and modules
+ * except TNI, and only inside the one project the grant names.
  * Administrator covers every project.
  * Older rows used view, create, edit, move, schema, and access. Those expand
  * to the same kind of work they allowed before.
@@ -17,6 +19,8 @@ public final class GrantCaps {
     public static final String TYPES = "types";
     public static final String OBJECT = "object";
     public static final String ASSETS = "assets";
+    /** Full rights inside one project. Settings and modules, except TNI. */
+    public static final String PROJECT_ADMIN = "projectAdmin";
     public static final String ADMIN = "admin";
     /** Opens reports and nothing else when it is the only kind. */
     public static final String REPORTS = "reports";
@@ -37,7 +41,7 @@ public final class GrantCaps {
     public static final String ACCESS = "access";
 
     private static final String[] ORDER = new String[] {
-            VIEW, PLACES, TYPES, OBJECT, ASSETS, ADMIN, REPORTS, MAP, SCHEME, SCHEME_EDIT
+            VIEW, PLACES, TYPES, OBJECT, ASSETS, PROJECT_ADMIN, ADMIN, REPORTS, MAP, SCHEME, SCHEME_EDIT
     };
 
     private GrantCaps() {
@@ -65,6 +69,9 @@ public final class GrantCaps {
         if (SCHEME_EDIT.equals(level) || "schemeedit".equals(level)) {
             return normalize(SCHEME_EDIT);
         }
+        if (PROJECT_ADMIN.equals(level) || "projectadmin".equals(level)) {
+            return normalize(PROJECT_ADMIN);
+        }
         return "";
     }
 
@@ -79,7 +86,7 @@ public final class GrantCaps {
         if (chosen.isEmpty()) {
             return "";
         }
-        if (chosen.contains(ADMIN)) {
+        if (chosen.contains(ADMIN) || chosen.contains(PROJECT_ADMIN)) {
             chosen.add(ASSETS);
         }
         if (chosen.contains(ASSETS)) {
@@ -93,7 +100,7 @@ public final class GrantCaps {
             chosen.add(SCHEME);
         }
         if (chosen.contains(PLACES) || chosen.contains(TYPES) || chosen.contains(OBJECT)
-                || chosen.contains(ASSETS) || chosen.contains(ADMIN)) {
+                || chosen.contains(ASSETS) || chosen.contains(ADMIN) || chosen.contains(PROJECT_ADMIN)) {
             chosen.add(VIEW);
         }
         StringBuilder builder = new StringBuilder();
@@ -135,7 +142,11 @@ public final class GrantCaps {
                     || contains(normalized, ASSETS) || contains(normalized, ADMIN);
         }
         if (SCHEME_EDIT.equals(cap)) {
-            return contains(normalized, SCHEME_EDIT) || contains(normalized, ASSETS) || contains(normalized, ADMIN);
+            return contains(normalized, SCHEME_EDIT) || contains(normalized, ASSETS)
+                    || contains(normalized, ADMIN) || contains(normalized, PROJECT_ADMIN);
+        }
+        if (PROJECT_ADMIN.equals(cap)) {
+            return contains(normalized, PROJECT_ADMIN);
         }
         return contains(normalized, cap);
     }
@@ -143,6 +154,9 @@ public final class GrantCaps {
     public static String levelOf(String caps) {
         if (has(caps, ADMIN)) {
             return ADMIN;
+        }
+        if (has(caps, PROJECT_ADMIN)) {
+            return PROJECT_ADMIN;
         }
         if (has(caps, ASSETS)) {
             return ASSETS;
@@ -170,7 +184,7 @@ public final class GrantCaps {
 
     private static void addToken(Set<String> chosen, String token) {
         if (VIEW.equals(token) || PLACES.equals(token) || TYPES.equals(token)
-                || OBJECT.equals(token) || ASSETS.equals(token) || ADMIN.equals(token)
+                || OBJECT.equals(token) || ASSETS.equals(token) || PROJECT_ADMIN.equals(token) || ADMIN.equals(token)
                 || REPORTS.equals(token) || MAP.equals(token)
                 || SCHEME.equals(token) || SCHEME_EDIT.equals(token)) {
             chosen.add(token);
