@@ -918,33 +918,6 @@ public class AssetResource {
         });
     }
 
-    @GET
-    @Path("projects/{projectKey}/lifecycle.xlsx")
-    @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    public Response lifecycleBook(@PathParam("projectKey") final String projectKey) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                byte[] book = assetService.lifecycleBook(user(), projectKey);
-                String file = "lifecycle-" + projectKey + ".xlsx";
-                return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                        .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
-                        .build();
-            }
-        });
-    }
-
-    @POST
-    @Path("projects/{projectKey}/lifecycle")
-    public Response importLifecycle(@PathParam("projectKey") final String projectKey, final ImportDraft draft) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.ok(assetService.importLifecycle(user(), projectKey, draft)).build();
-            }
-        });
-    }
-
     @POST
     @Path("projects/{projectKey}/equipment")
     public Response importEquipment(@PathParam("projectKey") final String projectKey, final ImportDraft draft,

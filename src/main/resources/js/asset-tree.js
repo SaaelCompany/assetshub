@@ -14396,9 +14396,6 @@
             label.appendChild(box);
             label.appendChild(text);
             option.appendChild(label);
-            if (item[0] === 'life' && moduleOn('life') && (state.canObjects || allowed)) {
-                option.appendChild(lifeImportBar());
-            }
             if (moduleOn(item[0]) && allowed) {
                 var pencil = button('', 'asset-tree-btn slim asset-tree-module-pencil', function () {
                     openModuleSetup(item[0]);
@@ -14414,58 +14411,6 @@
         stack.appendChild(modules);
         if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniRemovalCard(allowed));
         panel.appendChild(stack);
-    }
-
-    function lifeImportBar() {
-        var bar = el('div', 'asset-tree-life-import');
-        var template = el('a', 'asset-tree-btn', t('lifeImportTemplate'));
-        template.href = state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/lifecycle.xlsx';
-        bar.appendChild(template);
-        var file = el('input', 'asset-tree-import-file');
-        file.type = 'file';
-        file.accept = '.xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
-        file.addEventListener('change', function () {
-            var picked = file.files && file.files[0];
-            file.value = '';
-            if (picked) readLifeBook(picked);
-        });
-        bar.appendChild(file);
-        bar.appendChild(button(t('lifeImportFile'), 'asset-tree-btn', function () { file.click(); }));
-        bar.appendChild(el('p', 'asset-tree-hint', t('lifeImportHint')));
-        return bar;
-    }
-
-    function readLifeBook(file) {
-        var reader = new FileReader();
-        var csv = /\.csv$/i.test(file.name || '');
-        reader.onload = function () {
-            var body = {};
-            body.name = file.name || '';
-            if (csv) body.csv = String(reader.result || '');
-            else {
-                var text = String(reader.result || '');
-                var comma = text.indexOf(',');
-                body.content = comma >= 0 ? text.slice(comma + 1) : text;
-            }
-            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/lifecycle', body, function (status, payload) {
-                if (status >= 200 && status < 300) {
-                    var updated = payload && payload.updated ? payload.updated : 0;
-                    var note = t('lifeImportDone') + ' ' + updated;
-                    var errors = payload && payload.errors ? payload.errors : [];
-                    if (errors.length) {
-                        var bits = [];
-                        var i;
-                        for (i = 0; i < errors.length && i < 3; i++) bits.push(errors[i].message || '');
-                        note += '. ' + bits.join(' ');
-                    }
-                    notify(note);
-                    return;
-                }
-                notify((payload && payload.message) || t('lifeImportFailed'));
-            });
-        };
-        if (csv) reader.readAsText(file);
-        else reader.readAsDataURL(file);
     }
 
     function tniSourceFields(panel, setup, locked) {

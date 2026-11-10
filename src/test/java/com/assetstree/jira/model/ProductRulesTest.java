@@ -242,6 +242,23 @@ public class ProductRulesTest {
 
         EquipmentExchange.Plan blank = EquipmentExchange.planBook(Collections.singletonList(quiet), types, statuses, nodes,
                 "in_use", new HashMap<String, String>(), servicePeople(), true, kinds);
+        List<String> lifeHeaders = Arrays.asList("Key", "Name", "Type", "Place", "Lifecycle: contractor", "Lifecycle: contract number", "Lifecycle: cost");
+        EquipmentSheet.Sheet withLife = new EquipmentSheet.Sheet("Laptop", lifeHeaders, Collections.singletonList(
+                new EquipmentSheet.Record(2, Arrays.asList("STP-2", "ThinkPad", "Laptop", "Room", "North", "R-14", "1500"))));
+        EquipmentSheet.Sheet lifeOnly = new EquipmentSheet.Sheet("Lifecycle", Arrays.asList(
+                "Key", "Lifecycle: supplier"), Collections.singletonList(
+                new EquipmentSheet.Record(2, Arrays.asList("STP-2", "Kept"))));
+        EquipmentExchange.Plan lifeOn = EquipmentExchange.planBook(Arrays.asList(withLife, lifeOnly), types, statuses, nodes,
+                "in_use", new HashMap<String, String>(), servicePeople(), false, kinds, true);
+        assertTrue(lifeOn.getIssues().toString(), lifeOn.getIssues().isEmpty());
+        assertEquals("North", lifeOn.getChanges().get(0).getLifecycle().get("contractor"));
+        assertEquals("1500", lifeOn.getChanges().get(0).getLifecycle().get("price"));
+        assertEquals(1, lifeOn.getLifecycles().size());
+        assertEquals("Kept", lifeOn.getLifecycles().get(0).get("supplier"));
+        EquipmentExchange.Plan lifeOff = EquipmentExchange.planBook(Arrays.asList(withLife, lifeOnly), types, statuses, nodes,
+                "in_use", new HashMap<String, String>(), servicePeople(), false, kinds, false);
+        assertNull(lifeOff.getChanges().get(0).getLifecycle());
+        assertTrue(lifeOff.getLifecycles().isEmpty());
         assertTrue(blank.getIssues().isEmpty());
         assertNull(blank.getChanges().get(0).getService());
 

@@ -3231,57 +3231,6 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
-    @Override
-    public byte[] lifecycleBook(ApplicationUser user, String projectKey) {
-        Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
-        requireModule(project.getKey(), ProjectModules.LIFE);
-        return LifeBook.template();
-    }
-
-    @Override
-    public ImportResultDto importLifecycle(ApplicationUser user, String projectKey, ImportDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
-        requireModule(project.getKey(), ProjectModules.LIFE);
-        final List<LifeBook.Change> changes = LifeBook.read(equipmentSheets(draft));
-        final I18nHelper labels = i18n();
-        return ao().executeInTransaction(new TransactionCallback<ImportResultDto>() {
-            @Override
-            public ImportResultDto doInTransaction() {
-                ImportResultDto result = new ImportResultDto();
-                List<ImportIssueDto> errors = new ArrayList<ImportIssueDto>();
-                int updated = 0;
-                for (int i = 0; i < changes.size(); i++) {
-                    LifeBook.Change change = changes.get(i);
-                    AssetEntity asset = assetByKey(project.getKey(), change.getKey().trim());
-                    if (asset == null || isLocation(asset)) {
-                        errors.add(new ImportIssueDto(change.getRow(),
-                                labels.getText("asset-tree.error.life.key", change.getKey())));
-                        continue;
-                    }
-                    LifecycleEntity row = ensureLife(asset.getID());
-                    if ("approved".equals(row.getWriteoffState())) {
-                        errors.add(new ImportIssueDto(change.getRow(), labels.getText("asset-tree.error.writeoff.closed")));
-                        continue;
-                    }
-                    LifeBook.Stored stored = lifeStored(row);
-                    String error = LifeBook.apply(stored, change);
-                    if (error != null) {
-                        errors.add(new ImportIssueDto(change.getRow(), labels.getText(error)));
-                        continue;
-                    }
-                    writeLife(row, stored);
-                    stampBook(row);
-                    updated++;
-                }
-                result.setUpdated(updated);
-                result.setErrors(errors);
-                result.setTotalRows(changes.size());
-                result.setDone(true);
-                return result;
-            }
-        });
-    }
-
     private LifeBook.Stored lifeStored(LifecycleEntity row) {
         LifeBook.Stored stored = new LifeBook.Stored();
         if (row == null) {
@@ -3384,7 +3333,7 @@ public class AssetServiceImpl implements AssetService {
                 });
                 rememberProjectPeople(memory);
                 EquipmentExchange.Plan plan = EquipmentExchange.planBook(slice, prepared.types, prepared.statuses, prepared.nodes,
-                        Statuses.IN_USE, prepared.headerLabels, personDirectory(memory), prepared.service, prepared.kinds);
+                        Statuses.IN_USE, prepared.headerLabels, personDirectory(memory), prepared.service, prepared.kinds, prepared.life);
                 result = applyPlannedImport(user, storedKey, plan, memory);
             }
             result.setTotalRows(total);
@@ -5057,7 +5006,10 @@ public class AssetServiceImpl implements AssetService {
             }
         };
         boolean serviceOn = moduleOn(projectKey, ProjectModules.SERVICE);
+        boolean lifeOn = moduleOn(projectKey, ProjectModules.LIFE);
         List<String> serviceHeaders = serviceColumnLabels(labels);
+        List<String> lifeHeaders = lifeColumnLabels(labels);
+        Map<Integer, LifecycleEntity> lives = lifeOn ? livesByAsset(byType) : new HashMap<Integer, LifecycleEntity>();
         Map<Integer, List<ServicePlanEntity>> plans = serviceOn
                 ? plansByAsset(byType) : new HashMap<Integer, List<ServicePlanEntity>>();
         Map<String, String> kindLabels = serviceOn ? kindNames(projectKey) : new HashMap<String, String>();
@@ -5091,6 +5043,18 @@ public class AssetServiceImpl implements AssetService {
                         continue;
                     }
                     addedService.add(Integer.valueOf(slot));
+                    headers.add(header);
+                }
+            }
+            List<Integer> addedLife = new ArrayList<Integer>();
+            if (lifeOn) {
+                for (int slot = 0; slot < lifeHeaders.size(); slot++) {
+                    String header = lifeHeaders.get(slot);
+                    String marker = EquipmentExchange.norm(header);
+                    if (marker.isEmpty() || !taken.add(marker)) {
+                        continue;
+                    }
+                    addedLife.add(Integer.valueOf(slot));
                     headers.add(header);
                 }
             }
@@ -5132,6 +5096,12 @@ public class AssetServiceImpl implements AssetService {
                         line.add(one == null ? "" : serviceCell(one, slot.intValue(), kindLabels, labels, dayFirst));
                     }
                 }
+                if (lifeOn) {
+                    LifecycleEntity life = lives.get(Integer.valueOf(row.getID()));
+                    for (Integer slot : addedLife) {
+                        line.add(lifeCell(life, slot.intValue(), dayFirst));
+                    }
+                }
                 lines.add(line);
             }
             pages.add(new WorkbookSheet.Page(type.getLabel(), headers, lines));
@@ -5143,6 +5113,95 @@ public class AssetServiceImpl implements AssetService {
             pages.add(servicePage(types, byType, plans, serviceHeaders, kindLabels, labels, dayFirst));
         }
         return WorkbookSheet.write(pages);
+    }
+
+    private List<String> lifeColumnLabels(I18nHelper labels) {
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.lifeColPurchase"));
+        headers.add(labels.getText("asset-tree.ui.lifeColSupplier"));
+        headers.add(labels.getText("asset-tree.ui.lifeColDocument"));
+        headers.add(labels.getText("asset-tree.ui.lifeColPrice"));
+        headers.add(labels.getText("asset-tree.ui.lifeColCurrency"));
+        headers.add(labels.getText("asset-tree.ui.lifeColCommissioned"));
+        headers.add(labels.getText("asset-tree.ui.lifeColWarranty"));
+        headers.add(labels.getText("asset-tree.ui.lifeColWarrantyService"));
+        headers.add(labels.getText("asset-tree.ui.lifeColContractor"));
+        headers.add(labels.getText("asset-tree.ui.lifeColContractNo"));
+        headers.add(labels.getText("asset-tree.ui.lifeColFrom"));
+        headers.add(labels.getText("asset-tree.ui.lifeColUntil"));
+        headers.add(labels.getText("asset-tree.ui.lifeColMonths"));
+        headers.add(labels.getText("asset-tree.ui.lifeColResidual"));
+        return headers;
+    }
+
+    private Map<Integer, LifecycleEntity> livesByAsset(Map<String, List<AssetEntity>> byType) {
+        Map<Integer, LifecycleEntity> grouped = new HashMap<Integer, LifecycleEntity>();
+        LifecycleEntity[] rows = ao().find(LifecycleEntity.class);
+        if (rows == null) {
+            return grouped;
+        }
+        Set<Integer> wanted = new HashSet<Integer>();
+        for (List<AssetEntity> bucket : byType.values()) {
+            for (AssetEntity asset : bucket) {
+                wanted.add(Integer.valueOf(asset.getID()));
+            }
+        }
+        for (LifecycleEntity row : rows) {
+            Integer id = Integer.valueOf(row.getAssetId());
+            if (wanted.contains(id)) {
+                grouped.put(id, row);
+            }
+        }
+        return grouped;
+    }
+
+    private String lifeCell(LifecycleEntity row, int index, boolean dayFirst) {
+        if (row == null) {
+            return "";
+        }
+        if (index == 0) {
+            return FieldDates.display(row.getPurchased(), dayFirst);
+        }
+        if (index == 1) {
+            return row.getSupplier() == null ? "" : row.getSupplier();
+        }
+        if (index == 2) {
+            return row.getDocument() == null ? "" : row.getDocument();
+        }
+        if (index == 3) {
+            return row.getPriceMinor() == 0L ? "" : MoneyText.format(row.getPriceMinor());
+        }
+        if (index == 4) {
+            return row.getCurrency() == null ? "" : row.getCurrency();
+        }
+        if (index == 5) {
+            return FieldDates.display(row.getCommissioned(), dayFirst);
+        }
+        if (index == 6) {
+            return FieldDates.display(row.getWarrantyUntil(), dayFirst);
+        }
+        if (index == 7) {
+            return row.getWarrantyService() == null ? "" : row.getWarrantyService();
+        }
+        if (index == 8) {
+            return row.getContractor() == null ? "" : row.getContractor();
+        }
+        if (index == 9) {
+            return row.getContractNo() == null ? "" : row.getContractNo();
+        }
+        if (index == 10) {
+            return FieldDates.display(row.getContractFrom(), dayFirst);
+        }
+        if (index == 11) {
+            return FieldDates.display(row.getContractUntil(), dayFirst);
+        }
+        if (index == 12) {
+            return row.getLifeMonths() <= 0 ? "" : String.valueOf(row.getLifeMonths());
+        }
+        if (index == 13) {
+            return row.getResidualMinor() == 0L ? "" : MoneyText.format(row.getResidualMinor());
+        }
+        return "";
     }
 
     private List<String> serviceColumnLabels(I18nHelper labels) {
@@ -5316,7 +5375,22 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("serviceEvery", labels.getText("asset-tree.ui.serviceColEvery"));
         headerLabels.put("serviceUnit", labels.getText("asset-tree.ui.serviceColUnit"));
         headerLabels.put("serviceWho", labels.getText("asset-tree.ui.serviceColWho"));
+        headerLabels.put("lifePurchased", labels.getText("asset-tree.ui.lifeColPurchase"));
+        headerLabels.put("lifeSupplier", labels.getText("asset-tree.ui.lifeColSupplier"));
+        headerLabels.put("lifeDocument", labels.getText("asset-tree.ui.lifeColDocument"));
+        headerLabels.put("lifePrice", labels.getText("asset-tree.ui.lifeColPrice"));
+        headerLabels.put("lifeCurrency", labels.getText("asset-tree.ui.lifeColCurrency"));
+        headerLabels.put("lifeCommissioned", labels.getText("asset-tree.ui.lifeColCommissioned"));
+        headerLabels.put("lifeWarranty", labels.getText("asset-tree.ui.lifeColWarranty"));
+        headerLabels.put("lifeWarrantyService", labels.getText("asset-tree.ui.lifeColWarrantyService"));
+        headerLabels.put("lifeContractor", labels.getText("asset-tree.ui.lifeColContractor"));
+        headerLabels.put("lifeContractNo", labels.getText("asset-tree.ui.lifeColContractNo"));
+        headerLabels.put("lifeContractFrom", labels.getText("asset-tree.ui.lifeColFrom"));
+        headerLabels.put("lifeContractUntil", labels.getText("asset-tree.ui.lifeColUntil"));
+        headerLabels.put("lifeMonths", labels.getText("asset-tree.ui.lifeColMonths"));
+        headerLabels.put("lifeResidual", labels.getText("asset-tree.ui.lifeColResidual"));
         boolean service = moduleOn(projectKey, ProjectModules.SERVICE);
+        boolean life = moduleOn(projectKey, ProjectModules.LIFE);
         Map<String, String> named = kindNames(projectKey);
         List<EquipmentExchange.Named> kinds = new ArrayList<EquipmentExchange.Named>();
         for (Map.Entry<String, String> entry : named.entrySet()) {
@@ -5326,7 +5400,7 @@ public class AssetServiceImpl implements AssetService {
             }
             kinds.add(new EquipmentExchange.Named(entry.getKey(), label));
         }
-        return new PreparedImport(types, statuses, nodes, headerLabels, service, kinds);
+        return new PreparedImport(types, statuses, nodes, headerLabels, service, kinds, life);
     }
 
     private void rememberProjectPeople(ImportMemory memory) {
@@ -5392,6 +5466,21 @@ public class AssetServiceImpl implements AssetService {
                 errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), labels.getText("asset-tree.error.unexpected"))));
             }
         }
+        for (LifeBook.Change wish : plan.getLifecycles()) {
+            try {
+                AssetEntity asset = assetByKey(projectKey, wish.getKey());
+                if (asset == null || isLocation(asset)) {
+                    throw new AssetException(400, "asset-tree.error.life.key", wish.getKey());
+                }
+                attachImportedLife(asset, wish);
+                updated++;
+            } catch (AssetException ex) {
+                errors.add(new ImportIssueDto(wish.getRow(), exceptionText(labels, ex)));
+            } catch (RuntimeException ex) {
+                log.warn("Equipment import lifecycle row {} failed", Integer.valueOf(wish.getRow()), ex);
+                errors.add(new ImportIssueDto(wish.getRow(), labels.getText("asset-tree.error.unexpected")));
+            }
+        }
         result.setCreated(created);
         result.setUpdated(updated);
         result.setErrors(errors);
@@ -5425,16 +5514,18 @@ public class AssetServiceImpl implements AssetService {
         private final Map<String, String> headerLabels;
         private final boolean service;
         private final List<EquipmentExchange.Named> kinds;
+        private final boolean life;
 
         private PreparedImport(List<EquipmentExchange.TypeRef> types, List<EquipmentExchange.Named> statuses,
                                List<EquipmentExchange.Node> nodes, Map<String, String> headerLabels,
-                               boolean service, List<EquipmentExchange.Named> kinds) {
+                               boolean service, List<EquipmentExchange.Named> kinds, boolean life) {
             this.types = types;
             this.statuses = statuses;
             this.nodes = nodes;
             this.headerLabels = headerLabels;
             this.service = service;
             this.kinds = kinds;
+            this.life = life;
         }
     }
 
@@ -5941,6 +6032,26 @@ public class AssetServiceImpl implements AssetService {
         row.save();
     }
 
+    private void attachImportedLife(AssetEntity asset, LifeBook.Change change) {
+        if (asset == null || change == null) {
+            return;
+        }
+        if (!moduleOn(asset.getProjectKey(), ProjectModules.LIFE)) {
+            return;
+        }
+        LifecycleEntity row = ensureLife(asset.getID());
+        if ("approved".equals(row.getWriteoffState())) {
+            throw new AssetException(400, "asset-tree.error.writeoff.closed");
+        }
+        LifeBook.Stored stored = lifeStored(row);
+        String error = LifeBook.apply(stored, change);
+        if (error != null) {
+            throw new AssetException(400, error);
+        }
+        writeLife(row, stored);
+        stampBook(row);
+    }
+
     private void createImported(ApplicationUser user, String projectKey, EquipmentExchange.Change change, ImportMemory memory) {
         Date now = new Date();
         Integer parentId = TreeLogic.normalizeParent(Integer.valueOf(change.getParentId()));
@@ -5968,6 +6079,7 @@ public class AssetServiceImpl implements AssetService {
         logActivity(entity.getID(), user.getKey(), "created", "", "", entity.getName());
         logPlaceChange(user, memory.place(parentId), "place_add", entity);
         attachImportedPlan(entity, change.getService());
+        attachImportedLife(entity, change.getLifecycle());
     }
 
     private void updateImported(ApplicationUser user, EquipmentExchange.Change change, ImportMemory memory) {
@@ -6028,6 +6140,7 @@ public class AssetServiceImpl implements AssetService {
         logAttributeChanges(id, user.getKey(), change.getTypeKey(), oldAttributes);
         memory.note(id);
         attachImportedPlan(entity, change.getService());
+        attachImportedLife(entity, change.getLifecycle());
     }
 
     private List<AttributeDraft> drafts(EquipmentExchange.Change change) {

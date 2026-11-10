@@ -203,10 +203,6 @@ public interface AssetService {
 
     byte[] exportEquipment(ApplicationUser user, String projectKey);
 
-    byte[] lifecycleBook(ApplicationUser user, String projectKey);
-
-    ImportResultDto importLifecycle(ApplicationUser user, String projectKey, ImportDraft draft);
-
     ImportResultDto importEquipment(ApplicationUser user, String projectKey, ImportDraft draft);
 
     BulkResultDto applyBulk(ApplicationUser user, String projectKey, BulkDraft draft);
