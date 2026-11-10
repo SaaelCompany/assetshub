@@ -25,9 +25,10 @@ public class AssetPageServletTest {
         reader.close();
         String plan = "/jira/download/resources/com.assetstree.jira.asset-tree:asset-tree-web/plan-exchange.js?v=1.3.124";
         String html = AssetPageServlet.fill(builder.toString(), "ru", "Assets", "asset-tree.css", "qr-code.js",
-                plan, "scheme-library.js", "scheme-furniture.js", "schemes.js", "asset-tree.js", "/jira/rest/asset-tree/1.0", "STP", "mine");
+                plan, "scheme-library.js", "scheme-furniture.js", "scheme-engineering.js", "schemes.js", "asset-tree.js", "/jira/rest/asset-tree/1.0", "STP", "mine");
         assertTrue(html.contains(plan));
         assertTrue(html.contains("scheme-furniture.js"));
+        assertTrue(html.contains("scheme-engineering.js"));
         assertFalse(html.contains("@@"));
     }
 }
