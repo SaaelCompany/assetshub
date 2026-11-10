@@ -405,6 +405,26 @@
         });
         tools.appendChild(scaleBtn);
         tools.appendChild(removeScan);
+        var scanWidth = el('input', 'asset-tree-scheme-unit');
+        scanWidth.type = 'number';
+        scanWidth.min = '10';
+        scanWidth.title = api.t('mapScanWidth');
+        scanWidth.setAttribute('aria-label', api.t('mapScanWidth'));
+        scanWidth.addEventListener('focus', function () {
+            var scan = activeFloor().underlay;
+            scanWidth.value = scan ? String(Math.round(scan.w || 0)) : '';
+        });
+        scanWidth.addEventListener('change', function () {
+            var scan = activeFloor().underlay;
+            var next = Number(scanWidth.value);
+            if (!scan || !(next >= 10) || session.mode !== 'edit' || session.guest) return;
+            var ratio = (scan.h || 1) / Math.max(1, scan.w || 1);
+            scan.w = Math.max(10, roundCm(next));
+            scan.h = Math.max(10, roundCm(scan.w * ratio));
+            session.dirty = true;
+            paint();
+        });
+        tools.appendChild(scanWidth);
         var imageFile = el('input');
         imageFile.type = 'file';
         imageFile.accept = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif';
@@ -1613,6 +1633,82 @@
             opening.layerId = best.wall.layerId;
         }
 
+        function imageRatio(obj) {
+            var image = obj && obj.src ? cachedImage(obj.src) : null;
+            if (image && image.naturalWidth && image.naturalHeight) return image.naturalWidth / image.naturalHeight;
+            if (obj && obj.w && obj.h) return obj.w / obj.h;
+            return 1;
+        }
+
+        function imageAnchor(box, index) {
+            if (index === 0) return { x: box.x + box.w, y: box.y + box.h };
+            if (index === 1) return { x: box.x, y: box.y + box.h };
+            if (index === 2) return { x: box.x, y: box.y };
+            return { x: box.x + box.w, y: box.y };
+        }
+
+        function fitAspect(anchorX, anchorY, px, py, ratio) {
+            var dx = px - anchorX;
+            var dy = py - anchorY;
+            var signX = dx < 0 ? -1 : 1;
+            var signY = dy < 0 ? -1 : 1;
+            var adx = Math.abs(dx);
+            var ady = Math.abs(dy);
+            if (adx < 0.5 && ady < 0.5) return null;
+            if (!(ratio > 0)) ratio = 1;
+            var height = (ratio * adx + ady) / (ratio * ratio + 1);
+            var width = height * ratio;
+            if (width < 10) {
+                width = 10;
+                height = width / ratio;
+            }
+            if (height < 10) {
+                height = 10;
+                width = height * ratio;
+            }
+            width = roundCm(width);
+            height = Math.max(10, roundCm(width / ratio));
+            return {
+                x: roundCm(signX < 0 ? anchorX - width : anchorX),
+                y: roundCm(signY < 0 ? anchorY - height : anchorY),
+                w: width,
+                h: height
+            };
+        }
+
+        function underlayHandleAt(sx, sy) {
+            var scan = activeFloor().underlay;
+            if (!scan || !scan.src || session.mode !== 'edit') return null;
+            var corners = [
+                { x: scan.x, y: scan.y, index: 0 },
+                { x: scan.x + scan.w, y: scan.y, index: 1 },
+                { x: scan.x + scan.w, y: scan.y + scan.h, index: 2 },
+                { x: scan.x, y: scan.y + scan.h, index: 3 }
+            ];
+            var i;
+            for (i = 0; i < corners.length; i++) {
+                var screen = screenFrom(corners[i].x, corners[i].y);
+                if (dist(screen.x, screen.y, sx, sy) <= 10) return corners[i].index;
+            }
+            return null;
+        }
+
+        function drawCorners(ctx, x, y, w, h) {
+            var s = 8 / (session.cam.z || 1);
+            var pts = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+            var i;
+            ctx.save();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#0052cc';
+            ctx.lineWidth = 1 / (session.cam.z || 1);
+            for (i = 0; i < pts.length; i++) {
+                ctx.fillRect(pts[i][0] - s / 2, pts[i][1] - s / 2, s, s);
+                ctx.strokeRect(pts[i][0] - s / 2, pts[i][1] - s / 2, s, s);
+            }
+            ctx.restore();
+        }
+
         function handleAt(sx, sy) {
             var objects = selectedObjects();
             if (objects.length !== 1) return null;
@@ -1859,31 +1955,56 @@
             image.src = src;
         }
 
+        function bytesToDataUrl(bytes, mime) {
+            var binary = '';
+            var step = 0x8000;
+            var i;
+            for (i = 0; i < bytes.length; i += step) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(bytes.length, i + step)));
+            }
+            return 'data:' + mime + ';base64,' + btoa(binary);
+        }
+
         function shrinkSchemeScan(bytes, mime, done) {
+            var kind = String(mime || '').toLowerCase();
+            var png = kind.indexOf('png') >= 0;
+            var jpeg = kind.indexOf('jpeg') >= 0 || kind.indexOf('jpg') >= 0;
+            var budget = 850000;
+            if ((png || jpeg) && bytes && bytes.length) {
+                var direct = bytesToDataUrl(bytes, png ? 'image/png' : 'image/jpeg');
+                if (direct.length <= budget) {
+                    done(direct);
+                    return;
+                }
+            }
             var blob = new Blob([bytes], { type: mime || 'image/jpeg' });
             var url = URL.createObjectURL(blob);
             var image = new Image();
             image.onload = function () {
                 var canvas = el('canvas');
                 var longest = Math.max(image.naturalWidth || 1, image.naturalHeight || 1);
-                var limit = 1400;
-                var quality = 0.72;
+                var limits = [Math.min(longest, 3200), 2400, 1800, 1400, 1000, 800];
                 var data = '';
                 var guard = 0;
                 var scale = 1;
-                while (guard < 4) {
-                    scale = Math.min(1, limit / longest);
+                while (guard < limits.length) {
+                    scale = Math.min(1, limits[guard] / longest);
                     canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
                     canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
-                    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-                    data = canvas.toDataURL('image/jpeg', quality);
-                    if (data.length <= 450000) break;
-                    limit = Math.round(limit * 0.7);
-                    quality = 0.55;
+                    var board = canvas.getContext('2d');
+                    board.imageSmoothingEnabled = true;
+                    if (board.imageSmoothingQuality) board.imageSmoothingQuality = 'high';
+                    board.drawImage(image, 0, 0, canvas.width, canvas.height);
+                    if (png) {
+                        data = canvas.toDataURL('image/png');
+                        if (data.length <= budget) break;
+                    }
+                    data = canvas.toDataURL('image/jpeg', 0.92);
+                    if (data.length <= budget) break;
                     guard++;
                 }
                 URL.revokeObjectURL(url);
-                if (data && data.length <= 450000) done(data);
+                if (data && data.length <= budget) done(data);
                 else status.textContent = api.t('schemeImageBig');
             };
             image.onerror = function () {
@@ -2026,6 +2147,8 @@
             if (!scanCache.image || !scanCache.image.complete || !scanCache.image.naturalWidth) return;
             ctx.save();
             ctx.globalAlpha = 0.55;
+            ctx.imageSmoothingEnabled = true;
+            if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(scanCache.image, scan.x || 0, scan.y || 0, scan.w || 10, scan.h || 10);
             ctx.restore();
         }
@@ -3160,6 +3283,8 @@
                 if (!image) continue;
                 ctx.save();
                 ctx.globalAlpha = obj.opacity == null ? 0.72 : obj.opacity;
+                ctx.imageSmoothingEnabled = true;
+                if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = 'high';
                 if (obj.angle) rotateObj(ctx, obj);
                 ctx.drawImage(image, obj.x || 0, obj.y || 0, obj.w || 10, obj.h || 10);
                 ctx.restore();
@@ -3379,9 +3504,14 @@
                         ctx.lineTo(obj.x2, obj.y2);
                     } else if (obj.w != null) ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
                     ctx.stroke();
+                    if (obj.type === 'image' && obj.w != null) drawCorners(ctx, obj.x, obj.y, obj.w, obj.h || 10);
                     ctx.restore();
                 });
                 ctx.setLineDash([]);
+                if (session.mode === 'edit' && !session.guest && api.canEdit) {
+                    var scanSheet = activeFloor().underlay;
+                    if (scanSheet && scanSheet.src) drawCorners(ctx, scanSheet.x || 0, scanSheet.y || 0, scanSheet.w || 10, scanSheet.h || 10);
+                }
                 if (session.mode === 'edit' && objects.length === 1 && (objects[0].type === 'symbol' || objects[0].type === 'asset') && objects[0].w != null) {
                     var knob = knobOf(objects[0]);
                     var hubX = objects[0].x + objects[0].w / 2;
@@ -4445,8 +4575,20 @@
             }
             if (obj.x != null) field('X', obj.x, function (value) { obj.x = roundCm(Number(value) || 0); });
             if (obj.y != null) field('Y', obj.y, function (value) { obj.y = roundCm(Number(value) || 0); });
-            if (obj.w != null) field('W', obj.w, function (value) { obj.w = Math.max(1, roundCm(Number(value) || 1)); });
-            if (obj.h != null && obj.type !== 'text') field('H', obj.h, function (value) { obj.h = Math.max(1, roundCm(Number(value) || 1)); });
+            if (obj.w != null) field('W', obj.w, function (value) {
+                obj.w = Math.max(obj.type === 'image' ? 10 : 1, roundCm(Number(value) || 1));
+                if (obj.type === 'image') {
+                    obj.h = Math.max(10, roundCm(obj.w / imageRatio(obj)));
+                    renderProps();
+                }
+            });
+            if (obj.h != null && obj.type !== 'text') field('H', obj.h, function (value) {
+                obj.h = Math.max(obj.type === 'image' ? 10 : 1, roundCm(Number(value) || 1));
+                if (obj.type === 'image') {
+                    obj.w = Math.max(10, roundCm(obj.h * imageRatio(obj)));
+                    renderProps();
+                }
+            });
             if (obj.type === 'symbol') {
                 var portDef = symbolDef(obj.symbolId);
                 if (portDef && portDef.face) {
@@ -5869,6 +6011,22 @@
                     session.snapSkip = {};
                     session.snapSkip[handle.id] = true;
                     drag = { mode: 'handle', handle: handle, moved: false };
+                    var sized = objectById(handle.id);
+                    if (sized && sized.type === 'image') {
+                        drag.box = { x: sized.x, y: sized.y, w: sized.w, h: sized.h || 10 };
+                        drag.ratio = imageRatio(sized);
+                    }
+                    return;
+                }
+                var scanCorner = underlayHandleAt(sx, sy);
+                if (scanCorner != null && api.canEdit && !session.guest) {
+                    var sheet = activeFloor().underlay;
+                    drag = {
+                        mode: 'underlay-size',
+                        index: scanCorner,
+                        ratio: sheet.w / Math.max(1, sheet.h),
+                        box: { x: sheet.x, y: sheet.y, w: sheet.w, h: sheet.h }
+                    };
                     return;
                 }
                 var id = hit(raw.x, raw.y);
@@ -6084,6 +6242,22 @@
                 paint();
                 return;
             }
+            if (drag.mode === 'underlay-size') {
+                var sheet = activeFloor().underlay;
+                if (sheet && drag.box) {
+                    var corner = imageAnchor(drag.box, drag.index);
+                    var fittedSheet = fitAspect(corner.x, corner.y, raw.x, raw.y, drag.ratio);
+                    if (fittedSheet) {
+                        sheet.x = fittedSheet.x;
+                        sheet.y = fittedSheet.y;
+                        sheet.w = fittedSheet.w;
+                        sheet.h = fittedSheet.h;
+                        session.dirty = true;
+                    }
+                }
+                paint();
+                return;
+            }
             if (drag.mode === 'underlay') {
                 var scan = activeFloor().underlay;
                 if (scan) {
@@ -6108,6 +6282,20 @@
                 var i;
                 for (i = 0; i < all.length; i++) {
                     if (all[i].id === drag.handle.id || ('room:' + all[i].id) === drag.handle.id) target = all[i];
+                }
+                if (target && target.type === 'image' && drag.box && drag.ratio) {
+                    var anchor = imageAnchor(drag.box, drag.handle.index);
+                    var localRaw = unrotate(target, raw.x, raw.y);
+                    var fitted = fitAspect(anchor.x, anchor.y, localRaw.x, localRaw.y, drag.ratio);
+                    if (fitted) {
+                        target.x = fitted.x;
+                        target.y = fitted.y;
+                        target.w = fitted.w;
+                        target.h = fitted.h;
+                        drag.moved = true;
+                    }
+                    paint();
+                    return;
                 }
                 if (drag.handle.index === -1 && target && target.w != null) {
                     var centerX = target.x + target.w / 2;
