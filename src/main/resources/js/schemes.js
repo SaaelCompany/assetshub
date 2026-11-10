@@ -1564,13 +1564,66 @@
             return { a: a, b: b, thickness: wall.thickness || 15, len: dist(a.x, a.y, b.x, b.y) };
         }
 
-        function openingLeaf(span, opening) {
+        function doorPose(span, opening) {
             if (!span || !opening || opening.kind === 'window') return null;
             var len = dist(span.a.x, span.a.y, span.b.x, span.b.y);
             if (len < 1) return null;
+            var hingeAtA = opening.hinge === 'a';
+            var hinge = hingeAtA ? span.a : span.b;
+            var latch = hingeAtA ? span.b : span.a;
             var normal = leftNorm(span.a, span.b);
             if (opening.swing === 'right') normal = { x: -normal.x, y: -normal.y };
-            return { x: span.b.x + normal.x * len, y: span.b.y + normal.y * len, len: len };
+            return {
+                hinge: hinge,
+                latch: latch,
+                normal: normal,
+                len: len,
+                leaf: { x: hinge.x + normal.x * len, y: hinge.y + normal.y * len }
+            };
+        }
+
+        function openingLeaf(span, opening) {
+            var pose = doorPose(span, opening);
+            if (!pose) return null;
+            return { x: pose.leaf.x, y: pose.leaf.y, len: pose.len, hx: pose.hinge.x, hy: pose.hinge.y };
+        }
+
+        function doorMarks(opening) {
+            var pose = doorPose(openingSpan(opening), opening);
+            if (!pose) return null;
+            var wall = Math.atan2(pose.latch.y - pose.hinge.y, pose.latch.x - pose.hinge.x);
+            var leaf = Math.atan2(pose.normal.y, pose.normal.x);
+            var sweep = leaf - wall;
+            while (sweep <= -Math.PI) sweep += Math.PI * 2;
+            while (sweep > Math.PI) sweep -= Math.PI * 2;
+            var mid = wall + sweep / 2;
+            var radius = pose.len * 0.62;
+            var back = Math.max(10, pose.len * 0.16);
+            return {
+                side: { x: pose.hinge.x + Math.cos(mid) * radius, y: pose.hinge.y + Math.sin(mid) * radius },
+                hinge: { x: pose.hinge.x - Math.cos(wall) * back, y: pose.hinge.y - Math.sin(wall) * back }
+            };
+        }
+
+        function doorFlipAt(sx, sy) {
+            var objects = selectedObjects();
+            if (objects.length !== 1 || !mutableObject(objects[0])) return '';
+            var opening = objects[0];
+            if (opening.type !== 'opening' || opening.kind === 'window') return '';
+            var marks = doorMarks(opening);
+            if (!marks) return '';
+            var side = screenFrom(marks.side.x, marks.side.y);
+            if (dist(side.x, side.y, sx, sy) <= 12) return 'side';
+            var hinge = screenFrom(marks.hinge.x, marks.hinge.y);
+            if (dist(hinge.x, hinge.y, sx, sy) <= 12) return 'hinge';
+            return '';
+        }
+
+        function flipDoor(opening, which) {
+            if (!opening || opening.type !== 'opening' || opening.kind === 'window') return;
+            if (which === 'hinge') opening.hinge = opening.hinge === 'a' ? 'b' : 'a';
+            else opening.swing = opening.swing === 'right' ? 'left' : 'right';
+            rememberOpening(opening);
         }
 
         function openingAt(wallId, wx, wy, tol) {
@@ -1590,20 +1643,20 @@
             if (!span) return false;
             var reach = Math.max(tol, (span.thickness || 15) / 2 + 1);
             if (projectSeg(span.a.x, span.a.y, span.b.x, span.b.y, wx, wy).dist <= reach) return true;
-            var leaf = openingLeaf(span, obj);
-            if (!leaf) return false;
-            if (projectSeg(span.b.x, span.b.y, leaf.x, leaf.y, wx, wy).dist <= tol) return true;
-            var wallAng = Math.atan2(span.a.y - span.b.y, span.a.x - span.b.x);
-            var leafAng = Math.atan2(leaf.y - span.b.y, leaf.x - span.b.x);
+            var pose = doorPose(span, obj);
+            if (!pose) return false;
+            if (projectSeg(pose.hinge.x, pose.hinge.y, pose.leaf.x, pose.leaf.y, wx, wy).dist <= tol) return true;
+            var wallAng = Math.atan2(pose.latch.y - pose.hinge.y, pose.latch.x - pose.hinge.x);
+            var leafAng = Math.atan2(pose.leaf.y - pose.hinge.y, pose.leaf.x - pose.hinge.x);
             var sweep = leafAng - wallAng;
             while (sweep <= -Math.PI) sweep += Math.PI * 2;
             while (sweep > Math.PI) sweep -= Math.PI * 2;
             var steps = 8;
-            var prev = { x: span.b.x + Math.cos(wallAng) * leaf.len, y: span.b.y + Math.sin(wallAng) * leaf.len };
+            var prev = { x: pose.hinge.x + Math.cos(wallAng) * pose.len, y: pose.hinge.y + Math.sin(wallAng) * pose.len };
             var s;
             for (s = 1; s <= steps; s++) {
                 var ang = wallAng + sweep * (s / steps);
-                var next = { x: span.b.x + Math.cos(ang) * leaf.len, y: span.b.y + Math.sin(ang) * leaf.len };
+                var next = { x: pose.hinge.x + Math.cos(ang) * pose.len, y: pose.hinge.y + Math.sin(ang) * pose.len };
                 if (projectSeg(prev.x, prev.y, next.x, next.y, wx, wy).dist <= tol) return true;
                 prev = next;
             }
@@ -1929,7 +1982,16 @@
             opening.width = remembered ? remembered.width : (kind === 'window' ? 120 : 90);
             opening.height = remembered ? remembered.height : (kind === 'window' ? 140 : 210);
             opening.custom = remembered ? !!remembered.custom : false;
-            opening.swing = 'left';
+            var host = wallSegment(best.wall, best.index);
+            var side = 1;
+            if (host && kind === 'door') {
+                var aim = leftNorm(host.a, host.b);
+                var alongX = host.a.x + (host.b.x - host.a.x) * best.t;
+                var alongY = host.a.y + (host.b.y - host.a.y) * best.t;
+                side = (pt.x - alongX) * aim.x + (pt.y - alongY) * aim.y;
+            }
+            opening.swing = kind === 'door' && side < 0 ? 'right' : 'left';
+            opening.hinge = kind === 'door' && remembered && remembered.hinge === 'a' ? 'a' : 'b';
             opening.layerId = best.wall.layerId;
             floor.objects.push(opening);
             session.selection = [opening.id];
@@ -3077,12 +3139,16 @@
                 ctx.lineTo(b.x - n.x * 2, b.y - n.y * 2);
                 ctx.stroke();
             } else {
-                var hinge = b;
-                var latch = a;
-                var len = dist(hinge.x, hinge.y, latch.x, latch.y);
+                var pose = doorPose({ a: a, b: b }, opening);
+                if (!pose) {
+                    ctx.restore();
+                    return;
+                }
+                var hinge = pose.hinge;
+                var latch = pose.latch;
+                var len = pose.len;
                 var wall = Math.atan2(latch.y - hinge.y, latch.x - hinge.x);
-                var normal = leftNorm(a, b);
-                if (opening.swing === 'right') normal = { x: -normal.x, y: -normal.y };
+                var normal = pose.normal;
                 var leaf = Math.atan2(normal.y, normal.x);
                 var frame = Math.max(3.5, Math.min(len * 0.08, 9));
                 ctx.beginPath();
@@ -3506,7 +3572,7 @@
                             ctx.lineTo(span.b.x, span.b.y);
                             var leaf = openingLeaf(span, obj);
                             if (leaf) {
-                                ctx.moveTo(span.b.x, span.b.y);
+                                ctx.moveTo(leaf.hx, leaf.hy);
                                 ctx.lineTo(leaf.x, leaf.y);
                             }
                             ctx.stroke();
@@ -3529,6 +3595,28 @@
                 if (session.mode === 'edit' && !session.guest && api.canEdit) {
                     var scanSheet = activeFloor().underlay;
                     if (scanSheet && scanSheet.src) drawCorners(ctx, scanSheet.x || 0, scanSheet.y || 0, scanSheet.w || 10, scanSheet.h || 10);
+                }
+                if (session.mode === 'edit' && objects.length === 1 && objects[0].type === 'opening' && objects[0].kind !== 'window' && mutableObject(objects[0])) {
+                    var marks = doorMarks(objects[0]);
+                    if (marks) {
+                        var markR = 5.5 / session.cam.z;
+                        ctx.setLineDash([]);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.strokeStyle = '#0052cc';
+                        ctx.lineWidth = 1.4 / session.cam.z;
+                        ctx.beginPath();
+                        ctx.arc(marks.side.x, marks.side.y, markR, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.arc(marks.hinge.x, marks.hinge.y, markR, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                        ctx.fillStyle = '#0052cc';
+                        ctx.beginPath();
+                        ctx.arc(marks.hinge.x, marks.hinge.y, markR * 0.38, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
                 }
                 if (session.mode === 'edit' && objects.length === 1 && (objects[0].type === 'symbol' || objects[0].type === 'asset') && objects[0].w != null) {
                     var knob = knobOf(objects[0]);
@@ -4725,6 +4813,20 @@
                 });
                 orderWrap.appendChild(order);
                 props.appendChild(orderWrap);
+                if (obj.kind !== 'window') {
+                    [['schemeDoorSide', 'side'], ['schemeDoorHinge', 'hinge']].forEach(function (item) {
+                        var button = el('button', 'asset-tree-scheme-add', api.t(item[0]));
+                        button.type = 'button';
+                        button.disabled = !api.canEdit || session.mode !== 'edit';
+                        button.addEventListener('click', function () {
+                            if (!api.canEdit || session.mode !== 'edit') return;
+                            remember();
+                            flipDoor(obj, item[1]);
+                            paint();
+                        });
+                        props.appendChild(button);
+                    });
+                }
             }
             if (obj.type === 'symbol' || obj.type === 'asset' || obj.type === 'image') field(api.t('schemeAngle'), obj.angle || 0, function (value) { obj.angle = Math.round(Number(value) || 0); });
             if (obj.type === 'image') field(api.t('schemeOpacity'), Math.round((obj.opacity == null ? 0.72 : obj.opacity) * 100), function (value) {
@@ -6108,6 +6210,15 @@
                     };
                     return;
                 }
+                var flip = doorFlipAt(sx, sy);
+                if (flip) {
+                    var door = selectedObjects()[0];
+                    remember();
+                    flipDoor(door, flip);
+                    renderProps();
+                    paint();
+                    return;
+                }
                 var id = hit(raw.x, raw.y);
                 if (id) {
                     if (event.shiftKey) {
@@ -6694,7 +6805,9 @@
             session.openingSize[obj.kind || 'door'] = {
                 width: obj.width,
                 height: obj.height,
-                custom: !!obj.custom
+                custom: !!obj.custom,
+                swing: obj.swing === 'right' ? 'right' : 'left',
+                hinge: obj.hinge === 'a' ? 'a' : 'b'
             };
         }
 
