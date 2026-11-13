@@ -11,4 +11,4 @@
     <div class="asset-tree-picker-levels"></div>
     <p class="asset-tree-picker-current"></p>
 </div>
-<script src="$baseurl/download/resources/com.assetstree.jira.asset-tree:asset-tree-field/asset-field.js?v=1.3.249"></script>
+<script src="$baseurl/download/resources/com.assetstree.jira.asset-tree:asset-tree-field/asset-field.js?v=1.3.250"></script>

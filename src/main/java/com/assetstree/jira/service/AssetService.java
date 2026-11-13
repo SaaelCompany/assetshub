@@ -285,6 +285,12 @@ public interface AssetService {
      */
     void ensureIssueFieldLink(ApplicationUser user, Issue issue);
 
+    /**
+     * The asset chosen in the request form. The text may be the numeric id,
+     * the object key, or the line shown in the list, such as a place and a name.
+     */
+    Integer resolvePortalAsset(String projectKey, String text, String context);
+
     /** Moves equipment already linked to this request when the request itself changes status. */
     void syncRequestStatus(ApplicationUser user, Issue issue);
 

@@ -1592,17 +1592,33 @@ public class AssetServiceImpl implements AssetService {
         if (parsed != null) {
             return parsed;
         }
-        return assetIdByLabel(issue, raw);
+        String projectKey = issue != null && issue.getProjectObject() != null
+                ? issue.getProjectObject().getKey() : "";
+        return matchFieldAsset(projectKey, raw, issueHaystack(issue));
     }
 
-    private Integer assetIdByLabel(Issue issue, String text) {
+    @Override
+    public Integer resolvePortalAsset(String projectKey, String text, String context) {
+        if (text == null) {
+            return null;
+        }
+        String raw = text.trim();
+        if (raw.isEmpty() || "-1".equals(raw)) {
+            return null;
+        }
+        Integer parsed = parseId(raw);
+        if (parsed != null) {
+            return parsed;
+        }
+        return matchFieldAsset(projectKey == null ? "" : projectKey, raw, context == null ? "" : context);
+    }
+
+    private Integer matchFieldAsset(String projectKey, String text, String context) {
         try {
             List<String> hints = AssetFieldText.lookupHints(text);
             if (hints.isEmpty()) {
                 return null;
             }
-            String projectKey = issue != null && issue.getProjectObject() != null
-                    ? issue.getProjectObject().getKey() : "";
             List<AssetFieldMatch.Row> rows = new ArrayList<AssetFieldMatch.Row>();
             Set<Integer> seen = new HashSet<Integer>();
             if (projectKey != null && !projectKey.isEmpty()) {
@@ -1612,7 +1628,7 @@ public class AssetServiceImpl implements AssetService {
                 addLookupRows(rows, seen, "OBJECT_KEY", hints.get(i));
                 addLookupRows(rows, seen, "NAME", hints.get(i));
             }
-            return AssetFieldMatch.choose(rows, hints, projectKey, issueHaystack(issue));
+            return AssetFieldMatch.choose(rows, hints, projectKey, context == null ? "" : context);
         } catch (RuntimeException ex) {
             log.debug("Asset field text was not matched", ex);
             return null;

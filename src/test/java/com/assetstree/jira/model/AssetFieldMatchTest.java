@@ -57,6 +57,19 @@ public class AssetFieldMatchTest {
     }
 
     @Test
+    public void portalPathSelectsTheLeaf() {
+        List<AssetFieldMatch.Row> rows = Arrays.asList(
+                row(1, "Ноутбук", "AST-1", "STP", true, ""),
+                row(2, "Компьютер admin", "AST-2", "STP", false, "Ноутбук"),
+                row(5, "Canon 2035", "KRUL-IT", "STP", false, "Принтер"));
+        assertEquals(Integer.valueOf(2), AssetFieldMatch.choose(rows,
+                AssetFieldText.lookupHints("Ноутбук / Компьютер admin"), "STP", ""));
+        assertEquals(Integer.valueOf(5), AssetFieldMatch.choose(rows, hints("KRUL-IT"), "STP", ""));
+        assertEquals(Integer.valueOf(5), AssetFieldMatch.choose(rows,
+                AssetFieldText.lookupHints("Принтер / Canon 2035"), "STP", ""));
+    }
+
+    @Test
     public void equipmentWinsOverAPlaceWithTheSameName() {
         List<AssetFieldMatch.Row> rows = Arrays.asList(
                 row(1, "Test", "PLC-1", "STP", true, ""),

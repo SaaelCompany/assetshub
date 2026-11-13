@@ -52,18 +52,57 @@
         }
     }
 
+    function selectedAssetId(select) {
+        if (!select) return '';
+        if (/^\d+$/.test(select.value || '')) return select.value;
+        var option = select.options && select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+        if (!option) return '';
+        var marked = option.getAttribute('data-asset-id') || option.getAttribute('value') || '';
+        return /^\d+$/.test(marked) ? marked : '';
+    }
+
+    function writeFieldValue(input, value) {
+        input.value = value;
+        var prototype = Object.getPrototypeOf(input);
+        var descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, 'value');
+        if (descriptor && descriptor.set) descriptor.set.call(input, value);
+    }
+
+    function rememberChoiceQuiet(id) {
+        if (!/^\d+$/.test(id)) return;
+        document.cookie = 'assethub-portal-asset=' + encodeURIComponent(id) + '; path=/; max-age=7200; SameSite=Lax';
+        try {
+            sessionStorage.setItem('asset-tree-portal-asset', JSON.stringify({ id: id, projectKey: projectFromPage() }));
+        } catch (error) {}
+    }
+
     function flushPickers() {
-        var pickers = document.querySelectorAll('.asset-tree-picker');
-        for (var i = 0; i < pickers.length; i++) {
-            var picker = pickers[i];
-            var hidden = picker.valueInput || picker.querySelector('.asset-tree-picker-value');
-            if (!hidden) continue;
-            var select = picker.portalSelect;
-            if (!select || !select.parentNode) select = picker.querySelector('select');
-            var next = select && select.value ? select.value : '';
-            if (!/^\d+$/.test(next) || next === hidden.value) continue;
-            hidden.value = next;
+        if (flushPickers.busy) return;
+        flushPickers.busy = true;
+        try {
+            var pickers = document.querySelectorAll('.asset-tree-picker');
+            for (var i = 0; i < pickers.length; i++) {
+                var picker = pickers[i];
+                var hidden = picker.valueInput || picker.querySelector('.asset-tree-picker-value');
+                if (!hidden) continue;
+                var select = picker.portalSelect;
+                if (!select || !select.parentNode) select = picker.querySelector('select');
+                var next = selectedAssetId(select);
+                if (!next || next === hidden.value) continue;
+                writeFieldValue(hidden, next);
+                hidden.setAttribute('data-asset-committed', next);
+                rememberChoiceQuiet(next);
+            }
+        } finally {
+            flushPickers.busy = false;
         }
+    }
+
+    function bindAssetSelect(select, onPick) {
+        if (!select || select.getAttribute('data-asset-bound') === '1') return;
+        select.setAttribute('data-asset-bound', '1');
+        select.addEventListener('change', onPick);
+        if (window.AJS && AJS.$) AJS.$(select).on('change', onPick);
     }
 
     function holdPortalChoice(id) {
@@ -108,7 +147,8 @@
             var select = picker.portalSelect;
             if (!select || !select.parentNode) select = picker.querySelector('select');
             var value = '';
-            if (select && /^\d+$/.test(select.value || '')) value = select.value;
+            var picked = selectedAssetId(select);
+            if (picked) value = picked;
             else if (hidden && /^\d+$/.test(hidden.value || '')) value = hidden.value;
             if (value) id = value;
             var fieldName = hidden ? (hidden.name || hidden.id || '') : '';
@@ -1095,6 +1135,7 @@
                     if (query && !chosen && !nodeMatches(node, query)) return;
                     var option = el('option', null, optionText(node));
                     option.value = String(node.id);
+                    option.setAttribute('data-asset-id', String(node.id));
                     if (blob) option.setAttribute('data-search', blob);
                     if (chosen) option.selected = true;
                     select.appendChild(option);
@@ -1104,17 +1145,18 @@
                     if (extra && !extra.group) {
                         var kept = el('option', null, optionText(extra));
                         kept.value = String(extra.id);
+                        kept.setAttribute('data-asset-id', String(extra.id));
                         kept.selected = true;
                         select.appendChild(kept);
                     }
                 }
             }
             paintOptions();
-            select.addEventListener('change', function () {
-                commitValue(select.value);
+            attachSelect(select);
+            bindAssetSelect(select, function () {
+                commitValue(selectedAssetId(select));
                 show(hidden.value ? parseInt(hidden.value, 10) : null);
             });
-            attachSelect(select);
             if (!select2Ready(select)) mountFind(select, paintOptions, function (value) { query = value; });
             if (!options.length) showHint(emptyText);
             show(hidden.value ? parseInt(hidden.value, 10) : null);
@@ -1181,11 +1223,13 @@
             options.forEach(function (node) {
                 var option = el('option', null, node.name);
                 option.value = String(node.id);
+                option.setAttribute('data-asset-id', String(node.id));
                 if (chosen && chosen.id === node.id) option.selected = true;
                 select.appendChild(option);
             });
-            select.addEventListener('change', function () {
-                var chosen = select.value ? byId[parseInt(select.value, 10)] : null;
+            bindAssetSelect(select, function () {
+                var picked = selectedAssetId(select);
+                var chosen = picked ? byId[parseInt(picked, 10)] : null;
                 var cursor = chosen || parent;
                 var stored = cursor ? anchorId(cursor.id) : null;
                 commitValue(stored ? String(stored) : '');
@@ -2608,8 +2652,19 @@
         }
     }
 
-    document.addEventListener('submit', function () {
-        flushPickers();
+    document.addEventListener('submit', flushPickers, true);
+    document.addEventListener('submit', flushPickers, false);
+    document.addEventListener('click', function (event) {
+        var node = event.target;
+        while (node && node !== document) {
+            var tag = node.tagName ? node.tagName.toLowerCase() : '';
+            var type = (node.type || '').toLowerCase();
+            if (tag === 'button' || (tag === 'input' && type === 'submit')) {
+                flushPickers();
+                return;
+            }
+            node = node.parentNode;
+        }
     }, true);
 
     document.addEventListener('change', function (event) {
