@@ -39,6 +39,11 @@ public class AssetFlowListener extends AbstractIssueEventListener {
         } catch (RuntimeException ex) {
             log.warn("Portal asset was not linked to {}", event.getIssue().getKey(), ex);
         }
+        try {
+            service.ensureIssueFieldLink(event.getUser(), event.getIssue());
+        } catch (RuntimeException ex) {
+            log.warn("Asset field was not linked to {}", event.getIssue().getKey(), ex);
+        }
     }
 
     /**

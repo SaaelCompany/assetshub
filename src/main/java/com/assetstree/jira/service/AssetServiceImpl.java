@@ -307,6 +307,7 @@ public class AssetServiceImpl implements AssetService {
     private static final Logger log = LoggerFactory.getLogger(AssetServiceImpl.class);
     private final ThreadLocal<AccessScope> activeScope = new ThreadLocal<AccessScope>();
     private final Map<String, String> exportOwners = new ConcurrentHashMap<String, String>();
+    private final Set<Long> fieldAdoptions = Collections.synchronizedSet(new HashSet<Long>());
     private static final int SEARCH_LIMIT = 30;
     private static final int ID_BATCH = 200;
     private static final ConcurrentHashMap<String, Object> KEY_LOCKS = new ConcurrentHashMap<String, Object>();
@@ -1618,10 +1619,67 @@ public class AssetServiceImpl implements AssetService {
                     return byName;
                 }
             }
+            for (int i = 0; i < hints.size(); i++) {
+                Integer elsewhere = assetIdOutsideProject(hints.get(i));
+                if (elsewhere != null) {
+                    return elsewhere;
+                }
+            }
         } catch (RuntimeException ex) {
             log.debug("Asset field text was not matched", ex);
         }
         return null;
+    }
+
+    /** One object key, or one equipment name, in a project other than the request. */
+    private Integer assetIdOutsideProject(String hint) {
+        if (hint == null) {
+            return null;
+        }
+        String wanted = hint.trim();
+        if (wanted.isEmpty() || wanted.length() > 240) {
+            return null;
+        }
+        AssetEntity[] byKey = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY = ?", wanted));
+        Integer key = singleAsset(byKey, false);
+        if (key != null) {
+            return key;
+        }
+        AssetEntity[] byName = ao().find(AssetEntity.class, Query.select().where("NAME = ?", wanted));
+        return singleAsset(byName, true);
+    }
+
+    private Integer singleAsset(AssetEntity[] rows, boolean equipmentFirst) {
+        if (rows == null || rows.length == 0) {
+            return null;
+        }
+        if (!equipmentFirst) {
+            return rows.length == 1 && rows[0] != null ? Integer.valueOf(rows[0].getID()) : null;
+        }
+        Integer equipment = null;
+        int equipmentCount = 0;
+        Integer place = null;
+        int placeCount = 0;
+        for (int i = 0; i < rows.length; i++) {
+            AssetEntity row = rows[i];
+            if (row == null) {
+                continue;
+            }
+            if (isLocation(row)) {
+                placeCount++;
+                place = Integer.valueOf(row.getID());
+            } else {
+                equipmentCount++;
+                equipment = Integer.valueOf(row.getID());
+            }
+        }
+        if (equipmentCount == 1) {
+            return equipment;
+        }
+        if (equipmentCount > 1) {
+            return null;
+        }
+        return placeCount == 1 ? place : null;
     }
 
     private Integer assetIdByName(String projectKey, String name) {
@@ -1785,41 +1843,117 @@ public class AssetServiceImpl implements AssetService {
         if (assetId <= 0 || issue == null || issue.getId() == null) {
             return;
         }
-        if (rememberChosenLink(actor, issue, assetId)) {
-            settlePortalAsset(issue.getReporter(), assetId);
-            settlePortalAsset(actor, assetId);
+        if (linkFieldAsset(actor, issue, assetId)) {
             return;
         }
-        final Long issueId = issue.getId();
-        final ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        scheduleFieldAdoption(issue.getId());
+    }
+
+    /**
+     * The value in the asset field is the link on the request. Opening the
+     * request writes that link when the create transaction could not.
+     */
+    private void adoptFieldAsset(ApplicationUser user, Issue issue) {
+        if (issue == null || issue.getId() == null) {
+            return;
+        }
+        Integer assetId = storedAssetId(issue);
+        if (assetId == null || fieldLinkPresent(issue.getId().longValue(), assetId.intValue())) {
+            return;
+        }
+        ApplicationUser actor = user != null ? user : issue.getReporter();
+        if (!linkFieldAsset(actor, issue, assetId.intValue())) {
+            log.warn("Asset {} from the request field is not linked to {}", assetId, issue.getKey());
+        }
+    }
+
+    private boolean linkFieldAsset(ApplicationUser actor, Issue issue, int assetId) {
+        if (!rememberChosenLink(actor, issue, assetId)) {
+            return false;
+        }
+        settlePortalAsset(issue.getReporter(), assetId);
+        settlePortalAsset(actor, assetId);
+        return true;
+    }
+
+    private boolean fieldLinkPresent(long issueId, int assetId) {
+        AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
+                Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, Long.valueOf(issueId)));
+        return existing != null && existing.length > 0;
+    }
+
+    private void scheduleFieldAdoption(final Long issueId) {
+        if (issueId == null || !fieldAdoptions.add(issueId)) {
+            return;
+        }
+        final ClassLoader loader = AssetServiceImpl.class.getClassLoader();
         Thread retry = new Thread(new Runnable() {
             @Override
             public void run() {
                 if (loader != null) {
                     Thread.currentThread().setContextClassLoader(loader);
                 }
+                long[] waits = new long[] {500L, 2000L, 5000L};
                 try {
-                    Thread.sleep(2000L);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-                try {
-                    Issue loaded = issueManager().getIssueObject(issueId);
-                    if (loaded == null) {
-                        return;
+                    for (int attempt = 0; attempt < waits.length; attempt++) {
+                        try {
+                            Thread.sleep(waits[attempt]);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        try {
+                            Issue loaded = issueManager().getIssueObject(issueId);
+                            if (loaded == null) {
+                                continue;
+                            }
+                            Integer assetId = storedAssetId(loaded);
+                            if (assetId == null) {
+                                continue;
+                            }
+                            if (fieldLinkPresent(issueId.longValue(), assetId.intValue())) {
+                                return;
+                            }
+                            if (linkFieldAsset(loaded.getReporter(), loaded, assetId.intValue())) {
+                                return;
+                            }
+                        } catch (RuntimeException ex) {
+                            log.warn("Could not attach the asset field to issue {}", issueId, ex);
+                        }
                     }
-                    if (rememberChosenLink(actor, loaded, assetId)) {
-                        settlePortalAsset(loaded.getReporter(), assetId);
-                        settlePortalAsset(actor, assetId);
-                    }
-                } catch (RuntimeException ex) {
-                    log.warn("Could not attach asset {} after the request was saved", Integer.valueOf(assetId), ex);
+                } finally {
+                    fieldAdoptions.remove(issueId);
                 }
             }
-        }, "assethub-link-" + issueId);
+        }, "assethub-field-link-" + issueId);
         retry.setDaemon(true);
         retry.start();
+    }
+
+    private void clearFieldIfMatches(Issue issue, int assetId) {
+        if (issue == null || issue.getId() == null || assetId <= 0) {
+            return;
+        }
+        Integer stored = storedAssetId(issue);
+        if (stored == null || stored.intValue() != assetId) {
+            return;
+        }
+        CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+        if (manager == null) {
+            return;
+        }
+        for (String id : PortalLookup.assetFieldIds()) {
+            CustomField field = manager.getCustomFieldObject(id);
+            if (field == null) {
+                continue;
+            }
+            Object current = issue.getCustomFieldValue(field);
+            String now = current == null ? "" : String.valueOf(current).trim();
+            if (now.isEmpty() || "-1".equals(now)) {
+                continue;
+            }
+            field.updateValue(null, issue, new ModifiedValue(current, ""), new DefaultIssueChangeHolder());
+        }
     }
 
     /**
@@ -1837,6 +1971,7 @@ public class AssetServiceImpl implements AssetService {
                 if (cause != null && cause.getStatus() == 409) {
                     return true;
                 }
+                log.warn("Could not link asset {} to {}", Integer.valueOf(assetId), issue.getKey(), ex);
             }
         }
         return attachPortalIssue(user, issue, assetId, true);
@@ -2999,6 +3134,12 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
+        try {
+            Issue issue = issueManager().getIssueObject(Long.valueOf(issueId));
+            clearFieldIfMatches(issue, assetId);
+        } catch (RuntimeException ex) {
+            log.warn("Could not clear the asset field on issue {}", Long.valueOf(issueId), ex);
+        }
     }
 
     @Override
@@ -3316,6 +3457,7 @@ public class AssetServiceImpl implements AssetService {
         if (!canBrowse(user, issue)) {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
+        adoptFieldAsset(user, issue);
         return linkedAssets(user, issueId);
     }
 
@@ -5019,7 +5161,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void syncRequestAsset(ApplicationUser user, Issue incoming, String previousAssetId, String nextAssetId) {
         final Issue issue = resolvedIssue(incoming);
-        if (issue == null || issue.getId() == null || issue.getProjectObject() == null) {
+        if (issue == null || issue.getId() == null) {
             return;
         }
         ApplicationUser actor = user != null ? user : issue.getReporter();
@@ -5044,10 +5186,24 @@ public class AssetServiceImpl implements AssetService {
                 log.warn("Could not drop the previous asset link {}", previous, ex);
             }
         }
-        if (clear || next == null) {
+        if (clear) {
+            return;
+        }
+        if (next == null) {
+            scheduleFieldAdoption(issue.getId());
             return;
         }
         ensureRequestLink(actor, issue, next.intValue());
+    }
+
+    @Override
+    public void ensureIssueFieldLink(ApplicationUser user, Issue issue) {
+        Issue loaded = resolvedIssue(issue);
+        if (loaded == null || loaded.getId() == null) {
+            return;
+        }
+        adoptFieldAsset(user, loaded);
+        scheduleFieldAdoption(loaded.getId());
     }
 
     private static boolean clearedAssetText(String text) {

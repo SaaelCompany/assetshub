@@ -279,6 +279,12 @@ public interface AssetService {
 
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
 
+    /**
+     * The asset stored in the request field is the same object as the link on the request.
+     * A save that only wrote the field still gains the link, including after the request is opened.
+     */
+    void ensureIssueFieldLink(ApplicationUser user, Issue issue);
+
     /** Moves equipment already linked to this request when the request itself changes status. */
     void syncRequestStatus(ApplicationUser user, Issue issue);
 
