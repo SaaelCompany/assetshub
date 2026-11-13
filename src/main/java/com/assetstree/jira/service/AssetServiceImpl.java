@@ -5389,7 +5389,8 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("lifeContractUntil", labels.getText("asset-tree.ui.lifeColUntil"));
         headerLabels.put("lifeMonths", labels.getText("asset-tree.ui.lifeColMonths"));
         headerLabels.put("lifeResidual", labels.getText("asset-tree.ui.lifeColResidual"));
-        boolean service = moduleOn(projectKey, ProjectModules.SERVICE);
+        boolean service = moduleOn(projectKey, ProjectModules.SERVICE)
+                && ModuleSetup.calendarOn(moduleSetup(projectKey).getScheduleBoards());
         boolean life = moduleOn(projectKey, ProjectModules.LIFE);
         Map<String, String> named = kindNames(projectKey);
         List<EquipmentExchange.Named> kinds = new ArrayList<EquipmentExchange.Named>();
