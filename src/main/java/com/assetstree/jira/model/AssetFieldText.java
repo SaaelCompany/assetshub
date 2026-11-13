@@ -21,15 +21,28 @@ public final class AssetFieldText {
             return hints;
         }
         add(hints, text);
-        int slash = text.indexOf('/');
-        if (slash < 0) {
-            return hints;
+        split(hints, text, '/');
+        int gap = text.indexOf("  ");
+        if (gap > 0) {
+            add(hints, text.substring(0, gap));
+            add(hints, text.substring(gap + 2));
         }
-        String[] parts = text.split("/");
+        int dot = text.indexOf('·');
+        if (dot > 0) {
+            add(hints, text.substring(0, dot));
+            add(hints, text.substring(dot + 1));
+        }
+        return hints;
+    }
+
+    private static void split(List<String> hints, String text, char mark) {
+        if (text.indexOf(mark) < 0) {
+            return;
+        }
+        String[] parts = text.split(String.valueOf(mark));
         for (int i = parts.length - 1; i >= 0; i--) {
             add(hints, parts[i]);
         }
-        return hints;
     }
 
     private static void add(List<String> hints, String value) {

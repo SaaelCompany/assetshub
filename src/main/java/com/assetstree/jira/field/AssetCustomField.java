@@ -57,6 +57,9 @@ public class AssetCustomField extends GenericTextCFType {
                 return;
             }
             AssetBridge.service().syncRequestAsset(ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser(), issue, previous, value);
+            if (value != null && !value.trim().isEmpty() && !"-1".equals(value.trim())) {
+                AssetBridge.service().ensureIssueFieldLink(ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser(), issue);
+            }
         } catch (RuntimeException ex) {
             log.warn("The asset field was saved, but the request link was not", ex);
         }

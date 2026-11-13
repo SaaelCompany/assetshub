@@ -25,4 +25,12 @@ public class AssetFieldTextTest {
         assertEquals(1, plain.size());
         assertEquals("SD-14", plain.get(0));
     }
+
+    @Test
+    public void viewLabelKeepsTheKeyAndTheName() {
+        List<String> hints = AssetFieldText.lookupHints("SD-14  Test");
+        assertEquals("SD-14  Test", hints.get(0));
+        assertEquals("SD-14", hints.get(1));
+        assertEquals("Test", hints.get(2));
+    }
 }
