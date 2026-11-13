@@ -1785,13 +1785,13 @@ public class AssetServiceImpl implements AssetService {
         if (assetId <= 0 || issue == null || issue.getId() == null) {
             return;
         }
-        if (attachPortalIssue(actor, issue, assetId, true)) {
+        if (rememberChosenLink(actor, issue, assetId)) {
             settlePortalAsset(issue.getReporter(), assetId);
             settlePortalAsset(actor, assetId);
             return;
         }
         final Long issueId = issue.getId();
-        final ClassLoader loader = AssetServiceImpl.class.getClassLoader();
+        final ClassLoader loader = Thread.currentThread().getContextClassLoader();
         Thread retry = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -1809,7 +1809,7 @@ public class AssetServiceImpl implements AssetService {
                     if (loaded == null) {
                         return;
                     }
-                    if (attachPortalIssue(actor, loaded, assetId, true)) {
+                    if (rememberChosenLink(actor, loaded, assetId)) {
                         settlePortalAsset(loaded.getReporter(), assetId);
                         settlePortalAsset(actor, assetId);
                     }
@@ -1820,6 +1820,39 @@ public class AssetServiceImpl implements AssetService {
         }, "assethub-link-" + issueId);
         retry.setDaemon(true);
         retry.start();
+    }
+
+    /**
+     * The object the person picked on the request. The same project uses the
+     * original link. A different project, or a viewer without the asset
+     * screen, still keeps the row.
+     */
+    private boolean rememberChosenLink(ApplicationUser user, Issue issue, int assetId) {
+        if (user != null) {
+            try {
+                link(user, assetId, issue, false);
+                return true;
+            } catch (RuntimeException ex) {
+                AssetException cause = assetCause(ex);
+                if (cause != null && cause.getStatus() == 409) {
+                    return true;
+                }
+            }
+        }
+        return attachPortalIssue(user, issue, assetId, true);
+    }
+
+    private static AssetException assetCause(Throwable failure) {
+        Throwable current = failure;
+        int guard = 0;
+        while (current != null && guard < 8) {
+            if (current instanceof AssetException) {
+                return (AssetException) current;
+            }
+            current = current.getCause();
+            guard++;
+        }
+        return null;
     }
 
     private void writeAssetField(ApplicationUser user, Issue issue, int assetId) {
@@ -2936,8 +2969,16 @@ public class AssetServiceImpl implements AssetService {
         }
         link(user, assetId, issue, false);
         applyLinkedFlow(user, assetId, issue);
-        writeAssetField(user, issue, assetId);
-        return getAsset(user, assetId);
+        try {
+            writeAssetField(user, issue, assetId);
+        } catch (RuntimeException ex) {
+            log.warn("Could not store the asset field on {}", issue.getKey(), ex);
+        }
+        try {
+            return getAsset(user, assetId);
+        } catch (RuntimeException ex) {
+            return chosenAsset(assetId);
+        }
     }
 
     @Override
@@ -3284,7 +3325,43 @@ public class AssetServiceImpl implements AssetService {
         if (!canBrowse(user, issue) || issue.getProjectObject() == null) {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
-        return listAssets(user, issue.getProjectObject().getKey(), query).getAssets();
+        List<AssetDto> local = listAssets(user, issue.getProjectObject().getKey(), query).getAssets();
+        if (query == null || query.trim().isEmpty() || !local.isEmpty()) {
+            return local;
+        }
+        return assetsByObjectKey(query.trim());
+    }
+
+    /** An object key typed in the request's Assets field, including another project. */
+    private List<AssetDto> assetsByObjectKey(String objectKey) {
+        List<AssetDto> found = new ArrayList<AssetDto>();
+        AssetEntity[] rows = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY = ?", objectKey));
+        if (rows == null) {
+            return found;
+        }
+        for (AssetEntity row : rows) {
+            if (row == null) {
+                continue;
+            }
+            found.add(chosenAsset(row.getID()));
+            if (found.size() >= 8) {
+                break;
+            }
+        }
+        return found;
+    }
+
+    private AssetDto chosenAsset(int assetId) {
+        AssetEntity row = ao().get(AssetEntity.class, assetId);
+        AssetDto dto = new AssetDto();
+        dto.setId(assetId);
+        if (row == null) {
+            return dto;
+        }
+        dto.setName(row.getName() == null ? "" : row.getName());
+        dto.setObjectKey(row.getObjectKey() == null ? "" : row.getObjectKey());
+        dto.setProjectKey(row.getProjectKey() == null ? "" : row.getProjectKey());
+        return dto;
     }
 
     @Override
@@ -4946,9 +5023,11 @@ public class AssetServiceImpl implements AssetService {
             return;
         }
         ApplicationUser actor = user != null ? user : issue.getReporter();
+        boolean clear = clearedAssetText(nextAssetId);
         Integer previous = resolveFieldAsset(issue, previousAssetId);
-        final Integer next = resolveFieldAsset(issue, nextAssetId);
-        if (previous != null && (next == null || previous.intValue() != next.intValue())) {
+        final Integer next = clear ? null : resolveFieldAsset(issue, nextAssetId);
+        boolean replace = previous != null && (clear || (next != null && previous.intValue() != next.intValue()));
+        if (replace) {
             final Integer dropped = previous;
             try {
                 ao().executeInTransaction(new TransactionCallback<Void>() {
@@ -4965,10 +5044,18 @@ public class AssetServiceImpl implements AssetService {
                 log.warn("Could not drop the previous asset link {}", previous, ex);
             }
         }
-        if (next == null) {
+        if (clear || next == null) {
             return;
         }
         ensureRequestLink(actor, issue, next.intValue());
+    }
+
+    private static boolean clearedAssetText(String text) {
+        if (text == null) {
+            return false;
+        }
+        String raw = text.trim();
+        return raw.isEmpty() || "-1".equals(raw);
     }
 
     @Override
@@ -5044,13 +5131,14 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<IssueRefDto>() {
             @Override
             public IssueRefDto doInTransaction() {
-                AssetEntity asset = requireWrite ? requireWritable(user, assetId) : requireVisible(user, assetId);
-                if (issue.getProjectObject() == null || !ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+                AssetEntity asset = requireWrite ? requireWritable(user, assetId) : requireAsset(assetId);
+                if (requireWrite && (issue.getProjectObject() == null
+                        || !ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey()))) {
                     throw new AssetException(400, "asset-tree.error.project.mismatch");
                 }
                 AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
                         Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, issue.getId()));
-                if (existing.length > 0) {
+                if (existing != null && existing.length > 0) {
                     throw new AssetException(409, "asset-tree.error.issue.duplicate");
                 }
                 ao().create(AssetIssueLinkEntity.class,
@@ -5069,6 +5157,8 @@ public class AssetServiceImpl implements AssetService {
                 AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class, Query.select().where("ISSUE_ID = ?", issueId));
                 List<AssetEntity> visible = new ArrayList<AssetEntity>();
                 Map<String, AssetEntity[]> rowsByProject = new HashMap<String, AssetEntity[]>();
+                Issue host = issueManager().getIssueObject(Long.valueOf(issueId));
+                boolean onRequest = canBrowse(user, host);
                 if (links != null) {
                     for (AssetIssueLinkEntity link : links) {
                         AssetEntity entity = ao().get(AssetEntity.class, link.getAssetId());
@@ -5076,7 +5166,7 @@ public class AssetServiceImpl implements AssetService {
                             continue;
                         }
                         Project project = project(entity.getProjectKey());
-                        if (!canOpen(user, project)) {
+                        if (!onRequest && !canOpen(user, project) && !canSee(user, project)) {
                             continue;
                         }
                         visible.add(entity);
