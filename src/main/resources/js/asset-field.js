@@ -98,6 +98,83 @@
         });
     }
 
+    function readChosenAsset() {
+        var pickers = document.querySelectorAll('.asset-tree-picker');
+        var names = [];
+        var id = '';
+        for (var i = 0; i < pickers.length; i++) {
+            var picker = pickers[i];
+            var hidden = picker.valueInput || picker.querySelector('.asset-tree-picker-value');
+            var select = picker.portalSelect;
+            if (!select || !select.parentNode) select = picker.querySelector('select');
+            var value = '';
+            if (select && /^\d+$/.test(select.value || '')) value = select.value;
+            else if (hidden && /^\d+$/.test(hidden.value || '')) value = hidden.value;
+            if (value) id = value;
+            if (hidden && hidden.name && hidden.name.indexOf('customfield_') === 0 && names.indexOf(hidden.name) < 0) {
+                names.push(hidden.name);
+            }
+        }
+        if (!id) id = carriedAssetId();
+        if (!id || !names.length) return null;
+        return { id: id, names: names };
+    }
+
+    function assignFieldValue(current, id) {
+        if (current == null || typeof current === 'string' || typeof current === 'number') return id;
+        if (typeof current === 'object') {
+            if (Object.prototype.hasOwnProperty.call(current, 'text')) current.text = id;
+            else if (Object.prototype.hasOwnProperty.call(current, 'value')) current.value = id;
+            else return id;
+        }
+        return current;
+    }
+
+    function stampAssetJson(data, chosen) {
+        if (!data || typeof data !== 'object') return false;
+        var wrote = false;
+        var i;
+        function writeMap(map) {
+            if (!map || typeof map !== 'object' || Object.prototype.toString.call(map) === '[object Array]') return;
+            for (i = 0; i < chosen.names.length; i++) {
+                map[chosen.names[i]] = assignFieldValue(map[chosen.names[i]], chosen.id);
+                wrote = true;
+            }
+        }
+        writeMap(data.requestFieldValues);
+        writeMap(data.fields);
+        if (Object.prototype.toString.call(data.fields) === '[object Array]') {
+            for (var row = 0; row < data.fields.length; row++) {
+                var field = data.fields[row];
+                if (!field) continue;
+                var name = field.id || field.fieldId;
+                if (chosen.names.indexOf(name) < 0) continue;
+                if (Object.prototype.hasOwnProperty.call(field, 'value')) field.value = assignFieldValue(field.value, chosen.id);
+                else field.value = chosen.id;
+                wrote = true;
+            }
+        }
+        return wrote;
+    }
+
+    function stampCreateBody(url, body) {
+        var address = url == null ? '' : String(url);
+        var lower = address.toLowerCase();
+        if (lower.indexOf('servicedesk') < 0 || (lower.indexOf('request') < 0 && lower.indexOf('create') < 0)) return body;
+        if (typeof body !== 'string') return body;
+        var trimmed = body.replace(/^\s+/, '');
+        if (!trimmed || trimmed.charAt(0) !== '{') return body;
+        var chosen = readChosenAsset();
+        if (!chosen) return body;
+        try {
+            var data = JSON.parse(body);
+            if (!stampAssetJson(data, chosen)) return body;
+            return JSON.stringify(data);
+        } catch (error) {
+            return body;
+        }
+    }
+
     function carriedAssetId() {
         try {
             var raw = sessionStorage.getItem('asset-tree-portal-asset');
@@ -122,21 +199,27 @@
         var nativeSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.open = function (method, url) {
             this._assetHubUrl = url;
+            this._assetHubMethod = method;
             return nativeOpen.apply(this, arguments);
         };
-        XMLHttpRequest.prototype.send = function () {
+        XMLHttpRequest.prototype.send = function (body) {
+            var next = body;
             try {
                 var id = carryAssetHeader(this._assetHubUrl);
                 if (id) this.setRequestHeader('X-AssetHub-Asset', id);
+                if (this._assetHubMethod && String(this._assetHubMethod).toUpperCase() === 'POST') {
+                    next = stampCreateBody(this._assetHubUrl, body);
+                }
             } catch (error) {}
-            return nativeSend.apply(this, arguments);
+            return nativeSend.call(this, next);
         };
         if (window.fetch && window.Headers) {
             var nativeFetch = window.fetch;
             window.fetch = function (input, init) {
                 var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
                 var id = carryAssetHeader(url);
-                if (!id) return nativeFetch.apply(this, arguments);
+                var method = init && init.method ? String(init.method).toUpperCase() : 'GET';
+                if (!id && method !== 'POST') return nativeFetch.apply(this, arguments);
                 try {
                     var next = {};
                     if (init) {
@@ -144,9 +227,14 @@
                             if (Object.prototype.hasOwnProperty.call(init, key)) next[key] = init[key];
                         }
                     }
-                    var headers = new Headers(next.headers || (typeof input !== 'string' && input && input.headers));
-                    headers.set('X-AssetHub-Asset', id);
-                    next.headers = headers;
+                    if (id) {
+                        var headers = new Headers(next.headers || (typeof input !== 'string' && input && input.headers));
+                        headers.set('X-AssetHub-Asset', id);
+                        next.headers = headers;
+                    }
+                    if (method === 'POST' && typeof next.body === 'string') {
+                        next.body = stampCreateBody(url, next.body);
+                    }
                     return nativeFetch.call(this, input, next);
                 } catch (error) {
                     return nativeFetch.apply(this, arguments);
