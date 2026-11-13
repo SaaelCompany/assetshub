@@ -8,10 +8,13 @@ import com.atlassian.jira.issue.customfields.persistence.CustomFieldValuePersist
 import com.atlassian.jira.issue.fields.CustomField;
 import com.atlassian.jira.issue.fields.layout.field.FieldLayoutItem;
 import com.assetstree.jira.service.AssetBridge;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
 public class AssetCustomField extends GenericTextCFType {
+    private static final Logger log = LoggerFactory.getLogger(AssetCustomField.class);
     public AssetCustomField() {
         this(ComponentAccessor.getComponent(CustomFieldValuePersister.class),
                 ComponentAccessor.getComponent(GenericConfigManager.class));
@@ -49,9 +52,13 @@ public class AssetCustomField extends GenericTextCFType {
     }
 
     private void sync(Issue issue, String previous, String value) {
-        if (AssetBridge.service() == null) {
-            return;
+        try {
+            if (AssetBridge.service() == null) {
+                return;
+            }
+            AssetBridge.service().syncRequestAsset(ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser(), issue, previous, value);
+        } catch (RuntimeException ex) {
+            log.warn("The asset field was saved, but the request link was not", ex);
         }
-        AssetBridge.service().syncRequestAsset(ComponentAccessor.getJiraAuthenticationContext().getLoggedInUser(), issue, previous, value);
     }
 }
