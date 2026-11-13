@@ -80,8 +80,8 @@ public class AssetFlowListener extends AbstractIssueEventListener {
                 if (fieldId == null || !fields.contains(fieldId)) {
                     continue;
                 }
-                String previous = firstText(item, "oldstring", "oldvalue");
-                String next = firstText(item, "newstring", "newvalue");
+                String previous = fieldText(item, "oldvalue", "oldstring");
+                String next = fieldText(item, "newvalue", "newstring");
                 service.syncRequestAsset(event.getUser(), event.getIssue(), previous, next);
                 return;
             }
@@ -136,11 +136,16 @@ public class AssetFlowListener extends AbstractIssueEventListener {
         return value == null || value.trim().isEmpty();
     }
 
-    private static String firstText(GenericValue item, String primary, String fallback) {
-        String value = item.getString(primary);
-        if (value != null && !value.trim().isEmpty()) {
-            return value;
+    /** The stored id wins over the visible name in the history line. */
+    private static String fieldText(GenericValue item, String valueKey, String stringKey) {
+        String raw = item.getString(valueKey);
+        if (raw != null && raw.trim().matches("\\d+")) {
+            return raw.trim();
         }
-        return item.getString(fallback);
+        String shown = item.getString(stringKey);
+        if (shown != null && !shown.trim().isEmpty()) {
+            return shown;
+        }
+        return raw;
     }
 }
