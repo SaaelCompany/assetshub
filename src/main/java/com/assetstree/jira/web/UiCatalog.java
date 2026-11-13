@@ -71,6 +71,7 @@ public final class UiCatalog {
             "saved",
             "moved",
             "typeLabel",
+            "typeRenameHint",
             "addType",
             "systemType",
             "deleteType",

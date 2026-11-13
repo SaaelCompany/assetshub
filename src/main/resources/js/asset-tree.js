@@ -10711,6 +10711,27 @@
                     else notify((payload && payload.message) || t('errorTitle'));
                 });
             };
+            var nameInput = input('', type.label || '', false);
+            nameInput.maxLength = 255;
+            function saveTypeName() {
+                var next = String(nameInput.value || '').replace(/^\s+|\s+$/g, '');
+                if (!next) {
+                    nameInput.value = type.label || '';
+                    notify(t('typeNameRequired'));
+                    return;
+                }
+                if (next === (type.label || '')) return;
+                saveLook({ label: next });
+            }
+            nameInput.addEventListener('change', saveTypeName);
+            nameInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    nameInput.blur();
+                }
+            });
+            look.appendChild(field(t('typeLabel'), nameInput, true));
+            look.appendChild(el('p', 'asset-tree-hint', t('typeRenameHint')));
             var icons = iconPicker(iconKeyOf(type), type.color, function (key) {
                 saveLook({ icon: key });
             });
