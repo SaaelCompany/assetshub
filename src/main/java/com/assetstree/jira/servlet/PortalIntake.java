@@ -48,7 +48,7 @@ public final class PortalIntake {
             if (!portal && !marked) {
                 return;
             }
-            boolean explicit = queryId != null;
+            boolean explicit = queryId != null || formId != null || headerId != null;
             boolean post = "POST".equalsIgnoreCase(request.getMethod());
             ApplicationUser user = loggedIn();
             AssetService service = AssetBridge.service();

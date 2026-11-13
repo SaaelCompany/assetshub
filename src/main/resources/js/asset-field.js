@@ -111,11 +111,20 @@
             if (select && /^\d+$/.test(select.value || '')) value = select.value;
             else if (hidden && /^\d+$/.test(hidden.value || '')) value = hidden.value;
             if (value) id = value;
-            if (hidden && hidden.name && hidden.name.indexOf('customfield_') === 0 && names.indexOf(hidden.name) < 0) {
-                names.push(hidden.name);
+            var fieldName = hidden ? (hidden.name || hidden.id || '') : '';
+            if (fieldName.indexOf('customfield_') === 0 && names.indexOf(fieldName) < 0) {
+                names.push(fieldName);
             }
         }
         if (!id) id = carriedAssetId();
+        if (id && !names.length) {
+            var marker = document.getElementById('asset-tree-portal-boot');
+            var listed = marker ? (marker.getAttribute('data-fields') || '').split(',') : [];
+            for (var f = 0; f < listed.length; f++) {
+                var fieldId = listed[f].replace(/^\s+|\s+$/g, '');
+                if (fieldId.indexOf('customfield_') === 0 && names.indexOf(fieldId) < 0) names.push(fieldId);
+            }
+        }
         if (!id || !names.length) return null;
         return { id: id, names: names };
     }
@@ -137,6 +146,7 @@
         function writeMap(map) {
             if (!map || typeof map !== 'object' || Object.prototype.toString.call(map) === '[object Array]') return;
             for (i = 0; i < chosen.names.length; i++) {
+                if (!Object.prototype.hasOwnProperty.call(map, chosen.names[i])) continue;
                 map[chosen.names[i]] = assignFieldValue(map[chosen.names[i]], chosen.id);
                 wrote = true;
             }
@@ -163,7 +173,8 @@
         if (lower.indexOf('servicedesk') < 0 || (lower.indexOf('request') < 0 && lower.indexOf('create') < 0)) return body;
         if (typeof body !== 'string') return body;
         var trimmed = body.replace(/^\s+/, '');
-        if (!trimmed || trimmed.charAt(0) !== '{') return body;
+        if (!trimmed) return body;
+        if (trimmed.charAt(0) !== '{') return stampFormBody(body);
         var chosen = readChosenAsset();
         if (!chosen) return body;
         try {
@@ -173,6 +184,19 @@
         } catch (error) {
             return body;
         }
+    }
+
+    function stampFormBody(body) {
+        var chosen = readChosenAsset();
+        if (!chosen || body.indexOf('=') < 0) return body;
+        var next = body;
+        for (var i = 0; i < chosen.names.length; i++) {
+            var name = chosen.names[i];
+            var pattern = new RegExp('(^|&)' + name + '=[^&]*');
+            if (!pattern.test(next)) continue;
+            next = next.replace(pattern, '$1' + name + '=' + encodeURIComponent(chosen.id));
+        }
+        return next;
     }
 
     function carriedAssetId() {
@@ -205,6 +229,7 @@
         XMLHttpRequest.prototype.send = function (body) {
             var next = body;
             try {
+                flushPickers();
                 var id = carryAssetHeader(this._assetHubUrl);
                 if (id) this.setRequestHeader('X-AssetHub-Asset', id);
                 if (this._assetHubMethod && String(this._assetHubMethod).toUpperCase() === 'POST') {

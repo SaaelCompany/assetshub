@@ -113,6 +113,7 @@ import com.assetstree.jira.dto.PortalRequestCreatedDto;
 import com.assetstree.jira.dto.PortalRequestFormDto;
 import com.assetstree.jira.dto.PortalMineDto;
 import com.assetstree.jira.dto.ProjectViewDto;
+import com.assetstree.jira.model.AssetFieldMatch;
 import com.assetstree.jira.model.AssetFieldText;
 import com.assetstree.jira.model.PortalAssetHold;
 import com.assetstree.jira.model.PortalAssetMark;
@@ -308,6 +309,7 @@ public class AssetServiceImpl implements AssetService {
     private final ThreadLocal<AccessScope> activeScope = new ThreadLocal<AccessScope>();
     private final Map<String, String> exportOwners = new ConcurrentHashMap<String, String>();
     private final Set<Long> fieldAdoptions = Collections.synchronizedSet(new HashSet<Long>());
+    private final ThreadLocal<Boolean> rewritingField = new ThreadLocal<Boolean>();
     private static final int SEARCH_LIMIT = 30;
     private static final int ID_BATCH = 200;
     private static final ConcurrentHashMap<String, Object> KEY_LOCKS = new ConcurrentHashMap<String, Object>();
@@ -1318,21 +1320,22 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void attachPortalAsset(ApplicationUser user, Issue issue) {
         issue = resolvedIssue(issue);
-        if (issue == null || issue.getProjectObject() == null || issue.getId() == null || !freshRequest(issue)) {
+        if (issue == null || issue.getId() == null || !freshRequest(issue)) {
+            return;
+        }
+        ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : issue.getCreator();
+        ApplicationUser actor = user != null ? user : reporter;
+        Integer carried = PortalAssetHold.requestAsset();
+        if (carried != null && carried.intValue() > 0) {
+            ensureRequestLink(actor, issue, carried.intValue());
             return;
         }
         Integer picked = storedAssetId(issue);
         if (picked != null) {
-            ApplicationUser actor = user != null ? user : issue.getReporter();
             ensureRequestLink(actor, issue, picked.intValue());
             return;
         }
-        ApplicationUser reporter = issue.getReporter() != null ? issue.getReporter() : issue.getCreator();
-        Integer carried = PortalAssetHold.requestAsset();
-        Integer pending = carried;
-        if (pending == null) {
-            pending = peekPortal(reporter);
-        }
+        Integer pending = peekPortal(reporter);
         if (pending == null) {
             pending = peekPortal(user);
         }
@@ -1343,15 +1346,6 @@ public class AssetServiceImpl implements AssetService {
             pending = readPortalPending(user);
         }
         if (pending == null || pending.intValue() <= 0) {
-            Integer chosenOnForm = chosenAssetId(issue);
-            if (chosenOnForm != null) {
-                ensureRequestLink(user != null ? user : reporter, issue, chosenOnForm.intValue());
-            }
-            return;
-        }
-        boolean onThisRequest = carried != null && carried.intValue() == pending.intValue();
-        if (onThisRequest) {
-            ensureRequestLink(user != null ? user : reporter, issue, pending.intValue());
             return;
         }
         AssetEntity asset;
@@ -1375,12 +1369,12 @@ public class AssetServiceImpl implements AssetService {
             settlePortalAsset(user, pending.intValue());
             return;
         }
-        if (!ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
+        if (issue.getProjectObject() != null
+                && !ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey())) {
             log.info("Linking portal asset {} to {} in another project", pending, issue.getKey());
         }
         Integer chosen = chosenAssetId(issue);
         int target = chosen == null ? pending.intValue() : chosen.intValue();
-        ApplicationUser actor = user != null ? user : reporter;
         ensureRequestLink(actor, issue, target);
         if (chosen == null) {
             writeAssetField(actor, issue, target);
@@ -1585,7 +1579,7 @@ public class AssetServiceImpl implements AssetService {
         return null;
     }
 
-    /** A numeric id, an object key, or the visible path shown in the field. */
+    /** A numeric id, an object key, or the visible name shown in the field. */
     private Integer resolveFieldAsset(Issue issue, String text) {
         if (text == null) {
             return null;
@@ -1598,125 +1592,167 @@ public class AssetServiceImpl implements AssetService {
         if (parsed != null) {
             return parsed;
         }
-        if (issue == null || issue.getProjectObject() == null) {
-            return null;
-        }
-        return assetIdByLabel(issue.getProjectObject().getKey(), raw);
+        return assetIdByLabel(issue, raw);
     }
 
-    private Integer assetIdByLabel(String projectKey, String text) {
+    private Integer assetIdByLabel(Issue issue, String text) {
         try {
             List<String> hints = AssetFieldText.lookupHints(text);
-            for (int i = 0; i < hints.size(); i++) {
-                AssetEntity byKey = assetByKey(projectKey, hints.get(i));
-                if (byKey != null) {
-                    return Integer.valueOf(byKey.getID());
-                }
+            if (hints.isEmpty()) {
+                return null;
+            }
+            String projectKey = issue != null && issue.getProjectObject() != null
+                    ? issue.getProjectObject().getKey() : "";
+            List<AssetFieldMatch.Row> rows = new ArrayList<AssetFieldMatch.Row>();
+            Set<Integer> seen = new HashSet<Integer>();
+            if (projectKey != null && !projectKey.isEmpty()) {
+                addMatchRows(rows, seen, assetsIn(projectKey));
             }
             for (int i = 0; i < hints.size(); i++) {
-                Integer byName = assetIdByName(projectKey, hints.get(i));
-                if (byName != null) {
-                    return byName;
-                }
+                addLookupRows(rows, seen, "OBJECT_KEY", hints.get(i));
+                addLookupRows(rows, seen, "NAME", hints.get(i));
             }
-            for (int i = 0; i < hints.size(); i++) {
-                Integer elsewhere = assetIdOutsideProject(hints.get(i));
-                if (elsewhere != null) {
-                    return elsewhere;
-                }
-            }
+            return AssetFieldMatch.choose(rows, hints, projectKey, issueHaystack(issue));
         } catch (RuntimeException ex) {
             log.debug("Asset field text was not matched", ex);
+            return null;
         }
-        return null;
     }
 
-    /** One object key, or one equipment name, in a project other than the request. */
-    private Integer assetIdOutsideProject(String hint) {
-        if (hint == null) {
-            return null;
+    private void addLookupRows(List<AssetFieldMatch.Row> rows, Set<Integer> seen, String column, String hint) {
+        if (hint == null || (!"NAME".equals(column) && !"OBJECT_KEY".equals(column))) {
+            return;
         }
         String wanted = hint.trim();
         if (wanted.isEmpty() || wanted.length() > 240) {
-            return null;
+            return;
         }
-        AssetEntity[] byKey = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY = ?", wanted));
-        Integer key = singleAsset(byKey, false);
-        if (key != null) {
-            return key;
+        addMatchRows(rows, seen, ao().find(AssetEntity.class, Query.select().where(column + " = ?", wanted)));
+        try {
+            addMatchRows(rows, seen, ao().find(AssetEntity.class,
+                    Query.select().where("LOWER(" + column + ") = ?", wanted.toLowerCase(Locale.ROOT))));
+        } catch (RuntimeException ex) {
+            log.debug("Folded asset lookup was not available for {}", column, ex);
         }
-        AssetEntity[] byName = ao().find(AssetEntity.class, Query.select().where("NAME = ?", wanted));
-        return singleAsset(byName, true);
     }
 
-    private Integer singleAsset(AssetEntity[] rows, boolean equipmentFirst) {
-        if (rows == null || rows.length == 0) {
-            return null;
+    private void addMatchRows(List<AssetFieldMatch.Row> rows, Set<Integer> seen, AssetEntity[] assets) {
+        if (assets == null) {
+            return;
         }
-        if (!equipmentFirst) {
-            return rows.length == 1 && rows[0] != null ? Integer.valueOf(rows[0].getID()) : null;
+        Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
+        for (int i = 0; i < assets.length; i++) {
+            if (assets[i] != null) {
+                index.put(Integer.valueOf(assets[i].getID()), assets[i]);
+            }
         }
-        Integer equipment = null;
-        int equipmentCount = 0;
-        Integer place = null;
-        int placeCount = 0;
-        for (int i = 0; i < rows.length; i++) {
-            AssetEntity row = rows[i];
-            if (row == null) {
+        for (int i = 0; i < assets.length; i++) {
+            AssetEntity asset = assets[i];
+            if (asset == null || !seen.add(Integer.valueOf(asset.getID()))) {
                 continue;
             }
-            if (isLocation(row)) {
-                placeCount++;
-                place = Integer.valueOf(row.getID());
-            } else {
-                equipmentCount++;
-                equipment = Integer.valueOf(row.getID());
-            }
+            rows.add(new AssetFieldMatch.Row(asset.getID(), asset.getName(), asset.getObjectKey(),
+                    asset.getProjectKey(), isLocation(asset), placeOf(asset, index)));
         }
-        if (equipmentCount == 1) {
-            return equipment;
-        }
-        if (equipmentCount > 1) {
-            return null;
-        }
-        return placeCount == 1 ? place : null;
     }
 
-    private Integer assetIdByName(String projectKey, String name) {
-        if (projectKey == null || name == null || name.trim().isEmpty()) {
-            return null;
-        }
-        AssetEntity[] rows = assetsIn(projectKey);
-        if (rows == null) {
-            return null;
-        }
-        String wanted = name.trim();
-        Integer equipment = null;
-        int equipmentCount = 0;
-        Integer place = null;
-        int placeCount = 0;
-        for (AssetEntity row : rows) {
-            if (row == null || row.getName() == null || !wanted.equalsIgnoreCase(row.getName().trim())) {
-                continue;
+    private String placeOf(AssetEntity entity, Map<Integer, AssetEntity> index) {
+        List<String> names = new ArrayList<String>();
+        Integer parentId = TreeLogic.normalizeParent(entity.getParentId());
+        int guard = 0;
+        while (parentId != null && guard < 80) {
+            AssetEntity parent = index.get(parentId);
+            if (parent == null) {
+                try {
+                    parent = ao().get(AssetEntity.class, parentId.intValue());
+                } catch (RuntimeException ex) {
+                    parent = null;
+                }
+                if (parent == null) {
+                    break;
+                }
+                index.put(parentId, parent);
             }
-            if (!ProjectKeys.same(row.getProjectKey(), projectKey)) {
-                continue;
+            if (parent.getName() != null && !parent.getName().trim().isEmpty()) {
+                names.add(0, parent.getName().trim());
             }
-            if (isLocation(row)) {
-                placeCount++;
-                place = Integer.valueOf(row.getID());
-            } else {
-                equipmentCount++;
-                equipment = Integer.valueOf(row.getID());
+            Integer next = TreeLogic.normalizeParent(parent.getParentId());
+            if (next != null && next.equals(parentId)) {
+                break;
             }
+            parentId = next;
+            guard++;
         }
-        if (equipmentCount == 1) {
-            return equipment;
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) {
+                builder.append(" / ");
+            }
+            builder.append(names.get(i));
         }
-        if (equipmentCount > 1) {
-            return null;
+        return builder.toString();
+    }
+
+    /** Text on the request, apart from the asset field, used to tell identical names apart. */
+    private String issueHaystack(Issue issue) {
+        if (issue == null) {
+            return "";
         }
-        return placeCount == 1 ? place : null;
+        StringBuilder builder = new StringBuilder();
+        appendHay(builder, issue.getSummary());
+        appendHay(builder, issue.getDescription());
+        try {
+            CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+            if (manager == null) {
+                return builder.toString();
+            }
+            List<String> assetFields = PortalLookup.assetFieldIds();
+            for (CustomField field : manager.getCustomFieldObjects()) {
+                if (field == null || field.getId() == null || assetFields.contains(field.getId())) {
+                    continue;
+                }
+                if (builder.length() > 4000) {
+                    break;
+                }
+                Object raw;
+                try {
+                    raw = issue.getCustomFieldValue(field);
+                } catch (RuntimeException ex) {
+                    continue;
+                }
+                appendFieldHay(builder, raw);
+            }
+        } catch (RuntimeException ex) {
+            log.debug("Request text was not read for {}", issue.getKey(), ex);
+        }
+        return builder.toString();
+    }
+
+    private void appendFieldHay(StringBuilder builder, Object raw) {
+        if (raw == null) {
+            return;
+        }
+        if (raw instanceof Option) {
+            appendHay(builder, ((Option) raw).getValue());
+            return;
+        }
+        if (raw instanceof Collection) {
+            for (Object item : (Collection<?>) raw) {
+                appendFieldHay(builder, item);
+            }
+            return;
+        }
+        appendHay(builder, String.valueOf(raw));
+    }
+
+    private static void appendHay(StringBuilder builder, String text) {
+        if (text == null || text.trim().isEmpty() || builder.length() > 4000) {
+            return;
+        }
+        if (builder.length() > 0) {
+            builder.append('\n');
+        }
+        builder.append(text.trim());
     }
 
     private Integer chosenAssetId(Issue issue) {
@@ -1853,17 +1889,64 @@ public class AssetServiceImpl implements AssetService {
      * The value in the asset field is the link on the request. Opening the
      * request writes that link when the create transaction could not.
      */
-    private void adoptFieldAsset(ApplicationUser user, Issue issue) {
+    private void adoptFieldAsset(ApplicationUser user, Issue issue, boolean rewriteField) {
         if (issue == null || issue.getId() == null) {
             return;
         }
         Integer assetId = storedAssetId(issue);
-        if (assetId == null || fieldLinkPresent(issue.getId().longValue(), assetId.intValue())) {
+        if (assetId == null) {
             return;
         }
-        ApplicationUser actor = user != null ? user : issue.getReporter();
-        if (!linkFieldAsset(actor, issue, assetId.intValue())) {
-            log.warn("Asset {} from the request field is not linked to {}", assetId, issue.getKey());
+        if (!fieldLinkPresent(issue.getId().longValue(), assetId.intValue())) {
+            ApplicationUser actor = user != null ? user : issue.getReporter();
+            if (!linkFieldAsset(actor, issue, assetId.intValue())) {
+                log.warn("Asset {} from the request field is not linked to {}", assetId, issue.getKey());
+            }
+        }
+        if (rewriteField) {
+            rememberNumericField(issue, assetId.intValue());
+        }
+    }
+
+    /**
+     * A name saved by the portal becomes the numeric id, so the next open
+     * does not have to guess among objects that share that name.
+     */
+    private void rememberNumericField(Issue issue, int assetId) {
+        if (issue == null || assetId <= 0 || Boolean.TRUE.equals(rewritingField.get())) {
+            return;
+        }
+        String wanted = String.valueOf(assetId);
+        CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+        if (manager == null) {
+            return;
+        }
+        boolean needs = false;
+        for (String id : PortalLookup.assetFieldIds()) {
+            CustomField field = manager.getCustomFieldObject(id);
+            if (field == null) {
+                continue;
+            }
+            Object current;
+            try {
+                current = issue.getCustomFieldValue(field);
+            } catch (RuntimeException ex) {
+                continue;
+            }
+            String now = current == null ? "" : String.valueOf(current).trim();
+            if (!now.isEmpty() && !"-1".equals(now) && !wanted.equals(now)) {
+                needs = true;
+                break;
+            }
+        }
+        if (!needs) {
+            return;
+        }
+        rewritingField.set(Boolean.TRUE);
+        try {
+            writeAssetFieldDirect(issue, assetId);
+        } finally {
+            rewritingField.remove();
         }
     }
 
@@ -1911,10 +1994,9 @@ public class AssetServiceImpl implements AssetService {
                             if (assetId == null) {
                                 continue;
                             }
-                            if (fieldLinkPresent(issueId.longValue(), assetId.intValue())) {
-                                return;
-                            }
-                            if (linkFieldAsset(loaded.getReporter(), loaded, assetId.intValue())) {
+                            if (fieldLinkPresent(issueId.longValue(), assetId.intValue())
+                                    || linkFieldAsset(loaded.getReporter(), loaded, assetId.intValue())) {
+                                rememberNumericField(loaded, assetId.intValue());
                                 return;
                             }
                         } catch (RuntimeException ex) {
@@ -3457,8 +3539,39 @@ public class AssetServiceImpl implements AssetService {
         if (!canBrowse(user, issue)) {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
-        adoptFieldAsset(user, issue);
-        return linkedAssets(user, issueId);
+        adoptFieldAsset(user, issue, true);
+        List<AssetDto> linked = linkedAssets(user, issueId);
+        if (linked != null && !linked.isEmpty()) {
+            return linked;
+        }
+        return fieldAssetOnIssue(issue, linked);
+    }
+
+    /** The object written in the asset field, shown even when the link row is not visible yet. */
+    private List<AssetDto> fieldAssetOnIssue(Issue issue, List<AssetDto> linked) {
+        List<AssetDto> shown = linked == null ? new ArrayList<AssetDto>() : linked;
+        if (issue == null) {
+            return shown;
+        }
+        Integer assetId = storedAssetId(issue);
+        if (assetId == null) {
+            return shown;
+        }
+        AssetEntity row;
+        try {
+            row = ao().get(AssetEntity.class, assetId.intValue());
+        } catch (RuntimeException ex) {
+            log.warn("Asset {} from the request field was not loaded for {}", assetId, issue.getKey(), ex);
+            return shown;
+        }
+        if (row == null) {
+            return shown;
+        }
+        AssetDto dto = chosenAsset(row.getID());
+        dto.setLocation(placeOf(row, new HashMap<Integer, AssetEntity>()));
+        dto.setAttributes(new ArrayList<AttributeDto>());
+        shown.add(dto);
+        return shown;
     }
 
     @Override
@@ -5202,7 +5315,7 @@ public class AssetServiceImpl implements AssetService {
         if (loaded == null || loaded.getId() == null) {
             return;
         }
-        adoptFieldAsset(user, loaded);
+        adoptFieldAsset(user, loaded, false);
         scheduleFieldAdoption(loaded.getId());
     }
 
