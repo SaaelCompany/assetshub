@@ -2388,6 +2388,23 @@ public class AssetServiceImpl implements AssetService {
                     throw new AssetException(404, "asset-tree.error.type.notFound");
                 }
                 requireConfigurableProject(user, type.getProjectKey());
+                if (draft.getLabel() != null) {
+                    String labelError = AssetValidator.validateTypeLabel(draft.getLabel());
+                    if (labelError != null) {
+                        throw new AssetException(400, labelError);
+                    }
+                    String nextLabel = draft.getLabel().trim();
+                    String currentLabel = typeLabel(type);
+                    if (currentLabel == null || !nextLabel.equals(currentLabel.trim())) {
+                        if (typeLabelTaken(type, nextLabel)) {
+                            throw new AssetException(400, "asset-tree.error.type.duplicate");
+                        }
+                        type.setLabel(nextLabel);
+                        if (type.isSystemType() && type.getBaseKey() != null && !type.getBaseKey().isEmpty()) {
+                            type.setBaseKey("");
+                        }
+                    }
+                }
                 if (draft.getShowInTree() != null) {
                     type.setShowInTree(type.isLocation() || draft.getShowInTree().booleanValue());
                 }
@@ -8131,6 +8148,30 @@ public class AssetServiceImpl implements AssetService {
             String label = names.containsKey(key) ? names.get(key) : key;
             logActivity(assetId, authorKey, "attribute", label, oldValue, newValue);
         }
+    }
+
+    private boolean typeLabelTaken(AssetTypeEntity type, String label) {
+        if (type == null || label == null) {
+            return false;
+        }
+        AssetTypeEntity[] rows = ao().find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", type.getProjectKey()));
+        if (rows == null) {
+            return false;
+        }
+        String wanted = label.trim();
+        for (AssetTypeEntity row : rows) {
+            if (row == null || row.getTypeKey() == null || row.getTypeKey().equals(type.getTypeKey())) {
+                continue;
+            }
+            if (!ProjectKeys.same(row.getProjectKey(), type.getProjectKey())) {
+                continue;
+            }
+            String visible = typeLabel(row);
+            if (visible != null && wanted.equalsIgnoreCase(visible.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String typeLabel(AssetTypeEntity type) {
