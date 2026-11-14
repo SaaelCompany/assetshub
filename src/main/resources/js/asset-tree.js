@@ -376,6 +376,7 @@
         activityTab: 'all',
         mineAssets: null,
         mineQuery: '',
+        trashItems: null,
         searchHits: null,
         searching: false,
         searchToken: 0,
@@ -547,7 +548,7 @@
     function normalizeView(raw) {
         var value = String(raw || '').toLowerCase();
         if (value === 'tni') return 'settings';
-        if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
+        if (value === 'mine' || value === 'trash' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
             return value;
         }
         return 'all';
@@ -555,6 +556,7 @@
 
     function viewTitle(view) {
         if (view === 'mine') return t('menuMine');
+        if (view === 'trash') return t('trash');
         if (view === 'settings') return t('menuSettings');
         if (view === 'schedules') return t('menuSchedules');
         if (view === 'reports') return t('menuReports');
@@ -2259,6 +2261,7 @@
         if (state.canView !== false) {
             items.push({ view: 'all', label: t('tabAssets'), group: 'catalog' });
             items.push({ view: 'mine', label: t('menuMine'), group: 'catalog' });
+            if (state.canRemove) items.push({ view: 'trash', label: t('trash'), group: 'catalog' });
             if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules'), group: 'tools' });
         }
         if (moduleOn('reports') && (state.canView !== false || state.canReports)) {
@@ -2303,6 +2306,22 @@
                 mount();
             }
             loadMine();
+            return;
+        }
+        if (view === 'trash') {
+            if (!state.canRemove) {
+                showView('all');
+                return;
+            }
+            state.view = 'trash';
+            state.dirty = false;
+            state.editing = false;
+            state.trashItems = null;
+            state.error = null;
+            state.loading = true;
+            rememberView('trash');
+            mount();
+            loadTrash();
             return;
         }
         if (view === 'reports') forgetReports();
@@ -2354,8 +2373,14 @@
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
         }
+        if (state.view === 'trash') {
+            titles.appendChild(el('p', 'asset-tree-hint', t('trashHint')));
+        }
         var actions = el('div', 'asset-tree-actions');
         if (state.view === 'reports') actions.appendChild(reportToolButtons());
+        if (state.view === 'trash' && state.canRemove && state.trashItems && state.trashItems.length) {
+            actions.appendChild(button(t('trashEmptyAll'), 'asset-tree-btn danger', openEmptyTrash));
+        }
         var projectLabel = el('label', 'asset-tree-project-label', t('project'));
         projectLabel.setAttribute('for', 'asset-tree-project');
         var projectPicker = el('select', 'asset-tree-project');
@@ -2579,6 +2604,16 @@
         }
         if (state.view === 'mine') {
             frame.appendChild(renderMine());
+            return;
+        }
+        if (state.view === 'trash') {
+            if (!state.canRemove) {
+                state.view = 'all';
+                rememberView('all');
+                mount();
+                return;
+            }
+            frame.appendChild(renderTrash());
             return;
         }
         if ((state.view === 'schedules' && !moduleOn('service'))
@@ -4422,7 +4457,7 @@
             ops.appendChild(toolButton(t('addHere'), 'plus', function () {
                 openCreate(asset.id);
             }));
-            ops.appendChild(moreMenu([{ label: t('delete'), danger: true, onClick: function () { openDelete(full); } }]));
+            ops.appendChild(moreMenu([{ label: t('trashMove'), danger: true, onClick: function () { openDelete(full); } }]));
         }
         main.appendChild(ops);
         if (asset.parentId && crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
@@ -5648,7 +5683,7 @@
                 bar.appendChild(button(t('bulkMove'), 'asset-tree-btn', function () { openBulkMove(); }));
             }
             if (assetsOnly || onlyTypes) {
-                bar.appendChild(button(t('delete'), 'asset-tree-btn danger', openBulkDelete));
+                bar.appendChild(button(t('trashMove'), 'asset-tree-btn danger', openBulkDelete));
             }
             bar.appendChild(button(t('bulkClear'), 'asset-tree-btn', function () {
                 state.picked = {};
@@ -5824,7 +5859,7 @@
             if (extra) dialog.appendChild(el('p', null, t('deleteCascade', extra)));
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
-            actions.appendChild(button(t('delete'), 'asset-tree-btn danger', function () {
+            actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () {
                 postBulk('delete', { cascade: extra > 0 });
             }));
             dialog.appendChild(actions);
@@ -6573,6 +6608,8 @@
         if (item.action === 'photo') return t('actPhoto');
         if (item.action === 'photo_delete') return t('actPhotoDelete');
         if (item.action === 'move') return t('actMove');
+        if (item.action === 'trash') return t('actTrash');
+        if (item.action === 'restore') return t('actRestore');
         if (item.action === 'place_add') return t('actPlaceAdd');
         if (item.action === 'place_remove') return t('actPlaceRemove');
         if (item.action === 'place_in') return t('actPlaceIn');
@@ -6611,7 +6648,7 @@
             head.appendChild(drop);
         }
         row.appendChild(head);
-        if (item.action === 'created' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
+        if (item.action === 'created' || item.action === 'trash' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
         if (item.action === 'ping') {
             var pingChange = el('div', 'asset-tree-history-change');
             var pingWord = item.newValue === 'up' ? t('tniWatchUp') : t('tniWatchDown');
@@ -8104,7 +8141,7 @@
                 onClick: function () { pingAsset(asset); }
             });
         }
-        if (mayEdit(asset)) extra.push({ label: t('delete'), danger: true, onClick: function () { openDelete(asset); } });
+        if (mayEdit(asset)) extra.push({ label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
                 label: t('backToList'),
@@ -8258,7 +8295,7 @@
                 }
                 showDetail(state.detail || asset, false);
             }));
-            actions.appendChild(button(t('delete'), 'asset-tree-btn danger', function () { openDelete(asset); }));
+            actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () { openDelete(asset); }));
             var save = button(t('save'), 'asset-tree-btn primary', function () { saveDetail(); });
             save.id = 'asset-tree-save';
             actions.appendChild(save);
@@ -10386,7 +10423,7 @@
             }
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
-            actions.appendChild(button(t('delete'), 'asset-tree-btn danger', function () {
+            actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () {
                 ajax('DELETE', '/assets/' + asset.id + '?cascade=' + (nested ? 'true' : 'false'), null, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal();
@@ -11228,6 +11265,7 @@
             if (state.busy || state.dirty || state.loading) return;
             reloadTree(function () {
                 if (state.view === 'all' || state.view === 'mine') renderFrame();
+                if (state.view === 'trash') loadTrash();
             });
         });
     }
@@ -11419,6 +11457,9 @@
             if (state.view === 'mine') {
                 loadMine();
             }
+            if (state.view === 'trash') {
+                loadTrash();
+            }
             if (state.view === 'all' && state.selectedId) {
                 selectAsset(state.selectedId, true);
             }
@@ -11609,6 +11650,116 @@
 
     var reportToken = 0;
     var mineToken = 0;
+    var trashToken = 0;
+
+    function loadTrash() {
+        var token = ++trashToken;
+        if (!state.projectKey) {
+            state.trashItems = [];
+            state.loading = false;
+            renderFrame();
+            return;
+        }
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/trash', null, function (status, payload) {
+            if (token !== trashToken || state.view !== 'trash') return;
+            state.loading = false;
+            if (status >= 200 && status < 300) {
+                state.trashItems = payload || [];
+                state.error = null;
+            } else {
+                state.trashItems = [];
+                state.error = (payload && payload.message) || t('errorTitle');
+            }
+            if (!document.getElementById('asset-tree-frame')) mount();
+            renderFrame();
+        });
+    }
+
+    function renderTrash() {
+        var panel = el('div', 'asset-tree-catalog');
+        var items = state.trashItems || [];
+        if (!items.length) {
+            var empty = el('div', 'asset-tree-message');
+            empty.appendChild(el('h2', null, t('trashEmpty')));
+            empty.appendChild(el('p', null, t('trashHint')));
+            panel.appendChild(empty);
+            return panel;
+        }
+        var rows = items.map(function (item) {
+            var name = el('div');
+            name.appendChild(el('strong', null, item.name || ''));
+            if (item.objectKey) name.appendChild(el('div', 'asset-tree-key', item.objectKey));
+            var actions = el('div', 'asset-tree-trash-actions');
+            actions.appendChild(button(t('trashRestore'), 'asset-tree-btn primary', function () {
+                ajax('POST', '/assets/' + item.id + '/restore', {}, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        notify(t('trashRestored'));
+                        reloadTree(function () { loadTrash(); });
+                    } else {
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
+                });
+            }));
+            actions.appendChild(button(t('trashPurge'), 'asset-tree-btn danger', function () {
+                openPurgeTrash(item);
+            }));
+            return [
+                name,
+                item.typeLabel || item.typeKey || '',
+                item.location || t('root'),
+                stamp(item.deleted),
+                item.deletedBy || '',
+                item.nested ? t('trashNested', item.nested) : '',
+                actions
+            ];
+        });
+        panel.appendChild(assetTable(rows, [
+            t('name'), t('type'), t('trashPlace'), t('trashWhen'), t('trashBy'), '', ''
+        ]));
+        return panel;
+    }
+
+    function openPurgeTrash(item) {
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('trashPurgeTitle')));
+            dialog.appendChild(el('p', null, t('trashPurgeText', item.name || item.objectKey || '')));
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+            actions.appendChild(button(t('trashPurge'), 'asset-tree-btn danger', function () {
+                ajax('DELETE', '/assets/' + item.id + '?purge=true', null, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        closeModal();
+                        notify(t('trashPurged'));
+                        loadTrash();
+                    } else {
+                        dialog.appendChild(el('div', 'asset-tree-form-error', (payload && payload.message) || t('errorTitle')));
+                    }
+                });
+            }));
+            dialog.appendChild(actions);
+        });
+    }
+
+    function openEmptyTrash() {
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('trashEmptyTitle')));
+            dialog.appendChild(el('p', null, t('trashEmptyText')));
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+            actions.appendChild(button(t('trashEmptyAll'), 'asset-tree-btn danger', function () {
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/trash', null, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        closeModal();
+                        notify(t('trashPurged'));
+                        loadTrash();
+                    } else {
+                        dialog.appendChild(el('div', 'asset-tree-form-error', (payload && payload.message) || t('errorTitle')));
+                    }
+                });
+            }));
+            dialog.appendChild(actions);
+        });
+    }
 
     function assetsChanged() {
         state.report = null;
@@ -11618,6 +11769,11 @@
             loadMine();
         } else {
             state.mineAssets = null;
+        }
+        if (state.view === 'trash') {
+            loadTrash();
+        } else {
+            state.trashItems = null;
         }
     }
 
@@ -32598,6 +32754,14 @@
                 mount();
                 loadMine();
                 return;
+            }
+            if (state.view === 'trash') {
+                if (!state.canRemove) state.view = 'all';
+                else {
+                    mount();
+                    loadTrash();
+                    return;
+                }
             }
             mount();
             if (!state.projectKey) {

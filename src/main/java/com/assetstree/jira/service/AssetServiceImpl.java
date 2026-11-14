@@ -268,6 +268,7 @@ import com.assetstree.jira.web.PortalDesk;
 import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.web.PortalRequestForm;
 import com.assetstree.jira.model.StatusSummary;
+import com.assetstree.jira.model.TrashBin;
 import com.assetstree.jira.model.TreeLogic;
 import com.assetstree.jira.model.TypeDraft;
 import com.assetstree.jira.model.TypeIcons;
@@ -1664,7 +1665,7 @@ public class AssetServiceImpl implements AssetService {
         }
         for (int i = 0; i < assets.length; i++) {
             AssetEntity asset = assets[i];
-            if (asset == null || !seen.add(Integer.valueOf(asset.getID()))) {
+            if (asset == null || asset.getDeletedAt() != null || !seen.add(Integer.valueOf(asset.getID()))) {
                 continue;
             }
             rows.add(new AssetFieldMatch.Row(asset.getID(), asset.getName(), asset.getObjectKey(),
@@ -1967,6 +1968,15 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private boolean linkFieldAsset(ApplicationUser actor, Issue issue, int assetId) {
+        AssetEntity chosen;
+        try {
+            chosen = ao().get(AssetEntity.class, assetId);
+        } catch (RuntimeException ex) {
+            chosen = null;
+        }
+        if (chosen == null || chosen.getDeletedAt() != null) {
+            return false;
+        }
         if (!rememberChosenLink(actor, issue, assetId)) {
             return false;
         }
@@ -2426,28 +2436,31 @@ public class AssetServiceImpl implements AssetService {
     public void deleteAsset(ApplicationUser user, int id, boolean cascade) {
         final String[] gone = new String[3];
         final List<Long> linkedIssues = new ArrayList<Long>();
+        final String actorKey = user == null ? "" : user.getKey();
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
                 AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                if (entity.getDeletedAt() != null) {
+                    throw new AssetException(409, "asset-tree.error.inTrash");
+                }
                 gone[0] = entity.getProjectKey();
                 gone[1] = entity.getObjectKey();
                 gone[2] = entity.getName();
-                AssetEntity[] all = assetsIn(entity.getProjectKey());
-                List<Integer> descendants = TreeLogic.descendants(childrenMap(all), id);
+                AssetEntity[] live = assetsIn(entity.getProjectKey());
+                List<Integer> descendants = TreeLogic.descendants(childrenMap(live), id);
                 if (!descendants.isEmpty() && !cascade) {
                     throw new AssetException(409, "asset-tree.error.hasChildren", Integer.valueOf(descendants.size()));
                 }
-                List<Integer> toDelete = new ArrayList<Integer>(descendants);
-                toDelete.add(Integer.valueOf(id));
-                Map<Integer, AssetEntity> index = indexAssets(all);
-                Set<Integer> doomed = new HashSet<Integer>(toDelete);
-                for (Integer assetId : toDelete) {
-                    AssetEntity gone = index.get(assetId);
-                    if (gone == null) {
+                List<Integer> toTrash = TrashBin.branch(childrenMap(live), id);
+                Map<Integer, AssetEntity> index = indexAssets(live);
+                Set<Integer> doomed = new HashSet<Integer>(toTrash);
+                for (Integer assetId : toTrash) {
+                    AssetEntity row = index.get(assetId);
+                    if (row == null) {
                         continue;
                     }
-                    logPlaceChange(user, placeContainer(TreeLogic.normalizeParent(gone.getParentId()), all, doomed), "place_remove", gone);
+                    logPlaceChange(user, placeContainer(TreeLogic.normalizeParent(row.getParentId()), live, doomed), "place_remove", row);
                 }
                 AssetIssueLinkEntity[] noted = ao().find(AssetIssueLinkEntity.class,
                         Query.select().where("ASSET_ID = ?", id));
@@ -2458,41 +2471,23 @@ public class AssetServiceImpl implements AssetService {
                         }
                     }
                 }
-                List<Integer> fileIds = new ArrayList<Integer>();
-                for (AssetFileEntity file : findIn(AssetFileEntity.class, "ASSET_ID", toDelete, null)) {
-                    fileIds.add(Integer.valueOf(file.getID()));
-                }
-                deleteRows(AssetAttributeEntity.class, "ASSET_ID", toDelete);
-                deleteRows(AssetIssueLinkEntity.class, "ASSET_ID", toDelete);
-                deletePeerLinks(user, toDelete);
-                deleteRows(InventoryMarkEntity.class, "ASSET_ID", toDelete);
-                deleteRows(AssetCommentEntity.class, "ASSET_ID", toDelete);
-                deleteRows(AssetFileEntity.class, "ASSET_ID", toDelete);
-                deleteRows(AssetShareEntity.class, "ASSET_ID", toDelete);
-                deleteRows(AssetActivityEntity.class, "ASSET_ID", toDelete);
-                deleteRows(ServicePlanEntity.class, "ASSET_ID", toDelete);
-                deleteRows(LifecycleEntity.class, "ASSET_ID", toDelete);
-                deleteRows(PinEntity.class, "ASSET_ID", toDelete);
-                List<Integer> ruleIds = new ArrayList<Integer>();
-                for (PortalRuleEntity rule : findIn(PortalRuleEntity.class, "ASSET_ID", toDelete, null)) {
-                    ruleIds.add(Integer.valueOf(rule.getID()));
-                }
-                deleteRows(PortalRuleConditionEntity.class, "RULE_ID", ruleIds);
-                deleteRows(PortalRuleEntity.class, "ID", ruleIds);
-                for (Integer fileId : fileIds) {
-                    AssetFileStore.delete(fileId.intValue());
-                }
-                for (Integer assetId : toDelete) {
-                    CardImageStore.delete(assetId.intValue());
-                    PhotoStore.delete(assetId.intValue());
-                }
-                for (int i = descendants.size() - 1; i >= 0; i--) {
-                    AssetEntity child = ao().get(AssetEntity.class, descendants.get(i));
-                    if (child != null) {
-                        ao().delete(child);
+                Date now = new Date();
+                Integer rootId = Integer.valueOf(id);
+                for (Integer assetId : toTrash) {
+                    AssetEntity row = index.get(assetId);
+                    if (row == null) {
+                        continue;
                     }
+                    row.setDeletedAt(now);
+                    row.setDeletedBy(actorKey);
+                    row.setTrashRootId(rootId);
+                    row.setUpdated(now);
+                    row.setUpdatedBy(actorKey);
+                    row.save();
                 }
-                ao().delete(entity);
+                if (!actorKey.isEmpty()) {
+                    recordActivity(id, actorKey, "trash", "", "", "");
+                }
                 return null;
             }
         });
@@ -2500,6 +2495,311 @@ public class AssetServiceImpl implements AssetService {
             emit(gone[0], "asset.deleted", "{\"event\":\"asset.deleted\",\"project\":\"" + jsonEscape(gone[0])
                     + "\",\"id\":" + id + ",\"key\":\"" + jsonEscape(gone[1]) + "\",\"name\":\"" + jsonEscape(gone[2]) + "\"}");
             noteIssues(linkedIssues, "asset.deleted", gone[1], gone[2]);
+        }
+    }
+
+    @Override
+    public List<AssetDto> listTrash(ApplicationUser user, final String projectKey) {
+        final Project project = requireTrashProject(user, projectKey);
+        return ao().executeInTransaction(new TransactionCallback<List<AssetDto>>() {
+            @Override
+            public List<AssetDto> doInTransaction() {
+                AssetEntity[] all = assetsAll(project.getKey());
+                Map<Integer, AssetEntity> index = indexAssets(all);
+                Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), all));
+                Map<Integer, Integer> nested = new HashMap<Integer, Integer>();
+                List<AssetEntity> roots = new ArrayList<AssetEntity>();
+                if (all != null) {
+                    for (AssetEntity row : all) {
+                        if (row == null || row.getDeletedAt() == null) {
+                            continue;
+                        }
+                        int root = TrashBin.rootId(row.getID(), row.getTrashRootId());
+                        if (root != row.getID()) {
+                            Integer count = nested.get(Integer.valueOf(root));
+                            nested.put(Integer.valueOf(root), Integer.valueOf(count == null ? 1 : count.intValue() + 1));
+                            continue;
+                        }
+                        if (!canPurge(user, row)) {
+                            continue;
+                        }
+                        roots.add(row);
+                    }
+                }
+                Collections.sort(roots, new Comparator<AssetEntity>() {
+                    @Override
+                    public int compare(AssetEntity left, AssetEntity right) {
+                        long a = left.getDeletedAt() == null ? 0L : left.getDeletedAt().getTime();
+                        long b = right.getDeletedAt() == null ? 0L : right.getDeletedAt().getTime();
+                        return a == b ? 0 : (a > b ? -1 : 1);
+                    }
+                });
+                List<AssetDto> items = new ArrayList<AssetDto>();
+                for (AssetEntity row : roots) {
+                    AssetDto dto = new AssetDto();
+                    dto.setId(row.getID());
+                    dto.setObjectKey(row.getObjectKey());
+                    dto.setName(row.getName());
+                    dto.setTypeKey(row.getTypeKey());
+                    dto.setProjectKey(row.getProjectKey());
+                    dto.setParentId(TreeLogic.normalizeParent(row.getParentId()));
+                    dto.setLocation(location(row, index));
+                    dto.setDeleted(format(row.getDeletedAt()));
+                    dto.setDeletedBy(displayName(row.getDeletedBy()));
+                    Integer extra = nested.get(Integer.valueOf(row.getID()));
+                    dto.setNested(extra == null ? 0 : extra.intValue());
+                    AssetTypeDto type = types.get(row.getTypeKey());
+                    if (type != null) {
+                        dto.setTypeLabel(type.getLabel());
+                        dto.setColor(type.getColor());
+                        dto.setIcon(type.getIcon());
+                    } else {
+                        dto.setTypeLabel(row.getTypeKey());
+                    }
+                    items.add(dto);
+                }
+                return items;
+            }
+        });
+    }
+
+    @Override
+    public AssetDto restoreAsset(ApplicationUser user, final int id) {
+        final String actorKey = user == null ? "" : user.getKey();
+        final String[] projectKey = new String[1];
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                TRASH_WRITE.set(Boolean.TRUE);
+                try {
+                    AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                    if (entity.getDeletedAt() == null) {
+                        throw new AssetException(409, "asset-tree.error.notInTrash");
+                    }
+                    int root = TrashBin.rootId(entity.getID(), entity.getTrashRootId());
+                    if (root != id) {
+                        throw new AssetException(409, "asset-tree.error.inTrash");
+                    }
+                    projectKey[0] = entity.getProjectKey();
+                    AssetEntity[] all = assetsAll(entity.getProjectKey());
+                    Map<Integer, AssetEntity> index = indexAssets(all);
+                    Integer oldParent = TreeLogic.normalizeParent(entity.getParentId());
+                    AssetEntity parent = oldParent == null ? null : index.get(oldParent);
+                    boolean parentLive = parent != null && parent.getDeletedAt() == null;
+                    Integer nextParent = TrashBin.restoreParent(oldParent, parentLive);
+                    Date now = new Date();
+                    List<AssetEntity> group = new ArrayList<AssetEntity>();
+                    if (all != null) {
+                        for (AssetEntity row : all) {
+                            if (row == null || row.getDeletedAt() == null) {
+                                continue;
+                            }
+                            if (TrashBin.rootId(row.getID(), row.getTrashRootId()) == root) {
+                                group.add(row);
+                            }
+                        }
+                    }
+                    for (AssetEntity row : group) {
+                        if (row.getID() == root) {
+                            row.setParentId(nextParent);
+                        }
+                        row.setDeletedAt(null);
+                        row.setDeletedBy("");
+                        row.setTrashRootId(null);
+                        row.setUpdated(now);
+                        row.setUpdatedBy(actorKey);
+                        row.save();
+                    }
+                    if (!actorKey.isEmpty()) {
+                        recordActivity(root, actorKey, "restore", "", parentName(oldParent), parentName(nextParent));
+                    }
+                    Integer fromPlace = placeContainer(oldParent, all, null);
+                    Integer toPlace = placeContainer(nextParent, all, null);
+                    if (toPlace != null && !toPlace.equals(fromPlace)) {
+                        logPlaceChange(user, toPlace, "place_in", entity);
+                    } else if (toPlace != null) {
+                        logPlaceChange(user, toPlace, "place_in", entity);
+                    }
+                    return null;
+                } finally {
+                    TRASH_WRITE.remove();
+                }
+            }
+        });
+        AssetDto restored = getAsset(user, id);
+        if (projectKey[0] != null) {
+            emit(projectKey[0], "asset.restored", "{\"event\":\"asset.restored\",\"project\":\"" + jsonEscape(projectKey[0])
+                    + "\",\"id\":" + id + ",\"key\":\"" + jsonEscape(restored.getObjectKey())
+                    + "\",\"name\":\"" + jsonEscape(restored.getName()) + "\"}");
+            noteAsset("asset.restored", restored);
+        }
+        return restored;
+    }
+
+    @Override
+    public void purgeAsset(ApplicationUser user, final int id) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                TRASH_WRITE.set(Boolean.TRUE);
+                try {
+                    AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                    if (entity.getDeletedAt() == null) {
+                        throw new AssetException(409, "asset-tree.error.notInTrash");
+                    }
+                    int root = TrashBin.rootId(entity.getID(), entity.getTrashRootId());
+                    purgeGroup(user, entity.getProjectKey(), root);
+                    return null;
+                } finally {
+                    TRASH_WRITE.remove();
+                }
+            }
+        });
+    }
+
+    @Override
+    public int emptyTrash(ApplicationUser user, final String projectKey) {
+        final Project project = requireTrashProject(user, projectKey);
+        Integer done = ao().executeInTransaction(new TransactionCallback<Integer>() {
+            @Override
+            public Integer doInTransaction() {
+                TRASH_WRITE.set(Boolean.TRUE);
+                try {
+                    int removed = 0;
+                    AssetEntity[] all = assetsAll(project.getKey());
+                    List<Integer> roots = new ArrayList<Integer>();
+                    if (all != null) {
+                        for (AssetEntity row : all) {
+                            if (row == null || row.getDeletedAt() == null) {
+                                continue;
+                            }
+                            if (!TrashBin.isTrashRoot(row.getID(), row.getTrashRootId())) {
+                                continue;
+                            }
+                            if (canPurge(user, row)) {
+                                roots.add(Integer.valueOf(row.getID()));
+                            }
+                        }
+                    }
+                    for (Integer root : roots) {
+                        purgeGroup(user, project.getKey(), root.intValue());
+                        removed++;
+                    }
+                    return Integer.valueOf(removed);
+                } finally {
+                    TRASH_WRITE.remove();
+                }
+            }
+        });
+        return done == null ? 0 : done.intValue();
+    }
+
+    private void purgeGroup(ApplicationUser user, String projectKey, int rootId) {
+        AssetEntity[] all = assetsAll(projectKey);
+        if (all == null) {
+            return;
+        }
+        List<Integer> group = new ArrayList<Integer>();
+        Map<Integer, AssetEntity> index = indexAssets(all);
+        for (AssetEntity row : all) {
+            if (row == null || row.getDeletedAt() == null) {
+                continue;
+            }
+            if (TrashBin.rootId(row.getID(), row.getTrashRootId()) == rootId) {
+                group.add(Integer.valueOf(row.getID()));
+            }
+        }
+        if (!group.contains(Integer.valueOf(rootId))) {
+            return;
+        }
+        Set<Integer> doomed = new HashSet<Integer>(group);
+        Date now = new Date();
+        String actorKey = user == null ? "" : user.getKey();
+        for (AssetEntity row : all) {
+            if (row == null || doomed.contains(Integer.valueOf(row.getID()))) {
+                continue;
+            }
+            Integer parent = TreeLogic.normalizeParent(row.getParentId());
+            if (parent != null && doomed.contains(parent)) {
+                row.setParentId(null);
+                row.setUpdated(now);
+                row.setUpdatedBy(actorKey);
+                row.save();
+            }
+        }
+        Map<Integer, List<Integer>> children = new HashMap<Integer, List<Integer>>();
+        for (Integer assetId : group) {
+            AssetEntity row = index.get(assetId);
+            if (row == null) {
+                continue;
+            }
+            Integer parent = TreeLogic.normalizeParent(row.getParentId());
+            if (parent == null || !doomed.contains(parent)) {
+                continue;
+            }
+            List<Integer> bucket = children.get(parent);
+            if (bucket == null) {
+                bucket = new ArrayList<Integer>();
+                children.put(parent, bucket);
+            }
+            bucket.add(assetId);
+        }
+        List<Integer> nested = TreeLogic.descendants(children, rootId);
+        List<Integer> ordered = new ArrayList<Integer>();
+        Set<Integer> seen = new HashSet<Integer>();
+        for (int i = nested.size() - 1; i >= 0; i--) {
+            Integer assetId = nested.get(i);
+            if (seen.add(assetId)) {
+                ordered.add(assetId);
+            }
+        }
+        for (Integer assetId : group) {
+            if (assetId.intValue() != rootId && seen.add(assetId)) {
+                ordered.add(0, assetId);
+            }
+        }
+        if (seen.add(Integer.valueOf(rootId))) {
+            ordered.add(Integer.valueOf(rootId));
+        }
+        destroyAssets(user, ordered);
+    }
+
+    /** Removes the stored rows, files and pictures. The trash step keeps all of them. */
+    private void destroyAssets(ApplicationUser user, List<Integer> toDelete) {
+        if (toDelete == null || toDelete.isEmpty()) {
+            return;
+        }
+        List<Integer> fileIds = new ArrayList<Integer>();
+        for (AssetFileEntity file : findIn(AssetFileEntity.class, "ASSET_ID", toDelete, null)) {
+            fileIds.add(Integer.valueOf(file.getID()));
+        }
+        deleteRows(AssetAttributeEntity.class, "ASSET_ID", toDelete);
+        deleteRows(AssetIssueLinkEntity.class, "ASSET_ID", toDelete);
+        deletePeerLinks(user, toDelete);
+        deleteRows(InventoryMarkEntity.class, "ASSET_ID", toDelete);
+        deleteRows(AssetCommentEntity.class, "ASSET_ID", toDelete);
+        deleteRows(AssetFileEntity.class, "ASSET_ID", toDelete);
+        deleteRows(AssetShareEntity.class, "ASSET_ID", toDelete);
+        deleteRows(AssetActivityEntity.class, "ASSET_ID", toDelete);
+        deleteRows(ServicePlanEntity.class, "ASSET_ID", toDelete);
+        deleteRows(LifecycleEntity.class, "ASSET_ID", toDelete);
+        deleteRows(PinEntity.class, "ASSET_ID", toDelete);
+        List<Integer> ruleIds = new ArrayList<Integer>();
+        for (PortalRuleEntity rule : findIn(PortalRuleEntity.class, "ASSET_ID", toDelete, null)) {
+            ruleIds.add(Integer.valueOf(rule.getID()));
+        }
+        deleteRows(PortalRuleConditionEntity.class, "RULE_ID", ruleIds);
+        deleteRows(PortalRuleEntity.class, "ID", ruleIds);
+        for (Integer fileId : fileIds) {
+            AssetFileStore.delete(fileId.intValue());
+        }
+        for (Integer assetId : toDelete) {
+            CardImageStore.delete(assetId.intValue());
+            PhotoStore.delete(assetId.intValue());
+            AssetEntity row = ao().get(AssetEntity.class, assetId.intValue());
+            if (row != null) {
+                ao().delete(row);
+            }
         }
     }
 
@@ -3453,6 +3753,9 @@ public class AssetServiceImpl implements AssetService {
                 continue;
             }
             AssetEntity other = ao().get(AssetEntity.class, outgoing ? row.getToId() : row.getFromId());
+            if (other == null || other.getDeletedAt() != null) {
+                continue;
+            }
             links.add(linkDto(user, row, other, outgoing ? "out" : "in"));
         }
     }
@@ -3580,7 +3883,7 @@ public class AssetServiceImpl implements AssetService {
             log.warn("Asset {} from the request field was not loaded for {}", assetId, issue.getKey(), ex);
             return shown;
         }
-        if (row == null) {
+        if (row == null || row.getDeletedAt() != null) {
             return shown;
         }
         AssetDto dto = chosenAsset(row.getID());
@@ -3611,7 +3914,7 @@ public class AssetServiceImpl implements AssetService {
             return found;
         }
         for (AssetEntity row : rows) {
-            if (row == null) {
+            if (row == null || row.getDeletedAt() != null) {
                 continue;
             }
             found.add(chosenAsset(row.getID()));
@@ -5447,7 +5750,7 @@ public class AssetServiceImpl implements AssetService {
                 if (links != null) {
                     for (AssetIssueLinkEntity link : links) {
                         AssetEntity entity = ao().get(AssetEntity.class, link.getAssetId());
-                        if (entity == null) {
+                        if (entity == null || entity.getDeletedAt() != null) {
                             continue;
                         }
                         Project project = project(entity.getProjectKey());
@@ -7472,6 +7775,9 @@ public class AssetServiceImpl implements AssetService {
 
     private AssetEntity requireAssetCap(ApplicationUser user, int id, String cap) {
         AssetEntity entity = requireAsset(id);
+        if (entity.getDeletedAt() != null && !Boolean.TRUE.equals(TRASH_WRITE.get())) {
+            throw new AssetException(409, "asset-tree.error.inTrash");
+        }
         if (Boolean.TRUE.equals(SYSTEM_WRITE.get())) {
             return entity;
         }
@@ -7483,6 +7789,21 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
         return entity;
+    }
+
+    private Project requireTrashProject(ApplicationUser user, String projectKey) {
+        Project project = requireReadableProject(user, projectKey);
+        if (!hasCap(user, project, GrantCaps.PLACES) && !hasCap(user, project, GrantCaps.OBJECT)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        return project;
+    }
+
+    private boolean canPurge(ApplicationUser user, AssetEntity row) {
+        if (row == null) {
+            return false;
+        }
+        return hasCap(user, project(row.getProjectKey()), kindCap(row));
     }
 
     private boolean canSearchGroups(ApplicationUser user) {
@@ -7541,6 +7862,10 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private AssetEntity[] assetsIn(String projectKey) {
+        return ao().find(AssetEntity.class, Query.select().where("PROJECT_KEY = ? AND DELETED_AT IS NULL", projectKey));
+    }
+
+    private AssetEntity[] assetsAll(String projectKey) {
         return ao().find(AssetEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
     }
 
@@ -8855,7 +9180,7 @@ public class AssetServiceImpl implements AssetService {
                 continue;
             }
             AssetEntity other = ao().get(AssetEntity.class, otherId);
-            if (other != null) {
+            if (other != null && other.getDeletedAt() == null) {
                 peers.add(peerDto(user, other));
             }
         }
@@ -14629,6 +14954,7 @@ public class AssetServiceImpl implements AssetService {
 
     private static final ThreadLocal<Boolean> QUIET_NOTES = new ThreadLocal<Boolean>();
     private static final ThreadLocal<Boolean> SYSTEM_WRITE = new ThreadLocal<Boolean>();
+    private static final ThreadLocal<Boolean> TRASH_WRITE = new ThreadLocal<Boolean>();
     private static final java.util.concurrent.ConcurrentHashMap<String, Long> TNI_SEEN =
             new java.util.concurrent.ConcurrentHashMap<String, Long>();
 
@@ -14671,6 +14997,7 @@ public class AssetServiceImpl implements AssetService {
         }
         String verbKey = "asset.created".equals(event) ? "asset-tree.ui.automationCreated"
                 : "asset.deleted".equals(event) ? "asset-tree.ui.automationDeleted"
+                : "asset.restored".equals(event) ? "asset-tree.ui.automationRestored"
                 : "asset-tree.ui.automationUpdated";
         String body = AutomationNote.text(i18n().getText("asset-tree.ui.automationNote"), objectKey, name,
                 i18n().getText(verbKey));

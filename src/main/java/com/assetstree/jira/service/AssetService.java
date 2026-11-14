@@ -141,6 +141,14 @@ public interface AssetService {
 
     void deleteAsset(ApplicationUser user, int id, boolean cascade);
 
+    List<AssetDto> listTrash(ApplicationUser user, String projectKey);
+
+    AssetDto restoreAsset(ApplicationUser user, int id);
+
+    void purgeAsset(ApplicationUser user, int id);
+
+    int emptyTrash(ApplicationUser user, String projectKey);
+
     AssetDto moveAsset(ApplicationUser user, int id, MoveDraft move);
 
     AssetTypeDto createType(ApplicationUser user, TypeDraft draft);

@@ -46,6 +46,9 @@ public class AssetDto {
     private List<String> offeredTypes = new ArrayList<String>();
     private int pingUp;
     private boolean pingExempt;
+    private String deleted;
+    private String deletedBy;
+    private int nested;
 
     public int getId() {
         return id;
@@ -349,5 +352,29 @@ public class AssetDto {
 
     public void setPingExempt(boolean pingExempt) {
         this.pingExempt = pingExempt;
+    }
+
+    public String getDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(String deleted) {
+        this.deleted = deleted;
+    }
+
+    public String getDeletedBy() {
+        return deletedBy;
+    }
+
+    public void setDeletedBy(String deletedBy) {
+        this.deletedBy = deletedBy;
+    }
+
+    public int getNested() {
+        return nested;
+    }
+
+    public void setNested(int nested) {
+        this.nested = nested;
     }
 }

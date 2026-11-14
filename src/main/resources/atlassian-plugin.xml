@@ -102,6 +102,12 @@
         <condition class="com.atlassian.jira.plugin.webfragment.conditions.UserLoggedInCondition"/>
     </web-item>
 
+    <web-item key="asset-tree-trash" name="Asset Trash" section="asset-tree-nav-link/asset-tree-menu" weight="30">
+        <label key="asset-tree.nav.trash"/>
+        <link linkId="asset-tree-nav-trash">/plugins/servlet/asset-tree?view=trash</link>
+        <condition class="com.assetstree.jira.web.ManageAssetsCondition"/>
+    </web-item>
+
     <web-item key="asset-tree-settings" name="Asset Settings" section="asset-tree-nav-link/asset-tree-menu" weight="40">
         <label key="asset-tree.nav.settings"/>
         <link linkId="asset-tree-nav-settings">/plugins/servlet/asset-tree?view=settings</link>

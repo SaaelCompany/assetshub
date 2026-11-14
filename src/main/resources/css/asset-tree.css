@@ -14486,3 +14486,9 @@ button.asset-tree-attach-remove {
 .asset-tree-scheme-menu-item:hover {
     background: #deebff;
 }
+
+#asset-tree-app .asset-tree-trash-actions {
+    display: flex;
+    gap: 8px;
+    white-space: nowrap;
+}
