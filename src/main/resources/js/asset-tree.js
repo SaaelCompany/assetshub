@@ -2484,11 +2484,12 @@
             restoreViewScroll(keptScroll);
             alignStaffNotes();
             fitSplit();
+            window.setTimeout(fitSplit, 0);
         }
     }
 
-    /* The asset screen fills the space under the Jira header, so the card
-       scrolls inside the panel and the browser page does not scroll as well. */
+    /* The asset screen fills the space under the Jira header. The card scrolls
+       inside the panel; the browser page itself does not. */
     function fitSplit() {
         var app = document.getElementById('asset-tree-app');
         if (!app) return;
@@ -2506,15 +2507,32 @@
             app.style.overflow = '';
             return;
         }
-        var top = app.getBoundingClientRect().top + (window.pageYOffset || document.documentElement.scrollTop || 0);
-        var footer = document.getElementById('footer');
-        var foot = footer ? footer.offsetHeight : 0;
-        var height = window.innerHeight - top - foot - 4;
-        if (height < 360) height = 360;
+        if (window.pageYOffset || document.documentElement.scrollTop) window.scrollTo(0, 0);
+        var footer = document.getElementById('footer') || document.querySelector('footer');
+        var foot = 0;
+        if (footer) {
+            var footerStyle = window.getComputedStyle(footer);
+            foot = footer.offsetHeight
+                + (parseFloat(footerStyle.marginTop) || 0)
+                + (parseFloat(footerStyle.marginBottom) || 0);
+        }
+        var top = app.getBoundingClientRect().top;
+        if (top < 0) top = 0;
+        var height = window.innerHeight - top - foot;
+        if (height < 280) height = 280;
+        app.style.overflow = 'hidden';
         app.style.height = height + 'px';
         app.style.maxHeight = height + 'px';
-        app.style.overflow = 'hidden';
-        if (window.pageYOffset) window.scrollTo(0, 0);
+        var extra = Math.max(
+            document.documentElement.scrollHeight,
+            document.body ? document.body.scrollHeight : 0
+        ) - window.innerHeight;
+        if (extra > 0) {
+            height -= extra;
+            if (height < 280) height = 280;
+            app.style.height = height + 'px';
+            app.style.maxHeight = height + 'px';
+        }
     }
 
     function scrollTargets() {
