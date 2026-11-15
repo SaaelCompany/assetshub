@@ -9,7 +9,6 @@ import com.assetstree.jira.dto.ModuleSetupDto;
 
 import org.junit.Test;
 
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -121,18 +120,12 @@ public class ProductRulesTest {
     }
 
     @Test
-    public void timesheetDoublesNightAndSkipsLeave() {
+    public void markFactorsDoubleNightAndSkipLeave() {
         assertEquals(2, TimesheetMath.factor("night", 8, null));
         assertEquals(0, TimesheetMath.factor("leave", 0, null));
         assertEquals(1, TimesheetMath.factor("trip", 8, null));
         assertEquals(16, TimesheetMath.hours(8, 2));
         assertEquals(0, TimesheetMath.hours(8, 0));
-        List<LocalDate[]> leave = new ArrayList<LocalDate[]>();
-        leave.add(new LocalDate[] { LocalDate.of(2026, 11, 2), LocalDate.of(2026, 11, 2) });
-        int[] tally = StaffCalendar.tally(31, 8, leave, 2026, 11);
-        assertEquals(20, tally[0]);
-        assertEquals(160, tally[1]);
-        assertEquals(1, tally[2]);
     }
 
     @Test

@@ -29,7 +29,6 @@ import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.ao.RoomEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
 import com.assetstree.jira.ao.ServicePlanEntity;
-import com.assetstree.jira.ao.StaffDutyEntity;
 import com.assetstree.jira.ao.TypeSchemaEntity;
 import com.assetstree.jira.ao.WebhookEntity;
 import com.assetstree.jira.ao.TniDeviceEntity;
@@ -94,7 +93,6 @@ public final class SchemaReady {
             FlowRuleEntity.class,
             FlowGraphEntity.class,
             ServicePlanEntity.class,
-            StaffDutyEntity.class,
             FloorEntity.class,
             RoomEntity.class,
             PinEntity.class,
