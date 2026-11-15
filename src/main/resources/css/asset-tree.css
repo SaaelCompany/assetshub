@@ -2519,7 +2519,7 @@ a.asset-tree-url {
 }
 
 #asset-tree-app.asset-tree {
-    padding: 16px 24px 32px;
+    padding: 8px 24px 32px;
 }
 
 #asset-tree-app .asset-tree-top {
@@ -2527,7 +2527,7 @@ a.asset-tree-url {
     flex-direction: column;
     gap: 0;
     margin: 0 0 20px;
-    padding: 8px 4px 16px;
+    padding: 0 4px 16px;
 }
 
 #asset-tree-app .asset-tree-top-row {
