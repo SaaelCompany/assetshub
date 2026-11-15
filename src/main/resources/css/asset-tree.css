@@ -14487,6 +14487,12 @@ button.asset-tree-attach-remove {
     background: #deebff;
 }
 
+#asset-tree-app .asset-tree-row.is-trash {
+    margin-top: 12px;
+    border-top: 1px solid #dfe1e6;
+    border-radius: 0;
+}
+
 #asset-tree-app .asset-tree-trash-actions {
     display: flex;
     gap: 8px;

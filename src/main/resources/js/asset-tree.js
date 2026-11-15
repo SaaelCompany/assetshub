@@ -377,6 +377,7 @@
         mineAssets: null,
         mineQuery: '',
         trashItems: null,
+        trashOpen: String(app.getAttribute('data-view') || '').toLowerCase() === 'trash',
         searchHits: null,
         searching: false,
         searchToken: 0,
@@ -548,7 +549,8 @@
     function normalizeView(raw) {
         var value = String(raw || '').toLowerCase();
         if (value === 'tni') return 'settings';
-        if (value === 'mine' || value === 'trash' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
+        if (value === 'trash') return 'all';
+        if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
             return value;
         }
         return 'all';
@@ -556,7 +558,6 @@
 
     function viewTitle(view) {
         if (view === 'mine') return t('menuMine');
-        if (view === 'trash') return t('trash');
         if (view === 'settings') return t('menuSettings');
         if (view === 'schedules') return t('menuSchedules');
         if (view === 'reports') return t('menuReports');
@@ -2261,7 +2262,6 @@
         if (state.canView !== false) {
             items.push({ view: 'all', label: t('tabAssets'), group: 'catalog' });
             items.push({ view: 'mine', label: t('menuMine'), group: 'catalog' });
-            if (state.canRemove) items.push({ view: 'trash', label: t('trash'), group: 'catalog' });
             if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules'), group: 'tools' });
         }
         if (moduleOn('reports') && (state.canView !== false || state.canReports)) {
@@ -2306,22 +2306,6 @@
                 mount();
             }
             loadMine();
-            return;
-        }
-        if (view === 'trash') {
-            if (!state.canRemove) {
-                showView('all');
-                return;
-            }
-            state.view = 'trash';
-            state.dirty = false;
-            state.editing = false;
-            state.trashItems = null;
-            state.error = null;
-            state.loading = true;
-            rememberView('trash');
-            mount();
-            loadTrash();
             return;
         }
         if (view === 'reports') forgetReports();
@@ -2373,14 +2357,8 @@
         if (state.view === 'all') {
             titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
         }
-        if (state.view === 'trash') {
-            titles.appendChild(el('p', 'asset-tree-hint', t('trashHint')));
-        }
         var actions = el('div', 'asset-tree-actions');
         if (state.view === 'reports') actions.appendChild(reportToolButtons());
-        if (state.view === 'trash' && state.canRemove && state.trashItems && state.trashItems.length) {
-            actions.appendChild(button(t('trashEmptyAll'), 'asset-tree-btn danger', openEmptyTrash));
-        }
         var projectLabel = el('label', 'asset-tree-project-label', t('project'));
         projectLabel.setAttribute('for', 'asset-tree-project');
         var projectPicker = el('select', 'asset-tree-project');
@@ -2606,16 +2584,6 @@
             frame.appendChild(renderMine());
             return;
         }
-        if (state.view === 'trash') {
-            if (!state.canRemove) {
-                state.view = 'all';
-                rememberView('all');
-                mount();
-                return;
-            }
-            frame.appendChild(renderTrash());
-            return;
-        }
         if ((state.view === 'schedules' && !moduleOn('service'))
                 || (state.view === 'reports' && !moduleOn('reports'))
                 || (state.view === 'map' && !moduleOn('map'))) {
@@ -2836,13 +2804,46 @@
         }
         branch.appendChild(children);
         nodes.appendChild(branch);
+        if (state.canRemove) nodes.appendChild(trashRow());
+    }
+
+    function trashRow() {
+        var row = el('div', 'asset-tree-row is-trash');
+        row.setAttribute('role', 'treeitem');
+        if (state.trashOpen) row.classList.add('is-selected');
+        var chevron = el('button', 'asset-tree-chevron', '');
+        chevron.type = 'button';
+        chevron.disabled = true;
+        chevron.setAttribute('aria-hidden', 'true');
+        var name = el('span', 'asset-tree-name', t('trash'));
+        row.appendChild(chevron);
+        row.appendChild(name);
+        var count = state.trashItems ? state.trashItems.length : 0;
+        if (count) row.appendChild(el('span', 'asset-tree-qcount', '(' + count + ')'));
+        row.addEventListener('click', function () {
+            openTrash();
+        });
+        return row;
+    }
+
+    function openTrash() {
+        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        state.trashOpen = true;
+        state.selectedId = null;
+        state.typeGroup = null;
+        state.pane = 'list';
+        state.dirty = false;
+        state.editing = false;
+        renderNodes();
+        replaceDetail();
+        loadTrash();
     }
 
     function rootRow() {
         var project = currentProject();
         var row = el('div', 'asset-tree-row is-root');
         row.setAttribute('role', 'treeitem');
-        if (!treeAnchorId() && !state.typeGroup) row.classList.add('is-selected');
+        if (!treeAnchorId() && !state.typeGroup && !state.trashOpen) row.classList.add('is-selected');
         var chevron = el('button', 'asset-tree-chevron', state.rootOpen === false ? '▸' : '▾');
         chevron.type = 'button';
         chevron.setAttribute('aria-label', state.rootOpen === false ? t('expand') : t('collapse'));
@@ -2866,6 +2867,7 @@
             }
             state.selectedId = null;
             state.typeGroup = null;
+            state.trashOpen = false;
             state.dirty = false;
             state.pane = 'list';
             renderNodes();
@@ -3455,6 +3457,7 @@
     function selectTypeGroup(placeId, typeKey, scope) {
         if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
         state.typeGroup = { placeId: placeId, typeKey: typeKey, scope: scope || 'direct' };
+        state.trashOpen = false;
         state.selectedId = null;
         state.editing = false;
         state.dirty = false;
@@ -3914,6 +3917,7 @@
         }
         var next = byId()[id];
         if (next && isFolder(next)) state.typeGroup = null;
+        state.trashOpen = false;
         state.selectedId = id;
         state.dirty = false;
         expandPath(id);
@@ -3984,6 +3988,7 @@
     }
 
     function renderDetail() {
+        if (state.trashOpen && state.canRemove) return renderTrash();
         var asset = state.selectedId ? byId()[state.selectedId] : null;
         if (state.pane === 'card' && asset && !isFolder(asset) && !textQuery()) {
             var section = el('section', 'asset-tree-detail');
@@ -11265,7 +11270,7 @@
             if (state.busy || state.dirty || state.loading) return;
             reloadTree(function () {
                 if (state.view === 'all' || state.view === 'mine') renderFrame();
-                if (state.view === 'trash') loadTrash();
+                if (state.canRemove && state.view === 'all') loadTrash();
             });
         });
     }
@@ -11428,6 +11433,7 @@
         state.holderAssets = [];
         var project = currentProject();
         applyRights(project);
+        if (!state.canRemove) state.trashOpen = false;
         state.grants = null;
         state.portalRules = null;
         state.portalDraft = null;
@@ -11457,7 +11463,7 @@
             if (state.view === 'mine') {
                 loadMine();
             }
-            if (state.view === 'trash') {
+            if (state.canRemove && state.view === 'all') {
                 loadTrash();
             }
             if (state.view === 'all' && state.selectedId) {
@@ -11654,36 +11660,54 @@
 
     function loadTrash() {
         var token = ++trashToken;
-        if (!state.projectKey) {
+        if (!state.projectKey || !state.canRemove) {
             state.trashItems = [];
-            state.loading = false;
-            renderFrame();
             return;
         }
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/trash', null, function (status, payload) {
-            if (token !== trashToken || state.view !== 'trash') return;
-            state.loading = false;
+            if (token !== trashToken) return;
             if (status >= 200 && status < 300) {
                 state.trashItems = payload || [];
-                state.error = null;
+                state.trashError = '';
             } else {
                 state.trashItems = [];
-                state.error = (payload && payload.message) || t('errorTitle');
+                state.trashError = (payload && payload.message) || t('errorTitle');
             }
-            if (!document.getElementById('asset-tree-frame')) mount();
-            renderFrame();
+            if (state.view !== 'all') return;
+            if (document.getElementById('asset-tree-nodes')) renderNodes();
+            if (state.trashOpen) replaceDetail();
         });
     }
 
     function renderTrash() {
-        var panel = el('div', 'asset-tree-catalog');
-        var items = state.trashItems || [];
+        var section = el('section', 'asset-tree-detail is-queue');
+        section.id = 'asset-tree-detail';
+        var head = el('div', 'asset-tree-queue-head');
+        var titles = el('div', 'asset-tree-queue-titles');
+        var titleRow = el('div', 'asset-tree-queue-title');
+        var items = state.trashItems;
+        titleRow.appendChild(el('h2', null, t('trash')));
+        titleRow.appendChild(el('span', 'asset-tree-badge', String(items ? items.length : 0)));
+        titles.appendChild(titleRow);
+        titles.appendChild(el('p', 'asset-tree-hint', t('trashHint')));
+        head.appendChild(titles);
+        if (items && items.length) {
+            var tools = el('div', 'asset-tree-inline-actions');
+            tools.appendChild(button(t('trashEmptyAll'), 'asset-tree-btn danger', openEmptyTrash));
+            head.appendChild(tools);
+        }
+        section.appendChild(head);
+        if (items == null) {
+            section.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            return section;
+        }
+        if (state.trashError) {
+            section.appendChild(el('p', 'asset-tree-hint', state.trashError));
+            return section;
+        }
         if (!items.length) {
-            var empty = el('div', 'asset-tree-message');
-            empty.appendChild(el('h2', null, t('trashEmpty')));
-            empty.appendChild(el('p', null, t('trashHint')));
-            panel.appendChild(empty);
-            return panel;
+            section.appendChild(el('p', 'asset-tree-hint', t('trashEmpty')));
+            return section;
         }
         var rows = items.map(function (item) {
             var name = el('div');
@@ -11694,7 +11718,10 @@
                 ajax('POST', '/assets/' + item.id + '/restore', {}, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         notify(t('trashRestored'));
-                        reloadTree(function () { loadTrash(); });
+                        reloadTree(function () {
+                            renderNodes();
+                            loadTrash();
+                        });
                     } else {
                         notify((payload && payload.message) || t('errorTitle'));
                     }
@@ -11713,10 +11740,10 @@
                 actions
             ];
         });
-        panel.appendChild(assetTable(rows, [
+        section.appendChild(assetTable(rows, [
             t('name'), t('type'), t('trashPlace'), t('trashWhen'), t('trashBy'), '', ''
         ]));
-        return panel;
+        return section;
     }
 
     function openPurgeTrash(item) {
@@ -11770,11 +11797,7 @@
         } else {
             state.mineAssets = null;
         }
-        if (state.view === 'trash') {
-            loadTrash();
-        } else {
-            state.trashItems = null;
-        }
+        if (state.canRemove) loadTrash();
     }
 
     function loadReport() {
@@ -32750,18 +32773,11 @@
                 mount();
                 return;
             }
+            if (!state.canRemove) state.trashOpen = false;
             if (state.view === 'mine') {
                 mount();
                 loadMine();
                 return;
-            }
-            if (state.view === 'trash') {
-                if (!state.canRemove) state.view = 'all';
-                else {
-                    mount();
-                    loadTrash();
-                    return;
-                }
             }
             mount();
             if (!state.projectKey) {
@@ -32797,6 +32813,7 @@
                             selectAsset(requested, true);
                         }
                     }
+                    if (state.canRemove) loadTrash();
                     if (state.focusSearch) {
                         var searchBox = document.getElementById('asset-tree-search');
                         if (searchBox) searchBox.focus();
