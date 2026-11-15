@@ -5400,28 +5400,35 @@
         showView('schedules');
     }
 
-    function serviceBlock(asset) {
+    function serviceBlock(asset, editing) {
         if (!moduleOn('service') || !asset || isFolder(asset) || !asset.plans) return null;
         var offered = typeOffersService(asset);
         if (!offered && !asset.plans.length) return null;
+        if (!editing && !asset.plans.length) return null;
         var body = el('div', 'asset-tree-service');
-        body.appendChild(el('p', 'asset-tree-hint', t('serviceHint')));
         var due = asset.plans.filter(function (plan) { return plan.due; });
         if (due.length) {
             body.appendChild(el('div', 'asset-tree-service-banner', t('serviceDue') + ': ' + due.map(function (plan) {
                 return plan.name;
             }).join(', ')));
         }
-        var editing = offered && mayEdit(asset);
-        var creating = editing && state.serviceOpen === asset.id;
+        if (!editing) {
+            asset.plans.forEach(function (plan) {
+                body.appendChild(serviceRead(plan));
+            });
+            var tools = el('div', 'asset-tree-inline-actions');
+            tools.appendChild(button(t('serviceOpenSchedule'), 'asset-tree-btn', function () {
+                openPlansOnSchedule(asset);
+            }));
+            body.appendChild(tools);
+            return moduleBlock(t('serviceTitle'), body, false);
+        }
+        body.appendChild(el('p', 'asset-tree-hint', t('serviceHint')));
+        var creating = offered && mayEdit(asset) && state.serviceOpen === asset.id;
         var lastPlan = asset.plans.length - 1;
         asset.plans.forEach(function (plan, index) {
-            if (!mayEdit(asset)) {
-                body.appendChild(serviceRead(plan));
-                return;
-            }
             var extras = null;
-            if (!creating && index === lastPlan) extras = { open: true, add: editing };
+            if (!creating && index === lastPlan && offered && mayEdit(asset)) extras = { open: true, add: true };
             body.appendChild(serviceEditor(asset, plan, extras));
         });
         if (!asset.plans.length && !creating) {
@@ -5430,14 +5437,7 @@
         if (creating) {
             body.appendChild(serviceEditor(asset, null, asset.plans.length ? { open: true } : null));
         }
-        if (!mayEdit(asset) && asset.plans.length) {
-            var tools = el('div', 'asset-tree-inline-actions');
-            tools.appendChild(button(t('serviceOpenSchedule'), 'asset-tree-btn', function () {
-                openPlansOnSchedule(asset);
-            }));
-            body.appendChild(tools);
-        }
-        if (!asset.plans.length && editing && !creating) {
+        if (!asset.plans.length && offered && mayEdit(asset) && !creating) {
             var lone = el('div', 'asset-tree-plan-actions');
             lone.appendChild(button(t('serviceAdd'), 'asset-tree-btn primary', function () {
                 state.serviceOpen = asset.id;
@@ -8250,6 +8250,16 @@
                 onClick: function () { pingAsset(asset); }
             });
         }
+        if (mayEdit(asset) && !isFolder(asset) && moduleOn('life')) {
+            var lifeRow = state.life[asset.id];
+            if (lifeRow && lifeRow.writeoffState !== 'approved' && lifeRow.writeoffState !== 'pending') {
+                var directWriteoff = !moduleSetup().lifeApproval;
+                extra.push({
+                    label: directWriteoff ? t('lifeWriteoffNow') : t('lifeAsk'),
+                    onClick: function () { openWriteoffDialog(asset, lifeRow, directWriteoff); }
+                });
+            }
+        }
         if (mayEdit(asset)) extra.push({ label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
@@ -8279,7 +8289,7 @@
         var showPhoto = !isFolder(asset) && photoEnabled() && asset.photo;
         var story = showPhoto ? el('div', 'asset-tree-photo-stack') : main;
         story.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items)));
-        var service = serviceBlock(asset);
+        var service = serviceBlock(asset, false);
         if (service) story.appendChild(service);
         if (moduleOn('life') && !isFolder(asset)) {
             story.appendChild(lifeBlock(asset));
@@ -8456,6 +8466,14 @@
         paintAssetFields(attrList, asset.typeKey, asset.attributes || []);
         attributes.appendChild(attrList);
         main.appendChild(attributes);
+        if (!placePage) {
+            var serviceEdit = serviceBlock(asset, true);
+            if (serviceEdit) main.appendChild(serviceEdit);
+            if (!isFolder(asset) && moduleOn('life')) {
+                state.lifeFolded[asset.id] = false;
+                main.appendChild(lifeBlock(asset, true));
+            }
+        }
 
         var issues = el('div', 'asset-tree-request-block');
         issues.appendChild(el('h3', null, t('issues')));
@@ -9390,7 +9408,7 @@
             }
             if (approverKey !== null) rememberPlaceApprover(id, approverKey);
             if (!parentChanged) {
-                savePingExempt(id, function () { finishSave(id, t('saved'), typeMoved); });
+                savePingExempt(id, function () { saveLifecycle(id, function () { finishSave(id, t('saved'), typeMoved); }); });
                 return;
             }
             ajax('POST', '/assets/' + id + '/move', { parentId: parentId, index: null }, function (moveStatus, movePayload) {
@@ -9404,8 +9422,46 @@
                     state.expanded[parentId] = true;
                     rememberExpanded();
                 }
-                savePingExempt(id, function () { finishSave(id, t('moved'), typeMoved); });
+                savePingExempt(id, function () { saveLifecycle(id, function () { finishSave(id, t('moved'), typeMoved); }); });
             });
+        });
+    }
+
+    function saveLifecycle(id, done) {
+        var purchased = document.getElementById('asset-field-life-purchased');
+        if (!purchased) {
+            done();
+            return;
+        }
+        function val(fieldId) {
+            var node = document.getElementById(fieldId);
+            return node ? node.value : '';
+        }
+        ajax('PUT', '/assets/' + id + '/lifecycle', {
+            purchased: val('asset-field-life-purchased'),
+            supplier: val('asset-field-life-supplier'),
+            document: val('asset-field-life-document'),
+            price: moneyWire(val('asset-field-life-price')),
+            currency: val('asset-field-life-currency'),
+            commissioned: val('asset-field-life-commissioned'),
+            warrantyUntil: val('asset-field-life-warranty'),
+            warrantyService: val('asset-field-life-service'),
+            contractor: val('asset-field-life-contractor'),
+            contractNo: val('asset-field-life-contract-no'),
+            contractFrom: val('asset-field-life-contract-from'),
+            contractUntil: val('asset-field-life-contract-until'),
+            lifeMonths: parseInt(val('asset-field-life-months'), 10) || 0,
+            residual: moneyWire(val('asset-field-life-residual'))
+        }, function (status, payload) {
+            if (status >= 200 && status < 300 && payload) {
+                state.life[id] = payload;
+                state.lifeEditing[id] = false;
+                state.lifeContractOpen[id] = false;
+                done();
+            } else {
+                setBusy(false);
+                setFormError((payload && payload.message) || t('errorTitle'));
+            }
         });
     }
 
@@ -27220,8 +27276,12 @@
         });
     }
 
-    function lifeBlock(asset) {
-        if (state.life[asset.id]) return lifeModule(asset, lifeBody(asset, state.life[asset.id]));
+    function lifeBlock(asset, editing) {
+        if (state.life[asset.id]) {
+            var life = state.life[asset.id];
+            if (editing && life.writeoffState !== 'approved') return lifeModule(asset, lifeForm(asset, life, true));
+            return lifeModule(asset, lifeBody(asset, life));
+        }
         var inner = el('div', 'asset-tree-life');
         if (state.lifeFailed[asset.id]) {
             inner.appendChild(el('p', 'asset-tree-hint', t('errorTitle')));
@@ -27244,11 +27304,6 @@
 
     function lifeBody(asset, life) {
         var body = el('div', 'asset-tree-life');
-        var editingLife = !!(state.lifeEditing[asset.id] && life.writeoffState !== 'approved');
-        if (editingLife) {
-            body.appendChild(lifeForm(asset, life));
-            return body;
-        }
         body.appendChild(lifeStepper(life, asset));
         if (lifeBlank(life)) body.appendChild(el('p', 'asset-tree-hint', t('lifeEmpty')));
         var facts = el('div', 'asset-tree-life-facts');
@@ -27276,19 +27331,6 @@
             body.appendChild(el('p', 'asset-tree-life-state', t('lifeRejected')));
         }
         var actions = el('div', 'asset-tree-life-actions');
-        if (mayEdit(asset) && life.writeoffState !== 'approved' && life.writeoffState !== 'pending') {
-            if (moduleSetup().lifeApproval) {
-                actions.appendChild(button(t('lifeAsk'), 'asset-tree-btn', function () { openWriteoffDialog(asset, life); }));
-            } else {
-                actions.appendChild(button(t('lifeWriteoffNow'), 'asset-tree-btn', function () { openWriteoffDialog(asset, life, true); }));
-            }
-        }
-        if (mayEdit(asset) && life.writeoffState !== 'approved') {
-            actions.appendChild(button(t('lifeFill'), 'asset-tree-btn', function () {
-                state.lifeEditing[asset.id] = true;
-                showDetail(state.detail || asset, false);
-            }));
-        }
         if (life.writeoffState === 'pending' && state.userKey && state.userKey === life.approverKey) {
             actions.appendChild(button(t('lifeApprove'), 'asset-tree-btn primary', function () { decideWriteoff(asset, true); }));
             actions.appendChild(button(t('lifeReject'), 'asset-tree-btn', function () { decideWriteoff(asset, false); }));
@@ -27297,22 +27339,27 @@
         return body;
     }
 
-    function lifeForm(asset, life) {
-        var form = el('form', 'asset-tree-life-form');
-        form.addEventListener('submit', function (event) { event.preventDefault(); });
+    function lifeForm(asset, life, embedded) {
+        var form = el(embedded ? 'div' : 'form', 'asset-tree-life-form');
+        if (!embedded) form.addEventListener('submit', function (event) { event.preventDefault(); });
         var buyPanel = el('section', 'asset-tree-life-panel');
         buyPanel.appendChild(el('h4', null, t('lifeSectionBuy')));
         var buy = el('div', 'asset-tree-life-grid');
         var purchased = document.createElement('input');
         purchased.type = 'date';
+        purchased.id = 'asset-field-life-purchased';
         purchased.value = life.purchased || '';
         var supplier = document.createElement('input');
+        supplier.id = 'asset-field-life-supplier';
         supplier.value = life.supplier || '';
         var documentNo = document.createElement('input');
+        documentNo.id = 'asset-field-life-document';
         documentNo.value = life.document || '';
         var price = document.createElement('input');
+        price.id = 'asset-field-life-price';
         price.value = moneyInput(life.price);
         var currency = document.createElement('select');
+        currency.id = 'asset-field-life-currency';
         ['RUB', 'USD', 'EUR'].forEach(function (code) {
             var option = document.createElement('option');
             option.value = code;
@@ -27333,11 +27380,14 @@
         var use = el('div', 'asset-tree-life-grid');
         var commissioned = document.createElement('input');
         commissioned.type = 'date';
+        commissioned.id = 'asset-field-life-commissioned';
         commissioned.value = life.commissioned || '';
         var warranty = document.createElement('input');
         warranty.type = 'date';
+        warranty.id = 'asset-field-life-warranty';
         warranty.value = life.warrantyUntil || '';
         var service = document.createElement('input');
+        service.id = 'asset-field-life-service';
         service.value = life.warrantyService || '';
         use.appendChild(planField(t('lifeCommissioned'), commissioned));
         use.appendChild(planField(t('lifeWarranty'), warranty));
@@ -27345,14 +27395,18 @@
         usePanel.appendChild(use);
         form.appendChild(usePanel);
         var contractor = document.createElement('input');
+        contractor.id = 'asset-field-life-contractor';
         contractor.value = life.contractor || '';
         var contractNo = document.createElement('input');
+        contractNo.id = 'asset-field-life-contract-no';
         contractNo.value = life.contractNo || '';
         var contractFrom = document.createElement('input');
         contractFrom.type = 'date';
+        contractFrom.id = 'asset-field-life-contract-from';
         contractFrom.value = life.contractFrom || '';
         var contractUntil = document.createElement('input');
         contractUntil.type = 'date';
+        contractUntil.id = 'asset-field-life-contract-until';
         contractUntil.value = life.contractUntil || '';
         var contractPanel = el('section', 'asset-tree-life-panel');
         contractPanel.appendChild(el('h4', null, t('lifeSectionContract')));
@@ -27383,6 +27437,7 @@
         months.type = 'number';
         months.min = '0';
         months.max = '600';
+        months.id = 'asset-field-life-months';
         months.value = String(life.lifeMonths || moduleSetup().lifeMonths || 60);
         var methodSelect = document.createElement('select');
         var linear = document.createElement('option');
@@ -27390,12 +27445,14 @@
         linear.textContent = t('lifeMethodLinear');
         methodSelect.appendChild(linear);
         var residual = document.createElement('input');
+        residual.id = 'asset-field-life-residual';
         residual.value = moneyInput(life.residual);
         method.appendChild(planField(t('lifeMonths'), months));
         method.appendChild(planField(t('lifeMethod'), methodSelect));
         method.appendChild(planField(t('lifeResidual'), residual));
         methodPanel.appendChild(method);
         form.appendChild(methodPanel);
+        if (embedded) return form;
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
             ajax('PUT', '/assets/' + asset.id + '/lifecycle', {
