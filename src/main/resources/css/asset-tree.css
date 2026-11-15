@@ -14493,6 +14493,19 @@ button.asset-tree-attach-remove {
     border-radius: 0;
 }
 
+#asset-tree-app .asset-tree-row.is-trash .asset-tree-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-row.is-trash .asset-tree-type-icon,
+#asset-tree-app .asset-tree-queue-title .asset-tree-type-icon {
+    margin-right: 0;
+    align-self: center;
+}
+
 #asset-tree-app .asset-tree-trash-actions {
     display: flex;
     gap: 8px;

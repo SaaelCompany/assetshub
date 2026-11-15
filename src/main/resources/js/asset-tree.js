@@ -2816,6 +2816,7 @@
         chevron.disabled = true;
         chevron.setAttribute('aria-hidden', 'true');
         var name = el('span', 'asset-tree-name', t('trash'));
+        name.insertBefore(typeTile(null, 'sm', 'trashcan', '#6B778C'), name.firstChild);
         row.appendChild(chevron);
         row.appendChild(name);
         var count = state.trashItems ? state.trashItems.length : 0;
@@ -11686,6 +11687,7 @@
         var titles = el('div', 'asset-tree-queue-titles');
         var titleRow = el('div', 'asset-tree-queue-title');
         var items = state.trashItems;
+        titleRow.appendChild(typeTile(null, 'lg', 'trashcan', '#6B778C'));
         titleRow.appendChild(el('h2', null, t('trash')));
         titleRow.appendChild(el('span', 'asset-tree-badge', String(items ? items.length : 0)));
         titles.appendChild(titleRow);
