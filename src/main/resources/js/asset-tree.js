@@ -2744,6 +2744,7 @@
         drop.id = 'asset-tree-rootdrop';
         scroll.appendChild(drop);
         side.appendChild(scroll);
+        if (state.canRemove) side.appendChild(trashRow());
         if (state.canCreate) {
             side.appendChild(button('+ ' + t('addHere'), 'asset-tree-queue-add', function () {
                 if (state.typeGroup) openTypeAdd(state.typeGroup.placeId, state.typeGroup.typeKey);
@@ -2779,6 +2780,7 @@
         if (scroll) {
             scroll.scrollTop = top;
         }
+        paintTrashRow();
         var count = document.getElementById('asset-tree-count');
         if (count) {
             count.textContent = t('assetCount', visibleCount());
@@ -2804,11 +2806,11 @@
         }
         branch.appendChild(children);
         nodes.appendChild(branch);
-        if (state.canRemove) nodes.appendChild(trashRow());
     }
 
     function trashRow() {
         var row = el('div', 'asset-tree-row is-trash');
+        row.id = 'asset-tree-trash-row';
         row.setAttribute('role', 'treeitem');
         if (state.trashOpen) row.classList.add('is-selected');
         var chevron = el('button', 'asset-tree-chevron', '');
@@ -2825,6 +2827,21 @@
             openTrash();
         });
         return row;
+    }
+
+    function paintTrashRow() {
+        var row = document.getElementById('asset-tree-trash-row');
+        if (!row) return;
+        if (state.trashOpen) row.classList.add('is-selected');
+        else row.classList.remove('is-selected');
+        var count = row.querySelector('.asset-tree-qcount');
+        var total = state.trashItems ? state.trashItems.length : 0;
+        if (total) {
+            if (!count) row.appendChild(el('span', 'asset-tree-qcount', '(' + total + ')'));
+            else count.textContent = '(' + total + ')';
+        } else if (count) {
+            count.parentNode.removeChild(count);
+        }
     }
 
     function openTrash() {
@@ -11685,9 +11702,9 @@
         section.id = 'asset-tree-detail';
         var head = el('div', 'asset-tree-queue-head');
         var titles = el('div', 'asset-tree-queue-titles');
-        var titleRow = el('div', 'asset-tree-queue-title');
+        var titleRow = el('div', 'asset-tree-queue-title is-trash');
         var items = state.trashItems;
-        titleRow.appendChild(typeTile(null, 'lg', 'trashcan', '#6B778C'));
+        titleRow.appendChild(typeTile(null, 'sm', 'trashcan', '#6B778C'));
         titleRow.appendChild(el('h2', null, t('trash')));
         titleRow.appendChild(el('span', 'asset-tree-badge', String(items ? items.length : 0)));
         titles.appendChild(titleRow);
@@ -11708,7 +11725,7 @@
             return section;
         }
         if (!items.length) {
-            section.appendChild(el('p', 'asset-tree-hint', t('trashEmpty')));
+            section.appendChild(el('p', 'asset-tree-trash-empty', t('trashEmpty')));
             return section;
         }
         var rows = items.map(function (item) {
