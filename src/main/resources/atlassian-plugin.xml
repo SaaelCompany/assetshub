@@ -35,7 +35,6 @@
         <entity>com.assetstree.jira.ao.FlowRuleEntity</entity>
         <entity>com.assetstree.jira.ao.FlowGraphEntity</entity>
         <entity>com.assetstree.jira.ao.ServicePlanEntity</entity>
-        <entity>com.assetstree.jira.ao.StaffDutyEntity</entity>
         <entity>com.assetstree.jira.ao.FloorEntity</entity>
         <entity>com.assetstree.jira.ao.RoomEntity</entity>
         <entity>com.assetstree.jira.ao.PinEntity</entity>

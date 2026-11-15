@@ -40,7 +40,6 @@ import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleDraft;
-import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
@@ -615,51 +614,6 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.status(Response.Status.CREATED).entity(assetService.createSchedule(user(), projectKey, draft)).build();
-            }
-        });
-    }
-
-    @GET
-    @Path("projects/{projectKey}/staff")
-    public Response staff(@PathParam("projectKey") final String projectKey) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.ok(assetService.staff(user(), projectKey)).build();
-            }
-        });
-    }
-
-    @PUT
-    @Path("projects/{projectKey}/staff")
-    public Response saveStaff(@PathParam("projectKey") final String projectKey, final StaffDutyDraft draft) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.ok(assetService.saveStaff(user(), projectKey, draft)).build();
-            }
-        });
-    }
-
-    @POST
-    @Path("projects/{projectKey}/staff/leave")
-    public Response addStaffLeave(@PathParam("projectKey") final String projectKey, final StaffDutyDraft draft) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.status(Response.Status.CREATED).entity(assetService.addStaffLeave(user(), projectKey, draft)).build();
-            }
-        });
-    }
-
-    @DELETE
-    @Path("projects/{projectKey}/staff/{dutyId}")
-    public Response deleteStaff(@PathParam("projectKey") final String projectKey, @PathParam("dutyId") final int dutyId) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                assetService.deleteStaff(user(), projectKey, dutyId);
-                return Response.noContent().build();
             }
         });
     }

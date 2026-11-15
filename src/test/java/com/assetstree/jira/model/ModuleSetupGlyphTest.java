@@ -5,7 +5,6 @@ import com.assetstree.jira.dto.ModuleSetupDto;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ModuleSetupGlyphTest {
@@ -18,14 +17,15 @@ public class ModuleSetupGlyphTest {
     }
 
     @Test
-    public void timesheetOnlyTurnsTheCalendarOff() {
+    public void storedRosterStillOpensTheCalendar() {
         ModuleSetupDto draft = new ModuleSetupDto();
         draft.setScheduleBoards("roster");
+        draft.setScheduleOpen("roster");
         ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(draft));
-        assertEquals("roster", read.getScheduleBoards());
-        assertFalse(ModuleSetup.calendarOn(read.getScheduleBoards()));
+        assertEquals("calendar", read.getScheduleBoards());
+        assertEquals("calendar", read.getScheduleOpen());
+        assertTrue(ModuleSetup.calendarOn(read.getScheduleBoards()));
         assertTrue(ModuleSetup.calendarOn("calendar"));
-        assertTrue(ModuleSetup.calendarOn("calendar,roster"));
         assertTrue(ModuleSetup.calendarOn(""));
     }
 

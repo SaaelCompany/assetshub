@@ -371,39 +371,15 @@ public final class ModuleSetup {
     }
 
     private static String boards(String raw) {
-        boolean calendar = false;
-        boolean roster = false;
-        if (raw != null) {
-            String[] parts = raw.split(",");
-            for (String part : parts) {
-                String id = part == null ? "" : part.trim().toLowerCase(Locale.ROOT);
-                if ("calendar".equals(id)) {
-                    calendar = true;
-                } else if ("roster".equals(id)) {
-                    roster = true;
-                }
-            }
-        }
-        if (calendar && roster || !calendar && !roster) {
-            return "calendar,roster";
-        }
-        return calendar ? "calendar" : "roster";
+        return "calendar";
     }
 
-    /** The schedule calendar. A timesheet-only board list leaves it off. An empty list keeps both boards. */
+    /** The work calendar stays on. A stored timesheet board list no longer turns it off. */
     public static boolean calendarOn(String boards) {
-        return boards(boards).indexOf("calendar") >= 0;
+        return true;
     }
 
     private static String openBoard(String raw, String layer) {
-        String id = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
-        if ("calendar".equals(id) || "roster".equals(id)) {
-            return id;
-        }
-        String storedLayer = layer == null ? "" : layer.trim().toLowerCase(Locale.ROOT);
-        if ("roster".equals(storedLayer) || "staff".equals(storedLayer)) {
-            return "roster";
-        }
         return "calendar";
     }
 
@@ -491,11 +467,8 @@ public final class ModuleSetup {
 
     private static String layer(String raw, String kinds) {
         String id = WorkKind.id(raw);
-        if (id.isEmpty()) {
+        if (id.isEmpty() || "roster".equals(id)) {
             return "";
-        }
-        if ("roster".equals(id) || "staff".equals(id)) {
-            return "roster";
         }
         return parseKinds(kinds, false).containsKey(id) ? id : "";
     }
