@@ -2483,7 +2483,38 @@
         } finally {
             restoreViewScroll(keptScroll);
             alignStaffNotes();
+            fitSplit();
         }
+    }
+
+    /* The asset screen fills the space under the Jira header, so the card
+       scrolls inside the panel and the browser page does not scroll as well. */
+    function fitSplit() {
+        var app = document.getElementById('asset-tree-app');
+        if (!app) return;
+        if (!fitSplit.bound) {
+            fitSplit.bound = true;
+            window.addEventListener('resize', fitSplit);
+        }
+        var frame = document.getElementById('asset-tree-frame');
+        var split = frame && frame.className.indexOf('is-split') >= 0
+            && !frame.querySelector('.asset-tree-message')
+            && !frame.querySelector('.asset-tree-key-setup.is-gate');
+        if (!split) {
+            app.style.height = '';
+            app.style.maxHeight = '';
+            app.style.overflow = '';
+            return;
+        }
+        var top = app.getBoundingClientRect().top + (window.pageYOffset || document.documentElement.scrollTop || 0);
+        var footer = document.getElementById('footer');
+        var foot = footer ? footer.offsetHeight : 0;
+        var height = window.innerHeight - top - foot - 4;
+        if (height < 360) height = 360;
+        app.style.height = height + 'px';
+        app.style.maxHeight = height + 'px';
+        app.style.overflow = 'hidden';
+        if (window.pageYOffset) window.scrollTo(0, 0);
     }
 
     function scrollTargets() {

@@ -14491,10 +14491,7 @@ button.asset-tree-attach-remove {
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    height: calc(100vh - 112px);
-    max-height: calc(100vh - 112px);
     min-height: 0;
-    overflow: hidden;
     padding-bottom: 8px;
 }
 
