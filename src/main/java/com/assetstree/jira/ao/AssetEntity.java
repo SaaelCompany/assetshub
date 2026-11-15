@@ -113,4 +113,24 @@ public interface AssetEntity extends Entity {
     String getExternalKey();
 
     void setExternalKey(String externalKey);
+
+    /** When the object was moved to the trash. Empty while it is in the tree. */
+    @Indexed
+    Date getDeletedAt();
+
+    void setDeletedAt(Date deletedAt);
+
+    /** Account that moved the object to the trash. */
+    @StringLength(255)
+    String getDeletedBy();
+
+    void setDeletedBy(String deletedBy);
+
+    /**
+     * The object whose delete put this row in the trash.
+     * Restoring that object brings this row back with it.
+     */
+    Integer getTrashRootId();
+
+    void setTrashRootId(Integer trashRootId);
 }

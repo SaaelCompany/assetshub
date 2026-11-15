@@ -14486,3 +14486,77 @@ button.asset-tree-attach-remove {
 .asset-tree-scheme-menu-item:hover {
     background: #deebff;
 }
+
+#asset-tree-app.asset-tree:has(> .asset-tree-frame.is-split):not(:has(.asset-tree-key-setup.is-gate)):not(:has(.asset-tree-message)) {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-height: 0;
+    padding-bottom: 8px;
+}
+
+#asset-tree-app.asset-tree:has(> .asset-tree-frame.is-split) > .asset-tree-top,
+#asset-tree-app.asset-tree:has(> .asset-tree-frame.is-split) > .asset-tree-dashboard {
+    flex: 0 0 auto;
+}
+
+#asset-tree-app.asset-tree > .asset-tree-frame.is-split {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+}
+
+#asset-tree-app .asset-tree-row.is-trash {
+    flex: 0 0 auto;
+    margin-top: 0;
+    border-top: 1px solid #dfe1e6;
+    border-radius: 0;
+}
+
+#asset-tree-app .asset-tree-row.is-trash .asset-tree-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+}
+
+#asset-tree-app .asset-tree-row.is-trash.is-selected .asset-tree-name {
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-row.is-trash .asset-tree-type-icon,
+#asset-tree-app .asset-tree-queue-title.is-trash .asset-tree-type-icon {
+    margin-right: 0;
+    align-self: center;
+}
+
+#asset-tree-app .asset-tree-queue-title.is-trash {
+    align-items: center;
+}
+
+#asset-tree-app .asset-tree-queue-title.is-trash h2 {
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 24px;
+}
+
+#asset-tree-app .asset-tree-trash-empty {
+    margin: 16px 20px;
+    color: #172b4d;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 20px;
+    letter-spacing: normal;
+}
+
+#asset-tree-app .asset-tree-trash-actions {
+    display: flex;
+    gap: 8px;
+    white-space: nowrap;
+}

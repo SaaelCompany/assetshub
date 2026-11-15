@@ -376,6 +376,8 @@
         activityTab: 'all',
         mineAssets: null,
         mineQuery: '',
+        trashItems: null,
+        trashOpen: String(app.getAttribute('data-view') || '').toLowerCase() === 'trash',
         searchHits: null,
         searching: false,
         searchToken: 0,
@@ -547,6 +549,7 @@
     function normalizeView(raw) {
         var value = String(raw || '').toLowerCase();
         if (value === 'tni') return 'settings';
+        if (value === 'trash') return 'all';
         if (value === 'mine' || value === 'settings' || value === 'schedules' || value === 'reports' || value === 'map') {
             return value;
         }
@@ -2480,6 +2483,55 @@
         } finally {
             restoreViewScroll(keptScroll);
             alignStaffNotes();
+            fitSplit();
+            window.setTimeout(fitSplit, 0);
+        }
+    }
+
+    /* The asset screen fills the space under the Jira header. The card scrolls
+       inside the panel; the browser page itself does not. */
+    function fitSplit() {
+        var app = document.getElementById('asset-tree-app');
+        if (!app) return;
+        if (!fitSplit.bound) {
+            fitSplit.bound = true;
+            window.addEventListener('resize', fitSplit);
+        }
+        var frame = document.getElementById('asset-tree-frame');
+        var split = frame && frame.className.indexOf('is-split') >= 0
+            && !frame.querySelector('.asset-tree-message')
+            && !frame.querySelector('.asset-tree-key-setup.is-gate');
+        if (!split) {
+            app.style.height = '';
+            app.style.maxHeight = '';
+            app.style.overflow = '';
+            return;
+        }
+        if (window.pageYOffset || document.documentElement.scrollTop) window.scrollTo(0, 0);
+        var footer = document.getElementById('footer') || document.querySelector('footer');
+        var foot = 0;
+        if (footer) {
+            var footerStyle = window.getComputedStyle(footer);
+            foot = footer.offsetHeight
+                + (parseFloat(footerStyle.marginTop) || 0)
+                + (parseFloat(footerStyle.marginBottom) || 0);
+        }
+        var top = app.getBoundingClientRect().top;
+        if (top < 0) top = 0;
+        var height = window.innerHeight - top - foot;
+        if (height < 280) height = 280;
+        app.style.overflow = 'hidden';
+        app.style.height = height + 'px';
+        app.style.maxHeight = height + 'px';
+        var extra = Math.max(
+            document.documentElement.scrollHeight,
+            document.body ? document.body.scrollHeight : 0
+        ) - window.innerHeight;
+        if (extra > 0) {
+            height -= extra;
+            if (height < 280) height = 280;
+            app.style.height = height + 'px';
+            app.style.maxHeight = height + 'px';
         }
     }
 
@@ -2741,6 +2793,7 @@
         drop.id = 'asset-tree-rootdrop';
         scroll.appendChild(drop);
         side.appendChild(scroll);
+        if (state.canRemove) side.appendChild(trashRow());
         if (state.canCreate) {
             side.appendChild(button('+ ' + t('addHere'), 'asset-tree-queue-add', function () {
                 if (state.typeGroup) openTypeAdd(state.typeGroup.placeId, state.typeGroup.typeKey);
@@ -2776,6 +2829,7 @@
         if (scroll) {
             scroll.scrollTop = top;
         }
+        paintTrashRow();
         var count = document.getElementById('asset-tree-count');
         if (count) {
             count.textContent = t('assetCount', visibleCount());
@@ -2803,11 +2857,60 @@
         nodes.appendChild(branch);
     }
 
+    function trashRow() {
+        var row = el('div', 'asset-tree-row is-trash');
+        row.id = 'asset-tree-trash-row';
+        row.setAttribute('role', 'treeitem');
+        if (state.trashOpen) row.classList.add('is-selected');
+        var chevron = el('button', 'asset-tree-chevron', '');
+        chevron.type = 'button';
+        chevron.disabled = true;
+        chevron.setAttribute('aria-hidden', 'true');
+        var name = el('span', 'asset-tree-name', t('trash'));
+        name.insertBefore(typeTile(null, 'sm', 'trashcan', '#6B778C'), name.firstChild);
+        row.appendChild(chevron);
+        row.appendChild(name);
+        var count = state.trashItems ? state.trashItems.length : 0;
+        if (count) row.appendChild(el('span', 'asset-tree-qcount', '(' + count + ')'));
+        row.addEventListener('click', function () {
+            openTrash();
+        });
+        return row;
+    }
+
+    function paintTrashRow() {
+        var row = document.getElementById('asset-tree-trash-row');
+        if (!row) return;
+        if (state.trashOpen) row.classList.add('is-selected');
+        else row.classList.remove('is-selected');
+        var count = row.querySelector('.asset-tree-qcount');
+        var total = state.trashItems ? state.trashItems.length : 0;
+        if (total) {
+            if (!count) row.appendChild(el('span', 'asset-tree-qcount', '(' + total + ')'));
+            else count.textContent = '(' + total + ')';
+        } else if (count) {
+            count.parentNode.removeChild(count);
+        }
+    }
+
+    function openTrash() {
+        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        state.trashOpen = true;
+        state.selectedId = null;
+        state.typeGroup = null;
+        state.pane = 'list';
+        state.dirty = false;
+        state.editing = false;
+        renderNodes();
+        replaceDetail();
+        loadTrash();
+    }
+
     function rootRow() {
         var project = currentProject();
         var row = el('div', 'asset-tree-row is-root');
         row.setAttribute('role', 'treeitem');
-        if (!treeAnchorId() && !state.typeGroup) row.classList.add('is-selected');
+        if (!treeAnchorId() && !state.typeGroup && !state.trashOpen) row.classList.add('is-selected');
         var chevron = el('button', 'asset-tree-chevron', state.rootOpen === false ? '▸' : '▾');
         chevron.type = 'button';
         chevron.setAttribute('aria-label', state.rootOpen === false ? t('expand') : t('collapse'));
@@ -2831,6 +2934,7 @@
             }
             state.selectedId = null;
             state.typeGroup = null;
+            state.trashOpen = false;
             state.dirty = false;
             state.pane = 'list';
             renderNodes();
@@ -3420,6 +3524,7 @@
     function selectTypeGroup(placeId, typeKey, scope) {
         if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
         state.typeGroup = { placeId: placeId, typeKey: typeKey, scope: scope || 'direct' };
+        state.trashOpen = false;
         state.selectedId = null;
         state.editing = false;
         state.dirty = false;
@@ -3879,6 +3984,7 @@
         }
         var next = byId()[id];
         if (next && isFolder(next)) state.typeGroup = null;
+        state.trashOpen = false;
         state.selectedId = id;
         state.dirty = false;
         expandPath(id);
@@ -3949,6 +4055,7 @@
     }
 
     function renderDetail() {
+        if (state.trashOpen && state.canRemove) return renderTrash();
         var asset = state.selectedId ? byId()[state.selectedId] : null;
         if (state.pane === 'card' && asset && !isFolder(asset) && !textQuery()) {
             var section = el('section', 'asset-tree-detail');
@@ -4422,7 +4529,7 @@
             ops.appendChild(toolButton(t('addHere'), 'plus', function () {
                 openCreate(asset.id);
             }));
-            ops.appendChild(moreMenu([{ label: t('delete'), danger: true, onClick: function () { openDelete(full); } }]));
+            ops.appendChild(moreMenu([{ label: t('trashMove'), danger: true, onClick: function () { openDelete(full); } }]));
         }
         main.appendChild(ops);
         if (asset.parentId && crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
@@ -5648,7 +5755,7 @@
                 bar.appendChild(button(t('bulkMove'), 'asset-tree-btn', function () { openBulkMove(); }));
             }
             if (assetsOnly || onlyTypes) {
-                bar.appendChild(button(t('delete'), 'asset-tree-btn danger', openBulkDelete));
+                bar.appendChild(button(t('trashMove'), 'asset-tree-btn danger', openBulkDelete));
             }
             bar.appendChild(button(t('bulkClear'), 'asset-tree-btn', function () {
                 state.picked = {};
@@ -5824,7 +5931,7 @@
             if (extra) dialog.appendChild(el('p', null, t('deleteCascade', extra)));
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
-            actions.appendChild(button(t('delete'), 'asset-tree-btn danger', function () {
+            actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () {
                 postBulk('delete', { cascade: extra > 0 });
             }));
             dialog.appendChild(actions);
@@ -6573,6 +6680,8 @@
         if (item.action === 'photo') return t('actPhoto');
         if (item.action === 'photo_delete') return t('actPhotoDelete');
         if (item.action === 'move') return t('actMove');
+        if (item.action === 'trash') return t('actTrash');
+        if (item.action === 'restore') return t('actRestore');
         if (item.action === 'place_add') return t('actPlaceAdd');
         if (item.action === 'place_remove') return t('actPlaceRemove');
         if (item.action === 'place_in') return t('actPlaceIn');
@@ -6611,7 +6720,7 @@
             head.appendChild(drop);
         }
         row.appendChild(head);
-        if (item.action === 'created' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
+        if (item.action === 'created' || item.action === 'trash' || item.action === 'card_image' || item.action === 'card_image_delete') return row;
         if (item.action === 'ping') {
             var pingChange = el('div', 'asset-tree-history-change');
             var pingWord = item.newValue === 'up' ? t('tniWatchUp') : t('tniWatchDown');
@@ -8104,7 +8213,7 @@
                 onClick: function () { pingAsset(asset); }
             });
         }
-        if (mayEdit(asset)) extra.push({ label: t('delete'), danger: true, onClick: function () { openDelete(asset); } });
+        if (mayEdit(asset)) extra.push({ label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
                 label: t('backToList'),
@@ -8258,7 +8367,7 @@
                 }
                 showDetail(state.detail || asset, false);
             }));
-            actions.appendChild(button(t('delete'), 'asset-tree-btn danger', function () { openDelete(asset); }));
+            actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () { openDelete(asset); }));
             var save = button(t('save'), 'asset-tree-btn primary', function () { saveDetail(); });
             save.id = 'asset-tree-save';
             actions.appendChild(save);
@@ -10386,7 +10495,7 @@
             }
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
-            actions.appendChild(button(t('delete'), 'asset-tree-btn danger', function () {
+            actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () {
                 ajax('DELETE', '/assets/' + asset.id + '?cascade=' + (nested ? 'true' : 'false'), null, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         closeModal();
@@ -11228,6 +11337,7 @@
             if (state.busy || state.dirty || state.loading) return;
             reloadTree(function () {
                 if (state.view === 'all' || state.view === 'mine') renderFrame();
+                if (state.canRemove && state.view === 'all') loadTrash();
             });
         });
     }
@@ -11390,6 +11500,7 @@
         state.holderAssets = [];
         var project = currentProject();
         applyRights(project);
+        if (!state.canRemove) state.trashOpen = false;
         state.grants = null;
         state.portalRules = null;
         state.portalDraft = null;
@@ -11418,6 +11529,9 @@
             renderFrame();
             if (state.view === 'mine') {
                 loadMine();
+            }
+            if (state.canRemove && state.view === 'all') {
+                loadTrash();
             }
             if (state.view === 'all' && state.selectedId) {
                 selectAsset(state.selectedId, true);
@@ -11609,6 +11723,138 @@
 
     var reportToken = 0;
     var mineToken = 0;
+    var trashToken = 0;
+
+    function loadTrash() {
+        var token = ++trashToken;
+        if (!state.projectKey || !state.canRemove) {
+            state.trashItems = [];
+            return;
+        }
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/trash', null, function (status, payload) {
+            if (token !== trashToken) return;
+            if (status >= 200 && status < 300) {
+                state.trashItems = payload || [];
+                state.trashError = '';
+            } else {
+                state.trashItems = [];
+                state.trashError = (payload && payload.message) || t('errorTitle');
+            }
+            if (state.view !== 'all') return;
+            if (document.getElementById('asset-tree-nodes')) renderNodes();
+            if (state.trashOpen) replaceDetail();
+        });
+    }
+
+    function renderTrash() {
+        var section = el('section', 'asset-tree-detail is-queue');
+        section.id = 'asset-tree-detail';
+        var head = el('div', 'asset-tree-queue-head');
+        var titles = el('div', 'asset-tree-queue-titles');
+        var titleRow = el('div', 'asset-tree-queue-title is-trash');
+        var items = state.trashItems;
+        titleRow.appendChild(typeTile(null, 'sm', 'trashcan', '#6B778C'));
+        titleRow.appendChild(el('h2', null, t('trash')));
+        titleRow.appendChild(el('span', 'asset-tree-badge', String(items ? items.length : 0)));
+        titles.appendChild(titleRow);
+        titles.appendChild(el('p', 'asset-tree-hint', t('trashHint')));
+        head.appendChild(titles);
+        if (items && items.length) {
+            var tools = el('div', 'asset-tree-inline-actions');
+            tools.appendChild(button(t('trashEmptyAll'), 'asset-tree-btn danger', openEmptyTrash));
+            head.appendChild(tools);
+        }
+        section.appendChild(head);
+        if (items == null) {
+            section.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            return section;
+        }
+        if (state.trashError) {
+            section.appendChild(el('p', 'asset-tree-hint', state.trashError));
+            return section;
+        }
+        if (!items.length) {
+            section.appendChild(el('p', 'asset-tree-trash-empty', t('trashEmpty')));
+            return section;
+        }
+        var rows = items.map(function (item) {
+            var name = el('div');
+            name.appendChild(el('strong', null, item.name || ''));
+            if (item.objectKey) name.appendChild(el('div', 'asset-tree-key', item.objectKey));
+            var actions = el('div', 'asset-tree-trash-actions');
+            actions.appendChild(button(t('trashRestore'), 'asset-tree-btn primary', function () {
+                ajax('POST', '/assets/' + item.id + '/restore', {}, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        notify(t('trashRestored'));
+                        reloadTree(function () {
+                            renderNodes();
+                            loadTrash();
+                        });
+                    } else {
+                        notify((payload && payload.message) || t('errorTitle'));
+                    }
+                });
+            }));
+            actions.appendChild(button(t('trashPurge'), 'asset-tree-btn danger', function () {
+                openPurgeTrash(item);
+            }));
+            return [
+                name,
+                item.typeLabel || item.typeKey || '',
+                item.location || t('root'),
+                stamp(item.deleted),
+                item.deletedBy || '',
+                item.nested ? t('trashNested', item.nested) : '',
+                actions
+            ];
+        });
+        section.appendChild(assetTable(rows, [
+            t('name'), t('type'), t('trashPlace'), t('trashWhen'), t('trashBy'), '', ''
+        ]));
+        return section;
+    }
+
+    function openPurgeTrash(item) {
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('trashPurgeTitle')));
+            dialog.appendChild(el('p', null, t('trashPurgeText', item.name || item.objectKey || '')));
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+            actions.appendChild(button(t('trashPurge'), 'asset-tree-btn danger', function () {
+                ajax('DELETE', '/assets/' + item.id + '?purge=true', null, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        closeModal();
+                        notify(t('trashPurged'));
+                        loadTrash();
+                    } else {
+                        dialog.appendChild(el('div', 'asset-tree-form-error', (payload && payload.message) || t('errorTitle')));
+                    }
+                });
+            }));
+            dialog.appendChild(actions);
+        });
+    }
+
+    function openEmptyTrash() {
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('trashEmptyTitle')));
+            dialog.appendChild(el('p', null, t('trashEmptyText')));
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+            actions.appendChild(button(t('trashEmptyAll'), 'asset-tree-btn danger', function () {
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/trash', null, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        closeModal();
+                        notify(t('trashPurged'));
+                        loadTrash();
+                    } else {
+                        dialog.appendChild(el('div', 'asset-tree-form-error', (payload && payload.message) || t('errorTitle')));
+                    }
+                });
+            }));
+            dialog.appendChild(actions);
+        });
+    }
 
     function assetsChanged() {
         state.report = null;
@@ -11619,6 +11865,7 @@
         } else {
             state.mineAssets = null;
         }
+        if (state.canRemove) loadTrash();
     }
 
     function loadReport() {
@@ -32594,6 +32841,7 @@
                 mount();
                 return;
             }
+            if (!state.canRemove) state.trashOpen = false;
             if (state.view === 'mine') {
                 mount();
                 loadMine();
@@ -32633,6 +32881,7 @@
                             selectAsset(requested, true);
                         }
                     }
+                    if (state.canRemove) loadTrash();
                     if (state.focusSearch) {
                         var searchBox = document.getElementById('asset-tree-search');
                         if (searchBox) searchBox.focus();

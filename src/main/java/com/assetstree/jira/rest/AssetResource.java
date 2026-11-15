@@ -297,12 +297,51 @@ public class AssetResource {
 
     @DELETE
     @Path("assets/{id}")
-    public Response delete(@PathParam("id") final int id, @QueryParam("cascade") final boolean cascade) {
+    public Response delete(@PathParam("id") final int id, @QueryParam("cascade") final boolean cascade,
+                           @QueryParam("purge") final boolean purge) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                assetService.deleteAsset(user(), id, cascade);
+                if (purge) {
+                    assetService.purgeAsset(user(), id);
+                } else {
+                    assetService.deleteAsset(user(), id, cascade);
+                }
                 return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/trash")
+    public Response trash(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listTrash(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/trash")
+    public Response emptyTrash(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.emptyTrash(user(), projectKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/restore")
+    public Response restore(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.restoreAsset(user(), id)).build();
             }
         });
     }
