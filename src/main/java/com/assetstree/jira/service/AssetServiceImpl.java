@@ -2301,11 +2301,16 @@ public class AssetServiceImpl implements AssetService {
         if (data.length > PhotoStore.MAX_BYTES) {
             throw new AssetException(400, "asset-tree.error.photo.size");
         }
-        final String kind = PhotoStore.kindOf(data);
-        if (kind.isEmpty()) {
+        if (PhotoStore.kindOf(data).isEmpty()) {
             throw new AssetException(400, "asset-tree.error.photo.type");
         }
-        final byte[] bytes = data;
+        final byte[] bytes;
+        try {
+            bytes = PhotoStore.frame(data);
+        } catch (IOException ex) {
+            throw new AssetException(400, "asset-tree.error.photo.type");
+        }
+        final String kind = "jpeg";
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
@@ -2367,8 +2372,24 @@ public class AssetServiceImpl implements AssetService {
         } catch (IOException ex) {
             throw new AssetException(500, "asset-tree.error.unexpected");
         }
-        String name = "jpeg".equals(kind) ? "photo.jpg" : "photo.png";
-        return new StoredFile(name, PhotoStore.contentType(kind), data);
+        byte[] shown = data;
+        String shownKind = kind;
+        try {
+            byte[] framed = PhotoStore.frame(data);
+            if (framed != data) {
+                PhotoStore.write(assetId, framed);
+                shown = framed;
+                shownKind = "jpeg";
+                if (!"jpeg".equals(kind)) {
+                    markPhotoJpeg(assetId);
+                }
+            }
+        } catch (IOException ex) {
+            shown = data;
+            shownKind = kind;
+        }
+        String name = "jpeg".equals(shownKind) ? "photo.jpg" : "photo.png";
+        return new StoredFile(name, PhotoStore.contentType(shownKind), shown);
     }
 
     @Override
@@ -2394,6 +2415,20 @@ public class AssetServiceImpl implements AssetService {
         if (had[0]) {
             logActivity(assetId, user.getKey(), "photo_delete", "", "1", "");
         }
+    }
+
+    private void markPhotoJpeg(final int assetId) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = ao().get(AssetEntity.class, assetId);
+                if (entity != null && entity.getPhoto() != null && !entity.getPhoto().isEmpty()) {
+                    entity.setPhoto("jpeg");
+                    entity.save();
+                }
+                return null;
+            }
+        });
     }
 
     private void clearPhoto(final int assetId) {
