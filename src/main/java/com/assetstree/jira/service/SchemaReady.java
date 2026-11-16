@@ -477,6 +477,10 @@ public final class SchemaReady {
         }
     }
 
+    static EntityManager managerOf(ActiveObjects ao) {
+        return entityManager(ao);
+    }
+
     private static EntityManager entityManager(ActiveObjects ao) {
         return findManager(ao, new IdentityHashMap<Object, Boolean>(), 0);
     }

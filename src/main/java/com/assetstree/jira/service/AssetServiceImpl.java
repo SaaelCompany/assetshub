@@ -5840,18 +5840,7 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
         final long issueId = issue.getId().longValue();
-        try {
-            insertIssueLink(user, assetId, issueId, requireWrite);
-        } catch (RuntimeException ex) {
-            AssetException cause = assetCause(ex);
-            if (cause != null) {
-                throw cause;
-            }
-            log.warn("Could not store request {} on asset {}, repairing the link table", Long.valueOf(issueId), Integer.valueOf(assetId), ex);
-            SchemaReady.force();
-            SchemaReady.ensure(ao());
-            insertIssueLink(user, assetId, issueId, requireWrite);
-        }
+        insertIssueLink(user, assetId, issueId, requireWrite);
         try {
             return toIssue(issue);
         } catch (RuntimeException ex) {
@@ -5864,28 +5853,38 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void insertIssueLink(final ApplicationUser user, final int assetId, final long issueId, final boolean requireWrite) {
-        ao().executeInTransaction(new TransactionCallback<Void>() {
-            @Override
-            public Void doInTransaction() {
-                AssetEntity asset = requireWrite ? requireWritable(user, assetId) : requireAsset(assetId);
-                AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
-                        Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, Long.valueOf(issueId)));
-                if (existing != null && existing.length > 0) {
-                    throw new AssetException(409, "asset-tree.error.issue.duplicate");
+        final AssetEntity asset = requireWrite ? requireWritable(user, assetId) : requireAsset(assetId);
+        String kept = "";
+        try {
+            kept = Statuses.canonical(asset.getStatus());
+        } catch (RuntimeException ex) {
+            kept = "";
+        }
+        final String before = kept == null ? "" : kept;
+        try {
+            ao().executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
+                            Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, Long.valueOf(issueId)));
+                    if (existing != null && existing.length > 0) {
+                        throw new AssetException(409, "asset-tree.error.issue.duplicate");
+                    }
+                    ao().create(AssetIssueLinkEntity.class,
+                            new DBParam("ASSET_ID", assetId),
+                            new DBParam("ISSUE_ID", Long.valueOf(issueId)),
+                            new DBParam("STATUS_BEFORE", before));
+                    return null;
                 }
-                String before = "";
-                try {
-                    before = Statuses.canonical(asset.getStatus());
-                } catch (RuntimeException ex) {
-                    before = "";
-                }
-                ao().create(AssetIssueLinkEntity.class,
-                        new DBParam("ASSET_ID", assetId),
-                        new DBParam("ISSUE_ID", Long.valueOf(issueId)),
-                        new DBParam("STATUS_BEFORE", before == null ? "" : before));
-                return null;
+            });
+        } catch (RuntimeException ex) {
+            AssetException cause = assetCause(ex);
+            if (cause != null) {
+                throw cause;
             }
-        });
+            log.warn("ASSET-LINK ordinary insert failed for asset {} and issue {}", Integer.valueOf(assetId), Long.valueOf(issueId), ex);
+            IssueLinkStore.write(ao(), assetId, issueId, before);
+        }
     }
 
     private List<AssetDto> linkedAssets(ApplicationUser user, long issueId) {
