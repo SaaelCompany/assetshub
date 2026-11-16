@@ -7414,9 +7414,290 @@
         input.onchange = function () {
             var chosen = input.files && input.files[0];
             input.value = '';
-            if (chosen) uploadPhoto(asset, chosen);
+            if (chosen) openPhotoCrop(asset, chosen);
         };
         input.click();
+    }
+
+    function jpegOrientation(bytes) {
+        if (!bytes || bytes.length < 16 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return 1;
+        var i = 2;
+        while (i + 4 < bytes.length) {
+            if (bytes[i] !== 0xff) return 1;
+            var marker = bytes[i + 1];
+            if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+                i += 2;
+                continue;
+            }
+            var size = (bytes[i + 2] << 8) | bytes[i + 3];
+            if (size < 2 || i + 2 + size > bytes.length) return 1;
+            if (marker === 0xe1) return app1Orientation(bytes, i + 4, size - 2);
+            if (marker === 0xda) return 1;
+            i += 2 + size;
+        }
+        return 1;
+    }
+
+    function app1Orientation(bytes, offset, length) {
+        if (length < 14 || offset < 0 || offset + length > bytes.length) return 1;
+        if (bytes[offset] !== 69 || bytes[offset + 1] !== 120 || bytes[offset + 2] !== 105 || bytes[offset + 3] !== 102) return 1;
+        if (bytes[offset + 4] !== 0 || bytes[offset + 5] !== 0) return 1;
+        var tiff = offset + 6;
+        var end = offset + length;
+        if (tiff + 8 > end) return 1;
+        var little = bytes[tiff] === 73 && bytes[tiff + 1] === 73;
+        var big = bytes[tiff] === 77 && bytes[tiff + 1] === 77;
+        if (!little && !big) return 1;
+        if (photoU16(bytes, tiff + 2, little) !== 42) return 1;
+        var ifd = tiff + photoU32(bytes, tiff + 4, little);
+        if (ifd < tiff || ifd + 2 > end) return 1;
+        var count = photoU16(bytes, ifd, little);
+        var entry = ifd + 2;
+        var n;
+        for (n = 0; n < count; n++) {
+            if (entry + 12 > end) return 1;
+            if (photoU16(bytes, entry, little) === 0x0112) {
+                var value = photoU16(bytes, entry + 8, little);
+                return value >= 1 && value <= 8 ? value : 1;
+            }
+            entry += 12;
+        }
+        return 1;
+    }
+
+    function photoU16(bytes, offset, little) {
+        var a = bytes[offset];
+        var b = bytes[offset + 1];
+        return little ? (b << 8) | a : (a << 8) | b;
+    }
+
+    function photoU32(bytes, offset, little) {
+        var a = bytes[offset];
+        var b = bytes[offset + 1];
+        var c = bytes[offset + 2];
+        var d = bytes[offset + 3];
+        if (little) return ((d << 24) | (c << 16) | (b << 8) | a) >>> 0;
+        return ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
+    }
+
+    function uprightPhoto(img, orientation) {
+        var w = img.naturalWidth || img.width;
+        var h = img.naturalHeight || img.height;
+        var canvas = document.createElement('canvas');
+        var swap = orientation >= 5 && orientation <= 8;
+        canvas.width = swap ? h : w;
+        canvas.height = swap ? w : h;
+        var ctx = canvas.getContext('2d');
+        if (orientation === 2) {
+            ctx.translate(w, 0);
+            ctx.scale(-1, 1);
+        } else if (orientation === 3) {
+            ctx.translate(w, h);
+            ctx.rotate(Math.PI);
+        } else if (orientation === 4) {
+            ctx.translate(0, h);
+            ctx.scale(1, -1);
+        } else if (orientation === 5) {
+            ctx.rotate(-Math.PI / 2);
+            ctx.scale(-1, 1);
+        } else if (orientation === 6) {
+            ctx.translate(h, 0);
+            ctx.rotate(Math.PI / 2);
+        } else if (orientation === 7) {
+            ctx.scale(-1, 1);
+            ctx.translate(-h, 0);
+            ctx.translate(0, w);
+            ctx.rotate(3 * Math.PI / 2);
+        } else if (orientation === 8) {
+            ctx.translate(0, w);
+            ctx.rotate(3 * Math.PI / 2);
+        }
+        ctx.drawImage(img, 0, 0);
+        return canvas;
+    }
+
+    function openPhotoCrop(asset, file) {
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+            showPhotoError(t('photoSize'));
+            return;
+        }
+        showPhotoError('');
+        var reader = new FileReader();
+        reader.onload = function () {
+            var bytes = new Uint8Array(reader.result);
+            var orientation = jpegOrientation(bytes);
+            var url = URL.createObjectURL(file);
+            var img = new Image();
+            img.onload = function () {
+                URL.revokeObjectURL(url);
+                if (!img.width || !img.height) {
+                    showPhotoError(t('errorTitle'));
+                    return;
+                }
+                showPhotoCrop(asset, uprightPhoto(img, orientation));
+            };
+            img.onerror = function () {
+                URL.revokeObjectURL(url);
+                showPhotoError(t('errorTitle'));
+            };
+            img.style.imageOrientation = 'none';
+            img.src = url;
+        };
+        reader.onerror = function () { showPhotoError(t('errorTitle')); };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function showPhotoCrop(asset, source) {
+        var viewW = 0;
+        var viewH = 0;
+        var srcW = source.width;
+        var srcH = source.height;
+        var cover = 1;
+        var zoom = 1;
+        var dispW = 0;
+        var dispH = 0;
+        var offsetX = 0;
+        var offsetY = 0;
+        var drag = null;
+        var placed = false;
+        var closed = false;
+        var stage = null;
+        var slider = null;
+        source.className = 'asset-tree-crop-image';
+        function clampShift() {
+            if (offsetX > 0) offsetX = 0;
+            if (offsetY > 0) offsetY = 0;
+            if (offsetX < viewW - dispW) offsetX = viewW - dispW;
+            if (offsetY < viewH - dispH) offsetY = viewH - dispH;
+        }
+        function paintShift(keepCenter) {
+            var prevW = dispW;
+            var prevH = dispH;
+            dispW = srcW * cover * zoom;
+            dispH = srcH * cover * zoom;
+            if (keepCenter && prevW) {
+                var cx = (viewW / 2 - offsetX) / prevW;
+                var cy = (viewH / 2 - offsetY) / prevH;
+                offsetX = viewW / 2 - cx * dispW;
+                offsetY = viewH / 2 - cy * dispH;
+            } else if (!placed) {
+                offsetX = (viewW - dispW) / 2;
+                offsetY = (viewH - dispH) / 2;
+                placed = true;
+            }
+            clampShift();
+            source.style.width = dispW + 'px';
+            source.style.height = dispH + 'px';
+            source.style.left = offsetX + 'px';
+            source.style.top = offsetY + 'px';
+        }
+        function onMove(event) {
+            if (!drag) return;
+            var point = event.touches && event.touches.length ? event.touches[0] : event;
+            offsetX = drag.ox + point.clientX - drag.x;
+            offsetY = drag.oy + point.clientY - drag.y;
+            clampShift();
+            source.style.left = offsetX + 'px';
+            source.style.top = offsetY + 'px';
+            if (event.preventDefault) event.preventDefault();
+        }
+        function onUp() { drag = null; }
+        function release() {
+            if (closed) return;
+            closed = true;
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onUp);
+            if (backdrop && backdrop.parentNode) closeModal(backdrop);
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchmove', onMove);
+        document.addEventListener('touchend', onUp);
+        var backdrop = openModal(function (dialog) {
+            dialog.className += ' is-crop';
+            dialog.appendChild(el('h2', null, t('photoCropTitle')));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('photoCropHint')));
+            stage = el('div', 'asset-tree-crop');
+            stage.appendChild(source);
+            dialog.appendChild(stage);
+            var zoomLabel = el('label', 'asset-tree-crop-zoom-label');
+            zoomLabel.appendChild(el('span', null, t('photoCropZoom')));
+            slider = el('input', 'asset-tree-crop-zoom');
+            slider.type = 'range';
+            slider.min = '1';
+            slider.max = '3';
+            slider.step = '0.01';
+            slider.value = '1';
+            zoomLabel.appendChild(slider);
+            dialog.appendChild(zoomLabel);
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', release));
+            actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+                var out = document.createElement('canvas');
+                out.width = 960;
+                out.height = 640;
+                var sx = -offsetX / dispW * srcW;
+                var sy = -offsetY / dispH * srcH;
+                var sw = viewW / dispW * srcW;
+                var sh = viewH / dispH * srcH;
+                out.getContext('2d').drawImage(source, sx, sy, sw, sh, 0, 0, 960, 640);
+                function send(blob) {
+                    if (!blob) {
+                        showPhotoError(t('errorTitle'));
+                        return;
+                    }
+                    release();
+                    uploadPhoto(asset, blob);
+                }
+                if (out.toBlob) {
+                    out.toBlob(send, 'image/jpeg', 0.9);
+                    return;
+                }
+                var dataUrl = out.toDataURL('image/jpeg', 0.9);
+                var raw = atob(dataUrl.split(',')[1]);
+                var list = new Uint8Array(raw.length);
+                var i;
+                for (i = 0; i < raw.length; i++) list[i] = raw.charCodeAt(i);
+                send(new Blob([list], { type: 'image/jpeg' }));
+            }));
+            dialog.appendChild(actions);
+            slider.addEventListener('input', function () {
+                zoom = parseFloat(slider.value) || 1;
+                paintShift(true);
+            });
+            function startDrag(event) {
+                var point = event.touches && event.touches.length ? event.touches[0] : event;
+                drag = { x: point.clientX, y: point.clientY, ox: offsetX, oy: offsetY };
+                if (event.preventDefault) event.preventDefault();
+            }
+            stage.addEventListener('mousedown', startDrag);
+            stage.addEventListener('touchstart', startDrag);
+            stage.addEventListener('wheel', function (event) {
+                if (event.preventDefault) event.preventDefault();
+                var next = (parseFloat(slider.value) || 1) + (event.deltaY < 0 ? 0.08 : -0.08);
+                if (next < 1) next = 1;
+                if (next > 3) next = 3;
+                slider.value = String(next);
+                zoom = next;
+                paintShift(true);
+            });
+        });
+        if (backdrop) {
+            backdrop.addEventListener('click', function (event) {
+                if (event.target === backdrop) {
+                    event.stopPropagation();
+                    release();
+                }
+            }, true);
+        }
+        viewW = stage ? stage.clientWidth : 0;
+        viewH = viewW ? Math.round(viewW * 2 / 3) : 0;
+        if (stage && viewH) stage.style.height = viewH + 'px';
+        cover = viewW && viewH ? Math.max(viewW / srcW, viewH / srcH) : 1;
+        paintShift(false);
     }
 
     function deletePhoto(asset) {
