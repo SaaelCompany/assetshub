@@ -162,6 +162,34 @@
         <description>Moves linked equipment when a request changes status.</description>
     </listener>
 
+    <web-resource key="asset-tree-automation" name="Asset Tree Automation">
+        <context>automation-addons-context</context>
+        <resource type="download" name="automation-rules.js" location="js/automation-rules.js"/>
+        <resource type="download" name="automation.svg" location="images/automation.svg"/>
+        <transformation extension="js">
+            <transformer key="jsI18n"/>
+        </transformation>
+    </web-resource>
+
+    <automation-rule-component key="asset-changed-trigger"
+                               class="com.assetstree.jira.automation.AssetChangedTrigger"
+                               name="Equipment changed"
+                               type="TRIGGER">
+        <param name="projectSafe">true</param>
+    </automation-rule-component>
+    <automation-rule-component key="asset-linked-condition"
+                               class="com.assetstree.jira.automation.AssetLinkedCondition"
+                               name="Linked equipment"
+                               type="CONDITION">
+        <param name="projectSafe">true</param>
+    </automation-rule-component>
+    <automation-rule-component key="asset-status-action"
+                               class="com.assetstree.jira.automation.AssetStatusAction"
+                               name="Set equipment status"
+                               type="ACTION">
+        <param name="projectSafe">true</param>
+    </automation-rule-component>
+
     <servlet-filter name="Asset Tree TNI Sight" key="asset-tree-tni-sight" class="com.assetstree.jira.servlet.TniSightFilter" location="before-dispatch" weight="10">
         <description>Keeps the portal device report that arrives with the request which creates the issue.</description>
         <url-pattern>/*</url-pattern>

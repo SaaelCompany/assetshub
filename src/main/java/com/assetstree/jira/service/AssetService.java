@@ -433,4 +433,13 @@ public interface AssetService {
     TniWatchDto pingTni(ApplicationUser user, int assetId);
 
     ImportResultDto importTniSheet(ApplicationUser user, String projectKey, TniSheetDraft draft);
+
+    /** Request ids already linked to this equipment. Used by an Automation trigger. */
+    List<Long> issueIdsForAsset(int assetId);
+
+    /** True when the request has linked equipment, and the status matches when one is given. */
+    boolean issueHasEquipment(long issueId, String statusKey);
+
+    /** Sets the status of equipment linked to the request. Returns how many rows changed. */
+    int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey);
 }
