@@ -22,9 +22,14 @@ public final class ReportCatalog {
     public static final String WORK = "work";
     public static final String DONE = "done";
     public static final String FIELD = "field";
+    public static final String FAULTS = "faults";
+    public static final String REQUESTS = "requests";
+    public static final String IDLE = "idle";
+    public static final String PTO = "pto";
 
     private static final List<String> STANDARD = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK, DONE));
+            STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK, DONE,
+            FAULTS, REQUESTS, IDLE, PTO));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
             STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", DONE, "who", FIELD));
     private static final List<String> DONE_AXES = Collections.unmodifiableList(Arrays.asList(
@@ -86,6 +91,14 @@ public final class ReportCatalog {
     }
 
     /** A saved report whose rows are completed schedule days. */
+    public static boolean ops(String key) {
+        return FAULTS.equals(key) || REQUESTS.equals(key) || IDLE.equals(key) || PTO.equals(key);
+    }
+
+    public static boolean period(String key) {
+        return REQUESTS.equals(key) || IDLE.equals(key) || PTO.equals(key);
+    }
+
     public static boolean doneReport(String group) {
         return DONE.equals(group) || (group != null && group.startsWith(DONE + "+"));
     }

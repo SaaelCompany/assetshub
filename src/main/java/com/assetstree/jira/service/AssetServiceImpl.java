@@ -230,7 +230,10 @@ import com.assetstree.jira.model.ContractorContract;
 import com.assetstree.jira.model.LifeBook;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
+import com.assetstree.jira.model.PtoWindow;
+import com.assetstree.jira.model.RepairTime;
 import com.assetstree.jira.model.ReportCatalog;
+import com.assetstree.jira.model.ReportWindow;
 import com.assetstree.jira.model.ScheduleDone;
 import com.assetstree.jira.model.ReportWorkbook;
 import com.assetstree.jira.model.SavedReportDraft;
@@ -11808,18 +11811,18 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public ReportViewDto reportView(ApplicationUser user, final String projectKey, final String reportKey, final int lineFrom, final boolean allLines, final String bucket) {
+    public ReportViewDto reportView(ApplicationUser user, final String projectKey, final String reportKey, final int lineFrom, final boolean allLines, final String bucket, final String start, final String end) {
         final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         return ao().executeInTransaction(new TransactionCallback<ReportViewDto>() {
             @Override
             public ReportViewDto doInTransaction() {
-                return reportViewInside(project, reportKey, lineFrom, allLines, bucket);
+                return reportViewInside(project, reportKey, lineFrom, allLines, bucket, start, end);
             }
         });
     }
 
-    private ReportViewDto reportViewInside(Project project, String reportKey, int lineFrom, boolean allLines, String bucket) {
+    private ReportViewDto reportViewInside(Project project, String reportKey, int lineFrom, boolean allLines, String bucket, String start, String end) {
         String group = ReportCatalog.group(reportKey);
         String filter = "";
         String value = "";
@@ -11859,7 +11862,7 @@ public class AssetServiceImpl implements AssetService {
         if ("kind".equals(group) || ReportCatalog.doneReport(group) || ReportCatalog.DONE.equals(key)) {
             metric = "count";
         }
-        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue, chart);
+        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue, chart, start, end);
         view.setGroupBy(group);
         view.setFieldKey(fieldKey);
         view.setChart(chart);
@@ -11870,7 +11873,7 @@ public class AssetServiceImpl implements AssetService {
         List<SavedReportDto> items = new ArrayList<SavedReportDto>();
         boolean service = moduleOn(projectKey, ProjectModules.SERVICE);
         for (String key : ReportCatalog.standard()) {
-            if (ReportCatalog.DONE.equals(key) && !service) {
+            if ((ReportCatalog.DONE.equals(key) || ReportCatalog.PTO.equals(key)) && !service) {
                 continue;
             }
             SavedReportDto item = new SavedReportDto();
@@ -11976,6 +11979,12 @@ public class AssetServiceImpl implements AssetService {
         if (ReportCatalog.DONE.equals(key)) {
             return ReportCatalog.DONE;
         }
+        if (ReportCatalog.FAULTS.equals(key)) {
+            return ReportCatalog.PLACE;
+        }
+        if (ReportCatalog.REQUESTS.equals(key) || ReportCatalog.IDLE.equals(key) || ReportCatalog.PTO.equals(key)) {
+            return "asset";
+        }
         return "";
     }
 
@@ -12027,12 +12036,24 @@ public class AssetServiceImpl implements AssetService {
         if (ReportCatalog.DONE.equals(key)) {
             return i18n().getText("asset-tree.ui.reportDone");
         }
+        if (ReportCatalog.FAULTS.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportFaults");
+        }
+        if (ReportCatalog.REQUESTS.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportRequests");
+        }
+        if (ReportCatalog.IDLE.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportIdle");
+        }
+        if (ReportCatalog.PTO.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportPto");
+        }
         return i18n().getText("asset-tree.ui.reportStatusTitle");
     }
 
     private ReportViewDto buildReport(Project project, String key, String title, boolean standard,
             String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket,
-            String fieldKey, String attrKey, String attrValue, String chartList) {
+            String fieldKey, String attrKey, String attrValue, String chartList, String start, String end) {
         AssetEntity[] assets = assetsIn(project.getKey());
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), assets));
         Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
@@ -12052,6 +12073,9 @@ public class AssetServiceImpl implements AssetService {
         Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
                 ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         String valueKind = byField ? fieldKind(types, fieldKey) : "";
+        if (ReportCatalog.ops(key)) {
+            return buildOpsReport(project, key, title, standard, assets, types, index, statusNames, lineFrom, allLines, onlyBucket, start, end);
+        }
         boolean done = ReportCatalog.DONE.equals(key) || ReportCatalog.doneReport(group);
         if (done) {
             return buildDoneReport(project, key, title, standard, group, filter, value, assets, types, index, lineFrom, allLines, onlyBucket, attrKey, attrValue);
@@ -12856,6 +12880,352 @@ public class AssetServiceImpl implements AssetService {
         return piece;
     }
 
+    private ReportViewDto buildOpsReport(Project project, String key, String title, boolean standard,
+            AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
+            Map<String, String> statusNames, int lineFrom, boolean allLines, String onlyBucket, String start, String end) {
+        LocalDate today = businessToday();
+        ReportWindow window = ReportWindow.of(start, end, today, businessZone());
+        Map<String, ReportBucketDto> buckets = new LinkedHashMap<String, ReportBucketDto>();
+        List<ReportLineDto> lines = new ArrayList<ReportLineDto>();
+        List<String> lineKeys = new ArrayList<String>();
+        Map<String, String> placeSort = new HashMap<String, String>();
+        String repairLabel = statusNames.get(Statuses.REPAIR);
+        if (repairLabel == null || repairLabel.isEmpty()) {
+            repairLabel = i18n().getText("asset-tree.ui.statusRepair");
+        }
+        int onTimeUnits = 0;
+        int lateUnits = 0;
+        int waitingUnits = 0;
+        if (ReportCatalog.FAULTS.equals(key)) {
+            Map<Integer, Long> entered = repairEntered(index);
+            for (AssetEntity asset : assets) {
+                if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
+                    continue;
+                }
+                if (!Statuses.REPAIR.equals(Statuses.canonical(asset.getStatus()))) {
+                    continue;
+                }
+                String place = placeKey(asset, types, index);
+                AssetEntity room = place.isEmpty() ? null : index.get(Integer.valueOf(place));
+                String placeName = room == null ? i18n().getText("asset-tree.ui.root") : room.getName();
+                if (room != null) {
+                    placeSort.put(place, placeOwnPath(room, types, index));
+                }
+                ReportBucketDto bucket = buckets.get(place);
+                if (bucket == null) {
+                    bucket = new ReportBucketDto(place, placeName, "#DE350B", 0);
+                    buckets.put(place, bucket);
+                }
+                bucket.setCount(bucket.getCount() + 1);
+                Long since = entered.get(Integer.valueOf(asset.getID()));
+                String when = since == null ? "" : dayOf(since.longValue());
+                String clock = since == null ? "" : idleText(Math.max(0L, System.currentTimeMillis() - since.longValue()));
+                ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(),
+                        placeName + (clock.isEmpty() ? "" : " · " + clock));
+                line.setBucket(place);
+                line.setAsset(placeName);
+                line.setKind(repairLabel);
+                line.setWhen(when);
+                line.setState("repair");
+                line.setClock(clock);
+                lines.add(line);
+                lineKeys.add(place);
+            }
+        } else if (ReportCatalog.REQUESTS.equals(key)) {
+            fillRequestReport(assets, index, window, buckets, lines, lineKeys);
+        } else if (ReportCatalog.IDLE.equals(key)) {
+            Map<Integer, List<RepairTime.Change>> history = repairHistory(index);
+            for (AssetEntity asset : assets) {
+                if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
+                    continue;
+                }
+                boolean repairNow = Statuses.REPAIR.equals(Statuses.canonical(asset.getStatus()));
+                List<RepairTime.Change> changes = history.get(Integer.valueOf(asset.getID()));
+                List<RepairTime.Span> spans = RepairTime.spans(changes, repairNow, window.getStartMillis(), window.getEndMillis());
+                long overlap = RepairTime.overlap(spans);
+                if (overlap <= 0L) {
+                    continue;
+                }
+                String bucketKey = String.valueOf(asset.getID());
+                ReportBucketDto bucket = new ReportBucketDto(bucketKey, assetLabel(asset), "#DE350B", RepairTime.days(overlap));
+                buckets.put(bucketKey, bucket);
+                for (int i = 0; i < spans.size(); i++) {
+                    RepairTime.Span span = spans.get(i);
+                    String from = dayOf(span.getClippedStart());
+                    String to = dayOf(span.getClippedEnd() - 1L);
+                    String clock = idleText(span.overlap());
+                    ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), repairLabel,
+                            from + " – " + to + " · " + clock);
+                    line.setBucket(bucketKey);
+                    line.setAsset(asset.getName());
+                    line.setKind(repairLabel);
+                    line.setWhen(from);
+                    line.setFrom(from);
+                    line.setTo(to);
+                    line.setNext(to);
+                    line.setClock(clock);
+                    line.setState("idle");
+                    lines.add(line);
+                    lineKeys.add(bucketKey);
+                }
+            }
+        } else if (ReportCatalog.PTO.equals(key) && moduleOn(project.getKey(), ProjectModules.SERVICE)) {
+            int[] counts = fillPtoReport(project, assets, index, window, today, buckets, lines, lineKeys);
+            onTimeUnits = counts[0];
+            lateUnits = counts[1];
+            waitingUnits = counts[2];
+        }
+        int total = 0;
+        for (ReportBucketDto bucket : buckets.values()) {
+            total += bucket.getCount();
+        }
+        String reason = buckets.isEmpty() ? opsReason(key) : "";
+        ReportViewDto view = finishReport(key, title, standard, standardGroup(key), false, total, 0L, buckets, lines, lineKeys,
+                onlyBucket, lineFrom, allLines, false, reason, placeSort);
+        view.setHint(opsHint(key, window, onTimeUnits, lateUnits, waitingUnits));
+        return view;
+    }
+
+    private void fillRequestReport(AssetEntity[] assets, Map<Integer, AssetEntity> index, ReportWindow window,
+            Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines, List<String> lineKeys) {
+        List<Integer> ids = new ArrayList<Integer>();
+        for (AssetEntity asset : assets) {
+            if (asset != null && !isLocation(asset) && asset.getDeletedAt() == null) {
+                ids.add(Integer.valueOf(asset.getID()));
+            }
+        }
+        Map<Integer, List<Long>> issues = new HashMap<Integer, List<Long>>();
+        for (AssetIssueLinkEntity link : findByAssetIds(AssetIssueLinkEntity.class, ids)) {
+            if (link == null || link.getIssueId() <= 0L) {
+                continue;
+            }
+            String type = link.getLinkType();
+            if (type != null && !type.trim().isEmpty()) {
+                continue;
+            }
+            Integer assetId = Integer.valueOf(link.getAssetId());
+            List<Long> owned = issues.get(assetId);
+            if (owned == null) {
+                owned = new ArrayList<Long>();
+                issues.put(assetId, owned);
+            }
+            owned.add(Long.valueOf(link.getIssueId()));
+        }
+        IssueManager manager = issueManager();
+        for (Map.Entry<Integer, List<Long>> entry : issues.entrySet()) {
+            AssetEntity asset = index.get(entry.getKey());
+            if (asset == null || manager == null) {
+                continue;
+            }
+            String bucketKey = String.valueOf(asset.getID());
+            for (int i = 0; i < entry.getValue().size(); i++) {
+                Issue issue = manager.getIssueObject(entry.getValue().get(i).longValue());
+                if (issue == null || issue.getCreated() == null || !window.containsMillis(issue.getCreated().getTime())) {
+                    continue;
+                }
+                ReportBucketDto bucket = buckets.get(bucketKey);
+                if (bucket == null) {
+                    bucket = new ReportBucketDto(bucketKey, assetLabel(asset), "#0052CC", 0);
+                    buckets.put(bucketKey, bucket);
+                }
+                bucket.setCount(bucket.getCount() + 1);
+                String day = dayOf(issue.getCreated().getTime());
+                String summary = issue.getSummary() == null ? "" : issue.getSummary();
+                ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), issue.getKey(), summary);
+                line.setBucket(bucketKey);
+                line.setAsset(asset.getName());
+                line.setKind(summary);
+                line.setWhen(day);
+                line.setFrom(day);
+                line.setState("request");
+                lines.add(line);
+                lineKeys.add(bucketKey);
+            }
+        }
+    }
+
+    private int[] fillPtoReport(Project project, AssetEntity[] assets, Map<Integer, AssetEntity> index, ReportWindow window,
+            LocalDate today, Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines, List<String> lineKeys) {
+        int onTime = 0;
+        int late = 0;
+        int waiting = 0;
+        List<Integer> ids = new ArrayList<Integer>();
+        for (AssetEntity asset : assets) {
+            if (asset != null && !isLocation(asset) && asset.getDeletedAt() == null) {
+                ids.add(Integer.valueOf(asset.getID()));
+            }
+        }
+        Map<Integer, List<ServicePlanEntity>> plans = new HashMap<Integer, List<ServicePlanEntity>>();
+        for (ServicePlanEntity plan : findByAssetIds(ServicePlanEntity.class, ids)) {
+            if (plan == null || plan.getAssetId() <= 0) {
+                continue;
+            }
+            Integer id = Integer.valueOf(plan.getAssetId());
+            List<ServicePlanEntity> owned = plans.get(id);
+            if (owned == null) {
+                owned = new ArrayList<ServicePlanEntity>();
+                plans.put(id, owned);
+            }
+            owned.add(plan);
+        }
+        Map<String, String> kindNames = kindNames(project.getKey());
+        for (AssetEntity asset : assets) {
+            if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
+                continue;
+            }
+            List<ServicePlanEntity> owned = plans.get(Integer.valueOf(asset.getID()));
+            if (owned == null) {
+                continue;
+            }
+            List<PtoWindow.Item> items = new ArrayList<PtoWindow.Item>();
+            List<String> kinds = new ArrayList<String>();
+            for (int i = 0; i < owned.size(); i++) {
+                ServicePlanEntity plan = owned.get(i);
+                String kindKey = WorkKind.clean(plan.getKind());
+                if (kindKey.isEmpty()) {
+                    kindKey = WorkKind.TO;
+                }
+                String kindLabel = namedKind(kindKey, kindNames);
+                String work = plan.getName() == null || plan.getName().trim().isEmpty() ? kindLabel : plan.getName().trim();
+                LocalDate series = ServiceDue.next(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit());
+                List<PtoWindow.Item> part = PtoWindow.items(plan.getMoves(), plan.getLastDone(), plan.getEveryCount(),
+                        plan.getEveryUnit(), plan.getCompletedOn(), planCompleted(plan, series), work,
+                        window.getStart(), window.getEnd(), today);
+                for (int n = 0; n < part.size(); n++) {
+                    items.add(part.get(n));
+                    kinds.add(kindLabel);
+                }
+            }
+            if (items.isEmpty()) {
+                continue;
+            }
+            String roll = PtoWindow.rollup(items);
+            if (PtoWindow.LATE.equals(roll)) {
+                late++;
+            } else if (PtoWindow.ONTIME.equals(roll)) {
+                onTime++;
+            } else if (PtoWindow.EXPECTED.equals(roll)) {
+                waiting++;
+            }
+            String color = PtoWindow.LATE.equals(roll) ? "#DE350B" : PtoWindow.ONTIME.equals(roll) ? "#00875A" : "#0052CC";
+            String bucketKey = String.valueOf(asset.getID());
+            buckets.put(bucketKey, new ReportBucketDto(bucketKey, assetLabel(asset), color, items.size()));
+            for (int i = 0; i < items.size(); i++) {
+                PtoWindow.Item item = items.get(i);
+                String kindLabel = kinds.get(i);
+                ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), item.getWork(),
+                        kindLabel + " · " + item.getDay() + " · " + workStateLabel(item.getState()));
+                line.setBucket(bucketKey);
+                line.setAsset(asset.getName());
+                line.setKind(kindLabel);
+                line.setWhen(item.getDay());
+                line.setFrom(item.getDay());
+                line.setTo(item.getDay());
+                line.setState(item.getState());
+                lines.add(line);
+                lineKeys.add(bucketKey);
+            }
+        }
+        return new int[] { onTime, late, waiting };
+    }
+
+    private Map<Integer, Long> repairEntered(Map<Integer, AssetEntity> index) {
+        Map<Integer, Long> entered = new HashMap<Integer, Long>();
+        Map<Integer, List<RepairTime.Change>> history = repairHistory(index);
+        for (Map.Entry<Integer, List<RepairTime.Change>> entry : history.entrySet()) {
+            long open = -1L;
+            List<RepairTime.Change> changes = entry.getValue();
+            for (int i = 0; i < changes.size(); i++) {
+                RepairTime.Change change = changes.get(i);
+                if (Statuses.REPAIR.equals(change.getNext())) {
+                    if (open < 0L) {
+                        open = change.getAt();
+                    }
+                } else {
+                    open = -1L;
+                }
+            }
+            if (open >= 0L) {
+                entered.put(entry.getKey(), Long.valueOf(open));
+            }
+        }
+        return entered;
+    }
+
+    private Map<Integer, List<RepairTime.Change>> repairHistory(Map<Integer, AssetEntity> index) {
+        Map<Integer, List<RepairTime.Change>> history = new HashMap<Integer, List<RepairTime.Change>>();
+        AssetActivityEntity[] rows = ao().find(AssetActivityEntity.class, Query.select().where("KIND = ?", "status"));
+        if (rows == null) {
+            return history;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            AssetActivityEntity row = rows[i];
+            if (row == null || row.getCreated() == null || !index.containsKey(Integer.valueOf(row.getAssetId()))) {
+                continue;
+            }
+            Integer id = Integer.valueOf(row.getAssetId());
+            List<RepairTime.Change> changes = history.get(id);
+            if (changes == null) {
+                changes = new ArrayList<RepairTime.Change>();
+                history.put(id, changes);
+            }
+            changes.add(new RepairTime.Change(row.getCreated().getTime(), row.getNewValue()));
+        }
+        return history;
+    }
+
+    private String assetLabel(AssetEntity asset) {
+        String key = asset.getObjectKey() == null ? "" : asset.getObjectKey();
+        String name = asset.getName() == null ? "" : asset.getName();
+        return key.isEmpty() ? name : key + " " + name;
+    }
+
+    private String dayOf(long millis) {
+        return java.time.Instant.ofEpochMilli(millis).atZone(businessZone()).toLocalDate().toString();
+    }
+
+    private String idleText(long millis) {
+        long minutes = Math.max(0L, millis / 60000L);
+        long days = minutes / (60L * 24L);
+        long hours = (minutes / 60L) % 24L;
+        long rest = minutes % 60L;
+        if (days > 0L) {
+            return i18n().getText("asset-tree.ui.reportIdleSpan", String.valueOf(days), String.valueOf(hours));
+        }
+        if (hours > 0L) {
+            return i18n().getText("asset-tree.ui.reportIdleHours", String.valueOf(hours), String.valueOf(rest));
+        }
+        return i18n().getText("asset-tree.ui.reportIdleMinutes", String.valueOf(Math.max(1L, rest)));
+    }
+
+    private String opsReason(String key) {
+        if (ReportCatalog.FAULTS.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportEmptyFaults");
+        }
+        if (ReportCatalog.REQUESTS.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportEmptyRequests");
+        }
+        if (ReportCatalog.IDLE.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportEmptyIdle");
+        }
+        return i18n().getText("asset-tree.ui.reportEmptyPto");
+    }
+
+    private String opsHint(String key, ReportWindow window, int onTime, int late, int waiting) {
+        String range = window.getStart().toString() + " – " + window.getEnd().toString();
+        if (ReportCatalog.FAULTS.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportFaultsHint");
+        }
+        if (ReportCatalog.REQUESTS.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportRequestsHint", range);
+        }
+        if (ReportCatalog.IDLE.equals(key)) {
+            return i18n().getText("asset-tree.ui.reportIdleHint", range);
+        }
+        return new java.text.MessageFormat(i18n().getText("asset-tree.ui.reportPtoHint")).format(new Object[] {
+                range, String.valueOf(onTime), String.valueOf(late), String.valueOf(waiting) });
+    }
+
     private ReportViewDto finishReport(String key, String title, boolean standard, String group, boolean money, int total, long sum,
             Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines, List<String> lineKeys, String onlyBucket, int lineFrom, boolean allLines, boolean truncated,
             String reason, Map<String, String> placeSort) {
@@ -12997,8 +13367,8 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart) {
-        ReportViewDto view = reportView(user, projectKey, reportKey, 0, true, null);
+    public byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart, String start, String end) {
+        ReportViewDto view = reportView(user, projectKey, reportKey, 0, true, null, start, end);
         String chosen = chart == null ? "" : chart.trim();
         if ("columns".equalsIgnoreCase(chosen)) {
             chosen = "bar";
@@ -13316,7 +13686,7 @@ public class AssetServiceImpl implements AssetService {
             if (item.isStandard() && hidden != null && tokenHit(hidden, item.getId())) {
                 continue;
             }
-            ReportViewDto view = reportViewInside(project, item.getId(), 0, true, null);
+            ReportViewDto view = reportViewInside(project, item.getId(), 0, true, null, null, null);
             pages.add(reportPage(view));
         }
         if (pages.isEmpty()) {
@@ -13820,7 +14190,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private boolean keepReportColors(String group) {
-        if ("kind".equals(group)) {
+        if ("kind".equals(group) || "asset".equals(group)) {
             return true;
         }
         if (!ReportCatalog.doneReport(group)) {
@@ -13831,6 +14201,19 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void sortReportRows(String key, String group, List<ReportBucketDto> rows, final Map<String, String> placeSort) {
+        if (ReportCatalog.REQUESTS.equals(key) || ReportCatalog.IDLE.equals(key) || ReportCatalog.PTO.equals(key)) {
+            Collections.sort(rows, new Comparator<ReportBucketDto>() {
+                @Override
+                public int compare(ReportBucketDto left, ReportBucketDto right) {
+                    int byCount = right.getCount() - left.getCount();
+                    if (byCount != 0) {
+                        return byCount;
+                    }
+                    return textOf(left.getLabel()).compareToIgnoreCase(textOf(right.getLabel()));
+                }
+            });
+            return;
+        }
         if (ReportCatalog.doneReport(group) || ReportCatalog.DONE.equals(key)) {
             List<String> axes = ScheduleDone.axes(group == null || group.isEmpty() ? ReportCatalog.DONE : group);
             if (axes.size() == 1 && "state".equals(axes.get(0))) {

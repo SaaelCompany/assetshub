@@ -767,11 +767,11 @@ public class AssetResource {
     @Path("projects/{projectKey}/reports/{reportKey}/book.xlsx")
     @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     public Response exportReport(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
-            @QueryParam("chart") final String chart) {
+            @QueryParam("chart") final String chart, @QueryParam("start") final String start, @QueryParam("end") final String end) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                byte[] book = assetService.exportReport(user(), projectKey, reportKey, chart);
+                byte[] book = assetService.exportReport(user(), projectKey, reportKey, chart, start, end);
                 String file = "report-" + reportKey + ".xlsx";
                 return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                         .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
@@ -828,13 +828,14 @@ public class AssetResource {
     @GET
     @Path("projects/{projectKey}/reports/{reportKey}")
     public Response reportView(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
-            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines, @QueryParam("bucket") final String bucket) {
+            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines, @QueryParam("bucket") final String bucket,
+            @QueryParam("start") final String start, @QueryParam("end") final String end) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
                 int lineFrom = from == null ? 0 : from.intValue();
                 boolean allLines = lines != null && "all".equalsIgnoreCase(lines.trim());
-                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines, bucket)).build();
+                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines, bucket, start, end)).build();
             }
         });
     }

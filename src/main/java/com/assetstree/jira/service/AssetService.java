@@ -353,11 +353,11 @@ public interface AssetService {
 
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
 
-    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket);
+    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket, String start, String end);
 
     byte[] exportReports(ApplicationUser user, String projectKey);
 
-    byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart);
+    byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart, String start, String end);
 
     void sendReportMail(ApplicationUser user, String projectKey);
 

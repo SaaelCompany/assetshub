@@ -7482,6 +7482,24 @@ a.asset-tree-preview-icon:focus {
     font-size: 12px;
 }
 
+#asset-tree-app .asset-tree-report-period {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-period input {
+    height: 28px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    padding: 0 6px;
+    color: #172b4d;
+    font-size: 13px;
+}
+
 #asset-tree-app .asset-tree-report-switch,
 #asset-tree-app .asset-tree-report-chart-pick {
     margin-left: auto;

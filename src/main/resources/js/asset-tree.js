@@ -503,6 +503,9 @@
         reportCatalog: null,
         reportKey: 'status',
         reportView: null,
+        reportStart: '',
+        reportEnd: '',
+        reportBucket: '',
         reportChart: '',
         reportChartFor: '',
         reportChartBusy: false,
@@ -17562,7 +17565,7 @@
         var xhr = new XMLHttpRequest();
         var chartQuery = String(view.chart || '');
         if (chartQuery.indexOf(',') < 0) chartQuery = reportChartWire(reportChartKind(view));
-        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(chartQuery), true);
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(chartQuery) + reportQuery(view.id).replace('?', '&'), true);
         xhr.responseType = 'blob';
         xhr.setRequestHeader('Accept', '*/*');
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
@@ -18405,7 +18408,8 @@
     function reportStateWord(state) {
         var map = {
             ontime: 'reportStateOntime', late: 'reportStateLate', done: 'reportStateDone',
-            overdue: 'reportStateOverdue', expected: 'reportStateExpected'
+            overdue: 'reportStateOverdue', expected: 'reportStateExpected',
+            repair: 'reportStateRepair', request: 'reportStateRequest', idle: 'reportStateIdle'
         };
         return t(map[state] || 'reportStateDone');
     }
@@ -18477,9 +18481,44 @@
         });
     }
 
+    function reportUsesPeriod(key) {
+        return key === 'requests' || key === 'idle' || key === 'pto';
+    }
+
+    function reportDrills(key) {
+        return key === 'faults' || key === 'requests' || key === 'idle' || key === 'pto';
+    }
+
+    function reportIso(date) {
+        var month = date.getMonth() + 1;
+        var day = date.getDate();
+        return date.getFullYear() + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day;
+    }
+
+    function reportRange() {
+        if (!state.reportStart || !state.reportEnd) {
+            var now = new Date();
+            state.reportEnd = reportIso(now);
+            state.reportStart = state.reportEnd.slice(0, 8) + '01';
+        }
+        return { start: state.reportStart, end: state.reportEnd };
+    }
+
+    function reportQuery(key, extra) {
+        var parts = [];
+        if (reportUsesPeriod(key)) {
+            var range = reportRange();
+            parts.push('start=' + encodeURIComponent(range.start));
+            parts.push('end=' + encodeURIComponent(range.end));
+        }
+        if (state.reportBucket && reportDrills(key)) parts.push('bucket=' + encodeURIComponent(state.reportBucket));
+        if (extra) parts.push(extra);
+        return parts.length ? '?' + parts.join('&') : '';
+    }
+
     function fetchGalleryView(token) {
         var key = state.reportKey || 'status';
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(key), null, function (status, payload) {
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(key) + reportQuery(key), null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.galleryLoading = false;
             if (status === 200 && payload) {
@@ -18532,6 +18571,7 @@
         if (!id) return;
         closeAllModals();
         state.reportKey = id;
+        state.reportBucket = '';
         highlightReport(id);
         if (state.reportCatalog == null) return;
         var token = ++state.galleryToken;
@@ -19015,7 +19055,8 @@
         if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind' || group === 'field') return true;
         if (group === 'done' || String(group).indexOf('done+') === 0) return true;
         var id = String((view && view.id) || '');
-        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'done' || id === 'service';
+        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'done' || id === 'service'
+            || id === 'faults' || id === 'requests' || id === 'idle' || id === 'pto';
     }
 
     function reportJoin(labels) {
@@ -19200,7 +19241,15 @@
         }
         var rows = view.rows || [];
         rows.forEach(function (row) {
-            row.activate = function () { openReportInAssets(view, row); };
+            row.activate = function () {
+                if (reportDrills(String(view.id || ''))) {
+                    state.reportBucket = row.key == null ? '' : String(row.key);
+                    var token = ++state.galleryToken;
+                    fetchGalleryView(token);
+                    return;
+                }
+                openReportInAssets(view, row);
+            };
         });
         var money = reportMoney(view);
         var shareTotal = 0;
@@ -19223,6 +19272,37 @@
         titleRow.appendChild(titles);
         if (kinds.length < 2) titleRow.appendChild(reportChartSwitch(view, kind));
         main.appendChild(titleRow);
+        if (reportUsesPeriod(String(view.id || ''))) {
+            var period = el('div', 'asset-tree-report-period');
+            var range = reportRange();
+            period.appendChild(el('span', null, t('reportPeriod')));
+            var from = document.createElement('input');
+            from.type = 'date';
+            from.value = range.start;
+            from.setAttribute('aria-label', t('reportPeriodFrom'));
+            var to = document.createElement('input');
+            to.type = 'date';
+            to.value = range.end;
+            to.setAttribute('aria-label', t('reportPeriodTo'));
+            var applyPeriod = function () {
+                if (!from.value || !to.value) return;
+                state.reportStart = from.value;
+                state.reportEnd = to.value;
+                state.reportBucket = '';
+                fetchGalleryView(++state.galleryToken);
+            };
+            from.addEventListener('change', applyPeriod);
+            to.addEventListener('change', applyPeriod);
+            period.appendChild(from);
+            period.appendChild(to);
+            main.appendChild(period);
+        }
+        if (state.reportBucket && reportDrills(String(view.id || ''))) {
+            main.appendChild(button(t('reportShowAll'), 'asset-tree-btn', function () {
+                state.reportBucket = '';
+                fetchGalleryView(++state.galleryToken);
+            }));
+        }
         var facts = el('div', 'asset-tree-report-facts');
         facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
         if (view.sum) facts.appendChild(reportFact('', reportMoneyLabel(shareTotal), t('lifeBook')));
@@ -19313,7 +19393,16 @@
             });
             journal.appendChild(journalHead);
             view.lines.forEach(function (row) {
-                var item = el('tr');
+                var item = el('tr', row.assetId ? 'is-pick' : '');
+                if (row.assetId) {
+                    item.tabIndex = 0;
+                    item.addEventListener('click', function () {
+                        state.view = 'all';
+                        state.pane = 'card';
+                        selectAsset(row.assetId, true);
+                        renderFrame();
+                    });
+                }
                 item.appendChild(el('td', null, row.objectKey || ''));
                 item.appendChild(el('td', null, row.asset || ''));
                 item.appendChild(el('td', null, row.name || ''));
@@ -19326,7 +19415,7 @@
             main.appendChild(journal);
             if ((view.lineTotal || view.lines.length) > view.lines.length) {
                 var more = button(t('reportLinesMore'), 'asset-tree-btn', function () {
-                    ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
+                    ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + reportQuery(view.id, 'lines=all'), null, function (status, payload) {
                         if (status === 200 && payload && state.reportView && String(state.reportView.id) === String(view.id)) {
                             state.reportView.lines = payload.lines || [];
                             state.reportView.lineTotal = payload.lineTotal || state.reportView.lines.length;
