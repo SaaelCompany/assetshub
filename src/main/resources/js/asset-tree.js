@@ -8304,6 +8304,7 @@
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
 
         var items = [detailItem(t('type'), typeBadge(typeFor(asset), asset.typeLabel || typeOf(asset.typeKey).label || ''))];
+        items.push(detailItem(t('status'), statusPicker(asset)));
         var place = asset.location || (asset.parentId && byId()[asset.parentId] ? byId()[asset.parentId].name : t('root'));
         items.push(detailItem(parentCaption(asset), el('span', null, place)));
         (asset.attributes || []).forEach(function (attribute) {
@@ -8354,12 +8355,6 @@
         error.hidden = true;
         main.appendChild(error);
 
-        if (!isFolder(asset)) {
-            var statusBox = el('div', 'asset-tree-status-block');
-            statusBox.appendChild(el('div', 'asset-tree-side-label', t('status')));
-            statusBox.appendChild(statusPicker(asset));
-            aside.appendChild(statusBox);
-        }
         var people = el('div');
         people.appendChild(custodianPicker(asset));
         people.appendChild(issuedPicker(asset));
@@ -8414,6 +8409,9 @@
         var kicker = el('div', 'asset-tree-kicker');
         var key = el('span', 'asset-tree-issuekey', asset.objectKey);
         kicker.appendChild(key);
+        if (!placePage) {
+            kicker.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(asset.status), statusLabel(asset.status)));
+        }
         top.appendChild(kicker);
         var actions = el('div', 'asset-tree-detail-actions');
         if (!placePage && (childrenOf(asset.id).length || !showsInTree(asset))) {
