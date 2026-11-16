@@ -74,4 +74,19 @@ public class SchemaReadyTest {
         assertTrue(SchemaReady.identifier("AO_1234_AST_LINK"));
         assertFalse(SchemaReady.identifier("AST LINK"));
     }
+
+    @Test
+    public void linkTypeBecomesOptionalOnTheSharedTable() {
+        java.util.List<String> statements = com.assetstree.jira.service.LinkTableRepair.statements("PUBLIC", "AO_F08E8A_AST_LINK");
+        assertFalse(statements.isEmpty());
+        boolean nullable = false;
+        for (int i = 0; i < statements.size(); i++) {
+            assertFalse(SchemaReady.removes(statements.get(i)));
+            if (statements.get(i).contains("SET NULL")) {
+                nullable = true;
+            }
+        }
+        assertTrue(nullable);
+        assertTrue(com.assetstree.jira.service.LinkTableRepair.statements("PUBLIC.X", "AO_X").isEmpty());
+    }
 }

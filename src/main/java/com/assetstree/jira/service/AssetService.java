@@ -444,4 +444,7 @@ public interface AssetService {
 
     /** Sets the status of equipment linked to the request. Returns how many rows changed. */
     int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey);
+
+    /** Sets the status of one piece of equipment. Returns 1 when the status changed. */
+    int applyAssetStatus(ApplicationUser user, int assetId, String statusKey);
 }

@@ -34,6 +34,22 @@ public class AssetRuleValuesTest {
     }
 
     @Test
+    public void statusFilterMatchesOnlyAChangeIntoThatStatus() {
+        assertTrue(AssetRuleValues.statusMatches("", "repair", "in_use"));
+        assertTrue(AssetRuleValues.statusMatches("repair", "repair", "in_use"));
+        assertTrue(AssetRuleValues.statusMatches("repair", "repair", ""));
+        assertFalse(AssetRuleValues.statusMatches("repair", "repair", "repair"));
+        assertFalse(AssetRuleValues.statusMatches("repair", "in_use", ""));
+        assertTrue(AssetRuleValues.matches("asset.status", AssetRuleValues.STATUS));
+        assertFalse(AssetRuleValues.matches("", AssetRuleValues.STATUS));
+        assertTrue(AssetRuleValues.matches(AssetRuleValues.CALENDAR, AssetRuleValues.CALENDAR));
+        assertFalse(AssetRuleValues.matches("", AssetRuleValues.CALENDAR));
+        assertTrue(AssetRuleValues.currentStatus("", "in_use"));
+        assertTrue(AssetRuleValues.currentStatus("in_use", "in_use"));
+        assertFalse(AssetRuleValues.currentStatus("repair", "in_use"));
+    }
+
+    @Test
     public void jsonReadsTheEventBody() {
         String body = "{\"event\":\"asset.created\",\"id\":12,\"key\":\"ASIT-6\",\"name\":\"Laptop\"}";
         assertEquals("asset.created", AssetRuleValues.json(body, "event"));

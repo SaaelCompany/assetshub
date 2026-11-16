@@ -2,6 +2,7 @@ package com.assetstree.jira.automation;
 
 import com.atlassian.jira.util.json.JSONException;
 import com.atlassian.jira.util.json.JSONObject;
+import com.codebarrel.automation.api.thirdparty.context.ComponentInputs;
 
 import java.util.Map;
 
@@ -11,6 +12,8 @@ public final class AssetRuleValues {
     public static final String UPDATED = "asset.updated";
     public static final String DELETED = "asset.deleted";
     public static final String RESTORED = "asset.restored";
+    public static final String STATUS = "asset.status";
+    public static final String CALENDAR = "asset.calendar";
 
     private AssetRuleValues() {
     }
@@ -23,6 +26,46 @@ public final class AssetRuleValues {
             return CREATED.equals(event) || UPDATED.equals(event) || DELETED.equals(event) || RESTORED.equals(event);
         }
         return filter.trim().equals(event);
+    }
+
+    /** An empty status filter matches. A filled one matches only a real change into that status. */
+    public static boolean statusMatches(String filter, String current, String previous) {
+        if (filter == null || filter.trim().isEmpty()) {
+            return true;
+        }
+        String wanted = filter.trim();
+        String now = current == null ? "" : current.trim();
+        if (!wanted.equals(now)) {
+            return false;
+        }
+        String before = previous == null ? "" : previous.trim();
+        return before.isEmpty() || !before.equals(wanted);
+    }
+
+    /** An empty filter matches. A filled one matches the current status, even when it did not just change. */
+    public static boolean currentStatus(String filter, String current) {
+        if (filter == null || filter.trim().isEmpty()) {
+            return true;
+        }
+        String now = current == null ? "" : current.trim();
+        return filter.trim().equals(now);
+    }
+
+    public static int assetId(ComponentInputs inputs) {
+        if (inputs == null) {
+            return 0;
+        }
+        if (inputs.getInputs() != null) {
+            Object raw = inputs.getInputs().get("assetId");
+            if (raw instanceof Number && ((Number) raw).intValue() > 0) {
+                return ((Number) raw).intValue();
+            }
+        }
+        String body = inputs.getSerializedEvent();
+        if (!json(body, "event").startsWith("asset.")) {
+            return 0;
+        }
+        return jsonInt(body, "id");
     }
 
     public static String field(Object value, String key) {

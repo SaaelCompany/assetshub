@@ -90,11 +90,16 @@
                             '': AJS.I18n.getText('asset-tree.automation.changedAny'),
                             'asset.created': AJS.I18n.getText('asset-tree.automation.changedCreated'),
                             'asset.updated': AJS.I18n.getText('asset-tree.automation.changedUpdated'),
+                            'asset.status': AJS.I18n.getText('asset-tree.automation.changedStatus'),
+                            'asset.calendar': AJS.I18n.getText('asset-tree.automation.changedCalendar'),
                             'asset.deleted': AJS.I18n.getText('asset-tree.automation.changedDeleted'),
                             'asset.restored': AJS.I18n.getText('asset-tree.automation.changedRestored')
                         };
                         var chosen = field(config, 'event');
-                        el.appendChild(document.createTextNode(names[chosen] || chosen));
+                        var summary = names[chosen] || chosen;
+                        var status = field(config, 'status');
+                        if (status) summary += ': ' + status;
+                        el.appendChild(document.createTextNode(summary));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
@@ -104,9 +109,13 @@
                             { value: '', label: AJS.I18n.getText('asset-tree.automation.changedAny') },
                             { value: 'asset.created', label: AJS.I18n.getText('asset-tree.automation.changedCreated') },
                             { value: 'asset.updated', label: AJS.I18n.getText('asset-tree.automation.changedUpdated') },
+                            { value: 'asset.status', label: AJS.I18n.getText('asset-tree.automation.changedStatus') },
+                            { value: 'asset.calendar', label: AJS.I18n.getText('asset-tree.automation.changedCalendar') },
                             { value: 'asset.deleted', label: AJS.I18n.getText('asset-tree.automation.changedDeleted') },
                             { value: 'asset.restored', label: AJS.I18n.getText('asset-tree.automation.changedRestored') }
                         ]);
+                        label(el, AJS.I18n.getText('asset-tree.automation.triggerStatus'));
+                        input(el, config, 'status', 'in_use');
                     },
                     renderCard: function (el) {
                         clear(el);
@@ -190,6 +199,36 @@
         };
     }
 
+    function linkAction() {
+        return {
+            type: plugin + ':asset-link-action',
+            componentType: 'ACTION',
+            name: function () { return AJS.I18n.getText('asset-tree.automation.link'); },
+            icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
+            initialValue: function () { return {}; },
+            categories: [],
+            labels: [],
+            getRenderer: function () {
+                return {
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.link'); },
+                    renderSummary: function (config, context, el) {
+                        clear(el);
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.link')));
+                    },
+                    renderDetailed: function (config, context, el) {
+                        clear(el);
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.linkCard'));
+                    },
+                    renderCard: function (el) {
+                        clear(el);
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.linkCard')));
+                    }
+                };
+            },
+            validate: function () { return {}; }
+        };
+    }
+
     function register(attempt) {
         if (registered) {
             return;
@@ -204,6 +243,7 @@
         CodeBarrel.Automation.registerComponent(changed());
         CodeBarrel.Automation.registerComponent(linked());
         CodeBarrel.Automation.registerComponent(statusAction());
+        CodeBarrel.Automation.registerComponent(linkAction());
     }
 
     register(0);

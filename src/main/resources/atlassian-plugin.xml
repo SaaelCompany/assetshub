@@ -189,6 +189,12 @@
                                type="ACTION">
         <param name="projectSafe">true</param>
     </automation-rule-component>
+    <automation-rule-component key="asset-link-action"
+                               class="com.assetstree.jira.automation.AssetLinkAction"
+                               name="Link request to equipment"
+                               type="ACTION">
+        <param name="projectSafe">true</param>
+    </automation-rule-component>
 
     <servlet-filter name="Asset Tree TNI Sight" key="asset-tree-tni-sight" class="com.assetstree.jira.servlet.TniSightFilter" location="before-dispatch" weight="10">
         <description>Keeps the portal device report that arrives with the request which creates the issue.</description>

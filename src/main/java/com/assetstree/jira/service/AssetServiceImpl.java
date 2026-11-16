@@ -885,6 +885,7 @@ public class AssetServiceImpl implements AssetService {
         AssetEntity peek = requireAsset(id);
         Project peeked = project(peek.getProjectKey());
         bindScope(user, peeked);
+        final String[] priorStatus = new String[] { Statuses.canonical(peek.getStatus()) };
         try {
         AssetDto updated = ao().executeInTransaction(new TransactionCallback<AssetDto>() {
             @Override
@@ -906,6 +907,7 @@ public class AssetServiceImpl implements AssetService {
                 String oldDescription = entity.getDescription() == null ? "" : entity.getDescription();
                 String oldTypeKey = entity.getTypeKey() == null ? "" : entity.getTypeKey();
                 String oldStatus = Statuses.canonical(entity.getStatus());
+                priorStatus[0] = oldStatus;
                 String oldCustodian = entity.getCustodianKey() == null ? "" : entity.getCustodianKey();
                 String oldIssued = entity.getIssuedKey() == null ? "" : entity.getIssuedKey();
                 Map<String, String> oldAttributes = attributeValues(id);
@@ -945,7 +947,10 @@ public class AssetServiceImpl implements AssetService {
                 return toDto(entity, attributesFor(id), indexTypes(typeDtos(entity.getProjectKey(), rows)), indexAssets(rows), true);
             }
         });
-        emitAsset(peek.getProjectKey(), "asset.updated", updated);
+        emitAsset(peek.getProjectKey(), "asset.updated", updated, priorStatus[0]);
+        if (updated.getStatus() != null && !priorStatus[0].equals(Statuses.canonical(updated.getStatus()))) {
+            emitAsset(peek.getProjectKey(), "asset.status", updated, priorStatus[0]);
+        }
         return updated;
         } finally {
             clearScope();
@@ -10109,20 +10114,19 @@ public class AssetServiceImpl implements AssetService {
         if (dueKey.equals(plan.getAppliedFor())) {
             return;
         }
+        String previousStatus = Statuses.canonical(asset.getStatus());
         String statusKey = plan.getStatusKey() == null ? "" : plan.getStatusKey().trim();
-        if (!statusKey.isEmpty() && findStatus(asset.getProjectKey(), statusKey) != null) {
-            String oldStatus = Statuses.canonical(asset.getStatus());
-            if (!statusKey.equals(oldStatus)) {
-                asset.setStatus(statusKey);
-                asset.setUpdated(new Date());
-                asset.setUpdatedBy("");
-                asset.save();
-                logActivity(asset.getID(), "", "status", "", oldStatus, statusKey);
-            }
+        if (!statusKey.isEmpty() && findStatus(asset.getProjectKey(), statusKey) != null && !statusKey.equals(previousStatus)) {
+            asset.setStatus(statusKey);
+            asset.setUpdated(new Date());
+            asset.setUpdatedBy("");
+            asset.save();
+            logActivity(asset.getID(), "", "status", "", previousStatus, statusKey);
         }
         recordActivity(asset.getID(), "", "service_due", plan.getName(), plan.getLastDone(), dueKey);
         plan.setAppliedFor(dueKey);
         plan.save();
+        emitCalendar(asset, plan, dueKey, previousStatus);
         if (plan.getNotifyFlag() == 1) {
             ServiceNotice notice = noticeFor(asset, plan, dueKey, statusKey);
             if (notice != null) {
@@ -14861,14 +14865,38 @@ public class AssetServiceImpl implements AssetService {
                 + "\",\"created\":" + created + ",\"updated\":" + updated + ",\"errors\":" + errors + "}");
     }
 
+    private void emitCalendar(AssetEntity asset, ServicePlanEntity plan, String dueKey, String previousStatus) {
+        if (asset == null || plan == null) {
+            return;
+        }
+        emit(asset.getProjectKey(), "asset.calendar", "{\"event\":\"asset.calendar\",\"project\":\""
+                + jsonEscape(asset.getProjectKey()) + "\",\"id\":" + asset.getID()
+                + ",\"key\":\"" + jsonEscape(asset.getObjectKey())
+                + "\",\"name\":\"" + jsonEscape(asset.getName())
+                + "\",\"status\":\"" + jsonEscape(Statuses.canonical(asset.getStatus()))
+                + "\",\"type\":\"" + jsonEscape(asset.getTypeKey())
+                + "\",\"previous\":\"" + jsonEscape(previousStatus)
+                + "\",\"plan\":\"" + jsonEscape(plan.getName())
+                + "\",\"due\":\"" + jsonEscape(dueKey) + "\"}");
+    }
+
     private void emitAsset(String projectKey, String event, AssetDto asset) {
+        emitAsset(projectKey, event, asset, "");
+    }
+
+    private void emitAsset(String projectKey, String event, AssetDto asset, String previousStatus) {
         if (asset == null) {
             return;
         }
         emit(projectKey, event, "{\"event\":\"" + event + "\",\"project\":\"" + jsonEscape(projectKey)
                 + "\",\"id\":" + asset.getId() + ",\"key\":\"" + jsonEscape(asset.getObjectKey())
-                + "\",\"name\":\"" + jsonEscape(asset.getName()) + "\"}");
-        noteAsset(event, asset);
+                + "\",\"name\":\"" + jsonEscape(asset.getName())
+                + "\",\"status\":\"" + jsonEscape(asset.getStatus())
+                + "\",\"type\":\"" + jsonEscape(asset.getTypeKey())
+                + "\",\"previous\":\"" + jsonEscape(previousStatus) + "\"}");
+        if (!"asset.status".equals(event)) {
+            noteAsset(event, asset);
+        }
     }
 
     private static final ThreadLocal<Boolean> QUIET_NOTES = new ThreadLocal<Boolean>();
@@ -15026,6 +15054,25 @@ public class AssetServiceImpl implements AssetService {
         }).intValue();
     }
 
+    @Override
+    public int applyAssetStatus(final ApplicationUser user, final int assetId, final String statusKey) {
+        return ao().executeInTransaction(new TransactionCallback<Integer>() {
+            @Override
+            public Integer doInTransaction() {
+                AssetEntity asset = requireWritable(user, assetId);
+                if (isLocation(asset) || asset.getDeletedAt() != null) {
+                    return Integer.valueOf(0);
+                }
+                String next = resolveStatus(asset.getProjectKey(), statusKey);
+                if (next.equals(Statuses.canonical(asset.getStatus()))) {
+                    return Integer.valueOf(0);
+                }
+                assignFlowStatus(user, asset, next);
+                return Integer.valueOf(1);
+            }
+        }).intValue();
+    }
+
     private void emit(String projectKey, String event, String json) {
         if (projectKey == null || projectKey.isEmpty() || json == null) {
             return;
@@ -15057,9 +15104,14 @@ public class AssetServiceImpl implements AssetService {
             int id = body.has("id") ? body.getInt("id") : 0;
             String key = body.has("key") ? body.getString("key") : "";
             String name = body.has("name") ? body.getString("name") : "";
+            String status = body.has("status") ? body.getString("status") : "";
+            String typeKey = body.has("type") ? body.getString("type") : "";
+            String previous = body.has("previous") ? body.getString("previous") : "";
+            String plan = body.has("plan") ? body.getString("plan") : "";
+            String due = body.has("due") ? body.getString("due") : "";
             EventPublisher events = ComponentAccessor.getComponent(EventPublisher.class);
             if (events != null) {
-                events.publish(new AssetChangedEvent(projectKey, event, id, key, name));
+                events.publish(new AssetChangedEvent(projectKey, event, id, key, name, status, typeKey, previous, plan, due));
             }
         } catch (Exception ex) {
             log.warn("Automation event was not published", ex);
