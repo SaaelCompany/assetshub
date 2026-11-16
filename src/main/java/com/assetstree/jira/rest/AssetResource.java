@@ -414,6 +414,17 @@ public class AssetResource {
         });
     }
 
+    @GET
+    @Path("issues/search")
+    public Response searchIssues(@QueryParam("q") final String query) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.searchIssues(user(), query)).build();
+            }
+        });
+    }
+
     @DELETE
     @Path("assets/{id}/issues/{issueId}")
     public Response unlinkIssue(@PathParam("id") final int id, @PathParam("issueId") final long issueId) {
@@ -1804,10 +1815,27 @@ public class AssetResource {
         } catch (AssetException ex) {
             return message(ex.getStatus(), ex.getMessageKey(), ex.getArgs());
         } catch (Exception ex) {
+            AssetException cause = assetCause(ex);
+            if (cause != null) {
+                return message(cause.getStatus(), cause.getMessageKey(), cause.getArgs());
+            }
             log.error("Asset tree request failed", ex);
             boolean reading = request != null && "GET".equalsIgnoreCase(request.getMethod());
             return message(500, reading ? "asset-tree.error.load" : "asset-tree.error.unexpected");
         }
+    }
+
+    private static AssetException assetCause(Throwable failure) {
+        Throwable current = failure;
+        int guard = 0;
+        while (current != null && guard < 8) {
+            if (current instanceof AssetException) {
+                return (AssetException) current;
+            }
+            current = current.getCause();
+            guard++;
+        }
+        return null;
     }
 
     private Response message(int status, String key, Object... args) {

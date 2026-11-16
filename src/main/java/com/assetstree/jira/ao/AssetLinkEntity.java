@@ -10,7 +10,7 @@ import net.java.ao.schema.Table;
  * A directed link. {@code FROM_ID} is the card that owns the sentence
  * ("this depends on", "this is installed on", "this is part of").
  */
-@Table("AST_LINK")
+@Table("AST_REL")
 public interface AssetLinkEntity extends Entity {
     @Indexed
     int getFromId();

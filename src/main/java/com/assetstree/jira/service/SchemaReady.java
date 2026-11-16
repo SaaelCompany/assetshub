@@ -54,9 +54,13 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.IdentityHashMap;
 import java.util.Locale;
 import java.util.Set;
@@ -129,13 +133,22 @@ public final class SchemaReady {
             } catch (Throwable ex) {
                 log.warn("Asset schema was not ready", ex);
             }
+            boolean schemaOk = true;
             try {
                 addMissing(ao);
-                ready = true;
-                failedAt = 0L;
             } catch (Throwable ex) {
+                schemaOk = false;
                 failedAt = now;
                 log.warn("Asset schema was not updated", ex);
+            }
+            try {
+                separateRelations(ao);
+            } catch (Throwable ex) {
+                log.warn("Request links were not separated from asset links", ex);
+            }
+            if (schemaOk) {
+                ready = true;
+                failedAt = 0L;
             }
         }
     }
@@ -173,6 +186,161 @@ public final class SchemaReady {
         String upper = sql.toUpperCase(Locale.ROOT);
         return upper.contains("DROP TABLE") || upper.contains("DROP COLUMN")
                 || upper.contains("TRUNCATE") || upper.contains("DELETE FROM");
+    }
+
+    /**
+     * Asset links used to share the request-link table. A required column from
+     * that share rejects a new request link. These statements only make the
+     * extra columns optional. They do not delete rows.
+     */
+    static List<String> relaxColumn(String table, String column, boolean text) {
+        List<String> statements = new ArrayList<String>();
+        if (!identifier(table) || !identifier(column)) {
+            return statements;
+        }
+        String fallback = text ? "''" : "0";
+        String kind = text ? "VARCHAR(255)" : "BIGINT";
+        statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " DROP NOT NULL");
+        statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " SET NULL");
+        statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " SET DEFAULT " + fallback);
+        statements.add("ALTER TABLE " + table + " MODIFY " + column + " " + kind + " NULL DEFAULT " + fallback);
+        statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " " + (text ? "NVARCHAR(255)" : "BIGINT") + " NULL");
+        statements.add("ALTER TABLE " + table + " MODIFY (" + column + " NULL)");
+        return statements;
+    }
+
+    static boolean identifier(String name) {
+        String plain = name == null ? "" : name.trim();
+        int end = plain.length() - 1;
+        if (end > 0) {
+            char open = plain.charAt(0);
+            char close = plain.charAt(end);
+            if ((open == '"' && close == '"') || (open == '`' && close == '`') || (open == '[' && close == ']')) {
+                plain = plain.substring(1, end);
+            }
+        }
+        return plain.matches("[A-Za-z_][A-Za-z0-9_]*");
+    }
+
+    private static void separateRelations(ActiveObjects ao) throws Exception {
+        EntityManager manager = entityManager(ao);
+        if (manager == null) {
+            return;
+        }
+        DatabaseProvider provider = manager.getProvider();
+        NameConverters names = manager.getNameConverters();
+        String issueTable = names.getTableNameConverter().getName(AssetIssueLinkEntity.class);
+        String relationTable = names.getTableNameConverter().getName(AssetLinkEntity.class);
+        if (issueTable == null || relationTable == null || issueTable.equalsIgnoreCase(relationTable)) {
+            return;
+        }
+        String linkType = names.getFieldNameConverter().getName(AssetLinkEntity.class.getMethod("getLinkType"));
+        String fromId = names.getFieldNameConverter().getName(AssetLinkEntity.class.getMethod("getFromId"));
+        String toId = names.getFieldNameConverter().getName(AssetLinkEntity.class.getMethod("getToId"));
+        String inbound = names.getFieldNameConverter().getName(AssetLinkEntity.class.getMethod("getInbound"));
+        String attrs = names.getFieldNameConverter().getName(AssetLinkEntity.class.getMethod("getAttrs"));
+        Connection connection = provider.getConnection();
+        Statement statement = null;
+        try {
+            statement = connection.createStatement();
+            relax(connection, statement, issueTable, fromId, false);
+            relax(connection, statement, issueTable, toId, false);
+            relax(connection, statement, issueTable, linkType, true);
+            relax(connection, statement, issueTable, inbound, true);
+            relax(connection, statement, issueTable, attrs, true);
+            List<String[]> relations = readRelations(statement, issueTable, fromId, toId, linkType, inbound, attrs);
+            statement.close();
+            statement = null;
+            connection.close();
+            connection = null;
+            storeRelations(ao, relations);
+        } finally {
+            if (statement != null) {
+                statement.close();
+            }
+            if (connection != null) {
+                connection.close();
+            }
+        }
+    }
+
+    private static void relax(Connection connection, Statement statement, String table, String column, boolean text) {
+        List<String> statements = relaxColumn(table, column, text);
+        for (int i = 0; i < statements.size(); i++) {
+            try {
+                statement.execute(statements.get(i));
+                commit(connection);
+            } catch (Throwable ex) {
+                rollback(connection);
+            }
+        }
+    }
+
+    private static List<String[]> readRelations(Statement statement, String issueTable,
+                                                 String fromId, String toId, String linkType, String inbound, String attrs) {
+        List<String[]> found = new ArrayList<String[]>();
+        if (!identifier(issueTable) || !identifier(fromId) || !identifier(toId) || !identifier(linkType)
+                || !identifier(inbound) || !identifier(attrs)) {
+            return found;
+        }
+        ResultSet rows = null;
+        try {
+            rows = statement.executeQuery("SELECT " + fromId + ", " + toId + ", " + linkType + ", " + inbound + ", " + attrs
+                    + " FROM " + issueTable + " WHERE " + linkType + " IS NOT NULL AND " + linkType + " <> ''");
+            while (rows.next()) {
+                found.add(new String[] {
+                        String.valueOf(rows.getInt(1)),
+                        String.valueOf(rows.getInt(2)),
+                        rows.getString(3),
+                        rows.getString(4),
+                        rows.getString(5)
+                });
+            }
+        } catch (SQLException ex) {
+            log.warn("Shared request-link rows were not read", ex);
+        } finally {
+            if (rows != null) {
+                try {
+                    rows.close();
+                } catch (SQLException ignored) {
+                    // The statement closes with the connection.
+                }
+            }
+        }
+        return found;
+    }
+
+    private static void storeRelations(ActiveObjects ao, List<String[]> relations) {
+        for (int i = 0; i < relations.size(); i++) {
+            String[] row = relations.get(i);
+            int from;
+            int to;
+            try {
+                from = Integer.parseInt(row[0]);
+                to = Integer.parseInt(row[1]);
+            } catch (NumberFormatException ex) {
+                continue;
+            }
+            String type = row[2];
+            if (from <= 0 || to <= 0 || type == null || type.trim().isEmpty()) {
+                continue;
+            }
+            try {
+                AssetLinkEntity[] present = ao.find(AssetLinkEntity.class,
+                        "FROM_ID = ? AND TO_ID = ? AND LINK_TYPE = ?", Integer.valueOf(from), Integer.valueOf(to), type);
+                if (present != null && present.length > 0) {
+                    continue;
+                }
+                ao.create(AssetLinkEntity.class,
+                        new net.java.ao.DBParam("FROM_ID", Integer.valueOf(from)),
+                        new net.java.ao.DBParam("TO_ID", Integer.valueOf(to)),
+                        new net.java.ao.DBParam("LINK_TYPE", type),
+                        new net.java.ao.DBParam("INBOUND", row[3] == null ? "" : row[3]),
+                        new net.java.ao.DBParam("ATTRS", row[4] == null ? "" : row[4]));
+            } catch (RuntimeException ex) {
+                log.warn("Could not keep the asset link {} -> {}", Integer.valueOf(from), Integer.valueOf(to), ex);
+            }
+        }
     }
 
     private static boolean numeric(int jdbc) {
@@ -308,6 +476,10 @@ public final class SchemaReady {
         } catch (Throwable ignored) {
             // The next statement still runs on a clean connection when the database allows it.
         }
+    }
+
+    static EntityManager managerOf(ActiveObjects ao) {
+        return entityManager(ao);
     }
 
     private static EntityManager entityManager(ActiveObjects ao) {

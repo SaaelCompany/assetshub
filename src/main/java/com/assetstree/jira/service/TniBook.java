@@ -816,10 +816,7 @@ public final class TniBook {
             return;
         }
         String before = asset.getStatus() == null ? Statuses.IN_USE : asset.getStatus();
-        ao.create(AssetIssueLinkEntity.class,
-                new DBParam("ASSET_ID", Integer.valueOf(asset.getID())),
-                new DBParam("ISSUE_ID", Long.valueOf(issueId)),
-                new DBParam("STATUS_BEFORE", before));
+        ao.create(AssetIssueLinkEntity.class, IssueLinkStore.parameters(asset.getID(), issueId, before));
     }
 
     private Prepared prepare(ActiveObjects ao, String projectKey, String userKey, long now) {

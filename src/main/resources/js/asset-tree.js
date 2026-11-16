@@ -4644,16 +4644,7 @@
         main.appendChild(activityBlock(full, true));
 
         var issues = el('div');
-        if (mayEdit(full)) {
-            var linker = el('div', 'asset-tree-linkrow');
-            var issueInput = el('input');
-            issueInput.placeholder = t('issuePlaceholder');
-            linker.appendChild(issueInput);
-            linker.appendChild(button(t('linkIssue'), 'asset-tree-btn', function () {
-                linkIssue(full.id, issueInput.value);
-            }));
-            issues.appendChild(linker);
-        }
+        if (mayEdit(full)) issues.appendChild(issueLinker(full.id));
         if (full.issues == null) {
             issues.appendChild(el('p', 'asset-tree-hint', t('loadingIssues')));
         } else if (!full.issues.length) {
@@ -4663,7 +4654,7 @@
                 issues.appendChild(issueRow(full.id, issue));
             });
         }
-        main.appendChild(moduleBlock(t('issues'), issues, true, full.issues ? full.issues.length : 0));
+        main.appendChild(moduleBlock(t('issues'), issues, !(full.issues && full.issues.length), full.issues ? full.issues.length : 0));
 
         aside.appendChild(moduleBlock(t('people'), staticPeople(full)));
         aside.appendChild(moduleBlock(t('dates'), datesBody(full)));
@@ -8608,16 +8599,7 @@
         }
 
         var issues = el('div');
-        if (mayEdit(asset)) {
-            var linker = el('div', 'asset-tree-linkrow');
-            var issueInput = el('input');
-            issueInput.placeholder = t('issuePlaceholder');
-            linker.appendChild(issueInput);
-            linker.appendChild(button(t('linkIssue'), 'asset-tree-btn', function () {
-                linkIssue(asset.id, issueInput.value);
-            }));
-            issues.appendChild(linker);
-        }
+        if (mayEdit(asset)) issues.appendChild(issueLinker(asset.id));
         if (issuesLoading || asset.issues == null) {
             issues.appendChild(el('p', 'asset-tree-hint', t('loadingIssues')));
         } else if (!asset.issues.length) {
@@ -8627,7 +8609,7 @@
                 issues.appendChild(issueRow(asset.id, issue));
             });
         }
-        main.appendChild(moduleBlock(t('issues'), issues, true, asset.issues ? asset.issues.length : 0));
+        main.appendChild(moduleBlock(t('issues'), issues, !(asset.issues && asset.issues.length), asset.issues ? asset.issues.length : 0));
         main.appendChild(fileBlock(asset, true));
         main.appendChild(activityBlock(asset, true));
 
@@ -8784,14 +8766,9 @@
         var issues = el('div', 'asset-tree-request-block');
         issues.appendChild(el('h3', null, t('issues')));
         if (mayEdit(asset)) {
-            var linker = el('div', 'asset-tree-linkrow');
-            var issueInput = el('input');
-            issueInput.id = 'asset-field-issue';
-            issueInput.placeholder = t('issuePlaceholder');
-            linker.appendChild(issueInput);
-            linker.appendChild(button(t('linkIssue'), 'asset-tree-btn', function () {
-                linkIssue(asset.id, issueInput.value);
-            }));
+            var linker = issueLinker(asset.id);
+            var issueInput = linker.querySelector('input');
+            if (issueInput) issueInput.id = 'asset-field-issue';
             issues.appendChild(linker);
         }
         var issueList = el('div');
@@ -9889,17 +9866,78 @@
         });
     }
 
-    function linkIssue(assetId, issueKey) {
-        if (!issueKey || !issueKey.trim()) {
-            setFormError(t('issuePlaceholder'));
+    function issueLinker(assetId) {
+        var box = el('div', 'asset-tree-issue-link');
+        box.setAttribute('data-asset-id', String(assetId));
+        var linker = el('div', 'asset-tree-linkrow');
+        var issueInput = el('input');
+        issueInput.type = 'search';
+        issueInput.placeholder = t('issuePlaceholder');
+        issueInput.autocomplete = 'off';
+        var results = el('div', 'asset-tree-user-results');
+        var hint = el('p', 'asset-tree-hint');
+        hint.hidden = true;
+        var timer = null;
+        var seq = 0;
+        function showHint(message) {
+            hint.hidden = !message;
+            hint.textContent = message || '';
+        }
+        function submit(event) {
+            if (event && event.preventDefault) event.preventDefault();
+            if (event && event.stopPropagation) event.stopPropagation();
+            results.innerHTML = '';
+            linkIssue(assetId, issueInput.value, showHint);
+        }
+        issueInput.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var query = issueInput.value.replace(/^\s+|\s+$/g, '');
+                var token = ++seq;
+                results.innerHTML = '';
+                if (query.length < 2) return;
+                ajax('GET', '/issues/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                    if (token !== seq || issueInput.value.replace(/^\s+|\s+$/g, '') !== query) return;
+                    results.innerHTML = '';
+                    if (status !== 200 || !payload || !payload.length) return;
+                    payload.forEach(function (issue) {
+                        var caption = issue.issueKey || '';
+                        if (issue.summary) caption += '  ' + issue.summary;
+                        results.appendChild(button(caption, 'asset-tree-user-hit', function () {
+                            issueInput.value = issue.issueKey || '';
+                            results.innerHTML = '';
+                            linkIssue(assetId, issue.issueKey, showHint);
+                        }));
+                    });
+                });
+            }, 220);
+        });
+        issueInput.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.keyCode === 13) submit(event);
+        });
+        linker.appendChild(issueInput);
+        linker.appendChild(button(t('linkIssue'), 'asset-tree-btn', submit));
+        box.appendChild(linker);
+        box.appendChild(results);
+        box.appendChild(hint);
+        return box;
+    }
+
+    function linkIssue(assetId, issueKey, showHint) {
+        var key = issueKey ? String(issueKey).replace(/^\s+|\s+$/g, '') : '';
+        if (!key) {
+            if (showHint) showHint(t('issuePlaceholder'));
+            notify(t('issuePlaceholder'));
             return;
         }
-        ajax('POST', '/assets/' + assetId + '/issues', { issueKey: issueKey.trim() }, function (status, payload) {
+        ajax('POST', '/assets/' + assetId + '/issues', { issueKey: key }, function (status, payload) {
             if (status >= 200 && status < 300) {
                 notify(t('issueAdded'));
                 selectAsset(assetId, true);
             } else {
-                setFormError((payload && payload.message) || t('errorTitle'));
+                var message = (payload && payload.message) || t('errorTitle');
+                if (showHint) showHint(message);
+                notify(message);
             }
         });
     }

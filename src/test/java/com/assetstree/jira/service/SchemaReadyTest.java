@@ -61,4 +61,17 @@ public class SchemaReadyTest {
         assertFalse(SchemaReady.removes("CREATE TABLE AO_X (ID INTEGER)"));
         assertFalse(SchemaReady.removes(null));
     }
+
+    @Test
+    public void sharedLinkColumnsBecomeOptionalWithoutDeletingRows() {
+        java.util.List<String> statements = SchemaReady.relaxColumn("AO_X_AST_LINK", "LINK_TYPE", true);
+        assertFalse(statements.isEmpty());
+        for (int i = 0; i < statements.size(); i++) {
+            assertFalse(SchemaReady.removes(statements.get(i)));
+            assertTrue(statements.get(i).contains("LINK_TYPE"));
+        }
+        assertTrue(SchemaReady.relaxColumn("AO_X; DROP TABLE AO_X", "LINK_TYPE", true).isEmpty());
+        assertTrue(SchemaReady.identifier("AO_1234_AST_LINK"));
+        assertFalse(SchemaReady.identifier("AST LINK"));
+    }
 }

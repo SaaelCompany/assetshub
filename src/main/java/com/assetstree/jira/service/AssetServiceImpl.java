@@ -18,6 +18,10 @@ import com.atlassian.jira.event.issue.IssueEvent;
 import com.atlassian.jira.event.type.EventType;
 import com.atlassian.jira.issue.CustomFieldManager;
 import com.atlassian.jira.bc.issue.IssueService;
+import com.atlassian.jira.bc.issue.search.SearchService;
+import com.atlassian.jira.issue.search.SearchException;
+import com.atlassian.jira.issue.search.SearchResults;
+import com.atlassian.jira.web.bean.PagerFilter;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.issue.IssueInputParameters;
 import com.atlassian.jira.issue.IssueManager;
@@ -742,6 +746,7 @@ public class AssetServiceImpl implements AssetService {
             dto = ao().executeInTransaction(load);
         }
         dispatchNotices(notices);
+        includeFieldRequests(user, dto);
         return dto;
         } finally {
             clearScope();
@@ -1864,9 +1869,7 @@ public class AssetServiceImpl implements AssetService {
                         return Boolean.FALSE;
                     }
                     ao().create(AssetIssueLinkEntity.class,
-                            new DBParam("ASSET_ID", assetId),
-                            new DBParam("ISSUE_ID", issueId),
-                            new DBParam("STATUS_BEFORE", Statuses.canonical(asset.getStatus())));
+                            IssueLinkStore.parameters(assetId, issueId, Statuses.canonical(asset.getStatus())));
                     return Boolean.TRUE;
                 }
             });
@@ -3520,8 +3523,91 @@ public class AssetServiceImpl implements AssetService {
     public IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey) {
         Issue issue = requireIssue(user, issueKey);
         IssueRefDto linked = link(user, assetId, issue, true);
-        applyLinkedFlow(user, assetId, issue);
+        rememberIssueAsset(user, issue, assetId);
         return linked;
+    }
+
+    @Override
+    public List<IssueRefDto> searchIssues(ApplicationUser user, String query) {
+        requireUser(user);
+        String raw = query == null ? "" : query.trim();
+        if (raw.length() < 2) {
+            return Collections.emptyList();
+        }
+        List<IssueRefDto> found = new ArrayList<IssueRefDto>();
+        Set<Long> seen = new HashSet<Long>();
+        String normalized = AssetValidator.normalizeIssueKey(raw);
+        if (AssetValidator.isIssueKey(normalized)) {
+            try {
+                Issue exact = issueManager().getIssueObject(normalized);
+                if (canBrowse(user, exact) && exact.getId() != null && seen.add(exact.getId())) {
+                    found.add(toIssue(exact));
+                }
+            } catch (RuntimeException ex) {
+                log.warn("Request {} was not suggested", normalized, ex);
+            }
+        }
+        String jql = issueSuggestionJql(raw);
+        if (jql.isEmpty() || found.size() >= 8) {
+            return found;
+        }
+        try {
+            SearchService search = ComponentAccessor.getComponent(SearchService.class);
+            if (search == null) {
+                return found;
+            }
+            SearchService.ParseResult parsed = search.parseQuery(user, jql);
+            if (parsed == null || !parsed.isValid() || parsed.getQuery() == null) {
+                return found;
+            }
+            SearchResults<Issue> results = search.search(user, parsed.getQuery(), new PagerFilter<Issue>(8));
+            if (results == null || results.getResults() == null) {
+                return found;
+            }
+            for (Issue issue : results.getResults()) {
+                if (issue == null || issue.getId() == null || !seen.add(issue.getId()) || !canBrowse(user, issue)) {
+                    continue;
+                }
+                found.add(toIssue(issue));
+                if (found.size() >= 8) {
+                    break;
+                }
+            }
+        } catch (SearchException ex) {
+            log.warn("Request suggestions failed for {}", raw, ex);
+        } catch (RuntimeException ex) {
+            log.warn("Request suggestions failed for {}", raw, ex);
+        }
+        return found;
+    }
+
+    private static String issueSuggestionJql(String raw) {
+        String upper = raw.trim().toUpperCase(Locale.ROOT);
+        if (upper.matches("[A-Z][A-Z0-9_]+")) {
+            return "project = " + upper + " ORDER BY updated DESC";
+        }
+        return "text ~ \"" + jqlQuote(raw) + "*\" ORDER BY updated DESC";
+    }
+
+    private static String jqlQuote(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /** The request field is updated after the link row is stored, so a field error cannot undo the link. */
+    private void rememberIssueAsset(ApplicationUser user, Issue issue, int assetId) {
+        try {
+            applyLinkedFlow(user, assetId, issue);
+        } catch (RuntimeException ex) {
+            log.warn("Could not apply the equipment flow for {}", Integer.valueOf(assetId), ex);
+        }
+        try {
+            writeAssetFieldDirect(issue, assetId);
+        } catch (RuntimeException ex) {
+            log.warn("Could not store the asset field on {}", issue == null ? "" : issue.getKey(), ex);
+        }
     }
 
     @Override
@@ -3534,12 +3620,7 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
         link(user, assetId, issue, false);
-        applyLinkedFlow(user, assetId, issue);
-        try {
-            writeAssetField(user, issue, assetId);
-        } catch (RuntimeException ex) {
-            log.warn("Could not store the asset field on {}", issue.getKey(), ex);
-        }
+        rememberIssueAsset(user, issue, assetId);
         try {
             return getAsset(user, assetId);
         } catch (RuntimeException ex) {
@@ -3891,7 +3972,11 @@ public class AssetServiceImpl implements AssetService {
         if (!canBrowse(user, issue)) {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
-        adoptFieldAsset(user, issue, true);
+        try {
+            adoptFieldAsset(user, issue, true);
+        } catch (RuntimeException ex) {
+            log.warn("Could not adopt the asset field on {}", issue.getKey(), ex);
+        }
         List<AssetDto> linked = linkedAssets(user, issueId);
         if (linked != null && !linked.isEmpty()) {
             return linked;
@@ -5749,26 +5834,52 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private IssueRefDto link(ApplicationUser user, int assetId, Issue issue, boolean requireWrite) {
-        return ao().executeInTransaction(new TransactionCallback<IssueRefDto>() {
-            @Override
-            public IssueRefDto doInTransaction() {
-                AssetEntity asset = requireWrite ? requireWritable(user, assetId) : requireAsset(assetId);
-                if (requireWrite && (issue.getProjectObject() == null
-                        || !ProjectKeys.same(asset.getProjectKey(), issue.getProjectObject().getKey()))) {
-                    throw new AssetException(400, "asset-tree.error.project.mismatch");
+        if (issue == null || issue.getId() == null) {
+            throw new AssetException(404, "asset-tree.error.issue.notFound");
+        }
+        final long issueId = issue.getId().longValue();
+        insertIssueLink(user, assetId, issueId, requireWrite);
+        try {
+            return toIssue(issue);
+        } catch (RuntimeException ex) {
+            log.warn("Linked request {} could not be described", Long.valueOf(issueId), ex);
+            IssueRefDto dto = new IssueRefDto();
+            dto.setIssueId(issueId);
+            dto.setIssueKey(issue.getKey());
+            return dto;
+        }
+    }
+
+    private void insertIssueLink(final ApplicationUser user, final int assetId, final long issueId, final boolean requireWrite) {
+        final AssetEntity asset = requireWrite ? requireWritable(user, assetId) : requireAsset(assetId);
+        String kept = "";
+        try {
+            kept = Statuses.canonical(asset.getStatus());
+        } catch (RuntimeException ex) {
+            kept = "";
+        }
+        final String before = kept == null ? "" : kept;
+        try {
+            ao().executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
+                            Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, Long.valueOf(issueId)));
+                    if (existing != null && existing.length > 0) {
+                        throw new AssetException(409, "asset-tree.error.issue.duplicate");
+                    }
+                    ao().create(AssetIssueLinkEntity.class, IssueLinkStore.parameters(assetId, issueId, before));
+                    return null;
                 }
-                AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
-                        Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, issue.getId()));
-                if (existing != null && existing.length > 0) {
-                    throw new AssetException(409, "asset-tree.error.issue.duplicate");
-                }
-                ao().create(AssetIssueLinkEntity.class,
-                        new DBParam("ASSET_ID", assetId),
-                        new DBParam("ISSUE_ID", issue.getId()),
-                        new DBParam("STATUS_BEFORE", Statuses.canonical(asset.getStatus())));
-                return toIssue(issue);
+            });
+        } catch (RuntimeException ex) {
+            AssetException cause = assetCause(ex);
+            if (cause != null) {
+                throw cause;
             }
-        });
+            log.warn("ASSET-LINK ordinary insert failed for asset {} and issue {}", Integer.valueOf(assetId), Long.valueOf(issueId), ex);
+            IssueLinkStore.write(ao(), assetId, issueId, before);
+        }
     }
 
     private List<AssetDto> linkedAssets(ApplicationUser user, long issueId) {
@@ -9345,23 +9456,132 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private List<IssueRefDto> issuesFor(int assetId) {
-        AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class, Query.select().where("ASSET_ID = ?", assetId));
-        ApplicationUser user = authenticationContext().getLoggedInUser();
         List<IssueRefDto> issues = new ArrayList<IssueRefDto>();
-        for (AssetIssueLinkEntity link : links) {
-            Issue issue = issueManager().getIssueObject(Long.valueOf(link.getIssueId()));
-            if (!canBrowse(user, issue)) {
+        try {
+            AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class, Query.select().where("ASSET_ID = ?", assetId));
+            if (links == null) {
+                return issues;
+            }
+            ApplicationUser user = authenticationContext().getLoggedInUser();
+            for (AssetIssueLinkEntity link : links) {
+                if (link == null) {
+                    continue;
+                }
+                try {
+                    Issue issue = issueManager().getIssueObject(Long.valueOf(link.getIssueId()));
+                    if (!canBrowse(user, issue) || issue.getKey() == null) {
+                        continue;
+                    }
+                    issues.add(toIssue(issue));
+                } catch (RuntimeException ex) {
+                    log.warn("Linked request {} was not shown on asset {}", Long.valueOf(link.getIssueId()), Integer.valueOf(assetId), ex);
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Requests were not loaded for asset {}", Integer.valueOf(assetId), ex);
+        }
+        sortIssues(issues);
+        return issues;
+    }
+
+    /**
+     * A request that already stores this asset in its field belongs on the card,
+     * even when the link row was not written at the moment the field was saved.
+     * The lookup runs after the asset transaction, so a Jira read cannot roll the card back.
+     */
+    private void includeFieldRequests(ApplicationUser user, AssetDto dto) {
+        if (dto == null || dto.getId() <= 0) {
+            return;
+        }
+        if (dto.getIssues() == null) {
+            dto.setIssues(new ArrayList<IssueRefDto>());
+        }
+        Set<Long> seen = new HashSet<Long>();
+        for (IssueRefDto listed : dto.getIssues()) {
+            if (listed != null && listed.getIssueId() > 0L) {
+                seen.add(Long.valueOf(listed.getIssueId()));
+            }
+        }
+        String status = dto.getStatus() == null ? "" : dto.getStatus();
+        for (Long issueId : issueIdsStoredOnRequests(dto.getId())) {
+            if (issueId == null || issueId.longValue() <= 0L || !seen.add(issueId)) {
                 continue;
             }
-            issues.add(toIssue(issue));
+            try {
+                Issue issue = issueManager().getIssueObject(issueId);
+                if (!canBrowse(user, issue) || issue.getKey() == null) {
+                    continue;
+                }
+                ensureLinkQuiet(dto.getId(), issue, status);
+                dto.getIssues().add(toIssue(issue));
+            } catch (RuntimeException ex) {
+                log.warn("Request {} stored on asset {} was not shown", issueId, Integer.valueOf(dto.getId()), ex);
+            }
+        }
+        sortIssues(dto.getIssues());
+    }
+
+    private Set<Long> issueIdsStoredOnRequests(int assetId) {
+        Set<Long> ids = new LinkedHashSet<Long>();
+        try {
+            CustomFieldValuePersister persister = ComponentAccessor.getComponent(CustomFieldValuePersister.class);
+            CustomFieldManager manager = ComponentAccessor.getCustomFieldManager();
+            if (persister == null || manager == null) {
+                return ids;
+            }
+            String wanted = String.valueOf(assetId);
+            for (String fieldId : PortalLookup.assetFieldIds()) {
+                CustomField field = manager.getCustomFieldObject(fieldId);
+                if (field == null) {
+                    continue;
+                }
+                Set<Long> found = persister.getIssueIdsWithValue(field, PersistenceFieldType.TYPE_LIMITED_TEXT, wanted);
+                if (found != null) {
+                    ids.addAll(found);
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Requests that store asset {} were not read", Integer.valueOf(assetId), ex);
+        }
+        return ids;
+    }
+
+    private void ensureLinkQuiet(final int assetId, Issue issue, final String statusBefore) {
+        if (issue == null || issue.getId() == null) {
+            return;
+        }
+        final long issueId = issue.getId().longValue();
+        final String before = statusBefore == null ? "" : statusBefore;
+        try {
+            ao().executeInTransaction(new TransactionCallback<Void>() {
+                @Override
+                public Void doInTransaction() {
+                    AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
+                            Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, Long.valueOf(issueId)));
+                    if (existing != null && existing.length > 0) {
+                        return null;
+                    }
+                    ao().create(AssetIssueLinkEntity.class, IssueLinkStore.parameters(assetId, issueId, before));
+                    return null;
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.warn("Could not keep request {} on asset {}", Long.valueOf(issueId), Integer.valueOf(assetId), ex);
+        }
+    }
+
+    private void sortIssues(List<IssueRefDto> issues) {
+        if (issues == null || issues.size() < 2) {
+            return;
         }
         Collections.sort(issues, new Comparator<IssueRefDto>() {
             @Override
             public int compare(IssueRefDto left, IssueRefDto right) {
-                return left.getIssueKey().compareToIgnoreCase(right.getIssueKey());
+                String leftKey = left == null || left.getIssueKey() == null ? "" : left.getIssueKey();
+                String rightKey = right == null || right.getIssueKey() == null ? "" : right.getIssueKey();
+                return leftKey.compareToIgnoreCase(rightKey);
             }
         });
-        return issues;
     }
 
     private IssueRefDto toIssue(Issue issue) {
