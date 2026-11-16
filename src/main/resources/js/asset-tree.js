@@ -2244,35 +2244,66 @@
         if (node && node.parentNode) node.parentNode.removeChild(node);
     }
 
-    function viewTabs() {
-        var bar = el('div', 'asset-tree-viewtabs');
-        bar.setAttribute('role', 'tablist');
+    function railIcon(name) {
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        var shapes = {
+            list: 'M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z',
+            person: 'M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-2.67 0-8 1.34-8 4v1h16v-1c0-2.66-5.33-4-8-4z',
+            calendar: 'M7 2h2v2h6V2h2v2h3a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3V2zm12 8H5v8h14v-8zM5 6v2h14V6H5z',
+            chart: 'M4 19h16v2H4v-2zM7 17V10H5v7h2zm6 0V6h-2v11h2zm6 0v-6h-2v6h2z',
+            plan: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z',
+            gear: 'M12 8a4 4 0 1 0 .01 8.01A4 4 0 0 0 12 8zm8.94 3.06l-1.66-.28a6.9 6.9 0 0 0-.55-1.32l.96-1.38a1 1 0 0 0-.18-1.27l-1.36-1.36a1 1 0 0 0-1.27-.18l-1.38.96c-.42-.24-.86-.43-1.32-.55L13.94 3.06A1 1 0 0 0 12.96 2h-1.92a1 1 0 0 0-.98 1.06l-.28 1.66c-.46.12-.9.31-1.32.55l-1.38-.96a1 1 0 0 0-1.27.18L4.45 5.85a1 1 0 0 0-.18 1.27l.96 1.38c-.24.42-.43.86-.55 1.32l-1.66.28A1 1 0 0 0 2 11.04v1.92c0 .5.37.93.86.98l1.66.28c.12.46.31.9.55 1.32l-.96 1.38a1 1 0 0 0 .18 1.27l1.36 1.36a1 1 0 0 0 1.27.18l1.38-.96c.42.24.86.43 1.32.55l.28 1.66c.05.49.48.86.98.86h1.92c.5 0 .93-.37.98-.86l.28-1.66c.46-.12.9-.31 1.32-.55l1.38.96a1 1 0 0 0 1.27-.18l1.36-1.36a1 1 0 0 0 .18-1.27l-.96-1.38c.24-.42.43-.86.55-1.32l1.66-.28c.49-.05.86-.48.86-.98v-1.92a1 1 0 0 0-1.06-.98z'
+        };
+        path.setAttribute('d', shapes[name] || shapes.list);
+        path.setAttribute('fill', 'currentColor');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function viewItems() {
         var items = [];
         if (state.canView !== false) {
-            items.push({ view: 'all', label: t('tabAssets'), group: 'catalog' });
-            items.push({ view: 'mine', label: t('menuMine'), group: 'catalog' });
-            if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules'), group: 'tools' });
+            items.push({ view: 'all', label: t('menuAll'), icon: 'list' });
+            items.push({ view: 'mine', label: t('menuMine'), icon: 'person' });
+            if (moduleOn('service')) items.push({ view: 'schedules', label: t('menuSchedules'), icon: 'calendar' });
         }
         if (moduleOn('reports') && (state.canView !== false || state.canReports)) {
-            items.push({ view: 'reports', label: t('menuReports'), group: 'tools' });
+            items.push({ view: 'reports', label: t('menuReports'), icon: 'chart' });
         }
         if (moduleOn('map') && (state.canScheme || state.canView !== false || state.canMap)) {
-            items.push({ view: 'map', label: t('menuMap'), group: 'tools' });
+            items.push({ view: 'map', label: t('menuMap'), icon: 'plan' });
         }
         if (state.canManage && state.canView !== false) {
-            items.push({ view: 'settings', label: t('menuSettings'), group: 'end' });
+            items.push({ view: 'settings', label: t('menuSettings'), icon: 'gear', foot: true });
         }
-        items.forEach(function (item) {
+        return items;
+    }
+
+    function viewRail() {
+        var rail = el('nav', 'asset-tree-rail');
+        rail.setAttribute('aria-label', t('title'));
+        var head = el('div', 'asset-tree-rail-group');
+        var foot = el('div', 'asset-tree-rail-foot');
+        viewItems().forEach(function (item) {
             var active = state.view === item.view;
-            var extra = item.group === 'end' ? ' is-aside' : '';
-            var tab = button(item.label, 'asset-tree-viewtab' + extra + (active ? ' is-active' : ''), function () {
+            var tab = button('', 'asset-tree-rail-btn' + (active ? ' is-active' : ''), function () {
                 showView(item.view);
             });
-            tab.setAttribute('role', 'tab');
-            tab.setAttribute('aria-selected', active ? 'true' : 'false');
-            bar.appendChild(tab);
+            tab.setAttribute('aria-label', item.label);
+            if (active) tab.setAttribute('aria-current', 'page');
+            tab.appendChild(railIcon(item.icon));
+            var tip = el('span', 'asset-tree-rail-tip', item.label);
+            tip.setAttribute('aria-hidden', 'true');
+            tab.appendChild(tip);
+            (item.foot ? foot : head).appendChild(tab);
         });
-        return bar;
+        rail.appendChild(head);
+        rail.appendChild(foot);
+        return rail;
     }
 
     function showView(view) {
@@ -2335,8 +2366,9 @@
     function mount() {
         closeAllModals();
         app.innerHTML = '';
+        app.appendChild(viewRail());
+        var body = el('div', 'asset-tree-body');
         var top = el('div', 'asset-tree-top');
-        top.appendChild(viewTabs());
         var row = el('div', 'asset-tree-top-row');
         var titles = el('div', 'asset-tree-heading');
         var heading = el('h1', null, viewTitle(state.view));
@@ -2435,7 +2467,7 @@
         row.appendChild(titles);
         row.appendChild(actions);
         top.appendChild(row);
-        app.appendChild(top);
+        body.appendChild(top);
 
         var banner = el('div', 'asset-tree-banner');
         banner.id = 'asset-tree-banner';
@@ -2444,14 +2476,15 @@
         } else {
             banner.textContent = t('readOnly');
         }
-        app.appendChild(banner);
+        body.appendChild(banner);
         var notice = el('div', 'asset-tree-notice');
         notice.id = 'asset-tree-notice';
-        app.appendChild(notice);
+        body.appendChild(notice);
 
         var frame = el('div', 'asset-tree-frame ' + (state.view === 'all' ? 'is-split' : 'is-plain'));
         frame.id = 'asset-tree-frame';
-        app.appendChild(frame);
+        body.appendChild(frame);
+        app.appendChild(body);
         var modal = el('div');
         modal.id = 'asset-tree-modal-root';
         app.appendChild(modal);
@@ -2471,7 +2504,6 @@
             renderFrameContents();
         } finally {
             restoreViewScroll(keptScroll);
-            alignStaffNotes();
             fitSplit();
             window.setTimeout(fitSplit, 0);
         }
@@ -2490,13 +2522,6 @@
         var split = frame && frame.className.indexOf('is-split') >= 0
             && !frame.querySelector('.asset-tree-message')
             && !frame.querySelector('.asset-tree-key-setup.is-gate');
-        if (!split) {
-            app.style.height = '';
-            app.style.maxHeight = '';
-            app.style.overflow = '';
-            return;
-        }
-        if (window.pageYOffset || document.documentElement.scrollTop) window.scrollTo(0, 0);
         var footer = document.getElementById('footer') || document.querySelector('footer');
         var foot = 0;
         if (footer) {
@@ -2505,6 +2530,29 @@
                 + (parseFloat(footerStyle.marginTop) || 0)
                 + (parseFloat(footerStyle.marginBottom) || 0);
         }
+        function pinRail() {
+            var rail = app.querySelector('.asset-tree-rail');
+            if (!rail) return;
+            var style = window.getComputedStyle(app);
+            var room = app.clientHeight
+                - (parseFloat(style.paddingTop) || 0)
+                - (parseFloat(style.paddingBottom) || 0);
+            if (!split) {
+                var origin = app.getBoundingClientRect().top;
+                if (origin < 0) origin = 0;
+                room = window.innerHeight - origin - foot;
+            }
+            if (room < 240) room = 240;
+            rail.style.height = Math.round(room) + 'px';
+        }
+        if (!split) {
+            app.style.height = '';
+            app.style.maxHeight = '';
+            app.style.overflow = '';
+            pinRail();
+            return;
+        }
+        if (window.pageYOffset || document.documentElement.scrollTop) window.scrollTo(0, 0);
         var top = app.getBoundingClientRect().top;
         if (top < 0) top = 0;
         var height = window.innerHeight - top - foot;
@@ -2522,6 +2570,7 @@
             app.style.height = height + 'px';
             app.style.maxHeight = height + 'px';
         }
+        pinRail();
     }
 
     function scrollTargets() {
@@ -2583,7 +2632,6 @@
     function renderFrameContents() {
         closeStatusMenu();
         closeColorMenu();
-        closeStaffBranchAdd();
         closeMapMenu();
         var frame = document.getElementById('asset-tree-frame');
         if (!frame) {
