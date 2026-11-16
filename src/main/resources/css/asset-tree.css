@@ -14538,29 +14538,26 @@ button.asset-tree-attach-remove {
     padding: 8px 0;
     border-right: 1px solid #dfe1e6;
     background: #fff;
+    overflow: visible;
 }
 
-#asset-tree-app .asset-tree-rail-group,
-#asset-tree-app .asset-tree-rail-foot {
+#asset-tree-app .asset-tree-rail-group {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
 }
 
-#asset-tree-app .asset-tree-rail-foot {
-    margin-top: auto;
-}
-
 #asset-tree-app button.asset-tree-rail-btn {
-    position: relative;
+    position: relative !important;
     display: flex !important;
     align-items: center;
     justify-content: center;
     width: 32px !important;
     height: 32px !important;
+    min-width: 32px !important;
     min-height: 0 !important;
-    margin: 0;
+    margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
     border-radius: 3px;
@@ -14588,25 +14585,36 @@ button.asset-tree-attach-remove {
     color: #0052cc !important;
 }
 
-#asset-tree-app .asset-tree-rail-tip {
-    position: absolute;
-    left: calc(100% + 10px);
-    top: 50%;
-    z-index: 6;
-    transform: translateY(-50%);
-    padding: 4px 8px;
+#asset-tree-app button.asset-tree-rail-btn .asset-tree-rail-tip {
+    position: absolute !important;
+    left: 40px !important;
+    right: auto !important;
+    top: 4px !important;
+    bottom: auto !important;
+    z-index: 30 !important;
+    transform: none !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 4px 8px !important;
     border-radius: 3px;
-    background: #172b4d;
-    color: #fff;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    white-space: nowrap;
+    background: #172b4d !important;
+    color: #fff !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    line-height: 16px !important;
+    letter-spacing: 0 !important;
+    text-align: left !important;
+    text-transform: none !important;
+    white-space: nowrap !important;
     pointer-events: none;
-    opacity: 0;
+    opacity: 0 !important;
+    overflow: visible !important;
 }
 
-#asset-tree-app .asset-tree-rail-tip::before {
+#asset-tree-app button.asset-tree-rail-btn .asset-tree-rail-tip::before {
     content: "";
     position: absolute;
     right: 100%;
@@ -14616,9 +14624,8 @@ button.asset-tree-attach-remove {
     border-right-color: #172b4d;
 }
 
-#asset-tree-app button.asset-tree-rail-btn:hover .asset-tree-rail-tip,
-#asset-tree-app button.asset-tree-rail-btn:focus .asset-tree-rail-tip {
-    opacity: 1;
+#asset-tree-app button.asset-tree-rail-btn:hover .asset-tree-rail-tip {
+    opacity: 1 !important;
 }
 
 #asset-tree-app .asset-tree-row.is-trash {

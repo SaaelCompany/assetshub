@@ -2256,10 +2256,11 @@
             calendar: 'M7 2h2v2h6V2h2v2h3a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3V2zm12 8H5v8h14v-8zM5 6v2h14V6H5z',
             chart: 'M4 19h16v2H4v-2zM7 17V10H5v7h2zm6 0V6h-2v11h2zm6 0v-6h-2v6h2z',
             plan: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z',
-            gear: 'M12 8a4 4 0 1 0 .01 8.01A4 4 0 0 0 12 8zm8.94 3.06l-1.66-.28a6.9 6.9 0 0 0-.55-1.32l.96-1.38a1 1 0 0 0-.18-1.27l-1.36-1.36a1 1 0 0 0-1.27-.18l-1.38.96c-.42-.24-.86-.43-1.32-.55L13.94 3.06A1 1 0 0 0 12.96 2h-1.92a1 1 0 0 0-.98 1.06l-.28 1.66c-.46.12-.9.31-1.32.55l-1.38-.96a1 1 0 0 0-1.27.18L4.45 5.85a1 1 0 0 0-.18 1.27l.96 1.38c-.24.42-.43.86-.55 1.32l-1.66.28A1 1 0 0 0 2 11.04v1.92c0 .5.37.93.86.98l1.66.28c.12.46.31.9.55 1.32l-.96 1.38a1 1 0 0 0 .18 1.27l1.36 1.36a1 1 0 0 0 1.27.18l1.38-.96c.42.24.86.43 1.32.55l.28 1.66c.05.49.48.86.98.86h1.92c.5 0 .93-.37.98-.86l.28-1.66c.46-.12.9-.31 1.32-.55l1.38.96a1 1 0 0 0 1.27-.18l1.36-1.36a1 1 0 0 0 .18-1.27l-.96-1.38c.24-.42.43-.86.55-1.32l1.66-.28c.49-.05.86-.48.86-.98v-1.92a1 1 0 0 0-1.06-.98z'
+            gear: 'M12 15.5a3.5 3.5 0 0 1-3.5-3.5 3.5 3.5 0 0 1 3.5-3.5 3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-1.88-3.26a.5.5 0 0 0-.61-.22l-2.49 1c-.52-.4-1.06-.73-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-1.88 3.26a.5.5 0 0 0 .12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l1.88 3.26a.5.5 0 0 0 .61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l1.88-3.26a.5.5 0 0 0-.12-.64l-2.11-1.66z'
         };
         path.setAttribute('d', shapes[name] || shapes.list);
         path.setAttribute('fill', 'currentColor');
+        if (name === 'gear') path.setAttribute('fill-rule', 'evenodd');
         svg.appendChild(path);
         return svg;
     }
@@ -2278,7 +2279,7 @@
             items.push({ view: 'map', label: t('menuMap'), icon: 'plan' });
         }
         if (state.canManage && state.canView !== false) {
-            items.push({ view: 'settings', label: t('menuSettings'), icon: 'gear', foot: true });
+            items.push({ view: 'settings', label: t('menuSettings'), icon: 'gear' });
         }
         return items;
     }
@@ -2287,7 +2288,6 @@
         var rail = el('nav', 'asset-tree-rail');
         rail.setAttribute('aria-label', t('title'));
         var head = el('div', 'asset-tree-rail-group');
-        var foot = el('div', 'asset-tree-rail-foot');
         viewItems().forEach(function (item) {
             var active = state.view === item.view;
             var tab = button('', 'asset-tree-rail-btn' + (active ? ' is-active' : ''), function () {
@@ -2299,10 +2299,9 @@
             var tip = el('span', 'asset-tree-rail-tip', item.label);
             tip.setAttribute('aria-hidden', 'true');
             tab.appendChild(tip);
-            (item.foot ? foot : head).appendChild(tab);
+            head.appendChild(tab);
         });
         rail.appendChild(head);
-        rail.appendChild(foot);
         return rail;
     }
 
