@@ -11588,19 +11588,20 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.report");
         }
         final String name = draft.getName() == null ? "" : draft.getName().trim();
-        final String group = ReportCatalog.group(draft.getGroupBy());
+        final String metric = reportMetric(draft.getMetric());
+        final String group = ReportCatalog.ops(metric) ? ReportCatalog.opsGroup(draft.getGroupBy()) : ReportCatalog.group(draft.getGroupBy());
         final String filter = reportFilter(draft.getFilterField());
         final String value = draft.getFilterValue() == null ? "" : draft.getFilterValue().trim();
         final String chart = ReportCatalog.chart(draft.getChart());
-        final String metric = reportMetric(draft.getMetric());
         final String fieldKey = ReportCatalog.FIELD.equals(group) ? ReportCatalog.fieldKey(draft.getFieldKey()) : "";
         final String attrKey = ReportCatalog.fieldKey(draft.getAttrKey());
         final String attrValue = draft.getAttrValue() == null ? "" : draft.getAttrValue().trim();
         checkReportDraft(name, group, filter, value, fieldKey, attrKey, attrValue);
-        if (ReportCatalog.doneReport(group) && !moduleOn(project.getKey(), ProjectModules.SERVICE)) {
+        if ((ReportCatalog.doneReport(group) || ReportCatalog.PTO.equals(metric)) && !moduleOn(project.getKey(), ProjectModules.SERVICE)) {
             throw new AssetException(400, "asset-tree.error.module.off");
         }
-        final String storedMetric = ReportCatalog.doneReport(group) || "kind".equals(group) ? "count" : metric;
+        final String storedMetric = ReportCatalog.ops(metric) ? metric
+                : (ReportCatalog.doneReport(group) || "kind".equals(group) ? "count" : metric);
         return ao().executeInTransaction(new TransactionCallback<SavedReportDto>() {
             @Override
             public SavedReportDto doInTransaction() {
@@ -11643,16 +11644,16 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.report");
         }
         final String name = draft.getName() == null ? "" : draft.getName().trim();
-        final String group = ReportCatalog.group(draft.getGroupBy());
+        final String metric = reportMetric(draft.getMetric());
+        final String group = ReportCatalog.ops(metric) ? ReportCatalog.opsGroup(draft.getGroupBy()) : ReportCatalog.group(draft.getGroupBy());
         final String filter = reportFilter(draft.getFilterField());
         final String value = draft.getFilterValue() == null ? "" : draft.getFilterValue().trim();
         final String chart = ReportCatalog.chart(draft.getChart());
-        final String metric = reportMetric(draft.getMetric());
         final String fieldKey = ReportCatalog.FIELD.equals(group) ? ReportCatalog.fieldKey(draft.getFieldKey()) : "";
         final String attrKey = ReportCatalog.fieldKey(draft.getAttrKey());
         final String attrValue = draft.getAttrValue() == null ? "" : draft.getAttrValue().trim();
         checkReportDraft(name, group, filter, value, fieldKey, attrKey, attrValue);
-        if (ReportCatalog.doneReport(group) && !moduleOn(project.getKey(), ProjectModules.SERVICE)) {
+        if ((ReportCatalog.doneReport(group) || ReportCatalog.PTO.equals(metric)) && !moduleOn(project.getKey(), ProjectModules.SERVICE)) {
             throw new AssetException(400, "asset-tree.error.module.off");
         }
         final int id = ReportCatalog.savedId(reportKey);
@@ -11671,7 +11672,8 @@ public class AssetServiceImpl implements AssetService {
                 row.setFilterField(filter);
                 writeFilter(row, value);
                 writeChart(row, chart);
-                row.setMetric(ReportCatalog.doneReport(group) || "kind".equals(group) ? "count" : metric);
+                row.setMetric(ReportCatalog.ops(metric) ? metric
+                        : (ReportCatalog.doneReport(group) || "kind".equals(group) ? "count" : metric));
                 row.setFieldKey(fieldKey);
                 row.setAttrKey(attrKey);
                 row.setAttrValue(attrValue);
@@ -11859,7 +11861,7 @@ public class AssetServiceImpl implements AssetService {
             attrValue = saved.getAttrValue() == null ? "" : saved.getAttrValue();
             key = ReportCatalog.savedKey(saved.getID());
         }
-        if ("kind".equals(group) || ReportCatalog.doneReport(group) || ReportCatalog.DONE.equals(key)) {
+        if (!ReportCatalog.ops(metric) && ("kind".equals(group) || ReportCatalog.doneReport(group) || ReportCatalog.DONE.equals(key))) {
             metric = "count";
         }
         ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue, chart, start, end);
@@ -11900,7 +11902,8 @@ public class AssetServiceImpl implements AssetService {
                 }
             });
             for (SavedReportEntity row : own) {
-                if (ReportCatalog.doneReport(row.getGroupBy()) && !service) {
+                String measure = ReportCatalog.measure(row.getMetric());
+                if ((ReportCatalog.doneReport(row.getGroupBy()) || ReportCatalog.PTO.equals(measure)) && !service) {
                     continue;
                 }
                 items.add(savedReportDto(row));
@@ -11926,10 +11929,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private String reportMetric(String raw) {
-        if (raw != null && "cost".equals(raw.trim().toLowerCase(Locale.ROOT))) {
-            return "cost";
-        }
-        return "count";
+        return ReportCatalog.measure(raw);
     }
 
     private boolean mixLooksValid(String value) {
@@ -12073,8 +12073,10 @@ public class AssetServiceImpl implements AssetService {
         Map<Integer, List<AssetAttributeEntity>> attributes = needAttrs
                 ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
         String valueKind = byField ? fieldKind(types, fieldKey) : "";
-        if (ReportCatalog.ops(key)) {
-            return buildOpsReport(project, key, title, standard, assets, types, index, statusNames, lineFrom, allLines, onlyBucket, start, end);
+        if (ReportCatalog.ops(key) || ReportCatalog.ops(metric)) {
+            String opsKey = ReportCatalog.ops(key) ? key : metric;
+            String axis = ReportCatalog.ops(key) ? standardGroup(key) : group;
+            return buildOpsReport(project, key, opsKey, title, standard, axis, filter, value, assets, types, index, statusNames, lineFrom, allLines, onlyBucket, start, end);
         }
         boolean done = ReportCatalog.DONE.equals(key) || ReportCatalog.doneReport(group);
         if (done) {
@@ -12178,7 +12180,7 @@ public class AssetServiceImpl implements AssetService {
             if (bucket == null) {
                 bucket = new ReportBucketDto(bucketKey, label, reportColor(key, group, bucketKey, types), 0);
                 buckets.put(bucketKey, bucket);
-                if (ReportCatalog.PLACE.equals(group) && !bucketKey.isEmpty()) {
+                if ((ReportCatalog.PLACE.equals(group) || "branch".equals(group)) && !bucketKey.isEmpty()) {
                     AssetEntity place = index.get(Integer.valueOf(bucketKey));
                     placeSort.put(bucketKey, place == null ? label : placeOwnPath(place, types, index));
                 }
@@ -12880,12 +12882,17 @@ public class AssetServiceImpl implements AssetService {
         return piece;
     }
 
-    private ReportViewDto buildOpsReport(Project project, String key, String title, boolean standard,
-            AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
+    private ReportViewDto buildOpsReport(Project project, String viewId, String key, String title, boolean standard, String axis,
+            String filter, String value, AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
             Map<String, String> statusNames, int lineFrom, boolean allLines, String onlyBucket, String start, String end) {
+        if (axis == null || axis.isEmpty()) {
+            axis = standardGroup(key);
+        }
+        assets = reportChosen(assets, filter, value, types, index);
         LocalDate today = businessToday();
         ReportWindow window = ReportWindow.of(start, end, today, businessZone());
         Map<String, ReportBucketDto> buckets = new LinkedHashMap<String, ReportBucketDto>();
+        Map<String, String> rolls = new HashMap<String, String>();
         List<ReportLineDto> lines = new ArrayList<ReportLineDto>();
         List<String> lineKeys = new ArrayList<String>();
         Map<String, String> placeSort = new HashMap<String, String>();
@@ -12905,34 +12912,31 @@ public class AssetServiceImpl implements AssetService {
                 if (!Statuses.REPAIR.equals(Statuses.canonical(asset.getStatus()))) {
                     continue;
                 }
-                String place = placeKey(asset, types, index);
-                AssetEntity room = place.isEmpty() ? null : index.get(Integer.valueOf(place));
-                String placeName = room == null ? i18n().getText("asset-tree.ui.root") : room.getName();
-                if (room != null) {
-                    placeSort.put(place, placeOwnPath(room, types, index));
-                }
-                ReportBucketDto bucket = buckets.get(place);
+                String[] slot = opsBucket(axis, asset, types, index);
+                rememberPlace(placeSort, axis, slot[0], types, index);
+                ReportBucketDto bucket = buckets.get(slot[0]);
                 if (bucket == null) {
-                    bucket = new ReportBucketDto(place, placeName, "#DE350B", 0);
-                    buckets.put(place, bucket);
+                    bucket = new ReportBucketDto(slot[0], slot[1], "#DE350B", 0);
+                    buckets.put(slot[0], bucket);
                 }
                 bucket.setCount(bucket.getCount() + 1);
                 Long since = entered.get(Integer.valueOf(asset.getID()));
                 String when = since == null ? "" : dayOf(since.longValue());
                 String clock = since == null ? "" : idleText(Math.max(0L, System.currentTimeMillis() - since.longValue()));
+                String placeName = placeNameOf(asset, types, index);
                 ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), asset.getName(),
                         placeName + (clock.isEmpty() ? "" : " · " + clock));
-                line.setBucket(place);
+                line.setBucket(slot[0]);
                 line.setAsset(placeName);
                 line.setKind(repairLabel);
                 line.setWhen(when);
                 line.setState("repair");
                 line.setClock(clock);
                 lines.add(line);
-                lineKeys.add(place);
+                lineKeys.add(slot[0]);
             }
         } else if (ReportCatalog.REQUESTS.equals(key)) {
-            fillRequestReport(assets, index, window, buckets, lines, lineKeys);
+            fillRequestReport(assets, types, index, axis, window, buckets, lines, lineKeys, placeSort);
         } else if (ReportCatalog.IDLE.equals(key)) {
             Map<Integer, List<RepairTime.Change>> history = repairHistory(index);
             for (AssetEntity asset : assets) {
@@ -12946,9 +12950,15 @@ public class AssetServiceImpl implements AssetService {
                 if (overlap <= 0L) {
                     continue;
                 }
-                String bucketKey = String.valueOf(asset.getID());
-                ReportBucketDto bucket = new ReportBucketDto(bucketKey, assetLabel(asset), "#DE350B", RepairTime.days(overlap));
-                buckets.put(bucketKey, bucket);
+                String[] slot = opsBucket(axis, asset, types, index);
+                rememberPlace(placeSort, axis, slot[0], types, index);
+                ReportBucketDto bucket = buckets.get(slot[0]);
+                if (bucket == null) {
+                    bucket = new ReportBucketDto(slot[0], slot[1], "#DE350B", 0);
+                    buckets.put(slot[0], bucket);
+                }
+                bucket.setCount(bucket.getCount() + RepairTime.days(overlap));
+                String bucketKey = slot[0];
                 for (int i = 0; i < spans.size(); i++) {
                     RepairTime.Span span = spans.get(i);
                     String from = dayOf(span.getClippedStart());
@@ -12970,7 +12980,7 @@ public class AssetServiceImpl implements AssetService {
                 }
             }
         } else if (ReportCatalog.PTO.equals(key) && moduleOn(project.getKey(), ProjectModules.SERVICE)) {
-            int[] counts = fillPtoReport(project, assets, index, window, today, buckets, lines, lineKeys);
+            int[] counts = fillPtoReport(project, assets, types, index, axis, window, today, buckets, lines, lineKeys, placeSort, rolls);
             onTimeUnits = counts[0];
             lateUnits = counts[1];
             waitingUnits = counts[2];
@@ -12980,14 +12990,130 @@ public class AssetServiceImpl implements AssetService {
             total += bucket.getCount();
         }
         String reason = buckets.isEmpty() ? opsReason(key) : "";
-        ReportViewDto view = finishReport(key, title, standard, standardGroup(key), false, total, 0L, buckets, lines, lineKeys,
+        ReportViewDto view = finishReport(key, title, standard, axis, false, total, 0L, buckets, lines, lineKeys,
                 onlyBucket, lineFrom, allLines, false, reason, placeSort);
+        view.setId(viewId);
+        if (ReportCatalog.PTO.equals(key) && view.getRows() != null) {
+            for (int i = 0; i < view.getRows().size(); i++) {
+                ReportBucketDto row = view.getRows().get(i);
+                String roll = rolls.get(row.getKey());
+                if (roll != null) {
+                    row.setColor(PtoWindow.LATE.equals(roll) ? "#DE350B" : PtoWindow.ONTIME.equals(roll) ? "#00875A" : "#0052CC");
+                }
+            }
+        }
         view.setHint(opsHint(key, window, onTimeUnits, lateUnits, waitingUnits));
         return view;
     }
 
-    private void fillRequestReport(AssetEntity[] assets, Map<Integer, AssetEntity> index, ReportWindow window,
-            Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines, List<String> lineKeys) {
+    private AssetEntity[] reportChosen(AssetEntity[] assets, String filter, String value,
+            Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        boolean attrs = mixHasFieldRules(filter, value);
+        Map<Integer, List<AssetAttributeEntity>> attributes = attrs
+                ? attributesByAsset(idsOf(assets)) : new HashMap<Integer, List<AssetAttributeEntity>>();
+        List<AssetEntity> chosen = new ArrayList<AssetEntity>();
+        if (assets == null) {
+            return new AssetEntity[0];
+        }
+        for (int i = 0; i < assets.length; i++) {
+            AssetEntity asset = assets[i];
+            if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
+                continue;
+            }
+            if (!reportFilterMatches(asset, filter, value, types, index)) {
+                continue;
+            }
+            if (!reportAttributesMatch(attributes, asset, filter, value, "", "")) {
+                continue;
+            }
+            chosen.add(asset);
+        }
+        return chosen.toArray(new AssetEntity[chosen.size()]);
+    }
+
+    private String[] opsBucket(String axis, AssetEntity asset, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        String[] parts = axis == null ? new String[0] : axis.split("\\+");
+        StringBuilder key = new StringBuilder();
+        StringBuilder label = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                key.append('\u001f');
+                label.append(" · ");
+            }
+            key.append(opsPieceKey(parts[i], asset, types, index));
+            label.append(opsPieceLabel(parts[i], asset, types, index));
+        }
+        return new String[] { key.toString(), label.toString() };
+    }
+
+    private String opsPieceKey(String axis, AssetEntity asset, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        if (ReportCatalog.TYPE.equals(axis)) {
+            return asset.getTypeKey() == null ? "" : asset.getTypeKey();
+        }
+        if (ReportCatalog.PLACE.equals(axis)) {
+            return placeKey(asset, types, index);
+        }
+        if ("branch".equals(axis)) {
+            return branchKey(asset, types, index);
+        }
+        if (ReportCatalog.HOLDER.equals(axis)) {
+            return asset.getCustodianKey() == null ? "" : asset.getCustodianKey();
+        }
+        return String.valueOf(asset.getID());
+    }
+
+    private String opsPieceLabel(String axis, AssetEntity asset, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        String piece = opsPieceKey(axis, asset, types, index);
+        if ("asset".equals(axis)) {
+            return assetLabel(asset);
+        }
+        return reportBucketLabel("", axis.equals("branch") ? ReportCatalog.PLACE : axis, piece, asset, types, index, null, null);
+    }
+
+    private void rememberPlace(Map<String, String> placeSort, String axis, String bucketKey,
+            Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        if (placeSort == null || axis == null || axis.indexOf('+') >= 0 || bucketKey == null || bucketKey.isEmpty()) {
+            return;
+        }
+        if (!ReportCatalog.PLACE.equals(axis) && !"branch".equals(axis)) {
+            return;
+        }
+        try {
+            AssetEntity room = index.get(Integer.valueOf(bucketKey));
+            if (room != null) {
+                placeSort.put(bucketKey, placeOwnPath(room, types, index));
+            }
+        } catch (NumberFormatException ex) {
+            log.debug("Report place key was not numeric");
+        }
+    }
+
+    private String placeNameOf(AssetEntity asset, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        String place = placeKey(asset, types, index);
+        if (place.isEmpty()) {
+            return i18n().getText("asset-tree.ui.root");
+        }
+        AssetEntity room = index.get(Integer.valueOf(place));
+        return room == null || room.getName() == null ? place : room.getName();
+    }
+
+    private boolean ptoWorse(String next, String kept) {
+        return ptoRank(next) > ptoRank(kept);
+    }
+
+    private int ptoRank(String roll) {
+        if (PtoWindow.LATE.equals(roll)) {
+            return 2;
+        }
+        if (PtoWindow.ONTIME.equals(roll)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    private void fillRequestReport(AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
+            String axis, ReportWindow window, Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines,
+            List<String> lineKeys, Map<String, String> placeSort) {
         List<Integer> ids = new ArrayList<Integer>();
         for (AssetEntity asset : assets) {
             if (asset != null && !isLocation(asset) && asset.getDeletedAt() == null) {
@@ -13017,7 +13143,9 @@ public class AssetServiceImpl implements AssetService {
             if (asset == null || manager == null) {
                 continue;
             }
-            String bucketKey = String.valueOf(asset.getID());
+            String[] slot = opsBucket(axis, asset, types, index);
+            rememberPlace(placeSort, axis, slot[0], types, index);
+            String bucketKey = slot[0];
             for (int i = 0; i < entry.getValue().size(); i++) {
                 Issue issue = manager.getIssueObject(entry.getValue().get(i).longValue());
                 if (issue == null || issue.getCreated() == null || !window.containsMillis(issue.getCreated().getTime())) {
@@ -13025,7 +13153,7 @@ public class AssetServiceImpl implements AssetService {
                 }
                 ReportBucketDto bucket = buckets.get(bucketKey);
                 if (bucket == null) {
-                    bucket = new ReportBucketDto(bucketKey, assetLabel(asset), "#0052CC", 0);
+                    bucket = new ReportBucketDto(bucketKey, slot[1], "#0052CC", 0);
                     buckets.put(bucketKey, bucket);
                 }
                 bucket.setCount(bucket.getCount() + 1);
@@ -13044,8 +13172,9 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private int[] fillPtoReport(Project project, AssetEntity[] assets, Map<Integer, AssetEntity> index, ReportWindow window,
-            LocalDate today, Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines, List<String> lineKeys) {
+    private int[] fillPtoReport(Project project, AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
+            String axis, ReportWindow window, LocalDate today, Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines,
+            List<String> lineKeys, Map<String, String> placeSort, Map<String, String> rolls) {
         int onTime = 0;
         int late = 0;
         int waiting = 0;
@@ -13108,8 +13237,20 @@ public class AssetServiceImpl implements AssetService {
                 waiting++;
             }
             String color = PtoWindow.LATE.equals(roll) ? "#DE350B" : PtoWindow.ONTIME.equals(roll) ? "#00875A" : "#0052CC";
-            String bucketKey = String.valueOf(asset.getID());
-            buckets.put(bucketKey, new ReportBucketDto(bucketKey, assetLabel(asset), color, items.size()));
+            String[] slot = opsBucket(axis, asset, types, index);
+            rememberPlace(placeSort, axis, slot[0], types, index);
+            String bucketKey = slot[0];
+            ReportBucketDto bucket = buckets.get(bucketKey);
+            if (bucket == null) {
+                bucket = new ReportBucketDto(bucketKey, slot[1], color, 0);
+                buckets.put(bucketKey, bucket);
+            }
+            bucket.setCount(bucket.getCount() + items.size());
+            String kept = rolls.get(bucketKey);
+            if (kept == null || ptoWorse(roll, kept)) {
+                rolls.put(bucketKey, roll);
+                bucket.setColor(color);
+            }
             for (int i = 0; i < items.size(); i++) {
                 PtoWindow.Item item = items.get(i);
                 String kindLabel = kinds.get(i);
@@ -14045,6 +14186,9 @@ public class AssetServiceImpl implements AssetService {
         if (ReportCatalog.PLACE.equals(group)) {
             return placeKey(asset, types, index);
         }
+        if ("branch".equals(group)) {
+            return branchKey(asset, types, index);
+        }
         if (ReportCatalog.HOLDER.equals(group)) {
             return asset.getCustodianKey() == null ? "" : asset.getCustodianKey();
         }
@@ -14088,7 +14232,7 @@ public class AssetServiceImpl implements AssetService {
             AssetTypeDto type = types.get(bucketKey);
             return type == null ? bucketKey : type.getLabel();
         }
-        if (ReportCatalog.PLACE.equals(group)) {
+        if (ReportCatalog.PLACE.equals(group) || "branch".equals(group)) {
             if (bucketKey.isEmpty()) {
                 return i18n().getText("asset-tree.ui.root");
             }
@@ -14300,7 +14444,7 @@ public class AssetServiceImpl implements AssetService {
             });
             return;
         }
-        if (ReportCatalog.PLACE.equals(group)) {
+        if (ReportCatalog.PLACE.equals(group) || "branch".equals(group)) {
             Collections.sort(rows, new Comparator<ReportBucketDto>() {
                 @Override
                 public int compare(ReportBucketDto left, ReportBucketDto right) {
@@ -14456,6 +14600,26 @@ public class AssetServiceImpl implements AssetService {
             return decided == null ? "" : decided;
         }
         return "";
+    }
+
+    /** The top place, so rooms roll up into the branch. */
+    private String branchKey(AssetEntity asset, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        String top = "";
+        Integer parent = asset.getParentId();
+        int guard = 0;
+        while (parent != null && parent.intValue() > 0 && guard < 40) {
+            AssetEntity node = index.get(parent);
+            if (node == null) {
+                break;
+            }
+            AssetTypeDto type = types.get(node.getTypeKey());
+            if (type != null && type.isLocation()) {
+                top = String.valueOf(node.getID());
+            }
+            parent = node.getParentId();
+            guard++;
+        }
+        return top;
     }
 
     /** The place the object sits in, so a room is its own group. */
@@ -14626,6 +14790,9 @@ public class AssetServiceImpl implements AssetService {
         }
         if (ReportCatalog.PLACE.equals(group)) {
             return i18n().getText("asset-tree.ui.groupWordPlace");
+        }
+        if ("branch".equals(group)) {
+            return i18n().getText("asset-tree.ui.groupWordBranch");
         }
         if (ReportCatalog.HOLDER.equals(group)) {
             return i18n().getText("asset-tree.ui.groupWordHolder");

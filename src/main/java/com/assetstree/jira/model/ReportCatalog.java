@@ -31,7 +31,9 @@ public final class ReportCatalog {
             STATUS, TYPE, PLACE, HOLDER, ISSUED, RECEIPTS, COST, WARRANTY, AGE, WRITEOFF, WORK, DONE,
             FAULTS, REQUESTS, IDLE, PTO));
     private static final List<String> GROUPS = Collections.unmodifiableList(Arrays.asList(
-            STATUS, TYPE, PLACE, HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", DONE, "who", FIELD));
+            STATUS, TYPE, PLACE, "branch", HOLDER, ISSUED, "month", "age", WARRANTY, WRITEOFF, "kind", DONE, "who", FIELD));
+    private static final List<String> OPS_AXES = Collections.unmodifiableList(Arrays.asList(
+            TYPE, PLACE, "branch", "asset", HOLDER));
     private static final List<String> DONE_AXES = Collections.unmodifiableList(Arrays.asList(
             "kind", "month", PLACE, TYPE, "who", "asset", "state"));
     /** Long enough for every chart name joined once. The short column stays separate. */
@@ -90,9 +92,43 @@ public final class ReportCatalog {
         return out.length() > 16 ? "" : out.toString();
     }
 
-    /** A saved report whose rows are completed schedule days. */
+    /** Faults, requests, downtime, or maintenance. A saved report stores this in the metric. */
     public static boolean ops(String key) {
         return FAULTS.equals(key) || REQUESTS.equals(key) || IDLE.equals(key) || PTO.equals(key);
+    }
+
+    /** Count, cost, or one of the operational measures. */
+    public static String measure(String raw) {
+        if (raw == null) {
+            return "count";
+        }
+        String value = raw.trim().toLowerCase(Locale.ROOT);
+        if ("cost".equals(value) || ops(value)) {
+            return value;
+        }
+        return "count";
+    }
+
+    /** One or two axes for a constructed operational report. */
+    public static String opsGroup(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String value = raw.trim().toLowerCase(Locale.ROOT);
+        if (OPS_AXES.contains(value)) {
+            return value;
+        }
+        if (value.indexOf('+') < 0 || value.length() > 16) {
+            return "";
+        }
+        String[] parts = value.split("\\+");
+        if (parts.length != 2 || parts[0].equals(parts[1])) {
+            return "";
+        }
+        if (!OPS_AXES.contains(parts[0]) || !OPS_AXES.contains(parts[1])) {
+            return "";
+        }
+        return value;
     }
 
     public static boolean period(String key) {
