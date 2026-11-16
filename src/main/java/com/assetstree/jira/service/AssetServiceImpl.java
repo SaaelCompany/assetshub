@@ -1869,9 +1869,7 @@ public class AssetServiceImpl implements AssetService {
                         return Boolean.FALSE;
                     }
                     ao().create(AssetIssueLinkEntity.class,
-                            new DBParam("ASSET_ID", assetId),
-                            new DBParam("ISSUE_ID", issueId),
-                            new DBParam("STATUS_BEFORE", Statuses.canonical(asset.getStatus())));
+                            IssueLinkStore.parameters(assetId, issueId, Statuses.canonical(asset.getStatus())));
                     return Boolean.TRUE;
                 }
             });
@@ -5870,10 +5868,7 @@ public class AssetServiceImpl implements AssetService {
                     if (existing != null && existing.length > 0) {
                         throw new AssetException(409, "asset-tree.error.issue.duplicate");
                     }
-                    ao().create(AssetIssueLinkEntity.class,
-                            new DBParam("ASSET_ID", assetId),
-                            new DBParam("ISSUE_ID", Long.valueOf(issueId)),
-                            new DBParam("STATUS_BEFORE", before));
+                    ao().create(AssetIssueLinkEntity.class, IssueLinkStore.parameters(assetId, issueId, before));
                     return null;
                 }
             });
@@ -9566,10 +9561,7 @@ public class AssetServiceImpl implements AssetService {
                     if (existing != null && existing.length > 0) {
                         return null;
                     }
-                    ao().create(AssetIssueLinkEntity.class,
-                            new DBParam("ASSET_ID", assetId),
-                            new DBParam("ISSUE_ID", Long.valueOf(issueId)),
-                            new DBParam("STATUS_BEFORE", before));
+                    ao().create(AssetIssueLinkEntity.class, IssueLinkStore.parameters(assetId, issueId, before));
                     return null;
                 }
             });

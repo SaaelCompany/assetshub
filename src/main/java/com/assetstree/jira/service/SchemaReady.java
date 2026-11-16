@@ -201,6 +201,7 @@ public final class SchemaReady {
         String fallback = text ? "''" : "0";
         String kind = text ? "VARCHAR(255)" : "BIGINT";
         statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " DROP NOT NULL");
+        statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " SET NULL");
         statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " SET DEFAULT " + fallback);
         statements.add("ALTER TABLE " + table + " MODIFY " + column + " " + kind + " NULL DEFAULT " + fallback);
         statements.add("ALTER TABLE " + table + " ALTER COLUMN " + column + " " + (text ? "NVARCHAR(255)" : "BIGINT") + " NULL");

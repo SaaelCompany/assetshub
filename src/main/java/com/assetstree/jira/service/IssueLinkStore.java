@@ -3,8 +3,10 @@ package com.assetstree.jira.service;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.model.AssetException;
 import com.atlassian.activeobjects.external.ActiveObjects;
+import com.atlassian.jira.component.ComponentAccessor;
+import com.atlassian.jira.database.DatabaseAccessor;
 
-import net.java.ao.DatabaseProvider;
+import net.java.ao.DBParam;
 import net.java.ao.EntityManager;
 
 import org.slf4j.Logger;
@@ -21,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Writes a request link when the shared legacy table still has required
@@ -48,57 +51,117 @@ final class IssueLinkStore {
     private IssueLinkStore() {
     }
 
-    static void write(ActiveObjects ao, int assetId, long issueId, String status) {
-        EntityManager manager = SchemaReady.managerOf(ao);
-        if (manager == null) {
-            throw new AssetException(500, "asset-tree.error.link.failed", "schema");
+    /** Request-link columns, including the legacy required link type. */
+    static DBParam[] parameters(int assetId, long issueId, String status) {
+        return new DBParam[] {
+                new DBParam("ASSET_ID", Integer.valueOf(assetId)),
+                new DBParam("ISSUE_ID", Long.valueOf(issueId)),
+                new DBParam("STATUS_BEFORE", status == null ? "" : status),
+                new DBParam("LINK_TYPE", "")
+        };
+    }
+
+    static void write(final ActiveObjects ao, final int assetId, final long issueId, final String status) {
+        DatabaseAccessor database = ComponentAccessor.getComponent(DatabaseAccessor.class);
+        if (database == null) {
+            throw new AssetException(500, "asset-tree.error.link.failed", "database");
         }
-        DatabaseProvider provider = manager.getProvider();
-        String table = manager.getNameConverters().getTableNameConverter().getName(AssetIssueLinkEntity.class);
-        Connection connection = null;
         try {
-            connection = provider.getConnection();
-            String quote = connection.getMetaData().getIdentifierQuoteString();
-            String product = connection.getMetaData().getDatabaseProductName();
-            boolean oracle = product != null && product.toUpperCase(Locale.ROOT).contains("ORACLE");
-            List<Column> columns = readColumns(connection, table);
-            if (columns.isEmpty()) {
-                throw new AssetException(500, "asset-tree.error.link.failed", "table " + table);
-            }
-            if (present(connection, quote, table, columns, assetId, issueId)) {
-                throw new AssetException(409, "asset-tree.error.issue.duplicate");
-            }
-            try {
-                insert(connection, quote, table, values(columns, assetId, issueId, status, null, oracle));
-            } catch (SQLException ex) {
-                if (!missingIdentity(ex)) {
-                    throw ex;
+            database.runInTransaction(new Function<Connection, Boolean>() {
+                @Override
+                public Boolean apply(Connection connection) {
+                    try {
+                        store(connection, ao, assetId, issueId, status);
+                    } catch (SQLException ex) {
+                        throw new AssetException(500, "asset-tree.error.link.failed", reason(ex));
+                    }
+                    return Boolean.TRUE;
                 }
-                rollback(connection);
-                long next = nextId(connection, quote, table, named(columns, "ID"));
-                insert(connection, quote, table, values(columns, assetId, issueId, status, Long.valueOf(next), oracle));
-            }
-            commit(connection);
+            });
         } catch (AssetException ex) {
-            rollback(connection);
             throw ex;
         } catch (RuntimeException ex) {
-            rollback(connection);
+            AssetException cause = causeOf(ex);
+            if (cause != null) {
+                throw cause;
+            }
             log.error("ASSET-LINK direct insert failed for asset {} and issue {}", Integer.valueOf(assetId), Long.valueOf(issueId), ex);
             throw new AssetException(500, "asset-tree.error.link.failed", reason(ex));
-        } catch (Exception ex) {
-            rollback(connection);
-            log.error("ASSET-LINK direct insert failed for asset {} and issue {}", Integer.valueOf(assetId), Long.valueOf(issueId), ex);
-            throw new AssetException(500, "asset-tree.error.link.failed", reason(ex));
-        } finally {
-            if (connection != null) {
-                try {
-                    connection.close();
-                } catch (SQLException ignored) {
-                    // The insert was already committed or rolled back.
-                }
+        }
+    }
+
+    private static void store(Connection connection, ActiveObjects ao, int assetId, long issueId, String status) throws SQLException {
+        String table = tableName(connection, ao);
+        if (table == null) {
+            throw new AssetException(500, "asset-tree.error.link.failed", "table");
+        }
+        String quote = connection.getMetaData().getIdentifierQuoteString();
+        String product = connection.getMetaData().getDatabaseProductName();
+        boolean oracle = product != null && product.toUpperCase(Locale.ROOT).contains("ORACLE");
+        String plain = table.indexOf('.') < 0 ? table : table.substring(table.lastIndexOf('.') + 1);
+        String schema = table.indexOf('.') < 0 ? null : table.substring(0, table.lastIndexOf('.'));
+        List<Column> columns = readColumns(connection, schema, plain);
+        if (columns.isEmpty()) {
+            throw new AssetException(500, "asset-tree.error.link.failed", "columns " + table);
+        }
+        if (present(connection, quote, table, columns, assetId, issueId)) {
+            throw new AssetException(409, "asset-tree.error.issue.duplicate");
+        }
+        try {
+            insert(connection, quote, table, values(columns, assetId, issueId, status, null, oracle));
+        } catch (SQLException ex) {
+            if (!missingIdentity(ex)) {
+                throw ex;
+            }
+            long next = nextId(connection, quote, table, named(columns, "ID"));
+            insert(connection, quote, table, values(columns, assetId, issueId, status, Long.valueOf(next), oracle));
+        }
+    }
+
+    private static String tableName(Connection connection, ActiveObjects ao) throws SQLException {
+        EntityManager manager = SchemaReady.managerOf(ao);
+        if (manager != null) {
+            String named = manager.getNameConverters().getTableNameConverter().getName(AssetIssueLinkEntity.class);
+            if (named != null && !named.trim().isEmpty()) {
+                return named.trim();
             }
         }
+        PreparedStatement query = connection.prepareStatement(
+                "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE UPPER(COLUMN_NAME) = 'ISSUE_ID' AND UPPER(TABLE_NAME) LIKE '%AST_LINK'");
+        try {
+            ResultSet rows = query.executeQuery();
+            try {
+                if (!rows.next()) {
+                    return null;
+                }
+                String schema = rows.getString(1);
+                String table = rows.getString(2);
+                if (table == null || !SchemaReady.identifier(table)) {
+                    return null;
+                }
+                if (schema != null && SchemaReady.identifier(schema)) {
+                    return schema + "." + table;
+                }
+                return table;
+            } finally {
+                rows.close();
+            }
+        } finally {
+            query.close();
+        }
+    }
+
+    private static AssetException causeOf(Throwable failure) {
+        Throwable current = failure;
+        int guard = 0;
+        while (current != null && guard < 8) {
+            if (current instanceof AssetException) {
+                return (AssetException) current;
+            }
+            current = current.getCause();
+            guard++;
+        }
+        return null;
     }
 
     static Map<String, Object> values(List<Column> columns, int assetId, long issueId, String status, Long forcedId, boolean oracle) {
@@ -143,7 +206,7 @@ final class IssueLinkStore {
 
     static String insertSql(String table, String quote, List<String> names) {
         StringBuilder sql = new StringBuilder("INSERT INTO ");
-        sql.append(quoted(table, quote)).append(" (");
+        sql.append(quotedName(table, quote)).append(" (");
         StringBuilder marks = new StringBuilder();
         for (int i = 0; i < names.size(); i++) {
             if (i > 0) {
@@ -175,20 +238,23 @@ final class IssueLinkStore {
         return text;
     }
 
-    private static List<Column> readColumns(Connection connection, String table) throws SQLException {
+    private static List<Column> readColumns(Connection connection, String schema, String table) throws SQLException {
         if (table == null || table.trim().isEmpty()) {
             return Collections.emptyList();
         }
+        String[] schemas = schema == null ? new String[] {null} : new String[] {schema, schema.toUpperCase(Locale.ROOT), null};
         String[] names = new String[] {table, table.toUpperCase(Locale.ROOT), table.toLowerCase(Locale.ROOT)};
-        for (int i = 0; i < names.length; i++) {
-            ResultSet meta = connection.getMetaData().getColumns(null, null, names[i], null);
-            try {
-                List<Column> found = columns(meta, names[i]);
-                if (!found.isEmpty()) {
-                    return found;
+        for (int s = 0; s < schemas.length; s++) {
+            for (int i = 0; i < names.length; i++) {
+                ResultSet meta = connection.getMetaData().getColumns(null, schemas[s], names[i], null);
+                try {
+                    List<Column> found = columns(meta, names[i]);
+                    if (!found.isEmpty()) {
+                        return found;
+                    }
+                } finally {
+                    meta.close();
                 }
-            } finally {
-                meta.close();
             }
         }
         return Collections.emptyList();
@@ -224,7 +290,7 @@ final class IssueLinkStore {
         if (asset == null || issue == null) {
             return false;
         }
-        PreparedStatement query = connection.prepareStatement("SELECT COUNT(*) FROM " + quoted(table, quote)
+        PreparedStatement query = connection.prepareStatement("SELECT COUNT(*) FROM " + quotedName(table, quote)
                 + " WHERE " + quoted(asset, quote) + " = ? AND " + quoted(issue, quote) + " = ?");
         try {
             query.setInt(1, assetId);
@@ -254,7 +320,7 @@ final class IssueLinkStore {
     }
 
     private static long nextId(Connection connection, String quote, String table, String idColumn) throws SQLException {
-        PreparedStatement query = connection.prepareStatement("SELECT COALESCE(MAX(" + quoted(idColumn, quote) + "), 0) + 1 FROM " + quoted(table, quote));
+        PreparedStatement query = connection.prepareStatement("SELECT COALESCE(MAX(" + quoted(idColumn, quote) + "), 0) + 1 FROM " + quotedName(table, quote));
         try {
             ResultSet rows = query.executeQuery();
             try {
@@ -287,6 +353,21 @@ final class IssueLinkStore {
                 || type == Types.FLOAT || type == Types.REAL || type == Types.DOUBLE;
     }
 
+    static String quotedName(String name, String quote) {
+        if (name == null) {
+            return "";
+        }
+        int dot = name.indexOf('.');
+        if (dot > 0 && dot < name.length() - 1) {
+            String schema = name.substring(0, dot);
+            String table = name.substring(dot + 1);
+            if (SchemaReady.identifier(schema) && SchemaReady.identifier(table)) {
+                return quoted(schema, quote) + "." + quoted(table, quote);
+            }
+        }
+        return quoted(name, quote);
+    }
+
     static String quoted(String name, String quote) {
         String mark = quote == null ? "" : quote.trim();
         if (mark.isEmpty() || " ".equals(quote)) {
@@ -295,19 +376,4 @@ final class IssueLinkStore {
         return mark + name.replace(mark, mark + mark) + mark;
     }
 
-    private static void commit(Connection connection) throws SQLException {
-        if (connection != null && !connection.getAutoCommit()) {
-            connection.commit();
-        }
-    }
-
-    private static void rollback(Connection connection) {
-        try {
-            if (connection != null && !connection.getAutoCommit()) {
-                connection.rollback();
-            }
-        } catch (SQLException ignored) {
-            // The caller still reports the original failure.
-        }
-    }
 }

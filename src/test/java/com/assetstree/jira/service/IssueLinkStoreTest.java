@@ -47,9 +47,17 @@ public class IssueLinkStoreTest {
 
     @Test
     public void insertNamesStayQuoted() {
-        String sql = IssueLinkStore.insertSql("AO_X_AST_LINK", "\"", Arrays.asList("ASSET_ID", "LINK_TYPE"));
-        assertEquals("INSERT INTO \"AO_X_AST_LINK\" (\"ASSET_ID\", \"LINK_TYPE\") VALUES (?, ?)", sql);
+        String sql = IssueLinkStore.insertSql("PUBLIC.AO_X_AST_LINK", "\"", Arrays.asList("ASSET_ID", "LINK_TYPE"));
+        assertEquals("INSERT INTO \"PUBLIC\".\"AO_X_AST_LINK\" (\"ASSET_ID\", \"LINK_TYPE\") VALUES (?, ?)", sql);
         assertEquals("AO_X", IssueLinkStore.quoted("AO_X", " "));
+    }
+
+    @Test
+    public void requestLinkCarriesTheLegacyRequiredType() {
+        net.java.ao.DBParam[] params = IssueLinkStore.parameters(49, 10402L, "in_use");
+        assertEquals("LINK_TYPE", params[3].getField());
+        assertEquals("", params[3].getValue());
+        assertEquals(Long.valueOf(10402L), params[1].getValue());
     }
 
     @Test
