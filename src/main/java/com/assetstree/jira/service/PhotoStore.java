@@ -58,8 +58,8 @@ public final class PhotoStore {
     }
 
     /**
-     * Fit a PNG or JPEG into the shared frame. A picture that is already that JPEG
-     * is returned unchanged.
+     * Crop a PNG or JPEG so it fills the shared frame. A picture that is already
+     * that JPEG is returned unchanged.
      */
     public static byte[] frame(byte[] data) throws IOException {
         if (data == null || data.length == 0) {
@@ -77,21 +77,13 @@ public final class PhotoStore {
         BufferedImage canvas = new BufferedImage(FRAME_WIDTH, FRAME_HEIGHT, BufferedImage.TYPE_INT_RGB);
         Graphics2D pen = canvas.createGraphics();
         try {
-            pen.setColor(FRAME);
-            pen.fillRect(0, 0, FRAME_WIDTH, FRAME_HEIGHT);
             pen.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             pen.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             int sw = turned.getWidth();
             int sh = turned.getHeight();
-            double scale = Math.min(FRAME_WIDTH / (double) sw, FRAME_HEIGHT / (double) sh);
-            int dw = Math.max(1, (int) Math.round(sw * scale));
-            int dh = Math.max(1, (int) Math.round(sh * scale));
-            if (dw > FRAME_WIDTH) {
-                dw = FRAME_WIDTH;
-            }
-            if (dh > FRAME_HEIGHT) {
-                dh = FRAME_HEIGHT;
-            }
+            double scale = Math.max(FRAME_WIDTH / (double) sw, FRAME_HEIGHT / (double) sh);
+            int dw = Math.max(FRAME_WIDTH, (int) Math.ceil(sw * scale));
+            int dh = Math.max(FRAME_HEIGHT, (int) Math.ceil(sh * scale));
             int x = (FRAME_WIDTH - dw) / 2;
             int y = (FRAME_HEIGHT - dh) / 2;
             pen.drawImage(turned, x, y, dw, dh, null);

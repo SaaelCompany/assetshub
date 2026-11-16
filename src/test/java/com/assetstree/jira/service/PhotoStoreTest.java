@@ -41,10 +41,26 @@ public class PhotoStoreTest {
         assertEquals(PhotoStore.FRAME_WIDTH, wideImage.getWidth());
         assertEquals(PhotoStore.FRAME_HEIGHT, wideImage.getHeight());
         assertSame(tall, PhotoStore.frame(tall));
-        assertTrue(reddish(tallImage.getRGB(PhotoStore.FRAME_WIDTH / 2, PhotoStore.FRAME_HEIGHT / 2)));
-        assertTrue(gray(tallImage.getRGB(4, 4)));
-        assertTrue(bluish(wideImage.getRGB(PhotoStore.FRAME_WIDTH / 2, PhotoStore.FRAME_HEIGHT / 2)));
-        assertTrue(gray(wideImage.getRGB(PhotoStore.FRAME_WIDTH / 2, 4)));
+        assertTrue(reddish(tallImage.getRGB(4, 4)));
+        assertTrue(reddish(tallImage.getRGB(PhotoStore.FRAME_WIDTH - 5, PhotoStore.FRAME_HEIGHT - 5)));
+        assertTrue(bluish(wideImage.getRGB(4, 4)));
+        assertTrue(bluish(wideImage.getRGB(PhotoStore.FRAME_WIDTH - 5, PhotoStore.FRAME_HEIGHT - 5)));
+    }
+
+    @Test
+    public void cropsToTheCenterOfTheFrame() throws IOException {
+        BufferedImage split = new BufferedImage(200, 100, BufferedImage.TYPE_INT_RGB);
+        Graphics2D pen = split.createGraphics();
+        pen.setColor(Color.RED);
+        pen.fillRect(0, 0, 100, 100);
+        pen.setColor(Color.BLUE);
+        pen.fillRect(100, 0, 100, 100);
+        pen.dispose();
+        ByteArrayOutputStream raw = new ByteArrayOutputStream();
+        ImageIO.write(split, "png", raw);
+        BufferedImage framed = ImageIO.read(new ByteArrayInputStream(PhotoStore.frame(raw.toByteArray())));
+        assertTrue(reddish(framed.getRGB(8, PhotoStore.FRAME_HEIGHT / 2)));
+        assertTrue(bluish(framed.getRGB(PhotoStore.FRAME_WIDTH - 8, PhotoStore.FRAME_HEIGHT / 2)));
     }
 
     @Test
@@ -53,7 +69,7 @@ public class PhotoStoreTest {
         assertEquals(6, PhotoStore.orientation(sideways));
         BufferedImage framed = ImageIO.read(new ByteArrayInputStream(PhotoStore.frame(sideways)));
         assertTrue(reddish(framed.getRGB(PhotoStore.FRAME_WIDTH / 2, 8)));
-        assertTrue(gray(framed.getRGB(8, PhotoStore.FRAME_HEIGHT / 2)));
+        assertTrue(reddish(framed.getRGB(8, PhotoStore.FRAME_HEIGHT / 2)));
     }
 
     private static byte[] png(int width, int height, Color color) throws IOException {
@@ -106,10 +122,4 @@ public class PhotoStoreTest {
         return ((rgb >> 16) & 0xff) < 80 && ((rgb >> 8) & 0xff) < 80 && (rgb & 0xff) > 180;
     }
 
-    private static boolean gray(int rgb) {
-        int red = (rgb >> 16) & 0xff;
-        int green = (rgb >> 8) & 0xff;
-        int blue = rgb & 0xff;
-        return Math.abs(red - 244) < 8 && Math.abs(green - 245) < 8 && Math.abs(blue - 247) < 8;
-    }
 }
