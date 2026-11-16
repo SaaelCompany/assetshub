@@ -60,6 +60,7 @@ import com.atlassian.sal.api.transaction.TransactionCallback;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import com.assetstree.jira.PluginInfo;
+import com.assetstree.jira.event.AssetChangedEvent;
 import com.assetstree.jira.ao.AssetActivityEntity;
 import com.assetstree.jira.ao.AssetAttributeEntity;
 import com.assetstree.jira.ao.AssetCommentEntity;
@@ -14689,10 +14690,92 @@ public class AssetServiceImpl implements AssetService {
     }
 
 
+    @Override
+    public List<Long> issueIdsForAsset(final int assetId) {
+        return ao().executeInTransaction(new TransactionCallback<List<Long>>() {
+            @Override
+            public List<Long> doInTransaction() {
+                List<Long> ids = new ArrayList<Long>();
+                AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
+                        Query.select().where("ASSET_ID = ?", assetId));
+                if (links == null) {
+                    return ids;
+                }
+                for (int i = 0; i < links.length; i++) {
+                    if (links[i] != null) {
+                        ids.add(Long.valueOf(links[i].getIssueId()));
+                    }
+                }
+                return ids;
+            }
+        });
+    }
+
+    @Override
+    public boolean issueHasEquipment(final long issueId, final String statusKey) {
+        return ao().executeInTransaction(new TransactionCallback<Boolean>() {
+            @Override
+            public Boolean doInTransaction() {
+                AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
+                        Query.select().where("ISSUE_ID = ?", issueId));
+                if (links == null) {
+                    return Boolean.FALSE;
+                }
+                String wanted = statusKey == null ? "" : statusKey.trim();
+                for (int i = 0; i < links.length; i++) {
+                    if (links[i] == null) {
+                        continue;
+                    }
+                    AssetEntity asset = ao().get(AssetEntity.class, links[i].getAssetId());
+                    if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
+                        continue;
+                    }
+                    if (wanted.isEmpty() || wanted.equals(Statuses.canonical(asset.getStatus()))) {
+                        return Boolean.TRUE;
+                    }
+                }
+                return Boolean.FALSE;
+            }
+        }).booleanValue();
+    }
+
+    @Override
+    public int applyIssueEquipmentStatus(final ApplicationUser user, final long issueId, final String statusKey) {
+        return ao().executeInTransaction(new TransactionCallback<Integer>() {
+            @Override
+            public Integer doInTransaction() {
+                AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
+                        Query.select().where("ISSUE_ID = ?", issueId));
+                if (links == null) {
+                    return Integer.valueOf(0);
+                }
+                int changed = 0;
+                for (int i = 0; i < links.length; i++) {
+                    if (links[i] == null) {
+                        continue;
+                    }
+                    AssetEntity asset = ao().get(AssetEntity.class, links[i].getAssetId());
+                    if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
+                        continue;
+                    }
+                    asset = requireWritable(user, links[i].getAssetId());
+                    String next = resolveStatus(asset.getProjectKey(), statusKey);
+                    if (next.equals(Statuses.canonical(asset.getStatus()))) {
+                        continue;
+                    }
+                    assignFlowStatus(user, asset, next);
+                    changed++;
+                }
+                return Integer.valueOf(changed);
+            }
+        }).intValue();
+    }
+
     private void emit(String projectKey, String event, String json) {
         if (projectKey == null || projectKey.isEmpty() || json == null) {
             return;
         }
+        publishRule(projectKey, event, json);
         try {
             WebhookEntity[] rows = ao().find(WebhookEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
             if (rows == null) {
@@ -14707,6 +14790,24 @@ public class AssetServiceImpl implements AssetService {
             }
         } catch (RuntimeException ex) {
             log.warn("Webhook lookup failed", ex);
+        }
+    }
+
+    private void publishRule(String projectKey, String event, String json) {
+        if (event == null || !event.startsWith("asset.")) {
+            return;
+        }
+        try {
+            JSONObject body = new JSONObject(json);
+            int id = body.has("id") ? body.getInt("id") : 0;
+            String key = body.has("key") ? body.getString("key") : "";
+            String name = body.has("name") ? body.getString("name") : "";
+            EventPublisher events = ComponentAccessor.getComponent(EventPublisher.class);
+            if (events != null) {
+                events.publish(new AssetChangedEvent(projectKey, event, id, key, name));
+            }
+        } catch (Exception ex) {
+            log.warn("Automation event was not published", ex);
         }
     }
 
