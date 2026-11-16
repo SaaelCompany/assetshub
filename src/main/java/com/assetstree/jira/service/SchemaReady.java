@@ -141,14 +141,18 @@ public final class SchemaReady {
                 failedAt = now;
                 log.warn("Asset schema was not updated", ex);
             }
+            boolean split = false;
             try {
                 separateRelations(ao);
+                split = LinkTableRepair.repair(ao);
             } catch (Throwable ex) {
                 log.warn("Request links were not separated from asset links", ex);
             }
-            if (schemaOk) {
+            if (schemaOk && split) {
                 ready = true;
                 failedAt = 0L;
+            } else if (!split) {
+                failedAt = now;
             }
         }
     }
@@ -487,7 +491,7 @@ public final class SchemaReady {
     }
 
     private static EntityManager findManager(Object obj, IdentityHashMap<Object, Boolean> seen, int depth) {
-        if (obj == null || depth > 6 || seen.containsKey(obj)) {
+        if (obj == null || depth > 10 || seen.containsKey(obj)) {
             return null;
         }
         seen.put(obj, Boolean.TRUE);
@@ -523,24 +527,29 @@ public final class SchemaReady {
             }
             type = type.getSuperclass();
         }
-        Method[] methods = obj.getClass().getMethods();
-        for (int i = 0; i < methods.length; i++) {
-            if (methods[i].getParameterTypes().length != 0) {
-                continue;
-            }
-            String name = methods[i].getName();
-            if (!"delegate".equals(name) && !"claim".equals(name) && !"getDelegate".equals(name)) {
-                continue;
-            }
-            try {
-                Object value = methods[i].invoke(obj);
-                EntityManager found = findManager(value, seen, depth + 1);
-                if (found != null) {
-                    return found;
+        Class<?> look = obj.getClass();
+        while (look != null && look != Object.class) {
+            Method[] methods = look.getDeclaredMethods();
+            for (int i = 0; i < methods.length; i++) {
+                if (methods[i].getParameterTypes().length != 0) {
+                    continue;
                 }
-            } catch (Throwable ignored) {
-                // Another delegate method may be the one that is ready.
+                String name = methods[i].getName();
+                if (!"delegate".equals(name) && !"claim".equals(name) && !"getDelegate".equals(name)) {
+                    continue;
+                }
+                try {
+                    methods[i].setAccessible(true);
+                    Object value = methods[i].invoke(obj);
+                    EntityManager found = findManager(value, seen, depth + 1);
+                    if (found != null) {
+                        return found;
+                    }
+                } catch (Throwable ignored) {
+                    // Another delegate method may be the one that is ready.
+                }
             }
+            look = look.getSuperclass();
         }
         return null;
     }

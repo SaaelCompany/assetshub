@@ -36,11 +36,6 @@ public class AssetStatusAction implements AutomationRuleComponent {
             ruleContext.getAuditLog().addError("asset-tree.automation.statusRequired");
             return ExecutionResultBuilder.stopRule();
         }
-        List<Issue> issues = inputs == null ? null : inputs.getIssues();
-        if (issues == null || issues.isEmpty()) {
-            ruleContext.getAuditLog().addMessage("asset-tree.automation.statusMiss");
-            return ExecutionResultBuilder.continueRule();
-        }
         AssetService service = AssetBridge.service();
         if (service == null) {
             ruleContext.getAuditLog().addError("asset-tree.automation.statusMiss");
@@ -48,12 +43,20 @@ public class AssetStatusAction implements AutomationRuleComponent {
         }
         JiraAuthenticationContext authentication = ComponentAccessor.getJiraAuthenticationContext();
         ApplicationUser actor = authentication == null ? null : authentication.getLoggedInUser();
+        int assetId = AssetRuleValues.assetId(inputs);
         int changed = 0;
         try {
-            for (int i = 0; i < issues.size(); i++) {
-                Issue issue = issues.get(i);
-                if (issue != null && issue.getId() != null) {
-                    changed += service.applyIssueEquipmentStatus(actor, issue.getId().longValue(), status);
+            if (assetId > 0) {
+                changed = service.applyAssetStatus(actor, assetId, status);
+            } else {
+                List<Issue> issues = inputs == null ? null : inputs.getIssues();
+                if (issues != null) {
+                    for (int i = 0; i < issues.size(); i++) {
+                        Issue issue = issues.get(i);
+                        if (issue != null && issue.getId() != null) {
+                            changed += service.applyIssueEquipmentStatus(actor, issue.getId().longValue(), status);
+                        }
+                    }
                 }
             }
         } catch (AssetException ex) {
