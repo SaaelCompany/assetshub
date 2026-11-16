@@ -4229,6 +4229,7 @@
             more: 'M6 10a2 2 0 1 0 .01 4A2 2 0 0 0 6 10zm6 0a2 2 0 1 0 .01 4A2 2 0 0 0 12 10zm6 0a2 2 0 1 0 .01 4A2 2 0 0 0 18 10z',
             print: 'M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z',
             copy: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z',
+            ping: 'M12 18.5a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5zM7.4 14.1a6.5 6.5 0 0 1 9.2 0l-1.5 1.5a4.4 4.4 0 0 0-6.2 0l-1.5-1.5zm-2.6-2.6a10.2 10.2 0 0 1 14.4 0l-1.5 1.5a8 8 0 0 0-11.4 0L4.8 11.5z',
             link: 'M3.9 12a5 5 0 0 1 5-5h4v2h-4a3 3 0 0 0 0 6h4v2h-4a5 5 0 0 1-5-5zm6.1-1h4v2h-4v-2zm5.1-4h4a5 5 0 0 1 0 10h-4v-2h4a3 3 0 0 0 0-6h-4V7z',
             lock: 'M17 10h-1V8a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm-7-2a2 2 0 0 1 4 0v2h-4V8zm7 11H7v-7h10v7z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
@@ -4423,7 +4424,14 @@
             event.stopPropagation();
             menu.hidden = !menu.hidden;
         });
+        var sawPlain = false;
+        var split = false;
         items.forEach(function (item) {
+            if (!item.danger) sawPlain = true;
+            if (item.danger && sawPlain && !split) {
+                split = true;
+                menu.appendChild(el('div', 'asset-tree-more-sep'));
+            }
             var entry = el('button', 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''));
             entry.type = 'button';
             if (item.mark) entry.appendChild(pingDot(item.mark));
@@ -4439,14 +4447,15 @@
         return wrap;
     }
 
-    function moduleBlock(title, bodyNode, collapsed) {
+    function moduleBlock(title, bodyNode, collapsed, count) {
         var block = el('div', 'asset-tree-module' + (collapsed ? ' is-collapsed' : ''));
         var head = el('button', 'asset-tree-module-head');
         head.type = 'button';
         head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
         var caret = el('span', 'asset-tree-caret', collapsed ? '\u25B8' : '\u25BE');
         head.appendChild(caret);
-        head.appendChild(el('span', null, title));
+        head.appendChild(el('span', 'asset-tree-module-title', title));
+        if (count) head.appendChild(el('span', 'asset-tree-module-count', String(count)));
         var body = el('div', 'asset-tree-module-body');
         if (bodyNode) body.appendChild(bodyNode);
         if (collapsed) body.hidden = true;
@@ -4578,7 +4587,7 @@
             placeItems.push(detailItem(attribute.name || attribute.fieldKey, attributeView(attribute)));
         });
         main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
-        main.appendChild(descriptionModule(full, true));
+        main.appendChild(descriptionModule(full, true, true));
         main.appendChild(placeSchemesBlock(asset));
 
         if (departments.length) {
@@ -4631,8 +4640,8 @@
             });
         }
         main.appendChild(moduleBlock(t('placeTypes'), typeBlock));
-        main.appendChild(fileBlock(full));
-        main.appendChild(activityBlock(full));
+        main.appendChild(fileBlock(full, true));
+        main.appendChild(activityBlock(full, true));
 
         var issues = el('div');
         if (mayEdit(full)) {
@@ -4654,7 +4663,7 @@
                 issues.appendChild(issueRow(full.id, issue));
             });
         }
-        main.appendChild(moduleBlock(t('issues'), issues));
+        main.appendChild(moduleBlock(t('issues'), issues, true, full.issues ? full.issues.length : 0));
 
         aside.appendChild(moduleBlock(t('people'), staticPeople(full)));
         aside.appendChild(moduleBlock(t('dates'), datesBody(full)));
@@ -4685,6 +4694,27 @@
         return row;
     }
 
+    function emptyWelcome() {
+        var lead = el('div', 'asset-tree-empty');
+        lead.appendChild(el('h2', null, t('emptyProject')));
+        lead.appendChild(el('p', null, t('emptyProjectHint')));
+        var actions = el('div', 'asset-tree-inline-actions');
+        if (state.canPlaces) {
+            actions.appendChild(button(t('emptyAddPlace'), 'asset-tree-btn primary', function () {
+                openCreate(null, 'place');
+            }));
+        }
+        if (state.canConfigure) {
+            actions.appendChild(button(t('addType'), 'asset-tree-btn', function () {
+                state.schemaTab = 'types';
+                state.schemaAdding = !state.types.length;
+                showView('settings');
+            }));
+        }
+        if (actions.childNodes.length) lead.appendChild(actions);
+        return lead;
+    }
+
     function renderChildList(asset) {
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
@@ -4702,6 +4732,10 @@
             : listed(pool);
         if (remote || projectFiltering()) {
             title = t('searchResults');
+        }
+        if (!asset && !kids.length && !projectFiltering() && !remote) {
+            section.appendChild(emptyWelcome());
+            return section;
         }
         var head = el('div', 'asset-tree-queue-head');
         var titles = el('div', 'asset-tree-queue-titles');
@@ -4735,21 +4769,7 @@
             section.appendChild(el('p', 'asset-tree-hint', t('loading')));
             return section;
         }
-        if (!kids.length && !asset && !projectFiltering() && !remote) {
-            var lead = el('div', 'asset-tree-lead');
-            lead.appendChild(el('p', 'asset-tree-hint', t('hierarchyLead')));
-            var steps = el('ol', 'asset-tree-steps');
-            [t('stepBranch'), t('stepKind'), t('stepObject')].forEach(function (line) {
-                steps.appendChild(el('li', null, line));
-            });
-            lead.appendChild(steps);
-            if (state.canPlaces) {
-                lead.appendChild(button(t('addPlace'), 'asset-tree-btn primary', function () {
-                    openCreate(null, 'place');
-                }));
-            }
-            section.appendChild(lead);
-        } else if (!kids.length) {
+        if (!kids.length && (asset || projectFiltering() || remote)) {
             section.appendChild(el('p', 'asset-tree-hint', (projectFiltering() || remote) ? t('noResults') : (asset && isFolder(asset) ? t('placeListHint') : t('listEmpty'))));
         }
         if (!kids.length) {
@@ -5420,7 +5440,7 @@
                 openPlansOnSchedule(asset);
             }));
             body.appendChild(tools);
-            return moduleBlock(t('serviceTitle'), body, false);
+            return moduleBlock(t('serviceTitle'), body, true, asset.plans.length);
         }
         body.appendChild(el('p', 'asset-tree-hint', t('serviceHint')));
         var creating = offered && mayEdit(asset) && state.serviceOpen === asset.id;
@@ -6272,7 +6292,7 @@
         return field;
     }
 
-    function descriptionModule(asset, inline) {
+    function descriptionModule(asset, inline, folded) {
         var host = el('div');
         function paint() {
             host.innerHTML = '';
@@ -6300,7 +6320,7 @@
             area.focus();
         }
         paint();
-        return moduleBlock(t('description'), host);
+        return moduleBlock(t('description'), host, !!folded);
     }
 
     function changeIssued(asset, userKey) {
@@ -6827,7 +6847,7 @@
         return events;
     }
 
-    function activityBlock(asset) {
+    function activityBlock(asset, folded) {
         var body = el('div');
         var tabs = el('div', 'asset-tree-tabs');
         [['all', 'activityAll'], ['comments', 'activityComments'], ['history', 'activityHistory']].forEach(function (pair) {
@@ -6874,7 +6894,8 @@
             trigger.id = 'asset-tree-comment-trigger';
             body.appendChild(trigger);
         }
-        return moduleBlock(t('activityTitle'), body);
+        var activityCount = (asset.comments ? asset.comments.length : 0) + (asset.activities ? asset.activities.length : 0);
+        return moduleBlock(t('activityTitle'), body, !!folded, activityCount);
     }
 
     function fileUrl(id, extra) {
@@ -7136,7 +7157,7 @@
         return field;
     }
 
-    function fileBlock(asset) {
+    function fileBlock(asset, folded) {
         var body = el('div');
         var list = asset.files;
         if (list != null) {
@@ -7200,7 +7221,8 @@
         } else if (list && !list.length) {
             body.appendChild(el('p', 'asset-tree-hint', t('attachEmpty')));
         }
-        return moduleBlock(t('attachments'), body);
+        var fileCount = list && list.length ? list.length : 0;
+        return moduleBlock(t('attachments'), body, !!folded, fileCount);
     }
 
     function fileKind(name) {
@@ -8243,23 +8265,14 @@
             }
         }
         if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
-            extra.unshift({
-                label: t('tniPing'),
-                mark: pingMark(asset),
-                onClick: function () { pingAsset(asset); }
-            });
-        }
-        if (mayEdit(asset) && !isFolder(asset) && moduleOn('life')) {
-            var lifeRow = state.life[asset.id];
-            if (lifeRow && lifeRow.writeoffState !== 'approved' && lifeRow.writeoffState !== 'pending') {
-                var directWriteoff = !moduleSetup().lifeApproval;
-                extra.push({
-                    label: directWriteoff ? t('lifeWriteoffNow') : t('lifeAsk'),
-                    onClick: function () { openWriteoffDialog(asset, lifeRow, directWriteoff); }
-                });
+            var ping = toolButton(t('tniPing'), 'ping', function () { pingAsset(asset); });
+            var pingState = pingMark(asset);
+            if (pingState) {
+                var pingLabel = ping.querySelector('span');
+                ping.insertBefore(pingDot(pingState), pingLabel || null);
             }
+            ops.appendChild(ping);
         }
-        if (mayEdit(asset)) extra.push({ label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
                 label: t('backToList'),
@@ -8274,12 +8287,23 @@
                 }
             });
         }
+        if (mayEdit(asset) && !isFolder(asset) && moduleOn('life')) {
+            var lifeRow = state.life[asset.id];
+            if (lifeRow && lifeRow.writeoffState !== 'approved' && lifeRow.writeoffState !== 'pending') {
+                var directWriteoff = !moduleSetup().lifeApproval;
+                extra.push({
+                    label: directWriteoff ? t('lifeWriteoffNow') : t('lifeAsk'),
+                    danger: true,
+                    onClick: function () { openWriteoffDialog(asset, lifeRow, directWriteoff); }
+                });
+            }
+        }
+        if (mayEdit(asset)) extra.push({ label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
         if (extra.length) ops.appendChild(moreMenu(extra));
         main.appendChild(ops);
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
 
         var items = [detailItem(t('type'), typeBadge(typeFor(asset), asset.typeLabel || typeOf(asset.typeKey).label || ''))];
-        items.push(detailItem(t('status'), statusPicker(asset)));
         var place = asset.location || (asset.parentId && byId()[asset.parentId] ? byId()[asset.parentId].name : t('root'));
         items.push(detailItem(parentCaption(asset), el('span', null, place)));
         (asset.attributes || []).forEach(function (attribute) {
@@ -8293,7 +8317,7 @@
         if (moduleOn('life') && !isFolder(asset)) {
             story.appendChild(lifeBlock(asset));
         }
-        story.appendChild(descriptionModule(asset, true));
+        story.appendChild(descriptionModule(asset, true, true));
         if (showPhoto) {
             var band = el('div', 'asset-tree-photo-band');
             band.appendChild(story);
@@ -8321,15 +8345,21 @@
                 issues.appendChild(issueRow(asset.id, issue));
             });
         }
-        main.appendChild(moduleBlock(t('issues'), issues));
-        main.appendChild(fileBlock(asset));
-        main.appendChild(activityBlock(asset));
+        main.appendChild(moduleBlock(t('issues'), issues, true, asset.issues ? asset.issues.length : 0));
+        main.appendChild(fileBlock(asset, true));
+        main.appendChild(activityBlock(asset, true));
 
         var error = el('div', 'asset-tree-form-error');
         error.id = 'asset-tree-form-error';
         error.hidden = true;
         main.appendChild(error);
 
+        if (!isFolder(asset)) {
+            var statusBox = el('div', 'asset-tree-status-block');
+            statusBox.appendChild(el('div', 'asset-tree-side-label', t('status')));
+            statusBox.appendChild(statusPicker(asset));
+            aside.appendChild(statusBox);
+        }
         var people = el('div');
         people.appendChild(custodianPicker(asset));
         people.appendChild(issuedPicker(asset));
@@ -8384,9 +8414,6 @@
         var kicker = el('div', 'asset-tree-kicker');
         var key = el('span', 'asset-tree-issuekey', asset.objectKey);
         kicker.appendChild(key);
-        if (!placePage) {
-            kicker.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(asset.status), statusLabel(asset.status)));
-        }
         top.appendChild(kicker);
         var actions = el('div', 'asset-tree-detail-actions');
         if (!placePage && (childrenOf(asset.id).length || !showsInTree(asset))) {
@@ -8400,8 +8427,10 @@
                 replaceDetail();
             }));
         }
+        var editBar = null;
         if (state.canEdit) {
-            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', function () {
+            editBar = el('div', 'asset-tree-edit-bar');
+            editBar.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
                 if (state.dirty && !window.confirm(t('confirmDiscard'))) {
                     return;
                 }
@@ -8413,12 +8442,11 @@
                 }
                 showDetail(state.detail || asset, false);
             }));
-            actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () { openDelete(asset); }));
             var save = button(t('save'), 'asset-tree-btn primary', function () { saveDetail(); });
             save.id = 'asset-tree-save';
-            actions.appendChild(save);
+            editBar.appendChild(save);
         }
-        top.appendChild(actions);
+        if (actions.childNodes.length) top.appendChild(actions);
         main.appendChild(top);
         main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
 
@@ -8559,6 +8587,7 @@
             state.dirty = true;
         });
         section.appendChild(form);
+        if (editBar) section.appendChild(editBar);
         writePaneScroll(section, kept);
         var typeSelect = document.getElementById('asset-field-type');
         if (typeSelect) {
@@ -27153,7 +27182,7 @@
             });
         }
         block.classList.add('asset-tree-life-module');
-        var title = block.querySelector('.asset-tree-module-head > span:last-child');
+        var title = block.querySelector('.asset-tree-module-title');
         if (title) {
             title.classList.add('asset-tree-life-heading');
             title.appendChild(stageMark('beta'));

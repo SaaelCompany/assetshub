@@ -4685,25 +4685,25 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .asset-tree-detail.is-view {
-    background: #f4f5f7;
+    background: #fff;
 }
 
 #asset-tree-app .asset-tree-request.is-view {
-    gap: 8px;
-    padding: 8px;
-    background: transparent;
+    gap: 0;
+    padding: 0;
+    background: #fff;
 }
 
 #asset-tree-app .asset-tree-request.is-view .asset-tree-request-main,
 #asset-tree-app .asset-tree-request.is-view .asset-tree-request-aside {
     background: #fff;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    border: 0;
+    border-radius: 0;
 }
 
 #asset-tree-app .asset-tree-request.is-view .asset-tree-request-aside {
     border-left: 1px solid #dfe1e6;
-    padding: 8px 16px 24px;
+    padding: 16px 16px 24px;
 }
 
 #asset-tree-app .asset-tree-issue-crumb {
@@ -4727,10 +4727,21 @@ a.asset-tree-url {
 }
 
 #asset-tree-app .is-view .asset-tree-ops {
-    margin: 0 0 12px;
-    padding: 0 0 8px;
-    border-bottom: 1px solid #ebecf0;
-    gap: 2px;
+    margin: 8px 0 4px;
+    padding: 0;
+    border-bottom: 0;
+    gap: 8px;
+}
+
+#asset-tree-app .is-view button.asset-tree-tool {
+    border: 1px solid #dfe1e6 !important;
+    background: #fafbfc !important;
+    color: #172b4d !important;
+    padding: 0 10px !important;
+}
+
+#asset-tree-app .is-view button.asset-tree-tool:hover {
+    background: #ebecf0 !important;
 }
 
 #asset-tree-app button.asset-tree-tool[hidden],
@@ -4795,7 +4806,8 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-more-menu {
     position: absolute;
     top: 100%;
-    left: 0;
+    right: 0;
+    left: auto;
     z-index: 6;
     min-width: 180px;
     margin-top: 4px;
@@ -4832,8 +4844,71 @@ a.asset-tree-url {
     color: #de350b !important;
 }
 
+#asset-tree-app .asset-tree-more-sep {
+    height: 1px;
+    margin: 4px 0;
+    background: #ebecf0;
+}
+
 #asset-tree-app .asset-tree-module {
-    margin: 16px 0 8px;
+    margin: 8px 0 0;
+}
+
+#asset-tree-app .is-view .asset-tree-request-main button.asset-tree-module-head {
+    height: 40px !important;
+    margin: 0;
+    border-bottom: 1px solid #ebecf0 !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+}
+
+#asset-tree-app .asset-tree-module-count {
+    margin-left: auto;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+#asset-tree-app .is-view .asset-tree-request-aside button.asset-tree-module-head {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #6b778c !important;
+}
+
+#asset-tree-app .asset-tree-status-block {
+    margin: 0 0 16px;
+}
+
+#asset-tree-app .asset-tree-side-label {
+    margin: 0 0 8px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-status-block button.asset-tree-status-btn {
+    display: flex !important;
+    justify-content: center;
+    width: 100% !important;
+    height: 32px !important;
+    padding: 0 8px !important;
+    font-size: 12px !important;
+}
+
+#asset-tree-app .asset-tree-edit-bar {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    height: 56px;
+    padding: 0 16px;
+    background: #fff;
+    border-top: 1px solid #dfe1e6;
 }
 
 #asset-tree-app button.asset-tree-module-head {
@@ -4894,7 +4969,18 @@ a.asset-tree-url {
 #asset-tree-app .asset-tree-details {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px 32px;
+    gap: 12px 24px;
+}
+
+#asset-tree-app .is-view .asset-tree-detail-item {
+    display: block;
+}
+
+#asset-tree-app .is-view .asset-tree-detail-label {
+    display: block;
+    margin: 0 0 2px;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-detail-item {
