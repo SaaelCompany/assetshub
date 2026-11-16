@@ -9867,35 +9867,76 @@
     }
 
     function issueLinker(assetId) {
+        var box = el('div', 'asset-tree-issue-link');
+        box.setAttribute('data-asset-id', String(assetId));
         var linker = el('div', 'asset-tree-linkrow');
         var issueInput = el('input');
+        issueInput.type = 'search';
         issueInput.placeholder = t('issuePlaceholder');
+        issueInput.autocomplete = 'off';
+        var results = el('div', 'asset-tree-user-results');
+        var hint = el('p', 'asset-tree-hint');
+        hint.hidden = true;
+        var timer = null;
+        var seq = 0;
+        function showHint(message) {
+            hint.hidden = !message;
+            hint.textContent = message || '';
+        }
         function submit(event) {
             if (event && event.preventDefault) event.preventDefault();
             if (event && event.stopPropagation) event.stopPropagation();
-            linkIssue(assetId, issueInput.value);
+            results.innerHTML = '';
+            linkIssue(assetId, issueInput.value, showHint);
         }
+        issueInput.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var query = issueInput.value.replace(/^\s+|\s+$/g, '');
+                var token = ++seq;
+                results.innerHTML = '';
+                if (query.length < 2) return;
+                ajax('GET', '/issues/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                    if (token !== seq || issueInput.value.replace(/^\s+|\s+$/g, '') !== query) return;
+                    results.innerHTML = '';
+                    if (status !== 200 || !payload || !payload.length) return;
+                    payload.forEach(function (issue) {
+                        var caption = issue.issueKey || '';
+                        if (issue.summary) caption += '  ' + issue.summary;
+                        results.appendChild(button(caption, 'asset-tree-user-hit', function () {
+                            issueInput.value = issue.issueKey || '';
+                            results.innerHTML = '';
+                            linkIssue(assetId, issue.issueKey, showHint);
+                        }));
+                    });
+                });
+            }, 220);
+        });
         issueInput.addEventListener('keydown', function (event) {
             if (event.key === 'Enter' || event.keyCode === 13) submit(event);
         });
         linker.appendChild(issueInput);
         linker.appendChild(button(t('linkIssue'), 'asset-tree-btn', submit));
-        return linker;
+        box.appendChild(linker);
+        box.appendChild(results);
+        box.appendChild(hint);
+        return box;
     }
 
-    function linkIssue(assetId, issueKey) {
-        if (!issueKey || !issueKey.trim()) {
-            setFormError(t('issuePlaceholder'));
+    function linkIssue(assetId, issueKey, showHint) {
+        var key = issueKey ? String(issueKey).replace(/^\s+|\s+$/g, '') : '';
+        if (!key) {
+            if (showHint) showHint(t('issuePlaceholder'));
             notify(t('issuePlaceholder'));
             return;
         }
-        ajax('POST', '/assets/' + assetId + '/issues', { issueKey: issueKey.trim() }, function (status, payload) {
+        ajax('POST', '/assets/' + assetId + '/issues', { issueKey: key }, function (status, payload) {
             if (status >= 200 && status < 300) {
                 notify(t('issueAdded'));
                 selectAsset(assetId, true);
             } else {
                 var message = (payload && payload.message) || t('errorTitle');
-                setFormError(message);
+                if (showHint) showHint(message);
                 notify(message);
             }
         });

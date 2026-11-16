@@ -10049,6 +10049,19 @@ setTimeout(function () {
             if had:
                 apply_removed_flow(int(match.group(1)), ISSUES_BY_ID.get(int(match.group(2))), had.get("statusBefore") or "")
             return 204, None
+        if path == "/issues/search" and method == "GET":
+            needle = (query.get("q") or [""])[0].strip().lower()
+            rows = []
+            for issue in ISSUES.values():
+                hay = (issue["issueKey"] + " " + issue.get("summary", "")).lower()
+                if needle and needle in hay:
+                    rows.append({
+                        "issueId": issue["issueId"],
+                        "issueKey": issue["issueKey"],
+                        "summary": issue["summary"],
+                        "status": issue["status"]
+                    })
+            return 200, rows[:8]
         match = re.fullmatch(r"/issues/(\d+)/context", path)
         if match and method == "GET":
             issue = ISSUES_BY_ID.get(int(match.group(1)))

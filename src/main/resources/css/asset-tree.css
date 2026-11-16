@@ -152,8 +152,8 @@
 .asset-tree-notice {
     position: fixed;
     right: 20px;
-    bottom: 20px;
-    z-index: 30;
+    bottom: 64px;
+    z-index: 4000;
     width: auto;
     max-width: min(360px, calc(100vw - 40px));
     max-height: 72px;
@@ -4908,12 +4908,22 @@ a.asset-tree-url {
     margin: 8px 0 0;
 }
 
+#asset-tree-app .is-view .asset-tree-request-main .asset-tree-module {
+    margin-top: 22px;
+}
+
 #asset-tree-app .is-view .asset-tree-request-main button.asset-tree-module-head {
-    height: 40px !important;
+    height: auto !important;
+    min-height: 0 !important;
     margin: 0;
+    padding: 2px 0 12px !important;
     border-bottom: 1px solid #ebecf0 !important;
     font-size: 14px !important;
     font-weight: 600 !important;
+}
+
+#asset-tree-app .is-view .asset-tree-request-main .asset-tree-module-body {
+    padding-top: 10px;
 }
 
 #asset-tree-app .asset-tree-module-count {

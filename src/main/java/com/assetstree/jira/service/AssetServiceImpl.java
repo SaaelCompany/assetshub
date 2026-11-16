@@ -18,6 +18,10 @@ import com.atlassian.jira.event.issue.IssueEvent;
 import com.atlassian.jira.event.type.EventType;
 import com.atlassian.jira.issue.CustomFieldManager;
 import com.atlassian.jira.bc.issue.IssueService;
+import com.atlassian.jira.bc.issue.search.SearchService;
+import com.atlassian.jira.issue.search.SearchException;
+import com.atlassian.jira.issue.search.SearchResults;
+import com.atlassian.jira.web.bean.PagerFilter;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.issue.IssueInputParameters;
 import com.atlassian.jira.issue.IssueManager;
@@ -3521,13 +3525,91 @@ public class AssetServiceImpl implements AssetService {
     public IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey) {
         Issue issue = requireIssue(user, issueKey);
         IssueRefDto linked = link(user, assetId, issue, true);
-        applyLinkedFlow(user, assetId, issue);
-        try {
-            writeAssetField(user, issue, assetId);
-        } catch (RuntimeException ex) {
-            log.warn("Could not store the asset field on {}", issue.getKey(), ex);
-        }
+        rememberIssueAsset(user, issue, assetId);
         return linked;
+    }
+
+    @Override
+    public List<IssueRefDto> searchIssues(ApplicationUser user, String query) {
+        requireUser(user);
+        String raw = query == null ? "" : query.trim();
+        if (raw.length() < 2) {
+            return Collections.emptyList();
+        }
+        List<IssueRefDto> found = new ArrayList<IssueRefDto>();
+        Set<Long> seen = new HashSet<Long>();
+        String normalized = AssetValidator.normalizeIssueKey(raw);
+        if (AssetValidator.isIssueKey(normalized)) {
+            try {
+                Issue exact = issueManager().getIssueObject(normalized);
+                if (canBrowse(user, exact) && exact.getId() != null && seen.add(exact.getId())) {
+                    found.add(toIssue(exact));
+                }
+            } catch (RuntimeException ex) {
+                log.warn("Request {} was not suggested", normalized, ex);
+            }
+        }
+        String jql = issueSuggestionJql(raw);
+        if (jql.isEmpty() || found.size() >= 8) {
+            return found;
+        }
+        try {
+            SearchService search = ComponentAccessor.getComponent(SearchService.class);
+            if (search == null) {
+                return found;
+            }
+            SearchService.ParseResult parsed = search.parseQuery(user, jql);
+            if (parsed == null || !parsed.isValid() || parsed.getQuery() == null) {
+                return found;
+            }
+            SearchResults<Issue> results = search.search(user, parsed.getQuery(), new PagerFilter<Issue>(8));
+            if (results == null || results.getResults() == null) {
+                return found;
+            }
+            for (Issue issue : results.getResults()) {
+                if (issue == null || issue.getId() == null || !seen.add(issue.getId()) || !canBrowse(user, issue)) {
+                    continue;
+                }
+                found.add(toIssue(issue));
+                if (found.size() >= 8) {
+                    break;
+                }
+            }
+        } catch (SearchException ex) {
+            log.warn("Request suggestions failed for {}", raw, ex);
+        } catch (RuntimeException ex) {
+            log.warn("Request suggestions failed for {}", raw, ex);
+        }
+        return found;
+    }
+
+    private static String issueSuggestionJql(String raw) {
+        String upper = raw.trim().toUpperCase(Locale.ROOT);
+        if (upper.matches("[A-Z][A-Z0-9_]+")) {
+            return "project = " + upper + " ORDER BY updated DESC";
+        }
+        return "text ~ \"" + jqlQuote(raw) + "*\" ORDER BY updated DESC";
+    }
+
+    private static String jqlQuote(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /** The request field is updated after the link row is stored, so a field error cannot undo the link. */
+    private void rememberIssueAsset(ApplicationUser user, Issue issue, int assetId) {
+        try {
+            applyLinkedFlow(user, assetId, issue);
+        } catch (RuntimeException ex) {
+            log.warn("Could not apply the equipment flow for {}", Integer.valueOf(assetId), ex);
+        }
+        try {
+            writeAssetFieldDirect(issue, assetId);
+        } catch (RuntimeException ex) {
+            log.warn("Could not store the asset field on {}", issue == null ? "" : issue.getKey(), ex);
+        }
     }
 
     @Override
@@ -3540,12 +3622,7 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
         link(user, assetId, issue, false);
-        applyLinkedFlow(user, assetId, issue);
-        try {
-            writeAssetField(user, issue, assetId);
-        } catch (RuntimeException ex) {
-            log.warn("Could not store the asset field on {}", issue.getKey(), ex);
-        }
+        rememberIssueAsset(user, issue, assetId);
         try {
             return getAsset(user, assetId);
         } catch (RuntimeException ex) {
@@ -5755,25 +5832,41 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private IssueRefDto link(ApplicationUser user, int assetId, Issue issue, boolean requireWrite) {
-        return ao().executeInTransaction(new TransactionCallback<IssueRefDto>() {
+        if (issue == null || issue.getId() == null) {
+            throw new AssetException(404, "asset-tree.error.issue.notFound");
+        }
+        final long issueId = issue.getId().longValue();
+        ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
-            public IssueRefDto doInTransaction() {
+            public Void doInTransaction() {
                 AssetEntity asset = requireWrite ? requireWritable(user, assetId) : requireAsset(assetId);
-                if (issue == null || issue.getId() == null) {
-                    throw new AssetException(404, "asset-tree.error.issue.notFound");
-                }
                 AssetIssueLinkEntity[] existing = ao().find(AssetIssueLinkEntity.class,
-                        Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, issue.getId()));
+                        Query.select().where("ASSET_ID = ? AND ISSUE_ID = ?", assetId, Long.valueOf(issueId)));
                 if (existing != null && existing.length > 0) {
                     throw new AssetException(409, "asset-tree.error.issue.duplicate");
                 }
+                String before = "";
+                try {
+                    before = Statuses.canonical(asset.getStatus());
+                } catch (RuntimeException ex) {
+                    before = "";
+                }
                 ao().create(AssetIssueLinkEntity.class,
                         new DBParam("ASSET_ID", assetId),
-                        new DBParam("ISSUE_ID", issue.getId()),
-                        new DBParam("STATUS_BEFORE", Statuses.canonical(asset.getStatus())));
-                return toIssue(issue);
+                        new DBParam("ISSUE_ID", Long.valueOf(issueId)),
+                        new DBParam("STATUS_BEFORE", before == null ? "" : before));
+                return null;
             }
         });
+        try {
+            return toIssue(issue);
+        } catch (RuntimeException ex) {
+            log.warn("Linked request {} could not be described", Long.valueOf(issueId), ex);
+            IssueRefDto dto = new IssueRefDto();
+            dto.setIssueId(issueId);
+            dto.setIssueKey(issue.getKey());
+            return dto;
+        }
     }
 
     private List<AssetDto> linkedAssets(ApplicationUser user, long issueId) {

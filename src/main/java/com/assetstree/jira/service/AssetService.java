@@ -183,6 +183,8 @@ public interface AssetService {
 
     IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey);
 
+    List<IssueRefDto> searchIssues(ApplicationUser user, String query);
+
     void unlinkIssue(ApplicationUser user, int assetId, long issueId);
 
     AssetPeerDto linkPeer(ApplicationUser user, int assetId, int otherId);
