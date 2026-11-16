@@ -3974,7 +3974,11 @@ public class AssetServiceImpl implements AssetService {
         if (!canBrowse(user, issue)) {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
-        adoptFieldAsset(user, issue, true);
+        try {
+            adoptFieldAsset(user, issue, true);
+        } catch (RuntimeException ex) {
+            log.warn("Could not adopt the asset field on {}", issue.getKey(), ex);
+        }
         List<AssetDto> linked = linkedAssets(user, issueId);
         if (linked != null && !linked.isEmpty()) {
             return linked;
@@ -5836,6 +5840,30 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(404, "asset-tree.error.issue.notFound");
         }
         final long issueId = issue.getId().longValue();
+        try {
+            insertIssueLink(user, assetId, issueId, requireWrite);
+        } catch (RuntimeException ex) {
+            AssetException cause = assetCause(ex);
+            if (cause != null) {
+                throw cause;
+            }
+            log.warn("Could not store request {} on asset {}, repairing the link table", Long.valueOf(issueId), Integer.valueOf(assetId), ex);
+            SchemaReady.force();
+            SchemaReady.ensure(ao());
+            insertIssueLink(user, assetId, issueId, requireWrite);
+        }
+        try {
+            return toIssue(issue);
+        } catch (RuntimeException ex) {
+            log.warn("Linked request {} could not be described", Long.valueOf(issueId), ex);
+            IssueRefDto dto = new IssueRefDto();
+            dto.setIssueId(issueId);
+            dto.setIssueKey(issue.getKey());
+            return dto;
+        }
+    }
+
+    private void insertIssueLink(final ApplicationUser user, final int assetId, final long issueId, final boolean requireWrite) {
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
@@ -5858,15 +5886,6 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
-        try {
-            return toIssue(issue);
-        } catch (RuntimeException ex) {
-            log.warn("Linked request {} could not be described", Long.valueOf(issueId), ex);
-            IssueRefDto dto = new IssueRefDto();
-            dto.setIssueId(issueId);
-            dto.setIssueKey(issue.getKey());
-            return dto;
-        }
     }
 
     private List<AssetDto> linkedAssets(ApplicationUser user, long issueId) {
