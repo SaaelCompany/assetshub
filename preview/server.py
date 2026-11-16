@@ -10706,11 +10706,10 @@ setTimeout(function () {
 
     def link_issue(self, asset_id, issue_key, text):
         asset = STATE["assets"].get(asset_id)
-        issue = ISSUES.get((issue_key or "").strip().upper())
+        found = re.search(r"([A-Z][A-Z0-9_]+-\d+)", (issue_key or "").strip().upper())
+        issue = ISSUES.get(found.group(1) if found else "")
         if not asset or not issue:
             return 404, {"message": text["asset-tree.error.issue.notFound"] if not issue else text["asset-tree.error.notFound"]}
-        if asset["projectKey"] != issue["projectKey"]:
-            return 400, {"message": text["asset-tree.error.project.mismatch"]}
         if any(link["assetId"] == asset_id and link["issueId"] == issue["issueId"] for link in STATE["links"]):
             return 409, {"message": text["asset-tree.error.issue.duplicate"]}
         STATE["links"].append({"assetId": asset_id, "issueId": issue["issueId"], "statusBefore": STATE["assets"][asset_id].get("status") or ""})
