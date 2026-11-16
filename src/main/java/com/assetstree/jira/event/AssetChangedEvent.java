@@ -10,9 +10,11 @@ public final class AssetChangedEvent {
     private final String status;
     private final String typeKey;
     private final String previousStatus;
+    private final String plan;
+    private final String due;
 
     public AssetChangedEvent(String projectKey, String kind, int assetId, String objectKey, String name,
-                              String status, String typeKey, String previousStatus) {
+                              String status, String typeKey, String previousStatus, String plan, String due) {
         this.projectKey = projectKey == null ? "" : projectKey;
         this.kind = kind == null ? "" : kind;
         this.assetId = assetId;
@@ -21,6 +23,8 @@ public final class AssetChangedEvent {
         this.status = status == null ? "" : status;
         this.typeKey = typeKey == null ? "" : typeKey;
         this.previousStatus = previousStatus == null ? "" : previousStatus;
+        this.plan = plan == null ? "" : plan;
+        this.due = due == null ? "" : due;
     }
 
     public String getProjectKey() {
@@ -55,11 +59,20 @@ public final class AssetChangedEvent {
         return previousStatus;
     }
 
+    public String getPlan() {
+        return plan;
+    }
+
+    public String getDue() {
+        return due;
+    }
+
     public String toJson() {
         return "{\"event\":\"" + escape(kind) + "\",\"id\":" + assetId
                 + ",\"key\":\"" + escape(objectKey) + "\",\"name\":\"" + escape(name)
                 + "\",\"project\":\"" + escape(projectKey) + "\",\"status\":\"" + escape(status)
-                + "\",\"type\":\"" + escape(typeKey) + "\",\"previous\":\"" + escape(previousStatus) + "\"}";
+                + "\",\"type\":\"" + escape(typeKey) + "\",\"previous\":\"" + escape(previousStatus)
+                + "\",\"plan\":\"" + escape(plan) + "\",\"due\":\"" + escape(due) + "\"}";
     }
 
     private static String escape(String value) {

@@ -91,6 +91,7 @@
                             'asset.created': AJS.I18n.getText('asset-tree.automation.changedCreated'),
                             'asset.updated': AJS.I18n.getText('asset-tree.automation.changedUpdated'),
                             'asset.status': AJS.I18n.getText('asset-tree.automation.changedStatus'),
+                            'asset.calendar': AJS.I18n.getText('asset-tree.automation.changedCalendar'),
                             'asset.deleted': AJS.I18n.getText('asset-tree.automation.changedDeleted'),
                             'asset.restored': AJS.I18n.getText('asset-tree.automation.changedRestored')
                         };
@@ -109,6 +110,7 @@
                             { value: 'asset.created', label: AJS.I18n.getText('asset-tree.automation.changedCreated') },
                             { value: 'asset.updated', label: AJS.I18n.getText('asset-tree.automation.changedUpdated') },
                             { value: 'asset.status', label: AJS.I18n.getText('asset-tree.automation.changedStatus') },
+                            { value: 'asset.calendar', label: AJS.I18n.getText('asset-tree.automation.changedCalendar') },
                             { value: 'asset.deleted', label: AJS.I18n.getText('asset-tree.automation.changedDeleted') },
                             { value: 'asset.restored', label: AJS.I18n.getText('asset-tree.automation.changedRestored') }
                         ]);

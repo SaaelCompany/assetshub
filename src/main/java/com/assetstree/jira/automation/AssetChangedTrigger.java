@@ -69,7 +69,10 @@ public class AssetChangedTrigger implements EventTriggerRuleComponent, SmartValu
         String status = AssetRuleValues.json(body, "status");
         String previous = AssetRuleValues.json(body, "previous");
         String wanted = AssetRuleValues.field(ruleContext.getComponentConfigBean().getValue(), "status");
-        if (!AssetRuleValues.statusMatches(wanted, status, previous)) {
+        boolean statusOk = AssetRuleValues.CALENDAR.equals(kind)
+                ? AssetRuleValues.currentStatus(wanted, status)
+                : AssetRuleValues.statusMatches(wanted, status, previous);
+        if (!statusOk) {
             return ExecutionResultBuilder.stopRule();
         }
         ruleContext.getAuditLog().addMessage("asset-tree.automation.ran", objectKey, kind);
@@ -106,6 +109,8 @@ public class AssetChangedTrigger implements EventTriggerRuleComponent, SmartValu
         asset.put("type", AssetRuleValues.json(body, "type"));
         asset.put("project", AssetRuleValues.json(body, "project"));
         asset.put("event", AssetRuleValues.json(body, "event"));
+        asset.put("plan", AssetRuleValues.json(body, "plan"));
+        asset.put("due", AssetRuleValues.json(body, "due"));
         Map<String, Object> context = new HashMap<String, Object>();
         if (current != null) {
             context.putAll(current);

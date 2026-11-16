@@ -10114,20 +10114,19 @@ public class AssetServiceImpl implements AssetService {
         if (dueKey.equals(plan.getAppliedFor())) {
             return;
         }
+        String previousStatus = Statuses.canonical(asset.getStatus());
         String statusKey = plan.getStatusKey() == null ? "" : plan.getStatusKey().trim();
-        if (!statusKey.isEmpty() && findStatus(asset.getProjectKey(), statusKey) != null) {
-            String oldStatus = Statuses.canonical(asset.getStatus());
-            if (!statusKey.equals(oldStatus)) {
-                asset.setStatus(statusKey);
-                asset.setUpdated(new Date());
-                asset.setUpdatedBy("");
-                asset.save();
-                logActivity(asset.getID(), "", "status", "", oldStatus, statusKey);
-            }
+        if (!statusKey.isEmpty() && findStatus(asset.getProjectKey(), statusKey) != null && !statusKey.equals(previousStatus)) {
+            asset.setStatus(statusKey);
+            asset.setUpdated(new Date());
+            asset.setUpdatedBy("");
+            asset.save();
+            logActivity(asset.getID(), "", "status", "", previousStatus, statusKey);
         }
         recordActivity(asset.getID(), "", "service_due", plan.getName(), plan.getLastDone(), dueKey);
         plan.setAppliedFor(dueKey);
         plan.save();
+        emitCalendar(asset, plan, dueKey, previousStatus);
         if (plan.getNotifyFlag() == 1) {
             ServiceNotice notice = noticeFor(asset, plan, dueKey, statusKey);
             if (notice != null) {
@@ -14866,6 +14865,21 @@ public class AssetServiceImpl implements AssetService {
                 + "\",\"created\":" + created + ",\"updated\":" + updated + ",\"errors\":" + errors + "}");
     }
 
+    private void emitCalendar(AssetEntity asset, ServicePlanEntity plan, String dueKey, String previousStatus) {
+        if (asset == null || plan == null) {
+            return;
+        }
+        emit(asset.getProjectKey(), "asset.calendar", "{\"event\":\"asset.calendar\",\"project\":\""
+                + jsonEscape(asset.getProjectKey()) + "\",\"id\":" + asset.getID()
+                + ",\"key\":\"" + jsonEscape(asset.getObjectKey())
+                + "\",\"name\":\"" + jsonEscape(asset.getName())
+                + "\",\"status\":\"" + jsonEscape(Statuses.canonical(asset.getStatus()))
+                + "\",\"type\":\"" + jsonEscape(asset.getTypeKey())
+                + "\",\"previous\":\"" + jsonEscape(previousStatus)
+                + "\",\"plan\":\"" + jsonEscape(plan.getName())
+                + "\",\"due\":\"" + jsonEscape(dueKey) + "\"}");
+    }
+
     private void emitAsset(String projectKey, String event, AssetDto asset) {
         emitAsset(projectKey, event, asset, "");
     }
@@ -15093,9 +15107,11 @@ public class AssetServiceImpl implements AssetService {
             String status = body.has("status") ? body.getString("status") : "";
             String typeKey = body.has("type") ? body.getString("type") : "";
             String previous = body.has("previous") ? body.getString("previous") : "";
+            String plan = body.has("plan") ? body.getString("plan") : "";
+            String due = body.has("due") ? body.getString("due") : "";
             EventPublisher events = ComponentAccessor.getComponent(EventPublisher.class);
             if (events != null) {
-                events.publish(new AssetChangedEvent(projectKey, event, id, key, name, status, typeKey, previous));
+                events.publish(new AssetChangedEvent(projectKey, event, id, key, name, status, typeKey, previous, plan, due));
             }
         } catch (Exception ex) {
             log.warn("Automation event was not published", ex);

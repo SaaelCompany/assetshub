@@ -13,6 +13,7 @@ public final class AssetRuleValues {
     public static final String DELETED = "asset.deleted";
     public static final String RESTORED = "asset.restored";
     public static final String STATUS = "asset.status";
+    public static final String CALENDAR = "asset.calendar";
 
     private AssetRuleValues() {
     }
@@ -39,6 +40,15 @@ public final class AssetRuleValues {
         }
         String before = previous == null ? "" : previous.trim();
         return before.isEmpty() || !before.equals(wanted);
+    }
+
+    /** An empty filter matches. A filled one matches the current status, even when it did not just change. */
+    public static boolean currentStatus(String filter, String current) {
+        if (filter == null || filter.trim().isEmpty()) {
+            return true;
+        }
+        String now = current == null ? "" : current.trim();
+        return filter.trim().equals(now);
     }
 
     public static int assetId(ComponentInputs inputs) {
