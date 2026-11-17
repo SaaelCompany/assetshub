@@ -14670,6 +14670,14 @@
             who.appendChild(chips);
             who.appendChild(hits);
             panel.appendChild(who);
+            var branchOn = el('label', 'asset-tree-check');
+            var branchBox = document.createElement('input');
+            branchBox.type = 'checkbox';
+            branchBox.checked = !!setup.reportMailBranch;
+            branchOn.appendChild(branchBox);
+            branchOn.appendChild(document.createTextNode(t('reportMailBranch')));
+            panel.appendChild(branchOn);
+            panel.appendChild(el('p', 'asset-tree-hint', t('reportMailBranchHint')));
             var mailActions = el('div', 'asset-tree-inline-actions');
             mailActions.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var hidden = [];
@@ -14681,10 +14689,11 @@
                 next.reportMailEvery = every.value;
                 next.reportMailDay = Number(day.value) || 1;
                 next.reportMailTo = mailTo.join(',');
+                next.reportMailBranch = branchBox.checked;
                 saveSetup(next);
             }));
             mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
-                if (!mailTo.length) {
+                if (!mailTo.length && !branchBox.checked) {
                     notify(t('reportMailNeed'));
                     return;
                 }
@@ -14697,6 +14706,7 @@
                 next.reportMailEvery = every.value;
                 next.reportMailDay = Number(day.value) || 1;
                 next.reportMailTo = mailTo.join(',');
+                next.reportMailBranch = branchBox.checked;
                 saveProjectView({ setup: next }, function (ok) {
                     if (!ok) return;
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
@@ -20113,6 +20123,7 @@
                 return day;
             })(),
             reportMailTo: setup.reportMailTo || '',
+            reportMailBranch: !!setup.reportMailBranch,
             reportMailSent: setup.reportMailSent || '',
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,

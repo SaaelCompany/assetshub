@@ -11619,6 +11619,10 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private ReportViewDto reportViewInside(Project project, String reportKey, int lineFrom, boolean allLines, String bucket, String start, String end) {
+        return reportViewInside(project, reportKey, lineFrom, allLines, bucket, start, end, null);
+    }
+
+    private ReportViewDto reportViewInside(Project project, String reportKey, int lineFrom, boolean allLines, String bucket, String start, String end, Integer branchScope) {
         String group = ReportCatalog.group(reportKey);
         String filter = "";
         String value = "";
@@ -11658,7 +11662,7 @@ public class AssetServiceImpl implements AssetService {
         if (!ReportCatalog.ops(metric) && ("kind".equals(group) || ReportCatalog.doneReport(group) || ReportCatalog.DONE.equals(key))) {
             metric = "count";
         }
-        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue, chart, start, end);
+        ReportViewDto view = buildReport(project, key, title, standard, group, filter, value, metric, lineFrom, allLines, bucket, fieldKey, attrKey, attrValue, chart, start, end, branchScope);
         view.setGroupBy(group);
         view.setFieldKey(fieldKey);
         view.setChart(chart);
@@ -11847,12 +11851,15 @@ public class AssetServiceImpl implements AssetService {
 
     private ReportViewDto buildReport(Project project, String key, String title, boolean standard,
             String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket,
-            String fieldKey, String attrKey, String attrValue, String chartList, String start, String end) {
+            String fieldKey, String attrKey, String attrValue, String chartList, String start, String end, Integer branchScope) {
         AssetEntity[] assets = assetsIn(project.getKey());
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), assets));
         Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
         for (AssetEntity asset : assets) {
             index.put(Integer.valueOf(asset.getID()), asset);
+        }
+        if (branchScope != null) {
+            assets = assetsInBranch(assets, types, index, branchScope.intValue());
         }
         Map<String, String> statusNames = new HashMap<String, String>();
         for (StatusDto status : statusDtos(project.getKey(), assets)) {
@@ -13426,11 +13433,17 @@ public class AssetServiceImpl implements AssetService {
                 keys.add(userKey);
             }
         }
-        if (keys.isEmpty()) {
+        List<BranchBook> branches = Boolean.TRUE.equals(setup.getReportMailBranch())
+                ? branchBooks(project) : new ArrayList<BranchBook>();
+        if (keys.isEmpty() && branches.isEmpty()) {
             if (force) {
                 throw new AssetException(400, "asset-tree.error.report.mail");
             }
             return;
+        }
+        List<String> everyone = new ArrayList<String>(keys);
+        for (int i = 0; i < branches.size(); i++) {
+            everyone.add(branches.get(i).token);
         }
         Set<String> already = force || due == null ? new HashSet<String>() : mailPartKeys(setup.getReportMailPart(), due);
         List<String> pending = new ArrayList<String>();
@@ -13441,11 +13454,8 @@ public class AssetServiceImpl implements AssetService {
         }
         if (!force && due != null) {
             dueDates.put(project.getKey(), due);
-            expected.put(project.getKey(), keys);
+            expected.put(project.getKey(), everyone);
             prior.put(project.getKey(), already);
-        }
-        if (pending.isEmpty()) {
-            return;
         }
         List<String> emails = new ArrayList<String>();
         List<String> queuedKeys = new ArrayList<String>();
@@ -13468,13 +13478,126 @@ public class AssetServiceImpl implements AssetService {
             emails.add(email);
             queuedKeys.add(userKey);
         }
-        byte[] book = reportBook(project);
-        String subject = i18n().getText("asset-tree.mail.reports.subject", project.getKey());
-        String body = i18n().getText("asset-tree.mail.reports.body") + "\n" + jiraBaseUrl()
-                + "/plugins/servlet/asset-tree?project=" + project.getKey() + "&view=reports";
-        for (int i = 0; i < emails.size(); i++) {
-            notices.add(new ServiceNotice(emails.get(i), subject, body, book, "reports-" + project.getKey() + ".xlsx", project.getKey(), queuedKeys.get(i)));
+        boolean branchLeft = false;
+        for (int i = 0; i < branches.size(); i++) {
+            if (!already.contains(branches.get(i).token)) {
+                branchLeft = true;
+                break;
+            }
         }
+        if (pending.isEmpty() && !branchLeft) {
+            return;
+        }
+        String page = jiraBaseUrl() + "/plugins/servlet/asset-tree?project=" + project.getKey() + "&view=reports";
+        if (!emails.isEmpty()) {
+            byte[] book = reportBook(project);
+            String subject = i18n().getText("asset-tree.mail.reports.subject", project.getKey());
+            String body = i18n().getText("asset-tree.mail.reports.body") + "\n" + page;
+            for (int i = 0; i < emails.size(); i++) {
+                notices.add(new ServiceNotice(emails.get(i), subject, body, book, "reports-" + project.getKey() + ".xlsx", project.getKey(), queuedKeys.get(i)));
+            }
+        }
+        for (int i = 0; i < branches.size(); i++) {
+            BranchBook branch = branches.get(i);
+            if (already.contains(branch.token)) {
+                continue;
+            }
+            byte[] book = reportBook(project, Integer.valueOf(branch.placeId));
+            String subject = i18n().getText("asset-tree.mail.reports.branch.subject", project.getKey(), branch.name);
+            String body = i18n().getText("asset-tree.mail.reports.branch.body", branch.name) + "\n" + page;
+            notices.add(new ServiceNotice(branch.email, subject, body, book,
+                    "reports-" + project.getKey() + "-" + branch.placeId + ".xlsx", project.getKey(), branch.token));
+        }
+    }
+
+    /** A top place whose custodian can receive a book of that place only. */
+    private List<BranchBook> branchBooks(Project project) {
+        List<BranchBook> found = new ArrayList<BranchBook>();
+        AssetEntity[] rows = assetsIn(project.getKey());
+        Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
+        Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
+        if (rows != null) {
+            for (AssetEntity row : rows) {
+                if (row != null) {
+                    index.put(Integer.valueOf(row.getID()), row);
+                }
+            }
+        }
+        if (rows == null) {
+            return found;
+        }
+        for (AssetEntity place : rows) {
+            if (place == null || place.getDeletedAt() != null) {
+                continue;
+            }
+            AssetTypeDto type = types.get(place.getTypeKey());
+            if (type == null || !type.isLocation() || !topPlace(place, types, index)) {
+                continue;
+            }
+            if (!branchHasGear(place.getID(), rows, types, index)) {
+                continue;
+            }
+            String userKey = place.getCustodianKey() == null ? "" : place.getCustodianKey().trim();
+            if (userKey.isEmpty()) {
+                continue;
+            }
+            ApplicationUser person = userManager().getUserByKey(userKey);
+            String email = person == null || person.getEmailAddress() == null ? "" : person.getEmailAddress().trim();
+            if (email.isEmpty()) {
+                log.warn("Branch report was not queued because the place owner has no email");
+                continue;
+            }
+            String token = "b." + place.getID() + "." + userKey;
+            if (token.length() > 120 || !token.matches("[A-Za-z0-9._@-]+")) {
+                continue;
+            }
+            String name = place.getName() == null ? "" : place.getName().trim();
+            found.add(new BranchBook(place.getID(), name, email, token));
+        }
+        return found;
+    }
+
+    private static boolean topPlace(AssetEntity place, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        Integer parent = place.getParentId();
+        if (parent == null || parent.intValue() <= 0) {
+            return true;
+        }
+        AssetEntity node = index.get(parent);
+        if (node == null) {
+            return true;
+        }
+        AssetTypeDto type = types.get(node.getTypeKey());
+        return type == null || !type.isLocation();
+    }
+
+    private boolean branchHasGear(int placeId, AssetEntity[] rows, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index) {
+        String wanted = String.valueOf(placeId);
+        for (AssetEntity asset : rows) {
+            if (asset == null || asset.getDeletedAt() != null || isLocation(asset)) {
+                continue;
+            }
+            if (wanted.equals(branchKey(asset, types, index))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private AssetEntity[] assetsInBranch(AssetEntity[] rows, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index, int placeId) {
+        String wanted = String.valueOf(placeId);
+        List<AssetEntity> kept = new ArrayList<AssetEntity>();
+        if (rows == null) {
+            return new AssetEntity[0];
+        }
+        for (AssetEntity asset : rows) {
+            if (asset == null) {
+                continue;
+            }
+            if (isLocation(asset) || wanted.equals(branchKey(asset, types, index))) {
+                kept.add(asset);
+            }
+        }
+        return kept.toArray(new AssetEntity[kept.size()]);
     }
 
     private void markReportMail(Map<String, LocalDate> dueDates, Map<String, List<String>> expected, Map<String, Set<String>> prior,
@@ -13614,6 +13737,10 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private byte[] reportBook(Project project) {
+        return reportBook(project, null);
+    }
+
+    private byte[] reportBook(Project project, Integer branchScope) {
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
         ProjectViewEntity row = viewRow(project.getKey());
         String hidden = ModuleSetup.read(row == null ? "" : row.getOptionList()).getReportHidden();
@@ -13621,7 +13748,7 @@ public class AssetServiceImpl implements AssetService {
             if (item.isStandard() && hidden != null && tokenHit(hidden, item.getId())) {
                 continue;
             }
-            ReportViewDto view = reportViewInside(project, item.getId(), 0, true, null, null, null);
+            ReportViewDto view = reportViewInside(project, item.getId(), 0, true, null, null, null, branchScope);
             pages.add(reportPage(view));
         }
         if (pages.isEmpty()) {
@@ -17728,6 +17855,20 @@ public class AssetServiceImpl implements AssetService {
             return value;
         } catch (RuntimeException ex) {
             return "";
+        }
+    }
+
+    private static final class BranchBook {
+        private final int placeId;
+        private final String name;
+        private final String email;
+        private final String token;
+
+        private BranchBook(int placeId, String name, String email, String token) {
+            this.placeId = placeId;
+            this.name = name == null ? "" : name;
+            this.email = email;
+            this.token = token;
         }
     }
 

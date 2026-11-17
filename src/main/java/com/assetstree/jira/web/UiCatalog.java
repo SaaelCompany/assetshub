@@ -1852,6 +1852,8 @@ public final class UiCatalog {
             "reportMailWeekDay",
             "reportMailMonthDay",
             "reportMailTo",
+            "reportMailBranch",
+            "reportMailBranchHint",
             "reportMailNow",
             "reportMailQueued",
             "reportMailNeed",

@@ -41,6 +41,7 @@ public final class ModuleSetup {
         setup.setReportMailTo(mailTo(values.get("rto")));
         setup.setReportMailSent(mailSent(values.get("rsent")));
         setup.setReportMailPart(mailPart(values.get("rpart")));
+        setup.setReportMailBranch(Boolean.valueOf("1".equals(values.get("rbranch"))));
         setup.setLifeApproval(Boolean.valueOf(!"0".equals(values.get("approve"))));
         setup.setLifeApprover(who(values.get("who")));
         setup.setLifePlaces(LifeApprovers.normalize(values.get("lwho")));
@@ -96,6 +97,7 @@ public final class ModuleSetup {
         append(stored, "rto", mailTo(value.getReportMailTo()));
         append(stored, "rsent", mailSent(value.getReportMailSent()));
         append(stored, "rpart", mailPart(value.getReportMailPart()));
+        append(stored, "rbranch", Boolean.TRUE.equals(value.getReportMailBranch()) ? "1" : "0");
         append(stored, "approve", Boolean.FALSE.equals(value.getLifeApproval()) ? "0" : "1");
         append(stored, "who", who(value.getLifeApprover()));
         append(stored, "lwho", LifeApprovers.normalize(value.getLifePlaces()));
@@ -337,6 +339,7 @@ public final class ModuleSetup {
         merged.setReportMailTo(incoming.getReportMailTo() != null ? incoming.getReportMailTo() : base.getReportMailTo());
         merged.setReportMailSent(incoming.getReportMailSent() != null ? incoming.getReportMailSent() : base.getReportMailSent());
         merged.setReportMailPart(incoming.getReportMailPart() != null ? incoming.getReportMailPart() : base.getReportMailPart());
+        merged.setReportMailBranch(incoming.getReportMailBranch() != null ? incoming.getReportMailBranch() : base.getReportMailBranch());
         merged.setLifeApproval(incoming.getLifeApproval() != null ? incoming.getLifeApproval() : base.getLifeApproval());
         merged.setLifeApprover(incoming.getLifeApprover() != null ? incoming.getLifeApprover() : base.getLifeApprover());
         merged.setLifePlaces(incoming.getLifePlaces() != null ? incoming.getLifePlaces() : base.getLifePlaces());
@@ -571,7 +574,16 @@ public final class ModuleSetup {
         return value;
     }
 
+    /** Tokens already queued, including a branch book such as {@code b.12.JIRAUSER10000}. */
+    private static String mailTrack(String raw) {
+        return mailList(raw, 80, 120);
+    }
+
     private static String mailTo(String raw) {
+        return mailList(raw, 20, 80);
+    }
+
+    private static String mailList(String raw, int limit, int keyLimit) {
         StringBuilder stored = new StringBuilder();
         if (raw == null) {
             return "";
@@ -580,10 +592,10 @@ public final class ModuleSetup {
         String[] parts = raw.split(",");
         for (String part : parts) {
             String key = part == null ? "" : part.trim();
-            if (key.isEmpty() || key.length() > 80 || !key.matches("[A-Za-z0-9._@-]+") || seen.contains(key)) {
+            if (key.isEmpty() || key.length() > keyLimit || !key.matches("[A-Za-z0-9._@-]+") || seen.contains(key)) {
                 continue;
             }
-            if (seen.size() >= 20) {
+            if (seen.size() >= limit) {
                 break;
             }
             seen.add(key);
@@ -611,7 +623,7 @@ public final class ModuleSetup {
         if (day.isEmpty()) {
             return "";
         }
-        String keys = mailTo(value.substring(11));
+        String keys = mailTrack(value.substring(11));
         if (keys.isEmpty()) {
             return "";
         }
