@@ -171,6 +171,12 @@
         </transformation>
     </web-resource>
 
+    <automation-rule-component key="issue-status-trigger"
+                               class="com.assetstree.jira.automation.IssueStatusTrigger"
+                               name="Request status changed"
+                               type="TRIGGER">
+        <param name="projectSafe">true</param>
+    </automation-rule-component>
     <automation-rule-component key="asset-changed-trigger"
                                class="com.assetstree.jira.automation.AssetChangedTrigger"
                                name="Equipment changed"

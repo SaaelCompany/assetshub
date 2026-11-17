@@ -643,6 +643,106 @@
         };
     }
 
+    var workflowCache = {};
+
+    function loadWorkflow(done) {
+        var key = projectKey();
+        if (!key) {
+            done([]);
+            return;
+        }
+        if (workflowCache[key]) {
+            done(workflowCache[key]);
+            return;
+        }
+        var root = window.AJS && AJS.contextPath ? AJS.contextPath() : '';
+        var request = new XMLHttpRequest();
+        request.open('GET', root + '/rest/asset-tree/1.0/projects/' + encodeURIComponent(key) + '/workflow-statuses', true);
+        request.setRequestHeader('Accept', 'application/json');
+        request.onreadystatechange = function () {
+            if (request.readyState !== 4) {
+                return;
+            }
+            var options = [{ value: '', label: text('asset-tree.automation.anyIssueStatus') }];
+            if (request.status === 200) {
+                try {
+                    var rows = JSON.parse(request.responseText) || [];
+                    for (var i = 0; i < rows.length; i++) {
+                        options.push({ value: rows[i].id || '', label: rows[i].name || rows[i].id || '' });
+                    }
+                } catch (ignore) {
+                    options = [{ value: '', label: text('asset-tree.automation.anyIssueStatus') }];
+                }
+            }
+            workflowCache[key] = options;
+            done(options);
+        };
+        request.send();
+    }
+
+    function issueStatusWord(key) {
+        if (!key) {
+            return '';
+        }
+        var options = workflowCache[projectKey()] || [];
+        for (var i = 0; i < options.length; i++) {
+            if (options[i].value === key) {
+                return options[i].label;
+            }
+        }
+        return key;
+    }
+
+    function issueStatus() {
+        return {
+            type: plugin + ':issue-status-trigger',
+            componentType: 'TRIGGER',
+            name: function () { return text('asset-tree.automation.issueStatus'); },
+            icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
+            initialValue: function () { return { issueStatus: '' }; },
+            categories: [],
+            labels: [],
+            getRenderer: function () {
+                return {
+                    summaryLabel: function () { return text('asset-tree.automation.issueStatus'); },
+                    renderSummary: function (config, context, el) {
+                        clear(el);
+                        var name = issueStatusWord(field(config, 'issueStatus'));
+                        el.appendChild(document.createTextNode(name || text('asset-tree.automation.anyIssueStatus')));
+                    },
+                    renderDetailed: function (config, context, el) {
+                        clear(el);
+                        paragraph(el, text('asset-tree.automation.issueCard'));
+                        label(el, text('asset-tree.automation.issueList'));
+                        var box = document.createElement('select');
+                        box.disabled = !!readOnly();
+                        box.style.maxWidth = '100%';
+                        function show(options) {
+                            fillSelect(box, options, field(config, 'issueStatus'));
+                        }
+                        show([{ value: '', label: text('asset-tree.automation.anyIssueStatus') }]);
+                        loadWorkflow(function (options) {
+                            if (box.parentNode) {
+                                show(options);
+                            }
+                        });
+                        box.addEventListener('change', function () {
+                            var value = config.value || {};
+                            value.issueStatus = box.value;
+                            save(config, value);
+                        });
+                        el.appendChild(box);
+                    },
+                    renderCard: function (el) {
+                        clear(el);
+                        el.appendChild(document.createTextNode(text('asset-tree.automation.issueCard')));
+                    }
+                };
+            },
+            validate: function () { return {}; }
+        };
+    }
+
     function register(attempt) {
         if (registered) {
             return;
@@ -654,6 +754,7 @@
             return;
         }
         registered = true;
+        CodeBarrel.Automation.registerComponent(issueStatus());
         CodeBarrel.Automation.registerComponent(changed());
         CodeBarrel.Automation.registerComponent(linked());
         CodeBarrel.Automation.registerComponent(statusAction());

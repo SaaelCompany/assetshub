@@ -51,6 +51,10 @@ public class AssetRuleValuesTest {
         assertTrue(AssetRuleValues.watchesCurrent(AssetRuleValues.WRITEOFF));
         assertTrue(AssetRuleValues.watchesCurrent(AssetRuleValues.SCHEDULE));
         assertFalse(AssetRuleValues.watchesCurrent(AssetRuleValues.STATUS));
+        assertTrue(AssetRuleValues.issueStatusMatches("", "10001", "Repair"));
+        assertTrue(AssetRuleValues.issueStatusMatches("10001", "10001", "Repair"));
+        assertTrue(AssetRuleValues.issueStatusMatches("Repair", "10001", "Repair"));
+        assertFalse(AssetRuleValues.issueStatusMatches("10002", "10001", "Repair"));
         assertTrue(AssetRuleValues.detailMatches("", "approved"));
         assertTrue(AssetRuleValues.detailMatches("approved", "approved"));
         assertFalse(AssetRuleValues.detailMatches("pending", "approved"));

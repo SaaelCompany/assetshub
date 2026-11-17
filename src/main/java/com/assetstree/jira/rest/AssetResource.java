@@ -1466,6 +1466,17 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/workflow-statuses")
+    public Response workflowStatuses(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listWorkflowStatuses(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/issue-statuses")
     public Response issueStatuses(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {

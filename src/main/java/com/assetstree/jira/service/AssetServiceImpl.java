@@ -4646,6 +4646,12 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public List<IssueTypeDto> listWorkflowStatuses(ApplicationUser user, String projectKey) {
+        Project project = requireReadableProject(user, projectKey);
+        return issueStatusesOf(issueStatusNames(project));
+    }
+
+    @Override
     public List<FlowRuleDto> listFlowRules(ApplicationUser user, String projectKey) {
         final Project project = requireConfigurableProject(user, projectKey);
         requireModule(project.getKey(), ProjectModules.PORTAL);

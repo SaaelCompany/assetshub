@@ -234,6 +234,9 @@ public interface AssetService {
 
     List<IssueTypeDto> listIssueStatuses(ApplicationUser user, String projectKey);
 
+    /** Workflow statuses of the project, for a rule that follows a request. */
+    List<IssueTypeDto> listWorkflowStatuses(ApplicationUser user, String projectKey);
+
     List<FlowRuleDto> listFlowRules(ApplicationUser user, String projectKey);
 
     FlowRuleDto saveFlowRule(ApplicationUser user, String projectKey, FlowRuleDraft draft);

@@ -58,6 +58,20 @@ public final class AssetRuleValues {
         return filter.trim().equals(now);
     }
 
+    /** An empty request-status filter matches. A filled one matches the status id or its name. */
+    public static boolean issueStatusMatches(String filter, String statusId, String statusName) {
+        if (filter == null || filter.trim().isEmpty()) {
+            return true;
+        }
+        String wanted = filter.trim();
+        String id = statusId == null ? "" : statusId.trim();
+        if (wanted.equals(id)) {
+            return true;
+        }
+        String name = statusName == null ? "" : statusName.trim();
+        return !name.isEmpty() && wanted.equals(name);
+    }
+
     /** An empty filter matches. A filled one matches the current status, even when it did not just change. */
     public static boolean currentStatus(String filter, String current) {
         if (filter == null || filter.trim().isEmpty()) {
