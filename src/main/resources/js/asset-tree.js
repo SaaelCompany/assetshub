@@ -4543,6 +4543,7 @@
         var toggle = toolButton(t('moreActions'), 'more', function (event) {
             event.stopPropagation();
             menu.hidden = !menu.hidden;
+            if (!menu.hidden) placeMoreMenu(menu);
         });
         var sawPlain = false;
         var split = false;
@@ -4565,6 +4566,27 @@
         wrap.appendChild(toggle);
         wrap.appendChild(menu);
         return wrap;
+    }
+
+    function placeMoreMenu(menu) {
+        menu.style.left = '0';
+        menu.style.right = 'auto';
+        menu.style.maxWidth = '';
+        var pad = 8;
+        var view = window.innerWidth || document.documentElement.clientWidth;
+        var box = menu.getBoundingClientRect();
+        if (box.left < pad) menu.style.left = (pad - box.left) + 'px';
+        box = menu.getBoundingClientRect();
+        if (box.right > view - pad) {
+            menu.style.maxWidth = Math.max(140, view - pad * 2) + 'px';
+            box = menu.getBoundingClientRect();
+            if (box.right > view - pad) {
+                menu.style.left = 'auto';
+                menu.style.right = '0';
+                box = menu.getBoundingClientRect();
+                if (box.left < pad) menu.style.right = (box.right - (view - pad)) + 'px';
+            }
+        }
     }
 
     function moduleBlock(title, bodyNode, collapsed, count) {

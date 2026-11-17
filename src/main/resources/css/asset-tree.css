@@ -15374,3 +15374,34 @@ button.asset-tree-attach-remove {
 #asset-tree-app.is-phone .asset-tree-status-slot {
     display: none;
 }
+
+#asset-tree-app.is-phone .asset-tree-steps {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+#asset-tree-app.is-phone .asset-tree-step {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    text-align: left;
+}
+
+#asset-tree-app.is-phone .asset-tree-step-label {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+#asset-tree-app.is-phone .asset-tree-step:not(:last-child)::after {
+    display: none;
+}
+
+#asset-tree-app.is-phone .asset-tree-more-menu {
+    left: 0;
+    right: auto;
+    z-index: 40;
+    max-width: calc(100vw - 16px);
+}
