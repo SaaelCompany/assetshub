@@ -2,6 +2,7 @@
     var plugin = 'com.assetstree.jira.asset-tree';
     var registered = false;
     var statusCache = {};
+    var typeCache = {};
 
     function clear(el) {
         while (el.firstChild) {
@@ -404,6 +405,117 @@
                 return {};
             }
         };
+    }
+
+    function requestAction() {
+        return {
+            type: plugin + ':calendar-request-action',
+            componentType: 'ACTION',
+            name: function () { return text('asset-tree.automation.request'); },
+            icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
+            initialValue: function () { return { issueTypeId: '', issueTypeName: '' }; },
+            categories: [],
+            labels: [],
+            isEditable: true,
+            getRenderer: function () {
+                return {
+                    summaryLabel: function () { return text('asset-tree.automation.request'); },
+                    renderSummary: function (config, context, el) {
+                        clear(el);
+                        var name = field(config, 'issueTypeName') || field(config, 'issueTypeId');
+                        el.appendChild(document.createTextNode(name || text('asset-tree.automation.requestChoose')));
+                    },
+                    renderDetailed: function (config, context, el) {
+                        clear(el);
+                        paragraph(el, text('asset-tree.automation.requestCard'));
+                        label(el, text('asset-tree.automation.requestType'));
+                        typePick(el, config);
+                    },
+                    renderCard: function (el) {
+                        clear(el);
+                        el.appendChild(document.createTextNode(text('asset-tree.automation.requestCard')));
+                    }
+                };
+            },
+            validate: function (rule, config) {
+                if (!field(config, 'issueTypeId')) {
+                    var errors = {};
+                    errors.issueTypeId = text('asset-tree.automation.requestTypeRequired');
+                    return errors;
+                }
+                return {};
+            }
+        };
+    }
+
+    function typePick(parent, config) {
+        var box = document.createElement('select');
+        box.disabled = !!readOnly();
+        box.style.maxWidth = '100%';
+        var placeholder = text('asset-tree.automation.requestChoose');
+        function show(options) {
+            var list = [{ value: '', label: placeholder }];
+            for (var i = 0; i < options.length; i++) {
+                if (options[i].value) {
+                    list.push(options[i]);
+                }
+            }
+            fillSelect(box, list, field(config, 'issueTypeId'));
+        }
+        var stored = field(config, 'issueTypeId');
+        var storedName = field(config, 'issueTypeName') || stored;
+        show(stored ? [{ value: stored, label: storedName }] : []);
+        loadIssueTypes(function (options) {
+            if (box.parentNode) {
+                show(options);
+            }
+        });
+        box.addEventListener('change', function () {
+            var value = config.value || {};
+            value.issueTypeId = box.value;
+            var caption = '';
+            if (box.selectedIndex >= 0 && box.options[box.selectedIndex]) {
+                caption = box.options[box.selectedIndex].textContent || '';
+            }
+            value.issueTypeName = box.value ? caption : '';
+            save(config, value);
+        });
+        parent.appendChild(box);
+    }
+
+    function loadIssueTypes(done) {
+        var key = projectKey();
+        if (!key) {
+            done([]);
+            return;
+        }
+        if (typeCache[key]) {
+            done(typeCache[key]);
+            return;
+        }
+        var root = window.AJS && AJS.contextPath ? AJS.contextPath() : '';
+        var request = new XMLHttpRequest();
+        request.open('GET', root + '/rest/asset-tree/1.0/projects/' + encodeURIComponent(key) + '/issue-types', true);
+        request.setRequestHeader('Accept', 'application/json');
+        request.onreadystatechange = function () {
+            if (request.readyState !== 4) {
+                return;
+            }
+            var options = [];
+            if (request.status === 200) {
+                try {
+                    var rows = JSON.parse(request.responseText) || [];
+                    for (var i = 0; i < rows.length; i++) {
+                        options.push({ value: rows[i].id || '', label: rows[i].name || rows[i].id || '' });
+                    }
+                } catch (ignore) {
+                    options = [];
+                }
+            }
+            typeCache[key] = options;
+            done(options);
+        };
+        request.send();
     }
 
     function linkAction() {
@@ -849,6 +961,7 @@
         CodeBarrel.Automation.registerComponent(linked());
         CodeBarrel.Automation.registerComponent(statusAction());
         CodeBarrel.Automation.registerComponent(linkAction());
+        CodeBarrel.Automation.registerComponent(requestAction());
         CodeBarrel.Automation.registerComponent(mailAction());
     }
 
