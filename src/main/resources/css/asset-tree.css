@@ -15132,3 +15132,243 @@ button.asset-tree-attach-remove {
 #asset-tree-app.is-phone .asset-tree-outlook {
     overflow-x: auto;
 }
+
+#asset-tree-app.is-phone .asset-tree-side-foot {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(46px + env(safe-area-inset-bottom));
+    z-index: 20;
+    background: #fff;
+    border-top: 1px solid #dfe1e6;
+    box-shadow: 0 -4px 10px rgba(9, 30, 66, 0.06);
+}
+
+#asset-tree-app.is-phone .asset-tree-side-foot .asset-tree-row.is-trash {
+    background: #fff;
+}
+
+#asset-tree-app.is-phone .asset-tree-side-foot button.asset-tree-queue-add {
+    width: 100%;
+    margin: 0;
+    border-radius: 0;
+}
+
+#asset-tree-app.is-phone .asset-tree-scroll {
+    padding-bottom: 92px;
+}
+
+#asset-tree-app.is-phone .asset-tree-pick-wrap,
+#asset-tree-app.is-phone table.asset-tree-table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+}
+
+#asset-tree-app.is-phone table.asset-tree-table thead {
+    display: none;
+}
+
+#asset-tree-app.is-phone table.asset-tree-table tbody,
+#asset-tree-app.is-phone table.asset-tree-table tr {
+    display: block;
+    width: 100%;
+}
+
+#asset-tree-app.is-phone table.asset-tree-table tr {
+    padding: 6px 0;
+    border-bottom: 1px solid #ebecf0;
+}
+
+#asset-tree-app.is-phone table.asset-tree-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: auto;
+    padding: 3px 10px;
+    border-bottom: 0;
+    white-space: normal;
+}
+
+#asset-tree-app.is-phone table.asset-tree-table td::before {
+    content: attr(data-label);
+    flex: 0 0 38%;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app.is-phone table.asset-tree-table td.asset-tree-pick,
+#asset-tree-app.is-phone table.asset-tree-table td[data-label=""] {
+    justify-content: flex-start;
+}
+
+#asset-tree-app.is-phone table.asset-tree-table td.asset-tree-pick::before,
+#asset-tree-app.is-phone table.asset-tree-table td[data-label=""]::before {
+    content: none;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-fold {
+    width: 100%;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-nav[hidden] {
+    display: none !important;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-charts {
+    margin-left: 0;
+    margin-right: 0;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-chart-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-chart-block {
+    max-width: 100%;
+    overflow: visible;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-chart.is-round {
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100%;
+    max-width: 100%;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-chart svg.asset-tree-donut,
+#asset-tree-app.is-phone .asset-tree-report-ring,
+#asset-tree-app.is-phone .asset-tree-report-ring-value {
+    width: 168px !important;
+    height: 168px !important;
+    min-width: 0 !important;
+    max-width: 168px !important;
+    min-height: 168px !important;
+    max-height: 168px !important;
+    flex: 0 0 168px !important;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-ring-value {
+    font-size: 28px !important;
+    padding: 0 !important;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-legend {
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    gap: 4px;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-legend li {
+    max-width: 100%;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-legend span {
+    max-width: none;
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+}
+
+#asset-tree-app.is-phone .asset-tree-floorplan {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+}
+
+#asset-tree-app.is-phone .asset-tree-scheme-gallery {
+    padding: 8px;
+    overflow: visible;
+}
+
+#asset-tree-app.is-phone .asset-tree-scheme-cards {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+}
+
+#asset-tree-app.is-phone .asset-tree-scheme-card {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+}
+
+#asset-tree-app.is-phone .asset-tree-scheme-thumb {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    aspect-ratio: 2 / 1;
+    object-fit: contain;
+    object-position: center center;
+}
+
+#asset-tree-app.is-phone .asset-tree-schema,
+#asset-tree-app.is-phone .asset-tree-type-detail,
+#asset-tree-app.is-phone .asset-tree-schema-scroll,
+#asset-tree-app.is-phone .asset-tree-settings-block,
+#asset-tree-app.is-phone .asset-tree-sheet {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+#asset-tree-app.is-phone .asset-tree-schema-scroll {
+    overflow-x: hidden;
+}
+
+#asset-tree-app.is-phone .asset-tree-schema {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+#asset-tree-app.is-phone .asset-tree-hint {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+#asset-tree-app.is-phone .asset-tree-type-detail .asset-tree-schema-tools {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+#asset-tree-app.is-phone .asset-tree-icon-grid,
+#asset-tree-app.is-phone .asset-tree-icon-group,
+#asset-tree-app.is-phone .asset-tree-icon-picker {
+    max-width: 100%;
+}
+
+#asset-tree-app.is-phone .asset-tree-swatches {
+    flex-wrap: wrap;
+}
+
+#asset-tree-app.is-phone .asset-tree-field-list .asset-tree-type-field,
+#asset-tree-app.is-phone .asset-tree-field-list .asset-tree-type-field.is-editable,
+#asset-tree-app.is-phone .asset-tree-field-list .asset-tree-type-field.is-inherited {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+#asset-tree-app.is-phone .asset-tree-status-list {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+#asset-tree-app.is-phone .asset-tree-status-list > .asset-tree-status-row,
+#asset-tree-app.is-phone .asset-tree-status-list > form.asset-tree-status-add {
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    max-width: 100%;
+    row-gap: 6px;
+    padding: 8px 0;
+}
+
+#asset-tree-app.is-phone .asset-tree-status-list .asset-tree-key {
+    margin-left: 0;
+}
+
+#asset-tree-app.is-phone .asset-tree-status-slot {
+    display: none;
+}
