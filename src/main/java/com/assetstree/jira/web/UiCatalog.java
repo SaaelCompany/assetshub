@@ -1854,6 +1854,8 @@ public final class UiCatalog {
             "reportMailTo",
             "reportMailBranch",
             "reportMailBranchHint",
+            "reportIdleStatuses",
+            "reportIdleStatusesHint",
             "reportMailNow",
             "reportMailQueued",
             "reportMailNeed",

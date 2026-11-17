@@ -14567,6 +14567,46 @@
             });
             panel.appendChild(el('span', 'asset-tree-nav-label', t('setupShow')));
             panel.appendChild(reports);
+            var idleList = el('div', 'asset-tree-check-list');
+            function idleOn(key) {
+                var raw = setup.reportIdleStatuses;
+                if (raw == null || raw === '') return key === 'repair';
+                if (raw === '-') return false;
+                return String(raw).split(',').indexOf(key) >= 0;
+            }
+            function paintIdle(rows) {
+                idleList.innerHTML = '';
+                (rows || []).forEach(function (item) {
+                    if (!item || !item.statusKey) return;
+                    var label = el('label', 'asset-tree-check');
+                    var box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.checked = idleOn(item.statusKey);
+                    box.setAttribute('data-idle', item.statusKey);
+                    label.appendChild(box);
+                    label.appendChild(document.createTextNode(item.label || item.statusKey));
+                    idleList.appendChild(label);
+                });
+            }
+            function idleValue() {
+                var boxes = idleList.querySelectorAll('input');
+                if (!boxes.length) return setup.reportIdleStatuses == null ? '' : String(setup.reportIdleStatuses);
+                var picked = [];
+                for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) picked.push(boxes[i].getAttribute('data-idle'));
+                return picked.length ? picked.join(',') : '-';
+            }
+            paintIdle(state.statuses);
+            if (!state.statuses || !state.statuses.length) {
+                ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/statuses', null, function (status, payload) {
+                    if (status === 200 && payload && payload.length) {
+                        state.statuses = payload;
+                        paintIdle(payload);
+                    }
+                });
+            }
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('reportIdleStatuses')));
+            panel.appendChild(idleList);
+            panel.appendChild(el('p', 'asset-tree-hint', t('reportIdleStatusesHint')));
             var mailOn = el('label', 'asset-tree-check');
             var mailBox = document.createElement('input');
             mailBox.type = 'checkbox';
@@ -14690,6 +14730,7 @@
                 next.reportMailDay = Number(day.value) || 1;
                 next.reportMailTo = mailTo.join(',');
                 next.reportMailBranch = branchBox.checked;
+                next.reportIdleStatuses = idleValue();
                 saveSetup(next);
             }));
             mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
@@ -14707,6 +14748,7 @@
                 next.reportMailDay = Number(day.value) || 1;
                 next.reportMailTo = mailTo.join(',');
                 next.reportMailBranch = branchBox.checked;
+                next.reportIdleStatuses = idleValue();
                 saveProjectView({ setup: next }, function (ok) {
                     if (!ok) return;
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
@@ -20124,6 +20166,7 @@
             })(),
             reportMailTo: setup.reportMailTo || '',
             reportMailBranch: !!setup.reportMailBranch,
+            reportIdleStatuses: setup.reportIdleStatuses == null ? '' : String(setup.reportIdleStatuses),
             reportMailSent: setup.reportMailSent || '',
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,
