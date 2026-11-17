@@ -66,6 +66,23 @@ public class CalendarRaiseTest {
     }
 
     @Test
+    public void missedDaysSinceTheLastHandoverAreRaised() {
+        List<CalendarRaise.Hand> due = CalendarRaise.due("2026-11-13", 1, "day", "", "", "",
+                "", false, "2026-11-14", TODAY, "");
+        assertEquals(3, due.size());
+        assertEquals("2026-11-15", due.get(0).getDate());
+        assertEquals("2026-11-16", due.get(1).getDate());
+        assertEquals("2026-11-17", due.get(2).getDate());
+    }
+
+    @Test
+    public void anUntouchedHistoryStaysAtYesterday() {
+        List<CalendarRaise.Hand> due = CalendarRaise.due("2026-01-01", 1, "once", "", "", "",
+                "", false, "", TODAY, "");
+        assertTrue(due.isEmpty());
+    }
+
+    @Test
     public void aFutureDayWaits() {
         List<CalendarRaise.Hand> due = CalendarRaise.due("2026-11-20", 1, "once", "", "", "",
                 "", false, "", TODAY, "23:00");

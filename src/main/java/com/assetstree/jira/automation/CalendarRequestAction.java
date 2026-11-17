@@ -23,9 +23,11 @@ import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.CalendarRequest;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
+import com.assetstree.jira.web.PortalDesk;
 
 import java.io.Serializable;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Action: create one request from the calendar day and link the equipment when the event has one. */
@@ -35,7 +37,7 @@ public class CalendarRequestAction implements AutomationRuleComponent {
                                                                                            ComponentConfigBean config) {
         com.codebarrel.automation.api.thirdparty.context.ErrorCollection errors = new ErrorCollectionImpl();
         Object value = config == null ? null : config.getValue();
-        if (AssetRuleValues.field(value, "issueTypeId").isEmpty()) {
+        if (AssetRuleValues.field(value, "issueTypeId").isEmpty() && AssetRuleValues.field(value, "requestTypeId").isEmpty()) {
             errors.addError("issueTypeId", "asset-tree.automation.requestTypeRequired");
         }
         return errors;
@@ -48,8 +50,10 @@ public class CalendarRequestAction implements AutomationRuleComponent {
             ruleContext.getAuditLog().addMessage("asset-tree.automation.requestNoEvent");
             return ExecutionResultBuilder.stopRule();
         }
-        String typeId = AssetRuleValues.field(ruleContext.getComponentConfigBean().getValue(), "issueTypeId");
-        if (typeId.isEmpty()) {
+        Object value = ruleContext.getComponentConfigBean().getValue();
+        String typeId = AssetRuleValues.field(value, "issueTypeId");
+        String portalType = AssetRuleValues.field(value, "requestTypeId");
+        if (typeId.isEmpty() && portalType.isEmpty()) {
             ruleContext.getAuditLog().addError("asset-tree.automation.requestTypeRequired");
             return ExecutionResultBuilder.stopRule();
         }
@@ -87,23 +91,35 @@ public class CalendarRequestAction implements AutomationRuleComponent {
                 word(ruleContext, "asset-tree.automation.requestNote"),
                 word(ruleContext, "asset-tree.automation.requestFallback"));
         ApplicationUser assignee = assignee(AssetRuleValues.json(body, "assignee"));
-        IssueService.CreateValidationResult ready = validate(issueService, actor, project.getId(), typeId, text, assignee);
         boolean droppedAssignee = false;
-        if (!ready.isValid() && assignee != null) {
-            ready = validate(issueService, actor, project.getId(), typeId, text, null);
-            droppedAssignee = ready.isValid();
+        Issue issue;
+        if (!portalType.isEmpty()) {
+            issue = createPortal(ruleContext, actor, project, portalType, text);
+            if (issue == null) {
+                return ExecutionResultBuilder.stopRule();
+            }
+            if (assignee != null && !assign(issueService, actor, issue, assignee)) {
+                droppedAssignee = true;
+            }
+        } else {
+            IssueService.CreateValidationResult ready = validate(issueService, actor, project.getId(), typeId, text, assignee);
+            if (ready != null && !ready.isValid() && assignee != null) {
+                ready = validate(issueService, actor, project.getId(), typeId, text, null);
+                droppedAssignee = ready != null && ready.isValid();
+            }
+            if (ready == null || !ready.isValid()) {
+                ErrorCollection errors = ready == null ? null : ready.getErrorCollection();
+                ruleContext.getAuditLog().addError("asset-tree.automation.requestFailed", problem(errors));
+                return ExecutionResultBuilder.stopRule();
+            }
+            IssueService.IssueResult created = issueService.create(actor, ready);
+            if (created == null || !created.isValid() || created.getIssue() == null) {
+                ErrorCollection errors = created == null ? null : created.getErrorCollection();
+                ruleContext.getAuditLog().addError("asset-tree.automation.requestFailed", problem(errors));
+                return ExecutionResultBuilder.stopRule();
+            }
+            issue = created.getIssue();
         }
-        if (!ready.isValid()) {
-            ruleContext.getAuditLog().addError("asset-tree.automation.requestFailed", problem(ready.getErrorCollection()));
-            return ExecutionResultBuilder.stopRule();
-        }
-        IssueService.IssueResult created = issueService.create(actor, ready);
-        if (created == null || !created.isValid() || created.getIssue() == null) {
-            ErrorCollection errors = created == null ? null : created.getErrorCollection();
-            ruleContext.getAuditLog().addError("asset-tree.automation.requestFailed", problem(errors));
-            return ExecutionResultBuilder.stopRule();
-        }
-        Issue issue = created.getIssue();
         int assetId = AssetRuleValues.jsonInt(body, "id");
         boolean linked = assetId > 0 && link(actor, assetId, issue);
         if (issue.getId() != null) {
@@ -127,6 +143,52 @@ public class CalendarRequestAction implements AutomationRuleComponent {
         extra.put("assetName", AssetRuleValues.json(body, "name"));
         extra.put("assetStatus", AssetRuleValues.json(body, "status"));
         return ExecutionResultBuilder.withIssue(issue).withInputs(extra).build();
+    }
+
+    private static Issue createPortal(RuleContext ruleContext, ApplicationUser actor, Project project, String portalType,
+                                      CalendarRequest text) {
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("summary", text.getSummary());
+        values.put("description", text.getDescription());
+        PortalDesk.Created created = PortalDesk.create(actor, project, portalType, values);
+        if (created == null || created.getFailureKey() != null || created.getKey() == null || created.getKey().isEmpty()) {
+            String detail = created == null ? "" : word(ruleContext, created.getFailureKey());
+            if (created != null && created.getFailureArg() != null && !created.getFailureArg().isEmpty()) {
+                detail = detail.isEmpty() ? created.getFailureArg() : detail + " " + created.getFailureArg();
+            }
+            ruleContext.getAuditLog().addError("asset-tree.automation.requestFailed", detail);
+            return null;
+        }
+        Issue issue = created.getIssue();
+        if (issue == null) {
+            com.atlassian.jira.issue.IssueManager manager = ComponentAccessor.getIssueManager();
+            try {
+                issue = manager == null ? null : manager.getIssueByCurrentKey(created.getKey());
+            } catch (RuntimeException ex) {
+                issue = null;
+            }
+        }
+        if (issue == null) {
+            ruleContext.getAuditLog().addError("asset-tree.automation.requestFailed", created.getKey());
+        }
+        return issue;
+    }
+
+    private static boolean assign(IssueService issueService, ApplicationUser actor, Issue issue, ApplicationUser assignee) {
+        if (issueService == null || actor == null || issue == null || issue.getId() == null || assignee == null
+                || assignee.getName() == null || assignee.getName().isEmpty()) {
+            return false;
+        }
+        IssueInputParameters params = issueService.newIssueInputParameters();
+        params.setAssigneeId(assignee.getName());
+        params.setSkipScreenCheck(true);
+        params.setRetainExistingValuesWhenParameterNotProvided(true);
+        IssueService.UpdateValidationResult ready = issueService.validateUpdate(actor, issue.getId(), params);
+        if (ready == null || !ready.isValid()) {
+            return false;
+        }
+        IssueService.IssueResult updated = issueService.update(actor, ready);
+        return updated != null && updated.isValid();
     }
 
     private static IssueService.CreateValidationResult validate(IssueService issueService, ApplicationUser actor,

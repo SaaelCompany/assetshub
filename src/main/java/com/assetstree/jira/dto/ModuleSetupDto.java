@@ -26,6 +26,8 @@ public class ModuleSetupDto {
     private Boolean reportMailBranch;
     /** Comma-separated status keys that count as downtime. Empty means repair. "-" means none. */
     private String reportIdleStatuses;
+    /** Request statuses for the period report. Empty means all, open means not Done, "-" means none. */
+    private String reportRequestStatuses;
     private Boolean lifeApproval;
     private String lifeApprover;
     private String lifePlaces;
@@ -96,6 +98,8 @@ public class ModuleSetupDto {
     public void setReportMailBranch(Boolean reportMailBranch) { this.reportMailBranch = reportMailBranch; }
     public String getReportIdleStatuses() { return reportIdleStatuses; }
     public void setReportIdleStatuses(String reportIdleStatuses) { this.reportIdleStatuses = reportIdleStatuses; }
+    public String getReportRequestStatuses() { return reportRequestStatuses; }
+    public void setReportRequestStatuses(String reportRequestStatuses) { this.reportRequestStatuses = reportRequestStatuses; }
     public Boolean getLifeApproval() { return lifeApproval; }
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }

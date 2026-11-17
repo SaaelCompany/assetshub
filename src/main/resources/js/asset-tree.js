@@ -14607,6 +14607,56 @@
             panel.appendChild(el('span', 'asset-tree-nav-label', t('reportIdleStatuses')));
             panel.appendChild(idleList);
             panel.appendChild(el('p', 'asset-tree-hint', t('reportIdleStatusesHint')));
+            var requestMode = document.createElement('select');
+            [['', 'reportRequestAll'], ['open', 'reportRequestOpen'], ['chosen', 'reportRequestChosen']].forEach(function (pair) {
+                var option = document.createElement('option');
+                option.value = pair[0];
+                option.textContent = t(pair[1]);
+                requestMode.appendChild(option);
+            });
+            var requestRaw = setup.reportRequestStatuses == null ? '' : String(setup.reportRequestStatuses);
+            requestMode.value = requestRaw === '' ? '' : requestRaw === 'open' ? 'open' : 'chosen';
+            var requestList = el('div', 'asset-tree-check-list');
+            function requestOn(id) {
+                if (requestRaw === '' || requestRaw === 'open' || requestRaw === '-') return false;
+                return requestRaw.split(',').indexOf(id) >= 0;
+            }
+            function paintRequest(rows) {
+                requestList.innerHTML = '';
+                (rows || []).forEach(function (item) {
+                    if (!item || !item.id) return;
+                    var label = el('label', 'asset-tree-check');
+                    var box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.checked = requestOn(String(item.id));
+                    box.setAttribute('data-request-status', String(item.id));
+                    label.appendChild(box);
+                    label.appendChild(document.createTextNode(item.name || item.id));
+                    requestList.appendChild(label);
+                });
+            }
+            function showRequestList() {
+                requestList.style.display = requestMode.value === 'chosen' ? '' : 'none';
+            }
+            function requestValue() {
+                if (requestMode.value === '') return '';
+                if (requestMode.value === 'open') return 'open';
+                var boxes = requestList.querySelectorAll('input');
+                if (!boxes.length) return requestRaw;
+                var picked = [];
+                for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) picked.push(boxes[i].getAttribute('data-request-status'));
+                return picked.length ? picked.join(',') : '-';
+            }
+            requestMode.addEventListener('change', showRequestList);
+            paintRequest([]);
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/workflow-statuses', null, function (status, payload) {
+                if (status === 200 && payload && payload.length) paintRequest(payload);
+            });
+            showRequestList();
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('reportRequestStatuses')));
+            panel.appendChild(requestMode);
+            panel.appendChild(requestList);
+            panel.appendChild(el('p', 'asset-tree-hint', t('reportRequestStatusesHint')));
             var mailOn = el('label', 'asset-tree-check');
             var mailBox = document.createElement('input');
             mailBox.type = 'checkbox';
@@ -14731,6 +14781,7 @@
                 next.reportMailTo = mailTo.join(',');
                 next.reportMailBranch = branchBox.checked;
                 next.reportIdleStatuses = idleValue();
+                next.reportRequestStatuses = requestValue();
                 saveSetup(next);
             }));
             mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
@@ -14749,6 +14800,7 @@
                 next.reportMailTo = mailTo.join(',');
                 next.reportMailBranch = branchBox.checked;
                 next.reportIdleStatuses = idleValue();
+                next.reportRequestStatuses = requestValue();
                 saveProjectView({ setup: next }, function (ok) {
                     if (!ok) return;
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
@@ -20167,6 +20219,7 @@
             reportMailTo: setup.reportMailTo || '',
             reportMailBranch: !!setup.reportMailBranch,
             reportIdleStatuses: setup.reportIdleStatuses == null ? '' : String(setup.reportIdleStatuses),
+            reportRequestStatuses: setup.reportRequestStatuses == null ? '' : String(setup.reportRequestStatuses),
             reportMailSent: setup.reportMailSent || '',
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,
