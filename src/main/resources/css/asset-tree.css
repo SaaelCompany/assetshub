@@ -14870,7 +14870,7 @@ button.asset-tree-attach-remove {
 #asset-tree-app.asset-tree.is-phone {
     flex-direction: column;
     align-items: stretch;
-    padding: 6px 10px 72px;
+    padding: 4px 8px 68px;
     font-size: 14px;
     height: auto !important;
     max-height: none !important;
@@ -14890,7 +14890,7 @@ button.asset-tree-attach-remove {
     height: auto !important;
     flex: none;
     margin: 0;
-    min-height: 48px;
+    min-height: 44px;
     padding: 2px 2px calc(2px + env(safe-area-inset-bottom));
     border-right: 0;
     border-top: 1px solid #dfe1e6;
@@ -14912,13 +14912,13 @@ button.asset-tree-attach-remove {
     min-width: 0 !important;
     height: auto !important;
     gap: 2px;
-    min-height: 40px;
+    min-height: 36px;
     padding: 2px 1px !important;
 }
 
 #asset-tree-app.is-phone button.asset-tree-rail-btn svg {
-    width: 18px !important;
-    height: 18px !important;
+    width: 16px !important;
+    height: 16px !important;
 }
 
 #asset-tree-app.is-phone .asset-tree-rail-label {
@@ -14926,9 +14926,9 @@ button.asset-tree-attach-remove {
     max-width: 100%;
     overflow: hidden;
     color: inherit;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    line-height: 13px;
+    line-height: 12px;
     text-align: center;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -14947,12 +14947,12 @@ button.asset-tree-attach-remove {
 }
 
 #asset-tree-app.is-phone .asset-tree-top {
-    margin-bottom: 8px;
-    padding-bottom: 4px;
+    margin-bottom: 6px;
+    padding-bottom: 2px;
 }
 
 #asset-tree-app.is-phone .asset-tree-heading h1 {
-    font-size: 18px;
+    font-size: 16px;
 }
 
 #asset-tree-app.is-phone .asset-tree-heading .asset-tree-hint {
@@ -14969,7 +14969,7 @@ button.asset-tree-attach-remove {
 #asset-tree-app.is-phone .asset-tree-actions .asset-tree-key-edit {
     align-self: flex-start;
     width: auto;
-    min-height: 32px;
+    min-height: 28px;
 }
 
 #asset-tree-app.is-phone input.asset-tree-search,
@@ -14979,26 +14979,26 @@ button.asset-tree-attach-remove {
 #asset-tree-app.is-phone select.asset-tree-tree-sort {
     width: 100% !important;
     max-width: none !important;
-    height: 32px !important;
-    font-size: 14px !important;
+    height: 30px !important;
+    font-size: 13px !important;
 }
 
 #asset-tree-app.is-phone .asset-tree-row {
-    min-height: 34px;
-    padding-top: 2px;
-    padding-bottom: 2px;
-    font-size: 14px;
+    min-height: 30px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    font-size: 13px;
 }
 
 #asset-tree-app.is-phone .asset-tree-name,
 #asset-tree-app.is-phone .asset-tree-object-name {
-    font-size: 14px;
+    font-size: 13px;
 }
 
 #asset-tree-app.is-phone .asset-tree-btn,
 #asset-tree-app.is-phone button.asset-tree-queue-add {
-    min-height: 32px;
-    font-size: 14px;
+    min-height: 28px;
+    font-size: 13px;
 }
 
 #asset-tree-app.is-phone .asset-tree-frame.is-split {
@@ -15096,13 +15096,13 @@ button.asset-tree-attach-remove {
 }
 
 #asset-tree-app.is-phone .asset-tree-board-head {
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: 4px;
+    margin-bottom: 4px;
 }
 
 #asset-tree-app.is-phone .asset-tree-calendar-title {
     min-width: 0;
-    font-size: 16px;
+    font-size: 15px;
 }
 
 #asset-tree-app.is-phone .asset-tree-sheet-filters {
@@ -15110,13 +15110,13 @@ button.asset-tree-attach-remove {
 }
 
 #asset-tree-app.is-phone .asset-tree-dashboard svg.asset-tree-donut {
-    width: 96px !important;
-    height: 96px !important;
-    min-width: 96px !important;
-    max-width: 96px !important;
-    min-height: 96px !important;
-    max-height: 96px !important;
-    flex: 0 0 96px !important;
+    width: 84px !important;
+    height: 84px !important;
+    min-width: 84px !important;
+    max-width: 84px !important;
+    min-height: 84px !important;
+    max-height: 84px !important;
+    flex: 0 0 84px !important;
 }
 
 #asset-tree-app.is-phone .asset-tree-dashboard .asset-tree-chart-body {
