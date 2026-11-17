@@ -2302,6 +2302,7 @@
             tab.setAttribute('aria-label', item.label);
             if (active) tab.setAttribute('aria-current', 'page');
             tab.appendChild(railIcon(item.icon));
+            tab.appendChild(el('span', 'asset-tree-rail-label', phoneTabLabel(item.view)));
             var tip = el('span', 'asset-tree-rail-tip', item.label);
             tip.setAttribute('aria-hidden', 'true');
             tab.appendChild(tip);
@@ -2309,6 +2310,50 @@
         });
         rail.appendChild(head);
         return rail;
+    }
+
+    function phoneTabLabel(view) {
+        if (view === 'all') return t('menuPhoneAll');
+        if (view === 'mine') return t('menuPhoneMine');
+        if (view === 'settings') return t('menuPhoneSettings');
+        if (view === 'schedules') return t('menuSchedules');
+        if (view === 'reports') return t('menuReports');
+        if (view === 'map') return t('menuMap');
+        return t('menuPhoneAll');
+    }
+
+    function phoneLayout() {
+        return window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+    }
+
+    function syncPhone() {
+        var root = document.getElementById('asset-tree-app');
+        if (!root) return;
+        var phone = phoneLayout();
+        if (phone) root.classList.add('is-phone');
+        else root.classList.remove('is-phone');
+        var frame = document.getElementById('asset-tree-frame');
+        var focus = phone && state.view === 'all' && (state.pane === 'card' || state.trashOpen);
+        if (frame) {
+            if (focus) frame.classList.add('is-phone-card');
+            else frame.classList.remove('is-phone-card');
+        }
+        var back = frame ? frame.querySelector('.asset-tree-phone-back') : null;
+        if (!focus) {
+            if (back && back.parentNode) back.parentNode.removeChild(back);
+            return;
+        }
+        if (back) return;
+        back = button('\u2039  ' + t('phoneBack'), 'asset-tree-btn asset-tree-phone-back', function () {
+            state.trashOpen = false;
+            state.pane = 'list';
+            state.editing = false;
+            state.dirty = false;
+            renderFrame();
+        });
+        var detail = document.getElementById('asset-tree-detail');
+        if (detail && detail.parentNode === frame) frame.insertBefore(back, detail);
+        else if (frame) frame.appendChild(back);
     }
 
     function showView(view) {
@@ -2522,7 +2567,25 @@
         if (!fitSplit.bound) {
             fitSplit.bound = true;
             window.addEventListener('resize', fitSplit);
+            if (window.matchMedia) {
+                var phoneQuery = window.matchMedia('(max-width: 720px)');
+                var onPhone = function () { fitSplit(); };
+                if (phoneQuery.addEventListener) phoneQuery.addEventListener('change', onPhone);
+                else if (phoneQuery.addListener) phoneQuery.addListener(onPhone);
+            }
         }
+        if (phoneLayout()) {
+            app.classList.add('is-phone');
+            app.style.height = '';
+            app.style.maxHeight = '';
+            app.style.overflow = '';
+            var phoneRail = app.querySelector('.asset-tree-rail');
+            if (phoneRail) phoneRail.style.height = '';
+            syncPhone();
+            return;
+        }
+        app.classList.remove('is-phone');
+        syncPhone();
         var frame = document.getElementById('asset-tree-frame');
         var split = frame && frame.className.indexOf('is-split') >= 0
             && !frame.querySelector('.asset-tree-message')
@@ -2945,6 +3008,7 @@
         state.editing = false;
         renderNodes();
         replaceDetail();
+        syncPhone();
         loadTrash();
     }
 
@@ -3060,6 +3124,7 @@
         var next = renderDetail();
         frame.replaceChild(next, existing);
         restoreListedScroll(next);
+        syncPhone();
     }
 
     function appendLevel(container, parentId, visible, matches) {
@@ -8650,6 +8715,7 @@
         if (!section || !asset) {
             return;
         }
+        syncPhone();
         state.detail = asset;
         var placePage = isFolder(asset);
         if (!state.editing || !mayEdit(asset)) {
