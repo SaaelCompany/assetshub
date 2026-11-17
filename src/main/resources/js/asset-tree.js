@@ -15657,6 +15657,17 @@
         return parts.join(',');
     }
 
+    function issueOnDay(plan, source) {
+        var raw = plan && plan.requests ? String(plan.requests) : '';
+        if (!raw || !source) return '';
+        var parts = raw.split(',');
+        for (var i = 0; i < parts.length; i++) {
+            var pair = parts[i].split('=');
+            if (pair.length === 2 && pair[0] === source && pair[1]) return pair[1];
+        }
+        return '';
+    }
+
     function seriesSource(plan, displayIso) {
         var map = planMoveMap(plan);
         var source;
@@ -16775,6 +16786,8 @@
         if (clock.start) meta = clock.start + (clock.end ? '–' + clock.end : '') + ' · ' + meta;
         if (done) meta += ' · ' + t('serviceMarked');
         if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
+        var requestKey = issueOnDay(plan, source);
+        if (requestKey) meta += ' · ' + requestKey;
         if (plan.assetId) {
             var placeName = assetPlaceName(byId()[plan.assetId]);
             if (placeName) meta += ' · ' + placeName;
@@ -17111,6 +17124,19 @@
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, plan.name || kindLong(plan.kind)));
+            var requestKey = issueOnDay(plan, seriesSource(plan, iso));
+            if (requestKey) {
+                var requestLine = el('p', 'asset-tree-life-state');
+                requestLine.appendChild(document.createTextNode(t('schedulesRequest') + ' '));
+                var requestLink = document.createElement('a');
+                var root = window.AJS && AJS.contextPath ? AJS.contextPath() : '';
+                requestLink.href = root + '/browse/' + encodeURIComponent(requestKey);
+                requestLink.target = '_blank';
+                requestLink.rel = 'noopener';
+                requestLink.textContent = requestKey;
+                requestLine.appendChild(requestLink);
+                dialog.appendChild(requestLine);
+            }
             var place = (plan.assetName || '') + (plan.objectKey ? ' · ' + plan.objectKey : '');
             if (place) dialog.appendChild(el('p', null, place));
             var when = iso || plan.nextDue || plan.lastDone || '';
@@ -17246,6 +17272,8 @@
                 var readClock = occurrenceClock(plan, String(when).slice(0, 10));
                 if (readClock.start) meta += ' · ' + readClock.start + (readClock.end ? '–' + readClock.end : '');
                 if (plan.assigneeName) meta += ' · ' + plan.assigneeName;
+                var readKey = issueOnDay(plan, seriesSource(plan, iso));
+                if (readKey) meta += ' · ' + readKey;
                 dialog.appendChild(el('p', null, meta));
                 if (plan.note) dialog.appendChild(el('p', null, plan.note));
             }
@@ -28325,6 +28353,7 @@
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
             dialog.appendChild(el('h2', null, t('lifeAsk')));
+            dialog.appendChild(el('p', 'asset-tree-life-state', t('lifeWriteoffMail')));
             var reason = document.createElement('textarea');
             reason.placeholder = t('lifeReason');
             reason.value = life.writeoffReason || '';

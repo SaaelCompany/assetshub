@@ -11,6 +11,9 @@ import java.util.Set;
  * A day is handed over once. A finished day stays on the calendar and is not handed over again.
  */
 public final class CalendarRaise {
+    /** How many missed days one run hands to the rule. The next run continues after them. */
+    public static final int BATCH = 20;
+
     private CalendarRaise() {
     }
 
@@ -49,6 +52,7 @@ public final class CalendarRaise {
      * Occurrences from the last handed-over day through today. Today's start time must have arrived.
      * Earlier days ignore the clock, so a stopped server still catches the days it missed.
      * A plan that has never been handed over looks at yesterday and today only.
+     * One call returns at most {@link #BATCH} days, oldest first.
      * {@code clock} is {@code HH:mm} in the Jira zone. An empty clock means the day's start has passed.
      */
     public static List<Hand> due(String lastDone, int count, String unit, String moves, String seriesStart,
@@ -63,7 +67,7 @@ public final class CalendarRaise {
         Set<String> finished = finishedDays(moves, lastDone, unit, completedOn, completed);
         Set<String> sent = tokens(raised, null);
         LocalDate start = catchUpFrom(sent, today);
-        for (LocalDate day = start; !day.isAfter(today); day = day.plusDays(1)) {
+        for (LocalDate day = start; !day.isAfter(today) && found.size() < BATCH; day = day.plusDays(1)) {
             collect(found, lastDone, count, unit, moves, seriesStart, seriesEnd, finished, sent, day,
                     day.equals(today) ? clock : "");
         }
@@ -127,6 +131,9 @@ public final class CalendarRaise {
             }
             if (!clockReached(slot.getStart(), clock)) {
                 continue;
+            }
+            if (found.size() >= BATCH) {
+                return;
             }
             found.add(new Hand(source, shown, slot.getStart(), slot.getEnd()));
             sent.add(source);

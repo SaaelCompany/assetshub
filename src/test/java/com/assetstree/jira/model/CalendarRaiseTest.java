@@ -76,6 +76,23 @@ public class CalendarRaiseTest {
     }
 
     @Test
+    public void aLongGapArrivesInOneBatchThenContinues() {
+        List<CalendarRaise.Hand> first = CalendarRaise.due("2026-09-01", 1, "day", "", "", "",
+                "", false, "2026-09-01", TODAY, "");
+        assertEquals(CalendarRaise.BATCH, first.size());
+        assertEquals("2026-09-02", first.get(0).getDate());
+        assertEquals("2026-09-21", first.get(first.size() - 1).getDate());
+        String raised = "2026-09-01";
+        for (int i = 0; i < first.size(); i++) {
+            raised = CalendarRaise.remember(raised, first.get(i).getSource(), TODAY);
+        }
+        List<CalendarRaise.Hand> next = CalendarRaise.due("2026-09-01", 1, "day", "", "", "",
+                "", false, raised, TODAY, "");
+        assertEquals(CalendarRaise.BATCH, next.size());
+        assertEquals("2026-09-22", next.get(0).getDate());
+    }
+
+    @Test
     public void anUntouchedHistoryStaysAtYesterday() {
         List<CalendarRaise.Hand> due = CalendarRaise.due("2026-01-01", 1, "once", "", "", "",
                 "", false, "", TODAY, "");

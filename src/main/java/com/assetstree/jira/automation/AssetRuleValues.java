@@ -4,6 +4,8 @@ import com.atlassian.jira.util.json.JSONException;
 import com.atlassian.jira.util.json.JSONObject;
 import com.codebarrel.automation.api.thirdparty.context.ComponentInputs;
 
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Reads the small maps stored on an Automation component and on an equipment event. */
@@ -105,6 +107,32 @@ public final class AssetRuleValues {
             return 0;
         }
         return jsonInt(body, "id");
+    }
+
+    /** Reads a JSON object of short strings, such as the required portal fields stored on a rule. */
+    public static Map<String, String> map(String raw) {
+        Map<String, String> found = new LinkedHashMap<String, String>();
+        if (raw == null || raw.isEmpty() || raw.charAt(0) != '{') {
+            return found;
+        }
+        try {
+            JSONObject object = new JSONObject(raw);
+            Iterator<?> keys = object.keys();
+            while (keys.hasNext()) {
+                String key = String.valueOf(keys.next());
+                if (key.isEmpty() || object.isNull(key)) {
+                    continue;
+                }
+                String text = object.optString(key, "").trim();
+                if (text.isEmpty() || text.length() > 4000 || "summary".equals(key) || "description".equals(key)) {
+                    continue;
+                }
+                found.put(key, text);
+            }
+        } catch (JSONException ex) {
+            return found;
+        }
+        return found;
     }
 
     public static String field(Object value, String key) {

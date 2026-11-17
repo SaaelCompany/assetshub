@@ -4,6 +4,7 @@
     var statusCache = {};
     var typeCache = {};
     var portalCache = {};
+    var fieldCache = {};
 
     function clear(el) {
         while (el.firstChild) {
@@ -420,7 +421,18 @@
             componentType: 'ACTION',
             name: function () { return AJS.I18n.getText('asset-tree.automation.request'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
-            initialValue: function () { return { issueTypeId: '', issueTypeName: '', requestTypeId: '', requestTypeName: '' }; },
+            initialValue: function () {
+                return {
+                    issueTypeId: '',
+                    issueTypeName: '',
+                    requestTypeId: '',
+                    requestTypeName: '',
+                    customer: 'assignee',
+                    customerUser: '',
+                    customerName: '',
+                    fieldValues: ''
+                };
+            },
             categories: [],
             labels: [],
             isEditable: true,
@@ -436,7 +448,10 @@
                         clear(el);
                         paragraph(el, AJS.I18n.getText('asset-tree.automation.requestCard'));
                         label(el, AJS.I18n.getText('asset-tree.automation.requestPortal'));
-                        portalPick(el, config);
+                        var portalExtra = document.createElement('div');
+                        portalPick(el, config, function () { paintPortalExtra(portalExtra, config); });
+                        el.appendChild(portalExtra);
+                        paintPortalExtra(portalExtra, config);
                         label(el, AJS.I18n.getText('asset-tree.automation.requestType'));
                         typePick(el, config);
                     },
@@ -457,7 +472,7 @@
         };
     }
 
-    function portalPick(parent, config) {
+    function portalPick(parent, config, onPick) {
         var box = document.createElement('select');
         box.disabled = !!readOnly();
         box.style.maxWidth = '100%';
@@ -485,9 +500,221 @@
                 caption = box.options[box.selectedIndex].textContent || '';
             }
             value.requestTypeName = box.value ? caption : '';
+            value.fieldValues = '';
+            save(config, value);
+            if (typeof onPick === 'function') {
+                onPick();
+            }
+        });
+        parent.appendChild(box);
+    }
+
+    function paintPortalExtra(parent, config) {
+        clear(parent);
+        if (!field(config, 'requestTypeId')) {
+            return;
+        }
+        label(parent, AJS.I18n.getText('asset-tree.automation.requestCustomer'));
+        var role = document.createElement('select');
+        role.disabled = !!readOnly();
+        role.style.maxWidth = '100%';
+        fillSelect(role, [
+            { value: 'assignee', label: AJS.I18n.getText('asset-tree.automation.requestCustomerAssignee') },
+            { value: 'custodian', label: AJS.I18n.getText('asset-tree.automation.requestCustomerCustodian') },
+            { value: 'user', label: AJS.I18n.getText('asset-tree.automation.requestCustomerUser') }
+        ], field(config, 'customer') || 'assignee');
+        role.addEventListener('change', function () {
+            var value = config.value || {};
+            value.customer = role.value;
+            save(config, value);
+            paintPortalExtra(parent, config);
+        });
+        parent.appendChild(role);
+        if ((field(config, 'customer') || 'assignee') === 'user') {
+            customerFinder(parent, config);
+        }
+        var fields = document.createElement('div');
+        parent.appendChild(fields);
+        var typeId = field(config, 'requestTypeId');
+        loadRequestFields(typeId, function (rows) {
+            if (!fields.parentNode) {
+                return;
+            }
+            clear(fields);
+            if (!rows.length) {
+                return;
+            }
+            label(fields, AJS.I18n.getText('asset-tree.automation.requestFields'));
+            var stored = fieldMap(config);
+            for (var i = 0; i < rows.length; i++) {
+                addPortalField(fields, config, rows[i], stored);
+            }
+        });
+    }
+
+    function fieldMap(config) {
+        var raw = field(config, 'fieldValues');
+        if (!raw) {
+            return {};
+        }
+        try {
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (ignore) {
+            return {};
+        }
+    }
+
+    function writeField(config, id, text) {
+        var map = fieldMap(config);
+        var next = text ? String(text).trim() : '';
+        if (next) {
+            map[id] = next;
+        } else {
+            delete map[id];
+        }
+        var value = config.value || {};
+        value.fieldValues = JSON.stringify(map);
+        save(config, value);
+    }
+
+    function addPortalField(parent, config, row, stored) {
+        if (!row || !row.id) {
+            return;
+        }
+        label(parent, row.name || row.id);
+        var current = stored[row.id] || '';
+        if (row.kind === 'select' && row.options && row.options.length) {
+            var box = document.createElement('select');
+            box.disabled = !!readOnly();
+            box.style.maxWidth = '100%';
+            var options = [{ value: '', label: AJS.I18n.getText('asset-tree.automation.requestChoose') }];
+            for (var i = 0; i < row.options.length; i++) {
+                options.push({ value: row.options[i].id || '', label: row.options[i].name || row.options[i].id || '' });
+            }
+            fillSelect(box, options, current);
+            box.addEventListener('change', function () {
+                writeField(config, row.id, box.value);
+            });
+            parent.appendChild(box);
+            return;
+        }
+        var input = document.createElement(row.kind === 'textarea' ? 'textarea' : 'input');
+        if (input.tagName === 'INPUT') {
+            input.type = 'text';
+        }
+        input.value = current;
+        input.disabled = !!readOnly();
+        input.style.width = '100%';
+        input.style.boxSizing = 'border-box';
+        input.addEventListener('change', function () {
+            writeField(config, row.id, input.value);
+        });
+        parent.appendChild(input);
+    }
+
+    function customerFinder(parent, config) {
+        var box = document.createElement('input');
+        box.type = 'text';
+        box.value = field(config, 'customerName');
+        box.placeholder = AJS.I18n.getText('asset-tree.automation.mailFind');
+        box.disabled = !!readOnly();
+        box.style.width = '100%';
+        box.style.boxSizing = 'border-box';
+        box.style.marginTop = '4px';
+        var list = document.createElement('select');
+        list.size = 4;
+        list.style.width = '100%';
+        list.style.marginTop = '4px';
+        list.disabled = !!readOnly();
+        var timer = null;
+        function show(rows) {
+            while (list.firstChild) {
+                list.removeChild(list.firstChild);
+            }
+            for (var i = 0; i < rows.length; i++) {
+                var item = document.createElement('option');
+                item.value = rows[i].userKey || '';
+                var caption = rows[i].displayName || rows[i].username || item.value;
+                item.appendChild(document.createTextNode(caption));
+                item.setAttribute('data-name', caption);
+                list.appendChild(item);
+            }
+        }
+        box.addEventListener('input', function () {
+            if (timer) {
+                clearTimeout(timer);
+            }
+            var query = box.value;
+            timer = setTimeout(function () {
+                if (query.length < 2) {
+                    show([]);
+                    return;
+                }
+                var root = window.AJS && AJS.contextPath ? AJS.contextPath() : '';
+                var request = new XMLHttpRequest();
+                request.open('GET', root + '/rest/asset-tree/1.0/users?q=' + encodeURIComponent(query), true);
+                request.setRequestHeader('Accept', 'application/json');
+                request.onreadystatechange = function () {
+                    if (request.readyState !== 4 || request.status !== 200) {
+                        return;
+                    }
+                    try {
+                        show(JSON.parse(request.responseText) || []);
+                    } catch (ignore) {
+                        show([]);
+                    }
+                };
+                request.send();
+            }, 250);
+        });
+        list.addEventListener('change', function () {
+            var chosen = list.options[list.selectedIndex];
+            if (!chosen) {
+                return;
+            }
+            var value = config.value || {};
+            value.customerUser = chosen.value;
+            value.customerName = chosen.getAttribute('data-name') || chosen.text;
+            box.value = value.customerName;
             save(config, value);
         });
         parent.appendChild(box);
+        parent.appendChild(list);
+    }
+
+    function loadRequestFields(typeId, done) {
+        var key = projectKey();
+        if (!key || !typeId) {
+            done([]);
+            return;
+        }
+        var cacheKey = key + ':' + typeId;
+        if (fieldCache[cacheKey]) {
+            done(fieldCache[cacheKey]);
+            return;
+        }
+        var root = window.AJS && AJS.contextPath ? AJS.contextPath() : '';
+        var request = new XMLHttpRequest();
+        request.open('GET', root + '/rest/asset-tree/1.0/projects/' + encodeURIComponent(key)
+            + '/request-types/' + encodeURIComponent(typeId) + '/fields', true);
+        request.setRequestHeader('Accept', 'application/json');
+        request.onreadystatechange = function () {
+            if (request.readyState !== 4) {
+                return;
+            }
+            var rows = [];
+            if (request.status === 200) {
+                try {
+                    rows = JSON.parse(request.responseText) || [];
+                } catch (ignore) {
+                    rows = [];
+                }
+            }
+            fieldCache[cacheKey] = rows;
+            done(rows);
+        };
+        request.send();
     }
 
     function loadRequestTypes(done) {

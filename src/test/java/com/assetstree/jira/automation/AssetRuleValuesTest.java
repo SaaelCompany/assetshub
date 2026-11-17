@@ -26,6 +26,14 @@ public class AssetRuleValuesTest {
     }
 
     @Test
+    public void mapReadsPortalFieldValues() {
+        Map<String, String> values = AssetRuleValues.map("{\"customfield_1\":\" Room 4 \",\"summary\":\"skip\",\"blank\":\"\"}");
+        assertEquals("Room 4", values.get("customfield_1"));
+        assertFalse(values.containsKey("summary"));
+        assertTrue(AssetRuleValues.map("not-json").isEmpty());
+    }
+
+    @Test
     public void fieldReadsTheStoredMap() {
         Map<String, String> value = new HashMap<String, String>();
         value.put("status", " in_use ");

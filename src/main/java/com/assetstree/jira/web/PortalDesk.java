@@ -96,7 +96,39 @@ public final class PortalDesk {
         }
     }
 
+    /** One request type with its customer form. Null when Service Desk is absent or the type is unknown. */
+    public static PortalRequestForm.Type type(ApplicationUser user, Project project, String typeId) {
+        try {
+            int wanted = parseId(typeId);
+            if (wanted <= 0) {
+                return null;
+            }
+            Loaded loaded = load(user, project);
+            if (loaded.failure != null) {
+                return null;
+            }
+            Object row = findType(loaded.typeService, user, loaded.deskId, wanted);
+            if (row == null) {
+                return null;
+            }
+            return readType(user, loaded.fieldService, loaded.deskId, row, loaded.assetFields);
+        } catch (RuntimeException ex) {
+            return null;
+        } catch (ReflectiveOperationException ex) {
+            return null;
+        }
+    }
+
     public static Created create(ApplicationUser user, Project project, String typeId, Map<String, String> values) {
+        return create(user, project, typeId, values, null);
+    }
+
+    /**
+     * Creates the customer request. {@code customer} is raised on behalf of the actor when Service Desk supports it.
+     * A null customer leaves the actor as the customer.
+     */
+    public static Created create(ApplicationUser user, Project project, String typeId, Map<String, String> values,
+                                  ApplicationUser customer) {
         try {
             int wanted = parseId(typeId);
             if (wanted <= 0) {
@@ -120,6 +152,9 @@ public final class PortalDesk {
             Object channel = channel(requestService.getClass().getClassLoader());
             if (channel != null) {
                 callOptional(builder, "customerRequestChannelSource", channel);
+            }
+            if (customer != null) {
+                callOptional(builder, "raiseOnBehalfOf", customer);
             }
             ClassLoader loader = requestService.getClass().getClassLoader();
             Class<?> fieldIdClass = Class.forName(FIELD_ID, false, loader);

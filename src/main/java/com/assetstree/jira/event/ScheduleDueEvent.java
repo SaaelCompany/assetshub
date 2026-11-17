@@ -20,10 +20,14 @@ public final class ScheduleDueEvent {
     private final String start;
     private final String end;
     private final String source;
+    private final int planId;
+    private final String custodian;
+    private final String custodianName;
 
     public ScheduleDueEvent(String projectKey, int assetId, String objectKey, String assetName, String status,
                              String typeKey, String plan, String due, String note, String kind, String kindName,
-                             String assignee, String assigneeName, String start, String end, String source) {
+                             String assignee, String assigneeName, String start, String end, String source,
+                             int planId, String custodian, String custodianName) {
         this.projectKey = projectKey == null ? "" : projectKey;
         this.assetId = assetId;
         this.objectKey = objectKey == null ? "" : objectKey;
@@ -40,6 +44,9 @@ public final class ScheduleDueEvent {
         this.start = start == null ? "" : start;
         this.end = end == null ? "" : end;
         this.source = source == null ? "" : source;
+        this.planId = planId;
+        this.custodian = custodian == null ? "" : custodian;
+        this.custodianName = custodianName == null ? "" : custodianName;
     }
 
     public String getProjectKey() {
@@ -106,6 +113,18 @@ public final class ScheduleDueEvent {
         return source;
     }
 
+    public int getPlanId() {
+        return planId;
+    }
+
+    public String getCustodian() {
+        return custodian;
+    }
+
+    public String getCustodianName() {
+        return custodianName;
+    }
+
     public String toJson() {
         return "{\"event\":\"" + escape(NAME) + "\",\"project\":\"" + escape(projectKey)
                 + "\",\"id\":" + assetId
@@ -115,7 +134,9 @@ public final class ScheduleDueEvent {
                 + "\",\"note\":\"" + escape(note) + "\",\"kind\":\"" + escape(kind)
                 + "\",\"kindName\":\"" + escape(kindName) + "\",\"assignee\":\"" + escape(assignee)
                 + "\",\"assigneeName\":\"" + escape(assigneeName) + "\",\"start\":\"" + escape(start)
-                + "\",\"end\":\"" + escape(end) + "\",\"source\":\"" + escape(source) + "\"}";
+                + "\",\"end\":\"" + escape(end) + "\",\"source\":\"" + escape(source)
+                + "\",\"planId\":" + planId
+                + ",\"custodian\":\"" + escape(custodian) + "\",\"custodianName\":\"" + escape(custodianName) + "\"}";
     }
 
     private static String escape(String value) {

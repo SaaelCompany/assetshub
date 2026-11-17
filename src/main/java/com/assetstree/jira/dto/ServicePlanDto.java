@@ -23,6 +23,7 @@ public class ServicePlanDto {
     private String completedOn;
     private boolean completed;
     private String moves;
+    private String requests;
 
     public int getId() {
         return id;
@@ -132,4 +133,6 @@ public class ServicePlanDto {
     public void setCompleted(boolean completed) { this.completed = completed; }
     public String getMoves() { return moves; }
     public void setMoves(String moves) { this.moves = moves; }
+    public String getRequests() { return requests; }
+    public void setRequests(String requests) { this.requests = requests; }
 }
