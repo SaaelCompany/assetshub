@@ -5,6 +5,7 @@
     if (!app) {
         return;
     }
+    preparePhonePage();
 
     var PALETTE = ['#0052CC', '#00875A', '#6554C0', '#FF991F', '#DE350B', '#00A3BF', '#172B4D', '#36B37E'];
     var DEFAULT_PLACE_ICON = 'building';
@@ -2323,7 +2324,33 @@
     }
 
     function phoneLayout() {
-        return window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+        if (window.matchMedia && window.matchMedia('(max-width: 820px)').matches) return true;
+        var display = window.screen;
+        if (!display) return false;
+        var width = display.width || 0;
+        var height = display.height || 0;
+        var shortSide = width && height ? Math.min(width, height) : width;
+        return shortSide > 0 && shortSide <= 740;
+    }
+
+    function preparePhonePage() {
+        if (!phoneLayout()) return;
+        var head = document.head || document.getElementsByTagName('head')[0];
+        if (!head) return;
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+            meta = document.createElement('meta');
+            meta.setAttribute('name', 'viewport');
+            head.appendChild(meta);
+        }
+        meta.setAttribute('content', 'width=device-width, initial-scale=1');
+        if (document.getElementById('asset-tree-phone-page')) return;
+        var style = document.createElement('style');
+        style.id = 'asset-tree-phone-page';
+        style.appendChild(document.createTextNode(
+            '#page,#content,.aui-page-panel,.aui-page-panel-inner{min-width:0 !important;width:auto !important;}'
+        ));
+        head.appendChild(style);
     }
 
     function syncPhone() {
@@ -2568,7 +2595,7 @@
             fitSplit.bound = true;
             window.addEventListener('resize', fitSplit);
             if (window.matchMedia) {
-                var phoneQuery = window.matchMedia('(max-width: 720px)');
+                var phoneQuery = window.matchMedia('(max-width: 820px)');
                 var onPhone = function () { fitSplit(); };
                 if (phoneQuery.addEventListener) phoneQuery.addEventListener('change', onPhone);
                 else if (phoneQuery.addListener) phoneQuery.addListener(onPhone);
