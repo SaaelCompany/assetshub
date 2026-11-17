@@ -743,6 +743,95 @@
         };
     }
 
+    function dayKinds() {
+        return [
+            { value: '', label: text('asset-tree.automation.anyKind') },
+            { value: 'to', label: text('asset-tree.ui.kindTo') },
+            { value: 'kts', label: text('asset-tree.ui.kindKts') },
+            { value: 'verify', label: text('asset-tree.ui.kindVerify') },
+            { value: 'staff', label: text('asset-tree.ui.kindStaff') },
+            { value: 'event', label: text('asset-tree.ui.kindEvent') },
+            { value: 'update', label: text('asset-tree.ui.kindUpdate') }
+        ];
+    }
+
+    function knownKind(key) {
+        var options = dayKinds();
+        for (var i = 0; i < options.length; i++) {
+            if (options[i].value === key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function kindWord(key) {
+        if (!key) {
+            return text('asset-tree.automation.anyKind');
+        }
+        var options = dayKinds();
+        for (var i = 0; i < options.length; i++) {
+            if (options[i].value === key) {
+                return options[i].label;
+            }
+        }
+        return key;
+    }
+
+    function calendarDay() {
+        return {
+            type: plugin + ':schedule-due-trigger',
+            componentType: 'TRIGGER',
+            name: function () { return text('asset-tree.automation.day'); },
+            icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
+            initialValue: function () { return { kind: '' }; },
+            categories: [],
+            labels: [],
+            getRenderer: function () {
+                return {
+                    summaryLabel: function () { return text('asset-tree.automation.day'); },
+                    renderSummary: function (config, context, el) {
+                        clear(el);
+                        el.appendChild(document.createTextNode(kindWord(field(config, 'kind'))));
+                    },
+                    renderDetailed: function (config, context, el) {
+                        clear(el);
+                        paragraph(el, text('asset-tree.automation.dayCard'));
+                        label(el, text('asset-tree.automation.dayKind'));
+                        var current = field(config, 'kind');
+                        var box = pick(el, config, 'kind', dayKinds());
+                        if (!knownKind(current)) {
+                            fillSelect(box, dayKinds(), '');
+                        }
+                        label(el, text('asset-tree.automation.dayCustom'));
+                        var own = document.createElement('input');
+                        own.type = 'text';
+                        own.value = knownKind(current) ? '' : current;
+                        own.placeholder = 'to';
+                        own.disabled = !!readOnly();
+                        own.style.width = '100%';
+                        own.style.boxSizing = 'border-box';
+                        own.addEventListener('input', function () {
+                            var slug = own.value.trim().toLowerCase();
+                            var value = config.value || {};
+                            value.kind = slug || box.value;
+                            save(config, value);
+                        });
+                        box.addEventListener('change', function () {
+                            own.value = '';
+                        });
+                        el.appendChild(own);
+                    },
+                    renderCard: function (el) {
+                        clear(el);
+                        el.appendChild(document.createTextNode(text('asset-tree.automation.dayCard')));
+                    }
+                };
+            },
+            validate: function () { return {}; }
+        };
+    }
+
     function register(attempt) {
         if (registered) {
             return;
@@ -755,6 +844,7 @@
         }
         registered = true;
         CodeBarrel.Automation.registerComponent(issueStatus());
+        CodeBarrel.Automation.registerComponent(calendarDay());
         CodeBarrel.Automation.registerComponent(changed());
         CodeBarrel.Automation.registerComponent(linked());
         CodeBarrel.Automation.registerComponent(statusAction());

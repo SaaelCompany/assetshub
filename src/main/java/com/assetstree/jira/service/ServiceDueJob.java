@@ -18,6 +18,11 @@ public class ServiceDueJob implements PluginJob {
             log.warn("Service dates were not applied", ex);
         }
         try {
+            AssetBridge.service().raiseCalendar();
+        } catch (RuntimeException ex) {
+            log.warn("Calendar days were not handed to Automation", ex);
+        }
+        try {
             AssetBridge.service().sendScheduledReports();
         } catch (RuntimeException ex) {
             log.warn("Report mail was not sent", ex);

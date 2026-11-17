@@ -317,6 +317,9 @@ public interface AssetService {
     /** Moves equipment whose service date has arrived and queues the letters. */
     void applyDuePlans();
 
+    /** Hands today's calendar rows to the one Automation rule. The same day is handed over once. */
+    void raiseCalendar();
+
     List<ScheduleRowDto> schedule(ApplicationUser user, String projectKey);
 
     List<ScheduleRowDto> createSchedule(ApplicationUser user, String projectKey, ScheduleDraft draft);

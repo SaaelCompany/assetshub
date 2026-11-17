@@ -72,6 +72,15 @@ public final class AssetRuleValues {
         return !name.isEmpty() && wanted.equals(name);
     }
 
+    /** An empty kind matches every calendar work. A filled one matches that kind id. */
+    public static boolean kindMatches(String filter, String kind) {
+        if (filter == null || filter.trim().isEmpty()) {
+            return true;
+        }
+        String now = kind == null ? "" : kind.trim();
+        return filter.trim().equals(now);
+    }
+
     /** An empty filter matches. A filled one matches the current status, even when it did not just change. */
     public static boolean currentStatus(String filter, String current) {
         if (filter == null || filter.trim().isEmpty()) {
