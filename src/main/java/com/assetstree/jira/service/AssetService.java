@@ -226,6 +226,9 @@ public interface AssetService {
 
     List<IssueTypeDto> listIssueTypes(ApplicationUser user, String projectKey);
 
+    /** Service Desk request types of the project. Empty when Service Desk is absent. */
+    List<IssueTypeDto> listRequestTypes(ApplicationUser user, String projectKey);
+
     List<IssueTypeDto> listIssueStatuses(ApplicationUser user, String projectKey);
 
     /** Workflow statuses of the project, for a rule that follows a request. */

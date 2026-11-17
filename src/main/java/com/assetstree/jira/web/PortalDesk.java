@@ -59,6 +59,43 @@ public final class PortalDesk {
         }
     }
 
+    /** Request type id and name, without the customer form. Empty when Service Desk is absent. */
+    public static List<PortalRequestForm.Type> names(ApplicationUser user, Project project) {
+        try {
+            Loaded loaded = load(user, project);
+            if (loaded.failure != null) {
+                return Collections.emptyList();
+            }
+            Object builder = call(loaded.typeService, "newQueryBuilder");
+            call(builder, "serviceDesk", Integer.valueOf(loaded.deskId));
+            callOptional(builder, "filterHidden", Boolean.TRUE);
+            callOptional(builder, "isValid", Boolean.TRUE);
+            Object page = PortalLookup.unwrapResult(call(loaded.typeService, "getRequestTypes", user, call(builder, "build")));
+            List<PortalRequestForm.Type> types = new ArrayList<PortalRequestForm.Type>();
+            for (Object row : results(page)) {
+                if (types.size() >= 40) {
+                    break;
+                }
+                Object idValue = invokeQuiet(row, "getId");
+                if (!(idValue instanceof Number)) {
+                    continue;
+                }
+                int id = ((Number) idValue).intValue();
+                String name = text(invokeQuiet(row, "getName"));
+                if (name.isEmpty()) {
+                    name = String.valueOf(id);
+                }
+                types.add(new PortalRequestForm.Type(String.valueOf(id), name, "",
+                        Collections.<PortalRequestForm.Field>emptyList(), Collections.<String>emptyList()));
+            }
+            return types;
+        } catch (RuntimeException ex) {
+            return Collections.emptyList();
+        } catch (ReflectiveOperationException ex) {
+            return Collections.emptyList();
+        }
+    }
+
     public static Created create(ApplicationUser user, Project project, String typeId, Map<String, String> values) {
         try {
             int wanted = parseId(typeId);

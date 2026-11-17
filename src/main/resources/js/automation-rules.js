@@ -3,6 +3,7 @@
     var registered = false;
     var statusCache = {};
     var typeCache = {};
+    var portalCache = {};
 
     function clear(el) {
         while (el.firstChild) {
@@ -413,7 +414,7 @@
             componentType: 'ACTION',
             name: function () { return text('asset-tree.automation.request'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
-            initialValue: function () { return { issueTypeId: '', issueTypeName: '' }; },
+            initialValue: function () { return { issueTypeId: '', issueTypeName: '', requestTypeId: '', requestTypeName: '' }; },
             categories: [],
             labels: [],
             isEditable: true,
@@ -422,12 +423,14 @@
                     summaryLabel: function () { return text('asset-tree.automation.request'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
-                        var name = field(config, 'issueTypeName') || field(config, 'issueTypeId');
+                        var name = field(config, 'requestTypeName') || field(config, 'issueTypeName') || field(config, 'issueTypeId');
                         el.appendChild(document.createTextNode(name || text('asset-tree.automation.requestChoose')));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
                         paragraph(el, text('asset-tree.automation.requestCard'));
+                        label(el, text('asset-tree.automation.requestPortal'));
+                        portalPick(el, config);
                         label(el, text('asset-tree.automation.requestType'));
                         typePick(el, config);
                     },
@@ -438,7 +441,7 @@
                 };
             },
             validate: function (rule, config) {
-                if (!field(config, 'issueTypeId')) {
+                if (!field(config, 'issueTypeId') && !field(config, 'requestTypeId')) {
                     var errors = {};
                     errors.issueTypeId = text('asset-tree.automation.requestTypeRequired');
                     return errors;
@@ -446,6 +449,74 @@
                 return {};
             }
         };
+    }
+
+    function portalPick(parent, config) {
+        var box = document.createElement('select');
+        box.disabled = !!readOnly();
+        box.style.maxWidth = '100%';
+        function show(options) {
+            var list = [{ value: '', label: text('asset-tree.automation.requestPortalEmpty') }];
+            for (var i = 0; i < options.length; i++) {
+                if (options[i].value) {
+                    list.push(options[i]);
+                }
+            }
+            fillSelect(box, list, field(config, 'requestTypeId'));
+        }
+        var stored = field(config, 'requestTypeId');
+        show(stored ? [{ value: stored, label: field(config, 'requestTypeName') || stored }] : []);
+        loadRequestTypes(function (options) {
+            if (box.parentNode) {
+                show(options);
+            }
+        });
+        box.addEventListener('change', function () {
+            var value = config.value || {};
+            value.requestTypeId = box.value;
+            var caption = '';
+            if (box.selectedIndex >= 0 && box.options[box.selectedIndex]) {
+                caption = box.options[box.selectedIndex].textContent || '';
+            }
+            value.requestTypeName = box.value ? caption : '';
+            save(config, value);
+        });
+        parent.appendChild(box);
+    }
+
+    function loadRequestTypes(done) {
+        var key = projectKey();
+        if (!key) {
+            done([]);
+            return;
+        }
+        if (portalCache[key]) {
+            done(portalCache[key]);
+            return;
+        }
+        var root = window.AJS && AJS.contextPath ? AJS.contextPath() : '';
+        var request = new XMLHttpRequest();
+        request.open('GET', root + '/rest/asset-tree/1.0/projects/' + encodeURIComponent(key) + '/request-types', true);
+        request.setRequestHeader('Accept', 'application/json');
+        request.onreadystatechange = function () {
+            if (request.readyState !== 4) {
+                return;
+            }
+            var options = [];
+            if (request.status === 200) {
+                try {
+                    var rows = JSON.parse(request.responseText) || [];
+                    for (var i = 0; i < rows.length; i++) {
+                        options.push({ value: rows[i].id || '', label: rows[i].name || rows[i].id || '' });
+                    }
+                } catch (ignore) {
+                    options = [];
+                }
+            }
+            portalCache[key] = options;
+            done(options);
+        };
+        request.send();
     }
 
     function typePick(parent, config) {

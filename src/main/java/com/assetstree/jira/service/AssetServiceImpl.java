@@ -233,6 +233,7 @@ import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
 import com.assetstree.jira.model.PtoWindow;
 import com.assetstree.jira.model.Downtime;
+import com.assetstree.jira.model.RequestStatuses;
 import com.assetstree.jira.model.RepairTime;
 import com.assetstree.jira.model.ReportCatalog;
 import com.assetstree.jira.model.ReportWindow;
@@ -4516,6 +4517,22 @@ public class AssetServiceImpl implements AssetService {
                 return toPortalRule(rule);
             }
         });
+    }
+
+    @Override
+    public List<IssueTypeDto> listRequestTypes(ApplicationUser user, String projectKey) {
+        Project project = requireReadableProject(user, projectKey);
+        List<IssueTypeDto> result = new ArrayList<IssueTypeDto>();
+        for (PortalRequestForm.Type type : PortalDesk.names(user, project)) {
+            if (type == null || type.getId() == null || type.getId().isEmpty()) {
+                continue;
+            }
+            IssueTypeDto dto = new IssueTypeDto();
+            dto.setId(type.getId());
+            dto.setName(type.getName());
+            result.add(dto);
+        }
+        return result;
     }
 
     @Override
@@ -12860,7 +12877,8 @@ public class AssetServiceImpl implements AssetService {
                 lineKeys.add(slot[0]);
             }
         } else if (ReportCatalog.REQUESTS.equals(key)) {
-            fillRequestReport(assets, types, index, axis, window, buckets, lines, lineKeys, placeSort);
+            String requestStatuses = moduleSetup(project.getKey()).getReportRequestStatuses();
+            fillRequestReport(assets, types, index, axis, window, buckets, lines, lineKeys, placeSort, requestStatuses);
         } else if (ReportCatalog.IDLE.equals(key)) {
             Map<Integer, List<RepairTime.Change>> history = repairHistory(index);
             for (AssetEntity asset : assets) {
@@ -13040,7 +13058,7 @@ public class AssetServiceImpl implements AssetService {
 
     private void fillRequestReport(AssetEntity[] assets, Map<String, AssetTypeDto> types, Map<Integer, AssetEntity> index,
             String axis, ReportWindow window, Map<String, ReportBucketDto> buckets, List<ReportLineDto> lines,
-            List<String> lineKeys, Map<String, String> placeSort) {
+            List<String> lineKeys, Map<String, String> placeSort, String requestStatuses) {
         List<Integer> ids = new ArrayList<Integer>();
         for (AssetEntity asset : assets) {
             if (asset != null && !isLocation(asset) && asset.getDeletedAt() == null) {
@@ -13076,6 +13094,17 @@ public class AssetServiceImpl implements AssetService {
             for (int i = 0; i < entry.getValue().size(); i++) {
                 Issue issue = manager.getIssueObject(entry.getValue().get(i).longValue());
                 if (issue == null || issue.getCreated() == null || !window.containsMillis(issue.getCreated().getTime())) {
+                    continue;
+                }
+                String statusId = "";
+                String category = "";
+                if (issue.getStatus() != null) {
+                    statusId = issue.getStatus().getId() == null ? "" : issue.getStatus().getId();
+                    if (issue.getStatus().getStatusCategory() != null && issue.getStatus().getStatusCategory().getKey() != null) {
+                        category = issue.getStatus().getStatusCategory().getKey();
+                    }
+                }
+                if (!RequestStatuses.counts(requestStatuses, statusId, category)) {
                     continue;
                 }
                 ReportBucketDto bucket = buckets.get(bucketKey);

@@ -46,9 +46,10 @@ public final class CalendarRaise {
     }
 
     /**
-     * Occurrences shown today whose start time has arrived, plus yesterday when that day
-     * was not handed over. {@code clock} is {@code HH:mm} in the Jira zone. An empty clock
-     * means the day's start has passed.
+     * Occurrences from the last handed-over day through today. Today's start time must have arrived.
+     * Earlier days ignore the clock, so a stopped server still catches the days it missed.
+     * A plan that has never been handed over looks at yesterday and today only.
+     * {@code clock} is {@code HH:mm} in the Jira zone. An empty clock means the day's start has passed.
      */
     public static List<Hand> due(String lastDone, int count, String unit, String moves, String seriesStart,
             String seriesEnd, String completedOn, boolean completed, String raised, LocalDate today, String clock) {
@@ -61,9 +62,35 @@ public final class CalendarRaise {
         }
         Set<String> finished = finishedDays(moves, lastDone, unit, completedOn, completed);
         Set<String> sent = tokens(raised, null);
-        collect(found, lastDone, count, unit, moves, seriesStart, seriesEnd, finished, sent, today, clock);
-        collect(found, lastDone, count, unit, moves, seriesStart, seriesEnd, finished, sent, today.minusDays(1), "");
+        LocalDate start = catchUpFrom(sent, today);
+        for (LocalDate day = start; !day.isAfter(today); day = day.plusDays(1)) {
+            collect(found, lastDone, count, unit, moves, seriesStart, seriesEnd, finished, sent, day,
+                    day.equals(today) ? clock : "");
+        }
         return found;
+    }
+
+    /** The last handed-over day, or yesterday when nothing has been handed over yet. Not earlier than 400 days. */
+    private static LocalDate catchUpFrom(Set<String> sent, LocalDate today) {
+        String newest = "";
+        if (sent != null) {
+            for (String token : sent) {
+                if (token != null && token.compareTo(newest) > 0) {
+                    newest = token;
+                }
+            }
+        }
+        if (newest.isEmpty()) {
+            return today.minusDays(1);
+        }
+        LocalDate last;
+        try {
+            last = LocalDate.parse(newest);
+        } catch (RuntimeException ex) {
+            return today.minusDays(1);
+        }
+        LocalDate horizon = today.minusDays(400);
+        return last.isBefore(horizon) ? horizon : last;
     }
 
     /** Remembers a handed-over series day and drops days more than 400 days behind {@code today}. */
