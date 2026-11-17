@@ -503,6 +503,12 @@
         reportCatalog: null,
         reportKey: 'status',
         reportView: null,
+        reportBoard: false,
+        reportTiles: {},
+        reportTileToken: 0,
+        reportStart: '',
+        reportEnd: '',
+        reportBucket: '',
         reportChart: '',
         reportChartFor: '',
         reportChartBusy: false,
@@ -11909,6 +11915,9 @@
         state.reportCatalog = null;
         state.reportKey = 'status';
         state.reportView = null;
+        state.reportBoard = false;
+        state.reportTiles = {};
+        state.reportTileToken += 1;
         state.reportChart = '';
         state.reportChartFor = '';
         state.reportChartBusy = false;
@@ -14661,6 +14670,14 @@
             who.appendChild(chips);
             who.appendChild(hits);
             panel.appendChild(who);
+            var branchOn = el('label', 'asset-tree-check');
+            var branchBox = document.createElement('input');
+            branchBox.type = 'checkbox';
+            branchBox.checked = !!setup.reportMailBranch;
+            branchOn.appendChild(branchBox);
+            branchOn.appendChild(document.createTextNode(t('reportMailBranch')));
+            panel.appendChild(branchOn);
+            panel.appendChild(el('p', 'asset-tree-hint', t('reportMailBranchHint')));
             var mailActions = el('div', 'asset-tree-inline-actions');
             mailActions.appendChild(button(t('setupSave'), 'asset-tree-btn', function () {
                 var hidden = [];
@@ -14672,10 +14689,11 @@
                 next.reportMailEvery = every.value;
                 next.reportMailDay = Number(day.value) || 1;
                 next.reportMailTo = mailTo.join(',');
+                next.reportMailBranch = branchBox.checked;
                 saveSetup(next);
             }));
             mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
-                if (!mailTo.length) {
+                if (!mailTo.length && !branchBox.checked) {
                     notify(t('reportMailNeed'));
                     return;
                 }
@@ -14688,6 +14706,7 @@
                 next.reportMailEvery = every.value;
                 next.reportMailDay = Number(day.value) || 1;
                 next.reportMailTo = mailTo.join(',');
+                next.reportMailBranch = branchBox.checked;
                 saveProjectView({ setup: next }, function (ok) {
                     if (!ok) return;
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
@@ -17562,7 +17581,7 @@
         var xhr = new XMLHttpRequest();
         var chartQuery = String(view.chart || '');
         if (chartQuery.indexOf(',') < 0) chartQuery = reportChartWire(reportChartKind(view));
-        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(chartQuery), true);
+        xhr.open('GET', state.rest + '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '/book.xlsx?chart=' + encodeURIComponent(chartQuery) + reportQuery(view.id).replace('?', '&'), true);
         xhr.responseType = 'blob';
         xhr.setRequestHeader('Accept', '*/*');
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
@@ -18376,7 +18395,7 @@
         var map = {
             status: 'groupWordStatus', type: 'groupWordType', place: 'groupWordPlace', holder: 'groupWordHolder', issued: 'issuedTo',
             month: 'groupWordMonth', 'done-month': 'groupWordDoneMonth', age: 'groupWordAge', warranty: 'groupWordWarranty', writeoff: 'groupWordWriteoff', kind: 'groupWordKind',
-            who: 'groupWordWho', asset: 'groupWordAsset', state: 'groupWordState', field: 'reportField'
+            who: 'groupWordWho', asset: 'groupWordAsset', state: 'groupWordState', field: 'reportField', branch: 'groupWordBranch'
         };
         return t(map[group] || 'groupWordStatus');
     }
@@ -18393,7 +18412,7 @@
         var map = {
             status: 'reportGroupStatus', type: 'reportGroupType', place: 'reportGroupPlace', holder: 'reportGroupHolder', issued: 'reportGroupIssued',
             month: 'reportGroupMonth', 'done-month': 'reportGroupDoneMonth', age: 'reportGroupAge', warranty: 'reportGroupWarranty', writeoff: 'reportGroupWriteoff', kind: 'reportGroupKind',
-            who: 'reportGroupWho', asset: 'reportGroupAsset', state: 'reportGroupState'
+            who: 'reportGroupWho', asset: 'reportGroupAsset', state: 'reportGroupState', branch: 'reportGroupBranch'
         };
         return t(map[group] || 'reportGroupStatus');
     }
@@ -18405,7 +18424,8 @@
     function reportStateWord(state) {
         var map = {
             ontime: 'reportStateOntime', late: 'reportStateLate', done: 'reportStateDone',
-            overdue: 'reportStateOverdue', expected: 'reportStateExpected'
+            overdue: 'reportStateOverdue', expected: 'reportStateExpected',
+            repair: 'reportStateRepair', request: 'reportStateRequest', idle: 'reportStateIdle'
         };
         return t(map[state] || 'reportStateDone');
     }
@@ -18477,9 +18497,59 @@
         });
     }
 
+    function reportMeasureOf(key) {
+        if (key === 'faults' || key === 'requests' || key === 'idle' || key === 'pto') return key;
+        var found = '';
+        (state.reportCatalog || []).forEach(function (item) {
+            if (item && String(item.id) === String(key)) found = item.metric || '';
+        });
+        return found;
+    }
+
+    function reportUsesPeriod(key) {
+        var measure = reportMeasureOf(key);
+        return measure === 'requests' || measure === 'idle' || measure === 'pto';
+    }
+
+    function reportDrills(key) {
+        var measure = reportMeasureOf(key);
+        return measure === 'faults' || measure === 'requests' || measure === 'idle' || measure === 'pto';
+    }
+
+    function reportOpsSource(value) {
+        return value === 'faults' || value === 'requests' || value === 'idle' || value === 'pto';
+    }
+
+    function reportIso(date) {
+        var month = date.getMonth() + 1;
+        var day = date.getDate();
+        return date.getFullYear() + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day;
+    }
+
+    function reportRange() {
+        if (!state.reportStart || !state.reportEnd) {
+            var now = new Date();
+            state.reportEnd = reportIso(now);
+            state.reportStart = state.reportEnd.slice(0, 8) + '01';
+        }
+        return { start: state.reportStart, end: state.reportEnd };
+    }
+
+    function reportQuery(key, extra) {
+        var parts = [];
+        if (reportUsesPeriod(key)) {
+            var range = reportRange();
+            parts.push('start=' + encodeURIComponent(range.start));
+            parts.push('end=' + encodeURIComponent(range.end));
+        }
+        if (state.reportBucket && reportDrills(key)) parts.push('bucket=' + encodeURIComponent(state.reportBucket));
+        if (extra) parts.push(extra);
+        return parts.length ? '?' + parts.join('&') : '';
+    }
+
     function fetchGalleryView(token) {
         var key = state.reportKey || 'status';
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(key), null, function (status, payload) {
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(key) + reportQuery(key), null, function (status, payload) {
             if (token !== state.galleryToken) return;
             state.galleryLoading = false;
             if (status === 200 && payload) {
@@ -18514,7 +18584,7 @@
         var current = document.querySelector('#asset-tree-app .asset-tree-report-main');
         if (!current || !current.parentNode || state.reportCatalog == null) return false;
         paintReportTools();
-        var card = reportCard();
+        var card = state.reportBoard ? reportBoard() : reportCard();
         current.parentNode.replaceChild(card, current);
         reportFitPlotLabels(card);
         window.setTimeout(function () { reportFitPlotLabels(card); }, 0);
@@ -18531,7 +18601,9 @@
     function openGallery(id) {
         if (!id) return;
         closeAllModals();
+        state.reportBoard = false;
         state.reportKey = id;
+        state.reportBucket = '';
         highlightReport(id);
         if (state.reportCatalog == null) return;
         var token = ++state.galleryToken;
@@ -18550,7 +18622,12 @@
         var tools = el('div', 'asset-tree-inline-actions asset-tree-report-tools');
         tools.id = 'asset-tree-report-tools';
         if (state.canEdit) tools.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
-        if (state.reportView) {
+        tools.appendChild(button(t('reportBoard'), 'asset-tree-btn' + (state.reportBoard ? ' primary' : ''), function () {
+            state.reportBoard = !state.reportBoard;
+            if (state.reportBoard) loadReportBoard();
+            renderFrame();
+        }));
+        if (state.reportView && !state.reportBoard) {
             tools.appendChild(button(t('reportXlsx'), 'asset-tree-btn', function () { downloadReportFile(state.reportView); }));
         }
         return tools;
@@ -18993,7 +19070,7 @@
             });
         }
         shell.appendChild(nav);
-        shell.appendChild(reportCard());
+        shell.appendChild(state.reportBoard ? reportBoard() : reportCard());
         panel.appendChild(shell);
         return panel;
     }
@@ -19014,8 +19091,10 @@
         if (saved && saved.metric === 'cost') return true;
         if (group === 'month' || group === 'age' || group === 'warranty' || group === 'writeoff' || group === 'kind' || group === 'field') return true;
         if (group === 'done' || String(group).indexOf('done+') === 0) return true;
+        if (saved && reportOpsSource(saved.metric)) return true;
         var id = String((view && view.id) || '');
-        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'done' || id === 'service';
+        return id === 'receipts' || id === 'cost' || id === 'warranty' || id === 'age' || id === 'writeoff' || id === 'work' || id === 'done' || id === 'service'
+            || id === 'faults' || id === 'requests' || id === 'idle' || id === 'pto';
     }
 
     function reportJoin(labels) {
@@ -19187,6 +19266,88 @@
         });
     }
 
+    function loadReportBoard() {
+        var token = ++state.reportTileToken;
+        var projectKey = state.projectKey;
+        var saved = (state.reportCatalog || []).filter(function (item) { return item && !item.standard; });
+        state.reportTiles = {};
+        saved.forEach(function (item) {
+            ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(item.id) + reportQuery(item.id), null, function (status, payload) {
+                if (token !== state.reportTileToken || state.projectKey !== projectKey) return;
+                if (status === 200 && payload) {
+                    state.reportTiles[String(item.id)] = payload;
+                    if (state.view === 'reports' && state.reportBoard && !paintReport()) renderFrame();
+                }
+            });
+        });
+    }
+
+    function reportBoard() {
+        var main = el('div', 'asset-tree-report-main asset-tree-report-board-wrap');
+        var saved = (state.reportCatalog || []).filter(function (item) { return item && !item.standard; });
+        if (saved.some(function (item) { return reportUsesPeriod(item.id); })) {
+            var period = el('div', 'asset-tree-report-period');
+            var range = reportRange();
+            period.appendChild(el('span', null, t('reportPeriod')));
+            var from = document.createElement('input');
+            from.type = 'date';
+            from.value = range.start;
+            from.setAttribute('aria-label', t('reportPeriodFrom'));
+            var to = document.createElement('input');
+            to.type = 'date';
+            to.value = range.end;
+            to.setAttribute('aria-label', t('reportPeriodTo'));
+            var applyPeriod = function () {
+                if (!from.value || !to.value) return;
+                state.reportStart = from.value;
+                state.reportEnd = to.value;
+                loadReportBoard();
+            };
+            from.addEventListener('change', applyPeriod);
+            to.addEventListener('change', applyPeriod);
+            period.appendChild(from);
+            period.appendChild(to);
+            main.appendChild(period);
+        }
+        if (!saved.length) {
+            main.appendChild(el('p', 'asset-tree-hint', t('reportBoardEmpty')));
+            return main;
+        }
+        var grid = el('div', 'asset-tree-report-board');
+        saved.forEach(function (item) {
+            var tile = el('article', 'asset-tree-report-tile');
+            tile.tabIndex = 0;
+            var open = function () { openGallery(item.id); };
+            tile.addEventListener('click', open);
+            tile.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    open();
+                }
+            });
+            tile.appendChild(el('h3', null, item.name || ''));
+            tile.appendChild(el('p', null, groupPhrase(item.groupBy, { fieldLabel: item.fieldKey || '' })));
+            var view = state.reportTiles[String(item.id)];
+            if (!view) {
+                tile.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            } else {
+                var rows = view.rows || [];
+                var maxValue = 1;
+                rows.forEach(function (row) {
+                    if ((row.count || 0) > maxValue) maxValue = row.count || 0;
+                });
+                tile.appendChild(el('p', 'asset-tree-report-tile-total', String(view.total || 0)));
+                var kind = reportChartList(view)[0] || 'histogram';
+                var chart = reportChartPanel(rows, view.total || 0, maxValue, kind, false, '', shareLabels(rows.map(function (row) { return row.count || 0; })), view);
+                if (chart) tile.appendChild(chart);
+                else if (view.reason) tile.appendChild(el('p', 'asset-tree-hint', view.reason));
+            }
+            grid.appendChild(tile);
+        });
+        main.appendChild(grid);
+        return main;
+    }
+
     function reportCard() {
         var main = el('div', 'asset-tree-report-main');
         var view = state.reportView;
@@ -19200,7 +19361,15 @@
         }
         var rows = view.rows || [];
         rows.forEach(function (row) {
-            row.activate = function () { openReportInAssets(view, row); };
+            row.activate = function () {
+                if (reportDrills(String(view.id || ''))) {
+                    state.reportBucket = row.key == null ? '' : String(row.key);
+                    var token = ++state.galleryToken;
+                    fetchGalleryView(token);
+                    return;
+                }
+                openReportInAssets(view, row);
+            };
         });
         var money = reportMoney(view);
         var shareTotal = 0;
@@ -19223,6 +19392,37 @@
         titleRow.appendChild(titles);
         if (kinds.length < 2) titleRow.appendChild(reportChartSwitch(view, kind));
         main.appendChild(titleRow);
+        if (reportUsesPeriod(String(view.id || ''))) {
+            var period = el('div', 'asset-tree-report-period');
+            var range = reportRange();
+            period.appendChild(el('span', null, t('reportPeriod')));
+            var from = document.createElement('input');
+            from.type = 'date';
+            from.value = range.start;
+            from.setAttribute('aria-label', t('reportPeriodFrom'));
+            var to = document.createElement('input');
+            to.type = 'date';
+            to.value = range.end;
+            to.setAttribute('aria-label', t('reportPeriodTo'));
+            var applyPeriod = function () {
+                if (!from.value || !to.value) return;
+                state.reportStart = from.value;
+                state.reportEnd = to.value;
+                state.reportBucket = '';
+                fetchGalleryView(++state.galleryToken);
+            };
+            from.addEventListener('change', applyPeriod);
+            to.addEventListener('change', applyPeriod);
+            period.appendChild(from);
+            period.appendChild(to);
+            main.appendChild(period);
+        }
+        if (state.reportBucket && reportDrills(String(view.id || ''))) {
+            main.appendChild(button(t('reportShowAll'), 'asset-tree-btn', function () {
+                state.reportBucket = '';
+                fetchGalleryView(++state.galleryToken);
+            }));
+        }
         var facts = el('div', 'asset-tree-report-facts');
         facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
         if (view.sum) facts.appendChild(reportFact('', reportMoneyLabel(shareTotal), t('lifeBook')));
@@ -19313,7 +19513,16 @@
             });
             journal.appendChild(journalHead);
             view.lines.forEach(function (row) {
-                var item = el('tr');
+                var item = el('tr', row.assetId ? 'is-pick' : '');
+                if (row.assetId) {
+                    item.tabIndex = 0;
+                    item.addEventListener('click', function () {
+                        state.view = 'all';
+                        state.pane = 'card';
+                        selectAsset(row.assetId, true);
+                        renderFrame();
+                    });
+                }
                 item.appendChild(el('td', null, row.objectKey || ''));
                 item.appendChild(el('td', null, row.asset || ''));
                 item.appendChild(el('td', null, row.name || ''));
@@ -19326,7 +19535,7 @@
             main.appendChild(journal);
             if ((view.lineTotal || view.lines.length) > view.lines.length) {
                 var more = button(t('reportLinesMore'), 'asset-tree-btn', function () {
-                    ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + '?lines=all', null, function (status, payload) {
+                    ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/' + encodeURIComponent(view.id) + reportQuery(view.id, 'lines=all'), null, function (status, payload) {
                         if (status === 200 && payload && state.reportView && String(state.reportView.id) === String(view.id)) {
                             state.reportView.lines = payload.lines || [];
                             state.reportView.lineTotal = payload.lineTotal || state.reportView.lines.length;
@@ -19468,13 +19677,17 @@
             var storedGroup = editing && existing.groupBy ? String(existing.groupBy) : 'type';
             var doneStored = storedGroup === 'done' || storedGroup.indexOf('done+') === 0;
             var source = document.createElement('select');
-            [['assets', 'reportSourceAssets'], ['done', 'reportSourceDone']].forEach(function (pair) {
+            var sourcePairs = [['assets', 'reportSourceAssets'], ['faults', 'reportSourceFaults'], ['requests', 'reportSourceRequests'], ['idle', 'reportSourceIdle']];
+            if (moduleOn('service') || doneStored) sourcePairs.splice(1, 0, ['done', 'reportSourceDone']);
+            if (moduleOn('service') || (editing && existing.metric === 'pto')) sourcePairs.push(['pto', 'reportSourcePto']);
+            sourcePairs.forEach(function (pair) {
                 var option = document.createElement('option');
                 option.value = pair[0];
                 option.textContent = t(pair[1]);
                 source.appendChild(option);
             });
-            source.value = doneStored ? 'done' : 'assets';
+            var storedMeasure = editing && existing.metric ? String(existing.metric) : 'count';
+            source.value = reportOpsSource(storedMeasure) ? storedMeasure : (doneStored ? 'done' : 'assets');
             var group = document.createElement('select');
             var extraOn = {};
             (doneStored ? (storedGroup === 'done' ? ['kind'] : storedGroup.slice(5).split('+')) : storedGroup.split('+')).forEach(function (part, index) {
@@ -19484,17 +19697,24 @@
                 if (source.value === 'done') {
                     return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho'], ['asset', 'reportGroupAsset'], ['state', 'reportGroupState']];
                 }
-                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['field', 'reportGroupField'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']];
+                if (reportOpsSource(source.value)) {
+                    return [['branch', 'reportGroupBranch'], ['type', 'reportGroupType'], ['place', 'reportGroupPlace'], ['asset', 'reportGroupAsset'], ['holder', 'reportGroupHolder']];
+                }
+                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['branch', 'reportGroupBranch'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued'], ['field', 'reportGroupField'], ['month', 'reportGroupMonth'], ['age', 'reportGroupAge'], ['warranty', 'reportGroupWarranty'], ['writeoff', 'reportGroupWriteoff'], ['kind', 'reportGroupKind']];
             }
             function extraChoices() {
                 if (source.value === 'done') {
                     return [['kind', 'reportGroupKind'], ['month', 'reportGroupDoneMonth'], ['place', 'reportGroupPlace'], ['type', 'reportGroupType'], ['who', 'reportGroupWho'], ['asset', 'reportGroupAsset'], ['state', 'reportGroupState']];
                 }
-                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']];
+                if (reportOpsSource(source.value)) {
+                    return [['branch', 'reportGroupBranch'], ['type', 'reportGroupType'], ['place', 'reportGroupPlace'], ['asset', 'reportGroupAsset'], ['holder', 'reportGroupHolder']];
+                }
+                return [['type', 'reportGroupType'], ['status', 'reportGroupStatus'], ['place', 'reportGroupPlace'], ['branch', 'reportGroupBranch'], ['holder', 'reportGroupHolder'], ['issued', 'reportGroupIssued']];
             }
             function fillGroups(keep) {
                 var choices = groupChoices();
-                var current = keep ? group.value : (doneStored && source.value === 'done' ? (storedGroup === 'done' ? 'kind' : storedGroup.slice(5).split('+')[0]) : (source.value === 'assets' && !doneStored ? storedGroup.split('+')[0] : choices[0][0]));
+                var head = storedGroup.indexOf('done+') === 0 ? storedGroup.slice(5).split('+')[0] : storedGroup.split('+')[0];
+                var current = keep ? group.value : (source.value === 'done' ? (storedGroup === 'done' ? 'kind' : head) : (choices.some(function (pair) { return pair[0] === head; }) ? head : choices[0][0]));
                 group.innerHTML = '';
                 choices.forEach(function (pair) {
                     var option = document.createElement('option');
@@ -19527,11 +19747,15 @@
             var initialPlaces = editing ? mixKeys(existing.filterValue, 'p') : [];
             initialTypes.forEach(function (key) { pickedTypes[key] = true; });
             initialStatuses.forEach(function (key) { pickedStatuses[key] = true; });
+            var metricField = null;
+            var opsHint = el('p', 'asset-tree-hint', t('reportOpsHint'));
             function syncMetric() {
                 var cost = metric.querySelector('option[value="cost"]');
-                var countOnly = source.value === 'done' || group.value === 'kind';
+                var countOnly = source.value !== 'assets' || group.value === 'kind';
                 if (cost) cost.disabled = countOnly;
                 if (countOnly && metric.value === 'cost') metric.value = 'count';
+                if (metricField) metricField.hidden = source.value !== 'assets';
+                opsHint.hidden = !reportOpsSource(source.value);
             }
             function syncField() {
                 fieldRow.hidden = source.value === 'done' || group.value !== 'field';
@@ -19544,6 +19768,10 @@
             });
             source.addEventListener('change', function () {
                 extraOn = {};
+                if (reportOpsSource(source.value)) {
+                    chartOn = { histogram: true, donut: true };
+                    if (typeof paintCharts === 'function') paintCharts();
+                }
                 fillGroups(false);
                 syncMetric();
                 syncField();
@@ -19551,7 +19779,8 @@
             });
             var row = el('div', 'asset-tree-report-picks');
             row.appendChild(planField(t('reportGroupBy'), group));
-            row.appendChild(planField(t('reportMetric'), metric));
+            metricField = planField(t('reportMetric'), metric);
+            row.appendChild(metricField);
             var field = document.createElement('select');
             field.appendChild(new Option('\u2014', ''));
             reportFieldOptions().forEach(function (item) {
@@ -19606,7 +19835,8 @@
             paintFieldRules();
             dialog.appendChild(planField(t('reportName'), name));
             var sourceRow = planField(t('reportSource'), source);
-            if (moduleOn('service') || doneStored) dialog.appendChild(sourceRow);
+            dialog.appendChild(sourceRow);
+            dialog.appendChild(opsHint);
             dialog.appendChild(row);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportAlso')));
             var extraList = el('div', 'asset-tree-check-list');
@@ -19632,7 +19862,8 @@
                     box.checked = !!extraOn[pair[0]];
                     box.addEventListener('change', function () {
                         if (box.checked) {
-                            if (plannedGroup(pair[0]).length > 16) {
+                            var nextGroup = plannedGroup(pair[0]);
+                            if (nextGroup.length > 16 || (reportOpsSource(source.value) && nextGroup.split('+').length > 2)) {
                                 box.checked = false;
                                 notify(t('reportAlso'));
                                 return;
@@ -19649,25 +19880,29 @@
             dialog.appendChild(extraList);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportCharts')));
             var chartList = el('div', 'asset-tree-check-list');
-            chartOrder.forEach(function (pair) {
-                var label = el('label', 'asset-tree-check');
-                var box = document.createElement('input');
-                box.type = 'checkbox';
-                box.checked = !!chartOn[pair[0]];
-                box.addEventListener('change', function () {
-                    if (box.checked) chartOn[pair[0]] = true;
-                    else delete chartOn[pair[0]];
-                    var chosen = [];
-                    chartOrder.forEach(function (item) { if (chartOn[item[0]]) chosen.push(item[0]); });
-                    if (!chosen.length) {
-                        chartOn[pair[0]] = true;
-                        box.checked = true;
-                    }
+            function paintCharts() {
+                chartList.innerHTML = '';
+                chartOrder.forEach(function (pair) {
+                    var label = el('label', 'asset-tree-check');
+                    var box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.checked = !!chartOn[pair[0]];
+                    box.addEventListener('change', function () {
+                        if (box.checked) chartOn[pair[0]] = true;
+                        else delete chartOn[pair[0]];
+                        var chosen = [];
+                        chartOrder.forEach(function (item) { if (chartOn[item[0]]) chosen.push(item[0]); });
+                        if (!chosen.length) {
+                            chartOn[pair[0]] = true;
+                            box.checked = true;
+                        }
+                    });
+                    label.appendChild(box);
+                    label.appendChild(document.createTextNode(t(pair[1])));
+                    chartList.appendChild(label);
                 });
-                label.appendChild(box);
-                label.appendChild(document.createTextNode(t(pair[1])));
-                chartList.appendChild(label);
-            });
+            }
+            paintCharts();
             dialog.appendChild(chartList);
             dialog.appendChild(fieldRow);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyField')));
@@ -19730,6 +19965,7 @@
             });
             dialog.appendChild(holders);
             dialog.appendChild(el('span', 'asset-tree-nav-label', t('reportOnlyPlaces')));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('reportPlaceHint')));
             var places = el('div', 'asset-tree-check-list');
             (state.assets || []).forEach(function (asset) {
                 if (!asset || !typeOf(asset.typeKey).location) return;
@@ -19793,7 +20029,7 @@
                     name: name.value.trim(),
                     groupBy: groupValue,
                     chart: charts.join(','),
-                    metric: metric.value,
+                    metric: reportOpsSource(source.value) ? source.value : (source.value === 'done' ? 'count' : metric.value),
                     filterField: '',
                     filterValue: '',
                     fieldKey: group.value === 'field' ? field.value : '',
@@ -19887,6 +20123,7 @@
                 return day;
             })(),
             reportMailTo: setup.reportMailTo || '',
+            reportMailBranch: !!setup.reportMailBranch,
             reportMailSent: setup.reportMailSent || '',
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,
@@ -28263,537 +28500,14 @@
         return names.join(' / ');
     }
 
-    function cloneFlow(graph) {
-        var copy = { nodes: [], links: [] };
-        ((graph && graph.nodes) || []).forEach(function (node) {
-            copy.nodes.push({
-                id: node.id,
-                kind: node.kind,
-                x: node.x || 0,
-                y: node.y || 0,
-                issueTypeId: node.issueTypeId || '',
-                issueTypeName: node.issueTypeName || '',
-                issueStatusId: node.issueStatusId || '',
-                issueStatusName: node.issueStatusName || '',
-                statusKey: node.statusKey || ''
-            });
-        });
-        ((graph && graph.links) || []).forEach(function (link) {
-            copy.links.push({ from: link.from, to: link.to });
-        });
-        return copy;
-    }
-
-    function cloneBook(book) {
-        var copy = { processes: [] };
-        ((book && book.processes) || []).forEach(function (process) {
-            var graph = cloneFlow(process);
-            copy.processes.push({
-                id: process.id,
-                name: process.name || '',
-                removedStatus: process.removedStatus || '',
-                nodes: graph.nodes,
-                links: graph.links
-            });
-        });
-        return copy;
-    }
-
-    function flowNodeId(draft) {
-        var alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-        var taken = {};
-        (draft.nodes || []).forEach(function (node) { taken[node.id] = true; });
-        var id = '';
-        var guard = 0;
-        do {
-            id = '';
-            for (var i = 0; i < 8; i++) id += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-            guard++;
-        } while (taken[id] && guard < 20);
-        return id;
-    }
-
-    function flowFreshId(book) {
-        var nodes = [];
-        ((book && book.processes) || []).forEach(function (process) {
-            nodes.push({ id: process.id });
-            (process.nodes || []).forEach(function (node) { nodes.push(node); });
-        });
-        return flowNodeId({ nodes: nodes });
-    }
-
-    function selectedProcess(book) {
-        var found = null;
-        ((book && book.processes) || []).forEach(function (process) {
-            if (process.id === state.flowProcessId) found = process;
-        });
-        if (!found && book && book.processes && book.processes.length) found = book.processes[0];
-        if (found) state.flowProcessId = found.id;
-        return found;
-    }
-
-    function saveFlowBook(errorNode, done) {
-        var book = state.flowDraft || { processes: [] };
-        var body = {
-            processes: (book.processes || []).map(function (process) {
-                return {
-                    id: process.id,
-                    name: process.name || '',
-                    removedStatus: process.removedStatus || '',
-                    nodes: process.nodes || [],
-                    links: process.links || []
-                };
-            })
-        };
-        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/flow-graph', body, function (status, payload) {
-            if (status >= 200 && status < 300) {
-                state.flowBook = payload || { processes: [] };
-                state.flowDraft = cloneBook(state.flowBook);
-                selectedProcess(state.flowDraft);
-                state.flowRules = null;
-                if (done) done();
-                else renderFrame();
-            } else if (errorNode) {
-                errorNode.hidden = false;
-                errorNode.textContent = (payload && payload.message) || t('errorTitle');
-            } else {
-                notify((payload && payload.message) || t('errorTitle'));
-            }
-        });
-    }
-
     function renderFlowSettings(host) {
-        var block = el('div', 'asset-tree-flow-column');
+        var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('flowSection')));
-        if (!state.flowReady || state.issueTypes === null || state.issueStatuses === null) {
-            block.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            host.appendChild(block);
-            if (state.flowLoading) return;
-            state.flowLoading = true;
-            var projectKey = state.projectKey;
-            var pending = 3;
-            function finish() {
-                pending--;
-                if (pending > 0) return;
-                if (state.projectKey !== projectKey) return;
-                state.flowReady = true;
-                state.flowLoading = false;
-                if (!state.flowDraft) state.flowDraft = cloneBook(state.flowBook);
-                refreshPortalSettings();
-            }
-            ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/flow-graph', null, function (status, payload) {
-                if (state.projectKey !== projectKey) return;
-                if (status === 200) state.flowBook = payload || { processes: [] };
-                else {
-                    state.flowBook = { processes: [] };
-                    notify((payload && payload.message) || t('errorTitle'));
-                }
-                state.flowDraft = cloneBook(state.flowBook);
-                finish();
-            });
-            ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/issue-types', null, function (status, payload) {
-                if (state.projectKey !== projectKey) return;
-                state.issueTypes = status === 200 ? (payload || []) : [];
-                finish();
-            });
-            ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/issue-statuses', null, function (status, payload) {
-                if (state.projectKey !== projectKey) return;
-                state.issueStatuses = status === 200 ? (payload || []) : [];
-                finish();
-            });
-            return;
-        }
-        var book = state.flowDraft || cloneBook(state.flowBook);
-        state.flowDraft = book;
-        var process = selectedProcess(book);
-        var menu = el('div', 'asset-tree-flow-menu');
-        var picker = null;
-        if ((book.processes || []).length) {
-            var pick = el('label', 'asset-tree-jira-field');
-            pick.appendChild(el('span', null, t('flowSection')));
-            picker = el('select', 'asset-tree-text');
-            picker.setAttribute('aria-label', t('flowSection'));
-            (book.processes || []).forEach(function (item) {
-                var option = el('option', null, item.name || t('flowProcessDefault'));
-                option.value = item.id;
-                if (process && item.id === process.id) option.selected = true;
-                picker.appendChild(option);
-            });
-            picker.addEventListener('change', function () {
-                state.flowProcessId = picker.value;
-                renderFrame();
-            });
-            pick.appendChild(picker);
-            menu.appendChild(pick);
-        }
-        var menuActions = el('div', 'asset-tree-flow-menu-actions');
-        menuActions.appendChild(button(t('flowProcessNew'), 'asset-tree-btn', function () {
-            var created = {
-                id: flowFreshId(book),
-                name: t('flowProcessDefault') + (book.processes.length ? ' ' + (book.processes.length + 1) : ''),
-                nodes: [],
-                links: []
-            };
-            book.processes.push(created);
-            state.flowProcessId = created.id;
-            saveFlowBook(null);
+        block.appendChild(el('p', 'asset-tree-hint', t('flowGoneHint')));
+        block.appendChild(button(t('flowOpenAutomation'), 'asset-tree-btn primary', function () {
+            window.location.href = contextPath() + '/secure/AutomationProjectAdminAction!default.jspa?projectKey=' + encodeURIComponent(state.projectKey || '');
         }));
-        if (process) {
-            menuActions.appendChild(button(t('flowProcessDelete'), 'asset-tree-btn', function () {
-                if (!window.confirm(t('flowProcessDeleteConfirm'))) return;
-                book.processes = (book.processes || []).filter(function (item) { return item.id !== process.id; });
-                state.flowProcessId = book.processes.length ? book.processes[0].id : '';
-                saveFlowBook(null);
-            }));
-        }
-        if (!process) {
-            menu.appendChild(menuActions);
-            block.appendChild(menu);
-            block.appendChild(el('p', 'asset-tree-flow-empty is-static', t('flowProcessEmpty')));
-            host.appendChild(block);
-            return;
-        }
-        var name = input('', process.name || '');
-        name.className = 'asset-tree-text';
-        name.placeholder = t('flowProcessDefault');
-        name.setAttribute('aria-label', t('flowProcessName'));
-        name.addEventListener('input', function () {
-            process.name = name.value.replace(/^\s+|\s+$/g, '');
-            if (picker && picker.selectedIndex >= 0) {
-                picker.options[picker.selectedIndex].textContent = process.name || t('flowProcessDefault');
-            }
-        });
-        var nameRow = el('label', 'asset-tree-jira-field asset-tree-flow-name');
-        nameRow.appendChild(el('span', null, t('flowProcessName')));
-        nameRow.appendChild(name);
-        menu.appendChild(nameRow);
-        var removed = el('select', 'asset-tree-text');
-        removed.setAttribute('aria-label', t('flowRemovedStatus'));
-        var keep = el('option', null, t('flowRemovedKeep'));
-        keep.value = '';
-        removed.appendChild(keep);
-        var restore = el('option', null, t('flowRemovedRestore'));
-        restore.value = '_restore';
-        if (process.removedStatus === '_restore') restore.selected = true;
-        removed.appendChild(restore);
-        statusChoices().forEach(function (choice) {
-            var option = el('option', null, choice.label);
-            option.value = choice.value;
-            if (choice.value === process.removedStatus) option.selected = true;
-            removed.appendChild(option);
-        });
-        removed.addEventListener('change', function () {
-            process.removedStatus = removed.value;
-        });
-        var removedRow = el('label', 'asset-tree-jira-field asset-tree-flow-removed');
-        removedRow.appendChild(el('span', null, t('flowRemovedStatus')));
-        removedRow.appendChild(removed);
-        removedRow.title = t('flowRemovedHint');
-        menu.appendChild(removedRow);
-        menu.appendChild(menuActions);
-        block.appendChild(menu);
-        var tools = el('div', 'asset-tree-flow-tools');
-        function addTool(label, kind) {
-            var tool = button(label, 'asset-tree-btn asset-tree-flow-add', function () {
-                addFlowNode(process, kind);
-                paintFlow(canvas, process, error);
-            });
-            tool.insertBefore(el('span', 'asset-tree-flow-dot is-' + kind), tool.firstChild);
-            tools.appendChild(tool);
-        }
-        addTool(t('flowAddRequest'), 'request');
-        addTool(t('flowAddIssue'), 'issue');
-        addTool(t('flowAddStatus'), 'status');
-        tools.appendChild(el('span', 'asset-tree-hint asset-tree-flow-connect', t('flowConnect')));
-        block.appendChild(tools);
-        var error = el('div', 'asset-tree-form-error');
-        error.hidden = true;
-        tools.appendChild(button(t('save'), 'asset-tree-btn primary asset-tree-flow-save', function () {
-            error.hidden = true;
-            saveFlowBook(error);
-        }));
-        var board = el('div', 'asset-tree-flow-board');
-        var canvas = el('div', 'asset-tree-flow-canvas');
-        board.appendChild(canvas);
-        block.appendChild(error);
-        block.appendChild(board);
-        paintFlow(canvas, process, error);
         host.appendChild(block);
-    }
-
-    function addFlowNode(draft, kind) {
-        var count = 0;
-        (draft.nodes || []).forEach(function (node) {
-            if (node.kind === kind) count++;
-        });
-        var x = 40;
-        if (kind === 'issue') x = 340;
-        if (kind === 'status') x = 640;
-        draft.nodes.push({
-            id: flowNodeId(draft),
-            kind: kind,
-            x: x,
-            y: 48 + count * 168,
-            issueTypeId: '',
-            issueTypeName: '',
-            issueStatusId: '',
-            issueStatusName: '',
-            statusKey: ''
-        });
-    }
-
-    function flowAccepts(source, target) {
-        if (!source || !target || source.id === target.id) return false;
-        if (source.kind === 'request') return target.kind === 'issue' || target.kind === 'status';
-        if (source.kind === 'issue') return target.kind === 'status';
-        return false;
-    }
-
-    function flowExtent(canvas, draft) {
-        var width = canvas.parentNode && canvas.parentNode.clientWidth > 200 ? canvas.parentNode.clientWidth : 640;
-        var height = canvas.parentNode && canvas.parentNode.clientHeight > 160 ? canvas.parentNode.clientHeight : 240;
-        (draft.nodes || []).forEach(function (node) {
-            width = Math.max(width, (node.x || 0) + 320);
-            height = Math.max(height, (node.y || 0) + 150);
-        });
-        var room = canvas.parentNode ? canvas.parentNode.clientHeight : 0;
-        if (room > 160 && height - room < 28) height = room;
-        return { width: width, height: height };
-    }
-
-    function paintFlow(canvas, draft, error) {
-        while (canvas.firstChild) canvas.removeChild(canvas.firstChild);
-        var extent = flowExtent(canvas, draft);
-        var width = extent.width;
-        var height = extent.height;
-        canvas.style.width = width + 'px';
-        canvas.style.height = height + 'px';
-        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'asset-tree-flow-wires');
-        canvas.appendChild(svg);
-        if (!(draft.nodes || []).length) {
-            canvas.appendChild(el('p', 'asset-tree-flow-empty', t('flowEmpty')));
-        }
-        function nodeById(id) {
-            var found = null;
-            (draft.nodes || []).forEach(function (node) {
-                if (node.id === id) found = node;
-            });
-            return found;
-        }
-        function portPoint(id, side) {
-            var node = nodeById(id);
-            var card = canvas.querySelector('[data-flow-id="' + id + '"]');
-            var x = node ? (node.x || 0) : 0;
-            var y = node ? (node.y || 0) : 0;
-            var width = 256;
-            var height = 120;
-            if (card && card.offsetWidth) {
-                x = card.offsetLeft;
-                y = card.offsetTop;
-                width = card.offsetWidth;
-                height = card.offsetHeight;
-            }
-            return {
-                x: x + (side === 'out' ? width : 0),
-                y: y + Math.round(height / 2)
-            };
-        }
-        function curve(from, to) {
-            var pull = Math.max(48, Math.abs(to.x - from.x) / 2);
-            return 'M ' + from.x + ' ' + from.y + ' C ' + (from.x + pull) + ' ' + from.y + ', ' + (to.x - pull) + ' ' + to.y + ', ' + to.x + ' ' + to.y;
-        }
-        function drawWires(extra) {
-            while (svg.firstChild) svg.removeChild(svg.firstChild);
-            var marks = [];
-            (draft.links || []).forEach(function (link) {
-                if (!nodeById(link.from) || !nodeById(link.to)) return;
-                var from = portPoint(link.from, 'out');
-                var to = portPoint(link.to, 'in');
-                var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                path.setAttribute('d', curve(from, to));
-                svg.appendChild(path);
-                marks.push({ link: link, x: Math.round((from.x + to.x) / 2), y: Math.round((from.y + to.y) / 2) });
-            });
-            if (extra) {
-                var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                path.setAttribute('class', 'is-draft');
-                path.setAttribute('d', curve(extra.from, extra.to));
-                svg.appendChild(path);
-            }
-            var old = canvas.querySelectorAll('.asset-tree-flow-cut');
-            for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
-            marks.forEach(function (mark) {
-                var cut = button('×', 'asset-tree-flow-cut', function () {
-                    draft.links = (draft.links || []).filter(function (link) {
-                        return !(link.from === mark.link.from && link.to === mark.link.to);
-                    });
-                    paintFlow(canvas, draft, error);
-                });
-                cut.style.left = mark.x + 'px';
-                cut.style.top = (mark.y - 16) + 'px';
-                cut.title = t('flowLinkRemove');
-                cut.setAttribute('aria-label', t('flowLinkRemove'));
-                canvas.appendChild(cut);
-            });
-        }
-        (draft.nodes || []).forEach(function (node) {
-            var card = el('article', 'asset-tree-flow-node is-' + node.kind);
-            card.setAttribute('data-flow-id', node.id);
-            card.style.left = (node.x || 0) + 'px';
-            card.style.top = (node.y || 0) + 'px';
-            var title = t('flowNodeRequest');
-            if (node.kind === 'issue') title = t('flowNodeIssue');
-            if (node.kind === 'status') title = t('flowNodeStatus');
-            var head = el('div', 'asset-tree-flow-head');
-            head.appendChild(el('strong', null, title));
-            var remove = button('×', 'asset-tree-flow-remove', function () {
-                draft.nodes = (draft.nodes || []).filter(function (item) { return item.id !== node.id; });
-                draft.links = (draft.links || []).filter(function (link) {
-                    return link.from !== node.id && link.to !== node.id;
-                });
-                paintFlow(canvas, draft, error);
-            });
-            remove.title = t('flowRemoveNode');
-            remove.setAttribute('aria-label', t('flowRemoveNode'));
-            head.appendChild(remove);
-            card.appendChild(head);
-            var body = el('div', 'asset-tree-flow-body');
-            var select = el('select', 'asset-tree-text');
-            var empty = el('option', null, '—');
-            empty.value = '';
-            select.appendChild(empty);
-            var labelText = t('flowIssueType');
-            if (node.kind === 'status') {
-                labelText = t('flowNodeStatus');
-                select.setAttribute('aria-label', labelText);
-                statusChoices().forEach(function (item) {
-                    var option = el('option', null, item.label);
-                    option.value = item.value;
-                    if (item.value === node.statusKey) option.selected = true;
-                    select.appendChild(option);
-                });
-                select.value = node.statusKey || '';
-                select.addEventListener('change', function () { node.statusKey = select.value; });
-            } else if (node.kind === 'issue') {
-                labelText = t('flowIssueStatus');
-                select.setAttribute('aria-label', labelText);
-                var knownStatus = false;
-                (state.issueStatuses || []).forEach(function (item) {
-                    var option = el('option', null, item.name || item.id);
-                    option.value = item.id;
-                    if (item.id === node.issueStatusId) {
-                        option.selected = true;
-                        knownStatus = true;
-                    }
-                    select.appendChild(option);
-                });
-                if (node.issueStatusId && !knownStatus) {
-                    var missingStatus = el('option', null, node.issueStatusName || node.issueStatusId);
-                    missingStatus.value = node.issueStatusId;
-                    missingStatus.selected = true;
-                    select.appendChild(missingStatus);
-                }
-                select.value = node.issueStatusId || '';
-                select.addEventListener('change', function () { node.issueStatusId = select.value; });
-            } else {
-                select.setAttribute('aria-label', labelText);
-                var known = false;
-                (state.issueTypes || []).forEach(function (item) {
-                    var option = el('option', null, item.name || item.id);
-                    option.value = item.id;
-                    if (item.id === node.issueTypeId) {
-                        option.selected = true;
-                        known = true;
-                    }
-                    select.appendChild(option);
-                });
-                if (node.issueTypeId && !known) {
-                    var missing = el('option', null, node.issueTypeName || node.issueTypeId);
-                    missing.value = node.issueTypeId;
-                    missing.selected = true;
-                    select.appendChild(missing);
-                }
-                select.value = node.issueTypeId || '';
-                select.addEventListener('change', function () { node.issueTypeId = select.value; });
-            }
-            body.appendChild(el('label', 'asset-tree-flow-label', labelText));
-            body.appendChild(select);
-            card.appendChild(body);
-            function attachPort(side) {
-                var port = el('button', 'asset-tree-flow-port is-' + side);
-                port.type = 'button';
-                port.title = t('flowConnect');
-                port.addEventListener('pointerdown', function (event) {
-                    if (side !== 'out') return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    var origin = portPoint(node.id, 'out');
-                    function move(ev) {
-                        var rect = canvas.getBoundingClientRect();
-                        drawWires({
-                            from: origin,
-                            to: {
-                                x: ev.clientX - rect.left + canvas.parentNode.scrollLeft,
-                                y: ev.clientY - rect.top + canvas.parentNode.scrollTop
-                            }
-                        });
-                    }
-                    function up(ev) {
-                        window.removeEventListener('pointermove', move);
-                        window.removeEventListener('pointerup', up);
-                        var hit = document.elementFromPoint(ev.clientX, ev.clientY);
-                        var input = null;
-                        while (hit && hit !== canvas) {
-                            if (hit.className && String(hit.className).indexOf('is-in') >= 0) input = hit;
-                            hit = hit.parentNode;
-                        }
-                        var target = input ? input.parentNode : null;
-                        var targetId = target ? target.getAttribute('data-flow-id') : '';
-                        var targetNode = nodeById(targetId);
-                        if (flowAccepts(node, targetNode)) {
-                            var exists = false;
-                            (draft.links || []).forEach(function (link) {
-                                if (link.from === node.id && link.to === targetNode.id) exists = true;
-                            });
-                            if (!exists) draft.links.push({ from: node.id, to: targetNode.id });
-                        }
-                        paintFlow(canvas, draft, error);
-                    }
-                    window.addEventListener('pointermove', move);
-                    window.addEventListener('pointerup', up);
-                });
-                card.appendChild(port);
-            }
-            if (node.kind === 'issue' || node.kind === 'status') attachPort('in');
-            if (node.kind === 'request' || node.kind === 'issue') attachPort('out');
-            head.addEventListener('pointerdown', function (event) {
-                if (event.button !== 0 || (event.target && event.target.tagName === 'BUTTON')) return;
-                event.preventDefault();
-                var startX = event.clientX;
-                var startY = event.clientY;
-                var originX = node.x || 0;
-                var originY = node.y || 0;
-                function move(ev) {
-                    node.x = Math.max(0, Math.min(2400, originX + ev.clientX - startX));
-                    node.y = Math.max(0, Math.min(2400, originY + ev.clientY - startY));
-                    card.style.left = node.x + 'px';
-                    card.style.top = node.y + 'px';
-                    var extent = flowExtent(canvas, draft);
-                    canvas.style.width = extent.width + 'px';
-                    canvas.style.height = extent.height + 'px';
-                    drawWires();
-                }
-                function up() {
-                    window.removeEventListener('pointermove', move);
-                    window.removeEventListener('pointerup', up);
-                }
-                window.addEventListener('pointermove', move);
-                window.addEventListener('pointerup', up);
-            });
-            canvas.appendChild(card);
-        });
-        drawWires();
     }
 
     function emptyPortalDraft() {

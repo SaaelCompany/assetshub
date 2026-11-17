@@ -7388,6 +7388,41 @@ a.asset-tree-preview-icon:focus {
     align-items: start;
 }
 
+#asset-tree-app .asset-tree-report-board {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+    padding: 12px;
+}
+
+#asset-tree-app .asset-tree-report-tile {
+    margin: 0;
+    padding: 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fafbfc;
+    text-align: left;
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-report-tile h3 {
+    margin: 0 0 4px;
+    color: #172b4d;
+    font-size: 15px;
+}
+
+#asset-tree-app .asset-tree-report-tile > p {
+    margin: 0 0 8px;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-tile-total {
+    color: #172b4d !important;
+    font-size: 22px !important;
+    font-weight: 600;
+}
+
 #asset-tree-app .asset-tree-map-shell {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
@@ -7480,6 +7515,24 @@ a.asset-tree-preview-icon:focus {
     margin: 2px 0 0;
     color: #6b778c;
     font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-period {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-report-period input {
+    height: 28px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    padding: 0 6px;
+    color: #172b4d;
+    font-size: 13px;
 }
 
 #asset-tree-app .asset-tree-report-switch,

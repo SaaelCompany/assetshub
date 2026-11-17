@@ -2,7 +2,6 @@ package com.assetstree.jira.ao;
 
 import net.java.ao.Entity;
 import net.java.ao.schema.Indexed;
-import net.java.ao.schema.NotNull;
 import net.java.ao.schema.StringLength;
 import net.java.ao.schema.Table;
 
@@ -24,10 +23,10 @@ public interface AssetIssueLinkEntity extends Entity {
     void setStatusBefore(String statusBefore);
 
     /**
-     * Empty for a request link. The column is required because older databases
-     * kept links between assets in this same table.
+     * Empty for a request link. The column stays optional. H2 1.4 rejects the
+     * statement Active Objects uses to change nullability, and that failure
+     * stops the whole plugin from starting.
      */
-    @NotNull
     @StringLength(32)
     String getLinkType();
 

@@ -5,6 +5,7 @@ import com.assetstree.jira.dto.ModuleSetupDto;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ModuleSetupGlyphTest {
@@ -27,6 +28,18 @@ public class ModuleSetupGlyphTest {
         assertTrue(ModuleSetup.calendarOn(read.getScheduleBoards()));
         assertTrue(ModuleSetup.calendarOn("calendar"));
         assertTrue(ModuleSetup.calendarOn(""));
+    }
+
+    @Test
+    public void branchMailRoundTripsBesideTheSharedList() {
+        ModuleSetupDto draft = new ModuleSetupDto();
+        draft.setReportMailBranch(Boolean.TRUE);
+        draft.setReportMailPart("2026-11-17:b.4.JIRAUSER10000,admin");
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(draft));
+        assertEquals(Boolean.TRUE, read.getReportMailBranch());
+        assertEquals("2026-11-17:b.4.JIRAUSER10000,admin", read.getReportMailPart());
+        draft.setReportMailBranch(Boolean.FALSE);
+        assertFalse(Boolean.TRUE.equals(ModuleSetup.read(ModuleSetup.write(draft)).getReportMailBranch()));
     }
 
     @Test

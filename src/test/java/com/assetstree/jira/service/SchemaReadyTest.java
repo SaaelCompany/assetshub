@@ -1,5 +1,8 @@
 package com.assetstree.jira.service;
 
+import com.assetstree.jira.ao.AssetIssueLinkEntity;
+
+import net.java.ao.schema.NotNull;
 import net.java.ao.schema.ddl.DDLActionType;
 import net.java.ao.schema.ddl.DDLField;
 
@@ -9,6 +12,7 @@ import java.sql.Types;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class SchemaReadyTest {
@@ -73,6 +77,11 @@ public class SchemaReadyTest {
         assertTrue(SchemaReady.relaxColumn("AO_X; DROP TABLE AO_X", "LINK_TYPE", true).isEmpty());
         assertTrue(SchemaReady.identifier("AO_1234_AST_LINK"));
         assertFalse(SchemaReady.identifier("AST LINK"));
+    }
+
+    @Test
+    public void requestLinkTypeStaysOptionalSoH2CanStartThePlugin() throws Exception {
+        assertNull(AssetIssueLinkEntity.class.getMethod("getLinkType").getAnnotation(NotNull.class));
     }
 
     @Test

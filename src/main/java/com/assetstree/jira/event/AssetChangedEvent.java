@@ -1,6 +1,6 @@
 package com.assetstree.jira.event;
 
-/** Published when equipment is created, changed, moved to the trash, restored, or its status changes. */
+/** Published when equipment is created, changed, written off, or its calendar changes. */
 public final class AssetChangedEvent {
     private final String projectKey;
     private final String kind;
@@ -12,9 +12,17 @@ public final class AssetChangedEvent {
     private final String previousStatus;
     private final String plan;
     private final String due;
+    private final String detail;
+    private final String note;
 
     public AssetChangedEvent(String projectKey, String kind, int assetId, String objectKey, String name,
                               String status, String typeKey, String previousStatus, String plan, String due) {
+        this(projectKey, kind, assetId, objectKey, name, status, typeKey, previousStatus, plan, due, "", "");
+    }
+
+    public AssetChangedEvent(String projectKey, String kind, int assetId, String objectKey, String name,
+                              String status, String typeKey, String previousStatus, String plan, String due,
+                              String detail, String note) {
         this.projectKey = projectKey == null ? "" : projectKey;
         this.kind = kind == null ? "" : kind;
         this.assetId = assetId;
@@ -25,6 +33,8 @@ public final class AssetChangedEvent {
         this.previousStatus = previousStatus == null ? "" : previousStatus;
         this.plan = plan == null ? "" : plan;
         this.due = due == null ? "" : due;
+        this.detail = detail == null ? "" : detail;
+        this.note = note == null ? "" : note;
     }
 
     public String getProjectKey() {
@@ -67,12 +77,21 @@ public final class AssetChangedEvent {
         return due;
     }
 
+    public String getDetail() {
+        return detail;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
     public String toJson() {
         return "{\"event\":\"" + escape(kind) + "\",\"id\":" + assetId
                 + ",\"key\":\"" + escape(objectKey) + "\",\"name\":\"" + escape(name)
                 + "\",\"project\":\"" + escape(projectKey) + "\",\"status\":\"" + escape(status)
                 + "\",\"type\":\"" + escape(typeKey) + "\",\"previous\":\"" + escape(previousStatus)
-                + "\",\"plan\":\"" + escape(plan) + "\",\"due\":\"" + escape(due) + "\"}";
+                + "\",\"plan\":\"" + escape(plan) + "\",\"due\":\"" + escape(due)
+                + "\",\"detail\":\"" + escape(detail) + "\",\"note\":\"" + escape(note) + "\"}";
     }
 
     private static String escape(String value) {

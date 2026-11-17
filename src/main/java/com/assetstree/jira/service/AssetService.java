@@ -3,6 +3,7 @@ package com.assetstree.jira.service;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.dto.AssetDto;
+import com.assetstree.jira.model.AssetMailDraft;
 import com.assetstree.jira.dto.AssetLinkDto;
 import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
@@ -26,8 +27,6 @@ import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.dto.WebhookProbeDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.StatusDto;
-import com.assetstree.jira.dto.InventoryDto;
-import com.assetstree.jira.dto.InventoryRowDto;
 import com.assetstree.jira.dto.IssueContextDto;
 import com.assetstree.jira.dto.IssueRefDto;
 import com.assetstree.jira.dto.MetaDto;
@@ -215,10 +214,6 @@ public interface AssetService {
 
     BulkResultDto applyBulk(ApplicationUser user, String projectKey, BulkDraft draft);
 
-    InventoryDto inventory(ApplicationUser user, String projectKey);
-
-    InventoryRowDto markInventory(ApplicationUser user, int id, boolean checked);
-
     List<PickerNodeDto> picker(ApplicationUser user, String projectKey);
 
     List<PortalRuleDto> listPortalRules(ApplicationUser user, String projectKey);
@@ -232,6 +227,9 @@ public interface AssetService {
     List<IssueTypeDto> listIssueTypes(ApplicationUser user, String projectKey);
 
     List<IssueTypeDto> listIssueStatuses(ApplicationUser user, String projectKey);
+
+    /** Workflow statuses of the project, for a rule that follows a request. */
+    List<IssueTypeDto> listWorkflowStatuses(ApplicationUser user, String projectKey);
 
     List<FlowRuleDto> listFlowRules(ApplicationUser user, String projectKey);
 
@@ -353,11 +351,11 @@ public interface AssetService {
 
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
 
-    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket);
+    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket, String start, String end);
 
     byte[] exportReports(ApplicationUser user, String projectKey);
 
-    byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart);
+    byte[] exportReport(ApplicationUser user, String projectKey, String reportKey, String chart, String start, String end);
 
     void sendReportMail(ApplicationUser user, String projectKey);
 
@@ -447,4 +445,7 @@ public interface AssetService {
 
     /** Sets the status of one piece of equipment. Returns 1 when the status changed. */
     int applyAssetStatus(ApplicationUser user, int assetId, String statusKey);
+
+    /** Queues one plain letter about this equipment. Returns 1 when the queue accepted it. */
+    int mailEquipment(ApplicationUser user, int assetId, AssetMailDraft draft);
 }

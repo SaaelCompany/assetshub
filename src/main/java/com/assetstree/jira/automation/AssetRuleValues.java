@@ -14,6 +14,8 @@ public final class AssetRuleValues {
     public static final String RESTORED = "asset.restored";
     public static final String STATUS = "asset.status";
     public static final String CALENDAR = "asset.calendar";
+    public static final String WRITEOFF = "asset.writeoff";
+    public static final String SCHEDULE = "asset.schedule";
 
     private AssetRuleValues() {
     }
@@ -40,6 +42,34 @@ public final class AssetRuleValues {
         }
         String before = previous == null ? "" : previous.trim();
         return before.isEmpty() || !before.equals(wanted);
+    }
+
+    /** Write-off and schedule rows keep their current status, the same way a due date does. */
+    public static boolean watchesCurrent(String kind) {
+        return CALENDAR.equals(kind) || WRITEOFF.equals(kind) || SCHEDULE.equals(kind);
+    }
+
+    /** An empty detail filter matches. A filled one matches pending, approved, created, done, and the other words. */
+    public static boolean detailMatches(String filter, String detail) {
+        if (filter == null || filter.trim().isEmpty()) {
+            return true;
+        }
+        String now = detail == null ? "" : detail.trim();
+        return filter.trim().equals(now);
+    }
+
+    /** An empty request-status filter matches. A filled one matches the status id or its name. */
+    public static boolean issueStatusMatches(String filter, String statusId, String statusName) {
+        if (filter == null || filter.trim().isEmpty()) {
+            return true;
+        }
+        String wanted = filter.trim();
+        String id = statusId == null ? "" : statusId.trim();
+        if (wanted.equals(id)) {
+            return true;
+        }
+        String name = statusName == null ? "" : statusName.trim();
+        return !name.isEmpty() && wanted.equals(name);
     }
 
     /** An empty filter matches. A filled one matches the current status, even when it did not just change. */

@@ -13,9 +13,8 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 
 /**
- * When a request moves from one status to another, equipment already linked
- * to it follows the project diagram. The first status on a new request is
- * not a change: that path is the create rule.
+ * A new request still links the portal asset, the asset field and the TNI device.
+ * Status changes are left to Automation for Jira.
  */
 public class AssetFlowListener extends AbstractIssueEventListener {
     private static final Logger log = LoggerFactory.getLogger(AssetFlowListener.class);

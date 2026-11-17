@@ -28,6 +28,15 @@ public class ReportCatalogTest {
         assertEquals("", ReportCatalog.group("done+holder"));
         assertEquals("", ReportCatalog.group("done+status"));
         assertEquals("", ReportCatalog.group("done+kind+month+place"));
+        assertEquals("branch", ReportCatalog.group("branch"));
+        assertEquals("type+branch", ReportCatalog.group("type+branch"));
+        assertEquals("asset", ReportCatalog.opsGroup("asset"));
+        assertEquals("branch+type", ReportCatalog.opsGroup("branch+type"));
+        assertEquals("", ReportCatalog.opsGroup("month"));
+        assertEquals("", ReportCatalog.opsGroup("asset+type+place"));
+        assertEquals("faults", ReportCatalog.measure("Faults"));
+        assertEquals("cost", ReportCatalog.measure("cost"));
+        assertEquals("count", ReportCatalog.measure("nope"));
         assertEquals("model", ReportCatalog.fieldKey("Model"));
         assertEquals("", ReportCatalog.fieldKey("1bad"));
         assertEquals("", ReportCatalog.fieldKey("has space"));

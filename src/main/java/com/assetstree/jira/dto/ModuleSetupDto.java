@@ -22,6 +22,8 @@ public class ModuleSetupDto {
     private String reportMailTo;
     private String reportMailSent;
     private String reportMailPart;
+    /** When true, each top place's custodian also receives a book of that place only. */
+    private Boolean reportMailBranch;
     private Boolean lifeApproval;
     private String lifeApprover;
     private String lifePlaces;
@@ -88,6 +90,8 @@ public class ModuleSetupDto {
     public void setReportMailSent(String reportMailSent) { this.reportMailSent = reportMailSent; }
     public String getReportMailPart() { return reportMailPart; }
     public void setReportMailPart(String reportMailPart) { this.reportMailPart = reportMailPart; }
+    public Boolean getReportMailBranch() { return reportMailBranch; }
+    public void setReportMailBranch(Boolean reportMailBranch) { this.reportMailBranch = reportMailBranch; }
     public Boolean getLifeApproval() { return lifeApproval; }
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }
