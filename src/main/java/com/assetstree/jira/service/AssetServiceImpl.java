@@ -5395,32 +5395,8 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private void applyRequestFlow(ApplicationUser user, final int assetId, Issue issue) {
-        if (issue == null || issue.getIssueType() == null || issue.getProjectObject() == null) {
-            return;
-        }
-        final String typeId = issue.getIssueType().getId();
-        if (typeId == null || typeId.trim().isEmpty()) {
-            return;
-        }
-        final String projectKey = issue.getProjectObject().getKey();
-        final String wanted = typeId.trim();
-        final String issueStatusId = issue.getStatus() == null || issue.getStatus().getId() == null
-                ? "" : issue.getStatus().getId().trim();
-        ao().executeInTransaction(new TransactionCallback<Void>() {
-            @Override
-            public Void doInTransaction() {
-                AssetEntity asset = ao().get(AssetEntity.class, assetId);
-                if (asset == null || !ProjectKeys.same(asset.getProjectKey(), projectKey) || isLocation(asset)) {
-                    return null;
-                }
-                applyResolvedStatus(user, asset, wanted, equipmentStatusFor(projectKey, wanted, null, false));
-                if (!issueStatusId.isEmpty()) {
-                    applyResolvedStatus(user, asset, wanted, equipmentStatusFor(projectKey, wanted, issueStatusId, true));
-                }
-                return null;
-            }
-        });
+    private void applyRequestFlow(ApplicationUser user, int assetId, Issue issue) {
+        // A saved process diagram no longer changes equipment status. Use Automation.
     }
 
     /** Deletes the link and returns the status the asset had when it was linked, or null when there was no link. */
@@ -5441,28 +5417,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void applyRemovedFlow(ApplicationUser user, AssetEntity asset, Issue issue, String statusBefore) {
-        if (asset == null || issue == null || issue.getProjectObject() == null || isLocation(asset)) {
-            return;
-        }
-        String projectKey = issue.getProjectObject().getKey();
-        if (!ProjectKeys.same(asset.getProjectKey(), projectKey)) {
-            return;
-        }
-        FlowGraphEntity stored = findFlowGraph(projectKey);
-        if (stored == null || stored.getBody() == null || stored.getBody().trim().isEmpty()) {
-            return;
-        }
-        String typeId = issue.getIssueType() == null || issue.getIssueType().getId() == null
-                ? "" : issue.getIssueType().getId().trim();
-        String next = FlowBook.removedStatus(FlowBook.read(stored.getBody()), typeId);
-        if (FlowBook.RESTORE.equals(next)) {
-            next = statusBefore == null || statusBefore.isEmpty() ? null : statusBefore;
-        }
-        if (next == null || !knownStatusKeys(projectKey).contains(next)
-                || next.equals(Statuses.canonical(asset.getStatus()))) {
-            return;
-        }
-        assignFlowStatus(user, asset, next);
+        // Removing equipment from a request no longer restores a diagram status.
     }
 
     private void applyResolvedStatus(ApplicationUser user, AssetEntity asset, String issueTypeId, String resolved) {
@@ -5782,53 +5737,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void syncRequestStatus(ApplicationUser user, Issue issue) {
-        if (issue == null || issue.getId() == null || issue.getProjectObject() == null || issue.getStatus() == null) {
-            return;
-        }
-        final String projectKey = issue.getProjectObject().getKey();
-        final String typeId = issue.getIssueType() == null || issue.getIssueType().getId() == null
-                ? "" : issue.getIssueType().getId().trim();
-        final String issueStatusId = issue.getStatus().getId() == null ? "" : issue.getStatus().getId().trim();
-        if (projectKey == null || projectKey.trim().isEmpty() || issueStatusId.isEmpty()) {
-            return;
-        }
-        final long issueId = issue.getId().longValue();
-        try {
-            ao().executeInTransaction(new TransactionCallback<Void>() {
-                @Override
-                public Void doInTransaction() {
-                    String resolved = equipmentStatusFor(projectKey, typeId, issueStatusId, true);
-                    if (resolved == null || resolved.isEmpty()) {
-                        return null;
-                    }
-                    Set<String> known = knownStatusKeys(projectKey);
-                    String matchType = typeId.isEmpty() ? "*" : typeId;
-                    FlowRuleDto rule = new FlowRuleDto();
-                    rule.setIssueTypeId(matchType);
-                    rule.setStatusKey(resolved);
-                    AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
-                            Query.select().where("ISSUE_ID = ?", issueId));
-                    if (links == null) {
-                        return null;
-                    }
-                    for (AssetIssueLinkEntity link : links) {
-                        AssetEntity asset = ao().get(AssetEntity.class, link.getAssetId());
-                        if (asset == null || !ProjectKeys.same(asset.getProjectKey(), projectKey) || isLocation(asset)) {
-                            continue;
-                        }
-                        String next = FlowRules.statusToApply(Collections.singletonList(rule), matchType, true,
-                                Statuses.canonical(asset.getStatus()), known);
-                        if (next == null) {
-                            continue;
-                        }
-                        assignFlowStatus(user, asset, next);
-                    }
-                    return null;
-                }
-            });
-        } catch (RuntimeException ex) {
-            log.warn("Could not apply the equipment flow for issue {}", issue.getKey(), ex);
-        }
+        // Request transitions no longer copy a status from the process diagram.
     }
 
     @Override
