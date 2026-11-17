@@ -24,7 +24,6 @@ import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.model.ExportDraft;
 import com.assetstree.jira.model.ImportDraft;
 import com.assetstree.jira.model.JsonImportDraft;
-import com.assetstree.jira.model.InventoryDraft;
 import com.assetstree.jira.model.IssueLinkDraft;
 import com.assetstree.jira.model.LinkDraft;
 import com.assetstree.jira.model.MoveDraft;
@@ -345,18 +344,6 @@ public class AssetResource {
         });
     }
 
-    @POST
-    @Path("assets/{id}/inventory")
-    public Response inventoryMark(@PathParam("id") final int id, final InventoryDraft draft) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                boolean checked = draft != null && draft.isChecked();
-                return Response.ok(assetService.markInventory(user(), id, checked)).build();
-            }
-        });
-    }
-
     @GET
     @Path("projects/{projectKey}/tree-stamp")
     public Response treeStamp(@PathParam("projectKey") final String projectKey) {
@@ -365,17 +352,6 @@ public class AssetResource {
             public Response call() {
                 MessageDto mark = new MessageDto(assetService.treeMark(user(), projectKey));
                 return Response.ok(mark).build();
-            }
-        });
-    }
-
-    @GET
-    @Path("projects/{projectKey}/inventory")
-    public Response inventory(@PathParam("projectKey") final String projectKey) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.ok(assetService.inventory(user(), projectKey)).build();
             }
         });
     }

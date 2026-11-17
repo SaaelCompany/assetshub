@@ -23,7 +23,6 @@
         <entity>com.assetstree.jira.ao.ProjectViewEntity</entity>
         <entity>com.assetstree.jira.ao.PortalLayoutEntity</entity>
         <entity>com.assetstree.jira.ao.AssetFieldEntity</entity>
-        <entity>com.assetstree.jira.ao.InventoryMarkEntity</entity>
         <entity>com.assetstree.jira.ao.AssetCommentEntity</entity>
         <entity>com.assetstree.jira.ao.AssetFileEntity</entity>
         <entity>com.assetstree.jira.ao.AssetShareEntity</entity>

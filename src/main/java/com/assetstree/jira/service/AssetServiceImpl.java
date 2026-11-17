@@ -79,7 +79,6 @@ import com.assetstree.jira.ao.AssetShareEntity;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetLinkEntity;
 import com.assetstree.jira.ao.AssetPeerEntity;
-import com.assetstree.jira.ao.InventoryMarkEntity;
 import com.assetstree.jira.ao.PortalRuleConditionEntity;
 import com.assetstree.jira.ao.PortalRuleEntity;
 import com.assetstree.jira.ao.ProjectAssetKeyEntity;
@@ -145,8 +144,6 @@ import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.dto.WebhookProbeDto;
 import com.assetstree.jira.dto.ImportIssueDto;
 import com.assetstree.jira.dto.ImportResultDto;
-import com.assetstree.jira.dto.InventoryDto;
-import com.assetstree.jira.dto.InventoryRowDto;
 import com.assetstree.jira.dto.IssueContextDto;
 import com.assetstree.jira.dto.IssueRefDto;
 import com.assetstree.jira.dto.MetaDto;
@@ -2822,7 +2819,6 @@ public class AssetServiceImpl implements AssetService {
         deleteRows(AssetAttributeEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetIssueLinkEntity.class, "ASSET_ID", toDelete);
         deletePeerLinks(user, toDelete);
-        deleteRows(InventoryMarkEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetCommentEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetFileEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetShareEntity.class, "ASSET_ID", toDelete);
@@ -4351,118 +4347,6 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.bulk.action");
         }
         return bulkAssets(user, project, action, draft);
-    }
-
-    @Override
-    public InventoryDto inventory(ApplicationUser user, String projectKey) {
-        Project project = requireReadableProject(user, projectKey);
-        return ao().executeInTransaction(new TransactionCallback<InventoryDto>() {
-            @Override
-            public InventoryDto doInTransaction() {
-                AssetEntity[] rows = assetsIn(project.getKey());
-                Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
-                Map<Integer, AssetEntity> index = indexAssets(rows);
-                Map<Integer, InventoryMarkEntity> marks = marksFor(idsOf(rows));
-                List<InventoryRowDto> list = new ArrayList<InventoryRowDto>();
-                int checked = 0;
-                for (AssetEntity row : rows) {
-                    AssetTypeDto type = types.get(row.getTypeKey());
-                    if (type != null && type.isLocation()) {
-                        continue;
-                    }
-                    InventoryRowDto item = inventoryRow(row, type, index, marks.get(Integer.valueOf(row.getID())));
-                    if (item.isChecked()) {
-                        checked++;
-                    }
-                    list.add(item);
-                }
-                Collections.sort(list, new Comparator<InventoryRowDto>() {
-                    @Override
-                    public int compare(InventoryRowDto left, InventoryRowDto right) {
-                        int byPlace = left.getLocation().compareToIgnoreCase(right.getLocation());
-                        if (byPlace != 0) {
-                            return byPlace;
-                        }
-                        return left.getName().compareToIgnoreCase(right.getName());
-                    }
-                });
-                InventoryDto dto = new InventoryDto();
-                dto.setTotal(list.size());
-                dto.setChecked(checked);
-                dto.setRows(list);
-                return dto;
-            }
-        });
-    }
-
-    @Override
-    public InventoryRowDto markInventory(ApplicationUser user, int id, final boolean checked) {
-        return ao().executeInTransaction(new TransactionCallback<InventoryRowDto>() {
-            @Override
-            public InventoryRowDto doInTransaction() {
-                AssetEntity entity = requireWritable(user, id);
-                InventoryMarkEntity[] existing = ao().find(InventoryMarkEntity.class, Query.select().where("ASSET_ID = ?", entity.getID()));
-                InventoryMarkEntity mark = existing.length == 0 ? null : existing[0];
-                if (!checked) {
-                    if (mark != null) {
-                        ao().delete(mark);
-                    }
-                    for (int i = 1; i < existing.length; i++) {
-                        ao().delete(existing[i]);
-                    }
-                    mark = null;
-                } else if (mark == null) {
-                    mark = ao().create(InventoryMarkEntity.class,
-                            new DBParam("ASSET_ID", entity.getID()),
-                            new DBParam("CHECKED_AT", new Date()),
-                            new DBParam("CHECKED_BY", user.getKey()));
-                } else {
-                    mark.setCheckedAt(new Date());
-                    mark.setCheckedBy(user.getKey());
-                    mark.save();
-                    for (int i = 1; i < existing.length; i++) {
-                        ao().delete(existing[i]);
-                    }
-                }
-                AssetEntity[] rows = assetsIn(entity.getProjectKey());
-                Map<String, AssetTypeDto> types = indexTypes(typeDtos(entity.getProjectKey(), rows));
-                return inventoryRow(entity, types.get(entity.getTypeKey()), indexAssets(rows), mark);
-            }
-        });
-    }
-
-    private InventoryRowDto inventoryRow(AssetEntity row, AssetTypeDto type, Map<Integer, AssetEntity> index, InventoryMarkEntity mark) {
-        InventoryRowDto item = new InventoryRowDto();
-        item.setId(row.getID());
-        item.setName(row.getName());
-        item.setObjectKey(row.getObjectKey());
-        item.setTypeLabel(type == null ? row.getTypeKey() : type.getLabel());
-        item.setStatus(Statuses.canonical(row.getStatus()));
-        item.setLocation(location(row, index));
-        List<Integer> ancestors = new ArrayList<Integer>();
-        Integer cursor = TreeLogic.normalizeParent(row.getParentId());
-        int guard = 0;
-        while (cursor != null && guard < 80) {
-            ancestors.add(cursor);
-            AssetEntity parent = index.get(cursor);
-            if (parent == null) {
-                break;
-            }
-            cursor = TreeLogic.normalizeParent(parent.getParentId());
-            guard++;
-        }
-        Collections.reverse(ancestors);
-        item.setAncestors(ancestors);
-        if (row.getCustodianKey() != null && !row.getCustodianKey().isEmpty()) {
-            UserProfileDto person = profile(row.getCustodianKey());
-            item.setCustodian(person == null ? "" : person.getDisplayName());
-        } else {
-            item.setCustodian("");
-        }
-        item.setChecked(mark != null);
-        item.setCheckedAt(mark == null ? "" : format(mark.getCheckedAt()));
-        item.setCheckedBy(mark == null ? "" : displayName(mark.getCheckedBy()));
-        return item;
     }
 
     @Override
@@ -8040,30 +7924,6 @@ public class AssetServiceImpl implements AssetService {
             ids.add(Integer.valueOf(row.getID()));
         }
         return ids;
-    }
-
-    private Map<Integer, InventoryMarkEntity> marksFor(Collection<Integer> assetIds) {
-        Map<Integer, InventoryMarkEntity> marks = new HashMap<Integer, InventoryMarkEntity>();
-        for (InventoryMarkEntity mark : findIn(InventoryMarkEntity.class, "ASSET_ID", assetIds, null)) {
-            Integer assetId = Integer.valueOf(mark.getAssetId());
-            InventoryMarkEntity previous = marks.get(assetId);
-            if (previous == null || newerMark(mark, previous)) {
-                marks.put(assetId, mark);
-            }
-        }
-        return marks;
-    }
-
-    private static boolean newerMark(InventoryMarkEntity candidate, InventoryMarkEntity current) {
-        Date left = candidate.getCheckedAt();
-        Date right = current.getCheckedAt();
-        if (left == null) {
-            return false;
-        }
-        if (right == null) {
-            return true;
-        }
-        return left.after(right);
     }
 
     private <T extends RawEntity<Integer>> List<T> findIn(Class<T> type, String column, Collection<?> values, String order) {

@@ -17,7 +17,6 @@ import com.assetstree.jira.ao.FloorEntity;
 import com.assetstree.jira.ao.FlowGraphEntity;
 import com.assetstree.jira.ao.FlowRuleEntity;
 import com.assetstree.jira.ao.IdempotencyEntity;
-import com.assetstree.jira.ao.InventoryMarkEntity;
 import com.assetstree.jira.ao.LifecycleEntity;
 import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.PortalRuleConditionEntity;
@@ -85,7 +84,6 @@ public final class SchemaReady {
             ProjectAssetKeyEntity.class,
             ProjectViewEntity.class,
             AssetFieldEntity.class,
-            InventoryMarkEntity.class,
             AssetCommentEntity.class,
             AssetFileEntity.class,
             AssetShareEntity.class,

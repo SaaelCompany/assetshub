@@ -27,8 +27,6 @@ import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.dto.WebhookProbeDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.StatusDto;
-import com.assetstree.jira.dto.InventoryDto;
-import com.assetstree.jira.dto.InventoryRowDto;
 import com.assetstree.jira.dto.IssueContextDto;
 import com.assetstree.jira.dto.IssueRefDto;
 import com.assetstree.jira.dto.MetaDto;
@@ -215,10 +213,6 @@ public interface AssetService {
     ImportResultDto importEquipment(ApplicationUser user, String projectKey, ImportDraft draft);
 
     BulkResultDto applyBulk(ApplicationUser user, String projectKey, BulkDraft draft);
-
-    InventoryDto inventory(ApplicationUser user, String projectKey);
-
-    InventoryRowDto markInventory(ApplicationUser user, int id, boolean checked);
 
     List<PickerNodeDto> picker(ApplicationUser user, String projectKey);
 
