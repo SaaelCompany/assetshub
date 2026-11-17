@@ -3,9 +3,11 @@ package com.assetstree.jira.model;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-/** Time an asset spent in the repair status, clipped to a report window. */
+/** Time an asset spent in the downtime statuses, clipped to a report window. */
 public final class RepairTime {
     public static final long DAY = 24L * 60L * 60L * 1000L;
 
@@ -28,7 +30,7 @@ public final class RepairTime {
         }
     }
 
-    /** A stay in repair. {@code start} and {@code end} are the real edges. The clipped pair is inside the window. */
+    /** A stay in a downtime status. {@code start} and {@code end} are the real edges. The clipped pair is inside the window. */
     public static final class Span {
         private final long start;
         private final long end;
@@ -67,14 +69,34 @@ public final class RepairTime {
     }
 
     /**
-     * Repair stays. A history that is already in repair when the window opens counts from the window start.
+     * Downtime stays in the built-in repair status.
+     * A history that is already down when the window opens counts from the window start.
      * An asset with no history counts the whole window only when {@code repairNow} is true.
      * An open stay ends at {@code windowEnd}.
      */
     public static List<Span> spans(List<Change> changes, boolean repairNow, long windowStart, long windowEnd) {
+        return spans(changes, repairNow, windowStart, windowEnd, Collections.singleton(Statuses.REPAIR));
+    }
+
+    /**
+     * Downtime stays. A move from one status in {@code downtime} to another stays one open stay.
+     * An empty set counts nothing. A null set counts the built-in repair status.
+     */
+    public static List<Span> spans(List<Change> changes, boolean repairNow, long windowStart, long windowEnd,
+            Set<String> downtime) {
         List<Span> found = new ArrayList<Span>();
         if (windowEnd <= windowStart) {
             return found;
+        }
+        Set<String> down = new HashSet<String>();
+        if (downtime == null) {
+            down.add(Statuses.REPAIR);
+        } else {
+            for (String key : downtime) {
+                if (key != null && !key.trim().isEmpty()) {
+                    down.add(Statuses.canonical(key));
+                }
+            }
         }
         List<Change> ordered = new ArrayList<Change>();
         if (changes != null) {
@@ -87,7 +109,7 @@ public final class RepairTime {
             }
         });
         if (ordered.isEmpty()) {
-            if (repairNow) {
+            if (repairNow && !down.isEmpty()) {
                 add(found, windowStart, windowEnd, windowStart, windowEnd);
             }
             return found;
@@ -95,7 +117,7 @@ public final class RepairTime {
         long open = -1L;
         for (int i = 0; i < ordered.size(); i++) {
             Change change = ordered.get(i);
-            boolean repair = Statuses.REPAIR.equals(change.next);
+            boolean repair = down.contains(change.next);
             if (repair && open < 0L) {
                 open = change.at;
             } else if (!repair && open >= 0L) {

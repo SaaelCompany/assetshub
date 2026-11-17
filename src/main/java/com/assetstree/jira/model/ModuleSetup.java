@@ -42,6 +42,7 @@ public final class ModuleSetup {
         setup.setReportMailSent(mailSent(values.get("rsent")));
         setup.setReportMailPart(mailPart(values.get("rpart")));
         setup.setReportMailBranch(Boolean.valueOf("1".equals(values.get("rbranch"))));
+        setup.setReportIdleStatuses(Downtime.store(values.get("ridle")));
         setup.setLifeApproval(Boolean.valueOf(!"0".equals(values.get("approve"))));
         setup.setLifeApprover(who(values.get("who")));
         setup.setLifePlaces(LifeApprovers.normalize(values.get("lwho")));
@@ -98,6 +99,7 @@ public final class ModuleSetup {
         append(stored, "rsent", mailSent(value.getReportMailSent()));
         append(stored, "rpart", mailPart(value.getReportMailPart()));
         append(stored, "rbranch", Boolean.TRUE.equals(value.getReportMailBranch()) ? "1" : "0");
+        append(stored, "ridle", Downtime.store(value.getReportIdleStatuses()));
         append(stored, "approve", Boolean.FALSE.equals(value.getLifeApproval()) ? "0" : "1");
         append(stored, "who", who(value.getLifeApprover()));
         append(stored, "lwho", LifeApprovers.normalize(value.getLifePlaces()));
@@ -340,6 +342,7 @@ public final class ModuleSetup {
         merged.setReportMailSent(incoming.getReportMailSent() != null ? incoming.getReportMailSent() : base.getReportMailSent());
         merged.setReportMailPart(incoming.getReportMailPart() != null ? incoming.getReportMailPart() : base.getReportMailPart());
         merged.setReportMailBranch(incoming.getReportMailBranch() != null ? incoming.getReportMailBranch() : base.getReportMailBranch());
+        merged.setReportIdleStatuses(incoming.getReportIdleStatuses() != null ? Downtime.store(incoming.getReportIdleStatuses()) : base.getReportIdleStatuses());
         merged.setLifeApproval(incoming.getLifeApproval() != null ? incoming.getLifeApproval() : base.getLifeApproval());
         merged.setLifeApprover(incoming.getLifeApprover() != null ? incoming.getLifeApprover() : base.getLifeApprover());
         merged.setLifePlaces(incoming.getLifePlaces() != null ? incoming.getLifePlaces() : base.getLifePlaces());

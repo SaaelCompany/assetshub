@@ -232,6 +232,7 @@ import com.assetstree.jira.model.LifeBook;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.MoneyText;
 import com.assetstree.jira.model.PtoWindow;
+import com.assetstree.jira.model.Downtime;
 import com.assetstree.jira.model.RepairTime;
 import com.assetstree.jira.model.ReportCatalog;
 import com.assetstree.jira.model.ReportWindow;
@@ -12821,20 +12822,18 @@ public class AssetServiceImpl implements AssetService {
         List<ReportLineDto> lines = new ArrayList<ReportLineDto>();
         List<String> lineKeys = new ArrayList<String>();
         Map<String, String> placeSort = new HashMap<String, String>();
-        String repairLabel = statusNames.get(Statuses.REPAIR);
-        if (repairLabel == null || repairLabel.isEmpty()) {
-            repairLabel = i18n().getText("asset-tree.ui.statusRepair");
-        }
+        Set<String> downtime = Downtime.statuses(moduleSetup(project.getKey()).getReportIdleStatuses());
         int onTimeUnits = 0;
         int lateUnits = 0;
         int waitingUnits = 0;
         if (ReportCatalog.FAULTS.equals(key)) {
-            Map<Integer, Long> entered = repairEntered(index);
+            Map<Integer, Long> entered = repairEntered(index, downtime);
             for (AssetEntity asset : assets) {
                 if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
                     continue;
                 }
-                if (!Statuses.REPAIR.equals(Statuses.canonical(asset.getStatus()))) {
+                String status = Statuses.canonical(asset.getStatus());
+                if (!downtime.contains(status)) {
                     continue;
                 }
                 String[] slot = opsBucket(axis, asset, types, index);
@@ -12853,9 +12852,9 @@ public class AssetServiceImpl implements AssetService {
                         placeName + (clock.isEmpty() ? "" : " · " + clock));
                 line.setBucket(slot[0]);
                 line.setAsset(placeName);
-                line.setKind(repairLabel);
+                line.setKind(statusName(statusNames, status));
                 line.setWhen(when);
-                line.setState("repair");
+                line.setState(Statuses.REPAIR.equals(status) ? "repair" : "idle");
                 line.setClock(clock);
                 lines.add(line);
                 lineKeys.add(slot[0]);
@@ -12868,9 +12867,10 @@ public class AssetServiceImpl implements AssetService {
                 if (asset == null || isLocation(asset) || asset.getDeletedAt() != null) {
                     continue;
                 }
-                boolean repairNow = Statuses.REPAIR.equals(Statuses.canonical(asset.getStatus()));
+                String status = Statuses.canonical(asset.getStatus());
+                boolean repairNow = downtime.contains(status);
                 List<RepairTime.Change> changes = history.get(Integer.valueOf(asset.getID()));
-                List<RepairTime.Span> spans = RepairTime.spans(changes, repairNow, window.getStartMillis(), window.getEndMillis());
+                List<RepairTime.Span> spans = RepairTime.spans(changes, repairNow, window.getStartMillis(), window.getEndMillis(), downtime);
                 long overlap = RepairTime.overlap(spans);
                 if (overlap <= 0L) {
                     continue;
@@ -12889,11 +12889,13 @@ public class AssetServiceImpl implements AssetService {
                     String from = dayOf(span.getClippedStart());
                     String to = dayOf(span.getClippedEnd() - 1L);
                     String clock = idleText(span.overlap());
-                    ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), repairLabel,
+                    String stayStatus = statusAt(changes, span.getStart(), asset.getStatus());
+                    String stayLabel = statusName(statusNames, stayStatus);
+                    ReportLineDto line = new ReportLineDto(asset.getID(), asset.getObjectKey(), stayLabel,
                             from + " – " + to + " · " + clock);
                     line.setBucket(bucketKey);
                     line.setAsset(asset.getName());
-                    line.setKind(repairLabel);
+                    line.setKind(stayLabel);
                     line.setWhen(from);
                     line.setFrom(from);
                     line.setTo(to);
@@ -13195,15 +13197,43 @@ public class AssetServiceImpl implements AssetService {
         return new int[] { onTime, late, waiting };
     }
 
-    private Map<Integer, Long> repairEntered(Map<Integer, AssetEntity> index) {
+    private String statusName(Map<String, String> names, String key) {
+        String label = names == null || key == null ? null : names.get(key);
+        if (label == null || label.isEmpty()) {
+            if (Statuses.REPAIR.equals(key)) {
+                return i18n().getText("asset-tree.ui.statusRepair");
+            }
+            return key == null ? "" : key;
+        }
+        return label;
+    }
+
+    private String statusAt(List<RepairTime.Change> changes, long at, String fallback) {
+        String found = "";
+        if (changes != null) {
+            for (int i = 0; i < changes.size(); i++) {
+                RepairTime.Change change = changes.get(i);
+                if (change.getAt() <= at) {
+                    found = change.getNext();
+                }
+            }
+        }
+        if (found == null || found.isEmpty()) {
+            found = Statuses.canonical(fallback);
+        }
+        return found;
+    }
+
+    private Map<Integer, Long> repairEntered(Map<Integer, AssetEntity> index, Set<String> downtime) {
         Map<Integer, Long> entered = new HashMap<Integer, Long>();
+        Set<String> down = downtime == null ? Downtime.statuses("") : downtime;
         Map<Integer, List<RepairTime.Change>> history = repairHistory(index);
         for (Map.Entry<Integer, List<RepairTime.Change>> entry : history.entrySet()) {
             long open = -1L;
             List<RepairTime.Change> changes = entry.getValue();
             for (int i = 0; i < changes.size(); i++) {
                 RepairTime.Change change = changes.get(i);
-                if (Statuses.REPAIR.equals(change.getNext())) {
+                if (down.contains(change.getNext())) {
                     if (open < 0L) {
                         open = change.getAt();
                     }

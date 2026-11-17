@@ -24,6 +24,8 @@ public class ModuleSetupDto {
     private String reportMailPart;
     /** When true, each top place's custodian also receives a book of that place only. */
     private Boolean reportMailBranch;
+    /** Comma-separated status keys that count as downtime. Empty means repair. "-" means none. */
+    private String reportIdleStatuses;
     private Boolean lifeApproval;
     private String lifeApprover;
     private String lifePlaces;
@@ -92,6 +94,8 @@ public class ModuleSetupDto {
     public void setReportMailPart(String reportMailPart) { this.reportMailPart = reportMailPart; }
     public Boolean getReportMailBranch() { return reportMailBranch; }
     public void setReportMailBranch(Boolean reportMailBranch) { this.reportMailBranch = reportMailBranch; }
+    public String getReportIdleStatuses() { return reportIdleStatuses; }
+    public void setReportIdleStatuses(String reportIdleStatuses) { this.reportIdleStatuses = reportIdleStatuses; }
     public Boolean getLifeApproval() { return lifeApproval; }
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }
