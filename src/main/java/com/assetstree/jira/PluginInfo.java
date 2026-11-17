@@ -2,7 +2,7 @@ package com.assetstree.jira;
 
 public final class PluginInfo {
     public static final String KEY = "com.assetstree.jira.asset-tree";
-    public static final String VERSION = "1.3.285";
+    public static final String VERSION = "1.3.286";
 
     private PluginInfo() {
     }
