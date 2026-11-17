@@ -65,6 +65,7 @@ import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import com.assetstree.jira.PluginInfo;
 import com.assetstree.jira.event.AssetChangedEvent;
+import com.assetstree.jira.event.ScheduleDueEvent;
 import com.assetstree.jira.ao.AssetActivityEntity;
 import com.assetstree.jira.ao.AssetAttributeEntity;
 import com.assetstree.jira.ao.AssetCommentEntity;
@@ -225,6 +226,7 @@ import com.assetstree.jira.model.ReportLines;
 import com.assetstree.jira.model.LifeApprovers;
 import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.PlanUnderlay;
+import com.assetstree.jira.model.CalendarRaise;
 import com.assetstree.jira.model.ContractorContract;
 import com.assetstree.jira.model.LifeBook;
 import com.assetstree.jira.model.LifecycleDraft;
@@ -9814,6 +9816,128 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
+    @Override
+    public void raiseCalendar() {
+        SchemaReady.ensure(ao());
+        final List<ScheduleDueEvent> events = new ArrayList<ScheduleDueEvent>();
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                raiseInside(events);
+                return null;
+            }
+        });
+        for (int i = 0; i < events.size(); i++) {
+            emitSchedule(events.get(i));
+        }
+    }
+
+    private void raiseInside(List<ScheduleDueEvent> events) {
+        LocalDate today = businessToday();
+        LocalTime clock = businessClock();
+        String now = String.format("%02d:%02d", Integer.valueOf(clock.getHour()), Integer.valueOf(clock.getMinute()));
+        ServicePlanEntity[] rows = ao().find(ServicePlanEntity.class);
+        if (rows == null) {
+            return;
+        }
+        Map<String, Boolean> serviceOn = new HashMap<String, Boolean>();
+        Map<String, Map<String, String>> labels = new HashMap<String, Map<String, String>>();
+        for (int i = 0; i < rows.length; i++) {
+            ServicePlanEntity plan = rows[i];
+            if (plan == null) {
+                continue;
+            }
+            try {
+                raiseOne(plan, today, now, serviceOn, labels, events);
+            } catch (RuntimeException ex) {
+                log.warn("Calendar plan {} was skipped", Integer.valueOf(plan.getID()), ex);
+            }
+        }
+    }
+
+    private void raiseOne(ServicePlanEntity plan, LocalDate today, String clock, Map<String, Boolean> serviceOn,
+                           Map<String, Map<String, String>> labels, List<ScheduleDueEvent> events) {
+        AssetEntity asset = null;
+        String projectKey = plan.getProjectKey() == null ? "" : plan.getProjectKey().trim();
+        if (plan.getAssetId() > 0) {
+            asset = ao().get(AssetEntity.class, plan.getAssetId());
+            if (asset == null || asset.getDeletedAt() != null || isLocation(asset)) {
+                return;
+            }
+            projectKey = asset.getProjectKey();
+        }
+        if (projectKey == null || projectKey.isEmpty()) {
+            return;
+        }
+        Boolean enabled = serviceOn.get(projectKey);
+        if (enabled == null) {
+            enabled = Boolean.valueOf(moduleOn(projectKey, ProjectModules.SERVICE));
+            serviceOn.put(projectKey, enabled);
+        }
+        if (!enabled.booleanValue()) {
+            return;
+        }
+        String unit = plan.getEveryUnit() == null ? "" : plan.getEveryUnit();
+        boolean onceDone = ServiceDue.ONCE.equals(ServiceDue.unit(unit)) && "done".equals(plan.getAppliedFor());
+        List<CalendarRaise.Hand> hands = CalendarRaise.due(plan.getLastDone(), plan.getEveryCount(), unit,
+                plan.getMoves(), plan.getStartTime(), plan.getEndTime(), plan.getCompletedOn(), onceDone,
+                plan.getRaised(), today, clock);
+        if (hands.isEmpty()) {
+            return;
+        }
+        Map<String, String> names = labels.get(projectKey);
+        if (names == null) {
+            names = kindNames(projectKey);
+            labels.put(projectKey, names);
+        }
+        String raised = plan.getRaised();
+        for (int i = 0; i < hands.size(); i++) {
+            CalendarRaise.Hand hand = hands.get(i);
+            events.add(scheduleEvent(projectKey, asset, plan, hand, names));
+            raised = CalendarRaise.remember(raised, hand.getSource(), today);
+        }
+        plan.setRaised(raised);
+        plan.save();
+    }
+
+    private ScheduleDueEvent scheduleEvent(String projectKey, AssetEntity asset, ServicePlanEntity plan,
+                                           CalendarRaise.Hand hand, Map<String, String> names) {
+        String kind = WorkKind.clean(plan.getKind());
+        UserProfileDto person = profile(plan.getAssigneeKey());
+        String assignee = "";
+        String assigneeName = "";
+        if (person != null) {
+            assignee = person.getUsername() == null || person.getUsername().trim().isEmpty()
+                    ? (plan.getAssigneeKey() == null ? "" : plan.getAssigneeKey())
+                    : person.getUsername();
+            assigneeName = person.getDisplayName() == null ? "" : person.getDisplayName();
+        } else if (plan.getAssigneeKey() != null) {
+            assignee = plan.getAssigneeKey();
+        }
+        String assetName = asset == null || asset.getName() == null ? "" : asset.getName();
+        String objectKey = asset == null || asset.getObjectKey() == null ? "" : asset.getObjectKey();
+        String status = asset == null ? "" : Statuses.canonical(asset.getStatus());
+        String typeKey = asset == null || asset.getTypeKey() == null ? "" : asset.getTypeKey();
+        return new ScheduleDueEvent(projectKey, asset == null ? 0 : asset.getID(), objectKey, assetName, status, typeKey,
+                plan.getName(), hand.getDate(), plan.getNote(), kind, namedKind(kind, names), assignee, assigneeName,
+                hand.getStart(), hand.getEnd(), hand.getSource());
+    }
+
+    private void emitSchedule(ScheduleDueEvent event) {
+        if (event == null || event.getProjectKey().isEmpty()) {
+            return;
+        }
+        try {
+            EventPublisher publisher = ComponentAccessor.getComponent(EventPublisher.class);
+            if (publisher != null) {
+                publisher.publish(event);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Calendar day was not published", ex);
+        }
+        emit(event.getProjectKey(), ScheduleDueEvent.NAME, event.toJson());
+    }
+
     private void applyDueQuietly(String projectKey, List<ServiceNotice> notices) {
         try {
             applyDueInside(projectKey, null, notices);
@@ -15824,7 +15948,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void publishRule(String projectKey, String event, String json) {
-        if (event == null || !event.startsWith("asset.")) {
+        if (event == null || !event.startsWith("asset.") || ScheduleDueEvent.NAME.equals(event)) {
             return;
         }
         try {

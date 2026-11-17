@@ -61,6 +61,9 @@ public class AssetRuleValuesTest {
         assertTrue(AssetRuleValues.currentStatus("", "in_use"));
         assertTrue(AssetRuleValues.currentStatus("in_use", "in_use"));
         assertFalse(AssetRuleValues.currentStatus("repair", "in_use"));
+        assertTrue(AssetRuleValues.kindMatches("", "to"));
+        assertTrue(AssetRuleValues.kindMatches("to", "to"));
+        assertFalse(AssetRuleValues.kindMatches("kts", "to"));
     }
 
     @Test

@@ -176,6 +176,12 @@
                                type="TRIGGER">
         <param name="projectSafe">true</param>
     </automation-rule-component>
+    <automation-rule-component key="schedule-due-trigger"
+                               class="com.assetstree.jira.automation.ScheduleDueTrigger"
+                               name="Calendar day"
+                               type="TRIGGER">
+        <param name="projectSafe">true</param>
+    </automation-rule-component>
     <automation-rule-component key="asset-changed-trigger"
                                class="com.assetstree.jira.automation.AssetChangedTrigger"
                                name="Equipment changed"

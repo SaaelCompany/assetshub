@@ -352,4 +352,106 @@ public final class ScheduleOccurrences {
             return null;
         }
     }
+
+    /** One series day as it is shown, with the clock of that day. */
+    public static final class Slot {
+        private final String source;
+        private final LocalDate day;
+        private final String start;
+        private final String end;
+
+        public Slot(String source, LocalDate day, String start, String end) {
+            this.source = source == null ? "" : source;
+            this.day = day;
+            this.start = start == null ? "" : start;
+            this.end = end == null ? "" : end;
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public LocalDate getDay() {
+            return day;
+        }
+
+        public String getStart() {
+            return start;
+        }
+
+        public String getEnd() {
+            return end;
+        }
+    }
+
+    /**
+     * Series days shown on {@code day}. A drag uses the day it was moved to.
+     * A removed day is absent. A one-off uses its own date, which is also its anchor.
+     */
+    public static List<Slot> onDate(String lastDone, int count, String unit, String moves, String seriesStart,
+            String seriesEnd, LocalDate day) {
+        List<Slot> found = new ArrayList<Slot>();
+        if (day == null) {
+            return found;
+        }
+        String clean = ServiceDue.unit(unit);
+        LocalDate first = ServiceDue.next(lastDone, count, clean);
+        if (first == null) {
+            return found;
+        }
+        Map<String, String> moved = moveTargets(moves);
+        Set<String> seen = new HashSet<String>();
+        boolean once = ServiceDue.ONCE.equals(clean);
+        String anchor = lastDone == null ? "" : lastDone.trim();
+        for (Map.Entry<String, String> entry : moved.entrySet()) {
+            String source = entry.getKey();
+            String target = entry.getValue();
+            if (target == null || "-".equals(dayOf(target))) {
+                continue;
+            }
+            if (!once && !anchor.isEmpty() && source.compareTo(anchor) <= 0) {
+                continue;
+            }
+            LocalDate shown = parseDay(dayOf(target));
+            if (day.equals(shown)) {
+                addSlot(found, seen, source, shown, target, seriesStart, seriesEnd);
+            }
+        }
+        if (once) {
+            if (!moved.containsKey(first.toString()) && day.equals(first)) {
+                addSlot(found, seen, first.toString(), first, null, seriesStart, seriesEnd);
+            }
+            return found;
+        }
+        LocalDate cursor = first.isBefore(day) ? jumpTo(first, count, clean, day.minusDays(1)) : first;
+        int guard = 0;
+        while (cursor != null && !cursor.isAfter(day.plusDays(1)) && guard < 40) {
+            if (afterAnchor(cursor, lastDone)) {
+                LocalDate shown = displayOf(cursor, moved);
+                if (day.equals(shown)) {
+                    String target = moved.get(cursor.toString());
+                    addSlot(found, seen, cursor.toString(), shown, target, seriesStart, seriesEnd);
+                }
+            }
+            if (!cursor.isBefore(day)) {
+                break;
+            }
+            LocalDate next = ServiceDue.next(cursor.toString(), count, clean);
+            if (next == null || !next.isAfter(cursor)) {
+                break;
+            }
+            cursor = next;
+            guard++;
+        }
+        return found;
+    }
+
+    private static void addSlot(List<Slot> found, Set<String> seen, String source, LocalDate shown, String target,
+            String seriesStart, String seriesEnd) {
+        if (source == null || source.isEmpty() || shown == null || !seen.add(source)) {
+            return;
+        }
+        String[] clock = clockOf(target, seriesStart, seriesEnd);
+        found.add(new Slot(source, shown, clock[0], clock[1]));
+    }
 }
