@@ -3,6 +3,7 @@ package com.assetstree.jira.service;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.dto.AssetDto;
+import com.assetstree.jira.model.AssetMailDraft;
 import com.assetstree.jira.dto.AssetLinkDto;
 import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
@@ -447,4 +448,7 @@ public interface AssetService {
 
     /** Sets the status of one piece of equipment. Returns 1 when the status changed. */
     int applyAssetStatus(ApplicationUser user, int assetId, String statusKey);
+
+    /** Queues one plain letter about this equipment. Returns 1 when the queue accepted it. */
+    int mailEquipment(ApplicationUser user, int assetId, AssetMailDraft draft);
 }

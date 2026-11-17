@@ -182,6 +182,8 @@ import com.assetstree.jira.model.CardCanvas;
 import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkSelection;
 import com.assetstree.jira.model.AssetException;
+import com.assetstree.jira.model.AssetMailDraft;
+import com.assetstree.jira.model.AssetMailLetter;
 import com.assetstree.jira.model.AssetValidator;
 import com.assetstree.jira.model.AttributeDraft;
 import com.assetstree.jira.model.DefaultTypes;
@@ -15647,6 +15649,181 @@ public class AssetServiceImpl implements AssetService {
                 return Integer.valueOf(1);
             }
         }).intValue();
+    }
+
+    @Override
+    public int mailEquipment(ApplicationUser user, int assetId, AssetMailDraft draft) {
+        AssetEntity asset = requireReadable(user, assetId);
+        if (isLocation(asset) || asset.getDeletedAt() != null) {
+            return 0;
+        }
+        AssetMailDraft request = draft == null ? new AssetMailDraft() : draft;
+        UserProfileDto person = profile(mailRecipient(asset, request));
+        if (person == null || person.getEmail() == null || person.getEmail().trim().isEmpty()) {
+            return 0;
+        }
+        String statusLabel = statusName(asset.getProjectKey(), Statuses.canonical(asset.getStatus()));
+        String previous = request.getPrevious() == null ? "" : request.getPrevious().trim();
+        String previousLabel = previous.isEmpty() ? "" : statusName(asset.getProjectKey(), previous);
+        String detailLabel = mailDetail(request.getDetail());
+        String headline = mailHeadline(request.getEvent(), request.getDetail(), statusLabel);
+        List<String> lines = new ArrayList<String>();
+        String parts = request.getParts();
+        if (AssetMailLetter.includes(parts, "key")) {
+            lines.add(mailLine("asset-tree.mail.line.key", asset.getObjectKey()));
+        }
+        if (AssetMailLetter.includes(parts, "name")) {
+            lines.add(mailLine("asset-tree.mail.line.name", asset.getName()));
+        }
+        if (AssetMailLetter.includes(parts, "status")) {
+            lines.add(mailLine("asset-tree.mail.line.status", statusLabel));
+        }
+        if (AssetMailLetter.includes(parts, "previous")) {
+            lines.add(mailLine("asset-tree.mail.line.previous", previousLabel));
+        }
+        if (AssetMailLetter.includes(parts, "plan")) {
+            lines.add(mailLine("asset-tree.mail.line.plan", request.getPlan()));
+        }
+        if (AssetMailLetter.includes(parts, "due")) {
+            lines.add(mailLine("asset-tree.mail.line.due", request.getDue()));
+        }
+        if (AssetMailLetter.includes(parts, "detail")) {
+            lines.add(mailLine("asset-tree.mail.line.detail", detailLabel));
+        }
+        if (AssetMailLetter.includes(parts, "note")) {
+            lines.add(mailLine("asset-tree.mail.line.note", request.getNote()));
+        }
+        lines.add(jiraBaseUrl() + "/plugins/servlet/asset-tree?project=" + asset.getProjectKey() + "&view=all#" + asset.getID());
+        String extra = request.getExtra() == null ? "" : request.getExtra().trim();
+        if (extra.length() > 500) {
+            extra = extra.substring(0, 500);
+        }
+        String subject = mailText("asset-tree.mail.about", asset.getName() == null ? "" : asset.getName(), headline);
+        dispatchNotices(java.util.Collections.singletonList(
+                new ServiceNotice(person.getEmail().trim(), subject, AssetMailLetter.compose(lines, extra))));
+        return 1;
+    }
+
+    private String mailRecipient(AssetEntity asset, AssetMailDraft draft) {
+        String role = draft.getRole() == null ? "" : draft.getRole().trim();
+        if ("user".equals(role)) {
+            return draft.getUserKey() == null ? "" : draft.getUserKey().trim();
+        }
+        if ("issued".equals(role)) {
+            return asset.getIssuedKey() == null ? "" : asset.getIssuedKey();
+        }
+        if ("approver".equals(role)) {
+            LifecycleEntity row = lifeRow(asset.getID());
+            return row == null || row.getApproverKey() == null ? "" : row.getApproverKey();
+        }
+        if ("requester".equals(role)) {
+            LifecycleEntity row = lifeRow(asset.getID());
+            return row == null || row.getRequesterKey() == null ? "" : row.getRequesterKey();
+        }
+        if ("assignee".equals(role)) {
+            return planAssignee(asset.getID(), draft.getPlan());
+        }
+        return asset.getCustodianKey() == null ? "" : asset.getCustodianKey();
+    }
+
+    private String planAssignee(int assetId, String planName) {
+        String wanted = planName == null ? "" : planName.trim();
+        String fallback = "";
+        for (ServicePlanEntity plan : plansOf(assetId)) {
+            String assignee = plan.getAssigneeKey() == null ? "" : plan.getAssigneeKey().trim();
+            if (assignee.isEmpty()) {
+                continue;
+            }
+            String name = plan.getName() == null ? "" : plan.getName().trim();
+            if (!wanted.isEmpty() && wanted.equals(name)) {
+                return assignee;
+            }
+            if (fallback.isEmpty()) {
+                fallback = assignee;
+            }
+        }
+        return wanted.isEmpty() ? fallback : "";
+    }
+
+    private String statusName(String projectKey, String statusKey) {
+        if (statusKey == null || statusKey.trim().isEmpty()) {
+            return "";
+        }
+        ProjectStatusEntity known = findStatus(projectKey, statusKey.trim());
+        if (known != null && known.getLabel() != null && !known.getLabel().trim().isEmpty()) {
+            return known.getLabel().trim();
+        }
+        String text = statusText(statusKey.trim());
+        return text == null || text.isEmpty() ? statusKey.trim() : text;
+    }
+
+    private String mailLine(String key, String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return "";
+        }
+        return mailText(key) + ": " + value.trim();
+    }
+
+    private String mailDetail(String detail) {
+        if ("pending".equals(detail)) {
+            return mailText("asset-tree.mail.detail.pending");
+        }
+        if ("approved".equals(detail)) {
+            return mailText("asset-tree.mail.detail.approved");
+        }
+        if ("rejected".equals(detail)) {
+            return mailText("asset-tree.mail.detail.rejected");
+        }
+        if ("created".equals(detail)) {
+            return mailText("asset-tree.mail.detail.created");
+        }
+        if ("changed".equals(detail)) {
+            return mailText("asset-tree.mail.detail.changed");
+        }
+        if ("moved".equals(detail)) {
+            return mailText("asset-tree.mail.detail.moved");
+        }
+        if ("done".equals(detail)) {
+            return mailText("asset-tree.mail.detail.done");
+        }
+        if ("deleted".equals(detail)) {
+            return mailText("asset-tree.mail.detail.deleted");
+        }
+        return "";
+    }
+
+    private String mailHeadline(String event, String detail, String statusLabel) {
+        if ("asset.writeoff".equals(event)) {
+            if ("approved".equals(detail)) {
+                return mailText("asset-tree.mail.headline.approved");
+            }
+            if ("rejected".equals(detail)) {
+                return mailText("asset-tree.mail.headline.rejected");
+            }
+            return mailText("asset-tree.mail.headline.pending");
+        }
+        if ("asset.schedule".equals(event)) {
+            if ("moved".equals(detail)) {
+                return mailText("asset-tree.mail.headline.moved");
+            }
+            if ("done".equals(detail)) {
+                return mailText("asset-tree.mail.headline.done");
+            }
+            if ("deleted".equals(detail)) {
+                return mailText("asset-tree.mail.headline.deleted");
+            }
+            if ("changed".equals(detail)) {
+                return mailText("asset-tree.mail.headline.changed");
+            }
+            return mailText("asset-tree.mail.headline.created");
+        }
+        if ("asset.calendar".equals(event)) {
+            return mailText("asset-tree.mail.headline.calendar");
+        }
+        if ("asset.status".equals(event)) {
+            return mailText("asset-tree.mail.headline.status", statusLabel == null ? "" : statusLabel);
+        }
+        return mailText("asset-tree.mail.headline.updated");
     }
 
     private static final class RuleNote {
