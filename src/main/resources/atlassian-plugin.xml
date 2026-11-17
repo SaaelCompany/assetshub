@@ -200,6 +200,12 @@
                                type="ACTION">
         <param name="projectSafe">true</param>
     </automation-rule-component>
+    <automation-rule-component key="calendar-request-action"
+                               class="com.assetstree.jira.automation.CalendarRequestAction"
+                               name="Create the request from this day"
+                               type="ACTION">
+        <param name="projectSafe">true</param>
+    </automation-rule-component>
     <automation-rule-component key="asset-link-action"
                                class="com.assetstree.jira.automation.AssetLinkAction"
                                name="Link request to equipment"
