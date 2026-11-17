@@ -91,6 +91,8 @@
                             'asset.created': AJS.I18n.getText('asset-tree.automation.changedCreated'),
                             'asset.updated': AJS.I18n.getText('asset-tree.automation.changedUpdated'),
                             'asset.status': AJS.I18n.getText('asset-tree.automation.changedStatus'),
+                            'asset.writeoff': AJS.I18n.getText('asset-tree.automation.changedWriteoff'),
+                            'asset.schedule': AJS.I18n.getText('asset-tree.automation.changedSchedule'),
                             'asset.calendar': AJS.I18n.getText('asset-tree.automation.changedCalendar'),
                             'asset.deleted': AJS.I18n.getText('asset-tree.automation.changedDeleted'),
                             'asset.restored': AJS.I18n.getText('asset-tree.automation.changedRestored')
@@ -99,6 +101,8 @@
                         var summary = names[chosen] || chosen;
                         var status = field(config, 'status');
                         if (status) summary += ': ' + status;
+                        var detail = field(config, 'detail');
+                        if (detail) summary += ' / ' + detail;
                         el.appendChild(document.createTextNode(summary));
                     },
                     renderDetailed: function (config, context, el) {
@@ -110,12 +114,16 @@
                             { value: 'asset.created', label: AJS.I18n.getText('asset-tree.automation.changedCreated') },
                             { value: 'asset.updated', label: AJS.I18n.getText('asset-tree.automation.changedUpdated') },
                             { value: 'asset.status', label: AJS.I18n.getText('asset-tree.automation.changedStatus') },
+                            { value: 'asset.writeoff', label: AJS.I18n.getText('asset-tree.automation.changedWriteoff') },
+                            { value: 'asset.schedule', label: AJS.I18n.getText('asset-tree.automation.changedSchedule') },
                             { value: 'asset.calendar', label: AJS.I18n.getText('asset-tree.automation.changedCalendar') },
                             { value: 'asset.deleted', label: AJS.I18n.getText('asset-tree.automation.changedDeleted') },
                             { value: 'asset.restored', label: AJS.I18n.getText('asset-tree.automation.changedRestored') }
                         ]);
                         label(el, AJS.I18n.getText('asset-tree.automation.triggerStatus'));
                         input(el, config, 'status', 'in_use');
+                        label(el, AJS.I18n.getText('asset-tree.automation.triggerDetail'));
+                        input(el, config, 'detail', 'approved');
                     },
                     renderCard: function (el) {
                         clear(el);

@@ -9757,6 +9757,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public ServicePlanDto createPlan(ApplicationUser user, final int assetId, final ServicePlanDraft draft) {
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
+        final List<RuleNote> scheduleNotes = new ArrayList<RuleNote>();
         ServicePlanDto created = ao().executeInTransaction(new TransactionCallback<ServicePlanDto>() {
             @Override
             public ServicePlanDto doInTransaction() {
@@ -9774,11 +9775,13 @@ public class AssetServiceImpl implements AssetService {
                 ServicePlanEntity row = ao().create(ServicePlanEntity.class, new DBParam("ASSET_ID", assetId));
                 fillPlan(row, asset, draft, true);
                 row.save();
+                scheduleNotes.add(scheduleNote(asset, row, "created"));
                 applyDueQuietly(asset.getProjectKey(), notices);
                 return planDto(row, businessToday());
             }
         });
         dispatchNotices(notices);
+        publishNotes("asset.schedule", scheduleNotes);
         return created;
     }
 
@@ -9788,6 +9791,7 @@ public class AssetServiceImpl implements AssetService {
             return updateLoosePlan(user, planId, draft);
         }
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
+        final List<RuleNote> scheduleNotes = new ArrayList<RuleNote>();
         ServicePlanDto updated = ao().executeInTransaction(new TransactionCallback<ServicePlanDto>() {
             @Override
             public ServicePlanDto doInTransaction() {
@@ -9796,9 +9800,15 @@ public class AssetServiceImpl implements AssetService {
                 if (row == null) {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
+                String beforeMoves = row.getMoves() == null ? "" : row.getMoves();
+                String beforeLast = row.getLastDone() == null ? "" : row.getLastDone();
                 boolean marking = Boolean.TRUE.equals(draft.getDone());
                 fillPlan(row, asset, draft, false);
                 row.save();
+                String afterMoves = row.getMoves() == null ? "" : row.getMoves();
+                String afterLast = row.getLastDone() == null ? "" : row.getLastDone();
+                String detail = marking ? "done" : (!beforeMoves.equals(afterMoves) || !beforeLast.equals(afterLast) ? "moved" : "changed");
+                scheduleNotes.add(scheduleNote(asset, row, detail));
                 if (marking) {
                     recordActivity(asset.getID(), user.getKey(), "service_done",
                             row.getName() == null ? "" : row.getName(), "",
@@ -9809,6 +9819,7 @@ public class AssetServiceImpl implements AssetService {
             }
         });
         dispatchNotices(notices);
+        publishNotes("asset.schedule", scheduleNotes);
         return updated;
     }
 
@@ -9818,18 +9829,21 @@ public class AssetServiceImpl implements AssetService {
             deleteLoosePlan(user, planId);
             return;
         }
+        final List<RuleNote> scheduleNotes = new ArrayList<RuleNote>();
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
-                equipmentForPlan(user, assetId);
+                AssetEntity asset = equipmentForPlan(user, assetId);
                 ServicePlanEntity row = findPlan(assetId, planId);
                 if (row == null) {
                     throw new AssetException(404, "asset-tree.error.notFound");
                 }
+                scheduleNotes.add(scheduleNote(asset, row, "deleted"));
                 ao().delete(row);
                 return null;
             }
         });
+        publishNotes("asset.schedule", scheduleNotes);
     }
 
     @Override
@@ -10634,6 +10648,7 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.user");
         }
         final List<ServiceNotice> notices = new ArrayList<ServiceNotice>();
+        final List<RuleNote> scheduleNotes = new ArrayList<RuleNote>();
         List<ScheduleRowDto> created = ao().executeInTransaction(new TransactionCallback<List<ScheduleRowDto>>() {
             @Override
             public List<ScheduleRowDto> doInTransaction() {
@@ -10670,6 +10685,7 @@ public class AssetServiceImpl implements AssetService {
                     row.setProjectKey(project.getKey());
                     fillPlan(row, asset, plan, true);
                     row.save();
+                    scheduleNotes.add(scheduleNote(asset, row, "created"));
                     rows.add(scheduleRow(row, asset, today));
                 }
                 applyDueQuietly(project.getKey(), notices);
@@ -10677,6 +10693,7 @@ public class AssetServiceImpl implements AssetService {
             }
         });
         dispatchNotices(notices);
+        publishNotes("asset.schedule", scheduleNotes);
         return created;
     }
 
@@ -14986,7 +15003,7 @@ public class AssetServiceImpl implements AssetService {
                     ? "asset-tree.error.writeoff.approver"
                     : "asset-tree.error.writeoff.branch");
         }
-        return ao().executeInTransaction(new TransactionCallback<LifecycleDto>() {
+        LifecycleDto requested = ao().executeInTransaction(new TransactionCallback<LifecycleDto>() {
             @Override
             public LifecycleDto doInTransaction() {
                 LifecycleEntity row = ensureLife(asset.getID());
@@ -15004,6 +15021,8 @@ public class AssetServiceImpl implements AssetService {
                 return lifecycleDto(asset, row);
             }
         });
+        emitNote("asset.writeoff", equipmentNote(asset, "", "", "", "pending", reason));
+        return requested;
     }
 
     @Override
@@ -15013,7 +15032,8 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, "asset-tree.error.life");
         }
         final boolean approve = draft.getApprove().booleanValue();
-        return ao().executeInTransaction(new TransactionCallback<LifecycleDto>() {
+        final String previous = Statuses.canonical(asset.getStatus());
+        LifecycleDto decided = ao().executeInTransaction(new TransactionCallback<LifecycleDto>() {
             @Override
             public LifecycleDto doInTransaction() {
                 LifecycleEntity row = lifeRow(asset.getID());
@@ -15037,6 +15057,12 @@ public class AssetServiceImpl implements AssetService {
                 return lifecycleDto(asset, row);
             }
         });
+        String reason = decided.getWriteoffReason() == null ? "" : decided.getWriteoffReason();
+        emitNote("asset.writeoff", equipmentNote(asset, approve ? previous : "", "", "", approve ? "approved" : "rejected", reason));
+        if (approve) {
+            emitNote("asset.status", equipmentNote(asset, previous, "", "", "", ""));
+        }
+        return decided;
     }
 
     private AssetEntity equipmentForLife(ApplicationUser user, int assetId, boolean edit) {
@@ -15623,6 +15649,79 @@ public class AssetServiceImpl implements AssetService {
         }).intValue();
     }
 
+    private static final class RuleNote {
+        private String project = "";
+        private int id;
+        private String key = "";
+        private String name = "";
+        private String status = "";
+        private String type = "";
+        private String previous = "";
+        private String plan = "";
+        private String due = "";
+        private String detail = "";
+        private String note = "";
+    }
+
+    private RuleNote equipmentNote(AssetEntity asset, String previous, String plan, String due, String detail, String note) {
+        if (asset == null) {
+            return null;
+        }
+        RuleNote row = new RuleNote();
+        row.project = asset.getProjectKey() == null ? "" : asset.getProjectKey();
+        row.id = asset.getID();
+        row.key = asset.getObjectKey() == null ? "" : asset.getObjectKey();
+        row.name = asset.getName() == null ? "" : asset.getName();
+        row.status = Statuses.canonical(asset.getStatus());
+        row.type = asset.getTypeKey() == null ? "" : asset.getTypeKey();
+        row.previous = previous == null ? "" : previous;
+        row.plan = plan == null ? "" : plan;
+        row.due = due == null ? "" : due;
+        row.detail = detail == null ? "" : detail;
+        row.note = note == null ? "" : note;
+        return row;
+    }
+
+    private RuleNote scheduleNote(AssetEntity asset, ServicePlanEntity plan, String detail) {
+        String name = plan == null || plan.getName() == null ? "" : plan.getName();
+        return equipmentNote(asset, "", name, planDue(plan), detail, "");
+    }
+
+    private static String planDue(ServicePlanEntity plan) {
+        if (plan == null) {
+            return "";
+        }
+        LocalDate due = ServiceDue.next(plan.getLastDone(), plan.getEveryCount(), plan.getEveryUnit());
+        return due == null ? "" : due.toString();
+    }
+
+    private void publishNotes(String event, List<RuleNote> notes) {
+        if (notes == null) {
+            return;
+        }
+        for (int i = 0; i < notes.size(); i++) {
+            emitNote(event, notes.get(i));
+        }
+    }
+
+    private void emitNote(String event, RuleNote note) {
+        if (note == null || note.project == null || note.project.isEmpty()) {
+            return;
+        }
+        emit(note.project, event, "{\"event\":\"" + jsonEscape(event)
+                + "\",\"id\":" + note.id
+                + ",\"key\":\"" + jsonEscape(note.key)
+                + "\",\"name\":\"" + jsonEscape(note.name)
+                + "\",\"project\":\"" + jsonEscape(note.project)
+                + "\",\"status\":\"" + jsonEscape(note.status)
+                + "\",\"type\":\"" + jsonEscape(note.type)
+                + "\",\"previous\":\"" + jsonEscape(note.previous)
+                + "\",\"plan\":\"" + jsonEscape(note.plan)
+                + "\",\"due\":\"" + jsonEscape(note.due)
+                + "\",\"detail\":\"" + jsonEscape(note.detail)
+                + "\",\"note\":\"" + jsonEscape(note.note) + "\"}");
+    }
+
     private void emit(String projectKey, String event, String json) {
         if (projectKey == null || projectKey.isEmpty() || json == null) {
             return;
@@ -15659,9 +15758,11 @@ public class AssetServiceImpl implements AssetService {
             String previous = body.has("previous") ? body.getString("previous") : "";
             String plan = body.has("plan") ? body.getString("plan") : "";
             String due = body.has("due") ? body.getString("due") : "";
+            String detail = body.has("detail") ? body.getString("detail") : "";
+            String note = body.has("note") ? body.getString("note") : "";
             EventPublisher events = ComponentAccessor.getComponent(EventPublisher.class);
             if (events != null) {
-                events.publish(new AssetChangedEvent(projectKey, event, id, key, name, status, typeKey, previous, plan, due));
+                events.publish(new AssetChangedEvent(projectKey, event, id, key, name, status, typeKey, previous, plan, due, detail, note));
             }
         } catch (Exception ex) {
             log.warn("Automation event was not published", ex);
