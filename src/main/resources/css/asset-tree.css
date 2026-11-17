@@ -14867,170 +14867,168 @@ button.asset-tree-attach-remove {
     display: none;
 }
 
-@media (max-width: 720px) {
-    #asset-tree-app.asset-tree.is-phone {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 8px 12px 76px;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-    }
+#asset-tree-app.asset-tree.is-phone {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px 12px 76px;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
 
-    #asset-tree-app.is-phone .asset-tree-rail {
-        position: fixed;
-        top: auto;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        z-index: 30;
-        flex-direction: row;
-        align-items: stretch;
-        width: auto;
-        height: auto !important;
-        flex: none;
-        margin: 0;
-        padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
-        border-right: 0;
-        border-top: 1px solid #dfe1e6;
-        box-shadow: 0 -2px 8px rgba(9, 30, 66, 0.08);
-    }
+#asset-tree-app.is-phone .asset-tree-rail {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    flex-direction: row;
+    align-items: stretch;
+    width: auto;
+    height: auto !important;
+    flex: none;
+    margin: 0;
+    padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-top: 1px solid #dfe1e6;
+    box-shadow: 0 -2px 8px rgba(9, 30, 66, 0.08);
+}
 
-    #asset-tree-app.is-phone .asset-tree-rail-group {
-        flex-direction: row;
-        align-items: stretch;
-        justify-content: space-between;
-        width: 100%;
-        gap: 0;
-    }
+#asset-tree-app.is-phone .asset-tree-rail-group {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-between;
+    width: 100%;
+    gap: 0;
+}
 
-    #asset-tree-app.is-phone button.asset-tree-rail-btn {
-        flex: 1 1 0;
-        flex-direction: column;
-        width: auto !important;
-        min-width: 0 !important;
-        height: auto !important;
-        gap: 2px;
-        padding: 4px 1px !important;
-    }
+#asset-tree-app.is-phone button.asset-tree-rail-btn {
+    flex: 1 1 0;
+    flex-direction: column;
+    width: auto !important;
+    min-width: 0 !important;
+    height: auto !important;
+    gap: 2px;
+    padding: 4px 1px !important;
+}
 
-    #asset-tree-app.is-phone button.asset-tree-rail-btn svg {
-        width: 18px !important;
-        height: 18px !important;
-    }
+#asset-tree-app.is-phone button.asset-tree-rail-btn svg {
+    width: 18px !important;
+    height: 18px !important;
+}
 
-    #asset-tree-app.is-phone .asset-tree-rail-label {
-        display: block;
-        max-width: 100%;
-        overflow: hidden;
-        color: inherit;
-        font-size: 10px;
-        font-weight: 600;
-        line-height: 12px;
-        text-align: center;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-    }
+#asset-tree-app.is-phone .asset-tree-rail-label {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    color: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 12px;
+    text-align: center;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
 
-    #asset-tree-app.is-phone button.asset-tree-rail-btn .asset-tree-rail-tip {
-        display: none !important;
-    }
+#asset-tree-app.is-phone button.asset-tree-rail-btn .asset-tree-rail-tip {
+    display: none !important;
+}
 
-    #asset-tree-app.is-phone .asset-tree-body {
-        width: 100%;
-        padding-left: 0;
-    }
+#asset-tree-app.is-phone .asset-tree-body {
+    width: 100%;
+    padding-left: 0;
+}
 
-    #asset-tree-app.is-phone .asset-tree-top {
-        margin-bottom: 12px;
-        padding-bottom: 8px;
-    }
+#asset-tree-app.is-phone .asset-tree-top {
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+}
 
-    #asset-tree-app.is-phone .asset-tree-frame.is-split {
-        display: block;
-        height: auto;
-        min-height: 0;
-        overflow: visible;
-    }
+#asset-tree-app.is-phone .asset-tree-frame.is-split {
+    display: block;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+}
 
-    #asset-tree-app.is-phone .asset-tree-frame.is-split .asset-tree-side {
-        max-height: none;
-        border-bottom: 0;
-    }
+#asset-tree-app.is-phone .asset-tree-frame.is-split .asset-tree-side {
+    max-height: none;
+    border-bottom: 0;
+}
 
-    #asset-tree-app.is-phone .asset-tree-frame.is-split:not(.is-phone-card) .asset-tree-detail {
-        display: none;
-    }
+#asset-tree-app.is-phone .asset-tree-frame.is-split:not(.is-phone-card) .asset-tree-detail {
+    display: none;
+}
 
-    #asset-tree-app.is-phone .asset-tree-frame.is-split.is-phone-card .asset-tree-side,
-    #asset-tree-app.is-phone .asset-tree-frame.is-split.is-phone-card .asset-tree-split {
-        display: none;
-    }
+#asset-tree-app.is-phone .asset-tree-frame.is-split.is-phone-card .asset-tree-side,
+#asset-tree-app.is-phone .asset-tree-frame.is-split.is-phone-card .asset-tree-split {
+    display: none;
+}
 
-    #asset-tree-app.is-phone .asset-tree-phone-back {
-        display: inline-flex !important;
-        width: auto !important;
-        margin: 0 0 8px;
-        padding: 6px 10px !important;
-        justify-content: flex-start;
-    }
+#asset-tree-app.is-phone .asset-tree-phone-back {
+    display: inline-flex !important;
+    width: auto !important;
+    margin: 0 0 8px;
+    padding: 6px 10px !important;
+    justify-content: flex-start;
+}
 
-    #asset-tree-app.is-phone .asset-tree-viewtabs,
-    #asset-tree-app.is-phone .asset-tree-schema-tabs {
-        display: flex;
-        flex-wrap: wrap;
-        max-width: 100%;
-        gap: 6px;
-        overflow: hidden;
-    }
+#asset-tree-app.is-phone .asset-tree-viewtabs,
+#asset-tree-app.is-phone .asset-tree-schema-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    max-width: 100%;
+    gap: 6px;
+    overflow: hidden;
+}
 
-    #asset-tree-app.is-phone button.asset-tree-viewtab,
-    #asset-tree-app.is-phone button.asset-tree-schema-tab {
-        flex: 0 1 auto;
-        max-width: 100%;
-        margin: 0 0 4px;
-        padding: 6px 10px !important;
-        border: 1px solid #dfe1e6 !important;
-        border-radius: 3px;
-        white-space: nowrap;
-    }
+#asset-tree-app.is-phone button.asset-tree-viewtab,
+#asset-tree-app.is-phone button.asset-tree-schema-tab {
+    flex: 0 1 auto;
+    max-width: 100%;
+    margin: 0 0 4px;
+    padding: 6px 10px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    white-space: nowrap;
+}
 
-    #asset-tree-app.is-phone button.asset-tree-viewtab.is-active,
-    #asset-tree-app.is-phone button.asset-tree-schema-tab.is-active {
-        border-color: #0052cc !important;
-        background: #0052cc !important;
-        color: #fff !important;
-    }
+#asset-tree-app.is-phone button.asset-tree-viewtab.is-active,
+#asset-tree-app.is-phone button.asset-tree-schema-tab.is-active {
+    border-color: #0052cc !important;
+    background: #0052cc !important;
+    color: #fff !important;
+}
 
-    #asset-tree-app.is-phone .asset-tree-board .asset-tree-day {
-        min-height: 0;
-        padding: 2px;
-    }
+#asset-tree-app.is-phone .asset-tree-board .asset-tree-day {
+    min-height: 0;
+    padding: 2px;
+}
 
-    #asset-tree-app.is-phone .asset-tree-board button.asset-tree-event.is-chip {
-        display: block;
-        width: 6px;
-        height: 6px;
-        min-height: 0 !important;
-        margin: 2px auto 0;
-        padding: 0 !important;
-        border-radius: 50%;
-        overflow: hidden;
-        font-size: 0 !important;
-        line-height: 0 !important;
-    }
+#asset-tree-app.is-phone .asset-tree-board button.asset-tree-event.is-chip {
+    display: block;
+    width: 6px;
+    height: 6px;
+    min-height: 0 !important;
+    margin: 2px auto 0;
+    padding: 0 !important;
+    border-radius: 50%;
+    overflow: hidden;
+    font-size: 0 !important;
+    line-height: 0 !important;
+}
 
-    #asset-tree-app.is-phone .asset-tree-board button.asset-tree-event.is-chip * {
-        display: none !important;
-    }
+#asset-tree-app.is-phone .asset-tree-board button.asset-tree-event.is-chip * {
+    display: none !important;
+}
 
-    #asset-tree-app.is-phone .asset-tree-floorplan-body,
-    #asset-tree-app.is-phone .asset-tree-report-shell,
-    #asset-tree-app.is-phone .asset-tree-map-shell {
-        grid-template-columns: 1fr;
-    }
+#asset-tree-app.is-phone .asset-tree-floorplan-body,
+#asset-tree-app.is-phone .asset-tree-report-shell,
+#asset-tree-app.is-phone .asset-tree-map-shell {
+    grid-template-columns: 1fr;
+}
 
-    #asset-tree-app.is-phone .asset-tree-outlook {
-        overflow-x: auto;
-    }
+#asset-tree-app.is-phone .asset-tree-outlook {
+    overflow-x: auto;
 }
