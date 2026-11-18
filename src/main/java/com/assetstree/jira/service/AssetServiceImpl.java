@@ -178,6 +178,7 @@ import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.UserProfileDto;
 import com.assetstree.jira.model.MineColumns;
 import com.assetstree.jira.model.AssetDraft;
+import com.assetstree.jira.model.StatusMoment;
 import com.assetstree.jira.model.CopyNames;
 import com.assetstree.jira.model.BulkDraft;
 import com.assetstree.jira.model.CardCanvas;
@@ -927,6 +928,7 @@ public class AssetServiceImpl implements AssetService {
                 String newName = draft.getName().trim();
                 String newDescription = draft.getDescription() == null ? "" : draft.getDescription();
                 String newStatus = resolveStatus(entity.getProjectKey(), draft.getStatus() == null ? entity.getStatus() : draft.getStatus());
+                Date statusWhen = oldStatus.equals(newStatus) ? null : StatusMoment.at(draft.getStatusAt(), new Date());
                 String newCustodian = normalizeCustodian(draft.getCustodianKey());
                 String storedCustodian = newCustodian == null ? "" : newCustodian;
                 String newIssued = type.isLocation() ? null : normalizeCustodian(draft.getIssuedKey());
@@ -950,7 +952,7 @@ public class AssetServiceImpl implements AssetService {
                 logActivity(id, user.getKey(), "name", "", oldName, newName);
                 logActivity(id, user.getKey(), "description", "", clip(oldDescription), clip(newDescription));
                 logActivity(id, user.getKey(), "type", "", typeLabel(requireType(oldTypeKey)), typeLabel(type));
-                logActivity(id, user.getKey(), "status", "", oldStatus, newStatus);
+                logActivity(id, user.getKey(), "status", "", oldStatus, newStatus, statusWhen);
                 logActivity(id, user.getKey(), "custodian", "", displayName(oldCustodian), displayName(storedCustodian));
                 logActivity(id, user.getKey(), "issued", "", displayName(oldIssued), displayName(storedIssued));
                 if (draft.getAttributes() != null) {
@@ -1036,6 +1038,20 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         ao().delete(row);
+    }
+
+    @Override
+    public void moveStatusActivity(ApplicationUser user, int assetId, int activityId, Long created) {
+        requireWritable(user, assetId);
+        AssetActivityEntity row = ao().get(AssetActivityEntity.class, activityId);
+        if (row == null || row.getAssetId() != assetId) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        if (!"status".equals(row.getKind())) {
+            throw new AssetException(400, "asset-tree.error.statusWhen");
+        }
+        row.setCreated(StatusMoment.at(created, new Date()));
+        row.save();
     }
 
     @Override
@@ -5450,12 +5466,17 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void assignFlowStatus(ApplicationUser user, AssetEntity asset, String next) {
+        assignFlowStatus(user, asset, next, null);
+    }
+
+    private void assignFlowStatus(ApplicationUser user, AssetEntity asset, String next, Date when) {
         String oldStatus = Statuses.canonical(asset.getStatus());
         asset.setStatus(next);
         asset.setUpdated(new Date());
         asset.setUpdatedBy(user == null ? "" : user.getKey());
         asset.save();
-        logActivity(asset.getID(), user == null ? "" : user.getKey(), "status", "", oldStatus, next);
+        logActivity(asset.getID(), user == null ? "" : user.getKey(), "status", "", oldStatus, next,
+                when == null ? new Date() : when);
     }
 
     private String portalPath(AssetEntity entity) {
@@ -6588,7 +6609,7 @@ public class AssetServiceImpl implements AssetService {
                 if ("delete".equals(action)) {
                     deleteAsset(user, id.intValue(), draft.isCascade());
                 } else if ("status".equals(action)) {
-                    patchStatus(user, id.intValue(), draft.getStatus());
+                    patchStatus(user, id.intValue(), draft.getStatus(), draft.getStatusAt());
                 } else if ("copy".equals(action)) {
                     copyAsset(user, id.intValue());
                 } else {
@@ -6733,7 +6754,8 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private void patchStatus(ApplicationUser user, final int id, final String status) {
+    private void patchStatus(ApplicationUser user, final int id, final String status, final Long statusAt) {
+        final Date when = StatusMoment.at(statusAt, new Date());
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
@@ -6747,7 +6769,7 @@ public class AssetServiceImpl implements AssetService {
                 entity.setUpdated(new Date());
                 entity.setUpdatedBy(user.getKey());
                 entity.save();
-                logActivity(id, user.getKey(), "status", "", oldStatus, next);
+                logActivity(id, user.getKey(), "status", "", oldStatus, next, when);
                 return null;
             }
         });
@@ -8765,15 +8787,23 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void logActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue) {
+        logActivity(assetId, authorKey, kind, field, oldValue, newValue, null);
+    }
+
+    private void logActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue, Date created) {
         String left = oldValue == null ? "" : oldValue;
         String right = newValue == null ? "" : newValue;
         if (left.equals(right)) {
             return;
         }
-        recordActivity(assetId, authorKey, kind, field, left, right);
+        recordActivity(assetId, authorKey, kind, field, left, right, created);
     }
 
     private void recordActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue) {
+        recordActivity(assetId, authorKey, kind, field, oldValue, newValue, new Date());
+    }
+
+    private void recordActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue, Date created) {
         ao().create(AssetActivityEntity.class,
                 new DBParam("ASSET_ID", assetId),
                 new DBParam("AUTHOR_KEY", authorKey == null ? "" : authorKey),
@@ -8781,7 +8811,7 @@ public class AssetServiceImpl implements AssetService {
                 new DBParam("FIELD_NAME", field == null ? "" : field),
                 new DBParam("OLD_VALUE", clip(oldValue)),
                 new DBParam("NEW_VALUE", clip(newValue)),
-                new DBParam("CREATED", new Date()));
+                new DBParam("CREATED", created == null ? new Date() : created));
     }
 
     /** The ping text is kept whole. A failure to write it does not hide the check result. */
@@ -15925,7 +15955,12 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public int applyIssueEquipmentStatus(final ApplicationUser user, final long issueId, final String statusKey) {
+    public int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey) {
+        return applyIssueEquipmentStatus(user, issueId, statusKey, null);
+    }
+
+    @Override
+    public int applyIssueEquipmentStatus(final ApplicationUser user, final long issueId, final String statusKey, final Date when) {
         return ao().executeInTransaction(new TransactionCallback<Integer>() {
             @Override
             public Integer doInTransaction() {
@@ -15948,7 +15983,7 @@ public class AssetServiceImpl implements AssetService {
                     if (next.equals(Statuses.canonical(asset.getStatus()))) {
                         continue;
                     }
-                    assignFlowStatus(user, asset, next);
+                    assignFlowStatus(user, asset, next, when);
                     changed++;
                 }
                 return Integer.valueOf(changed);
@@ -15957,7 +15992,12 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public int applyAssetStatus(final ApplicationUser user, final int assetId, final String statusKey) {
+    public int applyAssetStatus(ApplicationUser user, int assetId, String statusKey) {
+        return applyAssetStatus(user, assetId, statusKey, null);
+    }
+
+    @Override
+    public int applyAssetStatus(final ApplicationUser user, final int assetId, final String statusKey, final Date when) {
         return ao().executeInTransaction(new TransactionCallback<Integer>() {
             @Override
             public Integer doInTransaction() {
@@ -15969,7 +16009,7 @@ public class AssetServiceImpl implements AssetService {
                 if (next.equals(Statuses.canonical(asset.getStatus()))) {
                     return Integer.valueOf(0);
                 }
-                assignFlowStatus(user, asset, next);
+                assignFlowStatus(user, asset, next, when);
                 return Integer.valueOf(1);
             }
         }).intValue();

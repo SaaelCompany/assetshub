@@ -6039,7 +6039,10 @@
             dialog.appendChild(el('h2', null, t('status')));
             statusChoices().forEach(function (choice) {
                 dialog.appendChild(button(choice.label, 'asset-tree-btn asset-tree-bulk-choice', function () {
-                    postBulk('status', { status: choice.value });
+                    closeModal(dialog);
+                    askStatusMoment(choice.label, null, function (millis) {
+                        postBulk('status', { status: choice.value, statusAt: millis });
+                    });
                 }));
             });
             var actions = el('div', 'asset-tree-dialog-actions');
@@ -6311,7 +6314,50 @@
     }
 
     function changeStatus(asset, status) {
-        persistAsset(asset, { status: status });
+        if (!asset || asset.status === status) return;
+        askStatusMoment(statusLabel(status), null, function (millis) {
+            persistAsset(asset, { status: status, statusAt: millis });
+        });
+    }
+
+    function askStatusMoment(title, initialIso, onSave) {
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, title));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('statusWhenHint')));
+            var when = initialIso ? new Date(initialIso) : new Date();
+            if (isNaN(when.getTime())) when = new Date();
+            function pad(value) {
+                return value < 10 ? '0' + value : String(value);
+            }
+            var date = document.createElement('input');
+            date.type = 'date';
+            date.value = when.getFullYear() + '-' + pad(when.getMonth() + 1) + '-' + pad(when.getDate());
+            var time = document.createElement('input');
+            time.type = 'time';
+            time.value = pad(when.getHours()) + ':' + pad(when.getMinutes());
+            var row = el('div', 'asset-tree-status-when');
+            row.appendChild(date);
+            row.appendChild(time);
+            dialog.appendChild(row);
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () { closeModal(dialog); }));
+            actions.appendChild(button(t('statusWhenSave'), 'asset-tree-btn primary', function () {
+                if (!date.value || !time.value) {
+                    setFormError(t('statusWhenNeed'));
+                    return;
+                }
+                var parts = date.value.split('-');
+                var clock = time.value.split(':');
+                var local = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), Number(clock[0]), Number(clock[1]), 0, 0);
+                if (isNaN(local.getTime()) || local.getTime() > Date.now() + 120000) {
+                    setFormError(t('statusWhenFuture'));
+                    return;
+                }
+                closeModal(dialog);
+                onSave(local.getTime());
+            }));
+            dialog.appendChild(actions);
+        });
     }
 
     function changeCustodian(asset, userKey) {
@@ -6373,7 +6419,7 @@
         var nextType = changes && changes.typeKey ? changes.typeKey : (source.typeKey || asset.typeKey);
         var typeMoved = nextType !== (source.typeKey || asset.typeKey);
         setBusy(true);
-        ajax('PUT', '/assets/' + asset.id, {
+        var body = {
             name: changes && Object.prototype.hasOwnProperty.call(changes, 'name') ? changes.name : source.name,
             projectKey: source.projectKey || asset.projectKey || state.projectKey,
             typeKey: nextType,
@@ -6382,7 +6428,9 @@
             custodianKey: custodianKey,
             issuedKey: issuedKey,
             attributes: attributes
-        }, function (code, payload) {
+        };
+        if (changes && typeof changes.statusAt === 'number') body.statusAt = changes.statusAt;
+        ajax('PUT', '/assets/' + asset.id, body, function (code, payload) {
             setBusy(false);
             if (code < 200 || code >= 300) {
                 if (changes && typeof changes.onError === 'function') changes.onError();
@@ -6911,6 +6959,18 @@
         text.appendChild(line);
         text.appendChild(el('span', null, stamp(item.created)));
         head.appendChild(text);
+        if (mayEdit(asset) && item.action === 'status' && item.id > 0) {
+            var fix = button(t('statusWhenFix'), 'asset-tree-history-when', function () {
+                askStatusMoment(t('statusWhenEdit'), item.created, function (millis) {
+                    ajax('PUT', '/assets/' + asset.id + '/activities/' + item.id, { created: millis }, function (status, payload) {
+                        if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                        else setFormError((payload && payload.message) || t('errorTitle'));
+                    });
+                });
+            });
+            fix.title = t('statusWhenEdit');
+            head.appendChild(fix);
+        }
         if (state.canArrange && asset && item.id > 0) {
             var drop = button('', 'asset-tree-history-delete', function () {
                 if (!window.confirm(t('activityDeleteConfirm'))) return;
@@ -9827,7 +9887,6 @@
         var approverBox = document.getElementById('asset-field-approver');
         var approverKey = approverBox ? (approverBox.value || '') : null;
         setFormError('');
-        setBusy(true);
         var saved = {
             name: name,
             projectKey: state.projectKey,
@@ -9843,7 +9902,9 @@
             attributes: collectAttributes(document.getElementById('asset-detail-form'))
         };
         if (approverKey !== null) saved.approverKey = approverKey;
-        ajax('PUT', '/assets/' + id, saved, function (status, payload) {
+        function sendSaved() {
+            setBusy(true);
+            ajax('PUT', '/assets/' + id, saved, function (status, payload) {
             if (status < 200 || status >= 300) {
                 setBusy(false);
                 setFormError((payload && payload.message) || t('errorTitle'));
@@ -9868,6 +9929,16 @@
                 savePingExempt(id, function () { saveLifecycle(id, function () { finishSave(id, t('moved'), typeMoved); }); });
             });
         });
+        }
+        var nextStatus = statusBox ? statusBox.value : saved.status;
+        if (current && statusBox && nextStatus !== current.status) {
+            askStatusMoment(statusLabel(nextStatus), null, function (millis) {
+                saved.statusAt = millis;
+                sendSaved();
+            });
+            return;
+        }
+        sendSaved();
     }
 
     function saveLifecycle(id, done) {

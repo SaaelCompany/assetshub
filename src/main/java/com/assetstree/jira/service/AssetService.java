@@ -77,6 +77,7 @@ import com.assetstree.jira.dto.TniWatchDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.TypeDraft;
 
+import java.util.Date;
 import java.util.List;
 
 public interface AssetService {
@@ -101,6 +102,9 @@ public interface AssetService {
     void deleteComment(ApplicationUser user, int assetId, int commentId);
 
     void deleteActivity(ApplicationUser user, int assetId, int activityId);
+
+    /** Rewrites the time of one status history row. The time is the actual change, not the save. */
+    void moveStatusActivity(ApplicationUser user, int assetId, int activityId, Long created);
 
     FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
 
@@ -465,8 +469,14 @@ public interface AssetService {
     /** Sets the status of equipment linked to the request. Returns how many rows changed. */
     int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey);
 
+    /** Same as {@link #applyIssueEquipmentStatus(ApplicationUser, long, String)} at a chosen moment. Null uses now. */
+    int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey, Date when);
+
     /** Sets the status of one piece of equipment. Returns 1 when the status changed. */
     int applyAssetStatus(ApplicationUser user, int assetId, String statusKey);
+
+    /** Same as {@link #applyAssetStatus(ApplicationUser, int, String)} at a chosen moment. Null uses now. */
+    int applyAssetStatus(ApplicationUser user, int assetId, String statusKey, Date when);
 
     /** Queues one plain letter about this equipment. Returns 1 when the queue accepted it. */
     int mailEquipment(ApplicationUser user, int assetId, AssetMailDraft draft);

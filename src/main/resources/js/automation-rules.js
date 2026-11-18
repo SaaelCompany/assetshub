@@ -381,7 +381,7 @@
             componentType: 'ACTION',
             name: function () { return AJS.I18n.getText('asset-tree.automation.status'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
-            initialValue: function () { return { status: '' }; },
+            initialValue: function () { return { status: '', whenField: '' }; },
             categories: [],
             labels: [],
             isEditable: true,
@@ -390,13 +390,18 @@
                     summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.status'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(statusWord(field(config, 'status'))));
+                        var text = statusWord(field(config, 'status'));
+                        var when = field(config, 'whenField');
+                        el.appendChild(document.createTextNode(when ? text + ' \u00b7 ' + when : text));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
                         paragraph(el, AJS.I18n.getText('asset-tree.automation.statusCard'));
                         label(el, AJS.I18n.getText('asset-tree.automation.statusField'));
                         statusPick(el, config, 'status', false, AJS.I18n.getText('asset-tree.automation.statusChoose'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.statusWhen'));
+                        input(el, config, 'whenField', 'customfield_10200');
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.statusWhenHint'));
                     },
                     renderCard: function (el) {
                         clear(el);

@@ -11,6 +11,8 @@ public class AssetDraft {
     private String description;
     private String typeKey;
     private String status;
+    /** Epoch millis of the real status change. Null keeps the moment of the save. */
+    private Long statusAt;
     private Integer parentId;
     private String projectKey;
     private String custodianKey;
@@ -49,6 +51,14 @@ public class AssetDraft {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Long getStatusAt() {
+        return statusAt;
+    }
+
+    public void setStatusAt(Long statusAt) {
+        this.statusAt = statusAt;
     }
 
     public Integer getParentId() {

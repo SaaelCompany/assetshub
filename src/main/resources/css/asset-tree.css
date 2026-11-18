@@ -5463,6 +5463,29 @@ a.asset-tree-preview-icon:focus {
     min-width: 0;
 }
 
+#asset-tree-app .asset-tree-history-when {
+    flex: 0 0 auto;
+    margin-left: 8px;
+    padding: 0 4px;
+    border: 0;
+    background: transparent;
+    color: #0052cc;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 24px;
+}
+
+#asset-tree-app .asset-tree-status-when {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-status-when input {
+    flex: 1 1 140px;
+    min-width: 0;
+}
+
 #asset-tree-app .asset-tree-history-delete {
     flex: 0 0 auto;
     display: inline-flex;

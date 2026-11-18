@@ -13,6 +13,8 @@ public class BulkDraft {
     private List<Integer> ids = new ArrayList<Integer>();
     private List<String> keys = new ArrayList<String>();
     private String status;
+    /** Epoch millis of the real status change. Null keeps the moment of the save. */
+    private Long statusAt;
     private String custodianKey;
     private Integer parentId;
     private boolean toRoot;
@@ -56,6 +58,14 @@ public class BulkDraft {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Long getStatusAt() {
+        return statusAt;
+    }
+
+    public void setStatusAt(Long statusAt) {
+        this.statusAt = statusAt;
     }
 
     public String getCustodianKey() {

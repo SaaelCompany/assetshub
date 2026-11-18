@@ -9,6 +9,7 @@ import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.MessageDto;
 import com.assetstree.jira.dto.MineViewDto;
+import com.assetstree.jira.model.ActivityWhenDraft;
 import com.assetstree.jira.model.AssetDraft;
 import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkDraft;
@@ -241,6 +242,19 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.deleteComment(user(), id, commentId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("assets/{id}/activities/{activityId}")
+    public Response moveActivity(@PathParam("id") final int id, @PathParam("activityId") final int activityId,
+                                 final ActivityWhenDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.moveStatusActivity(user(), id, activityId, draft == null ? null : draft.getCreated());
                 return Response.noContent().build();
             }
         });
