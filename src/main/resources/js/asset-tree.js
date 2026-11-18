@@ -19354,13 +19354,14 @@
             });
             nav.appendChild(link);
         });
-        if (state.canEdit && state.boardNaming && (state.boards || []).length) nav.appendChild(boardCreateRow());
-        else if (state.canEdit) {
-            nav.appendChild(button(t('reportBoardNew'), 'asset-tree-report-link', function () {
+        if (state.canEdit) {
+            var naming = state.reportBoard && state.boards != null && !boardById(state.boardId);
+            nav.appendChild(button(t('reportBoardNew'), 'asset-tree-report-link' + (naming ? ' is-current' : ''), function () {
                 state.boardNaming = true;
                 state.reportBoard = true;
                 state.boardId = 0;
                 state.boardEditing = false;
+                state.boardDraft = null;
                 renderFrame();
             }));
         }
@@ -19633,14 +19634,17 @@
         if (!paintReport()) renderFrame();
     }
 
-    function boardCreateRow() {
-        var row = el('div', 'asset-tree-board-create');
+    function boardCreateSheet() {
+        var wrap = el('div', 'asset-tree-report-compose');
+        wrap.appendChild(el('h2', null, t('reportBoardNew')));
+        wrap.appendChild(el('p', 'asset-tree-hint', t('reportBoardHint')));
         var input = document.createElement('input');
         input.type = 'text';
         input.maxLength = 80;
-        input.className = 'asset-tree-filter';
+        input.className = 'asset-tree-filter asset-tree-board-name';
         input.placeholder = t('reportBoardName');
-        var save = button(t('save'), 'asset-tree-btn primary', function () {
+        input.setAttribute('aria-label', t('reportBoardName'));
+        var save = function () {
             var title = String(input.value || '').replace(/^\s+|\s+$/g, '');
             if (!title) return;
             ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/boards', { name: title, panels: [] }, function (status, payload) {
@@ -19655,10 +19659,23 @@
                     renderFrame();
                 } else notify((payload && payload.message) || t('errorTitle'));
             });
+        };
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') save();
         });
-        row.appendChild(input);
-        row.appendChild(save);
-        return row;
+        wrap.appendChild(input);
+        var actions = el('div', 'asset-tree-inline-actions');
+        actions.appendChild(button(t('save'), 'asset-tree-btn primary', save));
+        if ((state.boards || []).length) {
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
+                state.boardNaming = false;
+                state.boardId = state.boards[0].id;
+                loadReportBoard();
+                renderFrame();
+            }));
+        }
+        wrap.appendChild(actions);
+        return wrap;
     }
 
     function boardChartSelect(panel) {
@@ -19745,7 +19762,7 @@
         var name = document.createElement('input');
         name.type = 'text';
         name.maxLength = 80;
-        name.className = 'asset-tree-filter';
+        name.className = 'asset-tree-filter asset-tree-board-name';
         name.value = state.boardDraft.name || '';
         name.setAttribute('aria-label', t('reportBoardName'));
         name.addEventListener('input', function () { state.boardDraft.name = name.value; });
@@ -19870,11 +19887,12 @@
             from.addEventListener('change', applyPeriod);
             to.addEventListener('change', applyPeriod);
             period.appendChild(from);
+            period.appendChild(el('span', null, '\u2014'));
             period.appendChild(to);
             bar.appendChild(period);
         }
         if (state.canEdit && board) {
-            bar.appendChild(button(t('reportBoardCompose'), 'asset-tree-btn', function () {
+            bar.appendChild(button(t('reportBoardCompose'), 'asset-tree-btn asset-tree-board-compose', function () {
                 state.boardEditing = true;
                 state.boardDraft = null;
                 renderFrame();
@@ -19919,24 +19937,27 @@
             shareValues.push(value);
             if (value > maxValue) maxValue = value;
         });
-        tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : String(view.total || 0)));
         var chart = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shareLabels(shareValues), view);
+        var headline = kind === 'line' || kind === 'area' || money;
+        if (chart && headline) tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : String(view.total || 0)));
         if (chart) tile.appendChild(chart);
         else if (view.reason) tile.appendChild(el('p', 'asset-tree-hint', view.reason));
+        else tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : String(view.total || 0)));
         return tile;
     }
 
     function reportBoard() {
-        var main = el('div', 'asset-tree-report-main asset-tree-report-board-wrap');
+        var board = state.boards == null ? null : boardById(state.boardId);
+        var tiles = !!(board && !state.boardEditing);
+        var main = el('div', 'asset-tree-report-main asset-tree-report-board-wrap' + (tiles ? ' is-board' : ''));
         if (state.boards == null) {
             main.appendChild(el('p', 'asset-tree-hint', t('loading')));
             loadBoards();
             return main;
         }
-        var board = boardById(state.boardId);
         if (!board) {
-            main.appendChild(el('p', 'asset-tree-hint', t('reportBoardEmpty')));
-            if (state.canEdit && !(state.boards || []).length) main.appendChild(boardCreateRow());
+            if (state.canEdit) main.appendChild(boardCreateSheet());
+            else main.appendChild(el('p', 'asset-tree-hint', t('reportBoardEmpty')));
             return main;
         }
         if (state.boardEditing) {

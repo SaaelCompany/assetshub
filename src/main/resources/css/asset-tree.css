@@ -7397,6 +7397,15 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-report-board.is-composed {
     grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-main.is-board {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
 }
 
 #asset-tree-app .asset-tree-report-tile.is-wide {
@@ -7407,8 +7416,22 @@ a.asset-tree-preview-icon:focus {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
-    padding: 0 12px;
+    gap: 8px;
+    min-height: 32px;
+    margin: 0 0 12px;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-board-bar .asset-tree-report-period {
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-board-bar .asset-tree-board-compose {
+    margin-left: auto;
+}
+
+#asset-tree-app .asset-tree-report-board-bar .asset-tree-report-period input {
+    height: 32px;
 }
 
 #asset-tree-app .asset-tree-report-compose {
@@ -7421,15 +7444,30 @@ a.asset-tree-preview-icon:focus {
     font-size: 18px;
 }
 
+#asset-tree-app .asset-tree-board-name {
+    display: block;
+    width: min(420px, 100%);
+    margin: 0 0 12px;
+}
+
 #asset-tree-app .asset-tree-board-row {
     display: grid;
     grid-template-columns: 28px minmax(0, 1fr) 160px 160px auto;
     gap: 8px;
     align-items: center;
-    margin: 0 0 8px;
+    margin: 0;
+    padding: 8px 0;
+    border-top: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-board-row .asset-tree-filter {
+    width: 100%;
+    min-width: 0;
 }
 
 #asset-tree-app .asset-tree-board-row.is-head {
+    border-top: 0;
+    padding-top: 0;
     color: #6b778c;
     font-size: 12px;
 }
@@ -7440,30 +7478,54 @@ a.asset-tree-preview-icon:focus {
     cursor: grab;
 }
 
-#asset-tree-app .asset-tree-board-create {
-    display: flex;
-    gap: 8px;
-    margin: 8px 0;
-}
-
 #asset-tree-app .asset-tree-report-compose .asset-tree-inline-actions {
     margin-top: 12px;
 }
 
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart {
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-plot {
+    max-width: none;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart svg.asset-tree-report-svg,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-round svg.asset-tree-report-svg,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-radar svg.asset-tree-report-svg {
+    width: 100% !important;
+    height: 140px !important;
+    min-height: 0 !important;
+    max-height: 140px !important;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart svg.asset-tree-donut,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring {
+    width: 132px !important;
+    height: 132px !important;
+    min-width: 132px !important;
+    max-width: 132px !important;
+    min-height: 132px !important;
+    max-height: 132px !important;
+    flex: 0 0 132px !important;
+}
+
 #asset-tree-app .asset-tree-report-tile {
     margin: 0;
-    padding: 12px;
+    padding: 12px 14px 14px;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
-    background: #fafbfc;
+    background: #fff;
     text-align: left;
     cursor: pointer;
+    min-width: 0;
 }
 
 #asset-tree-app .asset-tree-report-tile h3 {
-    margin: 0 0 4px;
+    margin: 0;
     color: #172b4d;
     font-size: 15px;
+    font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-report-tile > p {
