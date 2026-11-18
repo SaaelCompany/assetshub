@@ -13,6 +13,7 @@ import com.assetstree.jira.ao.AssetPeerEntity;
 import com.assetstree.jira.ao.AssetShareEntity;
 import com.assetstree.jira.ao.AssetTypeEntity;
 import com.assetstree.jira.ao.CardTemplateEntity;
+import com.assetstree.jira.ao.DocTemplateEntity;
 import com.assetstree.jira.ao.FloorEntity;
 import com.assetstree.jira.ao.FlowGraphEntity;
 import com.assetstree.jira.ao.FlowRuleEntity;
@@ -101,6 +102,7 @@ public final class SchemaReady {
             PinEntity.class,
             SavedReportEntity.class,
             ReportBoardEntity.class,
+            DocTemplateEntity.class,
             LifecycleEntity.class,
             CardTemplateEntity.class,
             TypeSchemaEntity.class,

@@ -4540,9 +4540,11 @@
         if (!state.moreBound) {
             state.moreBound = true;
             document.addEventListener('mousedown', function (event) {
-                var wrap = document.querySelector('.asset-tree-more');
-                var menu = document.querySelector('.asset-tree-more-menu');
-                if (menu && wrap && !wrap.contains(event.target)) menu.hidden = true;
+                var menus = document.querySelectorAll('.asset-tree-more-menu');
+                for (var i = 0; i < menus.length; i++) {
+                    var wrap = menus[i].parentNode;
+                    if (wrap && !wrap.contains(event.target)) menus[i].hidden = true;
+                }
             });
         }
         var wrap = el('div', 'asset-tree-more');
@@ -4570,6 +4572,57 @@
                 item.onClick();
             });
             menu.appendChild(entry);
+        });
+        wrap.appendChild(toggle);
+        wrap.appendChild(menu);
+        return wrap;
+    }
+
+    function documentButton(asset) {
+        if (!state.moreBound) {
+            state.moreBound = true;
+            document.addEventListener('mousedown', function (event) {
+                var menus = document.querySelectorAll('.asset-tree-more-menu');
+                for (var i = 0; i < menus.length; i++) {
+                    var wrap = menus[i].parentNode;
+                    if (wrap && !wrap.contains(event.target)) menus[i].hidden = true;
+                }
+            });
+        }
+        var wrap = el('div', 'asset-tree-more');
+        var menu = el('div', 'asset-tree-more-menu');
+        menu.hidden = true;
+        var toggle = toolButton(t('docButton'), 'issue', function (event) {
+            event.stopPropagation();
+            if (!menu.hidden) {
+                menu.hidden = true;
+                return;
+            }
+            menu.innerHTML = '';
+            menu.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            menu.hidden = false;
+            placeMoreMenu(menu);
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
+                if (!menu.parentNode) return;
+                menu.innerHTML = '';
+                var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
+                if (!rows.length) {
+                    menu.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('docEmpty')));
+                    return;
+                }
+                rows.forEach(function (row) {
+                    var entry = el('button', 'asset-tree-more-item');
+                    entry.type = 'button';
+                    entry.appendChild(document.createTextNode(row.name || row.id));
+                    entry.addEventListener('click', function () {
+                        menu.hidden = true;
+                        window.location.href = contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id
+                            + '&document=' + encodeURIComponent(row.id);
+                    });
+                    menu.appendChild(entry);
+                });
+                placeMoreMenu(menu);
+            });
         });
         wrap.appendChild(toggle);
         wrap.appendChild(menu);
@@ -8748,6 +8801,7 @@
                 printCards([state.detail && state.detail.id === asset.id ? state.detail : asset]);
             }));
         }
+        if (!isFolder(asset)) ops.appendChild(documentButton(asset));
         var extra = [];
         if (mayEdit(asset) && !isFolder(asset) && moduleOn('card')) {
             var current = state.detail && state.detail.id === asset.id ? state.detail : asset;
@@ -15304,6 +15358,7 @@
         var sections = [];
         if (state.canConfigure) {
             sections.push(['project', t('projectSection'), null]);
+            sections.push(['documents', t('docSection'), null]);
         }
         if (state.canConfigure) {
             sections.push(['types', t('typesSection'), state.types.length]);
@@ -15352,6 +15407,8 @@
             renderExchangeSettings(panel);
         } else if (state.schemaTab === 'access') {
             renderAccessSettings(panel);
+        } else if (state.schemaTab === 'documents') {
+            renderDocumentSettings(panel);
         } else if (state.schemaTab === 'project') {
             renderProjectSettings(panel);
         } else if (state.schemaTab === 'portal') {
@@ -15362,6 +15419,72 @@
             renderStatusSettings(panel);
         }
         return panel;
+    }
+
+    function renderDocumentSettings(panel) {
+        panel.appendChild(el('p', 'asset-tree-hint', t('docSectionHint')));
+        panel.appendChild(el('p', 'asset-tree-hint', t('docTokens')));
+        var form = el('div', 'asset-tree-settings-block');
+        var name = input('asset-tree-doc-name', '');
+        form.appendChild(field(t('docName'), name));
+        var file = el('input');
+        file.type = 'file';
+        file.accept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        form.appendChild(field(t('docFile'), file));
+        form.appendChild(button(t('docAdd'), 'asset-tree-btn primary', function () {
+            var chosen = file.files && file.files[0];
+            if (!name.value.trim() || !chosen) {
+                notify(t('errorTitle'));
+                return;
+            }
+            uploadDocument(name.value.trim(), chosen);
+        }));
+        panel.appendChild(form);
+        var list = el('div', 'asset-tree-settings-block');
+        list.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        panel.appendChild(list);
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
+            if (!list.parentNode) return;
+            list.innerHTML = '';
+            var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
+            if (status < 200 || status >= 300) {
+                list.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
+                return;
+            }
+            rows.forEach(function (row) {
+                var line = el('div', 'asset-tree-doc-row');
+                line.appendChild(el('span', null, row.name || row.id));
+                if (!row.builtin) {
+                    line.appendChild(button(t('docDelete'), 'asset-tree-btn', function () {
+                        ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/documents/' + encodeURIComponent(row.id), null, function () {
+                            renderFrame();
+                        });
+                    }));
+                }
+                list.appendChild(line);
+            });
+        });
+    }
+
+    function uploadDocument(name, file) {
+        var xhr = new XMLHttpRequest();
+        var data = new FormData();
+        data.append('file', file, file.name || 'template.docx');
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?documents=1&projectKey='
+            + encodeURIComponent(state.projectKey) + '&name=' + encodeURIComponent(name), true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                renderFrame();
+                return;
+            }
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            notify((payload && payload.message) || t('errorTitle'));
+        };
+        xhr.send(data);
     }
 
     function renderProjectSettings(panel) {

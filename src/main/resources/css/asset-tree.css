@@ -3615,6 +3615,15 @@ a.asset-tree-url {
     border-top: 1px solid var(--line);
 }
 
+#asset-tree-app .asset-tree-doc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid #ebecf0;
+}
+
 .asset-tree-settings-title {
     margin: 0 0 8px;
     font-size: 16px;

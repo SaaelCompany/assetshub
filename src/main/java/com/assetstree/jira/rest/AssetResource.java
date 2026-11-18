@@ -766,6 +766,30 @@ public class AssetResource {
         });
     }
 
+    @GET
+    @Path("projects/{projectKey}/documents")
+    public Response documents(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.documents(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/documents/{templateId}")
+    public Response deleteDocument(@PathParam("projectKey") final String projectKey,
+                                   @PathParam("templateId") final String templateId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteDocument(user(), projectKey, templateId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
     @DELETE
     @Path("projects/{projectKey}/boards/{boardId}")
     public Response deleteReportBoard(@PathParam("projectKey") final String projectKey, @PathParam("boardId") final int boardId) {

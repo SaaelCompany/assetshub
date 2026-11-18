@@ -76,6 +76,7 @@ import com.assetstree.jira.ao.AssetFieldEntity;
 import com.assetstree.jira.ao.FlowGraphEntity;
 import com.assetstree.jira.ao.FlowRuleEntity;
 import com.assetstree.jira.ao.AssetFileEntity;
+import com.assetstree.jira.ao.DocTemplateEntity;
 import com.assetstree.jira.ao.AssetShareEntity;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetLinkEntity;
@@ -166,6 +167,7 @@ import com.assetstree.jira.dto.ReportLineDto;
 import com.assetstree.jira.dto.ReportVennDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
+import com.assetstree.jira.dto.DocTemplateDto;
 import com.assetstree.jira.dto.ReportBoardDto;
 import com.assetstree.jira.dto.ReportBoardPanelDto;
 import com.assetstree.jira.dto.SavedReportDto;
@@ -204,6 +206,9 @@ import com.assetstree.jira.model.PlaceArrangeDraft;
 import com.assetstree.jira.model.PlaceLayout;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.FlowRules;
+import com.assetstree.jira.model.DocFields;
+import com.assetstree.jira.model.DocForms;
+import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
 import com.assetstree.jira.model.GrantDraft;
@@ -300,7 +305,10 @@ import java.time.ZoneId;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -18370,6 +18378,320 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             return "";
         }
+    }
+
+    @Override
+    public List<DocTemplateDto> documents(ApplicationUser user, String projectKey) {
+        Project project = requireReadableProject(user, projectKey);
+        List<DocTemplateDto> list = new ArrayList<DocTemplateDto>();
+        for (int i = 0; i < DocForms.ALL.length; i++) {
+            DocForms.Builtin form = DocForms.ALL[i];
+            DocTemplateDto dto = new DocTemplateDto();
+            dto.setId(form.getId());
+            dto.setName(i18n().getText(form.getNameKey()));
+            dto.setBuiltin(true);
+            list.add(dto);
+        }
+        DocTemplateEntity[] rows = ao().find(DocTemplateEntity.class,
+                Query.select().where("PROJECT_KEY = ?", project.getKey()).order("ID ASC"));
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                list.add(documentDto(rows[i]));
+            }
+        }
+        return list;
+    }
+
+    @Override
+    public DocTemplateDto saveDocument(ApplicationUser user, String projectKey, String name, String fileName, byte[] data) {
+        Project project = requireReadableProject(user, projectKey);
+        if (!canConfigure(user, project)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        String title = name == null ? "" : name.trim();
+        if (title.isEmpty() || title.length() > 120) {
+            throw new AssetException(400, "asset-tree.error.doc.name");
+        }
+        if (!DocxFill.isDocx(data) || data.length > DocxFill.MAX_BYTES) {
+            throw new AssetException(400, data != null && data.length > DocxFill.MAX_BYTES
+                    ? "asset-tree.error.doc.size" : "asset-tree.error.doc.type");
+        }
+        try {
+            DocxFill.fill(data, new HashMap<String, String>());
+        } catch (IOException ex) {
+            throw new AssetException(400, "asset-tree.error.doc.type");
+        }
+        DocTemplateEntity row = ao().create(DocTemplateEntity.class,
+                new DBParam("PROJECT_KEY", project.getKey()),
+                new DBParam("NAME", title));
+        row.setFileName(documentFileName(fileName));
+        row.setCreated(new Date());
+        row.save();
+        try {
+            writeDocument(row.getID(), data);
+        } catch (IOException ex) {
+            ao().delete(row);
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+        return documentDto(row);
+    }
+
+    @Override
+    public void deleteDocument(ApplicationUser user, String projectKey, String templateId) {
+        Project project = requireReadableProject(user, projectKey);
+        if (!canConfigure(user, project)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        int id = documentNumber(templateId);
+        DocTemplateEntity row = id <= 0 ? null : ao().get(DocTemplateEntity.class, id);
+        if (row == null || row.getProjectKey() == null || !row.getProjectKey().equals(project.getKey())) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        ao().delete(row);
+        File stored = documentFile(id);
+        if (stored.isFile()) {
+            stored.delete();
+        }
+    }
+
+    @Override
+    public StoredFile openDocument(ApplicationUser user, int assetId, String templateId) {
+        AssetEntity asset = requireVisible(user, assetId);
+        String title = documentTitle(asset.getProjectKey(), templateId);
+        byte[] template = documentBytes(asset.getProjectKey(), templateId);
+        try {
+            byte[] filled = DocxFill.fill(template, documentValues(asset));
+            String fileName = title + " " + (asset.getObjectKey() == null ? "" : asset.getObjectKey()) + ".docx";
+            return new StoredFile(fileName.trim(),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", filled);
+        } catch (IOException ex) {
+            throw new AssetException(400, "asset-tree.error.doc.type");
+        }
+    }
+
+    private DocTemplateDto documentDto(DocTemplateEntity row) {
+        DocTemplateDto dto = new DocTemplateDto();
+        dto.setId(String.valueOf(row.getID()));
+        dto.setName(row.getName() == null ? "" : row.getName());
+        dto.setBuiltin(false);
+        return dto;
+    }
+
+    private String documentTitle(String projectKey, String templateId) {
+        DocForms.Builtin builtin = DocForms.find(templateId);
+        if (builtin != null) {
+            return i18n().getText(builtin.getNameKey());
+        }
+        int id = documentNumber(templateId);
+        DocTemplateEntity row = id <= 0 ? null : ao().get(DocTemplateEntity.class, id);
+        if (row == null || row.getProjectKey() == null || !row.getProjectKey().equals(projectKey)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        return row.getName() == null || row.getName().trim().isEmpty() ? "document" : row.getName().trim();
+    }
+
+    private byte[] documentBytes(String projectKey, String templateId) {
+        DocForms.Builtin builtin = DocForms.find(templateId);
+        if (builtin != null) {
+            try {
+                return DocForms.bytes(builtin);
+            } catch (IOException ex) {
+                throw new AssetException(500, "asset-tree.error.unexpected");
+            }
+        }
+        int id = documentNumber(templateId);
+        DocTemplateEntity row = id <= 0 ? null : ao().get(DocTemplateEntity.class, id);
+        if (row == null || row.getProjectKey() == null || !row.getProjectKey().equals(projectKey)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        File stored = documentFile(id);
+        if (!stored.isFile() || stored.length() > DocxFill.MAX_BYTES) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        try {
+            FileInputStream input = new FileInputStream(stored);
+            try {
+                ByteArrayOutputStream out = new ByteArrayOutputStream((int) stored.length());
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+                return out.toByteArray();
+            } finally {
+                input.close();
+            }
+        } catch (IOException ex) {
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+    }
+
+    private void writeDocument(int id, byte[] data) throws IOException {
+        FileOutputStream out = new FileOutputStream(documentFile(id));
+        try {
+            out.write(data);
+        } finally {
+            out.close();
+        }
+    }
+
+    private File documentFile(int id) {
+        return new File(AssetFileStore.directory(), "doctpl-" + id);
+    }
+
+    private int documentNumber(String templateId) {
+        if (templateId == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(templateId.trim());
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    private String documentFileName(String fileName) {
+        String name = fileName == null ? "" : fileName.trim();
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        if (name.length() > 120) {
+            name = name.substring(name.length() - 120);
+        }
+        if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".docx")) {
+            return "template.docx";
+        }
+        return name;
+    }
+
+    private Map<String, String> documentValues(AssetEntity asset) {
+        DocFields.Source source = new DocFields.Source();
+        source.name = asset.getName() == null ? "" : asset.getName();
+        source.objectKey = asset.getObjectKey() == null ? "" : asset.getObjectKey();
+        source.description = asset.getDescription() == null ? "" : asset.getDescription();
+        AssetTypeEntity type = findType(asset.getTypeKey());
+        source.typeLabel = type == null ? "" : documentLabel(type.getLabel());
+        source.statusLabel = statusName(asset.getProjectKey(), asset.getStatus());
+        source.mol = userLabel(asset.getIssuedKey());
+        source.custodian = userLabel(asset.getCustodianKey());
+        source.role = source.mol.isEmpty() ? "" : i18n().getText("asset-tree.ui.issuedTo");
+        Project project = project(asset.getProjectKey());
+        source.project = project == null || project.getName() == null ? asset.getProjectKey() : project.getName();
+        source.today = DateTimeFormatter.ofPattern("dd.MM.yyyy").format(LocalDate.now(businessZone()));
+        source.quantity = "1";
+        LifecycleEntity life = lifeRow(asset.getID());
+        if (life != null && life.getLifeMonths() > 0) {
+            int months = life.getLifeMonths();
+            boolean english = i18n().getLocale() != null && "en".equals(i18n().getLocale().getLanguage());
+            if (months % 12 == 0) {
+                source.life = (months / 12) + (english ? " years" : " лет");
+            } else {
+                source.life = months + (english ? " mo" : " мес.");
+            }
+        }
+        if (life != null && life.getCommissioned() != null && life.getCommissioned().length() >= 4) {
+            source.year = life.getCommissioned().substring(0, 4);
+        }
+        Map<String, AssetFieldEntity> fieldByKey = new HashMap<String, AssetFieldEntity>();
+        if (asset.getTypeKey() != null) {
+            AssetFieldEntity[] typeFields = fields(asset.getTypeKey());
+            if (typeFields != null) {
+                for (int i = 0; i < typeFields.length; i++) {
+                    if (typeFields[i].getFieldKey() != null) {
+                        fieldByKey.put(typeFields[i].getFieldKey(), typeFields[i]);
+                    }
+                }
+            }
+        }
+        List<AssetAttributeEntity> attributes = attributesFor(asset.getID());
+        for (int i = 0; i < attributes.size(); i++) {
+            AssetAttributeEntity attribute = attributes.get(i);
+            AssetFieldEntity field = fieldByKey.get(attribute.getAttrName());
+            String value = attribute.getAttrValue() == null ? "" : attribute.getAttrValue();
+            if (field != null && FieldKinds.USER.equals(field.getKind())) {
+                value = userLabel(value);
+            }
+            String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
+            source.fields.put(attribute.getAttrName(), value);
+            source.labels.put(attribute.getAttrName(), label == null ? "" : label);
+            if (label != null && DocxFill.normalize(label).contains("должност") && !value.isEmpty()) {
+                source.role = value;
+            }
+        }
+        Integer parentId = asset.getParentId();
+        int guard = 0;
+        while (parentId != null && guard < 12) {
+            guard++;
+            AssetEntity parent = ao().get(AssetEntity.class, parentId);
+            if (parent == null) {
+                break;
+            }
+            if (source.place.isEmpty() && parent.getName() != null) {
+                source.place = parent.getName();
+            }
+            AssetTypeEntity parentType = findType(parent.getTypeKey());
+            if (parentType != null && "branch".equals(parentType.getTypeKey()) && parent.getName() != null) {
+                source.branch = parent.getName();
+            }
+            List<AssetAttributeEntity> parentAttributes = attributesFor(parent.getID());
+            Map<String, AssetFieldEntity> parentFields = new HashMap<String, AssetFieldEntity>();
+            if (parent.getTypeKey() != null) {
+                AssetFieldEntity[] rows = fields(parent.getTypeKey());
+                if (rows != null) {
+                    for (int i = 0; i < rows.length; i++) {
+                        if (rows[i].getFieldKey() != null) {
+                            parentFields.put(rows[i].getFieldKey(), rows[i]);
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < parentAttributes.size(); i++) {
+                AssetAttributeEntity attribute = parentAttributes.get(i);
+                String value = attribute.getAttrValue() == null ? "" : attribute.getAttrValue().trim();
+                if (value.isEmpty()) {
+                    continue;
+                }
+                AssetFieldEntity field = parentFields.get(attribute.getAttrName());
+                String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
+                String token = DocxFill.normalize((attribute.getAttrName() == null ? "" : attribute.getAttrName()) + label);
+                if (source.address.isEmpty() && (token.contains("address") || token.contains("адрес"))) {
+                    source.address = value;
+                }
+                if (source.city.isEmpty() && token.contains("город")) {
+                    source.city = value;
+                }
+            }
+            parentId = parent.getParentId();
+        }
+        source.request = documentRequest(asset.getID());
+        return DocFields.values(source);
+    }
+
+    private String documentRequest(int assetId) {
+        AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
+                Query.select().where("ASSET_ID = ?", assetId).order("ID DESC"));
+        if (links == null || links.length == 0 || issueManager() == null) {
+            return "";
+        }
+        try {
+            Issue issue = issueManager().getIssueObject(Long.valueOf(links[0].getIssueId()));
+            return issue == null || issue.getKey() == null ? "" : issue.getKey();
+        } catch (RuntimeException ex) {
+            return "";
+        }
+    }
+
+    private String documentLabel(String label) {
+        if (label == null) {
+            return "";
+        }
+        String text = label.trim();
+        if (text.startsWith("asset-tree.")) {
+            String translated = i18n().getText(text);
+            return translated == null || translated.isEmpty() ? text : translated;
+        }
+        return text;
     }
 
     private static final class BranchBook {

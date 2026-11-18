@@ -35,6 +35,7 @@ import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
+import com.assetstree.jira.dto.DocTemplateDto;
 import com.assetstree.jira.dto.ReportBoardDto;
 import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportViewDto;
@@ -480,4 +481,14 @@ public interface AssetService {
 
     /** Queues one plain letter about this equipment. Returns 1 when the queue accepted it. */
     int mailEquipment(ApplicationUser user, int assetId, AssetMailDraft draft);
+
+    /** Built-in act forms plus the Word templates uploaded for this project. */
+    List<DocTemplateDto> documents(ApplicationUser user, String projectKey);
+
+    DocTemplateDto saveDocument(ApplicationUser user, String projectKey, String name, String fileName, byte[] data);
+
+    void deleteDocument(ApplicationUser user, String projectKey, String templateId);
+
+    /** A filled .docx for one piece of equipment. */
+    StoredFile openDocument(ApplicationUser user, int assetId, String templateId);
 }

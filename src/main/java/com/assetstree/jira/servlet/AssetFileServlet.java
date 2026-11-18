@@ -4,6 +4,7 @@ import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.security.JiraAuthenticationContext;
 import com.atlassian.jira.user.ApplicationUser;
 import com.atlassian.jira.util.I18nHelper;
+import com.assetstree.jira.dto.DocTemplateDto;
 import com.assetstree.jira.dto.FileDto;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.service.AssetBridge;
@@ -30,6 +31,27 @@ public class AssetFileServlet extends HttpServlet {
         ApplicationUser user = user();
         if (user == null) {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
+        String documentId = request.getParameter("document");
+        if (documentId != null && !documentId.trim().isEmpty()) {
+            int assetId = parseId(request.getParameter("assetId"));
+            if (assetId <= 0) {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST);
+                return;
+            }
+            try {
+                StoredFile stored = service().openDocument(user, assetId, documentId.trim());
+                String name = stored.getFileName() == null ? "document.docx" : stored.getFileName().replace("\"", "").replace("\r", "").replace("\n", "");
+                response.setStatus(HttpServletResponse.SC_OK);
+                response.setContentType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                response.setHeader("Content-Disposition", disposition("attachment", name));
+                response.setContentLength(stored.getData().length);
+                response.getOutputStream().write(stored.getData());
+            } catch (AssetException ex) {
+                response.sendError(ex.getStatus());
+            }
             return;
         }
         int id = parseId(request.getParameter("id"));
@@ -72,6 +94,29 @@ public class AssetFileServlet extends HttpServlet {
         ApplicationUser user = user();
         if (user == null) {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
+        if ("1".equals(request.getParameter("documents"))) {
+            String projectKey = request.getParameter("projectKey");
+            String name = request.getParameter("name");
+            try {
+                String type = request.getContentType() == null ? "" : request.getContentType();
+                if (type.toLowerCase(Locale.ROOT).indexOf("multipart/") != 0) {
+                    throw new AssetException(400, "asset-tree.error.file.required");
+                }
+                byte[] body = readAll(request.getInputStream(), request.getContentLength());
+                MultipartBody.FilePart upload = MultipartBody.firstFile(body, type);
+                if (upload == null || upload.getData().length == 0) {
+                    throw new AssetException(400, "asset-tree.error.file.required");
+                }
+                DocTemplateDto saved = service().saveDocument(user, projectKey, name, upload.getFileName(), upload.getData());
+                response.setStatus(HttpServletResponse.SC_CREATED);
+                response.setContentType("application/json; charset=UTF-8");
+                response.setCharacterEncoding("UTF-8");
+                response.getWriter().write("{\"id\":\"" + jsonString(saved.getId()) + "\",\"name\":\"" + jsonString(saved.getName()) + "\"}");
+            } catch (AssetException ex) {
+                writeError(response, ex);
+            }
             return;
         }
         int assetId = parseId(queryValue(request.getQueryString(), "assetId"));
