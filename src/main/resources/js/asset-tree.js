@@ -3443,6 +3443,16 @@
         }, 0);
     }
 
+    function nameSortWay(objects) {
+        var index;
+        for (index = 1; index < objects.length; index++) {
+            var cmp = compareNames(objects[index - 1].name, objects[index].name);
+            if (!cmp) cmp = objects[index - 1].id - objects[index].id;
+            if (cmp > 0) return 1;
+        }
+        return objects.length > 1 ? -1 : 1;
+    }
+
     function sortTypeByName(placeId, typeKey, direction) {
         var objects = equipmentIn(placeId, typeKey).slice();
         var way = direction < 0 ? -1 : 1;
@@ -3527,16 +3537,12 @@
             if (!state.canObjects || !objects.length) return;
             event.preventDefault();
             event.stopPropagation();
+            var way = nameSortWay(objects);
             openTreeMenu(event.clientX, event.clientY, [{
                 arrow: true,
-                label: '\u2191',
-                title: t('sortNameUp'),
-                onClick: function () { sortTypeByName(placeId, type.typeKey, 1); }
-            }, {
-                arrow: true,
-                label: '\u2193',
-                title: t('sortNameDown'),
-                onClick: function () { sortTypeByName(placeId, type.typeKey, -1); }
+                label: way < 0 ? '\u2193' : '\u2191',
+                title: t(way < 0 ? 'sortNameDown' : 'sortNameUp'),
+                onClick: function () { sortTypeByName(placeId, type.typeKey, way); }
             }]);
         });
         branch.appendChild(row);
