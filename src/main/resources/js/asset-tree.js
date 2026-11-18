@@ -2605,6 +2605,27 @@
         }
     }
 
+    /* On a phone the layout viewport is taller than the screen, so a fixed
+       bottom lands in the middle. The tree scrolls inside the side, and the
+       trash row stays on the last visible line above the tab bar. */
+    function pinPhoneTree(app) {
+        var side = app.querySelector('.asset-tree-side');
+        if (!side) return;
+        var rail = app.querySelector('.asset-tree-rail');
+        var railHeight = 48;
+        if (rail) {
+            var railBox = rail.getBoundingClientRect();
+            if (railBox.height) railHeight = railBox.height;
+        }
+        var top = side.getBoundingClientRect().top;
+        if (top < 0) return;
+        var room = window.innerHeight - top - railHeight;
+        if (room < 140) room = 140;
+        side.style.height = room + 'px';
+        side.style.maxHeight = room + 'px';
+        side.style.overflow = 'hidden';
+    }
+
     /* The asset screen fills the space under the Jira header. The card scrolls
        inside the panel; the browser page itself does not. */
     function fitSplit() {
@@ -2627,8 +2648,15 @@
             app.style.overflow = '';
             var phoneRail = app.querySelector('.asset-tree-rail');
             if (phoneRail) phoneRail.style.height = '';
+            pinPhoneTree(app);
             syncPhone();
             return;
+        }
+        var phoneSide = app.querySelector('.asset-tree-side');
+        if (phoneSide) {
+            phoneSide.style.height = '';
+            phoneSide.style.maxHeight = '';
+            phoneSide.style.overflow = '';
         }
         app.classList.remove('is-phone');
         syncPhone();

@@ -15014,13 +15014,16 @@ button.asset-tree-attach-remove {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
-    max-height: none;
+    max-height: calc(100dvh - 180px);
     min-height: 0;
+    overflow: hidden;
     border-bottom: 0;
 }
 
 #asset-tree-app.is-phone .asset-tree-scroll {
     flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
 }
 
 #asset-tree-app.is-phone .asset-tree-frame.is-split:not(.is-phone-card) .asset-tree-detail {
@@ -15134,14 +15137,10 @@ button.asset-tree-attach-remove {
 }
 
 #asset-tree-app.is-phone .asset-tree-side-foot {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: calc(46px + env(safe-area-inset-bottom));
-    z-index: 20;
+    position: static;
+    flex: 0 0 auto;
     background: #fff;
     border-top: 1px solid #dfe1e6;
-    box-shadow: 0 -4px 10px rgba(9, 30, 66, 0.06);
 }
 
 #asset-tree-app.is-phone .asset-tree-side-foot .asset-tree-row.is-trash {
@@ -15155,7 +15154,7 @@ button.asset-tree-attach-remove {
 }
 
 #asset-tree-app.is-phone .asset-tree-scroll {
-    padding-bottom: 92px;
+    padding-bottom: 8px;
 }
 
 #asset-tree-app.is-phone .asset-tree-pick-wrap,
