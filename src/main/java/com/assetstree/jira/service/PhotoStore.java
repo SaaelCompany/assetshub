@@ -33,6 +33,19 @@ public final class PhotoStore {
         return new File(AssetFileStore.directory(), "photo-" + assetId);
     }
 
+    public static File typeFile(int typeId) {
+        return new File(AssetFileStore.directory(), "photo-type-" + typeId);
+    }
+
+    public static void writeType(int typeId, byte[] data) throws IOException {
+        FileOutputStream out = new FileOutputStream(typeFile(typeId));
+        try {
+            out.write(data);
+        } finally {
+            out.close();
+        }
+    }
+
     public static void write(int assetId, byte[] data) throws IOException {
         FileOutputStream out = new FileOutputStream(file(assetId));
         try {

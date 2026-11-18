@@ -1086,6 +1086,8 @@ public final class UiCatalog {
             "photoCropTitle",
             "photoCropHint",
             "photoCropZoom",
+            "photoForType",
+            "photoForTypeHint",
             "photoRemove",
             "photoSize",
             "projectSection",

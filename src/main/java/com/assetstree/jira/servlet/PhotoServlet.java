@@ -71,7 +71,8 @@ public class PhotoServlet extends HttpServlet {
             if (upload == null || upload.getData().length == 0) {
                 throw new AssetException(400, "asset-tree.error.file.required");
             }
-            service().storePhoto(user, assetId, upload.getData());
+            boolean forType = "1".equals(queryValue(request.getQueryString(), "forType"));
+            service().storePhoto(user, assetId, upload.getData(), forType);
             response.setStatus(HttpServletResponse.SC_CREATED);
             response.setContentType("application/json; charset=UTF-8");
             response.setCharacterEncoding("UTF-8");

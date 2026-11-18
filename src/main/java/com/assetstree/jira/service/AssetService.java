@@ -137,7 +137,7 @@ public interface AssetService {
 
     void deleteCardImage(ApplicationUser user, int assetId);
 
-    void storePhoto(ApplicationUser user, int assetId, byte[] data);
+    void storePhoto(ApplicationUser user, int assetId, byte[] data, boolean forType);
 
     StoredFile openPhoto(ApplicationUser user, int assetId);
 

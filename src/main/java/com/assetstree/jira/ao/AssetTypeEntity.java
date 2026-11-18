@@ -83,4 +83,15 @@ public interface AssetTypeEntity extends Entity {
     String getParentTypeKey();
 
     void setParentTypeKey(String parentTypeKey);
+
+    /** Shared picture for every card of this type that has no picture of its own. */
+    @StringLength(16)
+    String getPhoto();
+
+    void setPhoto(String photo);
+
+    /** Changes when the shared picture is replaced, so cards reload it. */
+    long getPhotoRev();
+
+    void setPhotoRev(long photoRev);
 }

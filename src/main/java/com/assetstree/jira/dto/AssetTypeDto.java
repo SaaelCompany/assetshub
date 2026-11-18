@@ -18,6 +18,8 @@ public class AssetTypeDto {
     private boolean showInTree;
     private boolean service;
     private boolean reach;
+    private boolean photo;
+    private long photoRev;
     private String placeCaption;
     private String parentTypeKey;
     private int assetCount;
@@ -109,6 +111,22 @@ public class AssetTypeDto {
 
     public void setReach(boolean reach) {
         this.reach = reach;
+    }
+
+    public boolean isPhoto() {
+        return photo;
+    }
+
+    public void setPhoto(boolean photo) {
+        this.photo = photo;
+    }
+
+    public long getPhotoRev() {
+        return photoRev;
+    }
+
+    public void setPhotoRev(long photoRev) {
+        this.photoRev = photoRev;
     }
 
     public String getPlaceCaption() {

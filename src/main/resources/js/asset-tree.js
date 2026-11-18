@@ -7616,8 +7616,8 @@
     }
 
     function photoUrl(asset) {
-        var stamp = asset && asset.updated ? encodeURIComponent(asset.updated) : '';
-        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id + (stamp ? '&v=' + stamp : '');
+        var stamp = asset && asset.photoRev ? String(asset.photoRev) : (asset && asset.updated ? asset.updated : '');
+        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id + (stamp ? '&v=' + encodeURIComponent(stamp) : '');
     }
 
     function showPhotoError(message) {
@@ -7630,7 +7630,7 @@
         node.textContent = message || '';
     }
 
-    function uploadPhoto(asset, file) {
+    function uploadPhoto(asset, file, forType) {
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
             showPhotoError(t('photoSize'));
@@ -7640,7 +7640,9 @@
         var xhr = new XMLHttpRequest();
         var data = new FormData();
         data.append('file', file, file.name || 'photo.jpg');
-        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id, true);
+        var url = contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id;
+        if (forType) url += '&forType=1';
+        xhr.open('POST', url, true);
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.onreadystatechange = function () {
@@ -7805,57 +7807,89 @@
     }
 
     function showPhotoCrop(asset, source) {
-        var viewW = 0;
-        var viewH = 0;
         var srcW = source.width;
         var srcH = source.height;
-        var cover = 1;
-        var zoom = 1;
-        var dispW = 0;
-        var dispH = 0;
-        var offsetX = 0;
-        var offsetY = 0;
+        var viewW = 1;
+        var viewH = 1;
+        var crop = { x: 0, y: 0, w: 1, h: 1 };
         var drag = null;
-        var placed = false;
         var closed = false;
+        var frame = null;
         var stage = null;
-        var slider = null;
-        source.className = 'asset-tree-crop-image';
-        function clampShift() {
-            if (offsetX > 0) offsetX = 0;
-            if (offsetY > 0) offsetY = 0;
-            if (offsetX < viewW - dispW) offsetX = viewW - dispW;
-            if (offsetY < viewH - dispH) offsetY = viewH - dispH;
+        var shareBox = null;
+        source.className = 'asset-tree-frame-source';
+        function pointOf(event) {
+            return event.touches && event.touches.length ? event.touches[0] : event;
         }
-        function paintShift(keepCenter) {
-            var prevW = dispW;
-            var prevH = dispH;
-            dispW = srcW * cover * zoom;
-            dispH = srcH * cover * zoom;
-            if (keepCenter && prevW) {
-                var cx = (viewW / 2 - offsetX) / prevW;
-                var cy = (viewH / 2 - offsetY) / prevH;
-                offsetX = viewW / 2 - cx * dispW;
-                offsetY = viewH / 2 - cy * dispH;
-            } else if (!placed) {
-                offsetX = (viewW - dispW) / 2;
-                offsetY = (viewH - dispH) / 2;
-                placed = true;
+        function fitSource() {
+            var maxW = 480;
+            var maxH = 320;
+            if (stage && stage.clientWidth > 64) {
+                maxW = Math.min(480, stage.clientWidth - 32);
             }
-            clampShift();
-            source.style.width = dispW + 'px';
-            source.style.height = dispH + 'px';
-            source.style.left = offsetX + 'px';
-            source.style.top = offsetY + 'px';
+            var scale = Math.min(maxW / srcW, maxH / srcH, 1);
+            viewW = Math.max(1, Math.round(srcW * scale));
+            viewH = Math.max(1, Math.round(srcH * scale));
+            source.style.width = viewW + 'px';
+            source.style.height = viewH + 'px';
+        }
+        function placeFrame() {
+            var aspect = 3 / 2;
+            var w;
+            var h;
+            if (viewW / viewH > aspect) {
+                h = viewH;
+                w = h * aspect;
+            } else {
+                w = viewW;
+                h = w / aspect;
+            }
+            crop = { x: (viewW - w) / 2, y: (viewH - h) / 2, w: w, h: h };
+        }
+        function paintFrame() {
+            if (!frame) return;
+            frame.style.left = crop.x + 'px';
+            frame.style.top = crop.y + 'px';
+            frame.style.width = crop.w + 'px';
+            frame.style.height = crop.h + 'px';
+        }
+        function applyCorner(start, dx) {
+            var minW = Math.min(48, start.availW);
+            var grow = start.corner === 'se' || start.corner === 'ne' ? dx : -dx;
+            var w = start.w + grow;
+            if (w < minW) w = minW;
+            if (w > start.availW) w = start.availW;
+            var h = w * 2 / 3;
+            if (h > start.availH) {
+                h = start.availH;
+                w = h * 3 / 2;
+            }
+            if (w < 1) w = 1;
+            if (h < 1) h = 1;
+            var x = start.cx;
+            var y = start.cy;
+            if (start.corner === 'nw' || start.corner === 'sw') x = start.right - w;
+            if (start.corner === 'nw' || start.corner === 'ne') y = start.bottom - h;
+            crop = { x: x, y: y, w: w, h: h };
         }
         function onMove(event) {
             if (!drag) return;
-            var point = event.touches && event.touches.length ? event.touches[0] : event;
-            offsetX = drag.ox + point.clientX - drag.x;
-            offsetY = drag.oy + point.clientY - drag.y;
-            clampShift();
-            source.style.left = offsetX + 'px';
-            source.style.top = offsetY + 'px';
+            var point = pointOf(event);
+            var dx = point.clientX - drag.x;
+            var dy = point.clientY - drag.y;
+            if (drag.mode === 'move') {
+                var nx = drag.cx + dx;
+                var ny = drag.cy + dy;
+                if (nx < 0) nx = 0;
+                if (ny < 0) ny = 0;
+                if (nx + crop.w > viewW) nx = viewW - crop.w;
+                if (ny + crop.h > viewH) ny = viewH - crop.h;
+                crop.x = nx;
+                crop.y = ny;
+            } else {
+                applyCorner(drag, dx);
+            }
+            paintFrame();
             if (event.preventDefault) event.preventDefault();
         }
         function onUp() { drag = null; }
@@ -7868,6 +7902,39 @@
             document.removeEventListener('touchend', onUp);
             if (backdrop && backdrop.parentNode) closeModal(backdrop);
         }
+        function startDrag(event) {
+            var point = pointOf(event);
+            var node = event.target;
+            var corner = node && node.getAttribute ? (node.getAttribute('data-corner') || '') : '';
+            drag = {
+                mode: corner ? corner : 'move',
+                corner: corner,
+                x: point.clientX,
+                y: point.clientY,
+                cx: crop.x,
+                cy: crop.y,
+                w: crop.w,
+                right: crop.x + crop.w,
+                bottom: crop.y + crop.h,
+                availW: viewW,
+                availH: viewH
+            };
+            if (corner === 'se') {
+                drag.availW = viewW - crop.x;
+                drag.availH = viewH - crop.y;
+            } else if (corner === 'nw') {
+                drag.availW = crop.x + crop.w;
+                drag.availH = crop.y + crop.h;
+            } else if (corner === 'ne') {
+                drag.availW = viewW - crop.x;
+                drag.availH = crop.y + crop.h;
+            } else if (corner === 'sw') {
+                drag.availW = crop.x + crop.w;
+                drag.availH = viewH - crop.y;
+            }
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopPropagation) event.stopPropagation();
+        }
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
         document.addEventListener('touchmove', onMove);
@@ -7876,37 +7943,54 @@
             dialog.className += ' is-crop';
             dialog.appendChild(el('h2', null, t('photoCropTitle')));
             dialog.appendChild(el('p', 'asset-tree-hint', t('photoCropHint')));
-            stage = el('div', 'asset-tree-crop');
-            stage.appendChild(source);
+            stage = el('div', 'asset-tree-frame-stage');
+            var picture = el('div', 'asset-tree-frame-picture');
+            picture.appendChild(source);
+            frame = el('div', 'asset-tree-frame-window');
+            var corners = ['nw', 'ne', 'sw', 'se'];
+            var n;
+            for (n = 0; n < corners.length; n++) {
+                var handle = el('span', 'asset-tree-frame-handle is-' + corners[n]);
+                handle.setAttribute('data-corner', corners[n]);
+                frame.appendChild(handle);
+            }
+            picture.appendChild(frame);
+            stage.appendChild(picture);
             dialog.appendChild(stage);
-            var zoomLabel = el('label', 'asset-tree-crop-zoom-label');
-            zoomLabel.appendChild(el('span', null, t('photoCropZoom')));
-            slider = el('input', 'asset-tree-crop-zoom');
-            slider.type = 'range';
-            slider.min = '1';
-            slider.max = '3';
-            slider.step = '0.01';
-            slider.value = '1';
-            zoomLabel.appendChild(slider);
-            dialog.appendChild(zoomLabel);
+            var typeName = asset.typeLabel || '';
+            if (!typeName) {
+                var kind = typeFor(asset);
+                typeName = kind && kind.label ? kind.label : (asset.typeKey || '');
+            }
+            var share = el('label', 'asset-tree-check-row');
+            shareBox = el('input');
+            shareBox.type = 'checkbox';
+            shareBox.checked = true;
+            share.appendChild(shareBox);
+            var shareText = el('span');
+            shareText.appendChild(el('strong', null, t('photoForType', typeName)));
+            shareText.appendChild(el('span', 'asset-tree-hint', t('photoForTypeHint')));
+            share.appendChild(shareText);
+            dialog.appendChild(share);
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', release));
             actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
                 var out = document.createElement('canvas');
                 out.width = 960;
                 out.height = 640;
-                var sx = -offsetX / dispW * srcW;
-                var sy = -offsetY / dispH * srcH;
-                var sw = viewW / dispW * srcW;
-                var sh = viewH / dispH * srcH;
+                var sx = crop.x / viewW * srcW;
+                var sy = crop.y / viewH * srcH;
+                var sw = crop.w / viewW * srcW;
+                var sh = crop.h / viewH * srcH;
                 out.getContext('2d').drawImage(source, sx, sy, sw, sh, 0, 0, 960, 640);
                 function send(blob) {
                     if (!blob) {
                         showPhotoError(t('errorTitle'));
                         return;
                     }
+                    var forType = !!(shareBox && shareBox.checked);
                     release();
-                    uploadPhoto(asset, blob);
+                    uploadPhoto(asset, blob, forType);
                 }
                 if (out.toBlob) {
                     out.toBlob(send, 'image/jpeg', 0.9);
@@ -7920,26 +8004,8 @@
                 send(new Blob([list], { type: 'image/jpeg' }));
             }));
             dialog.appendChild(actions);
-            slider.addEventListener('input', function () {
-                zoom = parseFloat(slider.value) || 1;
-                paintShift(true);
-            });
-            function startDrag(event) {
-                var point = event.touches && event.touches.length ? event.touches[0] : event;
-                drag = { x: point.clientX, y: point.clientY, ox: offsetX, oy: offsetY };
-                if (event.preventDefault) event.preventDefault();
-            }
-            stage.addEventListener('mousedown', startDrag);
-            stage.addEventListener('touchstart', startDrag);
-            stage.addEventListener('wheel', function (event) {
-                if (event.preventDefault) event.preventDefault();
-                var next = (parseFloat(slider.value) || 1) + (event.deltaY < 0 ? 0.08 : -0.08);
-                if (next < 1) next = 1;
-                if (next > 3) next = 3;
-                slider.value = String(next);
-                zoom = next;
-                paintShift(true);
-            });
+            frame.addEventListener('mousedown', startDrag);
+            frame.addEventListener('touchstart', startDrag);
         });
         if (backdrop) {
             backdrop.addEventListener('click', function (event) {
@@ -7949,11 +8015,9 @@
                 }
             }, true);
         }
-        viewW = stage ? stage.clientWidth : 0;
-        viewH = viewW ? Math.round(viewW * 2 / 3) : 0;
-        if (stage && viewH) stage.style.height = viewH + 'px';
-        cover = viewW && viewH ? Math.max(viewW / srcW, viewH / srcH) : 1;
-        paintShift(false);
+        fitSource();
+        placeFrame();
+        paintFrame();
     }
 
     function deletePhoto(asset) {
@@ -8795,7 +8859,7 @@
         }
         if (mayEdit(asset) && !isFolder(asset) && photoEnabled()) {
             var pictured = state.detail && state.detail.id === asset.id ? state.detail : asset;
-            if (pictured.photo) {
+            if (pictured.photo && !pictured.photoShared) {
                 extra.push({ label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
             } else {
                 extra.push({ label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
