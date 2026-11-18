@@ -2816,12 +2816,49 @@ a.asset-tree-url {
 .asset-tree-frame-handle.is-sw { bottom: 4px; left: 4px; cursor: nesw-resize; }
 .asset-tree-frame-handle.is-se { bottom: 4px; right: 4px; cursor: nwse-resize; }
 
-.asset-tree-dialog.is-crop .asset-tree-check-row {
+.asset-tree-frame-also {
     margin: 4px 0 0;
 }
 
-.asset-tree-dialog.is-crop .asset-tree-check-row .asset-tree-hint {
+.asset-tree-frame-also-title {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.asset-tree-dialog.is-crop .asset-tree-frame-also .asset-tree-text {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.asset-tree-frame-list {
+    max-height: 168px;
+    overflow: auto;
+    margin-top: 4px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #ffffff;
+}
+
+.asset-tree-frame-list .asset-tree-check-row {
     margin: 0;
+    padding: 6px 8px;
+    border-bottom: 1px solid #f4f5f7;
+}
+
+.asset-tree-frame-list .asset-tree-check-row:last-child {
+    border-bottom: 0;
+}
+
+.asset-tree-frame-list .asset-tree-hint,
+.asset-tree-frame-also > .asset-tree-hint {
+    margin: 0;
+}
+
+.asset-tree-frame-count {
+    margin: 6px 0 0;
+    font-weight: 600;
 }
 
 .asset-tree-photo-preview {

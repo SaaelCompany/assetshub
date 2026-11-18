@@ -7630,7 +7630,7 @@
         node.textContent = message || '';
     }
 
-    function uploadPhoto(asset, file, forType) {
+    function uploadPhoto(asset, file, ids) {
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
             showPhotoError(t('photoSize'));
@@ -7641,7 +7641,7 @@
         var data = new FormData();
         data.append('file', file, file.name || 'photo.jpg');
         var url = contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id;
-        if (forType) url += '&forType=1';
+        if (ids && ids.length) url += '&also=' + ids.join(',');
         xhr.open('POST', url, true);
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
         xhr.setRequestHeader('Accept', 'application/json');
@@ -7816,14 +7816,20 @@
         var closed = false;
         var frame = null;
         var stage = null;
-        var shareBox = null;
+        var picked = {};
+        var alsoQuery = '';
+        var onlyType = false;
+        var alsoList = null;
+        var alsoCount = null;
+        var alsoNote = null;
+        picked[asset.id] = true;
         source.className = 'asset-tree-frame-source';
         function pointOf(event) {
             return event.touches && event.touches.length ? event.touches[0] : event;
         }
         function fitSource() {
             var maxW = 480;
-            var maxH = 320;
+            var maxH = 220;
             if (stage && stage.clientWidth > 64) {
                 maxW = Math.min(480, stage.clientWidth - 32);
             }
@@ -7957,21 +7963,7 @@
             picture.appendChild(frame);
             stage.appendChild(picture);
             dialog.appendChild(stage);
-            var typeName = asset.typeLabel || '';
-            if (!typeName) {
-                var kind = typeFor(asset);
-                typeName = kind && kind.label ? kind.label : (asset.typeKey || '');
-            }
-            var share = el('label', 'asset-tree-check-row');
-            shareBox = el('input');
-            shareBox.type = 'checkbox';
-            shareBox.checked = true;
-            share.appendChild(shareBox);
-            var shareText = el('span');
-            shareText.appendChild(el('strong', null, t('photoForType', typeName)));
-            shareText.appendChild(el('span', 'asset-tree-hint', t('photoForTypeHint')));
-            share.appendChild(shareText);
-            dialog.appendChild(share);
+            dialog.appendChild(photoAlsoBlock(asset));
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', release));
             actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
@@ -7988,9 +7980,9 @@
                         showPhotoError(t('errorTitle'));
                         return;
                     }
-                    var forType = !!(shareBox && shareBox.checked);
+                    var ids = photoAlsoIds(asset);
                     release();
-                    uploadPhoto(asset, blob, forType);
+                    uploadPhoto(asset, blob, ids);
                 }
                 if (out.toBlob) {
                     out.toBlob(send, 'image/jpeg', 0.9);
@@ -8018,6 +8010,133 @@
         fitSource();
         placeFrame();
         paintFrame();
+        function photoAlsoIds(current) {
+            var ids = [];
+            var key;
+            for (key in picked) {
+                if (!picked.hasOwnProperty(key) || !picked[key]) continue;
+                var id = parseInt(key, 10);
+                if (id && id !== current.id) ids.push(id);
+            }
+            return ids;
+        }
+        function alsoCountValue() {
+            var count = 0;
+            var key;
+            for (key in picked) {
+                if (picked.hasOwnProperty(key) && picked[key]) count++;
+            }
+            return count;
+        }
+        function paintAlsoCount() {
+            if (alsoCount) alsoCount.textContent = t('photoAlsoCount', String(alsoCountValue()));
+        }
+        function alsoMatches(item, query) {
+            if (!item || isFolder(item)) return false;
+            if (item.projectKey && asset.projectKey && item.projectKey !== asset.projectKey) return false;
+            if (onlyType && item.typeKey !== asset.typeKey) return false;
+            if (!query) return true;
+            var blob = ((item.name || '') + ' ' + (item.objectKey || '') + ' ' + (typeFor(item).label || '')).toLowerCase();
+            return blob.indexOf(query) >= 0;
+        }
+        function alsoRow(item) {
+            var row = el('label', 'asset-tree-check-row');
+            var box = el('input');
+            box.type = 'checkbox';
+            var mine = item.id === asset.id;
+            box.checked = mine || !!picked[item.id];
+            if (mine) box.disabled = true;
+            box.addEventListener('change', function () {
+                if (box.checked) {
+                    if (alsoCountValue() >= 500) {
+                        box.checked = false;
+                        showPhotoError(t('photoAlsoLimit'));
+                        return;
+                    }
+                    picked[item.id] = true;
+                    showPhotoError('');
+                } else {
+                    delete picked[item.id];
+                }
+                paintAlsoCount();
+            });
+            row.appendChild(box);
+            var text = el('span');
+            text.appendChild(el('strong', null, item.name || item.objectKey || ''));
+            var meta = item.objectKey || '';
+            var label = typeFor(item).label || '';
+            if (label) meta = meta ? (meta + ' · ' + label) : label;
+            if (meta) text.appendChild(el('span', 'asset-tree-hint', meta));
+            row.appendChild(text);
+            return row;
+        }
+        function paintAlso() {
+            if (!alsoList) return;
+            alsoList.innerHTML = '';
+            var pool = state.assets || [];
+            var rows = [];
+            var i;
+            for (i = 0; i < pool.length; i++) {
+                if (alsoMatches(pool[i], alsoQuery)) rows.push(pool[i]);
+            }
+            rows.sort(function (a, b) {
+                if (a.id === asset.id) return -1;
+                if (b.id === asset.id) return 1;
+                var an = String(a.name || '').toLowerCase();
+                var bn = String(b.name || '').toLowerCase();
+                if (an < bn) return -1;
+                if (an > bn) return 1;
+                return a.id - b.id;
+            });
+            var hidden = 0;
+            for (i = 0; i < rows.length; i++) {
+                if (i >= 80) {
+                    hidden++;
+                    continue;
+                }
+                alsoList.appendChild(alsoRow(rows[i]));
+            }
+            if (!rows.length) alsoList.appendChild(el('p', 'asset-tree-hint', t('photoAlsoEmpty')));
+            if (alsoNote) {
+                alsoNote.hidden = !hidden;
+                alsoNote.textContent = hidden ? t('photoAlsoMore', '80') : '';
+            }
+            paintAlsoCount();
+        }
+        function photoAlsoBlock() {
+            var block = el('div', 'asset-tree-frame-also');
+            block.appendChild(el('strong', 'asset-tree-frame-also-title', t('photoAlso')));
+            block.appendChild(el('p', 'asset-tree-hint', t('photoAlsoHint')));
+            var search = el('input', 'asset-tree-text');
+            search.type = 'search';
+            search.placeholder = t('photoAlsoSearch');
+            search.addEventListener('input', function () {
+                alsoQuery = String(search.value || '').trim().toLowerCase();
+                paintAlso();
+            });
+            block.appendChild(search);
+            var typeRow = el('label', 'asset-tree-check-row');
+            var typeBox = el('input');
+            typeBox.type = 'checkbox';
+            typeBox.addEventListener('change', function () {
+                onlyType = !!typeBox.checked;
+                paintAlso();
+            });
+            typeRow.appendChild(typeBox);
+            var typeText = el('span');
+            typeText.appendChild(el('strong', null, t('photoAlsoType')));
+            typeRow.appendChild(typeText);
+            block.appendChild(typeRow);
+            alsoList = el('div', 'asset-tree-frame-list');
+            block.appendChild(alsoList);
+            alsoNote = el('p', 'asset-tree-hint');
+            alsoNote.hidden = true;
+            block.appendChild(alsoNote);
+            alsoCount = el('p', 'asset-tree-hint asset-tree-frame-count');
+            block.appendChild(alsoCount);
+            paintAlso();
+            return block;
+        }
     }
 
     function deletePhoto(asset) {
@@ -8859,7 +8978,7 @@
         }
         if (mayEdit(asset) && !isFolder(asset) && photoEnabled()) {
             var pictured = state.detail && state.detail.id === asset.id ? state.detail : asset;
-            if (pictured.photo && !pictured.photoShared) {
+            if (pictured.photo) {
                 extra.push({ label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
             } else {
                 extra.push({ label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });

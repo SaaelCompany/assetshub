@@ -71,8 +71,8 @@ public class PhotoServlet extends HttpServlet {
             if (upload == null || upload.getData().length == 0) {
                 throw new AssetException(400, "asset-tree.error.file.required");
             }
-            boolean forType = "1".equals(queryValue(request.getQueryString(), "forType"));
-            service().storePhoto(user, assetId, upload.getData(), forType);
+            int[] also = parseIds(queryValue(request.getQueryString(), "also"));
+            service().storePhoto(user, assetId, upload.getData(), also);
             response.setStatus(HttpServletResponse.SC_CREATED);
             response.setContentType("application/json; charset=UTF-8");
             response.setCharacterEncoding("UTF-8");
@@ -141,6 +141,27 @@ public class PhotoServlet extends HttpServlet {
             out.write(buffer, 0, read);
         }
         return out.toByteArray();
+    }
+
+    private static int[] parseIds(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return new int[0];
+        }
+        String[] parts = raw.split(",");
+        int[] ids = new int[Math.min(parts.length, 500)];
+        int count = 0;
+        for (int i = 0; i < parts.length && count < ids.length; i++) {
+            int id = parseId(parts[i]);
+            if (id > 0) {
+                ids[count++] = id;
+            }
+        }
+        if (count == ids.length) {
+            return ids;
+        }
+        int[] trimmed = new int[count];
+        System.arraycopy(ids, 0, trimmed, 0, count);
+        return trimmed;
     }
 
     private static int parseId(String raw) {

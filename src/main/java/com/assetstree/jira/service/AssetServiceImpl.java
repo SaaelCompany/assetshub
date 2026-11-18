@@ -2338,7 +2338,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public void storePhoto(ApplicationUser user, int assetId, byte[] data, final boolean forType) {
+    public void storePhoto(ApplicationUser user, int assetId, byte[] data, int[] also) {
         if (data == null || data.length == 0) {
             throw new AssetException(400, "asset-tree.error.file.required");
         }
@@ -2354,62 +2354,68 @@ public class AssetServiceImpl implements AssetService {
         } catch (IOException ex) {
             throw new AssetException(400, "asset-tree.error.photo.type");
         }
+        final int[] ids = photoTargets(assetId, also);
         final String kind = "jpeg";
-        final int[] typeId = new int[] {0};
-        final boolean[] dropOwn = new boolean[] {false};
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
-                AssetEntity entity = requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
-                if (!photosOn(entity.getProjectKey())) {
-                    throw new AssetException(403, "asset-tree.error.photo.off");
-                }
-                if (isLocation(entity)) {
-                    throw new AssetException(400, "asset-tree.error.photo.place");
-                }
-                if (forType) {
-                    AssetTypeEntity type = findTypeInProject(entity.getProjectKey(), entity.getTypeKey());
-                    if (type == null || type.isLocation()) {
+                String projectKey = null;
+                for (int i = 0; i < ids.length; i++) {
+                    AssetEntity entity = requireAssetCap(user, ids[i], kindCap(requireAsset(ids[i])));
+                    if (projectKey == null) {
+                        projectKey = entity.getProjectKey();
+                    } else if (entity.getProjectKey() == null || !projectKey.equals(entity.getProjectKey())) {
                         throw new AssetException(400, "asset-tree.error.photo.place");
                     }
-                    type.setPhoto(kind);
-                    type.setPhotoRev(System.currentTimeMillis());
-                    type.save();
-                    typeId[0] = type.getID();
-                    if (entity.getPhoto() != null && !entity.getPhoto().isEmpty()) {
-                        entity.setPhoto("");
-                        entity.setUpdated(new Date());
-                        entity.setUpdatedBy(user.getKey());
-                        entity.save();
-                        dropOwn[0] = true;
+                    if (!photosOn(entity.getProjectKey())) {
+                        throw new AssetException(403, "asset-tree.error.photo.off");
                     }
-                    return null;
+                    if (isLocation(entity)) {
+                        throw new AssetException(400, "asset-tree.error.photo.place");
+                    }
+                    entity.setPhoto(kind);
+                    entity.setUpdated(new Date());
+                    entity.setUpdatedBy(user.getKey());
+                    entity.save();
                 }
-                entity.setPhoto(kind);
-                entity.setUpdated(new Date());
-                entity.setUpdatedBy(user.getKey());
-                entity.save();
                 return null;
             }
         });
+        int written = 0;
         try {
-            if (forType) {
-                PhotoStore.writeType(typeId[0], bytes);
-                if (dropOwn[0]) {
-                    PhotoStore.delete(assetId);
-                }
-            } else {
-                PhotoStore.write(assetId, bytes);
+            for (int i = 0; i < ids.length; i++) {
+                PhotoStore.write(ids[i], bytes);
+                written++;
             }
         } catch (IOException ex) {
-            if (forType) {
-                clearTypePhoto(typeId[0]);
-            } else {
-                clearPhoto(assetId);
+            for (int i = written; i < ids.length; i++) {
+                clearPhoto(ids[i]);
             }
             throw new AssetException(500, "asset-tree.error.unexpected");
         }
-        logActivity(assetId, user.getKey(), "photo", "", "", forType ? "type" : "1");
+        for (int i = 0; i < ids.length; i++) {
+            logActivity(ids[i], user.getKey(), "photo", "", "", "1");
+        }
+    }
+
+    private int[] photoTargets(int assetId, int[] also) {
+        ArrayList<Integer> ids = new ArrayList<Integer>();
+        ids.add(Integer.valueOf(assetId));
+        if (also != null) {
+            for (int i = 0; i < also.length; i++) {
+                if (also[i] > 0 && !ids.contains(Integer.valueOf(also[i]))) {
+                    ids.add(Integer.valueOf(also[i]));
+                }
+            }
+        }
+        if (ids.size() > 500) {
+            throw new AssetException(400, "asset-tree.error.photo.many");
+        }
+        int[] out = new int[ids.size()];
+        for (int i = 0; i < ids.size(); i++) {
+            out[i] = ids.get(i).intValue();
+        }
+        return out;
     }
 
     @Override
@@ -2419,23 +2425,13 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         String kind = entity.getPhoto();
-        java.io.File storedFile = null;
-        int sharedType = 0;
         if (kind == null || kind.isEmpty()) {
-            AssetTypeEntity type = findTypeInProject(entity.getProjectKey(), entity.getTypeKey());
-            if (type == null || type.getPhoto() == null || type.getPhoto().isEmpty()) {
-                throw new AssetException(404, "asset-tree.error.notFound");
-            }
-            kind = "jpeg";
-            sharedType = type.getID();
-            storedFile = PhotoStore.typeFile(sharedType);
-        } else {
-            storedFile = PhotoStore.file(assetId);
+            throw new AssetException(404, "asset-tree.error.notFound");
         }
         if (!portalParticipant(user, assetId)) {
             requireReadable(user, assetId);
         }
-        java.io.File stored = storedFile;
+        java.io.File stored = PhotoStore.file(assetId);
         if (!stored.isFile()) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
@@ -2462,14 +2458,10 @@ public class AssetServiceImpl implements AssetService {
         try {
             byte[] framed = PhotoStore.frame(data);
             if (framed != data) {
-                if (sharedType > 0) {
-                    PhotoStore.writeType(sharedType, framed);
-                } else {
-                    PhotoStore.write(assetId, framed);
-                }
+                PhotoStore.write(assetId, framed);
                 shown = framed;
                 shownKind = "jpeg";
-                if (sharedType == 0 && !"jpeg".equals(kind)) {
+                if (!"jpeg".equals(kind)) {
                     markPhotoJpeg(assetId);
                 }
             }
@@ -2518,21 +2510,6 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
-    }
-
-    private void clearTypePhoto(final int typeId) {
-        ao().executeInTransaction(new TransactionCallback<Void>() {
-            @Override
-            public Void doInTransaction() {
-                AssetTypeEntity type = ao().get(AssetTypeEntity.class, typeId);
-                if (type != null) {
-                    type.setPhoto("");
-                    type.save();
-                }
-                return null;
-            }
-        });
-        PhotoStore.typeFile(typeId).delete();
     }
 
     private void clearPhoto(final int assetId) {
@@ -7538,13 +7515,10 @@ public class AssetServiceImpl implements AssetService {
         }
         card.setLines(lines);
         String kind = row.getPhoto();
-                if (photos && kind != null && !kind.isEmpty()) {
-                    card.setPhoto(true);
-                    card.setUpdated(format(row.getUpdated()));
-                } else if (photos && type != null && type.isPhoto()) {
-                    card.setPhoto(true);
-                    card.setUpdated(String.valueOf(type.getPhotoRev()));
-                }
+        if (photos && kind != null && !kind.isEmpty()) {
+            card.setPhoto(true);
+            card.setUpdated(format(row.getUpdated()));
+        }
         return card;
     }
 
@@ -8037,15 +8011,6 @@ public class AssetServiceImpl implements AssetService {
         return children != null && children.length > 0;
     }
 
-    private AssetTypeEntity findTypeInProject(String projectKey, String typeKey) {
-        if (projectKey == null || projectKey.trim().isEmpty() || typeKey == null || typeKey.trim().isEmpty()) {
-            return null;
-        }
-        AssetTypeEntity[] found = ao().find(AssetTypeEntity.class,
-                Query.select().where("PROJECT_KEY = ? AND TYPE_KEY = ?", projectKey.trim(), typeKey.trim()));
-        return found.length == 0 ? null : found[0];
-    }
-
     private AssetTypeEntity findType(String typeKey) {
         if (typeKey == null || typeKey.trim().isEmpty()) {
             return null;
@@ -8336,8 +8301,6 @@ public class AssetServiceImpl implements AssetService {
         dto.setShowInTree(type.isLocation() || type.isShowInTree());
         dto.setService(!type.isLocation() && type.isService());
         dto.setReach(!type.isLocation() && type.isReach());
-        dto.setPhoto(type.getPhoto() != null && !type.getPhoto().isEmpty());
-        dto.setPhotoRev(type.getPhotoRev());
         dto.setPlaceCaption(type.getPlaceCaption() == null ? "" : type.getPlaceCaption());
         dto.setParentTypeKey(type.getParentTypeKey() == null ? "" : type.getParentTypeKey());
         dto.setAssetCount(assetCount);
@@ -8846,11 +8809,6 @@ public class AssetServiceImpl implements AssetService {
             dto.setTypeLabel(type.getLabel());
             dto.setColor(type.getColor());
             dto.setIcon(type.getIcon());
-            if (!ownPhoto && type.isPhoto() && !type.isLocation()) {
-                dto.setPhoto(true);
-                dto.setPhotoShared(true);
-                dto.setPhotoRev(type.getPhotoRev());
-            }
         } else {
             dto.setTypeLabel(entity.getTypeKey());
             dto.setColor("#5D6B82");
