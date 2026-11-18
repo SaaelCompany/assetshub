@@ -2944,9 +2944,10 @@
         drop.id = 'asset-tree-rootdrop';
         scroll.appendChild(drop);
         side.appendChild(scroll);
-        if (state.canRemove) side.appendChild(trashRow());
+        var foot = el('div', 'asset-tree-side-foot');
+        if (state.canRemove) foot.appendChild(trashRow());
         if (state.canCreate) {
-            side.appendChild(button('+ ' + t('addHere'), 'asset-tree-queue-add', function () {
+            foot.appendChild(button('+ ' + t('addHere'), 'asset-tree-queue-add', function () {
                 if (state.typeGroup) openTypeAdd(state.typeGroup.placeId, state.typeGroup.typeKey);
                 else {
                     var anchor = treeAnchorId() ? byId()[treeAnchorId()] : null;
@@ -2956,6 +2957,7 @@
                 }
             }));
         }
+        if (foot.childNodes.length) side.appendChild(foot);
         renderNodesInto(nodes);
         return side;
     }
@@ -6102,6 +6104,12 @@
         });
     }
 
+    function headerText(label) {
+        if (label == null) return '';
+        if (label.nodeType) return (label.textContent || '').replace(/\s+/g, ' ').trim();
+        return String(label);
+    }
+
     function assetTable(records, headers) {
         var table = el('table', 'asset-tree-table');
         var head = el('thead');
@@ -6118,9 +6126,11 @@
         var body = el('tbody');
         records.forEach(function (cells) {
             var tr = el('tr');
-            cells.forEach(function (cell) {
+            cells.forEach(function (cell, index) {
                 var pickCell = cell && cell.nodeType && cell.classList && cell.classList.contains('asset-tree-pick-box');
                 var td = el('td', pickCell ? 'asset-tree-pick' : null);
+                var caption = headerText(headers[index]);
+                if (caption) td.setAttribute('data-label', caption);
                 if (cell && cell.nodeType) {
                     td.appendChild(cell);
                 } else {
@@ -18818,6 +18828,7 @@
 
     function reportLink(item) {
         var link = button(item.name, 'asset-tree-report-link' + (item.id === state.reportKey ? ' is-current' : ''), function () {
+            state.reportNavOpen = false;
             openGallery(item.id);
         });
         link.setAttribute('data-report', item.id);
@@ -19274,6 +19285,14 @@
             saved.forEach(function (item) {
                 nav.appendChild(reportLink(item));
             });
+        }
+        if (phoneLayout()) {
+            var navOpen = !!state.reportNavOpen;
+            panel.appendChild(button(navOpen ? t('reportListHide') : t('reportListShow'), 'asset-tree-btn asset-tree-report-fold', function () {
+                state.reportNavOpen = !state.reportNavOpen;
+                renderFrame();
+            }));
+            if (!navOpen) nav.hidden = true;
         }
         shell.appendChild(nav);
         shell.appendChild(state.reportBoard ? reportBoard() : reportCard());

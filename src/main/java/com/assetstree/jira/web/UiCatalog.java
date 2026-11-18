@@ -1361,6 +1361,8 @@ public final class UiCatalog {
             "reportFilterLong",
             "reportMailFull",
             "reportStandard",
+            "reportListShow",
+            "reportListHide",
             "reportSavedTitle",
             "reportService",
             "reportWarranty",

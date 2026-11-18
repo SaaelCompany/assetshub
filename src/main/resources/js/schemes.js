@@ -6221,6 +6221,44 @@
             return { x: box.x, y: box.y, w: Math.max(1, box.r - box.x), h: Math.max(1, box.b - box.y) };
         }
 
+        function thumbFrame(floor) {
+            var points = [];
+            function take(obj) {
+                if (!obj || obj.type === 'opening' || obj.type === 'image') return;
+                if (obj.points && obj.points.length) {
+                    obj.points.forEach(function (point) {
+                        if (point && point.x != null && point.y != null) points.push(point);
+                    });
+                    return;
+                }
+                var one = bounds(obj);
+                if (!one || one.w == null) return;
+                points.push({ x: one.x, y: one.y });
+                points.push({ x: one.x + one.w, y: one.y + one.h });
+            }
+            ((floor && floor.rooms) || []).forEach(take);
+            ((floor && floor.objects) || []).forEach(function (obj) {
+                if (obj.type === 'opening') return;
+                take(obj);
+            });
+            if (!points.length) return floorBounds(floor);
+            var sumX = 0;
+            var sumY = 0;
+            points.forEach(function (point) {
+                sumX += point.x;
+                sumY += point.y;
+            });
+            var centerX = sumX / points.length;
+            var centerY = sumY / points.length;
+            var halfW = 1;
+            var halfH = 1;
+            points.forEach(function (point) {
+                halfW = Math.max(halfW, Math.abs(point.x - centerX));
+                halfH = Math.max(halfH, Math.abs(point.y - centerY));
+            });
+            return { x: centerX - halfW, y: centerY - halfH, w: halfW * 2, h: halfH * 2 };
+        }
+
         function paintThumb(canvas, doc) {
             var ctx = canvas.getContext('2d');
             var width = canvas.width;
@@ -6240,7 +6278,7 @@
             session.doc.settings.showOtherFloors = false;
             try {
                 var floor = activeFloor();
-                var box = floorBounds(floor);
+                var box = thumbFrame(floor);
                 if (box) {
                     var pad = 28;
                     var zoom = Math.min((width - pad * 2) / box.w, (height - pad * 2) / box.h);
