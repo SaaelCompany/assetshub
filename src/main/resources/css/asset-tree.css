@@ -3008,6 +3008,15 @@ a.asset-tree-url {
     margin: 0 0 8px !important;
 }
 
+#asset-tree-app .asset-tree-summary-board {
+    margin-left: auto;
+    max-width: 240px;
+}
+
+#asset-tree-app .asset-tree-dashboard .asset-tree-report-board.is-summary {
+    margin: 0;
+}
+
 #asset-tree-app .asset-tree-dashboard.is-collapsed .asset-tree-summary-bar {
     margin: 0 !important;
 }
@@ -7490,24 +7499,36 @@ a.asset-tree-preview-icon:focus {
     max-width: none;
 }
 
-#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart svg.asset-tree-report-svg,
-#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-round svg.asset-tree-report-svg,
-#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-radar svg.asset-tree-report-svg {
-    width: 100% !important;
-    height: 140px !important;
-    min-height: 0 !important;
-    max-height: 140px !important;
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-round {
+    flex-wrap: wrap;
+    gap: 18px 28px;
 }
 
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart svg.asset-tree-report-svg,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-radar svg.asset-tree-report-svg {
+    width: 100% !important;
+    height: 160px !important;
+    min-height: 0 !important;
+    max-height: 160px !important;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring,
 #asset-tree-app .asset-tree-report-tile .asset-tree-report-chart svg.asset-tree-donut,
-#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring {
-    width: 132px !important;
-    height: 132px !important;
-    min-width: 132px !important;
-    max-width: 132px !important;
-    min-height: 132px !important;
-    max-height: 132px !important;
-    flex: 0 0 132px !important;
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value {
+    width: 188px !important;
+    height: 188px !important;
+    min-width: 188px !important;
+    max-width: 188px !important;
+    min-height: 188px !important;
+    max-height: 188px !important;
+    flex: 0 0 188px !important;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value.is-compact,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value.is-tiny {
+    padding: 0 !important;
+    font-size: 32px !important;
 }
 
 #asset-tree-app .asset-tree-report-tile {
