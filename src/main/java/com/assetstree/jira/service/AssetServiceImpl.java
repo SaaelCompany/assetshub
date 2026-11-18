@@ -13169,7 +13169,9 @@ public class AssetServiceImpl implements AssetService {
                     bucket = new ReportBucketDto(slot[0], slot[1], "#DE350B", 0);
                     buckets.put(slot[0], bucket);
                 }
-                bucket.setCount(bucket.getCount() + RepairTime.days(overlap));
+                int minutes = minutesOf(overlap);
+                bucket.setCount(bucket.getCount() + minutes);
+                bucket.setText(idleText(bucket.getCount() * 60000L));
                 String bucketKey = slot[0];
                 for (int i = 0; i < spans.size(); i++) {
                     RepairTime.Span span = spans.get(i);
@@ -13578,18 +13580,42 @@ public class AssetServiceImpl implements AssetService {
         return java.time.Instant.ofEpochMilli(millis).atZone(businessZone()).toLocalDate().toString();
     }
 
+    private int minutesOf(long millis) {
+        long minutes = millis / 60000L;
+        if (millis > 0L && minutes < 1L) {
+            minutes = 1L;
+        }
+        if (minutes > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        return (int) minutes;
+    }
+
     private String idleText(long millis) {
-        long minutes = Math.max(0L, millis / 60000L);
+        long minutes = millis / 60000L;
+        if (millis > 0L && minutes < 1L) {
+            minutes = 1L;
+        }
         long days = minutes / (60L * 24L);
         long hours = (minutes / 60L) % 24L;
         long rest = minutes % 60L;
+        StringBuilder text = new StringBuilder();
         if (days > 0L) {
-            return i18n().getText("asset-tree.ui.reportIdleSpan", String.valueOf(days), String.valueOf(hours));
+            text.append(i18n().getText("asset-tree.ui.reportIdleDays", String.valueOf(days)));
         }
         if (hours > 0L) {
-            return i18n().getText("asset-tree.ui.reportIdleHours", String.valueOf(hours), String.valueOf(rest));
+            if (text.length() > 0) {
+                text.append(' ');
+            }
+            text.append(i18n().getText("asset-tree.ui.reportIdleHour", String.valueOf(hours)));
         }
-        return i18n().getText("asset-tree.ui.reportIdleMinutes", String.valueOf(Math.max(1L, rest)));
+        if (rest > 0L || text.length() == 0) {
+            if (text.length() > 0) {
+                text.append(' ');
+            }
+            text.append(i18n().getText("asset-tree.ui.reportIdleMinutes", String.valueOf(rest)));
+        }
+        return text.toString();
     }
 
     private String opsReason(String key) {
@@ -13687,7 +13713,18 @@ public class AssetServiceImpl implements AssetService {
         view.setLineTotal(lineTotal);
         view.setExportLimited(exportCut);
         view.setCapped(truncated || exportCut || (!allLines && lineFrom + page.size() < lineTotal));
-        view.setSum(money ? MoneyText.format(sum) : "");
+        if (money) {
+            view.setSum(MoneyText.format(sum));
+        } else {
+            view.setSum("");
+        }
+        if (ReportCatalog.IDLE.equals(key)) {
+            long minutes = 0L;
+            for (int i = 0; i < rows.size(); i++) {
+                minutes += rows.get(i).getCount();
+            }
+            view.setFigure(idleText(minutes * 60000L));
+        }
         if (rows.isEmpty()) {
             view.setReason(reason == null ? "" : reason);
         }
@@ -14220,6 +14257,10 @@ public class AssetServiceImpl implements AssetService {
         List<String> headers = new ArrayList<String>();
         headers.add(view.getTitle() == null ? "" : view.getTitle());
         headers.add(i18n().getText("asset-tree.ui.reportCount"));
+        boolean timed = view.getFigure() != null && !view.getFigure().isEmpty();
+        if (timed) {
+            headers.add(i18n().getText("asset-tree.ui.reportColDuration"));
+        }
         boolean money = view.getSum() != null && !view.getSum().isEmpty();
         if (money) {
             headers.add(i18n().getText("asset-tree.ui.lifeBook"));
@@ -14249,6 +14290,9 @@ public class AssetServiceImpl implements AssetService {
                 List<String> cells = new ArrayList<String>();
                 cells.add(bucket.getLabel() == null ? "" : bucket.getLabel());
                 cells.add(bookCount(bucket.getCount()));
+                if (timed) {
+                    cells.add(bucket.getText() == null ? "" : bucket.getText());
+                }
                 if (money) {
                     cells.add(bookDecimal(bucket.getAmount()));
                 }
@@ -14259,6 +14303,9 @@ public class AssetServiceImpl implements AssetService {
         List<String> total = new ArrayList<String>();
         total.add(i18n().getText("asset-tree.ui.reportTotalRow"));
         total.add(bookCount(view.getTotal()));
+        if (timed) {
+            total.add(view.getFigure());
+        }
         if (money) {
             total.add(bookDecimal(shareTotal));
         }
@@ -14275,11 +14322,14 @@ public class AssetServiceImpl implements AssetService {
         }
         lines.add(new ArrayList<String>());
         boolean journal = false;
+        boolean clocks = false;
         if (view.getLines() != null) {
             for (ReportLineDto line : view.getLines()) {
                 if (line.getState() != null && !line.getState().isEmpty()) {
                     journal = true;
-                    break;
+                }
+                if (line.getClock() != null && !line.getClock().isEmpty()) {
+                    clocks = true;
                 }
             }
         }
@@ -14290,6 +14340,9 @@ public class AssetServiceImpl implements AssetService {
             detailHead.add(i18n().getText("asset-tree.ui.reportColWork"));
             detailHead.add(i18n().getText("asset-tree.ui.reportColKind"));
             detailHead.add(i18n().getText("asset-tree.ui.reportColWhen"));
+            if (clocks) {
+                detailHead.add(i18n().getText("asset-tree.ui.reportColDuration"));
+            }
             detailHead.add(i18n().getText("asset-tree.ui.reportColState"));
             detailHead.add(i18n().getText("asset-tree.ui.reportColNext"));
         } else {
@@ -14306,11 +14359,10 @@ public class AssetServiceImpl implements AssetService {
                     cells.add(line.getAsset() == null ? "" : line.getAsset());
                     cells.add(line.getName() == null ? "" : line.getName());
                     cells.add(line.getKind() == null ? "" : line.getKind());
-                    String when = line.getWhen() == null ? "" : line.getWhen();
-                    if (line.getClock() != null && !line.getClock().isEmpty()) {
-                        when = when.isEmpty() ? line.getClock() : when + " " + line.getClock();
+                    cells.add(line.getWhen() == null ? "" : line.getWhen());
+                    if (clocks) {
+                        cells.add(line.getClock() == null ? "" : line.getClock());
                     }
-                    cells.add(when);
                     cells.add(workStateLabel(line.getState()));
                     cells.add(line.getNext() == null ? "" : line.getNext());
                 } else {

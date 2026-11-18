@@ -17999,17 +17999,17 @@
         });
         if (!money) shareTotal = view.total || 0;
         var shares = shareLabels(shareValues);
-        var head = [csvCell(groupWord(view.groupBy, view)), csvCell(t('reportCount'))];
+        var head = [csvCell(groupWord(view.groupBy, view)), csvCell(reportIdle(view) ? t('reportColDuration') : t('reportCount'))];
         if (money) head.push(csvCell(t('lifeBook')));
         head.push(csvCell(t('reportShare')));
         var rows = [head.join(';')];
         (view.rows || []).forEach(function (row, index) {
-            var cells = [csvCell(row.label), csvCell(row.count)];
+            var cells = [csvCell(row.label), csvCell(reportCountShown(row))];
             if (money) cells.push(csvCell(reportMoneyCsv(Number(row.amount) || 0)));
             cells.push(csvCell(shares[index] || '0 %'));
             rows.push(cells.join(';'));
         });
-        var totalCells = [csvCell(t('reportTotalRow')), csvCell(view.total || 0)];
+        var totalCells = [csvCell(t('reportTotalRow')), csvCell(reportTotalShown(view))];
         if (money) totalCells.push(csvCell(reportMoneyCsv(shareTotal)));
         totalCells.push(csvCell(shareTotal ? '100 %' : '0 %'));
         rows.push(totalCells.join(';'));
@@ -18019,9 +18019,17 @@
             if (view.lines && view.lines.length) {
             rows.push('');
             if (reportJournal(view)) {
-                rows.push([csvCell(t('keyLabel')), csvCell(t('reportColAsset')), csvCell(t('reportColWork')), csvCell(t('reportColKind')), csvCell(t('reportColWhen')), csvCell(t('reportColState')), csvCell(t('reportColNext'))].join(';'));
+                var journalHead = [csvCell(t('keyLabel')), csvCell(t('reportColAsset')), csvCell(t('reportColWork')), csvCell(t('reportColKind')), csvCell(t('reportColWhen'))];
+                if (reportTimed(view)) journalHead.push(csvCell(t('reportColDuration')));
+                journalHead.push(csvCell(t('reportColState')));
+                journalHead.push(csvCell(t('reportColNext')));
+                rows.push(journalHead.join(';'));
                 view.lines.forEach(function (row) {
-                    rows.push([csvCell(row.objectKey), csvCell(row.asset), csvCell(row.name), csvCell(row.kind), csvCell(reportWhenText(row)), csvCell(reportStateWord(row.state)), csvCell(formatFieldDate(row.next || ''))].join(';'));
+                    var cells = [csvCell(row.objectKey), csvCell(row.asset), csvCell(row.name), csvCell(row.kind), csvCell(reportWhenText(row))];
+                    if (reportTimed(view)) cells.push(csvCell(row.clock || ''));
+                    cells.push(csvCell(reportStateWord(row.state)));
+                    cells.push(csvCell(formatFieldDate(row.next || '')));
+                    rows.push(cells.join(';'));
                 });
             } else {
                 var detailHead = money ? t('lifeBook') : detailWord(view.groupBy, view);
@@ -18078,19 +18086,23 @@
         var money = reportMoney(view);
         var body = '<h1>' + htmlEscape(view.title || '') + '</h1><p>' + htmlEscape(groupPhrase(view.groupBy, view)) + '</p>';
         if (chart) body += '<div class="chart">' + chart.innerHTML + '</div>';
-        body += '<table><tr><th>' + htmlEscape(groupWord(view.groupBy, view)) + '</th><th>' + htmlEscape(t('reportCount')) + '</th>';
+        body += '<table><tr><th>' + htmlEscape(groupWord(view.groupBy, view)) + '</th><th>' + htmlEscape(reportIdle(view) ? t('reportColDuration') : t('reportCount')) + '</th>';
         if (money) body += '<th>' + htmlEscape(t('lifeBook')) + '</th>';
         body += '</tr>';
         rows.forEach(function (row) {
-            body += '<tr><td>' + htmlEscape(row.label || '') + '</td><td class="num">' + htmlEscape(String(row.count || 0)) + '</td>';
+            body += '<tr><td>' + htmlEscape(row.label || '') + '</td><td class="num">' + htmlEscape(reportCountShown(row)) + '</td>';
             if (money) body += '<td class="num">' + htmlEscape(reportMoneyLabel(Number(row.amount) || 0)) + '</td>';
             body += '</tr>';
         });
         body += '</table>';
         if (reportJournal(view)) {
-            body += '<h2>' + htmlEscape(t('reportColWork')) + '</h2><table><tr><th>' + htmlEscape(t('keyLabel')) + '</th><th>' + htmlEscape(t('reportColAsset')) + '</th><th>' + htmlEscape(t('reportColWork')) + '</th><th>' + htmlEscape(t('reportColKind')) + '</th><th>' + htmlEscape(t('reportColWhen')) + '</th><th>' + htmlEscape(t('reportColState')) + '</th><th>' + htmlEscape(t('reportColNext')) + '</th></tr>';
+            body += '<h2>' + htmlEscape(t('reportColWork')) + '</h2><table><tr><th>' + htmlEscape(t('keyLabel')) + '</th><th>' + htmlEscape(t('reportColAsset')) + '</th><th>' + htmlEscape(t('reportColWork')) + '</th><th>' + htmlEscape(t('reportColKind')) + '</th><th>' + htmlEscape(t('reportColWhen')) + '</th>';
+            if (reportTimed(view)) body += '<th>' + htmlEscape(t('reportColDuration')) + '</th>';
+            body += '<th>' + htmlEscape(t('reportColState')) + '</th><th>' + htmlEscape(t('reportColNext')) + '</th></tr>';
             (view.lines || []).forEach(function (row) {
-                body += '<tr><td>' + htmlEscape(row.objectKey || '') + '</td><td>' + htmlEscape(row.asset || '') + '</td><td>' + htmlEscape(row.name || '') + '</td><td>' + htmlEscape(row.kind || '') + '</td><td>' + htmlEscape(reportWhenText(row)) + '</td><td>' + htmlEscape(reportStateWord(row.state)) + '</td><td>' + htmlEscape(formatFieldDate(row.next || '')) + '</td></tr>';
+                body += '<tr><td>' + htmlEscape(row.objectKey || '') + '</td><td>' + htmlEscape(row.asset || '') + '</td><td>' + htmlEscape(row.name || '') + '</td><td>' + htmlEscape(row.kind || '') + '</td><td>' + htmlEscape(reportWhenText(row)) + '</td>';
+                if (reportTimed(view)) body += '<td>' + htmlEscape(row.clock || '') + '</td>';
+                body += '<td>' + htmlEscape(reportStateWord(row.state)) + '</td><td>' + htmlEscape(formatFieldDate(row.next || '')) + '</td></tr>';
             });
             body += '</table>';
         }
@@ -18294,7 +18306,7 @@
             name.title = row.label || '';
             item.appendChild(name);
             var value = money ? (Number(row.amount) || 0) : (row.count || 0);
-            var shown = money ? reportMoneyLabel(value) : String(row.count);
+            var shown = money ? reportMoneyLabel(value) : reportCountShown(row);
             item.appendChild(el('strong', null, shown + ' · ' + (shares && shares[index] ? shares[index] : '0 %')));
             if (row.activate) {
                 item.tabIndex = 0;
@@ -18312,7 +18324,9 @@
     }
 
     function reportColumnsChart(rows, max, money) {
-        var wrap = el('div', 'asset-tree-report-columns' + (money ? ' is-money' : ''));
+        var wide = false;
+        rows.forEach(function (row) { if (row && row.text) wide = true; });
+        var wrap = el('div', 'asset-tree-report-columns' + (money ? ' is-money' : '') + (wide ? ' is-timed' : ''));
         rows.forEach(function (row) {
             var col = el('div', 'asset-tree-report-column' + (row.activate ? ' is-pick' : ''));
             if (row.activate) {
@@ -18325,7 +18339,7 @@
                     }
                 });
             }
-            var shown = row.text || String(row.count);
+            var shown = reportCountShown(row);
             var count = el('span', 'asset-tree-report-column-count', shown);
             count.title = shown;
             col.appendChild(count);
@@ -18368,7 +18382,7 @@
             fill.style.background = row.color || '#0052CC';
             track.appendChild(fill);
             line.appendChild(track);
-            var shown = row.text || String(row.count);
+            var shown = reportCountShown(row);
             var value = el('strong', null, shown);
             value.title = shown;
             line.appendChild(value);
@@ -18789,7 +18803,7 @@
         if (!drawn.length) return null;
         var round = el('div', 'asset-tree-report-chart is-round');
         var ring = el('div', 'asset-tree-report-ring');
-        var center = money ? reportMoneyLabel(maxShare(rows)) : String(total);
+        var center = money ? reportMoneyLabel(maxShare(rows)) : (view && view.figure ? String(view.figure) : String(total));
         if (kind === 'pie') {
             ring.appendChild(reportPieChart(drawn));
         } else {
@@ -18899,11 +18913,25 @@
         return t(map[state] || 'reportStateDone');
     }
 
+    function reportIdle(view) {
+        return !!(view && view.figure);
+    }
+
+    function reportCountShown(row) {
+        return row && row.text ? String(row.text) : String(row && row.count || 0);
+    }
+
+    function reportTotalShown(view) {
+        if (view && view.figure) return String(view.figure);
+        return String(view && view.total || 0);
+    }
+
+    function reportTimed(view) {
+        return !!(view && view.lines && view.lines.some(function (row) { return row && row.clock; }));
+    }
+
     function reportWhenText(line) {
-        var day = formatFieldDate(line && (line.when || line.from) || '');
-        var clock = line && line.clock ? String(line.clock) : '';
-        if (clock && day) return day + ' ' + clock;
-        return clock || day;
+        return formatFieldDate(line && (line.when || line.from) || '');
     }
 
     function detailWord(group, view) {
@@ -20147,10 +20175,10 @@
         });
         var chart = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shareLabels(shareValues), view);
         var headline = kind === 'line' || kind === 'area' || money;
-        if (chart && headline) tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : String(view.total || 0)));
+        if (chart && headline) tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : reportTotalShown(view)));
         if (chart) tile.appendChild(chart);
         else if (view.reason) tile.appendChild(el('p', 'asset-tree-hint', view.reason));
-        else tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : String(view.total || 0)));
+        else tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : reportTotalShown(view)));
         return tile;
     }
 
@@ -20262,7 +20290,7 @@
             }));
         }
         var facts = el('div', 'asset-tree-report-facts');
-        facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
+        facts.appendChild(reportFact('', reportTotalShown(view), t('reportTotalRow')));
         if (view.sum) facts.appendChild(reportFact('', reportMoneyLabel(shareTotal), t('lifeBook')));
         main.appendChild(facts);
         if (!rows.length) {
@@ -20304,7 +20332,7 @@
             var header = el('tr');
             header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy, view)));
             header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
-            header.appendChild(el('th', 'is-num', t('reportCount')));
+            header.appendChild(el('th', 'is-num', reportIdle(view) ? t('reportColDuration') : t('reportCount')));
             if (money) header.appendChild(el('th', 'is-num is-money', t('lifeBook')));
             header.appendChild(el('th', 'is-num', t('reportShare')));
             table.appendChild(header);
@@ -20329,7 +20357,7 @@
                 var meterValue = money ? (Number(row.amount) || 0) : (row.count || 0);
                 meter.appendChild(reportMeter(meterValue, maxValue, row.color));
                 line.appendChild(meter);
-                line.appendChild(el('td', 'is-num', String(row.count)));
+                line.appendChild(el('td', 'is-num', reportCountShown(row)));
                 if (money) line.appendChild(el('td', 'is-num is-money', reportMoneyLabel(Number(row.amount) || 0)));
                 line.appendChild(el('td', 'is-num', shares[index] || '0 %'));
                 table.appendChild(line);
@@ -20337,7 +20365,7 @@
             var total = el('tr', 'is-total');
             total.appendChild(el('td', null, t('reportTotalRow')));
             total.appendChild(el('td', 'asset-tree-report-meter', ''));
-            total.appendChild(el('td', 'is-num', String(view.total || 0)));
+            total.appendChild(el('td', 'is-num', reportTotalShown(view)));
             if (money) total.appendChild(el('td', 'is-num is-money', reportMoneyLabel(shareTotal)));
             total.appendChild(el('td', 'is-num', shareTotal ? '100 %' : '0 %'));
             table.appendChild(total);
@@ -20346,7 +20374,11 @@
         if (reportJournal(view)) {
             var journal = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-journal');
             var journalHead = el('tr');
-            ['keyLabel', 'reportColAsset', 'reportColWork', 'reportColKind', 'reportColWhen', 'reportColState', 'reportColNext'].forEach(function (key) {
+            var journalKeys = ['keyLabel', 'reportColAsset', 'reportColWork', 'reportColKind', 'reportColWhen'];
+            if (reportTimed(view)) journalKeys.push('reportColDuration');
+            journalKeys.push('reportColState');
+            journalKeys.push('reportColNext');
+            journalKeys.forEach(function (key) {
                 journalHead.appendChild(el('th', null, t(key)));
             });
             journal.appendChild(journalHead);
@@ -20366,6 +20398,7 @@
                 item.appendChild(el('td', null, row.name || ''));
                 item.appendChild(el('td', null, row.kind || ''));
                 item.appendChild(el('td', null, reportWhenText(row)));
+                if (reportTimed(view)) item.appendChild(el('td', null, row.clock || ''));
                 item.appendChild(el('td', 'asset-tree-report-state is-' + (row.state || 'done'), reportStateWord(row.state)));
                 item.appendChild(el('td', null, formatFieldDate(row.next || '')));
                 journal.appendChild(item);

@@ -7965,6 +7965,21 @@ a.asset-tree-preview-icon:focus {
     font-variant-numeric: tabular-nums;
 }
 
+#asset-tree-app .asset-tree-report-columns.is-timed .asset-tree-report-column {
+    flex-basis: 112px;
+    width: 112px;
+    min-width: 112px;
+    max-width: 132px;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-timed .asset-tree-report-column-count {
+    max-width: 100%;
+    font-size: 13px;
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal;
+}
+
 #asset-tree-app .asset-tree-report-shaft {
     display: flex;
     align-items: flex-end;
@@ -7990,6 +8005,13 @@ a.asset-tree-preview-icon:focus {
     width: 84px;
     min-width: 84px;
     max-width: 96px;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-histogram.is-timed .asset-tree-report-column {
+    flex-basis: 128px;
+    width: 128px;
+    min-width: 128px;
+    max-width: 148px;
 }
 
 #asset-tree-app .asset-tree-report-columns.is-histogram .asset-tree-report-shaft {

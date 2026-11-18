@@ -1953,6 +1953,7 @@ public final class UiCatalog {
             "reportColWhen",
             "reportColState",
             "reportColNext",
+            "reportColDuration",
             "reportStateOntime",
             "reportStateLate",
             "reportStateDone",
