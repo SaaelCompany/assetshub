@@ -1475,6 +1475,18 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/request-types/{typeId}/fields")
+    public Response requestFields(@PathParam("projectKey") final String projectKey,
+                                  @PathParam("typeId") final String typeId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listRequestFields(user(), projectKey, typeId)).build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/issue-types")
     public Response issueTypes(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {

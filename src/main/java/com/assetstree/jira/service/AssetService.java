@@ -182,6 +182,9 @@ public interface AssetService {
 
     IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey);
 
+    /** Stores the request key on the calendar plan day that created it. */
+    void notePlanIssue(int planId, String sourceDay, String issueKey);
+
     List<IssueRefDto> searchIssues(ApplicationUser user, String query);
 
     void unlinkIssue(ApplicationUser user, int assetId, long issueId);
@@ -228,6 +231,9 @@ public interface AssetService {
 
     /** Service Desk request types of the project. Empty when Service Desk is absent. */
     List<IssueTypeDto> listRequestTypes(ApplicationUser user, String projectKey);
+
+    /** Required fields of one portal request type, without summary and description. */
+    List<com.assetstree.jira.dto.RequestFieldDto> listRequestFields(ApplicationUser user, String projectKey, String typeId);
 
     List<IssueTypeDto> listIssueStatuses(ApplicationUser user, String projectKey);
 

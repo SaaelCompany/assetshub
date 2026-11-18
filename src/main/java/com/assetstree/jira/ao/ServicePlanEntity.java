@@ -100,4 +100,10 @@ public interface ServicePlanEntity extends Entity {
     String getRaised();
 
     void setRaised(String raised);
+
+    /** Request keys created from this plan, {@code yyyy-mm-dd=KEY} pairs separated by commas. */
+    @StringLength(StringLength.UNLIMITED)
+    String getRequests();
+
+    void setRequests(String requests);
 }

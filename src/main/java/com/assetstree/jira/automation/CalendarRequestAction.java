@@ -24,6 +24,7 @@ import com.assetstree.jira.model.CalendarRequest;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
 import com.assetstree.jira.web.PortalDesk;
+import com.assetstree.jira.web.PortalRequestForm;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -94,7 +95,12 @@ public class CalendarRequestAction implements AutomationRuleComponent {
         boolean droppedAssignee = false;
         Issue issue;
         if (!portalType.isEmpty()) {
-            issue = createPortal(ruleContext, actor, project, portalType, text);
+            ApplicationUser customer = customer(value, body);
+            if (namedCustomerMissing(value, customer)) {
+                ruleContext.getAuditLog().addError("asset-tree.automation.requestNoCustomer");
+                return ExecutionResultBuilder.stopRule();
+            }
+            issue = createPortal(ruleContext, actor, project, portalType, text, customer, value, body);
             if (issue == null) {
                 return ExecutionResultBuilder.stopRule();
             }
@@ -137,6 +143,7 @@ public class CalendarRequestAction implements AutomationRuleComponent {
         if (droppedAssignee) {
             ruleContext.getAuditLog().addMessage("asset-tree.automation.requestUnassigned", key);
         }
+        rememberKey(ruleContext, body, key);
         Map<String, Serializable> extra = new HashMap<String, Serializable>();
         extra.put("assetId", Integer.valueOf(assetId));
         extra.put("assetKey", AssetRuleValues.json(body, "key"));
@@ -146,11 +153,14 @@ public class CalendarRequestAction implements AutomationRuleComponent {
     }
 
     private static Issue createPortal(RuleContext ruleContext, ApplicationUser actor, Project project, String portalType,
-                                      CalendarRequest text) {
+                                      CalendarRequest text, ApplicationUser customer, Object config, String body) {
         Map<String, String> values = new LinkedHashMap<String, String>();
         values.put("summary", text.getSummary());
         values.put("description", text.getDescription());
-        PortalDesk.Created created = PortalDesk.create(actor, project, portalType, values);
+        if (!fillPortalFields(ruleContext, actor, project, portalType, values, config, body)) {
+            return null;
+        }
+        PortalDesk.Created created = PortalDesk.create(actor, project, portalType, values, customer);
         if (created == null || created.getFailureKey() != null || created.getKey() == null || created.getKey().isEmpty()) {
             String detail = created == null ? "" : word(ruleContext, created.getFailureKey());
             if (created != null && created.getFailureArg() != null && !created.getFailureArg().isEmpty()) {
@@ -172,6 +182,81 @@ public class CalendarRequestAction implements AutomationRuleComponent {
             ruleContext.getAuditLog().addError("asset-tree.automation.requestFailed", created.getKey());
         }
         return issue;
+    }
+
+    /** Puts the asset field, then the required fields the rule stored. Returns false when a required value is missing. */
+    private static boolean fillPortalFields(RuleContext ruleContext, ApplicationUser actor, Project project, String portalType,
+                                            Map<String, String> values, Object config, String body) {
+        PortalRequestForm.Type type = PortalDesk.type(actor, project, portalType);
+        if (type == null) {
+            return true;
+        }
+        int assetId = AssetRuleValues.jsonInt(body, "id");
+        for (String fieldId : type.getAssetFieldIds()) {
+            if (fieldId != null && !fieldId.isEmpty() && assetId > 0 && !values.containsKey(fieldId)) {
+                values.put(fieldId, String.valueOf(assetId));
+            }
+        }
+        Map<String, String> given = AssetRuleValues.map(AssetRuleValues.field(config, "fieldValues"));
+        for (PortalRequestForm.Field field : type.getFields()) {
+            if (field == null || "summary".equals(field.getId()) || "description".equals(field.getId())) {
+                continue;
+            }
+            String raw = given.get(field.getId());
+            String filled = raw == null ? "" : raw.trim();
+            if (filled.isEmpty()) {
+                if (field.isRequired() && !values.containsKey(field.getId())) {
+                    ruleContext.getAuditLog().addError("asset-tree.automation.requestFieldRequired", field.getName());
+                    return false;
+                }
+                continue;
+            }
+            if ("select".equals(field.getKind()) && !field.allows(filled)) {
+                ruleContext.getAuditLog().addError("asset-tree.automation.requestFieldRequired", field.getName());
+                return false;
+            }
+            int limit = filled.length() > 4000 ? 4000 : filled.length();
+            values.put(field.getId(), filled.substring(0, limit));
+        }
+        return true;
+    }
+
+    private static void rememberKey(RuleContext ruleContext, String body, String issueKey) {
+        int planId = AssetRuleValues.jsonInt(body, "planId");
+        if (planId <= 0 || issueKey == null || issueKey.isEmpty()) {
+            return;
+        }
+        AssetService service = AssetBridge.service();
+        if (service == null) {
+            return;
+        }
+        try {
+            service.notePlanIssue(planId, AssetRuleValues.json(body, "source"), issueKey);
+        } catch (RuntimeException ex) {
+            ruleContext.getAuditLog().addMessage("asset-tree.automation.requestKeyMiss", issueKey);
+        }
+    }
+
+    private static ApplicationUser customer(Object value, String body) {
+        String role = AssetRuleValues.field(value, "customer");
+        if (role.isEmpty() || "assignee".equals(role)) {
+            return assignee(AssetRuleValues.json(body, "assignee"));
+        }
+        if ("custodian".equals(role)) {
+            return assignee(AssetRuleValues.json(body, "custodian"));
+        }
+        if ("user".equals(role)) {
+            return assignee(AssetRuleValues.field(value, "customerUser"));
+        }
+        return assignee(AssetRuleValues.json(body, "assignee"));
+    }
+
+    private static boolean namedCustomerMissing(Object value, ApplicationUser customer) {
+        String role = AssetRuleValues.field(value, "customer");
+        if (!"user".equals(role) && !"custodian".equals(role)) {
+            return false;
+        }
+        return customer == null;
     }
 
     private static boolean assign(IssueService issueService, ApplicationUser actor, Issue issue, ApplicationUser assignee) {

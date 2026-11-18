@@ -136,6 +136,7 @@ import com.assetstree.jira.dto.FlowNodeDto;
 import com.assetstree.jira.dto.FlowProcessDto;
 import com.assetstree.jira.dto.FlowRuleDto;
 import com.assetstree.jira.dto.IssueTypeDto;
+import com.assetstree.jira.dto.RequestFieldDto;
 import com.assetstree.jira.dto.FileDto;
 import com.assetstree.jira.dto.ExportJobDto;
 import com.assetstree.jira.dto.ForecastRowDto;
@@ -226,6 +227,7 @@ import com.assetstree.jira.model.ReportLines;
 import com.assetstree.jira.model.LifeApprovers;
 import com.assetstree.jira.model.ModuleSetup;
 import com.assetstree.jira.model.PlanUnderlay;
+import com.assetstree.jira.model.CalendarIssues;
 import com.assetstree.jira.model.CalendarRaise;
 import com.assetstree.jira.model.ContractorContract;
 import com.assetstree.jira.model.LifeBook;
@@ -3530,6 +3532,31 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public void notePlanIssue(final int planId, final String sourceDay, final String issueKey) {
+        if (planId <= 0) {
+            return;
+        }
+        final LocalDate today = businessToday();
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                ServicePlanEntity plan = ao().get(ServicePlanEntity.class, planId);
+                if (plan == null) {
+                    return null;
+                }
+                String next = CalendarIssues.remember(plan.getRequests(), sourceDay, issueKey, today);
+                String current = plan.getRequests() == null ? "" : plan.getRequests();
+                if (next.equals(current)) {
+                    return null;
+                }
+                plan.setRequests(next);
+                plan.save();
+                return null;
+            }
+        });
+    }
+
+    @Override
     public IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey) {
         Issue issue = requireIssue(user, issueKey);
         IssueRefDto linked = link(user, assetId, issue, true);
@@ -4530,6 +4557,42 @@ public class AssetServiceImpl implements AssetService {
             IssueTypeDto dto = new IssueTypeDto();
             dto.setId(type.getId());
             dto.setName(type.getName());
+            result.add(dto);
+        }
+        return result;
+    }
+
+    @Override
+    public List<RequestFieldDto> listRequestFields(ApplicationUser user, String projectKey, String typeId) {
+        Project project = requireReadableProject(user, projectKey);
+        List<RequestFieldDto> result = new ArrayList<RequestFieldDto>();
+        PortalRequestForm.Type type = PortalDesk.type(user, project, typeId);
+        if (type == null) {
+            return result;
+        }
+        for (PortalRequestForm.Field field : type.getFields()) {
+            if (field == null || "summary".equals(field.getId()) || "description".equals(field.getId())) {
+                continue;
+            }
+            if (!field.isRequired()) {
+                continue;
+            }
+            RequestFieldDto dto = new RequestFieldDto();
+            dto.setId(field.getId());
+            dto.setName(field.getName());
+            dto.setRequired(true);
+            dto.setKind(field.getKind());
+            List<IssueTypeDto> options = new ArrayList<IssueTypeDto>();
+            for (PortalRequestForm.Option option : field.getOptions()) {
+                if (option == null || option.getValue() == null || option.getValue().isEmpty()) {
+                    continue;
+                }
+                IssueTypeDto row = new IssueTypeDto();
+                row.setId(option.getValue());
+                row.setName(option.getLabel());
+                options.add(row);
+            }
+            dto.setOptions(options);
             result.add(dto);
         }
         return result;
@@ -9875,6 +9938,9 @@ public class AssetServiceImpl implements AssetService {
 
     private void raiseOne(ServicePlanEntity plan, LocalDate today, String clock, Map<String, Boolean> serviceOn,
                            Map<String, Map<String, String>> labels, List<ScheduleDueEvent> events) {
+        if (events.size() >= CalendarRaise.BATCH) {
+            return;
+        }
         AssetEntity asset = null;
         String projectKey = plan.getProjectKey() == null ? "" : plan.getProjectKey().trim();
         if (plan.getAssetId() > 0) {
@@ -9909,10 +9975,18 @@ public class AssetServiceImpl implements AssetService {
             labels.put(projectKey, names);
         }
         String raised = plan.getRaised();
+        boolean handed = false;
         for (int i = 0; i < hands.size(); i++) {
+            if (events.size() >= CalendarRaise.BATCH) {
+                break;
+            }
             CalendarRaise.Hand hand = hands.get(i);
             events.add(scheduleEvent(projectKey, asset, plan, hand, names));
             raised = CalendarRaise.remember(raised, hand.getSource(), today);
+            handed = true;
+        }
+        if (!handed) {
+            return;
         }
         plan.setRaised(raised);
         plan.save();
@@ -9936,9 +10010,22 @@ public class AssetServiceImpl implements AssetService {
         String objectKey = asset == null || asset.getObjectKey() == null ? "" : asset.getObjectKey();
         String status = asset == null ? "" : Statuses.canonical(asset.getStatus());
         String typeKey = asset == null || asset.getTypeKey() == null ? "" : asset.getTypeKey();
+        String custodian = "";
+        String custodianName = "";
+        if (asset != null) {
+            UserProfileDto keeper = profile(asset.getCustodianKey());
+            if (keeper != null) {
+                custodian = keeper.getUsername() == null || keeper.getUsername().trim().isEmpty()
+                        ? (asset.getCustodianKey() == null ? "" : asset.getCustodianKey())
+                        : keeper.getUsername();
+                custodianName = keeper.getDisplayName() == null ? "" : keeper.getDisplayName();
+            } else if (asset.getCustodianKey() != null) {
+                custodian = asset.getCustodianKey();
+            }
+        }
         return new ScheduleDueEvent(projectKey, asset == null ? 0 : asset.getID(), objectKey, assetName, status, typeKey,
                 plan.getName(), hand.getDate(), plan.getNote(), kind, namedKind(kind, names), assignee, assigneeName,
-                hand.getStart(), hand.getEnd(), hand.getSource());
+                hand.getStart(), hand.getEnd(), hand.getSource(), plan.getID(), custodian, custodianName);
     }
 
     private void emitSchedule(ScheduleDueEvent event) {
@@ -10498,6 +10585,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setNextDue(next == null ? "" : next.toString());
         dto.setDue(planIsDue(row, next, today, completed));
         dto.setMoves(row.getMoves() == null ? "" : row.getMoves());
+        dto.setRequests(row.getRequests() == null ? "" : row.getRequests());
         return dto;
     }
 
