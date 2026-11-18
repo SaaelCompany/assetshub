@@ -589,6 +589,21 @@
     background: #f4f5f7;
 }
 
+.asset-tree-context.is-arrows {
+    display: flex;
+    min-width: 0;
+    padding: 4px;
+}
+
+.asset-tree-context-item.is-arrow {
+    width: 36px;
+    height: 32px;
+    padding: 0;
+    font-size: 18px;
+    line-height: 32px;
+    text-align: center;
+}
+
 .asset-tree-row.is-match .asset-tree-name {
     background: #fff3bf;
     border-radius: 4px;

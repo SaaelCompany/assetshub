@@ -3407,9 +3407,15 @@
         closeTreeMenu();
         var menu = el('div', 'asset-tree-context');
         menu.id = 'asset-tree-context';
+        var arrows = items.length && items.every(function (item) { return item.arrow; });
+        if (arrows) menu.classList.add('is-arrows');
         items.forEach(function (item) {
-            var entry = el('button', 'asset-tree-context-item', item.label);
+            var entry = el('button', 'asset-tree-context-item' + (item.arrow ? ' is-arrow' : ''), item.label);
             entry.type = 'button';
+            if (item.title) {
+                entry.title = item.title;
+                entry.setAttribute('aria-label', item.title);
+            }
             entry.addEventListener('click', function (event) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -3437,12 +3443,13 @@
         }, 0);
     }
 
-    function sortTypeByName(placeId, typeKey) {
+    function sortTypeByName(placeId, typeKey, direction) {
         var objects = equipmentIn(placeId, typeKey).slice();
+        var way = direction < 0 ? -1 : 1;
         objects.sort(function (left, right) {
             var cmp = compareNames(left.name, right.name);
-            if (cmp) return cmp;
-            return left.id - right.id;
+            if (!cmp) cmp = left.id - right.id;
+            return cmp * way;
         });
         ajax('POST', '/assets/' + placeId + '/types/sort', {
             typeKey: typeKey,
@@ -3521,8 +3528,15 @@
             event.preventDefault();
             event.stopPropagation();
             openTreeMenu(event.clientX, event.clientY, [{
-                label: t('sortByName'),
-                onClick: function () { sortTypeByName(placeId, type.typeKey); }
+                arrow: true,
+                label: '\u2191',
+                title: t('sortNameUp'),
+                onClick: function () { sortTypeByName(placeId, type.typeKey, 1); }
+            }, {
+                arrow: true,
+                label: '\u2193',
+                title: t('sortNameDown'),
+                onClick: function () { sortTypeByName(placeId, type.typeKey, -1); }
             }]);
         });
         branch.appendChild(row);
