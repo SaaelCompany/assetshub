@@ -6282,27 +6282,12 @@
         menu.setAttribute('role', 'listbox');
         statusChoices().forEach(function (choice) {
             var status = choice.value;
-            var row = el('div', 'asset-tree-status-choice');
             var item = button('', 'asset-tree-status-item' + (status === asset.status ? ' is-current' : ''), function () {
                 closeStatusMenu();
                 if (status !== asset.status) changeStatus(asset, status);
             });
             item.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(status), choice.label));
-            row.appendChild(item);
-            if (status !== asset.status) {
-                var clock = button('', 'asset-tree-status-clock', function (event) {
-                    event.stopPropagation();
-                    closeStatusMenu();
-                    askStatusMoment(choice.label, null, function (millis) {
-                        changeStatus(asset, status, millis);
-                    });
-                });
-                clock.title = t('statusWhen');
-                clock.setAttribute('aria-label', t('statusWhen'));
-                clock.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 5v3.2l2 1.3"/></svg>';
-                row.appendChild(clock);
-            }
-            menu.appendChild(row);
+            menu.appendChild(item);
         });
         app.appendChild(menu);
         var box = anchor.getBoundingClientRect();
@@ -6325,51 +6310,26 @@
         if (menu.parentNode) menu.parentNode.removeChild(menu);
     }
 
-    function changeStatus(asset, status, statusAt) {
+    function changeStatus(asset, status) {
         if (!asset || asset.status === status) return;
-        var changes = { status: status };
-        if (typeof statusAt === 'number') changes.statusAt = statusAt;
-        persistAsset(asset, changes);
+        persistAsset(asset, { status: status });
     }
 
-    function askStatusMoment(title, initialIso, onSave) {
-        openModal(function (dialog) {
-            dialog.appendChild(el('h2', null, title));
-            dialog.appendChild(el('p', 'asset-tree-hint', t('statusWhenHint')));
-            var when = initialIso ? new Date(initialIso) : new Date();
-            if (isNaN(when.getTime())) when = new Date();
-            function pad(value) {
-                return value < 10 ? '0' + value : String(value);
-            }
-            var date = document.createElement('input');
-            date.type = 'date';
-            date.value = when.getFullYear() + '-' + pad(when.getMonth() + 1) + '-' + pad(when.getDate());
-            var time = document.createElement('input');
-            time.type = 'time';
-            time.value = pad(when.getHours()) + ':' + pad(when.getMinutes());
-            var row = el('div', 'asset-tree-status-when');
-            row.appendChild(date);
-            row.appendChild(time);
-            dialog.appendChild(row);
-            var actions = el('div', 'asset-tree-dialog-actions');
-            actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () { closeModal(dialog); }));
-            actions.appendChild(button(initialIso ? t('save') : t('statusWhenSave'), 'asset-tree-btn primary', function () {
-                if (!date.value || !time.value) {
-                    setFormError(t('statusWhenNeed'));
-                    return;
-                }
-                var parts = date.value.split('-');
-                var clock = time.value.split(':');
-                var local = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), Number(clock[0]), Number(clock[1]), 0, 0);
-                if (isNaN(local.getTime()) || local.getTime() > Date.now() + 120000) {
-                    setFormError(t('statusWhenFuture'));
-                    return;
-                }
-                closeModal(dialog);
-                onSave(local.getTime());
-            }));
-            dialog.appendChild(actions);
-        });
+    function readStatusMoment(dateText, timeText) {
+        var date = String(dateText || '').trim().split('.');
+        var time = String(timeText || '').trim().split(':');
+        if (date.length !== 3 || time.length < 2) return null;
+        var day = Number(date[0]);
+        var month = Number(date[1]);
+        var year = Number(date[2]);
+        var hour = Number(time[0]);
+        var minute = Number(time[1]);
+        if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || time[0] === '' || time[1] === '') return null;
+        var local = new Date(year, month - 1, day, hour, minute, 0, 0);
+        if (isNaN(local.getTime())) return null;
+        if (local.getFullYear() !== year || local.getMonth() !== month - 1 || local.getDate() !== day) return null;
+        return local.getTime();
     }
 
     function changeCustodian(asset, userKey) {
@@ -6959,6 +6919,57 @@
         return t('actUpdated');
     }
 
+    function historyStamp(asset, item) {
+        var line = el('div', 'asset-tree-history-stamp');
+        function pad(value) {
+            return value < 10 ? '0' + value : String(value);
+        }
+        function show() {
+            while (line.firstChild) line.removeChild(line.firstChild);
+            line.appendChild(el('span', null, stamp(item.created)));
+            if (!(mayEdit(asset) && item.action === 'status' && item.id > 0)) return;
+            line.appendChild(button(t('statusWhenEdit'), 'asset-tree-history-when', edit));
+        }
+        function edit() {
+            while (line.firstChild) line.removeChild(line.firstChild);
+            var when = item.created ? new Date(item.created) : new Date();
+            if (isNaN(when.getTime())) when = new Date();
+            var date = document.createElement('input');
+            date.type = 'text';
+            date.className = 'asset-tree-history-date';
+            date.value = pad(when.getDate()) + '.' + pad(when.getMonth() + 1) + '.' + when.getFullYear();
+            date.placeholder = '\u0434\u0434.\u043c\u043c.\u0433\u0433\u0433\u0433';
+            var time = document.createElement('input');
+            time.type = 'text';
+            time.className = 'asset-tree-history-time';
+            time.value = pad(when.getHours()) + ':' + pad(when.getMinutes());
+            time.placeholder = '\u0447\u0447:\u043c\u043c';
+            var save = button(t('save'), 'asset-tree-history-when', function () {
+                var millis = readStatusMoment(date.value, time.value);
+                if (millis == null) {
+                    setFormError(t('statusWhenNeed'));
+                    return;
+                }
+                if (millis > Date.now() + 120000) {
+                    setFormError(t('statusWhenFuture'));
+                    return;
+                }
+                ajax('PUT', '/assets/' + asset.id + '/activities/' + item.id, { created: millis }, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('statusWhenNeed'));
+                });
+            });
+            line.appendChild(date);
+            line.appendChild(time);
+            line.appendChild(save);
+            line.appendChild(button(t('cancel'), 'asset-tree-history-when is-quiet', show));
+            date.focus();
+            date.select();
+        }
+        show();
+        return line;
+    }
+
     function historyCard(asset, item) {
         var row = el('div', 'asset-tree-history');
         var head = el('div', 'asset-tree-history-head');
@@ -6969,20 +6980,8 @@
         line.appendChild(el('strong', null, author));
         line.appendChild(document.createTextNode(' ' + historyVerb(item)));
         text.appendChild(line);
-        text.appendChild(el('span', null, stamp(item.created)));
+        text.appendChild(historyStamp(asset, item));
         head.appendChild(text);
-        if (mayEdit(asset) && item.action === 'status' && item.id > 0) {
-            var fix = button(t('statusWhenFix'), 'asset-tree-history-when', function () {
-                askStatusMoment(t('statusWhenEdit'), item.created, function (millis) {
-                    ajax('PUT', '/assets/' + asset.id + '/activities/' + item.id, { created: millis }, function (status, payload) {
-                        if (status >= 200 && status < 300) selectAsset(asset.id, true);
-                        else setFormError((payload && payload.message) || t('errorTitle'));
-                    });
-                });
-            });
-            fix.title = t('statusWhenEdit');
-            head.appendChild(fix);
-        }
         if (state.canArrange && asset && item.id > 0) {
             var drop = button('', 'asset-tree-history-delete', function () {
                 if (!window.confirm(t('activityDeleteConfirm'))) return;

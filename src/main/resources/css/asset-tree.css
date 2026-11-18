@@ -4487,10 +4487,6 @@ a.asset-tree-url {
     box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
 }
 
-.asset-tree-status-choice {
-    position: relative;
-}
-
 #asset-tree-app button.asset-tree-status-item {
     display: flex !important;
     align-items: center;
@@ -5467,68 +5463,45 @@ a.asset-tree-preview-icon:focus {
     min-width: 0;
 }
 
-#asset-tree-app .asset-tree-history-when {
-    flex: 0 0 auto;
-    margin-left: 8px;
-    padding: 0 4px;
-    border: 0;
-    background: transparent;
-    color: #0052cc;
-    cursor: pointer;
-    font-size: 12px;
-    line-height: 24px;
-    opacity: 0;
-}
-
-#asset-tree-app .asset-tree-history:hover .asset-tree-history-when,
-#asset-tree-app .asset-tree-history-when:focus,
-#asset-tree-app.is-phone .asset-tree-history-when {
-    opacity: 1;
-}
-
-#asset-tree-app button.asset-tree-status-clock {
-    position: absolute;
-    top: 50%;
-    right: 4px;
-    display: inline-flex !important;
-    align-items: center;
-    justify-content: center;
-    width: 24px !important;
-    min-width: 24px !important;
-    height: 24px !important;
-    min-height: 24px !important;
-    margin: 0;
-    padding: 0 !important;
-    border: 0 !important;
-    border-radius: 3px;
-    background: #fff !important;
-    color: #6b778c;
-    cursor: pointer;
-    box-shadow: none;
-    transform: translateY(-50%);
-    opacity: 0;
-}
-
-#asset-tree-app .asset-tree-status-choice:hover button.asset-tree-status-clock,
-#asset-tree-app button.asset-tree-status-clock:focus,
-#asset-tree-app.is-phone button.asset-tree-status-clock {
-    opacity: 1;
-}
-
-#asset-tree-app button.asset-tree-status-clock:hover {
-    background: #ebecf0;
-    color: #172b4d;
-}
-
-#asset-tree-app .asset-tree-status-when {
+#asset-tree-app .asset-tree-history-stamp {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 8px;
 }
 
-#asset-tree-app .asset-tree-status-when input {
-    flex: 1 1 140px;
-    min-width: 0;
+#asset-tree-app button.asset-tree-history-when {
+    flex: 0 0 auto;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #0052cc;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-history-when.is-quiet {
+    color: #6b778c;
+}
+
+#asset-tree-app .asset-tree-history-stamp input {
+    width: 96px !important;
+    min-width: 0 !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    margin: 0;
+    padding: 0 8px !important;
+    font-size: 13px;
+}
+
+#asset-tree-app .asset-tree-history-stamp input.asset-tree-history-date {
+    width: 112px !important;
 }
 
 #asset-tree-app .asset-tree-history-delete {
