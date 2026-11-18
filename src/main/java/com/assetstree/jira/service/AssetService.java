@@ -54,8 +54,10 @@ import com.assetstree.jira.dto.FlowRuleDto;
 import com.assetstree.jira.dto.IssueTypeDto;
 import com.assetstree.jira.dto.FlowBookDto;
 import com.assetstree.jira.dto.PortalRuleDto;
+import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
+import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.PortalRequestDraft;
@@ -154,6 +156,9 @@ public interface AssetService {
     int emptyTrash(ApplicationUser user, String projectKey);
 
     AssetDto moveAsset(ApplicationUser user, int id, MoveDraft move);
+
+    /** Drops several equipment rows onto one place, keeping their order. */
+    void moveObjects(ApplicationUser user, String projectKey, GroupMoveDraft draft);
 
     AssetTypeDto createType(ApplicationUser user, TypeDraft draft);
 
@@ -325,6 +330,9 @@ public interface AssetService {
 
     /** Moves a type up, down, into the type above, or back onto the place. */
     AssetDto arrangeType(ApplicationUser user, int assetId, PlaceArrangeDraft draft);
+
+    /** Puts one type's equipment on a place into the given order. */
+    void sortTypeObjects(ApplicationUser user, int assetId, PlaceSortDraft draft);
 
     ServicePlanDto updatePlan(ApplicationUser user, int assetId, int planId, ServicePlanDraft draft);
 

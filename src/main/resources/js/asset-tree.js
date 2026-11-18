@@ -397,6 +397,7 @@
         issueTypes: null,
         issueStatuses: null,
         selectedId: null,
+        treePicked: {},
         dirty: false,
         expanded: {},
         expansionReady: false,
@@ -3058,6 +3059,7 @@
     function openTrash() {
         if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
         state.trashOpen = true;
+        state.treePicked = {};
         state.selectedId = null;
         state.typeGroup = null;
         state.pane = 'list';
@@ -3095,6 +3097,7 @@
             if (state.dirty && !window.confirm(t('confirmDiscard'))) {
                 return;
             }
+            state.treePicked = {};
             state.selectedId = null;
             state.typeGroup = null;
             state.trashOpen = false;
@@ -3220,6 +3223,7 @@
             if (queued) row.appendChild(el('span', 'asset-tree-qcount', '(' + queued + ')'));
             row.appendChild(nestButton(asset.id));
             row.addEventListener('click', function () {
+                state.treePicked = {};
                 state.pane = 'list';
                 selectAsset(asset.id);
             });
@@ -3382,6 +3386,85 @@
         return mode + ':' + targetKey;
     }
 
+    function closeTreeMenu() {
+        var menu = document.getElementById('asset-tree-context');
+        if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+        document.removeEventListener('mousedown', onTreeMenuDown, true);
+        document.removeEventListener('keydown', onTreeMenuKey, true);
+    }
+
+    function onTreeMenuDown(event) {
+        var menu = document.getElementById('asset-tree-context');
+        if (menu && menu.contains(event.target)) return;
+        closeTreeMenu();
+    }
+
+    function onTreeMenuKey(event) {
+        if (event.key === 'Escape' || event.keyCode === 27) closeTreeMenu();
+    }
+
+    function openTreeMenu(x, y, items) {
+        closeTreeMenu();
+        var menu = el('div', 'asset-tree-context');
+        menu.id = 'asset-tree-context';
+        items.forEach(function (item) {
+            var entry = el('button', 'asset-tree-context-item', item.label);
+            entry.type = 'button';
+            entry.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                closeTreeMenu();
+                item.onClick();
+            });
+            menu.appendChild(entry);
+        });
+        document.body.appendChild(menu);
+        var pad = 8;
+        var box = menu.getBoundingClientRect();
+        var left = x;
+        var top = y;
+        var viewW = window.innerWidth || 0;
+        var viewH = window.innerHeight || 0;
+        if (viewW && left + box.width > viewW - pad) left = viewW - pad - box.width;
+        if (viewH && top + box.height > viewH - pad) top = viewH - pad - box.height;
+        if (left < pad) left = pad;
+        if (top < pad) top = pad;
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+        setTimeout(function () {
+            document.addEventListener('mousedown', onTreeMenuDown, true);
+            document.addEventListener('keydown', onTreeMenuKey, true);
+        }, 0);
+    }
+
+    function sortTypeByName(placeId, typeKey) {
+        var objects = equipmentIn(placeId, typeKey).slice();
+        objects.sort(function (left, right) {
+            var cmp = compareNames(left.name, right.name);
+            if (cmp) return cmp;
+            return left.id - right.id;
+        });
+        ajax('POST', '/assets/' + placeId + '/types/sort', {
+            typeKey: typeKey,
+            ids: objects.map(function (asset) { return asset.id; })
+        }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            reloadTree(function () {
+                state.expanded[placeId] = true;
+                state.expanded[typeExpandKey(placeId, typeKey)] = true;
+                var local = localParent(placeId, typeKey);
+                if (local) state.expanded[typeExpandKey(placeId, local)] = true;
+                rememberExpanded();
+                renderNodes();
+                replaceDetail();
+                notify(t('saved'));
+            });
+        });
+    }
+
     function typeGroupRow(placeId, type) {
         var nestedHere = !!localParent(placeId, type.typeKey);
         var kids = nestedHere ? [] : subtypesAt(placeId, type.typeKey);
@@ -3432,6 +3515,16 @@
         row.addEventListener('click', function () {
             selectTypeGroup(placeId, type.typeKey);
         });
+        row.addEventListener('contextmenu', function (event) {
+            var objects = equipmentIn(placeId, type.typeKey);
+            if (!state.canObjects || !objects.length) return;
+            event.preventDefault();
+            event.stopPropagation();
+            openTreeMenu(event.clientX, event.clientY, [{
+                label: t('sortByName'),
+                onClick: function () { sortTypeByName(placeId, type.typeKey); }
+            }]);
+        });
         branch.appendChild(row);
         if (open) {
             var nested = el('div', 'asset-tree-children');
@@ -3456,6 +3549,7 @@
         row.setAttribute('role', 'treeitem');
         row.setAttribute('data-asset-id', String(asset.id));
         if (state.selectedId === asset.id) row.classList.add('is-selected');
+        if (state.treePicked && state.treePicked[asset.id]) row.classList.add('is-picked');
         if (mayEdit(asset)) {
             row.classList.add('is-movable');
             bindObjectDrag(row, asset);
@@ -3471,7 +3565,18 @@
         name.appendChild(el('span', 'asset-tree-object-name', asset.name));
         row.appendChild(name);
         if (asset.objectKey) row.appendChild(el('span', 'asset-tree-object-key', asset.objectKey));
-        row.addEventListener('click', function () {
+        row.addEventListener('click', function (event) {
+            if (event.ctrlKey || event.metaKey) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!mayEdit(asset)) return;
+                if (!state.treePicked) state.treePicked = {};
+                if (state.treePicked[asset.id]) delete state.treePicked[asset.id];
+                else state.treePicked[asset.id] = true;
+                renderNodes();
+                return;
+            }
+            state.treePicked = {};
             state.pane = 'card';
             selectAsset(asset.id);
         });
@@ -3687,6 +3792,7 @@
 
     function selectTypeGroup(placeId, typeKey, scope) {
         if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        state.treePicked = {};
         state.typeGroup = { placeId: placeId, typeKey: typeKey, scope: scope || 'direct' };
         state.trashOpen = false;
         state.selectedId = null;
@@ -3707,11 +3813,30 @@
 
     var pointerDrag = null;
 
+    function pickedObjectIds() {
+        var ids = [];
+        function walk(parentId) {
+            childrenOf(parentId).forEach(function (asset) {
+                if (isFolder(asset)) walk(asset.id);
+                else if (state.treePicked && state.treePicked[asset.id] && mayEdit(asset)) ids.push(asset.id);
+            });
+        }
+        walk(null);
+        return ids;
+    }
+
     function beginAssetDrag(asset, event) {
         if (event.button !== 0 || !mayEdit(asset) || pointerDrag) return;
+        if (event.ctrlKey || event.metaKey) return;
         event.preventDefault();
+        var ids = [asset.id];
+        if (!isFolder(asset) && state.treePicked && state.treePicked[asset.id]) {
+            var picked = pickedObjectIds();
+            if (picked.length > 1) ids = picked;
+        }
         pointerDrag = {
             id: asset.id,
+            ids: ids,
             object: !isFolder(asset),
             pointerId: event.pointerId,
             startX: event.clientX,
@@ -3764,7 +3889,12 @@
             clearTextSelection();
             var moving = byId()[pointerDrag.id];
             var ghostLabel = '';
-            if (moving) ghostLabel = moving.objectKey && !isFolder(moving) ? moving.objectKey + '  ' + (moving.name || '') : (moving.name || '');
+            var dragged = pointerDrag.ids && pointerDrag.ids.length > 1 ? pointerDrag.ids.length : 0;
+            if (moving && dragged) {
+                ghostLabel = t('treeDragCount', moving.name || '').split('{1}').join(String(dragged));
+            } else if (moving) {
+                ghostLabel = moving.objectKey && !isFolder(moving) ? moving.objectKey + '  ' + (moving.name || '') : (moving.name || '');
+            }
             var ghost = el('div', 'asset-tree-drag-ghost', ghostLabel);
             ghost.id = 'asset-tree-drag-ghost';
             document.body.appendChild(ghost);
@@ -3792,11 +3922,13 @@
         var commit = event.type !== 'pointercancel' && pointerDrag.active;
         var plan = commit ? (pointerDrag.plan || planDrop(event.clientX, event.clientY, pointerDrag.id)) : null;
         var movingId = pointerDrag.id;
+        var movingIds = pointerDrag.ids && pointerDrag.ids.length ? pointerDrag.ids.slice() : [movingId];
         var objectDrag = !!pointerDrag.object;
         if (pointerDrag.active) suppressNextClick();
         endPointerDrag();
         if (!plan) return;
-        if (objectDrag) relocateObject(movingId, plan);
+        if (objectDrag && movingIds.length > 1) relocateObjects(movingIds, plan);
+        else if (objectDrag) relocateObject(movingId, plan);
         else moveAsset(movingId, plan.parentId, plan.index);
     }
 
@@ -3824,7 +3956,7 @@
 
     function planDrop(x, y, movingId) {
         var moving = byId()[movingId];
-        if (moving && !isFolder(moving)) return planObjectDrop(x, y, moving);
+        if (moving && !isFolder(moving)) return planObjectDrop(x, y, moving, pointerDrag && pointerDrag.ids);
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
         if (root) root.classList.remove('is-over');
@@ -3871,7 +4003,7 @@
         return { parentId: parentId, index: destinationIndex(parentId, targetId, mode, movingId) };
     }
 
-    function planObjectDrop(x, y, moving) {
+    function planObjectDrop(x, y, moving, ids) {
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
         if (root) root.classList.remove('is-over');
@@ -3889,10 +4021,11 @@
             }
         }
         if (!row || !moving) return null;
+        var group = ids && ids.length ? ids : [moving.id];
         var assetId = row.getAttribute('data-asset-id');
         if (assetId) {
             var targetId = parseInt(assetId, 10);
-            if (targetId === moving.id) return null;
+            if (movingSkip(group)[targetId]) return null;
             var target = byId()[targetId];
             if (!target || isFolder(target)) return null;
             var rect = row.getBoundingClientRect();
@@ -3901,7 +4034,7 @@
             var parentId = target.parentId ? target.parentId : null;
             return {
                 parentId: parentId,
-                index: destinationIndex(parentId, targetId, mode, moving.id),
+                index: destinationIndex(parentId, targetId, mode, group),
                 typeKey: target.typeKey
             };
         }
@@ -3916,7 +4049,7 @@
             row.classList.add(slot === 'before' ? 'is-drop-before' : (ratio > 0.72 ? 'is-drop-after' : 'is-drop-inside'));
             return {
                 parentId: placeId,
-                index: typeSlotIndex(placeId, typeKey, slot, moving.id),
+                index: typeSlotIndex(placeId, typeKey, slot, group),
                 typeKey: typeKey
             };
         }
@@ -3926,16 +4059,24 @@
         var place = byId()[into];
         if (!place || !isFolder(place)) return null;
         row.classList.add('is-drop-inside');
+        if (group.length > 1) {
+            return {
+                parentId: into,
+                index: childrenOf(into).filter(function (asset) { return !movingSkip(group)[asset.id]; }).length,
+                typeKey: ''
+            };
+        }
         return {
             parentId: into,
-            index: typeSlotIndex(into, moving.typeKey, 'after', moving.id),
+            index: typeSlotIndex(into, moving.typeKey, 'after', group),
             typeKey: moving.typeKey
         };
     }
 
     function typeSlotIndex(parentId, typeKey, mode, movingId) {
+        var skip = movingSkip(movingId);
         var siblings = childrenOf(parentId).filter(function (asset) {
-            return asset.id !== movingId;
+            return !skip[asset.id];
         });
         var first = -1;
         var last = -1;
@@ -4003,6 +4144,52 @@
                 return;
             }
             send(payload);
+        });
+    }
+
+    function relocateObjects(ids, plan) {
+        var rows = [];
+        (ids || []).forEach(function (id) {
+            var asset = byId()[id];
+            if (asset && !isFolder(asset) && mayEdit(asset)) rows.push(asset);
+        });
+        if (!rows.length || !plan) return;
+        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        var nextType = plan.typeKey || '';
+        var changes = 0;
+        if (nextType) {
+            rows.forEach(function (asset) {
+                if (asset.typeKey !== nextType) changes += 1;
+            });
+        }
+        if (changes) {
+            var label = typeOf(nextType).label || nextType;
+            if (!window.confirm(t('confirmTypeMoveMany', rows.length).split('{1}').join(label))) return;
+        }
+        if (wouldCycle(rows[0].id, plan.parentId)) {
+            notify(t('errorTitle'));
+            return;
+        }
+        state.dirty = false;
+        setBusy(true);
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/move-objects', {
+            ids: rows.map(function (asset) { return asset.id; }),
+            parentId: plan.parentId,
+            index: plan.index,
+            typeKey: nextType
+        }, function (status, payload) {
+            setBusy(false);
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            assetsChanged();
+            reloadTree(function () {
+                var placed = byId()[rows[0].id];
+                if (placed) expandObjectBranch(placed.parentId, nextType || placed.typeKey);
+                selectAsset(rows[0].id, true);
+                notify(t('moved'));
+            });
         });
     }
 
@@ -4079,9 +4266,20 @@
         }
     }
 
+    function movingSkip(movingId) {
+        var skip = {};
+        if (movingId && movingId.length) {
+            for (var i = 0; i < movingId.length; i++) skip[movingId[i]] = true;
+        } else if (movingId) {
+            skip[movingId] = true;
+        }
+        return skip;
+    }
+
     function destinationIndex(parentId, targetId, mode, movingId) {
+        var skip = movingSkip(movingId);
         var siblings = childrenOf(parentId).filter(function (asset) {
-            return asset.id !== movingId;
+            return !skip[asset.id];
         });
         var index = siblings.length;
         for (var i = 0; i < siblings.length; i++) {

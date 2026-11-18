@@ -203,6 +203,7 @@ import com.assetstree.jira.model.FlowBook;
 import com.assetstree.jira.model.FlowGraph;
 import com.assetstree.jira.model.PickerLayout;
 import com.assetstree.jira.model.PlaceArrangeDraft;
+import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceLayout;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.FlowRules;
@@ -211,6 +212,7 @@ import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.model.AssetKeyRules;
 import com.assetstree.jira.model.ObjectKeys;
@@ -2984,6 +2986,192 @@ public class AssetServiceImpl implements AssetService {
                     sibling.save();
                 }
                 return toDto(moving, attributesFor(id), indexTypes(typeDtos(moving.getProjectKey(), all)), indexAssets(all), true);
+            }
+        });
+    }
+
+    @Override
+    public void moveObjects(ApplicationUser user, String projectKey, GroupMoveDraft draft) {
+        if (draft == null || draft.getIds() == null || draft.getIds().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final List<Integer> ids = new ArrayList<Integer>();
+        Set<Integer> unique = new HashSet<Integer>();
+        for (Integer id : draft.getIds()) {
+            if (id != null && id.intValue() > 0 && unique.add(id)) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        if (ids.size() > BulkSelection.MAX_ITEMS) {
+            throw new AssetException(400, "asset-tree.error.bulk.limit", Integer.valueOf(BulkSelection.MAX_ITEMS));
+        }
+        final Integer parentId = TreeLogic.normalizeParent(draft.getParentId());
+        final String requestedType = draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
+        final AssetTypeEntity nextType = requestedType.isEmpty() ? null : requireEquipmentType(project, requestedType);
+        final Integer index = draft.getIndex();
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                if (parentId != null) {
+                    AssetEntity parent = requireReadable(user, parentId.intValue());
+                    if (!ProjectKeys.same(parent.getProjectKey(), project.getKey())) {
+                        throw new AssetException(400, "asset-tree.error.project.mismatch");
+                    }
+                }
+                AssetEntity[] all = assetsIn(project.getKey());
+                Map<Integer, Integer> parents = parentMap(all);
+                Map<Integer, List<Integer>> children = childrenMap(all);
+                if (parentId != null && !parents.containsKey(parentId)) {
+                    throw new AssetException(400, "asset-tree.error.parent");
+                }
+                List<AssetEntity> moving = new ArrayList<AssetEntity>();
+                Set<Integer> movingIds = new HashSet<Integer>();
+                for (Integer id : ids) {
+                    AssetEntity entity = requireAssetCap(user, id.intValue(), kindCap(requireAsset(id.intValue())));
+                    if (!ProjectKeys.same(entity.getProjectKey(), project.getKey())) {
+                        throw new AssetException(400, "asset-tree.error.project.mismatch");
+                    }
+                    if (isLocation(entity)) {
+                        throw new AssetException(400, "asset-tree.error.bulk.place", entity.getName());
+                    }
+                    if (TreeLogic.wouldCycle(parents, id.intValue(), parentId)) {
+                        throw new AssetException(400, "asset-tree.error.cycle");
+                    }
+                    int baseDepth = parentId == null ? 0 : TreeLogic.depth(parents, parentId.intValue()) + 1;
+                    int extra = TreeLogic.subtreeHeight(children, id.intValue());
+                    if (baseDepth >= TreeLogic.MAX_DEPTH || baseDepth + extra >= TreeLogic.MAX_DEPTH) {
+                        throw new AssetException(400, "asset-tree.error.depth");
+                    }
+                    moving.add(entity);
+                    movingIds.add(id);
+                }
+                List<AssetEntity> siblings = new ArrayList<AssetEntity>();
+                for (AssetEntity candidate : all) {
+                    if (movingIds.contains(Integer.valueOf(candidate.getID()))) {
+                        continue;
+                    }
+                    if (TreeLogic.sameParent(candidate.getParentId(), parentId)) {
+                        siblings.add(candidate);
+                    }
+                }
+                Collections.sort(siblings, SIBLING_ORDER);
+                int at = index == null ? siblings.size() : index.intValue();
+                if (at < 0) {
+                    at = 0;
+                }
+                if (at > siblings.size()) {
+                    at = siblings.size();
+                }
+                for (AssetEntity entity : moving) {
+                    Integer previousParent = TreeLogic.normalizeParent(entity.getParentId());
+                    Integer fromPlace = placeContainer(previousParent, all, null);
+                    Integer toPlace = placeContainer(parentId, all, null);
+                    String oldType = entity.getTypeKey() == null ? "" : entity.getTypeKey();
+                    if (nextType != null && !nextType.getTypeKey().equals(oldType)) {
+                        entity.setTypeKey(nextType.getTypeKey());
+                        logActivity(entity.getID(), user.getKey(), "type", "", typeLabel(findType(oldType)), typeLabel(nextType));
+                    }
+                    entity.setParentId(parentId);
+                    entity.setUpdated(new Date());
+                    entity.setUpdatedBy(user.getKey());
+                    if (!TreeLogic.sameParent(previousParent, parentId)) {
+                        logActivity(entity.getID(), user.getKey(), "move", "", parentName(previousParent), parentName(parentId));
+                    }
+                    if (fromPlace != null && !fromPlace.equals(toPlace)) {
+                        logPlaceChange(user, fromPlace, "place_out", entity);
+                    }
+                    if (toPlace != null && !toPlace.equals(fromPlace)) {
+                        logPlaceChange(user, toPlace, "place_in", entity);
+                    }
+                }
+                siblings.addAll(at, moving);
+                for (int i = 0; i < siblings.size(); i++) {
+                    AssetEntity sibling = siblings.get(i);
+                    sibling.setSortOrder(i);
+                    sibling.save();
+                }
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public void sortTypeObjects(ApplicationUser user, final int assetId, final PlaceSortDraft draft) {
+        if (draft == null || draft.getTypeKey() == null || draft.getTypeKey().trim().isEmpty()
+                || draft.getIds() == null || draft.getIds().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        final String typeKey = draft.getTypeKey().trim();
+        final List<Integer> wanted = new ArrayList<Integer>();
+        Set<Integer> seen = new HashSet<Integer>();
+        for (Integer id : draft.getIds()) {
+            if (id != null && id.intValue() > 0 && seen.add(id)) {
+                wanted.add(id);
+            }
+        }
+        if (wanted.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        if (wanted.size() > BulkSelection.MAX_ITEMS) {
+            throw new AssetException(400, "asset-tree.error.bulk.limit", Integer.valueOf(BulkSelection.MAX_ITEMS));
+        }
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity place = requireAsset(assetId);
+                requireProjectCap(user, place.getProjectKey(), GrantCaps.OBJECT);
+                if (!isLocation(place)) {
+                    throw new AssetException(400, "asset-tree.error.type.place");
+                }
+                AssetTypeEntity type = requireType(typeKey);
+                if (type.isLocation() || !ProjectKeys.same(type.getProjectKey(), place.getProjectKey())) {
+                    throw new AssetException(400, "asset-tree.error.type");
+                }
+                AssetEntity[] all = assetsIn(place.getProjectKey());
+                List<AssetEntity> siblings = new ArrayList<AssetEntity>();
+                Map<Integer, AssetEntity> ofType = new HashMap<Integer, AssetEntity>();
+                for (AssetEntity candidate : all) {
+                    if (!TreeLogic.sameParent(candidate.getParentId(), Integer.valueOf(place.getID()))) {
+                        continue;
+                    }
+                    siblings.add(candidate);
+                    if (!isLocation(candidate) && typeKey.equals(candidate.getTypeKey())) {
+                        ofType.put(Integer.valueOf(candidate.getID()), candidate);
+                    }
+                }
+                if (ofType.size() != wanted.size()) {
+                    throw new AssetException(400, "asset-tree.error.bulk.action");
+                }
+                List<AssetEntity> ordered = new ArrayList<AssetEntity>();
+                for (Integer id : wanted) {
+                    AssetEntity row = ofType.get(id);
+                    if (row == null) {
+                        throw new AssetException(400, "asset-tree.error.bulk.action");
+                    }
+                    ordered.add(row);
+                }
+                Collections.sort(siblings, SIBLING_ORDER);
+                List<Integer> slots = new ArrayList<Integer>();
+                for (int i = 0; i < siblings.size(); i++) {
+                    if (ofType.containsKey(Integer.valueOf(siblings.get(i).getID()))) {
+                        slots.add(Integer.valueOf(i));
+                    }
+                }
+                for (int i = 0; i < slots.size(); i++) {
+                    siblings.set(slots.get(i).intValue(), ordered.get(i));
+                }
+                for (int i = 0; i < siblings.size(); i++) {
+                    AssetEntity sibling = siblings.get(i);
+                    if (sibling.getSortOrder() != i) {
+                        sibling.setSortOrder(i);
+                        sibling.save();
+                    }
+                }
+                return null;
             }
         });
     }

@@ -538,14 +538,55 @@
     background: #ebecf0;
 }
 
+.asset-tree-row.is-picked {
+    background: #deebff;
+    box-shadow: inset 3px 0 0 #4c9aff;
+}
+
 .asset-tree-row.is-selected {
     background: #ffffff;
     box-shadow: inset 3px 0 0 #0052cc;
     color: #0052cc;
 }
 
+.asset-tree-row.is-picked.is-selected {
+    background: #deebff;
+    box-shadow: inset 3px 0 0 #0052cc;
+    color: #0052cc;
+}
+
 .asset-tree-row.is-selected .asset-tree-name {
     font-weight: 600;
+}
+
+.asset-tree-context {
+    position: fixed;
+    z-index: 80;
+    min-width: 160px;
+    margin: 0;
+    padding: 4px 0;
+    background: #ffffff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+}
+
+.asset-tree-context-item {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: #172b4d;
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.asset-tree-context-item:hover {
+    background: #f4f5f7;
 }
 
 .asset-tree-row.is-match .asset-tree-name {
