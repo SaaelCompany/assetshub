@@ -16,6 +16,9 @@ public final class DocFields {
         public String city = "";
         public String mol = "";
         public String role = "";
+        public String phone = "";
+        public String email = "";
+        public String department = "";
         public String custodian = "";
         public String description = "";
         public String project = "";
@@ -48,7 +51,10 @@ public final class DocFields {
         put(out, card.address, "address", "адрес");
         put(out, card.city, "city", "город");
         put(out, card.mol, "mol", "мол");
-        put(out, card.role, "должность", "роль");
+        put(out, card.role, "должность", "роль", "title");
+        put(out, card.phone, "phone", "телефон", "тел");
+        put(out, card.email, "email", "почта");
+        put(out, card.department, "department", "отдел", "подразделение");
         put(out, card.custodian, "custodian", "ответственный");
         put(out, card.description, "description", "описание");
         put(out, card.project, "project", "организация", "клиника");

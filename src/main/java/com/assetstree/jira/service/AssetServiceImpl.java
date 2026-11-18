@@ -18554,7 +18554,13 @@ public class AssetServiceImpl implements AssetService {
         source.statusLabel = statusName(asset.getProjectKey(), asset.getStatus());
         source.mol = userLabel(asset.getIssuedKey());
         source.custodian = userLabel(asset.getCustodianKey());
-        source.role = source.mol.isEmpty() ? "" : i18n().getText("asset-tree.ui.issuedTo");
+        UserProfileDto issued = profile(asset.getIssuedKey());
+        if (issued != null) {
+            source.role = issued.getTitle() == null ? "" : issued.getTitle();
+            source.phone = issued.getPhone() == null ? "" : issued.getPhone();
+            source.email = issued.getEmail() == null ? "" : issued.getEmail();
+            source.department = issued.getDepartment() == null ? "" : issued.getDepartment();
+        }
         Project project = project(asset.getProjectKey());
         source.project = project == null || project.getName() == null ? asset.getProjectKey() : project.getName();
         source.today = DateTimeFormatter.ofPattern("dd.MM.yyyy").format(LocalDate.now(businessZone()));
@@ -18594,8 +18600,17 @@ public class AssetServiceImpl implements AssetService {
             String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
             source.fields.put(attribute.getAttrName(), value);
             source.labels.put(attribute.getAttrName(), label == null ? "" : label);
-            if (label != null && DocxFill.normalize(label).contains("должност") && !value.isEmpty()) {
-                source.role = value;
+            String folded = DocxFill.normalize(label);
+            if (!value.isEmpty()) {
+                if (folded.contains("должност")) {
+                    source.role = value;
+                } else if (folded.contains("телефон") || folded.contains("phone")) {
+                    source.phone = value;
+                } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел")) {
+                    source.department = value;
+                } else if (folded.contains("почт") || folded.contains("email")) {
+                    source.email = value;
+                }
             }
         }
         Integer parentId = asset.getParentId();
