@@ -35,6 +35,7 @@ import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
+import com.assetstree.jira.dto.ReportBoardDto;
 import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.SavedReportDto;
@@ -60,6 +61,7 @@ import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.dto.ServicePlanDto;
 import com.assetstree.jira.model.LifecycleDraft;
+import com.assetstree.jira.model.ReportBoardDraft;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
@@ -362,6 +364,14 @@ public interface AssetService {
     SavedReportDto updateSavedReport(ApplicationUser user, String projectKey, String reportKey, SavedReportDraft draft);
 
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
+
+    List<ReportBoardDto> reportBoards(ApplicationUser user, String projectKey);
+
+    ReportBoardDto createReportBoard(ApplicationUser user, String projectKey, ReportBoardDraft draft);
+
+    ReportBoardDto updateReportBoard(ApplicationUser user, String projectKey, int boardId, ReportBoardDraft draft);
+
+    void deleteReportBoard(ApplicationUser user, String projectKey, int boardId);
 
     ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket, String start, String end);
 

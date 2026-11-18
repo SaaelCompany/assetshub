@@ -94,6 +94,7 @@ import com.assetstree.jira.ao.TypeSchemaEntity;
 import com.assetstree.jira.ao.WebhookEntity;
 import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.RoomEntity;
+import com.assetstree.jira.ao.ReportBoardEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
 import com.assetstree.jira.ao.SchemeEntity;
 import com.assetstree.jira.ao.SchemePlacementEntity;
@@ -165,6 +166,8 @@ import com.assetstree.jira.dto.ReportLineDto;
 import com.assetstree.jira.dto.ReportVennDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
+import com.assetstree.jira.dto.ReportBoardDto;
+import com.assetstree.jira.dto.ReportBoardPanelDto;
 import com.assetstree.jira.dto.SavedReportDto;
 import com.assetstree.jira.dto.TniSourceDto;
 import com.assetstree.jira.dto.TniWatchDto;
@@ -241,6 +244,8 @@ import com.assetstree.jira.model.ReportCatalog;
 import com.assetstree.jira.model.ReportWindow;
 import com.assetstree.jira.model.ScheduleDone;
 import com.assetstree.jira.model.ReportWorkbook;
+import com.assetstree.jira.model.ReportBoardDraft;
+import com.assetstree.jira.model.ReportBoards;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleAnchor;
 import com.assetstree.jira.model.ScheduleOccurrences;
@@ -11834,6 +11839,152 @@ public class AssetServiceImpl implements AssetService {
                 return null;
             }
         });
+    }
+
+    @Override
+    public List<ReportBoardDto> reportBoards(ApplicationUser user, String projectKey) {
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        SchemaReady.ensure(ao());
+        return ao().executeInTransaction(new TransactionCallback<List<ReportBoardDto>>() {
+            @Override
+            public List<ReportBoardDto> doInTransaction() {
+                return boardDtos(project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public ReportBoardDto createReportBoard(ApplicationUser user, String projectKey, final ReportBoardDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        SchemaReady.ensure(ao());
+        final String title = ReportBoards.name(draft == null ? "" : draft.getName());
+        if (title.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        final String panels = ReportBoards.write(boardPanels(draft));
+        return ao().executeInTransaction(new TransactionCallback<ReportBoardDto>() {
+            @Override
+            public ReportBoardDto doInTransaction() {
+                List<ReportBoardDto> existing = boardDtos(project.getKey());
+                if (existing.size() >= ReportBoards.MAX_BOARDS) {
+                    throw new AssetException(400, "asset-tree.error.report");
+                }
+                ReportBoardEntity row = ao().create(ReportBoardEntity.class,
+                        new DBParam("PROJECT_KEY", project.getKey()),
+                        new DBParam("NAME", title),
+                        new DBParam("POSITION", Integer.valueOf(existing.size())),
+                        new DBParam("PANELS", panels));
+                row.setName(title);
+                row.setPanels(panels);
+                row.setPosition(existing.size());
+                row.save();
+                return boardDto(row);
+            }
+        });
+    }
+
+    @Override
+    public ReportBoardDto updateReportBoard(ApplicationUser user, String projectKey, final int boardId, final ReportBoardDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        final String title = ReportBoards.name(draft == null ? "" : draft.getName());
+        if (boardId <= 0 || title.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        final String panels = ReportBoards.write(boardPanels(draft));
+        return ao().executeInTransaction(new TransactionCallback<ReportBoardDto>() {
+            @Override
+            public ReportBoardDto doInTransaction() {
+                ReportBoardEntity row = ao().get(ReportBoardEntity.class, boardId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                row.setName(title);
+                row.setPanels(panels);
+                row.save();
+                return boardDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void deleteReportBoard(ApplicationUser user, String projectKey, final int boardId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        if (boardId <= 0) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                ReportBoardEntity row = ao().get(ReportBoardEntity.class, boardId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    private List<ReportBoards.Panel> boardPanels(ReportBoardDraft draft) {
+        List<ReportBoards.Panel> panels = new ArrayList<ReportBoards.Panel>();
+        if (draft == null || draft.getPanels() == null) {
+            return panels;
+        }
+        for (int i = 0; i < draft.getPanels().size(); i++) {
+            ReportBoardPanelDto panel = draft.getPanels().get(i);
+            if (panel == null) {
+                continue;
+            }
+            panels.add(new ReportBoards.Panel(panel.getReport(), panel.getChart(), panel.getWidth()));
+        }
+        return panels;
+    }
+
+    private List<ReportBoardDto> boardDtos(String projectKey) {
+        List<ReportBoardDto> found = new ArrayList<ReportBoardDto>();
+        ReportBoardEntity[] rows = ao().find(ReportBoardEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return found;
+        }
+        List<ReportBoardEntity> own = new ArrayList<ReportBoardEntity>();
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null) {
+                own.add(rows[i]);
+            }
+        }
+        Collections.sort(own, new Comparator<ReportBoardEntity>() {
+            @Override
+            public int compare(ReportBoardEntity left, ReportBoardEntity right) {
+                int order = left.getPosition() - right.getPosition();
+                return order == 0 ? left.getID() - right.getID() : order;
+            }
+        });
+        for (int i = 0; i < own.size(); i++) {
+            found.add(boardDto(own.get(i)));
+        }
+        return found;
+    }
+
+    private ReportBoardDto boardDto(ReportBoardEntity row) {
+        ReportBoardDto dto = new ReportBoardDto();
+        dto.setId(row.getID());
+        dto.setName(row.getName() == null ? "" : row.getName());
+        List<ReportBoardPanelDto> panels = new ArrayList<ReportBoardPanelDto>();
+        List<ReportBoards.Panel> stored = ReportBoards.read(row.getPanels());
+        for (int i = 0; i < stored.size(); i++) {
+            ReportBoards.Panel panel = stored.get(i);
+            ReportBoardPanelDto item = new ReportBoardPanelDto();
+            item.setReport(panel.getReport());
+            item.setChart(panel.getChart());
+            item.setWidth(panel.getWidth());
+            panels.add(item);
+        }
+        dto.setPanels(panels);
+        return dto;
     }
 
     @Override
