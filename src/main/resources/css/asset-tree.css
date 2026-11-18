@@ -5044,6 +5044,18 @@ a.asset-tree-url {
     background: #ebecf0;
 }
 
+#asset-tree-app .asset-tree-more-caption {
+    padding: 6px 12px 2px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-more-docs .asset-tree-hint {
+    margin: 0;
+    padding: 4px 12px 8px;
+}
+
 #asset-tree-app .asset-tree-module {
     margin: 8px 0 0;
 }

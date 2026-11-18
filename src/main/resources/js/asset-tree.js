@@ -4558,6 +4558,11 @@
         var sawPlain = false;
         var split = false;
         items.forEach(function (item) {
+            if (item.documents) {
+                sawPlain = true;
+                appendDocumentEntries(menu, item.documents);
+                return;
+            }
             if (!item.danger) sawPlain = true;
             if (item.danger && sawPlain && !split) {
                 split = true;
@@ -4578,55 +4583,33 @@
         return wrap;
     }
 
-    function documentButton(asset) {
-        if (!state.moreBound) {
-            state.moreBound = true;
-            document.addEventListener('mousedown', function (event) {
-                var menus = document.querySelectorAll('.asset-tree-more-menu');
-                for (var i = 0; i < menus.length; i++) {
-                    var wrap = menus[i].parentNode;
-                    if (wrap && !wrap.contains(event.target)) menus[i].hidden = true;
-                }
-            });
-        }
-        var wrap = el('div', 'asset-tree-more');
-        var menu = el('div', 'asset-tree-more-menu');
-        menu.hidden = true;
-        var toggle = toolButton(t('docButton'), 'issue', function (event) {
-            event.stopPropagation();
-            if (!menu.hidden) {
-                menu.hidden = true;
+    function appendDocumentEntries(menu, asset) {
+        menu.appendChild(el('div', 'asset-tree-more-caption', t('docButton')));
+        var slot = el('div', 'asset-tree-more-docs');
+        slot.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        menu.appendChild(slot);
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
+            if (!slot.parentNode) return;
+            slot.innerHTML = '';
+            var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
+            if (!rows.length) {
+                slot.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('docEmpty')));
+                if (!menu.hidden) placeMoreMenu(menu);
                 return;
             }
-            menu.innerHTML = '';
-            menu.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            menu.hidden = false;
-            placeMoreMenu(menu);
-            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
-                if (!menu.parentNode) return;
-                menu.innerHTML = '';
-                var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
-                if (!rows.length) {
-                    menu.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('docEmpty')));
-                    return;
-                }
-                rows.forEach(function (row) {
-                    var entry = el('button', 'asset-tree-more-item');
-                    entry.type = 'button';
-                    entry.appendChild(document.createTextNode(row.name || row.id));
-                    entry.addEventListener('click', function () {
-                        menu.hidden = true;
-                        window.location.href = contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id
-                            + '&document=' + encodeURIComponent(row.id);
-                    });
-                    menu.appendChild(entry);
+            rows.forEach(function (row) {
+                var entry = el('button', 'asset-tree-more-item');
+                entry.type = 'button';
+                entry.appendChild(document.createTextNode(row.name || row.id));
+                entry.addEventListener('click', function () {
+                    menu.hidden = true;
+                    window.location.href = contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id
+                        + '&document=' + encodeURIComponent(row.id);
                 });
-                placeMoreMenu(menu);
+                slot.appendChild(entry);
             });
+            if (!menu.hidden) placeMoreMenu(menu);
         });
-        wrap.appendChild(toggle);
-        wrap.appendChild(menu);
-        return wrap;
     }
 
     function placeMoreMenu(menu) {
@@ -8801,7 +8784,6 @@
                 printCards([state.detail && state.detail.id === asset.id ? state.detail : asset]);
             }));
         }
-        if (!isFolder(asset)) ops.appendChild(documentButton(asset));
         var extra = [];
         if (mayEdit(asset) && !isFolder(asset) && moduleOn('card')) {
             var current = state.detail && state.detail.id === asset.id ? state.detail : asset;
@@ -8819,14 +8801,12 @@
                 extra.push({ label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
             }
         }
+        if (!isFolder(asset)) extra.push({ documents: asset });
         if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
-            var ping = toolButton(t('tniPing'), 'ping', function () { pingAsset(asset); });
+            var pingItem = { label: t('tniPing'), onClick: function () { pingAsset(asset); } };
             var pingState = pingMark(asset);
-            if (pingState) {
-                var pingLabel = ping.querySelector('span');
-                ping.insertBefore(pingDot(pingState), pingLabel || null);
-            }
-            ops.appendChild(ping);
+            if (pingState) pingItem.mark = pingState;
+            extra.push(pingItem);
         }
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
