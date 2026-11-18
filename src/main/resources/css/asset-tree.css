@@ -3615,13 +3615,140 @@ a.asset-tree-url {
     border-top: 1px solid var(--line);
 }
 
+#asset-tree-app .asset-tree-doc-form {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) minmax(200px, 1.3fr) auto;
+    gap: 12px;
+    align-items: end;
+}
+
+#asset-tree-app .asset-tree-doc-form .asset-tree-field {
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-doc-form .asset-tree-field > span {
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-doc-pick {
+    position: relative;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 0 8px;
+    border: 2px solid var(--line);
+    border-radius: 3px;
+    background: var(--field, #fafbfc);
+    cursor: pointer;
+}
+
+#asset-tree-app .asset-tree-doc-pick:hover {
+    background: var(--field-hover, #ebecf0);
+}
+
+#asset-tree-app .asset-tree-doc-pick input[type="file"] {
+    position: absolute;
+    width: 1px !important;
+    height: 1px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    opacity: 0;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-doc-pick-name {
+    min-width: 0;
+    overflow: hidden;
+    color: #97a0af;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-doc-pick-name.is-set {
+    color: #172b4d;
+}
+
+#asset-tree-app .asset-tree-doc-list {
+    margin-top: 16px;
+    border-top: 1px solid #ebecf0;
+}
+
+#asset-tree-app .asset-tree-doc-list > .asset-tree-hint {
+    margin: 12px 0 0;
+}
+
 #asset-tree-app .asset-tree-doc-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 8px 0;
+    min-height: 40px;
+    padding: 6px 0;
     border-bottom: 1px solid #ebecf0;
+}
+
+#asset-tree-app .asset-tree-doc-name {
+    min-width: 0;
+    overflow: hidden;
+    color: #172b4d;
+    font-size: 14px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#asset-tree-app .asset-tree-doc-group {
+    margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-doc-group-title {
+    margin: 0 0 6px;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-doc-tokens {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+#asset-tree-app button.asset-tree-doc-token {
+    display: inline-flex !important;
+    align-items: center;
+    height: 24px;
+    margin: 0;
+    padding: 0 8px !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #f4f5f7 !important;
+    color: #172b4d !important;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 20px;
+    cursor: pointer;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-doc-token:hover {
+    background: #ebecf0 !important;
+    border-color: #c1c7d0 !important;
+}
+
+@media (max-width: 860px) {
+    #asset-tree-app .asset-tree-doc-form {
+        grid-template-columns: 1fr;
+    }
 }
 
 .asset-tree-settings-title {

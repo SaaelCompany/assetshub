@@ -15422,15 +15422,30 @@
     }
 
     function renderDocumentSettings(panel) {
-        panel.appendChild(el('p', 'asset-tree-hint', t('docSectionHint')));
-        panel.appendChild(el('p', 'asset-tree-hint', t('docTokens')));
-        var form = el('div', 'asset-tree-settings-block');
+        var stack = el('div', 'asset-tree-project-stack');
+        var templates = el('section', 'asset-tree-project-card');
+        templates.appendChild(el('h3', 'asset-tree-settings-title', t('docTemplates')));
+        templates.appendChild(el('p', 'asset-tree-hint', t('docSectionHint')));
+        var form = el('div', 'asset-tree-doc-form');
         var name = input('asset-tree-doc-name', '');
+        name.autocomplete = 'off';
+        name.maxLength = 120;
         form.appendChild(field(t('docName'), name));
         var file = el('input');
         file.type = 'file';
+        file.className = 'asset-tree-doc-file';
         file.accept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        form.appendChild(field(t('docFile'), file));
+        var pick = el('span', 'asset-tree-doc-pick');
+        var fileName = el('span', 'asset-tree-doc-pick-name', t('docFileEmpty'));
+        pick.appendChild(file);
+        pick.appendChild(fileName);
+        file.addEventListener('change', function () {
+            var chosen = file.files && file.files[0];
+            fileName.textContent = chosen ? chosen.name : t('docFileEmpty');
+            if (chosen) fileName.classList.add('is-set');
+            else fileName.classList.remove('is-set');
+        });
+        form.appendChild(field(t('docFile'), pick));
         form.appendChild(button(t('docAdd'), 'asset-tree-btn primary', function () {
             var chosen = file.files && file.files[0];
             if (!name.value.trim() || !chosen) {
@@ -15439,10 +15454,36 @@
             }
             uploadDocument(name.value.trim(), chosen);
         }));
-        panel.appendChild(form);
-        var list = el('div', 'asset-tree-settings-block');
+        templates.appendChild(form);
+        var list = el('div', 'asset-tree-doc-list');
         list.appendChild(el('p', 'asset-tree-hint', t('loading')));
-        panel.appendChild(list);
+        templates.appendChild(list);
+        stack.appendChild(templates);
+
+        var marks = el('section', 'asset-tree-project-card');
+        marks.appendChild(el('h3', 'asset-tree-settings-title', t('docMarks')));
+        marks.appendChild(el('p', 'asset-tree-hint', t('docTokens')));
+        docTokenGroups().forEach(function (group) {
+            var block = el('div', 'asset-tree-doc-group');
+            block.appendChild(el('div', 'asset-tree-doc-group-title', group[0]));
+            var chips = el('div', 'asset-tree-doc-tokens');
+            group[1].forEach(function (token) {
+                var text = '{{' + token + '}}';
+                var chip = el('button', 'asset-tree-doc-token', text);
+                chip.type = 'button';
+                chip.title = t('copy');
+                chip.addEventListener('click', function () {
+                    copyPlain(text);
+                    notify(t('docCopied'));
+                });
+                chips.appendChild(chip);
+            });
+            block.appendChild(chips);
+            marks.appendChild(block);
+        });
+        stack.appendChild(marks);
+        panel.appendChild(stack);
+
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
             if (!list.parentNode) return;
             list.innerHTML = '';
@@ -15457,7 +15498,7 @@
             }
             rows.forEach(function (row) {
                 var line = el('div', 'asset-tree-doc-row');
-                line.appendChild(el('span', null, row.name || row.id));
+                line.appendChild(el('span', 'asset-tree-doc-name', row.name || row.id));
                 line.appendChild(button(t('docDelete'), 'asset-tree-btn', function () {
                     ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/documents/' + encodeURIComponent(row.id), null, function () {
                         renderFrame();
@@ -15466,6 +15507,38 @@
                 list.appendChild(line);
             });
         });
+    }
+
+    function docTokenGroups() {
+        var english = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0;
+        if (english) {
+            return [
+                [t('docGroupCard'), ['name', 'key', 'serial', 'inventory', 'type', 'status', 'description', 'maker', 'model', 'group', 'quantity', 'life', 'year', 'date', 'request']],
+                [t('docGroupPerson'), ['mol', 'title', 'phone', 'department', 'email', 'custodian']],
+                [t('docGroupPlace'), ['place', 'address', 'city', 'project']]
+            ];
+        }
+        return [
+            [t('docGroupCard'), ['наименование', 'ключ', 'серийный', 'инвентарный', 'тип', 'статус', 'описание', 'производитель', 'модель', 'группа', 'количество', 'срок', 'год', 'дата', 'заявка']],
+            [t('docGroupPerson'), ['мол', 'должность', 'телефон', 'отдел', 'почта', 'ответственный']],
+            [t('docGroupPlace'), ['площадка', 'филиал', 'адрес', 'город', 'организация']]
+        ];
+    }
+
+    function copyPlain(text) {
+        var area = el('textarea');
+        area.value = text;
+        area.setAttribute('readonly', 'readonly');
+        area.style.position = 'fixed';
+        area.style.left = '-9999px';
+        document.body.appendChild(area);
+        area.select();
+        try {
+            document.execCommand('copy');
+        } catch (error) {
+            /* The chip still shows the token when the browser blocks the copy. */
+        }
+        document.body.removeChild(area);
     }
 
     function uploadDocument(name, file) {
