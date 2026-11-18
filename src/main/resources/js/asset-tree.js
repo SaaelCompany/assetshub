@@ -4362,6 +4362,9 @@
             lock: 'M17 10h-1V8a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm-7-2a2 2 0 0 1 4 0v2h-4V8zm7 11H7v-7h10v7z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
             trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 7h12l-1 14H7L6 7z',
+            image: 'M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5L19 18H5l3.5-4.5z',
+            back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
+            qr: 'M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm13-2h3v3h-3v-3zm-4 4h3v3h-3v-3zm4 4h3v3h-3v-3z',
             cloud: 'M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 8.6 3.5 3.5 0 0 0 7 18z',
             issue: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 13h8v1.6H8V13zm0 4h5v1.6H8V17z'
         };
@@ -4558,11 +4561,6 @@
         var sawPlain = false;
         var split = false;
         items.forEach(function (item) {
-            if (item.documents) {
-                sawPlain = true;
-                appendDocumentEntries(menu, item.documents);
-                return;
-            }
             if (!item.danger) sawPlain = true;
             if (item.danger && sawPlain && !split) {
                 split = true;
@@ -4570,6 +4568,7 @@
             }
             var entry = el('button', 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''));
             entry.type = 'button';
+            entry.appendChild(toolIcon(item.icon || 'more'));
             if (item.mark) entry.appendChild(pingDot(item.mark));
             entry.appendChild(document.createTextNode(item.label));
             entry.addEventListener('click', function () {
@@ -4583,33 +4582,56 @@
         return wrap;
     }
 
-    function appendDocumentEntries(menu, asset) {
-        menu.appendChild(el('div', 'asset-tree-more-caption', t('docButton')));
-        var slot = el('div', 'asset-tree-more-docs');
-        slot.appendChild(el('p', 'asset-tree-hint', t('loading')));
-        menu.appendChild(slot);
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
-            if (!slot.parentNode) return;
-            slot.innerHTML = '';
-            var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
-            if (!rows.length) {
-                slot.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('docEmpty')));
-                if (!menu.hidden) placeMoreMenu(menu);
+    function documentButton(asset) {
+        if (!state.moreBound) {
+            state.moreBound = true;
+            document.addEventListener('mousedown', function (event) {
+                var menus = document.querySelectorAll('.asset-tree-more-menu');
+                for (var i = 0; i < menus.length; i++) {
+                    var holder = menus[i].parentNode;
+                    if (holder && !holder.contains(event.target)) menus[i].hidden = true;
+                }
+            });
+        }
+        var wrap = el('div', 'asset-tree-more');
+        var menu = el('div', 'asset-tree-more-menu');
+        menu.hidden = true;
+        var toggle = toolButton(t('docButton'), 'issue', function (event) {
+            event.stopPropagation();
+            if (!menu.hidden) {
+                menu.hidden = true;
                 return;
             }
-            rows.forEach(function (row) {
-                var entry = el('button', 'asset-tree-more-item');
-                entry.type = 'button';
-                entry.appendChild(document.createTextNode(row.name || row.id));
-                entry.addEventListener('click', function () {
-                    menu.hidden = true;
-                    window.location.href = contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id
-                        + '&document=' + encodeURIComponent(row.id);
+            menu.innerHTML = '';
+            menu.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            menu.hidden = false;
+            placeMoreMenu(menu);
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
+                if (!menu.parentNode) return;
+                menu.innerHTML = '';
+                var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
+                if (!rows.length) {
+                    menu.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('docEmpty')));
+                    return;
+                }
+                rows.forEach(function (row) {
+                    var entry = el('button', 'asset-tree-more-item');
+                    entry.type = 'button';
+                    entry.appendChild(toolIcon('issue'));
+                    entry.appendChild(document.createTextNode(row.name || row.id));
+                    entry.addEventListener('click', function () {
+                        menu.hidden = true;
+                        window.location.href = contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id
+                            + '&document=' + encodeURIComponent(row.id);
+                    });
+                    menu.appendChild(entry);
                 });
-                slot.appendChild(entry);
+                placeMoreMenu(menu);
             });
-            if (!menu.hidden) placeMoreMenu(menu);
         });
+        wrap.appendChild(toggle);
+        wrap.appendChild(menu);
+        return wrap;
     }
 
     function placeMoreMenu(menu) {
@@ -4760,7 +4782,7 @@
             ops.appendChild(toolButton(t('addHere'), 'plus', function () {
                 openCreate(asset.id);
             }));
-            ops.appendChild(moreMenu([{ label: t('trashMove'), danger: true, onClick: function () { openDelete(full); } }]));
+            ops.appendChild(moreMenu([{ icon: 'trash', label: t('trashMove'), danger: true, onClick: function () { openDelete(full); } }]));
         }
         main.appendChild(ops);
         if (asset.parentId && crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
@@ -5980,6 +6002,20 @@
                         printCards(items.map(function (item) {
                             return item.asset || assetByAnyId(parseInt(item.key, 10));
                         }));
+                    }));
+                }
+                if (photoEnabled()) {
+                    bar.appendChild(button(t('photoAdd'), 'asset-tree-btn', function () {
+                        var chosen = [];
+                        items.forEach(function (item) {
+                            var row = item.asset || assetByAnyId(parseInt(item.key, 10));
+                            if (row && row.id && !isFolder(row)) chosen.push(row);
+                        });
+                        if (!chosen.length) return;
+                        var rest = [];
+                        var n;
+                        for (n = 1; n < chosen.length; n++) rest.push(chosen[n].id);
+                        pickPhoto(chosen[0], rest, true);
                     }));
                 }
                 bar.appendChild(button(t('copy'), 'asset-tree-btn', function () { postBulk('copy'); }));
@@ -7630,7 +7666,7 @@
         node.textContent = message || '';
     }
 
-    function uploadPhoto(asset, file, ids) {
+    function uploadPhoto(asset, file, ids, stay) {
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
             showPhotoError(t('photoSize'));
@@ -7649,6 +7685,10 @@
             if (xhr.readyState !== 4) return;
             if (xhr.status >= 200 && xhr.status < 300) {
                 notify(t('saved'));
+                if (stay) {
+                    reloadTree(function () { renderFrame(); });
+                    return;
+                }
                 selectAsset(asset.id, true);
                 return;
             }
@@ -7659,7 +7699,7 @@
         xhr.send(data);
     }
 
-    function pickPhoto(asset) {
+    function pickPhoto(asset, ids, stay) {
         var input = document.getElementById('asset-tree-photo-file');
         if (!input) {
             input = el('input');
@@ -7672,7 +7712,7 @@
         input.onchange = function () {
             var chosen = input.files && input.files[0];
             input.value = '';
-            if (chosen) openPhotoCrop(asset, chosen);
+            if (chosen) openPhotoCrop(asset, chosen, ids, stay);
         };
         input.click();
     }
@@ -7774,7 +7814,7 @@
         return canvas;
     }
 
-    function openPhotoCrop(asset, file) {
+    function openPhotoCrop(asset, file, ids, stay) {
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
             showPhotoError(t('photoSize'));
@@ -7793,7 +7833,7 @@
                     showPhotoError(t('errorTitle'));
                     return;
                 }
-                showPhotoCrop(asset, uprightPhoto(img, orientation));
+                showPhotoCrop(asset, uprightPhoto(img, orientation), ids, stay);
             };
             img.onerror = function () {
                 URL.revokeObjectURL(url);
@@ -7806,7 +7846,7 @@
         reader.readAsArrayBuffer(file);
     }
 
-    function showPhotoCrop(asset, source) {
+    function showPhotoCrop(asset, source, alsoIds, stay) {
         var srcW = source.width;
         var srcH = source.height;
         var viewW = 1;
@@ -7816,13 +7856,6 @@
         var closed = false;
         var frame = null;
         var stage = null;
-        var picked = {};
-        var alsoQuery = '';
-        var onlyType = false;
-        var alsoList = null;
-        var alsoCount = null;
-        var alsoNote = null;
-        picked[asset.id] = true;
         source.className = 'asset-tree-frame-source';
         function pointOf(event) {
             return event.touches && event.touches.length ? event.touches[0] : event;
@@ -7963,7 +7996,6 @@
             picture.appendChild(frame);
             stage.appendChild(picture);
             dialog.appendChild(stage);
-            dialog.appendChild(photoAlsoBlock(asset));
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', release));
             actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
@@ -7980,9 +8012,8 @@
                         showPhotoError(t('errorTitle'));
                         return;
                     }
-                    var ids = photoAlsoIds(asset);
                     release();
-                    uploadPhoto(asset, blob, ids);
+                    uploadPhoto(asset, blob, alsoIds || [], !!stay);
                 }
                 if (out.toBlob) {
                     out.toBlob(send, 'image/jpeg', 0.9);
@@ -8010,133 +8041,6 @@
         fitSource();
         placeFrame();
         paintFrame();
-        function photoAlsoIds(current) {
-            var ids = [];
-            var key;
-            for (key in picked) {
-                if (!picked.hasOwnProperty(key) || !picked[key]) continue;
-                var id = parseInt(key, 10);
-                if (id && id !== current.id) ids.push(id);
-            }
-            return ids;
-        }
-        function alsoCountValue() {
-            var count = 0;
-            var key;
-            for (key in picked) {
-                if (picked.hasOwnProperty(key) && picked[key]) count++;
-            }
-            return count;
-        }
-        function paintAlsoCount() {
-            if (alsoCount) alsoCount.textContent = t('photoAlsoCount', String(alsoCountValue()));
-        }
-        function alsoMatches(item, query) {
-            if (!item || isFolder(item)) return false;
-            if (item.projectKey && asset.projectKey && item.projectKey !== asset.projectKey) return false;
-            if (onlyType && item.typeKey !== asset.typeKey) return false;
-            if (!query) return true;
-            var blob = ((item.name || '') + ' ' + (item.objectKey || '') + ' ' + (typeFor(item).label || '')).toLowerCase();
-            return blob.indexOf(query) >= 0;
-        }
-        function alsoRow(item) {
-            var row = el('label', 'asset-tree-check-row');
-            var box = el('input');
-            box.type = 'checkbox';
-            var mine = item.id === asset.id;
-            box.checked = mine || !!picked[item.id];
-            if (mine) box.disabled = true;
-            box.addEventListener('change', function () {
-                if (box.checked) {
-                    if (alsoCountValue() >= 500) {
-                        box.checked = false;
-                        showPhotoError(t('photoAlsoLimit'));
-                        return;
-                    }
-                    picked[item.id] = true;
-                    showPhotoError('');
-                } else {
-                    delete picked[item.id];
-                }
-                paintAlsoCount();
-            });
-            row.appendChild(box);
-            var text = el('span');
-            text.appendChild(el('strong', null, item.name || item.objectKey || ''));
-            var meta = item.objectKey || '';
-            var label = typeFor(item).label || '';
-            if (label) meta = meta ? (meta + ' · ' + label) : label;
-            if (meta) text.appendChild(el('span', 'asset-tree-hint', meta));
-            row.appendChild(text);
-            return row;
-        }
-        function paintAlso() {
-            if (!alsoList) return;
-            alsoList.innerHTML = '';
-            var pool = state.assets || [];
-            var rows = [];
-            var i;
-            for (i = 0; i < pool.length; i++) {
-                if (alsoMatches(pool[i], alsoQuery)) rows.push(pool[i]);
-            }
-            rows.sort(function (a, b) {
-                if (a.id === asset.id) return -1;
-                if (b.id === asset.id) return 1;
-                var an = String(a.name || '').toLowerCase();
-                var bn = String(b.name || '').toLowerCase();
-                if (an < bn) return -1;
-                if (an > bn) return 1;
-                return a.id - b.id;
-            });
-            var hidden = 0;
-            for (i = 0; i < rows.length; i++) {
-                if (i >= 80) {
-                    hidden++;
-                    continue;
-                }
-                alsoList.appendChild(alsoRow(rows[i]));
-            }
-            if (!rows.length) alsoList.appendChild(el('p', 'asset-tree-hint', t('photoAlsoEmpty')));
-            if (alsoNote) {
-                alsoNote.hidden = !hidden;
-                alsoNote.textContent = hidden ? t('photoAlsoMore', '80') : '';
-            }
-            paintAlsoCount();
-        }
-        function photoAlsoBlock() {
-            var block = el('div', 'asset-tree-frame-also');
-            block.appendChild(el('strong', 'asset-tree-frame-also-title', t('photoAlso')));
-            block.appendChild(el('p', 'asset-tree-hint', t('photoAlsoHint')));
-            var search = el('input', 'asset-tree-text');
-            search.type = 'search';
-            search.placeholder = t('photoAlsoSearch');
-            search.addEventListener('input', function () {
-                alsoQuery = String(search.value || '').trim().toLowerCase();
-                paintAlso();
-            });
-            block.appendChild(search);
-            var typeRow = el('label', 'asset-tree-check-row');
-            var typeBox = el('input');
-            typeBox.type = 'checkbox';
-            typeBox.addEventListener('change', function () {
-                onlyType = !!typeBox.checked;
-                paintAlso();
-            });
-            typeRow.appendChild(typeBox);
-            var typeText = el('span');
-            typeText.appendChild(el('strong', null, t('photoAlsoType')));
-            typeRow.appendChild(typeText);
-            block.appendChild(typeRow);
-            alsoList = el('div', 'asset-tree-frame-list');
-            block.appendChild(alsoList);
-            alsoNote = el('p', 'asset-tree-hint');
-            alsoNote.hidden = true;
-            block.appendChild(alsoNote);
-            alsoCount = el('p', 'asset-tree-hint asset-tree-frame-count');
-            block.appendChild(alsoCount);
-            paintAlso();
-            return block;
-        }
     }
 
     function deletePhoto(asset) {
@@ -8971,28 +8875,32 @@
         if (mayEdit(asset) && !isFolder(asset) && moduleOn('card')) {
             var current = state.detail && state.detail.id === asset.id ? state.detail : asset;
             if (current.cardImage) {
-                extra.push({ label: t('cardQrRemove'), onClick: function () { deleteCardImage(current); } });
+                extra.push({ icon: 'trash', label: t('cardQrRemove'), onClick: function () { deleteCardImage(current); } });
             } else {
-                extra.push({ label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
+                extra.push({ icon: 'qr', label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
             }
         }
         if (mayEdit(asset) && !isFolder(asset) && photoEnabled()) {
             var pictured = state.detail && state.detail.id === asset.id ? state.detail : asset;
             if (pictured.photo) {
-                extra.push({ label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
+                extra.push({ icon: 'trash', label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
             } else {
-                extra.push({ label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
+                extra.push({ icon: 'image', label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
             }
         }
-        if (!isFolder(asset)) extra.push({ documents: asset });
+        if (!isFolder(asset)) ops.appendChild(documentButton(asset));
         if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
-            var pingItem = { label: t('tniPing'), onClick: function () { pingAsset(asset); } };
+            var ping = toolButton(t('tniPing'), 'ping', function () { pingAsset(asset); });
             var pingState = pingMark(asset);
-            if (pingState) pingItem.mark = pingState;
-            extra.push(pingItem);
+            if (pingState) {
+                var pingLabel = ping.querySelector('span');
+                ping.insertBefore(pingDot(pingState), pingLabel || null);
+            }
+            ops.appendChild(ping);
         }
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
+                icon: 'back',
                 label: t('backToList'),
                 onClick: function () {
                     state.pane = 'list';
@@ -9010,13 +8918,14 @@
             if (lifeRow && lifeRow.writeoffState !== 'approved' && lifeRow.writeoffState !== 'pending') {
                 var directWriteoff = !moduleSetup().lifeApproval;
                 extra.push({
+                    icon: 'issue',
                     label: directWriteoff ? t('lifeWriteoffNow') : t('lifeAsk'),
                     danger: true,
                     onClick: function () { openWriteoffDialog(asset, lifeRow, directWriteoff); }
                 });
             }
         }
-        if (mayEdit(asset)) extra.push({ label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
+        if (mayEdit(asset)) extra.push({ icon: 'trash', label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
         if (extra.length) ops.appendChild(moreMenu(extra));
         main.appendChild(ops);
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
