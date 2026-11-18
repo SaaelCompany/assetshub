@@ -6604,7 +6604,7 @@ public class AssetServiceImpl implements AssetService {
 
     private BulkResultDto bulkAssets(ApplicationUser user, Project project, String action, BulkDraft draft) {
         if (!"delete".equals(action) && !"move".equals(action) && !"status".equals(action)
-                && !"custodian".equals(action) && !"copy".equals(action)) {
+                && !"custodian".equals(action) && !"copy".equals(action) && !"type".equals(action)) {
             throw new AssetException(400, "asset-tree.error.bulk.action");
         }
         if ("move".equals(action) && !draft.isToRoot() && TreeLogic.normalizeParent(draft.getParentId()) == null) {
@@ -6632,6 +6632,7 @@ public class AssetServiceImpl implements AssetService {
         if ("move".equals(action)) {
             return moveAssets(user, project, ids, order, draft);
         }
+        final AssetTypeEntity nextType = "type".equals(action) ? requireEquipmentType(project, draft.getTypeKey()) : null;
         Set<Integer> selected = new HashSet<Integer>(ids);
         Set<Integer> covered = new HashSet<Integer>();
         BulkResultDto result = new BulkResultDto();
@@ -6656,6 +6657,8 @@ public class AssetServiceImpl implements AssetService {
                     patchStatus(user, id.intValue(), draft.getStatus(), draft.getStatusAt());
                 } else if ("copy".equals(action)) {
                     copyAsset(user, id.intValue());
+                } else if ("type".equals(action)) {
+                    patchType(user, id.intValue(), nextType);
                 } else {
                     patchCustodian(user, id.intValue(), draft.getCustodianKey());
                 }
@@ -6814,6 +6817,35 @@ public class AssetServiceImpl implements AssetService {
                 entity.setUpdatedBy(user.getKey());
                 entity.save();
                 logActivity(id, user.getKey(), "status", "", oldStatus, next, when);
+                return null;
+            }
+        });
+    }
+
+    private AssetTypeEntity requireEquipmentType(Project project, String typeKey) {
+        AssetTypeEntity type = requireType(typeKey == null ? "" : typeKey.trim());
+        if (type.isLocation() || !ProjectKeys.same(type.getProjectKey(), project.getKey())) {
+            throw new AssetException(400, "asset-tree.error.type");
+        }
+        return type;
+    }
+
+    private void patchType(ApplicationUser user, final int id, final AssetTypeEntity type) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                if (isLocation(entity)) {
+                    throw new AssetException(400, "asset-tree.error.bulk.place", entity.getName());
+                }
+                String oldKey = entity.getTypeKey() == null ? "" : entity.getTypeKey();
+                if (!type.getTypeKey().equals(oldKey)) {
+                    entity.setTypeKey(type.getTypeKey());
+                    entity.setUpdated(new Date());
+                    entity.setUpdatedBy(user.getKey());
+                    entity.save();
+                    logActivity(id, user.getKey(), "type", "", typeLabel(findType(oldKey)), typeLabel(type));
+                }
                 return null;
             }
         });

@@ -5986,8 +5986,9 @@
 
     function bulkBar() {
         var bar = el('div', 'asset-tree-bulk');
+        var row = el('div', 'asset-tree-bulk-row');
         var items = pickedItems();
-        bar.appendChild(el('span', 'asset-tree-bulk-count', t('bulkSelected', items.length)));
+        row.appendChild(el('span', 'asset-tree-bulk-count', t('bulkSelected', items.length)));
         var kinds = {};
         items.forEach(function (item) { kinds[item.kind] = true; });
         var onlyObjects = kinds.object && !kinds.place && !kinds.type;
@@ -5995,17 +5996,18 @@
         var assetsOnly = !kinds.type && (kinds.object || kinds.place);
         if (items.length) {
             if (onlyObjects) {
-                bar.appendChild(button(t('status'), 'asset-tree-btn', function () { openBulkStatus(); }));
-                bar.appendChild(button(t('custodian'), 'asset-tree-btn', function () { openBulkCustodian(); }));
+                row.appendChild(button(t('status'), 'asset-tree-btn', function () { openBulkStatus(); }));
+                row.appendChild(button(t('type'), 'asset-tree-btn', function () { openBulkType(); }));
+                row.appendChild(button(t('custodian'), 'asset-tree-btn', function () { openBulkCustodian(); }));
                 if (moduleOn('card')) {
-                    bar.appendChild(button(t('printCards'), 'asset-tree-btn', function () {
+                    row.appendChild(button(t('printCards'), 'asset-tree-btn', function () {
                         printCards(items.map(function (item) {
                             return item.asset || assetByAnyId(parseInt(item.key, 10));
                         }));
                     }));
                 }
                 if (photoEnabled()) {
-                    bar.appendChild(button(t('photoAdd'), 'asset-tree-btn', function () {
+                    row.appendChild(button(t('photoAdd'), 'asset-tree-btn', function () {
                         var chosen = [];
                         items.forEach(function (item) {
                             var row = item.asset || assetByAnyId(parseInt(item.key, 10));
@@ -6018,20 +6020,21 @@
                         pickPhoto(chosen[0], rest, true);
                     }));
                 }
-                bar.appendChild(button(t('copy'), 'asset-tree-btn', function () { postBulk('copy'); }));
+                row.appendChild(button(t('copy'), 'asset-tree-btn', function () { postBulk('copy'); }));
             }
             if (assetsOnly) {
-                bar.appendChild(button(t('bulkMove'), 'asset-tree-btn', function () { openBulkMove(); }));
+                row.appendChild(button(t('bulkMove'), 'asset-tree-btn', function () { openBulkMove(); }));
             }
             if (assetsOnly || onlyTypes) {
-                bar.appendChild(button(t('trashMove'), 'asset-tree-btn danger', openBulkDelete));
+                row.appendChild(button(t('trashMove'), 'asset-tree-btn danger', openBulkDelete));
             }
-            bar.appendChild(button(t('bulkClear'), 'asset-tree-btn', function () {
+            row.appendChild(button(t('bulkClear'), 'asset-tree-btn', function () {
                 state.picked = {};
                 state.bulkErrors = [];
                 refreshPick();
             }));
         }
+        bar.appendChild(row);
         var errors = state.bulkErrors || [];
         if (errors.length) {
             var list = el('ul', 'asset-tree-bulk-errors');
@@ -6104,6 +6107,39 @@
             }
         }
         setTimeout(next, 40);
+    }
+
+    function openBulkType() {
+        var options = [];
+        (state.types || []).forEach(function (type) {
+            if (!type || type.location || !type.typeKey) return;
+            options.push({ value: type.typeKey, label: type.label || type.typeKey });
+        });
+        options.sort(function (a, b) {
+            return String(a.label).localeCompare(String(b.label));
+        });
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('type')));
+            if (!options.length) {
+                dialog.appendChild(el('p', 'asset-tree-hint', t('needType')));
+                var empty = el('div', 'asset-tree-dialog-actions');
+                empty.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+                dialog.appendChild(empty);
+                return;
+            }
+            var select = selectBox('asset-tree-bulk-type', options, options[0].value, false);
+            dialog.appendChild(field(t('type'), select, true));
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+            actions.appendChild(button(t('bulkApply'), 'asset-tree-btn primary', function () {
+                if (!select.value) {
+                    notify(t('needType'));
+                    return;
+                }
+                postBulk('type', { typeKey: select.value });
+            }));
+            dialog.appendChild(actions);
+        });
     }
 
     function openBulkStatus() {
@@ -7861,12 +7897,16 @@
             return event.touches && event.touches.length ? event.touches[0] : event;
         }
         function fitSource() {
-            var maxW = 480;
-            var maxH = 220;
-            if (stage && stage.clientWidth > 64) {
-                maxW = Math.min(480, stage.clientWidth - 32);
+            var maxW = 1040;
+            var maxH = 640;
+            if (window.innerHeight) maxH = Math.max(360, window.innerHeight - 180);
+            if (stage && stage.clientWidth > 80) {
+                maxW = stage.clientWidth - 16;
+            } else if (window.innerWidth) {
+                maxW = Math.max(360, Math.min(1040, window.innerWidth - 96));
             }
-            var scale = Math.min(maxW / srcW, maxH / srcH, 1);
+            var scale = Math.min(maxW / srcW, maxH / srcH);
+            if (!isFinite(scale) || scale <= 0) scale = 1;
             viewW = Math.max(1, Math.round(srcW * scale));
             viewH = Math.max(1, Math.round(srcH * scale));
             source.style.width = viewW + 'px';
