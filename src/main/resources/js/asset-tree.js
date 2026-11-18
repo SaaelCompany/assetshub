@@ -2333,24 +2333,43 @@
         return shortSide > 0 && shortSide <= 740;
     }
 
-    function preparePhonePage() {
-        if (!phoneLayout()) return;
+    function phoneViewport() {
         var head = document.head || document.getElementsByTagName('head')[0];
         if (!head) return;
-        var meta = document.querySelector('meta[name="viewport"]');
-        if (!meta) {
-            meta = document.createElement('meta');
-            meta.setAttribute('name', 'viewport');
-            head.appendChild(meta);
+        var nodes = document.querySelectorAll('meta[name="viewport"]');
+        var i;
+        for (i = nodes.length - 1; i >= 0; i--) {
+            if (nodes[i].parentNode) nodes[i].parentNode.removeChild(nodes[i]);
         }
-        meta.setAttribute('content', 'width=device-width, initial-scale=1');
-        if (document.getElementById('asset-tree-phone-page')) return;
-        var style = document.createElement('style');
-        style.id = 'asset-tree-phone-page';
-        style.appendChild(document.createTextNode(
-            '#page,#content,.aui-page-panel,.aui-page-panel-inner{min-width:0 !important;width:auto !important;}'
-        ));
-        head.appendChild(style);
+        var meta = document.createElement('meta');
+        meta.setAttribute('name', 'viewport');
+        var shortSide = 0;
+        if (window.screen) {
+            var width = window.screen.width || 0;
+            var height = window.screen.height || 0;
+            shortSide = width && height ? Math.min(width, height) : width;
+        }
+        var layout = shortSide > 240 && shortSide <= 900 ? String(shortSide) : 'device-width';
+        meta.setAttribute('content', 'width=' + layout + ', initial-scale=1, viewport-fit=cover');
+        head.insertBefore(meta, head.firstChild);
+    }
+
+    function preparePhonePage() {
+        if (!phoneLayout()) return;
+        phoneViewport();
+        if (document.body) document.body.classList.add('is-asset-phone');
+        if (!document.getElementById('asset-tree-phone-page')) {
+            var style = document.createElement('style');
+            style.id = 'asset-tree-phone-page';
+            style.appendChild(document.createTextNode(
+                'html,body,#header,.aui-header,.aui-header-inner,#page,#content,.aui-page-panel,.aui-page-panel-inner,#footer{min-width:0 !important;max-width:100% !important;}' +
+                'html,body{width:100% !important;overflow-x:hidden !important;}' +
+                'body.is-asset-phone #footer{display:none !important;}'
+            ));
+            (document.head || document.documentElement).appendChild(style);
+        }
+        window.addEventListener('load', phoneViewport);
+        setTimeout(phoneViewport, 60);
     }
 
     function syncPhone() {
