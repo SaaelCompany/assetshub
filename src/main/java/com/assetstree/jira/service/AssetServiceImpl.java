@@ -94,6 +94,7 @@ import com.assetstree.jira.ao.TypeSchemaEntity;
 import com.assetstree.jira.ao.WebhookEntity;
 import com.assetstree.jira.ao.PinEntity;
 import com.assetstree.jira.ao.RoomEntity;
+import com.assetstree.jira.ao.ReportBoardEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
 import com.assetstree.jira.ao.SchemeEntity;
 import com.assetstree.jira.ao.SchemePlacementEntity;
@@ -165,6 +166,8 @@ import com.assetstree.jira.dto.ReportLineDto;
 import com.assetstree.jira.dto.ReportVennDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
+import com.assetstree.jira.dto.ReportBoardDto;
+import com.assetstree.jira.dto.ReportBoardPanelDto;
 import com.assetstree.jira.dto.SavedReportDto;
 import com.assetstree.jira.dto.TniSourceDto;
 import com.assetstree.jira.dto.TniWatchDto;
@@ -175,6 +178,7 @@ import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.UserProfileDto;
 import com.assetstree.jira.model.MineColumns;
 import com.assetstree.jira.model.AssetDraft;
+import com.assetstree.jira.model.StatusMoment;
 import com.assetstree.jira.model.CopyNames;
 import com.assetstree.jira.model.BulkDraft;
 import com.assetstree.jira.model.CardCanvas;
@@ -241,6 +245,8 @@ import com.assetstree.jira.model.ReportCatalog;
 import com.assetstree.jira.model.ReportWindow;
 import com.assetstree.jira.model.ScheduleDone;
 import com.assetstree.jira.model.ReportWorkbook;
+import com.assetstree.jira.model.ReportBoardDraft;
+import com.assetstree.jira.model.ReportBoards;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleAnchor;
 import com.assetstree.jira.model.ScheduleOccurrences;
@@ -922,6 +928,7 @@ public class AssetServiceImpl implements AssetService {
                 String newName = draft.getName().trim();
                 String newDescription = draft.getDescription() == null ? "" : draft.getDescription();
                 String newStatus = resolveStatus(entity.getProjectKey(), draft.getStatus() == null ? entity.getStatus() : draft.getStatus());
+                Date statusWhen = oldStatus.equals(newStatus) ? null : StatusMoment.at(draft.getStatusAt(), new Date());
                 String newCustodian = normalizeCustodian(draft.getCustodianKey());
                 String storedCustodian = newCustodian == null ? "" : newCustodian;
                 String newIssued = type.isLocation() ? null : normalizeCustodian(draft.getIssuedKey());
@@ -945,7 +952,7 @@ public class AssetServiceImpl implements AssetService {
                 logActivity(id, user.getKey(), "name", "", oldName, newName);
                 logActivity(id, user.getKey(), "description", "", clip(oldDescription), clip(newDescription));
                 logActivity(id, user.getKey(), "type", "", typeLabel(requireType(oldTypeKey)), typeLabel(type));
-                logActivity(id, user.getKey(), "status", "", oldStatus, newStatus);
+                logActivity(id, user.getKey(), "status", "", oldStatus, newStatus, statusWhen);
                 logActivity(id, user.getKey(), "custodian", "", displayName(oldCustodian), displayName(storedCustodian));
                 logActivity(id, user.getKey(), "issued", "", displayName(oldIssued), displayName(storedIssued));
                 if (draft.getAttributes() != null) {
@@ -1031,6 +1038,20 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         ao().delete(row);
+    }
+
+    @Override
+    public void moveStatusActivity(ApplicationUser user, int assetId, int activityId, Long created) {
+        requireWritable(user, assetId);
+        AssetActivityEntity row = ao().get(AssetActivityEntity.class, activityId);
+        if (row == null || row.getAssetId() != assetId) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        if (!"status".equals(row.getKind())) {
+            throw new AssetException(400, "asset-tree.error.statusWhen");
+        }
+        row.setCreated(StatusMoment.at(created, new Date()));
+        row.save();
     }
 
     @Override
@@ -5445,12 +5466,17 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void assignFlowStatus(ApplicationUser user, AssetEntity asset, String next) {
+        assignFlowStatus(user, asset, next, null);
+    }
+
+    private void assignFlowStatus(ApplicationUser user, AssetEntity asset, String next, Date when) {
         String oldStatus = Statuses.canonical(asset.getStatus());
         asset.setStatus(next);
         asset.setUpdated(new Date());
         asset.setUpdatedBy(user == null ? "" : user.getKey());
         asset.save();
-        logActivity(asset.getID(), user == null ? "" : user.getKey(), "status", "", oldStatus, next);
+        logActivity(asset.getID(), user == null ? "" : user.getKey(), "status", "", oldStatus, next,
+                when == null ? new Date() : when);
     }
 
     private String portalPath(AssetEntity entity) {
@@ -6583,7 +6609,7 @@ public class AssetServiceImpl implements AssetService {
                 if ("delete".equals(action)) {
                     deleteAsset(user, id.intValue(), draft.isCascade());
                 } else if ("status".equals(action)) {
-                    patchStatus(user, id.intValue(), draft.getStatus());
+                    patchStatus(user, id.intValue(), draft.getStatus(), draft.getStatusAt());
                 } else if ("copy".equals(action)) {
                     copyAsset(user, id.intValue());
                 } else {
@@ -6728,7 +6754,8 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private void patchStatus(ApplicationUser user, final int id, final String status) {
+    private void patchStatus(ApplicationUser user, final int id, final String status, final Long statusAt) {
+        final Date when = StatusMoment.at(statusAt, new Date());
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
@@ -6742,7 +6769,7 @@ public class AssetServiceImpl implements AssetService {
                 entity.setUpdated(new Date());
                 entity.setUpdatedBy(user.getKey());
                 entity.save();
-                logActivity(id, user.getKey(), "status", "", oldStatus, next);
+                logActivity(id, user.getKey(), "status", "", oldStatus, next, when);
                 return null;
             }
         });
@@ -8760,15 +8787,23 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void logActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue) {
+        logActivity(assetId, authorKey, kind, field, oldValue, newValue, null);
+    }
+
+    private void logActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue, Date created) {
         String left = oldValue == null ? "" : oldValue;
         String right = newValue == null ? "" : newValue;
         if (left.equals(right)) {
             return;
         }
-        recordActivity(assetId, authorKey, kind, field, left, right);
+        recordActivity(assetId, authorKey, kind, field, left, right, created);
     }
 
     private void recordActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue) {
+        recordActivity(assetId, authorKey, kind, field, oldValue, newValue, new Date());
+    }
+
+    private void recordActivity(int assetId, String authorKey, String kind, String field, String oldValue, String newValue, Date created) {
         ao().create(AssetActivityEntity.class,
                 new DBParam("ASSET_ID", assetId),
                 new DBParam("AUTHOR_KEY", authorKey == null ? "" : authorKey),
@@ -8776,7 +8811,7 @@ public class AssetServiceImpl implements AssetService {
                 new DBParam("FIELD_NAME", field == null ? "" : field),
                 new DBParam("OLD_VALUE", clip(oldValue)),
                 new DBParam("NEW_VALUE", clip(newValue)),
-                new DBParam("CREATED", new Date()));
+                new DBParam("CREATED", created == null ? new Date() : created));
     }
 
     /** The ping text is kept whole. A failure to write it does not hide the check result. */
@@ -11837,6 +11872,152 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public List<ReportBoardDto> reportBoards(ApplicationUser user, String projectKey) {
+        final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        SchemaReady.ensure(ao());
+        return ao().executeInTransaction(new TransactionCallback<List<ReportBoardDto>>() {
+            @Override
+            public List<ReportBoardDto> doInTransaction() {
+                return boardDtos(project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public ReportBoardDto createReportBoard(ApplicationUser user, String projectKey, final ReportBoardDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        SchemaReady.ensure(ao());
+        final String title = ReportBoards.name(draft == null ? "" : draft.getName());
+        if (title.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        final String panels = ReportBoards.write(boardPanels(draft));
+        return ao().executeInTransaction(new TransactionCallback<ReportBoardDto>() {
+            @Override
+            public ReportBoardDto doInTransaction() {
+                List<ReportBoardDto> existing = boardDtos(project.getKey());
+                if (existing.size() >= ReportBoards.MAX_BOARDS) {
+                    throw new AssetException(400, "asset-tree.error.report");
+                }
+                ReportBoardEntity row = ao().create(ReportBoardEntity.class,
+                        new DBParam("PROJECT_KEY", project.getKey()),
+                        new DBParam("NAME", title),
+                        new DBParam("POSITION", Integer.valueOf(existing.size())),
+                        new DBParam("PANELS", panels));
+                row.setName(title);
+                row.setPanels(panels);
+                row.setPosition(existing.size());
+                row.save();
+                return boardDto(row);
+            }
+        });
+    }
+
+    @Override
+    public ReportBoardDto updateReportBoard(ApplicationUser user, String projectKey, final int boardId, final ReportBoardDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        final String title = ReportBoards.name(draft == null ? "" : draft.getName());
+        if (boardId <= 0 || title.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        final String panels = ReportBoards.write(boardPanels(draft));
+        return ao().executeInTransaction(new TransactionCallback<ReportBoardDto>() {
+            @Override
+            public ReportBoardDto doInTransaction() {
+                ReportBoardEntity row = ao().get(ReportBoardEntity.class, boardId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                row.setName(title);
+                row.setPanels(panels);
+                row.save();
+                return boardDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void deleteReportBoard(ApplicationUser user, String projectKey, final int boardId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        requireModule(project.getKey(), ProjectModules.REPORTS);
+        if (boardId <= 0) {
+            throw new AssetException(400, "asset-tree.error.report");
+        }
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                ReportBoardEntity row = ao().get(ReportBoardEntity.class, boardId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    private List<ReportBoards.Panel> boardPanels(ReportBoardDraft draft) {
+        List<ReportBoards.Panel> panels = new ArrayList<ReportBoards.Panel>();
+        if (draft == null || draft.getPanels() == null) {
+            return panels;
+        }
+        for (int i = 0; i < draft.getPanels().size(); i++) {
+            ReportBoardPanelDto panel = draft.getPanels().get(i);
+            if (panel == null) {
+                continue;
+            }
+            panels.add(new ReportBoards.Panel(panel.getReport(), panel.getChart(), panel.getWidth()));
+        }
+        return panels;
+    }
+
+    private List<ReportBoardDto> boardDtos(String projectKey) {
+        List<ReportBoardDto> found = new ArrayList<ReportBoardDto>();
+        ReportBoardEntity[] rows = ao().find(ReportBoardEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return found;
+        }
+        List<ReportBoardEntity> own = new ArrayList<ReportBoardEntity>();
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null) {
+                own.add(rows[i]);
+            }
+        }
+        Collections.sort(own, new Comparator<ReportBoardEntity>() {
+            @Override
+            public int compare(ReportBoardEntity left, ReportBoardEntity right) {
+                int order = left.getPosition() - right.getPosition();
+                return order == 0 ? left.getID() - right.getID() : order;
+            }
+        });
+        for (int i = 0; i < own.size(); i++) {
+            found.add(boardDto(own.get(i)));
+        }
+        return found;
+    }
+
+    private ReportBoardDto boardDto(ReportBoardEntity row) {
+        ReportBoardDto dto = new ReportBoardDto();
+        dto.setId(row.getID());
+        dto.setName(row.getName() == null ? "" : row.getName());
+        List<ReportBoardPanelDto> panels = new ArrayList<ReportBoardPanelDto>();
+        List<ReportBoards.Panel> stored = ReportBoards.read(row.getPanels());
+        for (int i = 0; i < stored.size(); i++) {
+            ReportBoards.Panel panel = stored.get(i);
+            ReportBoardPanelDto item = new ReportBoardPanelDto();
+            item.setReport(panel.getReport());
+            item.setChart(panel.getChart());
+            item.setWidth(panel.getWidth());
+            panels.add(item);
+        }
+        dto.setPanels(panels);
+        return dto;
+    }
+
+    @Override
     public ReportViewDto reportView(ApplicationUser user, final String projectKey, final String reportKey, final int lineFrom, final boolean allLines, final String bucket, final String start, final String end) {
         final Project project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
         requireModule(project.getKey(), ProjectModules.REPORTS);
@@ -12988,7 +13169,9 @@ public class AssetServiceImpl implements AssetService {
                     bucket = new ReportBucketDto(slot[0], slot[1], "#DE350B", 0);
                     buckets.put(slot[0], bucket);
                 }
-                bucket.setCount(bucket.getCount() + RepairTime.days(overlap));
+                int minutes = minutesOf(overlap);
+                bucket.setCount(bucket.getCount() + minutes);
+                bucket.setText(idleText(bucket.getCount() * 60000L));
                 String bucketKey = slot[0];
                 for (int i = 0; i < spans.size(); i++) {
                     RepairTime.Span span = spans.get(i);
@@ -13397,18 +13580,42 @@ public class AssetServiceImpl implements AssetService {
         return java.time.Instant.ofEpochMilli(millis).atZone(businessZone()).toLocalDate().toString();
     }
 
+    private int minutesOf(long millis) {
+        long minutes = millis / 60000L;
+        if (millis > 0L && minutes < 1L) {
+            minutes = 1L;
+        }
+        if (minutes > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        return (int) minutes;
+    }
+
     private String idleText(long millis) {
-        long minutes = Math.max(0L, millis / 60000L);
+        long minutes = millis / 60000L;
+        if (millis > 0L && minutes < 1L) {
+            minutes = 1L;
+        }
         long days = minutes / (60L * 24L);
         long hours = (minutes / 60L) % 24L;
         long rest = minutes % 60L;
+        StringBuilder text = new StringBuilder();
         if (days > 0L) {
-            return i18n().getText("asset-tree.ui.reportIdleSpan", String.valueOf(days), String.valueOf(hours));
+            text.append(i18n().getText("asset-tree.ui.reportIdleDays", String.valueOf(days)));
         }
         if (hours > 0L) {
-            return i18n().getText("asset-tree.ui.reportIdleHours", String.valueOf(hours), String.valueOf(rest));
+            if (text.length() > 0) {
+                text.append(' ');
+            }
+            text.append(i18n().getText("asset-tree.ui.reportIdleHour", String.valueOf(hours)));
         }
-        return i18n().getText("asset-tree.ui.reportIdleMinutes", String.valueOf(Math.max(1L, rest)));
+        if (rest > 0L || text.length() == 0) {
+            if (text.length() > 0) {
+                text.append(' ');
+            }
+            text.append(i18n().getText("asset-tree.ui.reportIdleMinutes", String.valueOf(rest)));
+        }
+        return text.toString();
     }
 
     private String opsReason(String key) {
@@ -13506,7 +13713,18 @@ public class AssetServiceImpl implements AssetService {
         view.setLineTotal(lineTotal);
         view.setExportLimited(exportCut);
         view.setCapped(truncated || exportCut || (!allLines && lineFrom + page.size() < lineTotal));
-        view.setSum(money ? MoneyText.format(sum) : "");
+        if (money) {
+            view.setSum(MoneyText.format(sum));
+        } else {
+            view.setSum("");
+        }
+        if (ReportCatalog.IDLE.equals(key)) {
+            long minutes = 0L;
+            for (int i = 0; i < rows.size(); i++) {
+                minutes += rows.get(i).getCount();
+            }
+            view.setFigure(idleText(minutes * 60000L));
+        }
         if (rows.isEmpty()) {
             view.setReason(reason == null ? "" : reason);
         }
@@ -14039,6 +14257,10 @@ public class AssetServiceImpl implements AssetService {
         List<String> headers = new ArrayList<String>();
         headers.add(view.getTitle() == null ? "" : view.getTitle());
         headers.add(i18n().getText("asset-tree.ui.reportCount"));
+        boolean timed = view.getFigure() != null && !view.getFigure().isEmpty();
+        if (timed) {
+            headers.add(i18n().getText("asset-tree.ui.reportColDuration"));
+        }
         boolean money = view.getSum() != null && !view.getSum().isEmpty();
         if (money) {
             headers.add(i18n().getText("asset-tree.ui.lifeBook"));
@@ -14068,6 +14290,9 @@ public class AssetServiceImpl implements AssetService {
                 List<String> cells = new ArrayList<String>();
                 cells.add(bucket.getLabel() == null ? "" : bucket.getLabel());
                 cells.add(bookCount(bucket.getCount()));
+                if (timed) {
+                    cells.add(bucket.getText() == null ? "" : bucket.getText());
+                }
                 if (money) {
                     cells.add(bookDecimal(bucket.getAmount()));
                 }
@@ -14078,6 +14303,9 @@ public class AssetServiceImpl implements AssetService {
         List<String> total = new ArrayList<String>();
         total.add(i18n().getText("asset-tree.ui.reportTotalRow"));
         total.add(bookCount(view.getTotal()));
+        if (timed) {
+            total.add(view.getFigure());
+        }
         if (money) {
             total.add(bookDecimal(shareTotal));
         }
@@ -14094,11 +14322,14 @@ public class AssetServiceImpl implements AssetService {
         }
         lines.add(new ArrayList<String>());
         boolean journal = false;
+        boolean clocks = false;
         if (view.getLines() != null) {
             for (ReportLineDto line : view.getLines()) {
                 if (line.getState() != null && !line.getState().isEmpty()) {
                     journal = true;
-                    break;
+                }
+                if (line.getClock() != null && !line.getClock().isEmpty()) {
+                    clocks = true;
                 }
             }
         }
@@ -14109,6 +14340,9 @@ public class AssetServiceImpl implements AssetService {
             detailHead.add(i18n().getText("asset-tree.ui.reportColWork"));
             detailHead.add(i18n().getText("asset-tree.ui.reportColKind"));
             detailHead.add(i18n().getText("asset-tree.ui.reportColWhen"));
+            if (clocks) {
+                detailHead.add(i18n().getText("asset-tree.ui.reportColDuration"));
+            }
             detailHead.add(i18n().getText("asset-tree.ui.reportColState"));
             detailHead.add(i18n().getText("asset-tree.ui.reportColNext"));
         } else {
@@ -14125,11 +14359,10 @@ public class AssetServiceImpl implements AssetService {
                     cells.add(line.getAsset() == null ? "" : line.getAsset());
                     cells.add(line.getName() == null ? "" : line.getName());
                     cells.add(line.getKind() == null ? "" : line.getKind());
-                    String when = line.getWhen() == null ? "" : line.getWhen();
-                    if (line.getClock() != null && !line.getClock().isEmpty()) {
-                        when = when.isEmpty() ? line.getClock() : when + " " + line.getClock();
+                    cells.add(line.getWhen() == null ? "" : line.getWhen());
+                    if (clocks) {
+                        cells.add(line.getClock() == null ? "" : line.getClock());
                     }
-                    cells.add(when);
                     cells.add(workStateLabel(line.getState()));
                     cells.add(line.getNext() == null ? "" : line.getNext());
                 } else {
@@ -15774,7 +16007,12 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public int applyIssueEquipmentStatus(final ApplicationUser user, final long issueId, final String statusKey) {
+    public int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey) {
+        return applyIssueEquipmentStatus(user, issueId, statusKey, null);
+    }
+
+    @Override
+    public int applyIssueEquipmentStatus(final ApplicationUser user, final long issueId, final String statusKey, final Date when) {
         return ao().executeInTransaction(new TransactionCallback<Integer>() {
             @Override
             public Integer doInTransaction() {
@@ -15797,7 +16035,7 @@ public class AssetServiceImpl implements AssetService {
                     if (next.equals(Statuses.canonical(asset.getStatus()))) {
                         continue;
                     }
-                    assignFlowStatus(user, asset, next);
+                    assignFlowStatus(user, asset, next, when);
                     changed++;
                 }
                 return Integer.valueOf(changed);
@@ -15806,7 +16044,12 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public int applyAssetStatus(final ApplicationUser user, final int assetId, final String statusKey) {
+    public int applyAssetStatus(ApplicationUser user, int assetId, String statusKey) {
+        return applyAssetStatus(user, assetId, statusKey, null);
+    }
+
+    @Override
+    public int applyAssetStatus(final ApplicationUser user, final int assetId, final String statusKey, final Date when) {
         return ao().executeInTransaction(new TransactionCallback<Integer>() {
             @Override
             public Integer doInTransaction() {
@@ -15818,7 +16061,7 @@ public class AssetServiceImpl implements AssetService {
                 if (next.equals(Statuses.canonical(asset.getStatus()))) {
                     return Integer.valueOf(0);
                 }
-                assignFlowStatus(user, asset, next);
+                assignFlowStatus(user, asset, next, when);
                 return Integer.valueOf(1);
             }
         }).intValue();

@@ -13,6 +13,8 @@ public class ReportViewDto {
     private String hint;
     private int total;
     private String sum;
+    /** A written total, such as downtime in days, hours and minutes. */
+    private String figure;
     private boolean standard;
     private String groupBy;
     private String fieldKey;
@@ -36,6 +38,8 @@ public class ReportViewDto {
     public void setTotal(int total) { this.total = total; }
     public String getSum() { return sum; }
     public void setSum(String sum) { this.sum = sum; }
+    public String getFigure() { return figure; }
+    public void setFigure(String figure) { this.figure = figure; }
     public boolean isStandard() { return standard; }
     public void setStandard(boolean standard) { this.standard = standard; }
     public String getGroupBy() { return groupBy; }

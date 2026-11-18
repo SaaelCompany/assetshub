@@ -44,6 +44,7 @@ public final class ModuleSetup {
         setup.setReportMailBranch(Boolean.valueOf("1".equals(values.get("rbranch"))));
         setup.setReportIdleStatuses(Downtime.store(values.get("ridle")));
         setup.setReportRequestStatuses(RequestStatuses.store(values.get("rreq")));
+        setup.setReportSummary(summaryBoard(values.get("rsum")));
         setup.setLifeApproval(Boolean.valueOf(!"0".equals(values.get("approve"))));
         setup.setLifeApprover(who(values.get("who")));
         setup.setLifePlaces(LifeApprovers.normalize(values.get("lwho")));
@@ -102,6 +103,7 @@ public final class ModuleSetup {
         append(stored, "rbranch", Boolean.TRUE.equals(value.getReportMailBranch()) ? "1" : "0");
         append(stored, "ridle", Downtime.store(value.getReportIdleStatuses()));
         append(stored, "rreq", RequestStatuses.store(value.getReportRequestStatuses()));
+        append(stored, "rsum", summaryBoard(value.getReportSummary()));
         append(stored, "approve", Boolean.FALSE.equals(value.getLifeApproval()) ? "0" : "1");
         append(stored, "who", who(value.getLifeApprover()));
         append(stored, "lwho", LifeApprovers.normalize(value.getLifePlaces()));
@@ -199,6 +201,24 @@ public final class ModuleSetup {
             }
         }
         return false;
+    }
+
+    /** A stored board id, or empty when the summary keeps its own cards. */
+    static String summaryBoard(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String text = raw.trim();
+        if (text.isEmpty() || text.length() > 9) {
+            return "";
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch < '0' || ch > '9') {
+                return "";
+            }
+        }
+        return text.charAt(0) == '0' ? "" : text;
     }
 
     private static void append(StringBuilder stored, String key, String value) {
@@ -346,6 +366,7 @@ public final class ModuleSetup {
         merged.setReportMailBranch(incoming.getReportMailBranch() != null ? incoming.getReportMailBranch() : base.getReportMailBranch());
         merged.setReportIdleStatuses(incoming.getReportIdleStatuses() != null ? Downtime.store(incoming.getReportIdleStatuses()) : base.getReportIdleStatuses());
         merged.setReportRequestStatuses(incoming.getReportRequestStatuses() != null ? RequestStatuses.store(incoming.getReportRequestStatuses()) : base.getReportRequestStatuses());
+        merged.setReportSummary(incoming.getReportSummary() != null ? summaryBoard(incoming.getReportSummary()) : base.getReportSummary());
         merged.setLifeApproval(incoming.getLifeApproval() != null ? incoming.getLifeApproval() : base.getLifeApproval());
         merged.setLifeApprover(incoming.getLifeApprover() != null ? incoming.getLifeApprover() : base.getLifeApprover());
         merged.setLifePlaces(incoming.getLifePlaces() != null ? incoming.getLifePlaces() : base.getLifePlaces());

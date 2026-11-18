@@ -35,6 +35,7 @@ import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
+import com.assetstree.jira.dto.ReportBoardDto;
 import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.SavedReportDto;
@@ -60,6 +61,7 @@ import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.dto.ServicePlanDto;
 import com.assetstree.jira.model.LifecycleDraft;
+import com.assetstree.jira.model.ReportBoardDraft;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
@@ -75,6 +77,7 @@ import com.assetstree.jira.dto.TniWatchDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.model.TypeDraft;
 
+import java.util.Date;
 import java.util.List;
 
 public interface AssetService {
@@ -99,6 +102,9 @@ public interface AssetService {
     void deleteComment(ApplicationUser user, int assetId, int commentId);
 
     void deleteActivity(ApplicationUser user, int assetId, int activityId);
+
+    /** Rewrites the time of one status history row. The time is the actual change, not the save. */
+    void moveStatusActivity(ApplicationUser user, int assetId, int activityId, Long created);
 
     FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal);
 
@@ -363,6 +369,14 @@ public interface AssetService {
 
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
 
+    List<ReportBoardDto> reportBoards(ApplicationUser user, String projectKey);
+
+    ReportBoardDto createReportBoard(ApplicationUser user, String projectKey, ReportBoardDraft draft);
+
+    ReportBoardDto updateReportBoard(ApplicationUser user, String projectKey, int boardId, ReportBoardDraft draft);
+
+    void deleteReportBoard(ApplicationUser user, String projectKey, int boardId);
+
     ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket, String start, String end);
 
     byte[] exportReports(ApplicationUser user, String projectKey);
@@ -455,8 +469,14 @@ public interface AssetService {
     /** Sets the status of equipment linked to the request. Returns how many rows changed. */
     int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey);
 
+    /** Same as {@link #applyIssueEquipmentStatus(ApplicationUser, long, String)} at a chosen moment. Null uses now. */
+    int applyIssueEquipmentStatus(ApplicationUser user, long issueId, String statusKey, Date when);
+
     /** Sets the status of one piece of equipment. Returns 1 when the status changed. */
     int applyAssetStatus(ApplicationUser user, int assetId, String statusKey);
+
+    /** Same as {@link #applyAssetStatus(ApplicationUser, int, String)} at a chosen moment. Null uses now. */
+    int applyAssetStatus(ApplicationUser user, int assetId, String statusKey, Date when);
 
     /** Queues one plain letter about this equipment. Returns 1 when the queue accepted it. */
     int mailEquipment(ApplicationUser user, int assetId, AssetMailDraft draft);

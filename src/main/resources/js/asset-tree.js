@@ -505,6 +505,14 @@
         reportKey: 'status',
         reportView: null,
         reportBoard: false,
+        boards: null,
+        boardId: 0,
+        boardToken: 0,
+        boardEditing: false,
+        boardNaming: false,
+        boardDraft: null,
+        summaryTiles: {},
+        summaryTileToken: 0,
         reportTiles: {},
         reportTileToken: 0,
         reportStart: '',
@@ -6303,7 +6311,25 @@
     }
 
     function changeStatus(asset, status) {
+        if (!asset || asset.status === status) return;
         persistAsset(asset, { status: status });
+    }
+
+    function readStatusMoment(dateText, timeText) {
+        var date = String(dateText || '').trim().split('.');
+        var time = String(timeText || '').trim().split(':');
+        if (date.length !== 3 || time.length < 2) return null;
+        var day = Number(date[0]);
+        var month = Number(date[1]);
+        var year = Number(date[2]);
+        var hour = Number(time[0]);
+        var minute = Number(time[1]);
+        if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || time[0] === '' || time[1] === '') return null;
+        var local = new Date(year, month - 1, day, hour, minute, 0, 0);
+        if (isNaN(local.getTime())) return null;
+        if (local.getFullYear() !== year || local.getMonth() !== month - 1 || local.getDate() !== day) return null;
+        return local.getTime();
     }
 
     function changeCustodian(asset, userKey) {
@@ -6365,7 +6391,7 @@
         var nextType = changes && changes.typeKey ? changes.typeKey : (source.typeKey || asset.typeKey);
         var typeMoved = nextType !== (source.typeKey || asset.typeKey);
         setBusy(true);
-        ajax('PUT', '/assets/' + asset.id, {
+        var body = {
             name: changes && Object.prototype.hasOwnProperty.call(changes, 'name') ? changes.name : source.name,
             projectKey: source.projectKey || asset.projectKey || state.projectKey,
             typeKey: nextType,
@@ -6374,7 +6400,9 @@
             custodianKey: custodianKey,
             issuedKey: issuedKey,
             attributes: attributes
-        }, function (code, payload) {
+        };
+        if (changes && typeof changes.statusAt === 'number') body.statusAt = changes.statusAt;
+        ajax('PUT', '/assets/' + asset.id, body, function (code, payload) {
             setBusy(false);
             if (code < 200 || code >= 300) {
                 if (changes && typeof changes.onError === 'function') changes.onError();
@@ -6891,6 +6919,57 @@
         return t('actUpdated');
     }
 
+    function historyStamp(asset, item) {
+        var line = el('div', 'asset-tree-history-stamp');
+        function pad(value) {
+            return value < 10 ? '0' + value : String(value);
+        }
+        function show() {
+            while (line.firstChild) line.removeChild(line.firstChild);
+            line.appendChild(el('span', null, stamp(item.created)));
+            if (!(mayEdit(asset) && item.action === 'status' && item.id > 0)) return;
+            line.appendChild(button(t('statusWhenEdit'), 'asset-tree-history-when', edit));
+        }
+        function edit() {
+            while (line.firstChild) line.removeChild(line.firstChild);
+            var when = item.created ? new Date(item.created) : new Date();
+            if (isNaN(when.getTime())) when = new Date();
+            var date = document.createElement('input');
+            date.type = 'text';
+            date.className = 'asset-tree-history-date';
+            date.value = pad(when.getDate()) + '.' + pad(when.getMonth() + 1) + '.' + when.getFullYear();
+            date.placeholder = '\u0434\u0434.\u043c\u043c.\u0433\u0433\u0433\u0433';
+            var time = document.createElement('input');
+            time.type = 'text';
+            time.className = 'asset-tree-history-time';
+            time.value = pad(when.getHours()) + ':' + pad(when.getMinutes());
+            time.placeholder = '\u0447\u0447:\u043c\u043c';
+            var save = button(t('save'), 'asset-tree-history-when', function () {
+                var millis = readStatusMoment(date.value, time.value);
+                if (millis == null) {
+                    setFormError(t('statusWhenNeed'));
+                    return;
+                }
+                if (millis > Date.now() + 120000) {
+                    setFormError(t('statusWhenFuture'));
+                    return;
+                }
+                ajax('PUT', '/assets/' + asset.id + '/activities/' + item.id, { created: millis }, function (status, payload) {
+                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                    else setFormError((payload && payload.message) || t('statusWhenNeed'));
+                });
+            });
+            line.appendChild(date);
+            line.appendChild(time);
+            line.appendChild(save);
+            line.appendChild(button(t('cancel'), 'asset-tree-history-when is-quiet', show));
+            date.focus();
+            date.select();
+        }
+        show();
+        return line;
+    }
+
     function historyCard(asset, item) {
         var row = el('div', 'asset-tree-history');
         var head = el('div', 'asset-tree-history-head');
@@ -6901,7 +6980,7 @@
         line.appendChild(el('strong', null, author));
         line.appendChild(document.createTextNode(' ' + historyVerb(item)));
         text.appendChild(line);
-        text.appendChild(el('span', null, stamp(item.created)));
+        text.appendChild(historyStamp(asset, item));
         head.appendChild(text);
         if (state.canArrange && asset && item.id > 0) {
             var drop = button('', 'asset-tree-history-delete', function () {
@@ -9819,7 +9898,6 @@
         var approverBox = document.getElementById('asset-field-approver');
         var approverKey = approverBox ? (approverBox.value || '') : null;
         setFormError('');
-        setBusy(true);
         var saved = {
             name: name,
             projectKey: state.projectKey,
@@ -9835,7 +9913,9 @@
             attributes: collectAttributes(document.getElementById('asset-detail-form'))
         };
         if (approverKey !== null) saved.approverKey = approverKey;
-        ajax('PUT', '/assets/' + id, saved, function (status, payload) {
+        function sendSaved() {
+            setBusy(true);
+            ajax('PUT', '/assets/' + id, saved, function (status, payload) {
             if (status < 200 || status >= 300) {
                 setBusy(false);
                 setFormError((payload && payload.message) || t('errorTitle'));
@@ -9860,6 +9940,8 @@
                 savePingExempt(id, function () { saveLifecycle(id, function () { finishSave(id, t('moved'), typeMoved); }); });
             });
         });
+        }
+        sendSaved();
     }
 
     function saveLifecycle(id, done) {
@@ -12673,9 +12755,98 @@
         holderRows = holderRows.slice(0, 5);
         side.appendChild(dashCard(t('reportHolders'), holderRows.length ? holderList(holderRows) : el('p', 'asset-tree-hint', t('chartEmpty'))));
         row.appendChild(side);
-        node.appendChild(el('p', 'asset-tree-hint asset-tree-dash-note', t('dashHint')));
         node.appendChild(totals);
+        var wanted = String(moduleSetup().reportSummary || '');
+        if (wanted && state.boards == null && moduleOn('reports')) {
+            node.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadBoards(function () {
+                var dash = document.getElementById('asset-tree-dashboard');
+                if (dash && state.view !== 'reports') fillDashboard(dash);
+            });
+            return;
+        }
+        var chosen = summaryBoard();
+        if (chosen) {
+            if (state.reportCatalog == null) {
+                node.appendChild(el('p', 'asset-tree-hint', t('loading')));
+                var catalogKey = state.projectKey;
+                ajax('GET', '/projects/' + encodeURIComponent(catalogKey) + '/reports', null, function (status, payload) {
+                    if (state.projectKey !== catalogKey) return;
+                    if (state.reportCatalog == null) {
+                        state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+                    }
+                    var dash = document.getElementById('asset-tree-dashboard');
+                    if (dash && state.view !== 'reports') fillDashboard(dash);
+                });
+                return;
+            }
+            if (!summaryTilesReady(chosen)) {
+                node.appendChild(el('p', 'asset-tree-hint', t('loading')));
+                loadSummaryTiles(chosen);
+                return;
+            }
+            if (!(chosen.panels || []).length) {
+                node.appendChild(el('p', 'asset-tree-hint', t('reportBoardEmptyPanels')));
+                return;
+            }
+            node.appendChild(summaryBoardGrid(chosen));
+            return;
+        }
+        node.appendChild(el('p', 'asset-tree-hint asset-tree-dash-note', t('dashHint')));
         node.appendChild(row);
+    }
+
+    function summaryBoard() {
+        var id = String(moduleSetup().reportSummary || '');
+        if (!id || !state.boards) return null;
+        var found = null;
+        state.boards.forEach(function (board) {
+            if (board && String(board.id) === id) found = board;
+        });
+        return found;
+    }
+
+    function summaryTilesReady(board) {
+        var ready = true;
+        var seen = {};
+        (board.panels || []).forEach(function (panel) {
+            var id = String(panel && panel.report || '');
+            if (!id || seen[id]) return;
+            seen[id] = true;
+            if (!state.summaryTiles[id]) ready = false;
+        });
+        return ready;
+    }
+
+    function loadSummaryTiles(board) {
+        var token = ++state.summaryTileToken;
+        var projectKey = state.projectKey;
+        var left = 0;
+        var seen = {};
+        (board.panels || []).forEach(function (panel) {
+            var id = String(panel && panel.report || '');
+            if (!id || seen[id]) return;
+            seen[id] = true;
+            if (state.summaryTiles[id]) return;
+            left++;
+            ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(id) + reportQuery(id), null, function (status, payload) {
+                if (token !== state.summaryTileToken || state.projectKey !== projectKey) return;
+                state.summaryTiles[id] = status === 200 && payload ? payload : { missing: true };
+                left--;
+                if (left === 0 && state.view !== 'reports') {
+                    var dash = document.getElementById('asset-tree-dashboard');
+                    if (dash) fillDashboard(dash);
+                }
+            });
+        });
+    }
+
+    function summaryBoardGrid(board) {
+        var grid = el('div', 'asset-tree-report-board is-composed is-summary');
+        (board.panels || []).forEach(function (panel) {
+            grid.appendChild(reportBoardTile(panel, state.summaryTiles));
+        });
+        return grid;
     }
 
     function dashCard(title, body) {
@@ -14712,6 +14883,35 @@
             });
             panel.appendChild(el('span', 'asset-tree-nav-label', t('setupShow')));
             panel.appendChild(reports);
+            var summaryPick = document.createElement('select');
+            summaryPick.className = 'asset-tree-filter';
+            summaryPick.setAttribute('aria-label', t('reportSummary'));
+            var summaryDefault = document.createElement('option');
+            summaryDefault.value = '';
+            summaryDefault.textContent = t('summaryTitle');
+            summaryPick.appendChild(summaryDefault);
+            function paintSummaryPick(rows) {
+                var current = String(setup.reportSummary || '');
+                while (summaryPick.options.length > 1) summaryPick.remove(1);
+                (rows || []).forEach(function (board) {
+                    if (!board || !board.id) return;
+                    var option = document.createElement('option');
+                    option.value = String(board.id);
+                    option.textContent = board.name || ('#' + board.id);
+                    summaryPick.appendChild(option);
+                });
+                var known = false;
+                var n;
+                for (n = 0; n < summaryPick.options.length; n++) {
+                    if (summaryPick.options[n].value === current) known = true;
+                }
+                summaryPick.value = known ? current : '';
+            }
+            paintSummaryPick(state.boards || []);
+            if (state.boards == null) loadBoards(function () { paintSummaryPick(state.boards || []); });
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('reportSummary')));
+            panel.appendChild(summaryPick);
+            panel.appendChild(el('p', 'asset-tree-hint', t('reportSummaryHint')));
             var idleList = el('div', 'asset-tree-check-list');
             function idleOn(key) {
                 var raw = setup.reportIdleStatuses;
@@ -14927,6 +15127,7 @@
                 next.reportMailBranch = branchBox.checked;
                 next.reportIdleStatuses = idleValue();
                 next.reportRequestStatuses = requestValue();
+                next.reportSummary = summaryPick.value;
                 saveSetup(next);
             }));
             mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
@@ -14946,6 +15147,7 @@
                 next.reportMailBranch = branchBox.checked;
                 next.reportIdleStatuses = idleValue();
                 next.reportRequestStatuses = requestValue();
+                next.reportSummary = summaryPick.value;
                 saveProjectView({ setup: next }, function (ok) {
                     if (!ok) return;
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
@@ -17797,17 +17999,17 @@
         });
         if (!money) shareTotal = view.total || 0;
         var shares = shareLabels(shareValues);
-        var head = [csvCell(groupWord(view.groupBy, view)), csvCell(t('reportCount'))];
+        var head = [csvCell(groupWord(view.groupBy, view)), csvCell(reportIdle(view) ? t('reportColDuration') : t('reportCount'))];
         if (money) head.push(csvCell(t('lifeBook')));
         head.push(csvCell(t('reportShare')));
         var rows = [head.join(';')];
         (view.rows || []).forEach(function (row, index) {
-            var cells = [csvCell(row.label), csvCell(row.count)];
+            var cells = [csvCell(row.label), csvCell(reportCountShown(row))];
             if (money) cells.push(csvCell(reportMoneyCsv(Number(row.amount) || 0)));
             cells.push(csvCell(shares[index] || '0 %'));
             rows.push(cells.join(';'));
         });
-        var totalCells = [csvCell(t('reportTotalRow')), csvCell(view.total || 0)];
+        var totalCells = [csvCell(t('reportTotalRow')), csvCell(reportTotalShown(view))];
         if (money) totalCells.push(csvCell(reportMoneyCsv(shareTotal)));
         totalCells.push(csvCell(shareTotal ? '100 %' : '0 %'));
         rows.push(totalCells.join(';'));
@@ -17817,9 +18019,17 @@
             if (view.lines && view.lines.length) {
             rows.push('');
             if (reportJournal(view)) {
-                rows.push([csvCell(t('keyLabel')), csvCell(t('reportColAsset')), csvCell(t('reportColWork')), csvCell(t('reportColKind')), csvCell(t('reportColWhen')), csvCell(t('reportColState')), csvCell(t('reportColNext'))].join(';'));
+                var journalHead = [csvCell(t('keyLabel')), csvCell(t('reportColAsset')), csvCell(t('reportColWork')), csvCell(t('reportColKind')), csvCell(t('reportColWhen'))];
+                if (reportTimed(view)) journalHead.push(csvCell(t('reportColDuration')));
+                journalHead.push(csvCell(t('reportColState')));
+                journalHead.push(csvCell(t('reportColNext')));
+                rows.push(journalHead.join(';'));
                 view.lines.forEach(function (row) {
-                    rows.push([csvCell(row.objectKey), csvCell(row.asset), csvCell(row.name), csvCell(row.kind), csvCell(reportWhenText(row)), csvCell(reportStateWord(row.state)), csvCell(formatFieldDate(row.next || ''))].join(';'));
+                    var cells = [csvCell(row.objectKey), csvCell(row.asset), csvCell(row.name), csvCell(row.kind), csvCell(reportWhenText(row))];
+                    if (reportTimed(view)) cells.push(csvCell(row.clock || ''));
+                    cells.push(csvCell(reportStateWord(row.state)));
+                    cells.push(csvCell(formatFieldDate(row.next || '')));
+                    rows.push(cells.join(';'));
                 });
             } else {
                 var detailHead = money ? t('lifeBook') : detailWord(view.groupBy, view);
@@ -17876,19 +18086,23 @@
         var money = reportMoney(view);
         var body = '<h1>' + htmlEscape(view.title || '') + '</h1><p>' + htmlEscape(groupPhrase(view.groupBy, view)) + '</p>';
         if (chart) body += '<div class="chart">' + chart.innerHTML + '</div>';
-        body += '<table><tr><th>' + htmlEscape(groupWord(view.groupBy, view)) + '</th><th>' + htmlEscape(t('reportCount')) + '</th>';
+        body += '<table><tr><th>' + htmlEscape(groupWord(view.groupBy, view)) + '</th><th>' + htmlEscape(reportIdle(view) ? t('reportColDuration') : t('reportCount')) + '</th>';
         if (money) body += '<th>' + htmlEscape(t('lifeBook')) + '</th>';
         body += '</tr>';
         rows.forEach(function (row) {
-            body += '<tr><td>' + htmlEscape(row.label || '') + '</td><td class="num">' + htmlEscape(String(row.count || 0)) + '</td>';
+            body += '<tr><td>' + htmlEscape(row.label || '') + '</td><td class="num">' + htmlEscape(reportCountShown(row)) + '</td>';
             if (money) body += '<td class="num">' + htmlEscape(reportMoneyLabel(Number(row.amount) || 0)) + '</td>';
             body += '</tr>';
         });
         body += '</table>';
         if (reportJournal(view)) {
-            body += '<h2>' + htmlEscape(t('reportColWork')) + '</h2><table><tr><th>' + htmlEscape(t('keyLabel')) + '</th><th>' + htmlEscape(t('reportColAsset')) + '</th><th>' + htmlEscape(t('reportColWork')) + '</th><th>' + htmlEscape(t('reportColKind')) + '</th><th>' + htmlEscape(t('reportColWhen')) + '</th><th>' + htmlEscape(t('reportColState')) + '</th><th>' + htmlEscape(t('reportColNext')) + '</th></tr>';
+            body += '<h2>' + htmlEscape(t('reportColWork')) + '</h2><table><tr><th>' + htmlEscape(t('keyLabel')) + '</th><th>' + htmlEscape(t('reportColAsset')) + '</th><th>' + htmlEscape(t('reportColWork')) + '</th><th>' + htmlEscape(t('reportColKind')) + '</th><th>' + htmlEscape(t('reportColWhen')) + '</th>';
+            if (reportTimed(view)) body += '<th>' + htmlEscape(t('reportColDuration')) + '</th>';
+            body += '<th>' + htmlEscape(t('reportColState')) + '</th><th>' + htmlEscape(t('reportColNext')) + '</th></tr>';
             (view.lines || []).forEach(function (row) {
-                body += '<tr><td>' + htmlEscape(row.objectKey || '') + '</td><td>' + htmlEscape(row.asset || '') + '</td><td>' + htmlEscape(row.name || '') + '</td><td>' + htmlEscape(row.kind || '') + '</td><td>' + htmlEscape(reportWhenText(row)) + '</td><td>' + htmlEscape(reportStateWord(row.state)) + '</td><td>' + htmlEscape(formatFieldDate(row.next || '')) + '</td></tr>';
+                body += '<tr><td>' + htmlEscape(row.objectKey || '') + '</td><td>' + htmlEscape(row.asset || '') + '</td><td>' + htmlEscape(row.name || '') + '</td><td>' + htmlEscape(row.kind || '') + '</td><td>' + htmlEscape(reportWhenText(row)) + '</td>';
+                if (reportTimed(view)) body += '<td>' + htmlEscape(row.clock || '') + '</td>';
+                body += '<td>' + htmlEscape(reportStateWord(row.state)) + '</td><td>' + htmlEscape(formatFieldDate(row.next || '')) + '</td></tr>';
             });
             body += '</table>';
         }
@@ -18092,7 +18306,7 @@
             name.title = row.label || '';
             item.appendChild(name);
             var value = money ? (Number(row.amount) || 0) : (row.count || 0);
-            var shown = money ? reportMoneyLabel(value) : String(row.count);
+            var shown = money ? reportMoneyLabel(value) : reportCountShown(row);
             item.appendChild(el('strong', null, shown + ' · ' + (shares && shares[index] ? shares[index] : '0 %')));
             if (row.activate) {
                 item.tabIndex = 0;
@@ -18110,7 +18324,9 @@
     }
 
     function reportColumnsChart(rows, max, money) {
-        var wrap = el('div', 'asset-tree-report-columns' + (money ? ' is-money' : ''));
+        var wide = false;
+        rows.forEach(function (row) { if (row && row.text) wide = true; });
+        var wrap = el('div', 'asset-tree-report-columns' + (money ? ' is-money' : '') + (wide ? ' is-timed' : ''));
         rows.forEach(function (row) {
             var col = el('div', 'asset-tree-report-column' + (row.activate ? ' is-pick' : ''));
             if (row.activate) {
@@ -18123,7 +18339,7 @@
                     }
                 });
             }
-            var shown = row.text || String(row.count);
+            var shown = reportCountShown(row);
             var count = el('span', 'asset-tree-report-column-count', shown);
             count.title = shown;
             col.appendChild(count);
@@ -18166,7 +18382,7 @@
             fill.style.background = row.color || '#0052CC';
             track.appendChild(fill);
             line.appendChild(track);
-            var shown = row.text || String(row.count);
+            var shown = reportCountShown(row);
             var value = el('strong', null, shown);
             value.title = shown;
             line.appendChild(value);
@@ -18587,7 +18803,7 @@
         if (!drawn.length) return null;
         var round = el('div', 'asset-tree-report-chart is-round');
         var ring = el('div', 'asset-tree-report-ring');
-        var center = money ? reportMoneyLabel(maxShare(rows)) : String(total);
+        var center = money ? reportMoneyLabel(maxShare(rows)) : (view && view.figure ? String(view.figure) : String(total));
         if (kind === 'pie') {
             ring.appendChild(reportPieChart(drawn));
         } else {
@@ -18697,11 +18913,25 @@
         return t(map[state] || 'reportStateDone');
     }
 
+    function reportIdle(view) {
+        return !!(view && view.figure);
+    }
+
+    function reportCountShown(row) {
+        return row && row.text ? String(row.text) : String(row && row.count || 0);
+    }
+
+    function reportTotalShown(view) {
+        if (view && view.figure) return String(view.figure);
+        return String(view && view.total || 0);
+    }
+
+    function reportTimed(view) {
+        return !!(view && view.lines && view.lines.some(function (row) { return row && row.clock; }));
+    }
+
     function reportWhenText(line) {
-        var day = formatFieldDate(line && (line.when || line.from) || '');
-        var clock = line && line.clock ? String(line.clock) : '';
-        if (clock && day) return day + ' ' + clock;
-        return clock || day;
+        return formatFieldDate(line && (line.when || line.from) || '');
     }
 
     function detailWord(group, view) {
@@ -18716,6 +18946,7 @@
     function loadGallery() {
         if (state.galleryLoading) return;
         state.galleryLoading = true;
+        loadBoards();
         var token = ++state.galleryToken;
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports?fresh=' + String(Date.now()), null, function (status, payload) {
             if (token !== state.galleryToken) return;
@@ -18863,6 +19094,14 @@
         state.reportView = null;
         state.galleryLoading = false;
         state.galleryToken++;
+        state.boards = null;
+        state.boardId = 0;
+        state.boardEditing = false;
+        state.boardNaming = false;
+        state.boardDraft = null;
+        state.boardDone = null;
+        state.boardsLoading = false;
+        state.boardToken++;
     }
 
     function openGallery(id) {
@@ -18878,7 +19117,8 @@
     }
 
     function reportLink(item) {
-        var link = button(item.name, 'asset-tree-report-link' + (item.id === state.reportKey ? ' is-current' : ''), function () {
+        var current = !state.reportBoard && String(item.id) === String(state.reportKey);
+        var link = button(item.name, 'asset-tree-report-link' + (current ? ' is-current' : ''), function () {
             state.reportNavOpen = false;
             openGallery(item.id);
         });
@@ -18892,7 +19132,12 @@
         if (state.canEdit) tools.appendChild(button(t('reportCreate'), 'asset-tree-btn primary', openReportDialog));
         tools.appendChild(button(t('reportBoard'), 'asset-tree-btn' + (state.reportBoard ? ' primary' : ''), function () {
             state.reportBoard = !state.reportBoard;
-            if (state.reportBoard) loadReportBoard();
+            state.boardEditing = false;
+            state.boardNaming = false;
+            if (state.reportBoard) {
+                if (state.boards && state.boards.length && !boardById(state.boardId)) state.boardId = state.boards[0].id;
+                loadReportBoard();
+            }
             renderFrame();
         }));
         if (state.reportView && !state.reportBoard) {
@@ -19325,6 +19570,25 @@
         }
         var shell = el('div', 'asset-tree-report-shell');
         var nav = el('nav', 'asset-tree-report-nav');
+        nav.appendChild(el('span', 'asset-tree-nav-label', t('reportBoards')));
+        (state.boards || []).forEach(function (board) {
+            var current = state.reportBoard && Number(state.boardId) === Number(board.id);
+            var link = button(board.name || ('#' + board.id), 'asset-tree-report-link' + (current ? ' is-current' : ''), function () {
+                openBoard(board.id);
+            });
+            nav.appendChild(link);
+        });
+        if (state.canEdit) {
+            var naming = state.reportBoard && state.boards != null && !boardById(state.boardId);
+            nav.appendChild(button(t('reportBoardNew'), 'asset-tree-report-link' + (naming ? ' is-current' : ''), function () {
+                state.boardNaming = true;
+                state.reportBoard = true;
+                state.boardId = 0;
+                state.boardEditing = false;
+                state.boardDraft = null;
+                renderFrame();
+            }));
+        }
         nav.appendChild(el('span', 'asset-tree-nav-label', t('reportStandard')));
         (state.reportCatalog || []).forEach(function (item) {
             if (!item.standard || reportHidden(item.id)) return;
@@ -19542,26 +19806,291 @@
         });
     }
 
+    function boardById(id) {
+        var found = null;
+        (state.boards || []).forEach(function (board) {
+            if (board && Number(board.id) === Number(id)) found = board;
+        });
+        return found;
+    }
+
+    function catalogItem(id) {
+        var found = null;
+        (state.reportCatalog || []).forEach(function (item) {
+            if (item && String(item.id) === String(id)) found = item;
+        });
+        return found;
+    }
+
+    function loadBoards(done) {
+        if (state.boards != null) {
+            if (done) done();
+            return;
+        }
+        if (done) state.boardDone = done;
+        if (state.boardsLoading) return;
+        state.boardsLoading = true;
+        var token = ++state.boardToken;
+        var projectKey = state.projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/boards', null, function (status, payload) {
+            if (token !== state.boardToken || state.projectKey !== projectKey) return;
+            state.boardsLoading = false;
+            state.boards = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            if (state.reportBoard && !boardById(state.boardId) && state.boards.length && !state.boardNaming) {
+                state.boardId = state.boards[0].id;
+            }
+            var next = state.boardDone;
+            state.boardDone = null;
+            if (next) next();
+            if (state.view === 'reports' && state.reportCatalog != null) renderFrame();
+        });
+    }
+
+    function openBoard(id) {
+        closeAllModals();
+        state.reportBoard = true;
+        state.boardId = id;
+        state.boardEditing = false;
+        state.boardNaming = false;
+        state.boardDraft = null;
+        state.reportNavOpen = false;
+        loadReportBoard();
+        if (!paintReport()) renderFrame();
+    }
+
+    function boardCreateSheet() {
+        var wrap = el('div', 'asset-tree-report-compose');
+        wrap.appendChild(el('h2', null, t('reportBoardNew')));
+        wrap.appendChild(el('p', 'asset-tree-hint', t('reportBoardHint')));
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.maxLength = 80;
+        input.className = 'asset-tree-filter asset-tree-board-name';
+        input.placeholder = t('reportBoardName');
+        input.setAttribute('aria-label', t('reportBoardName'));
+        var save = function () {
+            var title = String(input.value || '').replace(/^\s+|\s+$/g, '');
+            if (!title) return;
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/boards', { name: title, panels: [] }, function (status, payload) {
+                if (status >= 200 && status < 300 && payload && payload.id) {
+                    state.boards = state.boards || [];
+                    state.boards.push(payload);
+                    state.boardNaming = false;
+                    state.reportBoard = true;
+                    state.boardId = payload.id;
+                    state.boardEditing = true;
+                    state.boardDraft = { id: payload.id, name: payload.name || title, panels: [] };
+                    renderFrame();
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+        };
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') save();
+        });
+        wrap.appendChild(input);
+        var actions = el('div', 'asset-tree-inline-actions');
+        actions.appendChild(button(t('save'), 'asset-tree-btn primary', save));
+        if ((state.boards || []).length) {
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
+                state.boardNaming = false;
+                state.boardId = state.boards[0].id;
+                loadReportBoard();
+                renderFrame();
+            }));
+        }
+        wrap.appendChild(actions);
+        return wrap;
+    }
+
+    function boardChartSelect(panel) {
+        var select = document.createElement('select');
+        select.className = 'asset-tree-filter';
+        select.setAttribute('aria-label', t('reportChart'));
+        [['histogram', 'reportHistogram'], ['bars', 'reportBars'], ['line', 'reportLine'], ['area', 'reportArea'], ['scatter', 'reportScatter'], ['donut', 'reportDonut'], ['pie', 'reportPie'], ['radar', 'reportRadar'], ['gantt', 'reportGantt'], ['venn', 'reportVenn']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = t(pair[1]);
+            select.appendChild(option);
+        });
+        select.value = reportChartWire(panel.chart || 'histogram');
+        select.addEventListener('change', function () { panel.chart = select.value; });
+        return select;
+    }
+
+    function boardEditorRow(panel, index) {
+        var row = el('div', 'asset-tree-board-row');
+        row.draggable = true;
+        row.addEventListener('dragstart', function () { state.boardDrag = index; });
+        row.addEventListener('dragover', function (event) { event.preventDefault(); });
+        row.addEventListener('drop', function (event) {
+            event.preventDefault();
+            var from = state.boardDrag;
+            state.boardDrag = -1;
+            if (from === index || from == null || from < 0 || !state.boardDraft) return;
+            var moved = state.boardDraft.panels.splice(from, 1)[0];
+            if (!moved) return;
+            state.boardDraft.panels.splice(index, 0, moved);
+            renderFrame();
+        });
+        row.appendChild(el('span', 'asset-tree-board-grip', '\u2630'));
+        var report = document.createElement('select');
+        report.className = 'asset-tree-filter';
+        report.setAttribute('aria-label', t('reportBoardPanel'));
+        (state.reportCatalog || []).forEach(function (item) {
+            if (!item || !item.id || reportHidden(item.id)) return;
+            var option = document.createElement('option');
+            option.value = String(item.id);
+            option.textContent = item.name || String(item.id);
+            report.appendChild(option);
+        });
+        if (panel.report && !catalogItem(panel.report)) {
+            var missing = document.createElement('option');
+            missing.value = String(panel.report);
+            missing.textContent = t('reportBoardMissing');
+            report.appendChild(missing);
+        }
+        report.value = String(panel.report || '');
+        report.addEventListener('change', function () { panel.report = report.value; });
+        row.appendChild(report);
+        row.appendChild(boardChartSelect(panel));
+        var width = document.createElement('select');
+        width.className = 'asset-tree-filter';
+        width.setAttribute('aria-label', t('reportBoardWidth'));
+        [['half', 'reportBoardHalf'], ['full', 'reportBoardFull']].forEach(function (pair) {
+            var option = document.createElement('option');
+            option.value = pair[0];
+            option.textContent = t(pair[1]);
+            width.appendChild(option);
+        });
+        width.value = panel.width === 'full' ? 'full' : 'half';
+        width.addEventListener('change', function () { panel.width = width.value; });
+        row.appendChild(width);
+        row.appendChild(button(t('reportBoardRemove'), 'asset-tree-btn', function () {
+            state.boardDraft.panels.splice(index, 1);
+            renderFrame();
+        }));
+        return row;
+    }
+
+    function boardEditor(board) {
+        if (!state.boardDraft || Number(state.boardDraft.id) !== Number(board.id)) {
+            var panels = [];
+            (board.panels || []).forEach(function (panel) {
+                panels.push({ report: panel.report, chart: panel.chart, width: panel.width });
+            });
+            state.boardDraft = { id: board.id, name: board.name || '', panels: panels };
+        }
+        var wrap = el('div', 'asset-tree-report-compose');
+        wrap.appendChild(el('h2', null, t('reportBoardCompose')));
+        wrap.appendChild(el('p', 'asset-tree-hint', t('reportBoardHint')));
+        var name = document.createElement('input');
+        name.type = 'text';
+        name.maxLength = 80;
+        name.className = 'asset-tree-filter asset-tree-board-name';
+        name.value = state.boardDraft.name || '';
+        name.setAttribute('aria-label', t('reportBoardName'));
+        name.addEventListener('input', function () { state.boardDraft.name = name.value; });
+        wrap.appendChild(name);
+        var head = el('div', 'asset-tree-board-row is-head');
+        head.appendChild(el('span', null, ''));
+        head.appendChild(el('span', null, t('reportBoardPanel')));
+        head.appendChild(el('span', null, t('reportChart')));
+        head.appendChild(el('span', null, t('reportBoardWidth')));
+        head.appendChild(el('span', null, ''));
+        wrap.appendChild(head);
+        state.boardDraft.panels.forEach(function (panel, index) {
+            wrap.appendChild(boardEditorRow(panel, index));
+        });
+        var actions = el('div', 'asset-tree-inline-actions');
+        if (state.boardDraft.panels.length < 12) {
+            actions.appendChild(button(t('reportBoardAdd'), 'asset-tree-btn', function () {
+                var first = '';
+                (state.reportCatalog || []).some(function (item) {
+                    if (!item || !item.id || reportHidden(item.id)) return false;
+                    first = String(item.id);
+                    return true;
+                });
+                if (!first) return;
+                state.boardDraft.panels.push({ report: first, chart: 'histogram', width: 'half' });
+                renderFrame();
+            }));
+        }
+        actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+            var title = String(state.boardDraft.name || '').replace(/^\s+|\s+$/g, '');
+            if (!title) return;
+            ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/boards/' + encodeURIComponent(board.id), {
+                name: title,
+                panels: state.boardDraft.panels
+            }, function (status, payload) {
+                if (status >= 200 && status < 300 && payload) {
+                    state.boards = (state.boards || []).map(function (item) {
+                        return Number(item.id) === Number(board.id) ? payload : item;
+                    });
+                    state.boardEditing = false;
+                    state.boardDraft = null;
+                    loadReportBoard();
+                    if (!paintReport()) renderFrame();
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () {
+            state.boardEditing = false;
+            state.boardDraft = null;
+            renderFrame();
+        }));
+        actions.appendChild(button(t('reportBoardDelete'), 'asset-tree-btn', function () {
+            if (!window.confirm(t('reportBoardDeleteAsk', board.name || ''))) return;
+            ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/boards/' + encodeURIComponent(board.id), null, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    state.boards = (state.boards || []).filter(function (item) { return Number(item.id) !== Number(board.id); });
+                    state.boardEditing = false;
+                    state.boardDraft = null;
+                    state.boardId = state.boards.length ? state.boards[0].id : 0;
+                    if (state.boardId) loadReportBoard();
+                    if (!paintReport()) renderFrame();
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        wrap.appendChild(actions);
+        return wrap;
+    }
+
     function loadReportBoard() {
+        if (state.boards == null) {
+            loadBoards(function () {
+                if (state.reportBoard) loadReportBoard();
+            });
+            return;
+        }
+        var board = boardById(state.boardId);
         var token = ++state.reportTileToken;
         var projectKey = state.projectKey;
-        var saved = (state.reportCatalog || []).filter(function (item) { return item && !item.standard; });
         state.reportTiles = {};
-        saved.forEach(function (item) {
-            ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(item.id) + reportQuery(item.id), null, function (status, payload) {
+        if (!board || !(board.panels || []).length) {
+            if (state.view === 'reports' && state.reportBoard && !paintReport()) renderFrame();
+            return;
+        }
+        var pending = {};
+        var left = 0;
+        (board.panels || []).forEach(function (panel) {
+            var id = String(panel && panel.report || '');
+            if (!id || pending[id]) return;
+            pending[id] = true;
+            left++;
+            ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/reports/' + encodeURIComponent(id) + reportQuery(id), null, function (status, payload) {
                 if (token !== state.reportTileToken || state.projectKey !== projectKey) return;
-                if (status === 200 && payload) {
-                    state.reportTiles[String(item.id)] = payload;
-                    if (state.view === 'reports' && state.reportBoard && !paintReport()) renderFrame();
-                }
+                state.reportTiles[id] = status === 200 && payload ? payload : { missing: true };
+                left--;
+                if (left === 0 && state.view === 'reports' && state.reportBoard && !paintReport()) renderFrame();
             });
         });
     }
 
-    function reportBoard() {
-        var main = el('div', 'asset-tree-report-main asset-tree-report-board-wrap');
-        var saved = (state.reportCatalog || []).filter(function (item) { return item && !item.standard; });
-        if (saved.some(function (item) { return reportUsesPeriod(item.id); })) {
+    function reportBoardPeriod(board) {
+        var needs = (board.panels || []).some(function (panel) { return reportUsesPeriod(panel && panel.report); });
+        if (!needs && !state.canEdit) return null;
+        var bar = el('div', 'asset-tree-report-board-bar');
+        if (needs) {
             var period = el('div', 'asset-tree-report-period');
             var range = reportRange();
             period.appendChild(el('span', null, t('reportPeriod')));
@@ -19582,43 +20111,104 @@
             from.addEventListener('change', applyPeriod);
             to.addEventListener('change', applyPeriod);
             period.appendChild(from);
+            period.appendChild(el('span', null, '\u2014'));
             period.appendChild(to);
-            main.appendChild(period);
+            bar.appendChild(period);
         }
-        if (!saved.length) {
-            main.appendChild(el('p', 'asset-tree-hint', t('reportBoardEmpty')));
+        if (state.canEdit && board) {
+            bar.appendChild(button(t('reportBoardCompose'), 'asset-tree-btn asset-tree-board-compose', function () {
+                state.boardEditing = true;
+                state.boardDraft = null;
+                renderFrame();
+            }));
+        }
+        return bar;
+    }
+
+    function reportBoardTile(panel, tiles) {
+        var id = String(panel && panel.report || '');
+        var item = catalogItem(id);
+        var store = tiles || state.reportTiles;
+        var tile = el('article', 'asset-tree-report-tile' + (panel && panel.width === 'full' ? ' is-wide' : ''));
+        tile.tabIndex = 0;
+        var open = function () {
+            if (!id) return;
+            if (state.view !== 'reports') {
+                state.reportKey = id;
+                state.reportBoard = false;
+                state.reportBucket = '';
+                showView('reports');
+                return;
+            }
+            if (item) openGallery(item.id);
+        };
+        tile.addEventListener('click', open);
+        tile.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                open();
+            }
+        });
+        var kind = reportChartWire(panel && panel.chart || 'histogram');
+        var view = store[id];
+        var title = item ? (item.name || '') : (view && (view.title || (view.missing ? t('reportBoardMissing') : ''))) || (view ? '' : t('loading'));
+        tile.appendChild(el('h3', null, title || t('reportBoardMissing')));
+        tile.appendChild(el('p', null, (item ? groupPhrase(item.groupBy, { fieldLabel: item.fieldKey || '' }) : (view && view.groupBy ? groupPhrase(view.groupBy, view) : id)) + ' \u00b7 ' + reportChartCaption(kind)));
+        if (!view) {
+            tile.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            return tile;
+        }
+        if (view.missing) {
+            tile.appendChild(el('p', 'asset-tree-hint', t('reportBoardMissing')));
+            return tile;
+        }
+        var rows = view.rows || [];
+        var money = reportMoney(view);
+        var shareTotal = 0;
+        var shareValues = [];
+        var maxValue = 1;
+        rows.forEach(function (row) {
+            var value = money ? (Number(row.amount) || 0) : (row.count || 0);
+            shareTotal += value;
+            shareValues.push(value);
+            if (value > maxValue) maxValue = value;
+        });
+        var chart = reportChartPanel(rows, view.total || 0, maxValue, kind, money, view.sum || '', shareLabels(shareValues), view);
+        var headline = kind === 'line' || kind === 'area' || money;
+        if (chart && headline) tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : reportTotalShown(view)));
+        if (chart) tile.appendChild(chart);
+        else if (view.reason) tile.appendChild(el('p', 'asset-tree-hint', view.reason));
+        else tile.appendChild(el('p', 'asset-tree-report-tile-total', money ? reportMoneyLabel(shareTotal) : reportTotalShown(view)));
+        return tile;
+    }
+
+    function reportBoard() {
+        var board = state.boards == null ? null : boardById(state.boardId);
+        var tiles = !!(board && !state.boardEditing);
+        var main = el('div', 'asset-tree-report-main asset-tree-report-board-wrap' + (tiles ? ' is-board' : ''));
+        if (state.boards == null) {
+            main.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadBoards();
             return main;
         }
-        var grid = el('div', 'asset-tree-report-board');
-        saved.forEach(function (item) {
-            var tile = el('article', 'asset-tree-report-tile');
-            tile.tabIndex = 0;
-            var open = function () { openGallery(item.id); };
-            tile.addEventListener('click', open);
-            tile.addEventListener('keydown', function (event) {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    open();
-                }
-            });
-            tile.appendChild(el('h3', null, item.name || ''));
-            tile.appendChild(el('p', null, groupPhrase(item.groupBy, { fieldLabel: item.fieldKey || '' })));
-            var view = state.reportTiles[String(item.id)];
-            if (!view) {
-                tile.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            } else {
-                var rows = view.rows || [];
-                var maxValue = 1;
-                rows.forEach(function (row) {
-                    if ((row.count || 0) > maxValue) maxValue = row.count || 0;
-                });
-                tile.appendChild(el('p', 'asset-tree-report-tile-total', String(view.total || 0)));
-                var kind = reportChartList(view)[0] || 'histogram';
-                var chart = reportChartPanel(rows, view.total || 0, maxValue, kind, false, '', shareLabels(rows.map(function (row) { return row.count || 0; })), view);
-                if (chart) tile.appendChild(chart);
-                else if (view.reason) tile.appendChild(el('p', 'asset-tree-hint', view.reason));
-            }
-            grid.appendChild(tile);
+        if (!board) {
+            if (state.canEdit) main.appendChild(boardCreateSheet());
+            else main.appendChild(el('p', 'asset-tree-hint', t('reportBoardEmpty')));
+            return main;
+        }
+        if (state.boardEditing) {
+            main.appendChild(boardEditor(board));
+            return main;
+        }
+        var bar = reportBoardPeriod(board);
+        if (bar) main.appendChild(bar);
+        if (!(board.panels || []).length) {
+            main.appendChild(el('p', 'asset-tree-hint', t('reportBoardEmptyPanels')));
+            return main;
+        }
+        var grid = el('div', 'asset-tree-report-board is-composed');
+        (board.panels || []).forEach(function (panel) {
+            grid.appendChild(reportBoardTile(panel));
         });
         main.appendChild(grid);
         return main;
@@ -19700,7 +20290,7 @@
             }));
         }
         var facts = el('div', 'asset-tree-report-facts');
-        facts.appendChild(reportFact('', String(view.total || 0), t('reportTotalRow')));
+        facts.appendChild(reportFact('', reportTotalShown(view), t('reportTotalRow')));
         if (view.sum) facts.appendChild(reportFact('', reportMoneyLabel(shareTotal), t('lifeBook')));
         main.appendChild(facts);
         if (!rows.length) {
@@ -19742,7 +20332,7 @@
             var header = el('tr');
             header.appendChild(el('th', 'asset-tree-report-name', groupWord(view.groupBy, view)));
             header.appendChild(el('th', 'asset-tree-report-meter-h', ''));
-            header.appendChild(el('th', 'is-num', t('reportCount')));
+            header.appendChild(el('th', 'is-num', reportIdle(view) ? t('reportColDuration') : t('reportCount')));
             if (money) header.appendChild(el('th', 'is-num is-money', t('lifeBook')));
             header.appendChild(el('th', 'is-num', t('reportShare')));
             table.appendChild(header);
@@ -19767,7 +20357,7 @@
                 var meterValue = money ? (Number(row.amount) || 0) : (row.count || 0);
                 meter.appendChild(reportMeter(meterValue, maxValue, row.color));
                 line.appendChild(meter);
-                line.appendChild(el('td', 'is-num', String(row.count)));
+                line.appendChild(el('td', 'is-num', reportCountShown(row)));
                 if (money) line.appendChild(el('td', 'is-num is-money', reportMoneyLabel(Number(row.amount) || 0)));
                 line.appendChild(el('td', 'is-num', shares[index] || '0 %'));
                 table.appendChild(line);
@@ -19775,7 +20365,7 @@
             var total = el('tr', 'is-total');
             total.appendChild(el('td', null, t('reportTotalRow')));
             total.appendChild(el('td', 'asset-tree-report-meter', ''));
-            total.appendChild(el('td', 'is-num', String(view.total || 0)));
+            total.appendChild(el('td', 'is-num', reportTotalShown(view)));
             if (money) total.appendChild(el('td', 'is-num is-money', reportMoneyLabel(shareTotal)));
             total.appendChild(el('td', 'is-num', shareTotal ? '100 %' : '0 %'));
             table.appendChild(total);
@@ -19784,7 +20374,11 @@
         if (reportJournal(view)) {
             var journal = el('table', 'asset-tree-sheet-table asset-tree-report-table asset-tree-report-journal');
             var journalHead = el('tr');
-            ['keyLabel', 'reportColAsset', 'reportColWork', 'reportColKind', 'reportColWhen', 'reportColState', 'reportColNext'].forEach(function (key) {
+            var journalKeys = ['keyLabel', 'reportColAsset', 'reportColWork', 'reportColKind', 'reportColWhen'];
+            if (reportTimed(view)) journalKeys.push('reportColDuration');
+            journalKeys.push('reportColState');
+            journalKeys.push('reportColNext');
+            journalKeys.forEach(function (key) {
                 journalHead.appendChild(el('th', null, t(key)));
             });
             journal.appendChild(journalHead);
@@ -19804,6 +20398,7 @@
                 item.appendChild(el('td', null, row.name || ''));
                 item.appendChild(el('td', null, row.kind || ''));
                 item.appendChild(el('td', null, reportWhenText(row)));
+                if (reportTimed(view)) item.appendChild(el('td', null, row.clock || ''));
                 item.appendChild(el('td', 'asset-tree-report-state is-' + (row.state || 'done'), reportStateWord(row.state)));
                 item.appendChild(el('td', null, formatFieldDate(row.next || '')));
                 journal.appendChild(item);
@@ -20402,6 +20997,7 @@
             reportMailBranch: !!setup.reportMailBranch,
             reportIdleStatuses: setup.reportIdleStatuses == null ? '' : String(setup.reportIdleStatuses),
             reportRequestStatuses: setup.reportRequestStatuses == null ? '' : String(setup.reportRequestStatuses),
+            reportSummary: setup.reportSummary == null ? '' : String(setup.reportSummary),
             reportMailSent: setup.reportMailSent || '',
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,

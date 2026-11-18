@@ -28,6 +28,8 @@ public class ModuleSetupDto {
     private String reportIdleStatuses;
     /** Request statuses for the period report. Empty means all, open means not Done, "-" means none. */
     private String reportRequestStatuses;
+    /** Board id shown in the asset summary. Empty keeps the built-in summary cards. */
+    private String reportSummary;
     private Boolean lifeApproval;
     private String lifeApprover;
     private String lifePlaces;
@@ -100,6 +102,8 @@ public class ModuleSetupDto {
     public void setReportIdleStatuses(String reportIdleStatuses) { this.reportIdleStatuses = reportIdleStatuses; }
     public String getReportRequestStatuses() { return reportRequestStatuses; }
     public void setReportRequestStatuses(String reportRequestStatuses) { this.reportRequestStatuses = reportRequestStatuses; }
+    public String getReportSummary() { return reportSummary; }
+    public void setReportSummary(String reportSummary) { this.reportSummary = reportSummary; }
     public Boolean getLifeApproval() { return lifeApproval; }
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }

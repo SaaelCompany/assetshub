@@ -3008,6 +3008,10 @@ a.asset-tree-url {
     margin: 0 0 8px !important;
 }
 
+#asset-tree-app .asset-tree-dashboard .asset-tree-report-board.is-summary {
+    margin: 0;
+}
+
 #asset-tree-app .asset-tree-dashboard.is-collapsed .asset-tree-summary-bar {
     margin: 0 !important;
 }
@@ -5459,6 +5463,47 @@ a.asset-tree-preview-icon:focus {
     min-width: 0;
 }
 
+#asset-tree-app .asset-tree-history-stamp {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#asset-tree-app button.asset-tree-history-when {
+    flex: 0 0 auto;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #0052cc;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    box-shadow: none !important;
+}
+
+#asset-tree-app button.asset-tree-history-when.is-quiet {
+    color: #6b778c;
+}
+
+#asset-tree-app .asset-tree-history-stamp input {
+    width: 96px !important;
+    min-width: 0 !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    margin: 0;
+    padding: 0 8px !important;
+    font-size: 13px;
+}
+
+#asset-tree-app .asset-tree-history-stamp input.asset-tree-history-date {
+    width: 112px !important;
+}
+
 #asset-tree-app .asset-tree-history-delete {
     flex: 0 0 auto;
     display: inline-flex;
@@ -7395,20 +7440,149 @@ a.asset-tree-preview-icon:focus {
     padding: 12px;
 }
 
+#asset-tree-app .asset-tree-report-board.is-composed {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-main.is-board {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+}
+
+#asset-tree-app .asset-tree-report-tile.is-wide {
+    grid-column: 1 / -1;
+}
+
+#asset-tree-app .asset-tree-report-board-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    margin: 0 0 12px;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-board-bar .asset-tree-report-period {
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-board-bar .asset-tree-board-compose {
+    margin-left: auto;
+}
+
+#asset-tree-app .asset-tree-report-board-bar .asset-tree-report-period input {
+    height: 32px;
+}
+
+#asset-tree-app .asset-tree-report-compose {
+    padding: 12px 16px 20px;
+}
+
+#asset-tree-app .asset-tree-report-compose h2 {
+    margin: 0 0 8px;
+    color: #172b4d;
+    font-size: 18px;
+}
+
+#asset-tree-app .asset-tree-board-name {
+    display: block;
+    width: min(420px, 100%);
+    margin: 0 0 12px;
+}
+
+#asset-tree-app .asset-tree-board-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) 160px 160px auto;
+    gap: 8px;
+    align-items: center;
+    margin: 0;
+    padding: 8px 0;
+    border-top: 1px solid #dfe1e6;
+}
+
+#asset-tree-app .asset-tree-board-row .asset-tree-filter {
+    width: 100%;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-board-row.is-head {
+    border-top: 0;
+    padding-top: 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+#asset-tree-app .asset-tree-board-grip {
+    color: #6b778c;
+    text-align: center;
+    cursor: grab;
+}
+
+#asset-tree-app .asset-tree-report-compose .asset-tree-inline-actions {
+    margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart {
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-plot {
+    max-width: none;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-round {
+    flex-wrap: wrap;
+    gap: 18px 28px;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart svg.asset-tree-report-svg,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart.is-radar svg.asset-tree-report-svg {
+    width: 100% !important;
+    height: 160px !important;
+    min-height: 0 !important;
+    max-height: 160px !important;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-chart svg.asset-tree-donut,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value {
+    width: 188px !important;
+    height: 188px !important;
+    min-width: 188px !important;
+    max-width: 188px !important;
+    min-height: 188px !important;
+    max-height: 188px !important;
+    flex: 0 0 188px !important;
+}
+
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value.is-compact,
+#asset-tree-app .asset-tree-report-tile .asset-tree-report-ring-value.is-tiny {
+    padding: 0 !important;
+    font-size: 32px !important;
+}
+
 #asset-tree-app .asset-tree-report-tile {
     margin: 0;
-    padding: 12px;
+    padding: 12px 14px 14px;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
-    background: #fafbfc;
+    background: #fff;
     text-align: left;
     cursor: pointer;
+    min-width: 0;
 }
 
 #asset-tree-app .asset-tree-report-tile h3 {
-    margin: 0 0 4px;
+    margin: 0;
     color: #172b4d;
     font-size: 15px;
+    font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-report-tile > p {
@@ -7791,6 +7965,21 @@ a.asset-tree-preview-icon:focus {
     font-variant-numeric: tabular-nums;
 }
 
+#asset-tree-app .asset-tree-report-columns.is-timed .asset-tree-report-column {
+    flex-basis: 112px;
+    width: 112px;
+    min-width: 112px;
+    max-width: 132px;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-timed .asset-tree-report-column-count {
+    max-width: 100%;
+    font-size: 13px;
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal;
+}
+
 #asset-tree-app .asset-tree-report-shaft {
     display: flex;
     align-items: flex-end;
@@ -7816,6 +8005,13 @@ a.asset-tree-preview-icon:focus {
     width: 84px;
     min-width: 84px;
     max-width: 96px;
+}
+
+#asset-tree-app .asset-tree-report-columns.is-histogram.is-timed .asset-tree-report-column {
+    flex-basis: 128px;
+    width: 128px;
+    min-width: 128px;
+    max-width: 148px;
 }
 
 #asset-tree-app .asset-tree-report-columns.is-histogram .asset-tree-report-shaft {
@@ -15097,8 +15293,14 @@ button.asset-tree-attach-remove {
 
 #asset-tree-app.is-phone .asset-tree-floorplan-body,
 #asset-tree-app.is-phone .asset-tree-report-shell,
-#asset-tree-app.is-phone .asset-tree-map-shell {
+#asset-tree-app.is-phone .asset-tree-map-shell,
+#asset-tree-app.is-phone .asset-tree-report-board.is-composed,
+#asset-tree-app.is-phone .asset-tree-board-row {
     grid-template-columns: 1fr;
+}
+
+#asset-tree-app.is-phone .asset-tree-report-tile.is-wide {
+    grid-column: auto;
 }
 
 #asset-tree-app.is-phone .asset-tree-board-head {

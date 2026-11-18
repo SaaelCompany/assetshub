@@ -26,6 +26,7 @@ import com.assetstree.jira.ao.ProjectGrantEntity;
 import com.assetstree.jira.ao.ProjectStatusEntity;
 import com.assetstree.jira.ao.ProjectViewEntity;
 import com.assetstree.jira.ao.RoomEntity;
+import com.assetstree.jira.ao.ReportBoardEntity;
 import com.assetstree.jira.ao.SavedReportEntity;
 import com.assetstree.jira.ao.ServicePlanEntity;
 import com.assetstree.jira.ao.TypeSchemaEntity;
@@ -99,6 +100,7 @@ public final class SchemaReady {
             RoomEntity.class,
             PinEntity.class,
             SavedReportEntity.class,
+            ReportBoardEntity.class,
             LifecycleEntity.class,
             CardTemplateEntity.class,
             TypeSchemaEntity.class,
