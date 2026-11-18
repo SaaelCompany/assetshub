@@ -7,7 +7,6 @@ import javax.xml.bind.annotation.XmlAccessorType;
 public class DocTemplateDto {
     private String id;
     private String name;
-    private boolean builtin;
 
     public String getId() {
         return id;
@@ -23,13 +22,5 @@ public class DocTemplateDto {
 
     public void setName(String name) {
         this.name = name;
-    }
-
-    public boolean isBuiltin() {
-        return builtin;
-    }
-
-    public void setBuiltin(boolean builtin) {
-        this.builtin = builtin;
     }
 }

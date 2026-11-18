@@ -15451,16 +15451,18 @@
                 list.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
                 return;
             }
+            if (!rows.length) {
+                list.appendChild(el('p', 'asset-tree-hint', t('docEmpty')));
+                return;
+            }
             rows.forEach(function (row) {
                 var line = el('div', 'asset-tree-doc-row');
                 line.appendChild(el('span', null, row.name || row.id));
-                if (!row.builtin) {
-                    line.appendChild(button(t('docDelete'), 'asset-tree-btn', function () {
-                        ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/documents/' + encodeURIComponent(row.id), null, function () {
-                            renderFrame();
-                        });
-                    }));
-                }
+                line.appendChild(button(t('docDelete'), 'asset-tree-btn', function () {
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/documents/' + encodeURIComponent(row.id), null, function () {
+                        renderFrame();
+                    });
+                }));
                 list.appendChild(line);
             });
         });

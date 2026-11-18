@@ -207,7 +207,6 @@ import com.assetstree.jira.model.PlaceLayout;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.FlowRules;
 import com.assetstree.jira.model.DocFields;
-import com.assetstree.jira.model.DocForms;
 import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
@@ -18384,14 +18383,6 @@ public class AssetServiceImpl implements AssetService {
     public List<DocTemplateDto> documents(ApplicationUser user, String projectKey) {
         Project project = requireReadableProject(user, projectKey);
         List<DocTemplateDto> list = new ArrayList<DocTemplateDto>();
-        for (int i = 0; i < DocForms.ALL.length; i++) {
-            DocForms.Builtin form = DocForms.ALL[i];
-            DocTemplateDto dto = new DocTemplateDto();
-            dto.setId(form.getId());
-            dto.setName(i18n().getText(form.getNameKey()));
-            dto.setBuiltin(true);
-            list.add(dto);
-        }
         DocTemplateEntity[] rows = ao().find(DocTemplateEntity.class,
                 Query.select().where("PROJECT_KEY = ?", project.getKey()).order("ID ASC"));
         if (rows != null) {
@@ -18473,37 +18464,25 @@ public class AssetServiceImpl implements AssetService {
         DocTemplateDto dto = new DocTemplateDto();
         dto.setId(String.valueOf(row.getID()));
         dto.setName(row.getName() == null ? "" : row.getName());
-        dto.setBuiltin(false);
         return dto;
     }
 
-    private String documentTitle(String projectKey, String templateId) {
-        DocForms.Builtin builtin = DocForms.find(templateId);
-        if (builtin != null) {
-            return i18n().getText(builtin.getNameKey());
-        }
+    private DocTemplateEntity documentRow(String projectKey, String templateId) {
         int id = documentNumber(templateId);
         DocTemplateEntity row = id <= 0 ? null : ao().get(DocTemplateEntity.class, id);
         if (row == null || row.getProjectKey() == null || !row.getProjectKey().equals(projectKey)) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
-        return row.getName() == null || row.getName().trim().isEmpty() ? "document" : row.getName().trim();
+        return row;
+    }
+
+    private String documentTitle(String projectKey, String templateId) {
+        String name = documentRow(projectKey, templateId).getName();
+        return name == null || name.trim().isEmpty() ? "document" : name.trim();
     }
 
     private byte[] documentBytes(String projectKey, String templateId) {
-        DocForms.Builtin builtin = DocForms.find(templateId);
-        if (builtin != null) {
-            try {
-                return DocForms.bytes(builtin);
-            } catch (IOException ex) {
-                throw new AssetException(500, "asset-tree.error.unexpected");
-            }
-        }
-        int id = documentNumber(templateId);
-        DocTemplateEntity row = id <= 0 ? null : ao().get(DocTemplateEntity.class, id);
-        if (row == null || row.getProjectKey() == null || !row.getProjectKey().equals(projectKey)) {
-            throw new AssetException(404, "asset-tree.error.notFound");
-        }
+        int id = documentRow(projectKey, templateId).getID();
         File stored = documentFile(id);
         if (!stored.isFile() || stored.length() > DocxFill.MAX_BYTES) {
             throw new AssetException(404, "asset-tree.error.notFound");

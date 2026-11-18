@@ -41,27 +41,6 @@ public class DocxFillTest {
         assertTrue(document.contains("{{причина}}"));
     }
 
-    @Test
-    public void shippedCommissioningActKeepsItsLetterhead() throws Exception {
-        byte[] source = DocForms.bytes(DocForms.find("act-commission"));
-        Map<String, String> values = DocFields.values(sample());
-        String document = documentXml(DocxFill.fill(source, values));
-        assertTrue(document.contains("Клиника Будь Здоров"));
-        assertTrue(document.contains("Атол 55Ф"));
-        assertTrue(document.contains("00106228866670"));
-        assertTrue(document.contains("18.11.2026"));
-    }
-
-    private static DocFields.Source sample() {
-        DocFields.Source source = new DocFields.Source();
-        source.name = "Атол 55Ф";
-        source.objectKey = "AST-2";
-        source.today = "18.11.2026";
-        source.fields.put("serial", "00106228866670");
-        source.labels.put("serial", "Серийный номер");
-        return source;
-    }
-
     private static byte[] docx(String xml) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ZipOutputStream zip = new ZipOutputStream(out);
