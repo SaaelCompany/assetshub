@@ -15012,18 +15012,21 @@ button.asset-tree-attach-remove {
 
 #asset-tree-app.is-phone .asset-tree-frame.is-split .asset-tree-side {
     display: flex;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     flex-direction: column;
-    max-height: calc(100dvh - 180px);
+    height: auto;
+    max-height: none;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
     border-bottom: 0;
 }
 
 #asset-tree-app.is-phone .asset-tree-scroll {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
     min-height: 0;
-    overflow: auto;
+    overflow: visible;
 }
 
 #asset-tree-app.is-phone .asset-tree-frame.is-split:not(.is-phone-card) .asset-tree-detail {
