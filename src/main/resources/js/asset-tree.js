@@ -6039,10 +6039,7 @@
             dialog.appendChild(el('h2', null, t('status')));
             statusChoices().forEach(function (choice) {
                 dialog.appendChild(button(choice.label, 'asset-tree-btn asset-tree-bulk-choice', function () {
-                    closeModal(dialog);
-                    askStatusMoment(choice.label, null, function (millis) {
-                        postBulk('status', { status: choice.value, statusAt: millis });
-                    });
+                    postBulk('status', { status: choice.value });
                 }));
             });
             var actions = el('div', 'asset-tree-dialog-actions');
@@ -6285,12 +6282,27 @@
         menu.setAttribute('role', 'listbox');
         statusChoices().forEach(function (choice) {
             var status = choice.value;
+            var row = el('div', 'asset-tree-status-choice');
             var item = button('', 'asset-tree-status-item' + (status === asset.status ? ' is-current' : ''), function () {
                 closeStatusMenu();
                 if (status !== asset.status) changeStatus(asset, status);
             });
             item.appendChild(el('span', 'asset-tree-lozenge ' + statusClass(status), choice.label));
-            menu.appendChild(item);
+            row.appendChild(item);
+            if (status !== asset.status) {
+                var clock = button('', 'asset-tree-status-clock', function (event) {
+                    event.stopPropagation();
+                    closeStatusMenu();
+                    askStatusMoment(choice.label, null, function (millis) {
+                        changeStatus(asset, status, millis);
+                    });
+                });
+                clock.title = t('statusWhen');
+                clock.setAttribute('aria-label', t('statusWhen'));
+                clock.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 5v3.2l2 1.3"/></svg>';
+                row.appendChild(clock);
+            }
+            menu.appendChild(row);
         });
         app.appendChild(menu);
         var box = anchor.getBoundingClientRect();
@@ -6313,11 +6325,11 @@
         if (menu.parentNode) menu.parentNode.removeChild(menu);
     }
 
-    function changeStatus(asset, status) {
+    function changeStatus(asset, status, statusAt) {
         if (!asset || asset.status === status) return;
-        askStatusMoment(statusLabel(status), null, function (millis) {
-            persistAsset(asset, { status: status, statusAt: millis });
-        });
+        var changes = { status: status };
+        if (typeof statusAt === 'number') changes.statusAt = statusAt;
+        persistAsset(asset, changes);
     }
 
     function askStatusMoment(title, initialIso, onSave) {
@@ -6341,7 +6353,7 @@
             dialog.appendChild(row);
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn', function () { closeModal(dialog); }));
-            actions.appendChild(button(t('statusWhenSave'), 'asset-tree-btn primary', function () {
+            actions.appendChild(button(initialIso ? t('save') : t('statusWhenSave'), 'asset-tree-btn primary', function () {
                 if (!date.value || !time.value) {
                     setFormError(t('statusWhenNeed'));
                     return;
@@ -9929,14 +9941,6 @@
                 savePingExempt(id, function () { saveLifecycle(id, function () { finishSave(id, t('moved'), typeMoved); }); });
             });
         });
-        }
-        var nextStatus = statusBox ? statusBox.value : saved.status;
-        if (current && statusBox && nextStatus !== current.status) {
-            askStatusMoment(statusLabel(nextStatus), null, function (millis) {
-                saved.statusAt = millis;
-                sendSaved();
-            });
-            return;
         }
         sendSaved();
     }

@@ -4487,6 +4487,10 @@ a.asset-tree-url {
     box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
 }
 
+.asset-tree-status-choice {
+    position: relative;
+}
+
 #asset-tree-app button.asset-tree-status-item {
     display: flex !important;
     align-items: center;
@@ -5473,6 +5477,47 @@ a.asset-tree-preview-icon:focus {
     cursor: pointer;
     font-size: 12px;
     line-height: 24px;
+    opacity: 0;
+}
+
+#asset-tree-app .asset-tree-history:hover .asset-tree-history-when,
+#asset-tree-app .asset-tree-history-when:focus,
+#asset-tree-app.is-phone .asset-tree-history-when {
+    opacity: 1;
+}
+
+#asset-tree-app button.asset-tree-status-clock {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 24px !important;
+    min-width: 24px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 3px;
+    background: #fff !important;
+    color: #6b778c;
+    cursor: pointer;
+    box-shadow: none;
+    transform: translateY(-50%);
+    opacity: 0;
+}
+
+#asset-tree-app .asset-tree-status-choice:hover button.asset-tree-status-clock,
+#asset-tree-app button.asset-tree-status-clock:focus,
+#asset-tree-app.is-phone button.asset-tree-status-clock {
+    opacity: 1;
+}
+
+#asset-tree-app button.asset-tree-status-clock:hover {
+    background: #ebecf0;
+    color: #172b4d;
 }
 
 #asset-tree-app .asset-tree-status-when {
