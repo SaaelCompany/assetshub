@@ -24,8 +24,14 @@
         CodeBarrel.Automation.updateComponentValue(config, next);
     }
 
+    // A stored status name that is still an internal key is turned into words.
+    // Jira only ships a phrase when AJS.I18n.getText('key') is written out below.
     function text(key) {
-        return AJS.I18n.getText(key);
+        if (!key || key.indexOf('asset-tree.') !== 0) {
+            return key || '';
+        }
+        var translated = AJS.I18n.getText(key);
+        return translated && translated !== key ? translated : (key || '');
     }
 
     function label(parent, caption) {
@@ -61,13 +67,13 @@
 
     function builtinStatuses() {
         return [
-            { value: '', label: text('asset-tree.automation.anyStatus') },
-            { value: 'in_stock', label: text('asset-tree.ui.statusStock') },
-            { value: 'in_use', label: text('asset-tree.ui.statusInUse') },
-            { value: 'repair', label: text('asset-tree.ui.statusRepair') },
-            { value: 'reserve', label: text('asset-tree.ui.statusReserve') },
-            { value: 'maintenance', label: text('asset-tree.ui.statusMaintenance') },
-            { value: 'written_off', label: text('asset-tree.ui.statusWrittenOff') }
+            { value: '', label: AJS.I18n.getText('asset-tree.automation.anyStatus') },
+            { value: 'in_stock', label: AJS.I18n.getText('asset-tree.ui.statusStock') },
+            { value: 'in_use', label: AJS.I18n.getText('asset-tree.ui.statusInUse') },
+            { value: 'repair', label: AJS.I18n.getText('asset-tree.ui.statusRepair') },
+            { value: 'reserve', label: AJS.I18n.getText('asset-tree.ui.statusReserve') },
+            { value: 'maintenance', label: AJS.I18n.getText('asset-tree.ui.statusMaintenance') },
+            { value: 'written_off', label: AJS.I18n.getText('asset-tree.ui.statusWrittenOff') }
         ];
     }
 
@@ -94,11 +100,11 @@
                 try {
                     var rows = JSON.parse(request.responseText);
                     if (rows && rows.length) {
-                        options = [{ value: '', label: text('asset-tree.automation.anyStatus') }];
+                        options = [{ value: '', label: AJS.I18n.getText('asset-tree.automation.anyStatus') }];
                         for (var i = 0; i < rows.length; i++) {
                             options.push({
                                 value: rows[i].statusKey || '',
-                                label: rows[i].label || rows[i].statusKey || ''
+                                label: text(rows[i].label || rows[i].statusKey || '')
                             });
                         }
                     }
@@ -215,15 +221,15 @@
 
     function eventNames() {
         return {
-            '': text('asset-tree.automation.changedAny'),
-            'asset.created': text('asset-tree.automation.changedCreated'),
-            'asset.updated': text('asset-tree.automation.changedUpdated'),
-            'asset.status': text('asset-tree.automation.changedStatus'),
-            'asset.writeoff': text('asset-tree.automation.changedWriteoff'),
-            'asset.schedule': text('asset-tree.automation.changedSchedule'),
-            'asset.calendar': text('asset-tree.automation.changedCalendar'),
-            'asset.deleted': text('asset-tree.automation.changedDeleted'),
-            'asset.restored': text('asset-tree.automation.changedRestored')
+            '': AJS.I18n.getText('asset-tree.automation.changedAny'),
+            'asset.created': AJS.I18n.getText('asset-tree.automation.changedCreated'),
+            'asset.updated': AJS.I18n.getText('asset-tree.automation.changedUpdated'),
+            'asset.status': AJS.I18n.getText('asset-tree.automation.changedStatus'),
+            'asset.writeoff': AJS.I18n.getText('asset-tree.automation.changedWriteoff'),
+            'asset.schedule': AJS.I18n.getText('asset-tree.automation.changedSchedule'),
+            'asset.calendar': AJS.I18n.getText('asset-tree.automation.changedCalendar'),
+            'asset.deleted': AJS.I18n.getText('asset-tree.automation.changedDeleted'),
+            'asset.restored': AJS.I18n.getText('asset-tree.automation.changedRestored')
         };
     }
 
@@ -240,20 +246,20 @@
     function detailOptions(event) {
         if (event === 'asset.writeoff') {
             return [
-                { value: '', label: text('asset-tree.automation.anyDetail') },
-                { value: 'pending', label: text('asset-tree.automation.detailPending') },
-                { value: 'approved', label: text('asset-tree.automation.detailApproved') },
-                { value: 'rejected', label: text('asset-tree.automation.detailRejected') }
+                { value: '', label: AJS.I18n.getText('asset-tree.automation.anyDetail') },
+                { value: 'pending', label: AJS.I18n.getText('asset-tree.automation.detailPending') },
+                { value: 'approved', label: AJS.I18n.getText('asset-tree.automation.detailApproved') },
+                { value: 'rejected', label: AJS.I18n.getText('asset-tree.automation.detailRejected') }
             ];
         }
         if (event === 'asset.schedule') {
             return [
-                { value: '', label: text('asset-tree.automation.anyDetail') },
-                { value: 'created', label: text('asset-tree.automation.detailCreated') },
-                { value: 'changed', label: text('asset-tree.automation.detailChanged') },
-                { value: 'moved', label: text('asset-tree.automation.detailMoved') },
-                { value: 'done', label: text('asset-tree.automation.detailDone') },
-                { value: 'deleted', label: text('asset-tree.automation.detailDeleted') }
+                { value: '', label: AJS.I18n.getText('asset-tree.automation.anyDetail') },
+                { value: 'created', label: AJS.I18n.getText('asset-tree.automation.detailCreated') },
+                { value: 'changed', label: AJS.I18n.getText('asset-tree.automation.detailChanged') },
+                { value: 'moved', label: AJS.I18n.getText('asset-tree.automation.detailMoved') },
+                { value: 'done', label: AJS.I18n.getText('asset-tree.automation.detailDone') },
+                { value: 'deleted', label: AJS.I18n.getText('asset-tree.automation.detailDeleted') }
             ];
         }
         return null;
@@ -276,14 +282,14 @@
         return {
             type: plugin + ':asset-changed-trigger',
             componentType: 'TRIGGER',
-            name: function () { return text('asset-tree.automation.changed'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.changed'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () { return { event: '' }; },
             categories: [],
             labels: [],
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.changed'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.changed'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
                         var names = eventNames();
@@ -298,8 +304,8 @@
                     renderDetailed: function (config, context, el) {
                         function paint() {
                             clear(el);
-                            paragraph(el, text('asset-tree.automation.changedCard'));
-                            label(el, text('asset-tree.automation.event'));
+                            paragraph(el, AJS.I18n.getText('asset-tree.automation.changedCard'));
+                            label(el, AJS.I18n.getText('asset-tree.automation.event'));
                             pick(el, config, 'event', eventOptions(), function () {
                                 var options = detailOptions(field(config, 'event'));
                                 var current = field(config, 'detail');
@@ -316,11 +322,11 @@
                                 }
                                 paint();
                             });
-                            label(el, text('asset-tree.automation.statusList'));
-                            statusPick(el, config, 'status', true, text('asset-tree.automation.anyStatus'));
+                            label(el, AJS.I18n.getText('asset-tree.automation.statusList'));
+                            statusPick(el, config, 'status', true, AJS.I18n.getText('asset-tree.automation.anyStatus'));
                             var details = detailOptions(field(config, 'event'));
                             if (details) {
-                                label(el, text('asset-tree.automation.detailList'));
+                                label(el, AJS.I18n.getText('asset-tree.automation.detailList'));
                                 pick(el, config, 'detail', details);
                             }
                         }
@@ -328,7 +334,7 @@
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.changedCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.changedCard')));
                     }
                 };
             },
@@ -340,27 +346,27 @@
         return {
             type: plugin + ':asset-linked-condition',
             componentType: 'CONDITION',
-            name: function () { return text('asset-tree.automation.linked'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.linked'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () { return { status: '' }; },
             categories: [],
             labels: [],
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.linked'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.linked'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
                         el.appendChild(document.createTextNode(statusWord(field(config, 'status'))));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
-                        paragraph(el, text('asset-tree.automation.linkedCard'));
-                        label(el, text('asset-tree.automation.linkedStatus'));
-                        statusPick(el, config, 'status', true, text('asset-tree.automation.anyStatus'));
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.linkedCard'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.linkedStatus'));
+                        statusPick(el, config, 'status', true, AJS.I18n.getText('asset-tree.automation.anyStatus'));
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.linkedCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.linkedCard')));
                     }
                 };
             },
@@ -372,7 +378,7 @@
         return {
             type: plugin + ':asset-status-action',
             componentType: 'ACTION',
-            name: function () { return text('asset-tree.automation.status'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.status'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () { return { status: '' }; },
             categories: [],
@@ -380,27 +386,27 @@
             isEditable: true,
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.status'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.status'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
                         el.appendChild(document.createTextNode(statusWord(field(config, 'status'))));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
-                        paragraph(el, text('asset-tree.automation.statusCard'));
-                        label(el, text('asset-tree.automation.statusField'));
-                        statusPick(el, config, 'status', false, text('asset-tree.automation.statusChoose'));
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.statusCard'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.statusField'));
+                        statusPick(el, config, 'status', false, AJS.I18n.getText('asset-tree.automation.statusChoose'));
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.statusCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.statusCard')));
                     }
                 };
             },
             validate: function (rule, config) {
                 if (!field(config, 'status')) {
                     var errors = {};
-                    errors.status = text('asset-tree.automation.statusRequired');
+                    errors.status = AJS.I18n.getText('asset-tree.automation.statusRequired');
                     return errors;
                 }
                 return {};
@@ -412,7 +418,7 @@
         return {
             type: plugin + ':calendar-request-action',
             componentType: 'ACTION',
-            name: function () { return text('asset-tree.automation.request'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.request'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () { return { issueTypeId: '', issueTypeName: '', requestTypeId: '', requestTypeName: '' }; },
             categories: [],
@@ -420,30 +426,30 @@
             isEditable: true,
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.request'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.request'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
                         var name = field(config, 'requestTypeName') || field(config, 'issueTypeName') || field(config, 'issueTypeId');
-                        el.appendChild(document.createTextNode(name || text('asset-tree.automation.requestChoose')));
+                        el.appendChild(document.createTextNode(name || AJS.I18n.getText('asset-tree.automation.requestChoose')));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
-                        paragraph(el, text('asset-tree.automation.requestCard'));
-                        label(el, text('asset-tree.automation.requestPortal'));
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.requestCard'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.requestPortal'));
                         portalPick(el, config);
-                        label(el, text('asset-tree.automation.requestType'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.requestType'));
                         typePick(el, config);
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.requestCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.requestCard')));
                     }
                 };
             },
             validate: function (rule, config) {
                 if (!field(config, 'issueTypeId') && !field(config, 'requestTypeId')) {
                     var errors = {};
-                    errors.issueTypeId = text('asset-tree.automation.requestTypeRequired');
+                    errors.issueTypeId = AJS.I18n.getText('asset-tree.automation.requestTypeRequired');
                     return errors;
                 }
                 return {};
@@ -456,7 +462,7 @@
         box.disabled = !!readOnly();
         box.style.maxWidth = '100%';
         function show(options) {
-            var list = [{ value: '', label: text('asset-tree.automation.requestPortalEmpty') }];
+            var list = [{ value: '', label: AJS.I18n.getText('asset-tree.automation.requestPortalEmpty') }];
             for (var i = 0; i < options.length; i++) {
                 if (options[i].value) {
                     list.push(options[i]);
@@ -523,7 +529,7 @@
         var box = document.createElement('select');
         box.disabled = !!readOnly();
         box.style.maxWidth = '100%';
-        var placeholder = text('asset-tree.automation.requestChoose');
+        var placeholder = AJS.I18n.getText('asset-tree.automation.requestChoose');
         function show(options) {
             var list = [{ value: '', label: placeholder }];
             for (var i = 0; i < options.length; i++) {
@@ -593,25 +599,25 @@
         return {
             type: plugin + ':asset-link-action',
             componentType: 'ACTION',
-            name: function () { return text('asset-tree.automation.link'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.link'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () { return {}; },
             categories: [],
             labels: [],
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.link'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.link'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.link')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.link')));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
-                        paragraph(el, text('asset-tree.automation.linkCard'));
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.linkCard'));
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.linkCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.linkCard')));
                     }
                 };
             },
@@ -621,12 +627,12 @@
 
     function recipientOptions() {
         return [
-            { value: 'custodian', label: text('asset-tree.automation.mailCustodian') },
-            { value: 'issued', label: text('asset-tree.automation.mailIssued') },
-            { value: 'approver', label: text('asset-tree.automation.mailApprover') },
-            { value: 'requester', label: text('asset-tree.automation.mailRequester') },
-            { value: 'assignee', label: text('asset-tree.automation.mailAssignee') },
-            { value: 'user', label: text('asset-tree.automation.mailUser') }
+            { value: 'custodian', label: AJS.I18n.getText('asset-tree.automation.mailCustodian') },
+            { value: 'issued', label: AJS.I18n.getText('asset-tree.automation.mailIssued') },
+            { value: 'approver', label: AJS.I18n.getText('asset-tree.automation.mailApprover') },
+            { value: 'requester', label: AJS.I18n.getText('asset-tree.automation.mailRequester') },
+            { value: 'assignee', label: AJS.I18n.getText('asset-tree.automation.mailAssignee') },
+            { value: 'user', label: AJS.I18n.getText('asset-tree.automation.mailUser') }
         ];
     }
 
@@ -642,14 +648,14 @@
 
     function lineOptions() {
         return [
-            ['key', text('asset-tree.automation.mailKey')],
-            ['name', text('asset-tree.automation.mailName')],
-            ['status', text('asset-tree.automation.mailStatus')],
-            ['previous', text('asset-tree.automation.mailPrevious')],
-            ['plan', text('asset-tree.automation.mailPlan')],
-            ['due', text('asset-tree.automation.mailDue')],
-            ['detail', text('asset-tree.automation.mailDetail')],
-            ['note', text('asset-tree.automation.mailNote')]
+            ['key', AJS.I18n.getText('asset-tree.automation.mailKey')],
+            ['name', AJS.I18n.getText('asset-tree.automation.mailName')],
+            ['status', AJS.I18n.getText('asset-tree.automation.mailStatus')],
+            ['previous', AJS.I18n.getText('asset-tree.automation.mailPrevious')],
+            ['plan', AJS.I18n.getText('asset-tree.automation.mailPlan')],
+            ['due', AJS.I18n.getText('asset-tree.automation.mailDue')],
+            ['detail', AJS.I18n.getText('asset-tree.automation.mailDetail')],
+            ['note', AJS.I18n.getText('asset-tree.automation.mailNote')]
         ];
     }
 
@@ -689,7 +695,7 @@
         var box = document.createElement('input');
         box.type = 'text';
         box.value = field(config, 'userName');
-        box.placeholder = text('asset-tree.automation.mailFind');
+        box.placeholder = AJS.I18n.getText('asset-tree.automation.mailFind');
         box.disabled = !!readOnly();
         box.style.width = '100%';
         box.style.boxSizing = 'border-box';
@@ -758,7 +764,7 @@
         return {
             type: plugin + ':asset-mail-action',
             componentType: 'ACTION',
-            name: function () { return text('asset-tree.automation.mail'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.mail'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () {
                 return { to: 'custodian', parts: 'key,name,status,previous,plan,due,detail,note', extra: '' };
@@ -767,7 +773,7 @@
             labels: [],
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.mail'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.mail'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
                         var summary = recipientWord(field(config, 'to') || 'custodian');
@@ -780,13 +786,13 @@
                     renderDetailed: function (config, context, el) {
                         function paint() {
                             clear(el);
-                            paragraph(el, text('asset-tree.automation.mailCard'));
-                            label(el, text('asset-tree.automation.mailTo'));
+                            paragraph(el, AJS.I18n.getText('asset-tree.automation.mailCard'));
+                            label(el, AJS.I18n.getText('asset-tree.automation.mailTo'));
                             pick(el, config, 'to', recipientOptions(), paint);
                             if ((field(config, 'to') || 'custodian') === 'user') {
                                 personFinder(el, config);
                             }
-                            label(el, text('asset-tree.automation.mailLines'));
+                            label(el, AJS.I18n.getText('asset-tree.automation.mailLines'));
                             var lines = lineOptions();
                             for (var i = 0; i < lines.length; i++) {
                                 (function (token, caption) {
@@ -804,21 +810,21 @@
                                     el.appendChild(row);
                                 }(lines[i][0], lines[i][1]));
                             }
-                            label(el, text('asset-tree.automation.mailExtra'));
-                            input(el, config, 'extra', text('asset-tree.automation.mailExtraHint'));
+                            label(el, AJS.I18n.getText('asset-tree.automation.mailExtra'));
+                            input(el, config, 'extra', AJS.I18n.getText('asset-tree.automation.mailExtraHint'));
                         }
                         paint();
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.mailCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.mailCard')));
                     }
                 };
             },
             validate: function (rule, config) {
                 if (field(config, 'to') === 'user' && !field(config, 'userKey')) {
                     var errors = {};
-                    errors.userKey = text('asset-tree.automation.mailRequired');
+                    errors.userKey = AJS.I18n.getText('asset-tree.automation.mailRequired');
                     return errors;
                 }
                 return {};
@@ -846,7 +852,7 @@
             if (request.readyState !== 4) {
                 return;
             }
-            var options = [{ value: '', label: text('asset-tree.automation.anyIssueStatus') }];
+            var options = [{ value: '', label: AJS.I18n.getText('asset-tree.automation.anyIssueStatus') }];
             if (request.status === 200) {
                 try {
                     var rows = JSON.parse(request.responseText) || [];
@@ -854,7 +860,7 @@
                         options.push({ value: rows[i].id || '', label: rows[i].name || rows[i].id || '' });
                     }
                 } catch (ignore) {
-                    options = [{ value: '', label: text('asset-tree.automation.anyIssueStatus') }];
+                    options = [{ value: '', label: AJS.I18n.getText('asset-tree.automation.anyIssueStatus') }];
                 }
             }
             workflowCache[key] = options;
@@ -880,30 +886,30 @@
         return {
             type: plugin + ':issue-status-trigger',
             componentType: 'TRIGGER',
-            name: function () { return text('asset-tree.automation.issueStatus'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.issueStatus'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () { return { issueStatus: '' }; },
             categories: [],
             labels: [],
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.issueStatus'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.issueStatus'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
                         var name = issueStatusWord(field(config, 'issueStatus'));
-                        el.appendChild(document.createTextNode(name || text('asset-tree.automation.anyIssueStatus')));
+                        el.appendChild(document.createTextNode(name || AJS.I18n.getText('asset-tree.automation.anyIssueStatus')));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
-                        paragraph(el, text('asset-tree.automation.issueCard'));
-                        label(el, text('asset-tree.automation.issueList'));
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.issueCard'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.issueList'));
                         var box = document.createElement('select');
                         box.disabled = !!readOnly();
                         box.style.maxWidth = '100%';
                         function show(options) {
                             fillSelect(box, options, field(config, 'issueStatus'));
                         }
-                        show([{ value: '', label: text('asset-tree.automation.anyIssueStatus') }]);
+                        show([{ value: '', label: AJS.I18n.getText('asset-tree.automation.anyIssueStatus') }]);
                         loadWorkflow(function (options) {
                             if (box.parentNode) {
                                 show(options);
@@ -918,7 +924,7 @@
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.issueCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.issueCard')));
                     }
                 };
             },
@@ -928,13 +934,13 @@
 
     function dayKinds() {
         return [
-            { value: '', label: text('asset-tree.automation.anyKind') },
-            { value: 'to', label: text('asset-tree.ui.kindTo') },
-            { value: 'kts', label: text('asset-tree.ui.kindKts') },
-            { value: 'verify', label: text('asset-tree.ui.kindVerify') },
-            { value: 'staff', label: text('asset-tree.ui.kindStaff') },
-            { value: 'event', label: text('asset-tree.ui.kindEvent') },
-            { value: 'update', label: text('asset-tree.ui.kindUpdate') }
+            { value: '', label: AJS.I18n.getText('asset-tree.automation.anyKind') },
+            { value: 'to', label: AJS.I18n.getText('asset-tree.ui.kindTo') },
+            { value: 'kts', label: AJS.I18n.getText('asset-tree.ui.kindKts') },
+            { value: 'verify', label: AJS.I18n.getText('asset-tree.ui.kindVerify') },
+            { value: 'staff', label: AJS.I18n.getText('asset-tree.ui.kindStaff') },
+            { value: 'event', label: AJS.I18n.getText('asset-tree.ui.kindEvent') },
+            { value: 'update', label: AJS.I18n.getText('asset-tree.ui.kindUpdate') }
         ];
     }
 
@@ -950,7 +956,7 @@
 
     function kindWord(key) {
         if (!key) {
-            return text('asset-tree.automation.anyKind');
+            return AJS.I18n.getText('asset-tree.automation.anyKind');
         }
         var options = dayKinds();
         for (var i = 0; i < options.length; i++) {
@@ -965,28 +971,28 @@
         return {
             type: plugin + ':schedule-due-trigger',
             componentType: 'TRIGGER',
-            name: function () { return text('asset-tree.automation.day'); },
+            name: function () { return AJS.I18n.getText('asset-tree.automation.day'); },
             icon: function () { return '../' + plugin + ':asset-tree-automation/automation.svg'; },
             initialValue: function () { return { kind: '' }; },
             categories: [],
             labels: [],
             getRenderer: function () {
                 return {
-                    summaryLabel: function () { return text('asset-tree.automation.day'); },
+                    summaryLabel: function () { return AJS.I18n.getText('asset-tree.automation.day'); },
                     renderSummary: function (config, context, el) {
                         clear(el);
                         el.appendChild(document.createTextNode(kindWord(field(config, 'kind'))));
                     },
                     renderDetailed: function (config, context, el) {
                         clear(el);
-                        paragraph(el, text('asset-tree.automation.dayCard'));
-                        label(el, text('asset-tree.automation.dayKind'));
+                        paragraph(el, AJS.I18n.getText('asset-tree.automation.dayCard'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.dayKind'));
                         var current = field(config, 'kind');
                         var box = pick(el, config, 'kind', dayKinds());
                         if (!knownKind(current)) {
                             fillSelect(box, dayKinds(), '');
                         }
-                        label(el, text('asset-tree.automation.dayCustom'));
+                        label(el, AJS.I18n.getText('asset-tree.automation.dayCustom'));
                         var own = document.createElement('input');
                         own.type = 'text';
                         own.value = knownKind(current) ? '' : current;
@@ -1007,7 +1013,7 @@
                     },
                     renderCard: function (el) {
                         clear(el);
-                        el.appendChild(document.createTextNode(text('asset-tree.automation.dayCard')));
+                        el.appendChild(document.createTextNode(AJS.I18n.getText('asset-tree.automation.dayCard')));
                     }
                 };
             },
