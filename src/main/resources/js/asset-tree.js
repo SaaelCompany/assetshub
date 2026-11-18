@@ -12642,12 +12642,10 @@
         bar.appendChild(toggle);
         if (!open) {
             bar.appendChild(el('span', 'asset-tree-summary-brief', t('reportEquipment') + ' ' + report.equipment));
-            if (moduleOn('reports') && (state.canView !== false || state.canReports)) bar.appendChild(summaryBoardSelect());
             node.appendChild(bar);
             node.classList.add('is-collapsed');
             return;
         }
-        if (moduleOn('reports') && (state.canView !== false || state.canReports)) bar.appendChild(summaryBoardSelect());
         node.classList.remove('is-collapsed');
         node.appendChild(bar);
         var places = report.total - report.equipment;
@@ -12684,6 +12682,15 @@
         side.appendChild(dashCard(t('reportHolders'), holderRows.length ? holderList(holderRows) : el('p', 'asset-tree-hint', t('chartEmpty'))));
         row.appendChild(side);
         node.appendChild(totals);
+        var wanted = String(moduleSetup().reportSummary || '');
+        if (wanted && state.boards == null && moduleOn('reports')) {
+            node.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            loadBoards(function () {
+                var dash = document.getElementById('asset-tree-dashboard');
+                if (dash && state.view !== 'reports') fillDashboard(dash);
+            });
+            return;
+        }
         var chosen = summaryBoard();
         if (chosen) {
             if (state.reportCatalog == null) {
@@ -12715,65 +12722,14 @@
         node.appendChild(row);
     }
 
-    function summaryBoardKey() {
-        return 'asset-tree-summary-board:' + (state.projectKey || '');
-    }
-
-    function summaryBoardId() {
-        try {
-            return sessionStorage.getItem(summaryBoardKey()) || '';
-        } catch (error) {
-            return '';
-        }
-    }
-
-    function rememberSummaryBoard(id) {
-        try {
-            sessionStorage.setItem(summaryBoardKey(), id ? String(id) : '');
-        } catch (error) { /* ignore */ }
-    }
-
     function summaryBoard() {
-        var id = summaryBoardId();
+        var id = String(moduleSetup().reportSummary || '');
         if (!id || !state.boards) return null;
         var found = null;
         state.boards.forEach(function (board) {
-            if (board && String(board.id) === String(id)) found = board;
+            if (board && String(board.id) === id) found = board;
         });
         return found;
-    }
-
-    function summaryBoardSelect() {
-        var select = document.createElement('select');
-        select.className = 'asset-tree-filter asset-tree-summary-board';
-        select.setAttribute('aria-label', t('reportBoard'));
-        var summary = document.createElement('option');
-        summary.value = '';
-        summary.textContent = t('summaryTitle');
-        select.appendChild(summary);
-        (state.boards || []).forEach(function (board) {
-            if (!board) return;
-            var option = document.createElement('option');
-            option.value = String(board.id);
-            option.textContent = board.name || ('#' + board.id);
-            select.appendChild(option);
-        });
-        var current = summaryBoardId();
-        select.value = summaryBoard() ? current : '';
-        select.addEventListener('change', function () {
-            rememberSummaryBoard(select.value);
-            state.summaryTiles = {};
-            state.summaryTileToken++;
-            var dash = document.getElementById('asset-tree-dashboard');
-            if (dash) fillDashboard(dash);
-        });
-        if (state.boards == null) {
-            loadBoards(function () {
-                var dash = document.getElementById('asset-tree-dashboard');
-                if (dash && state.view !== 'reports') fillDashboard(dash);
-            });
-        }
-        return select;
     }
 
     function summaryTilesReady(board) {
@@ -14853,6 +14809,35 @@
             });
             panel.appendChild(el('span', 'asset-tree-nav-label', t('setupShow')));
             panel.appendChild(reports);
+            var summaryPick = document.createElement('select');
+            summaryPick.className = 'asset-tree-filter';
+            summaryPick.setAttribute('aria-label', t('reportSummary'));
+            var summaryDefault = document.createElement('option');
+            summaryDefault.value = '';
+            summaryDefault.textContent = t('summaryTitle');
+            summaryPick.appendChild(summaryDefault);
+            function paintSummaryPick(rows) {
+                var current = String(setup.reportSummary || '');
+                while (summaryPick.options.length > 1) summaryPick.remove(1);
+                (rows || []).forEach(function (board) {
+                    if (!board || !board.id) return;
+                    var option = document.createElement('option');
+                    option.value = String(board.id);
+                    option.textContent = board.name || ('#' + board.id);
+                    summaryPick.appendChild(option);
+                });
+                var known = false;
+                var n;
+                for (n = 0; n < summaryPick.options.length; n++) {
+                    if (summaryPick.options[n].value === current) known = true;
+                }
+                summaryPick.value = known ? current : '';
+            }
+            paintSummaryPick(state.boards || []);
+            if (state.boards == null) loadBoards(function () { paintSummaryPick(state.boards || []); });
+            panel.appendChild(el('span', 'asset-tree-nav-label', t('reportSummary')));
+            panel.appendChild(summaryPick);
+            panel.appendChild(el('p', 'asset-tree-hint', t('reportSummaryHint')));
             var idleList = el('div', 'asset-tree-check-list');
             function idleOn(key) {
                 var raw = setup.reportIdleStatuses;
@@ -15068,6 +15053,7 @@
                 next.reportMailBranch = branchBox.checked;
                 next.reportIdleStatuses = idleValue();
                 next.reportRequestStatuses = requestValue();
+                next.reportSummary = summaryPick.value;
                 saveSetup(next);
             }));
             mailActions.appendChild(button(t('reportMailNow'), 'asset-tree-btn', function () {
@@ -15087,6 +15073,7 @@
                 next.reportMailBranch = branchBox.checked;
                 next.reportIdleStatuses = idleValue();
                 next.reportRequestStatuses = requestValue();
+                next.reportSummary = summaryPick.value;
                 saveProjectView({ setup: next }, function (ok) {
                     if (!ok) return;
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/reports/mail', {}, function (status, payload) {
@@ -19765,7 +19752,6 @@
         state.boardNaming = false;
         state.boardDraft = null;
         state.reportNavOpen = false;
-        rememberSummaryBoard(id);
         loadReportBoard();
         if (!paintReport()) renderFrame();
     }
@@ -19957,7 +19943,6 @@
                     state.boards = (state.boards || []).filter(function (item) { return Number(item.id) !== Number(board.id); });
                     state.boardEditing = false;
                     state.boardDraft = null;
-                    if (summaryBoardId() === String(board.id)) rememberSummaryBoard('');
                     state.boardId = state.boards.length ? state.boards[0].id : 0;
                     if (state.boardId) loadReportBoard();
                     if (!paintReport()) renderFrame();
@@ -20905,6 +20890,7 @@
             reportMailBranch: !!setup.reportMailBranch,
             reportIdleStatuses: setup.reportIdleStatuses == null ? '' : String(setup.reportIdleStatuses),
             reportRequestStatuses: setup.reportRequestStatuses == null ? '' : String(setup.reportRequestStatuses),
+            reportSummary: setup.reportSummary == null ? '' : String(setup.reportSummary),
             reportMailSent: setup.reportMailSent || '',
             reportMailPart: setup.reportMailPart || '',
             lifeApproval: setup.lifeApproval !== false,

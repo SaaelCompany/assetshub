@@ -1864,6 +1864,8 @@ public final class UiCatalog {
             "reportBoardDeleteAsk",
             "reportBoardEmptyPanels",
             "reportBoardMissing",
+            "reportSummary",
+            "reportSummaryHint",
             "reportOpsHint",
             "reportPlaceHint",
             "reportOnlyHolders",

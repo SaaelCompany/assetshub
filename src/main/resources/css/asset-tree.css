@@ -3008,11 +3008,6 @@ a.asset-tree-url {
     margin: 0 0 8px !important;
 }
 
-#asset-tree-app .asset-tree-summary-board {
-    margin-left: auto;
-    max-width: 240px;
-}
-
 #asset-tree-app .asset-tree-dashboard .asset-tree-report-board.is-summary {
     margin: 0;
 }

@@ -43,6 +43,16 @@ public class ModuleSetupGlyphTest {
     }
 
     @Test
+    public void theSummaryKeepsABoardId() {
+        ModuleSetupDto draft = new ModuleSetupDto();
+        draft.setReportSummary("12");
+        assertEquals("12", ModuleSetup.read(ModuleSetup.write(draft)).getReportSummary());
+        draft.setReportSummary("nope");
+        assertEquals("", ModuleSetup.read(ModuleSetup.write(draft)).getReportSummary());
+        assertEquals("", ModuleSetup.read("rsum=").getReportSummary());
+    }
+
+    @Test
     public void glyphsCannotBreakLaterOptions() {
         ModuleSetupDto draft = new ModuleSetupDto();
         draft.setGlyphs("a=b;c");
