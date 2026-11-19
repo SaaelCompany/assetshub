@@ -65,6 +65,25 @@ public class DocFieldsTest {
         assertEquals("Инженер", values.get(DocxFill.normalize("должность кому выдано")));
         assertEquals("eng@example.com", values.get(DocxFill.normalize("почта кому выдано")));
         assertEquals("ИТ", values.get(DocxFill.normalize("отдел кому выдано")));
+        source.molPhone = "+7 111";
+        source.issuedPhone = "+7 222";
+        values = DocFields.values(source);
+        assertEquals("+7 111", values.get(DocxFill.normalize("телефон мол")));
+        assertEquals("+7 222", values.get(DocxFill.normalize("телефон кому выдано")));
+    }
+
+    @Test
+    public void aNamedCardFieldFillsThatPersonsJobAndPhone() {
+        DocFields.Source source = new DocFields.Source();
+        source.phone = "+7 111";
+        source.molPhone = "+7 111";
+        DocFields.keepContact(source, "Телефон", "+7 333");
+        DocFields.keepContact(source, "Должность МОЛ", "Заведующий");
+        DocFields.keepContact(source, "Телефон кому выдано", "+7 222");
+        assertEquals("+7 111", source.phone);
+        assertEquals("Заведующий", source.molRole);
+        assertEquals("Заведующий", source.role);
+        assertEquals("+7 222", source.issuedPhone);
     }
 
     @Test

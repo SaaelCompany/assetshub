@@ -206,6 +206,7 @@ import com.assetstree.jira.model.PlaceLayout;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.FlowRules;
 import com.assetstree.jira.model.DocFields;
+import com.assetstree.jira.model.PersonContact;
 import com.assetstree.jira.model.DuplicateMarks;
 import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
@@ -10229,42 +10230,86 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             log.debug("Directory lookup failed for {}", userKey, ex);
         }
+        Map<String, String> contact = new LinkedHashMap<String, String>();
         try {
             UserWithAttributes attributes = crowdService().getUserWithAttributes(user.getName());
             if (attributes != null) {
-                dto.setPhone(firstValue(attributes, "telephoneNumber", "phone", "mobile", "mobilePhone", "telephone", "ipPhone"));
-                dto.setDepartment(firstValue(attributes, "department", "departmentNumber", "division", "ou"));
-                dto.setTitle(firstValue(attributes, "title", "jobTitle", "jobtitle", "position", "employeeType", "profession"));
-                if (dto.getEmail() == null || dto.getEmail().trim().isEmpty()) {
-                    String mail = firstValue(attributes, "mail", "email", "emailAddress", "userPrincipalName");
-                    if (mail.contains("@")) {
-                        dto.setEmail(mail);
-                    }
-                }
-                Set<String> keys = attributes.getKeys();
-                if (keys != null) {
-                    for (String key : keys) {
-                        readContact(dto, key, attributes.getValue(key));
-                        if (blank(dto.getDepartment())) {
-                            String unit = organizationalUnit(attributes.getValue(key));
-                            if (!unit.isEmpty() && DocxFill.normalize(key).contains("distinguished")) {
-                                dto.setDepartment(unit);
-                            }
-                        }
-                    }
-                }
-                if (blank(dto.getDepartment())) {
-                    dto.setDepartment(organizationalUnit(firstValue(attributes, "distinguishedName", "distinguishedname")));
-                }
+                rememberContact(contact, attributes);
             }
         } catch (RuntimeException ex) {
             log.debug("Directory attributes failed for {}", userKey, ex);
         }
-        readUserContact(user, dto);
+        rememberProperties(user, contact);
+        PersonContact.apply(dto, contact);
+        if (blank(dto.getDepartment())) {
+            dto.setDepartment(organizationalUnit(contactValue(contact, "distinguished")));
+        }
         return dto;
     }
 
-    private void readUserContact(ApplicationUser user, UserProfileDto dto) {
+    private UserProfileDto profileForDocument(String userKey) {
+        UserProfileDto dto = profile(userKey);
+        fillFromDirectory(dto, userKey);
+        return dto;
+    }
+
+    /** Job title and phone live in the directory even when Crowd does not cache them. */
+    private void fillFromDirectory(UserProfileDto dto, String userKey) {
+        if (dto == null || (!blank(dto.getPhone()) && !blank(dto.getTitle()) && !blank(dto.getDepartment()))) {
+            return;
+        }
+        ApplicationUser user = lookupUser(userKey);
+        if (user == null) {
+            return;
+        }
+        try {
+            Directory directory = crowdDirectoryService().findDirectoryById(user.getDirectoryId());
+            DirectoryPeople.Found found = DirectoryPeople.find(directory, user.getUsername(), user.getEmailAddress());
+            if (found == null) {
+                return;
+            }
+            if (blank(dto.getPhone())) {
+                dto.setPhone(found.phone);
+            }
+            if (blank(dto.getTitle())) {
+                dto.setTitle(found.title);
+            }
+            if (blank(dto.getDepartment())) {
+                dto.setDepartment(found.department);
+            }
+        } catch (RuntimeException ex) {
+            log.debug("Directory contact was not read for {}", userKey, ex);
+        }
+    }
+
+    private static void rememberContact(Map<String, String> contact, UserWithAttributes attributes) {
+        Set<String> keys = attributes.getKeys();
+        if (keys == null) {
+            return;
+        }
+        for (String key : keys) {
+            if (key == null || contact.containsKey(key)) {
+                continue;
+            }
+            String value = attributes.getValue(key);
+            if (blank(value)) {
+                Set<String> all = attributes.getValues(key);
+                if (all != null) {
+                    for (String one : all) {
+                        if (!blank(one)) {
+                            value = one;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!blank(value)) {
+                contact.put(key, value.trim());
+            }
+        }
+    }
+
+    private void rememberProperties(ApplicationUser user, Map<String, String> contact) {
         try {
             PropertySet set = portalProperties(user);
             if (set == null) {
@@ -10280,10 +10325,12 @@ public class AssetServiceImpl implements AssetService {
                     continue;
                 }
                 String name = String.valueOf(key);
-                try {
-                    readContact(dto, name, set.getString(name));
-                } catch (RuntimeException ignored) {
-                    // A non-text property is not a contact field.
+                if (contact.containsKey(name)) {
+                    continue;
+                }
+                String value = propertyText(set, name);
+                if (!blank(value)) {
+                    contact.put(name, value.trim());
                 }
             }
         } catch (RuntimeException ex) {
@@ -10291,31 +10338,33 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private void readContact(UserProfileDto dto, String key, String value) {
-        if (dto == null || key == null || value == null) {
-            return;
+    private static String propertyText(PropertySet set, String name) {
+        try {
+            Object value = set.getAsActualType(name);
+            if (value instanceof String) {
+                return (String) value;
+            }
+        } catch (RuntimeException ignored) {
+            // A number or a date is not a contact field. Text stored beside strings still counts.
         }
-        String text = value.trim();
-        if (text.isEmpty()) {
-            return;
-        }
-        String norm = DocxFill.normalize(key);
-        if (norm.contains("password") || norm.contains("token") || norm.contains("secret")) {
-            return;
-        }
-        if (blank(dto.getPhone()) && (norm.contains("phone") || norm.contains("tel") || norm.contains("телефон"))) {
-            dto.setPhone(text);
-        } else if (blank(dto.getDepartment()) && (norm.contains("department") || norm.contains("division")
-                || norm.contains("отдел") || norm.contains("подраздел") || norm.contains("отделени"))) {
-            dto.setDepartment(text);
-        } else if (blank(dto.getTitle()) && (norm.contains("title") || norm.contains("position")
-                || norm.contains("должност") || norm.contains("profession") || norm.contains("employeetype"))) {
-            dto.setTitle(text);
-        } else if (blank(dto.getEmail()) && (norm.contains("mail") || norm.contains("почт") || norm.contains("principal"))) {
-            if (text.contains("@")) {
-                dto.setEmail(text);
+        try {
+            return set.getString(name);
+        } catch (RuntimeException ignored) {
+            try {
+                return set.getText(name);
+            } catch (RuntimeException again) {
+                return "";
             }
         }
+    }
+
+    private static String contactValue(Map<String, String> contact, String needle) {
+        for (Map.Entry<String, String> entry : contact.entrySet()) {
+            if (DocxFill.normalize(entry.getKey()).contains(needle)) {
+                return entry.getValue();
+            }
+        }
+        return "";
     }
 
     /** The first OU in a directory name, which is the person's department when no department attribute is stored. */
@@ -10406,16 +10455,6 @@ public class AssetServiceImpl implements AssetService {
             log.debug("Avatar lookup failed for {}", user.getKey(), ex);
             return "";
         }
-    }
-
-    private String firstValue(UserWithAttributes attributes, String... keys) {
-        for (String key : keys) {
-            String value = attributes.getValue(key);
-            if (value != null && !value.trim().isEmpty()) {
-                return value.trim();
-            }
-        }
-        return "";
     }
 
     private String userLabel(String userKey) {
@@ -19486,8 +19525,8 @@ public class AssetServiceImpl implements AssetService {
         source.mol = molName.isEmpty() ? issuedName : molName;
         source.custodian = source.mol;
         source.issued = issuedName;
-        writeDocumentPerson(source, profile(asset.getIssuedKey()), true);
-        writeDocumentPerson(source, profile(asset.getCustodianKey()), false);
+        writeDocumentPerson(source, profileForDocument(asset.getIssuedKey()), true);
+        writeDocumentPerson(source, profileForDocument(asset.getCustodianKey()), false);
         source.role = firstText(source.issuedRole, source.molRole);
         source.phone = firstText(source.issuedPhone, source.molPhone);
         source.email = firstText(source.issuedEmail, source.molEmail);
@@ -19528,7 +19567,7 @@ public class AssetServiceImpl implements AssetService {
             String value = raw;
             UserProfileDto fieldPerson = null;
             if (field != null && FieldKinds.USER.equals(field.getKind())) {
-                fieldPerson = profile(raw);
+                fieldPerson = profileForDocument(raw);
                 value = userLabel(raw);
             } else if (field != null && FieldChoices.handles(field.getKind())) {
                 value = FieldChoices.display(value);
@@ -19544,15 +19583,12 @@ public class AssetServiceImpl implements AssetService {
                     }
                     writeDocumentPerson(source, fieldPerson, true);
                     fillDocumentPerson(source, fieldPerson, true);
-                } else if (folded.contains("должност") || folded.contains("position") || folded.contains("profession")) {
-                    source.role = value;
-                } else if (folded.contains("телефон") || folded.contains("phone")) {
-                    source.phone = value;
                 } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел") || folded.contains("отделени")) {
-                    source.department = value;
+                    source.department = firstText(source.department, value);
                 } else if (folded.contains("почт") || folded.contains("email") || folded.contains("mail")) {
-                    source.email = value;
+                    source.email = firstText(source.email, value);
                 }
+                DocFields.keepContact(source, folded, value);
             }
         }
         Integer parentId = asset.getParentId();
