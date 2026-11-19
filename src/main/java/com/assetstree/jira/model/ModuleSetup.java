@@ -61,6 +61,7 @@ public final class ModuleSetup {
         setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
         setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
         setup.setPhoto(Boolean.valueOf("1".equals(values.get("photo"))));
+        setup.setIssueNotes(Boolean.valueOf(!"0".equals(values.get("inote"))));
         setup.setTniKeep(Integer.valueOf(TniPolicy.keepDays(number(values.get("tkeep")))));
         setup.setTniProbeDays(Integer.valueOf(TniPolicy.probeDays(number(values.get("tdays")))));
         setup.setTniProbeTries(Integer.valueOf(TniPolicy.probeTries(number(values.get("ttry")))));
@@ -120,6 +121,7 @@ public final class ModuleSetup {
         append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
         append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
         append(stored, "photo", Boolean.TRUE.equals(value.getPhoto()) ? "1" : "0");
+        append(stored, "inote", Boolean.FALSE.equals(value.getIssueNotes()) ? "0" : "1");
         append(stored, "tkeep", String.valueOf(TniPolicy.keepDays(value.getTniKeep() == null ? 0 : value.getTniKeep().intValue())));
         append(stored, "tdays", String.valueOf(TniPolicy.probeDays(value.getTniProbeDays() == null ? 0 : value.getTniProbeDays().intValue())));
         append(stored, "ttry", String.valueOf(TniPolicy.probeTries(value.getTniProbeTries() == null ? 0 : value.getTniProbeTries().intValue())));
@@ -383,6 +385,7 @@ public final class ModuleSetup {
         merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
         merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
         merged.setPhoto(incoming.getPhoto() != null ? incoming.getPhoto() : base.getPhoto());
+        merged.setIssueNotes(incoming.getIssueNotes() != null ? incoming.getIssueNotes() : base.getIssueNotes());
         merged.setTniKeep(incoming.getTniKeep() != null ? incoming.getTniKeep() : base.getTniKeep());
         merged.setTniProbeDays(incoming.getTniProbeDays() != null ? incoming.getTniProbeDays() : base.getTniProbeDays());
         merged.setTniProbeTries(incoming.getTniProbeTries() != null ? incoming.getTniProbeTries() : base.getTniProbeTries());

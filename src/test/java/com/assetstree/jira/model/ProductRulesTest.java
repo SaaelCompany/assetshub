@@ -121,6 +121,24 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void issueNotesStayOnUntilTheProjectTurnsThemOff() {
+        assertEquals(Boolean.TRUE, ModuleSetup.read("").getIssueNotes());
+        ModuleSetupDto off = new ModuleSetupDto();
+        off.setIssueNotes(Boolean.FALSE);
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(off));
+        assertEquals(Boolean.FALSE, read.getIssueNotes());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setPhoto(Boolean.TRUE);
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals(Boolean.FALSE, merged.getIssueNotes());
+        assertEquals(Boolean.TRUE, merged.getPhoto());
+        ModuleSetupDto on = new ModuleSetupDto();
+        on.setIssueNotes(Boolean.TRUE);
+        ModuleSetupDto restored = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(merged, on)));
+        assertEquals(Boolean.TRUE, restored.getIssueNotes());
+    }
+
+    @Test
     public void markFactorsDoubleNightAndSkipLeave() {
         assertEquals(2, TimesheetMath.factor("night", 8, null));
         assertEquals(0, TimesheetMath.factor("leave", 0, null));
