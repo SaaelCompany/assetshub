@@ -19709,6 +19709,9 @@
             }
             renderFrame();
         }));
+        if (state.reportView && !state.reportBoard) {
+            tools.appendChild(button(t('reportXlsx'), 'asset-tree-btn', function () { downloadReportFile(state.reportView); }));
+        }
         return tools;
     }
 
@@ -24725,7 +24728,7 @@
         row.appendChild(button(t('mapMirror'), 'asset-tree-btn slim', mirrorSelection));
         var file = document.createElement('input');
         file.type = 'file';
-        file.accept = '.png,.jpg,.jpeg,image/png,image/jpeg';
+        file.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
         file.className = 'asset-tree-plan-file';
         file.addEventListener('change', function () {
             var picked = file.files && file.files[0];
@@ -24746,9 +24749,12 @@
             };
             reader.readAsArrayBuffer(picked);
         });
-        var importer = button(t('schemeUnderlay'), 'asset-tree-btn slim', function () { file.click(); });
+        var importer = button(t('mapImport'), 'asset-tree-btn slim', function () { file.click(); });
         row.appendChild(importer);
         row.appendChild(file);
+        row.appendChild(button(t('mapExportDxf'), 'asset-tree-btn slim', function () { exportPlan('dxf'); }));
+        row.appendChild(button(t('mapExportDwg'), 'asset-tree-btn slim', function () { exportPlan('dwg'); }));
+        row.appendChild(button(t('mapExportPdf'), 'asset-tree-btn slim', function () { exportPlan('pdf'); }));
         row.appendChild(button(t('mapPrint'), 'asset-tree-btn slim', printPlanSheet));
         var scan = state.mapDraft && state.mapDraft.underlay;
         if (scan && scan.src) {
@@ -29558,244 +29564,6 @@
         });
     }
 
-    function downloadBlob(name, blob) {
-        var link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = name;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    }
-
-    function reportExchangeCard() {
-        var card = el('section', 'asset-tree-project-card');
-        card.appendChild(el('h3', 'asset-tree-settings-title', t('exchangeReports')));
-        card.appendChild(el('p', 'asset-tree-hint', t('exchangeReportsHint')));
-        if (state.reportCatalog == null) {
-            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
-                state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
-                if (state.view === 'settings' && state.schemaTab === 'exchange') renderFrame();
-            });
-            card.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            return card;
-        }
-        var actions = el('div', 'asset-tree-inline-actions');
-        actions.appendChild(button(t('exchangeReportsAll'), 'asset-tree-btn', downloadReportBook));
-        card.appendChild(actions);
-        var list = el('div', 'asset-tree-import-errors');
-        (state.reportCatalog || []).forEach(function (item) {
-            if (!item || !item.id || (item.standard && reportHidden(item.id))) return;
-            var row = el('div', 'asset-tree-inline-actions');
-            row.appendChild(el('span', null, item.name || item.id));
-            row.appendChild(button(t('reportXlsx'), 'asset-tree-btn', function () {
-                downloadReportFile({ id: item.id, title: item.name || 'report', chart: item.chart || '' });
-            }));
-            list.appendChild(row);
-        });
-        card.appendChild(list);
-        return card;
-    }
-
-    function schemeWallsFromDrawing(parsed) {
-        var walls = [];
-        var count = 0;
-        (parsed.rooms || []).forEach(function (room) {
-            if (room.kind && room.kind !== 'wall' && room.kind !== 'partition') return;
-            var points = [];
-            if (room.x1 != null && room.y1 != null && room.x2 != null && room.y2 != null) {
-                points = [{ x: Math.round(room.x1), y: Math.round(room.y1) }, { x: Math.round(room.x2), y: Math.round(room.y2) }];
-            } else {
-                var len = room.w || 0;
-                if (len < 8) return;
-                var rad = (room.angle || 0) * Math.PI / 180;
-                var cx = (room.x || 0) + len / 2;
-                var cy = (room.y || 0) + (room.h || 0) / 2;
-                points = [
-                    { x: Math.round(cx - Math.cos(rad) * len / 2), y: Math.round(cy - Math.sin(rad) * len / 2) },
-                    { x: Math.round(cx + Math.cos(rad) * len / 2), y: Math.round(cy + Math.sin(rad) * len / 2) }
-                ];
-            }
-            if (Math.abs(points[0].x - points[1].x) + Math.abs(points[0].y - points[1].y) < 8) return;
-            count += 1;
-            walls.push({
-                id: 'wall-file-' + Date.now() + '-' + count,
-                type: 'wall',
-                layerId: 'walls',
-                color: '#172b4d',
-                thickness: room.kind === 'partition' ? 6 : 8,
-                opacity: 1,
-                closed: false,
-                alignment: 'center',
-                hatch: 'none',
-                height: 300,
-                points: points
-            });
-        });
-        return walls;
-    }
-
-    function schemeFloor(doc) {
-        var floors = doc && doc.floors || [];
-        var i;
-        for (i = 0; i < floors.length; i++) {
-            if (floors[i] && floors[i].id === doc.activeFloorId) return floors[i];
-        }
-        return floors[0] || null;
-    }
-
-    function schemeExportModel(doc) {
-        var floor = schemeFloor(doc);
-        var items = [];
-        var maxY = 100;
-        ((floor && floor.objects) || []).forEach(function (obj) {
-            if (!obj.points || obj.points.length < 2) return;
-            if (obj.type !== 'wall' && obj.type !== 'polyline' && obj.type !== 'line') return;
-            var i;
-            for (i = 1; i < obj.points.length; i++) {
-                items.push({
-                    kind: obj.type === 'wall' ? 'wall' : 'line',
-                    x1: obj.points[i - 1].x, y1: obj.points[i - 1].y,
-                    x2: obj.points[i].x, y2: obj.points[i].y
-                });
-                maxY = Math.max(maxY, obj.points[i - 1].y, obj.points[i].y);
-            }
-        });
-        return { planH: maxY + 40, items: items, rooms: [] };
-    }
-
-    function withScheme(id, done) {
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schemes/' + id, null, function (status, payload) {
-            if (status !== 200 || !payload || !payload.body) {
-                notify((payload && payload.message) || t('errorTitle'));
-                return;
-            }
-            var doc = null;
-            try {
-                doc = JSON.parse(payload.body);
-            } catch (error) {
-                doc = null;
-            }
-            if (!doc) {
-                notify(t('errorTitle'));
-                return;
-            }
-            done(doc, payload.name || '');
-        });
-    }
-
-    function saveSchemeDoc(id, name, doc, done) {
-        ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/schemes/' + id, {
-            name: name || '',
-            body: JSON.stringify(doc)
-        }, function (status, payload) {
-            if (status >= 200 && status < 300) {
-                if (done) done();
-                return;
-            }
-            notify((payload && payload.message) || t('errorTitle'));
-        });
-    }
-
-    function schemeExchangeCard() {
-        var card = el('section', 'asset-tree-project-card');
-        card.appendChild(el('h3', 'asset-tree-settings-title', t('exchangeSchemes')));
-        card.appendChild(el('p', 'asset-tree-hint', t('exchangeSchemesHint')));
-        if (!state.exchangeSchemes || state.exchangeSchemes.project !== state.projectKey) {
-            state.exchangeSchemes = { project: state.projectKey, loading: true, rows: [] };
-            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schemes', null, function (status, payload) {
-                state.exchangeSchemes = {
-                    project: state.projectKey,
-                    loading: false,
-                    rows: status === 200 && payload && payload.length !== undefined ? payload : []
-                };
-                if (state.view === 'settings' && state.schemaTab === 'exchange') renderFrame();
-            });
-            card.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            return card;
-        }
-        if (state.exchangeSchemes.loading) {
-            card.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            return card;
-        }
-        var rows = state.exchangeSchemes.rows || [];
-        if (!rows.length) {
-            card.appendChild(el('p', 'asset-tree-hint', t('exchangeSchemesEmpty')));
-            return card;
-        }
-        var select = document.createElement('select');
-        select.className = 'asset-tree-filter';
-        rows.forEach(function (row) {
-            if (!row || !row.id) return;
-            var option = document.createElement('option');
-            option.value = String(row.id);
-            option.textContent = row.name || String(row.id);
-            select.appendChild(option);
-        });
-        card.appendChild(select);
-        var file = el('input', 'asset-tree-import-file');
-        file.type = 'file';
-        file.accept = '.dxf,.dwg,.pdf,application/pdf';
-        var actions = el('div', 'asset-tree-inline-actions');
-        actions.appendChild(button(t('exchangeSchemeImport'), 'asset-tree-btn primary', function () {
-            var picked = file.files && file.files[0];
-            var id = parseInt(select.value, 10);
-            if (!picked || !id || !window.AssetTreePlan) {
-                notify(t('exchangePick'));
-                return;
-            }
-            var reader = new FileReader();
-            reader.onload = function () {
-                var bytes = new Uint8Array(reader.result || []);
-                var parsed = window.AssetTreePlan.importDrawing(picked.name, bytes);
-                if (!parsed || parsed.error || !parsed.rooms || !parsed.rooms.length) {
-                    notify(t(parsed && parsed.error ? parsed.error : 'mapImportNone'));
-                    return;
-                }
-                var walls = schemeWallsFromDrawing(parsed);
-                if (!walls.length) {
-                    notify(t('mapImportNone'));
-                    return;
-                }
-                withScheme(id, function (doc, name) {
-                    var floor = schemeFloor(doc);
-                    if (!floor) {
-                        notify(t('errorTitle'));
-                        return;
-                    }
-                    floor.objects = floor.objects || [];
-                    walls.forEach(function (wall) { floor.objects.push(wall); });
-                    saveSchemeDoc(id, name, doc, function () { notify(t('exchangeSchemeSaved')); });
-                });
-            };
-            reader.readAsArrayBuffer(picked);
-        }));
-        function exportChosen(kind) {
-            var id = parseInt(select.value, 10);
-            if (!id || !window.AssetTreePlan) return;
-            withScheme(id, function (doc, name) {
-                var model = schemeExportModel(doc);
-                var data = kind === 'pdf' ? window.AssetTreePlan.exportPdf(model)
-                    : kind === 'dwg' ? window.AssetTreePlan.exportDwg(model)
-                    : window.AssetTreePlan.exportDxf(model);
-                if (!data) {
-                    notify(t('errorTitle'));
-                    return;
-                }
-                var bytes = new Uint8Array(data.length);
-                var i;
-                for (i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 255;
-                var base = (name || 'scheme').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'scheme';
-                downloadBlob(base + '.' + kind, new Blob([bytes], { type: kind === 'pdf' ? 'application/pdf' : 'application/dxf' }));
-            });
-        }
-        actions.appendChild(button(t('mapExportDxf'), 'asset-tree-btn', function () { exportChosen('dxf'); }));
-        actions.appendChild(button(t('mapExportDwg'), 'asset-tree-btn', function () { exportChosen('dwg'); }));
-        actions.appendChild(button(t('mapExportPdf'), 'asset-tree-btn', function () { exportChosen('pdf'); }));
-        card.appendChild(file);
-        card.appendChild(actions);
-        return card;
-    }
-
     function renderExchangeSettings(panel) {
         var stack = el('div', 'asset-tree-project-stack');
         var block = el('section', 'asset-tree-project-card');
@@ -29834,11 +29602,10 @@
             option.textContent = new Array(depth + 1).join('\u00b7 ') + (place.name || place.objectKey || '');
             placeSelect.appendChild(option);
         });
-        var scope = el('div', 'asset-tree-life-grid');
-        scope.appendChild(planField(t('exchangeType'), typeSelect));
-        scope.appendChild(planField(t('exchangePlace'), placeSelect));
-        block.appendChild(scope);
-        block.appendChild(el('p', 'asset-tree-hint', t('exchangeScope')));
+        var fields = el('div', 'asset-tree-exchange-fields');
+        fields.appendChild(planField(t('exchangeType'), typeSelect));
+        fields.appendChild(planField(t('exchangePlace'), placeSelect));
+        block.appendChild(fields);
         var file = el('input', 'asset-tree-import-file');
         file.type = 'file';
         file.id = 'asset-tree-import-file';
@@ -29854,28 +29621,30 @@
             file.click();
         }));
         picker.appendChild(chosen);
-        block.appendChild(picker);
-        var actions = el('div', 'asset-tree-inline-actions');
-        actions.appendChild(button(t('exchangeExport'), 'asset-tree-btn', function () {
+        var downloads = el('div', 'asset-tree-inline-actions');
+        downloads.appendChild(button(t('exchangeExport'), 'asset-tree-btn', function () {
             startWorkbook('equipment', {
                 typeKey: typeSelect.value,
                 placeId: parseInt(placeSelect.value, 10) || 0
             });
         }));
-        actions.appendChild(button(t('exchangeBlank'), 'asset-tree-btn', function () {
+        downloads.appendChild(button(t('exchangeBlank'), 'asset-tree-btn', function () {
             startWorkbook('equipment', {
                 typeKey: typeSelect.value,
                 placeId: parseInt(placeSelect.value, 10) || 0,
                 blank: true
             });
         }));
-        actions.appendChild(button(t('exchangeLinksExport'), 'asset-tree-btn', function () {
+        downloads.appendChild(button(t('exchangeLinksExport'), 'asset-tree-btn', function () {
             startWorkbook('links', {
                 typeKey: typeSelect.value,
                 placeId: parseInt(placeSelect.value, 10) || 0
             });
         }));
-        actions.appendChild(button(t('exchangeImport'), 'asset-tree-btn primary', function () {
+        block.appendChild(downloads);
+        var upload = el('div', 'asset-tree-exchange-upload');
+        upload.appendChild(picker);
+        upload.appendChild(button(t('exchangeImport'), 'asset-tree-btn primary', function () {
             if (needsAssetKey()) {
                 notify(state.canArrange ? t('assetKeyHint') : t('assetKeyDenied'));
                 return;
@@ -29942,7 +29711,8 @@
             };
             reader.readAsArrayBuffer(chosen);
         }));
-        block.appendChild(actions);
+        block.appendChild(upload);
+        block.appendChild(el('p', 'asset-tree-hint', t('exchangeScope')));
         var result = state.importResult;
         if (result) {
             var summary = el('p', 'asset-tree-hint');
@@ -29958,8 +29728,6 @@
             }
         }
         stack.appendChild(block);
-        if (moduleOn('reports')) stack.appendChild(reportExchangeCard());
-        if (moduleOn('map')) stack.appendChild(schemeExchangeCard());
         if (state.canAdmin && moduleOn('tni')) {
             stack.appendChild(tniImportCard());
             stack.appendChild(tniSitesCard());
