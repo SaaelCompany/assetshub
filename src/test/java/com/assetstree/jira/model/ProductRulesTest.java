@@ -147,6 +147,11 @@ public class ProductRulesTest {
         assertEquals(6, ObjectKeys.nextNumber("BZ", Arrays.asList("BZ-1", "BZ-2", "BZ-5")));
         assertEquals(11, ObjectKeys.nextNumber("BZ", Arrays.asList("BZ-10")));
         assertEquals(1, ObjectKeys.nextNumber("BZ", Collections.<String>emptyList()));
+        int[] packed = ObjectKeys.compact(new int[] { 2000, 500, 1 });
+        assertEquals(3, packed[0]);
+        assertEquals(2, packed[1]);
+        assertEquals(1, packed[2]);
+        assertEquals(0, ObjectKeys.compact(new int[0]).length);
         assertFalse(EquipmentExchange.computerType("\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "printer"));
         assertFalse(EquipmentExchange.computerType("\u0418\u0411\u041f", "ups"));
         assertTrue(EquipmentExchange.computerType("\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "pc"));

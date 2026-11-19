@@ -1353,6 +1353,17 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("projects/{projectKey}/asset-key/restart")
+    public Response restartAssetKeys(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.restartAssetKeys(user(), projectKey)).build();
+            }
+        });
+    }
+
     @PUT
     @Path("projects/{projectKey}/view")
     public Response saveProjectView(@PathParam("projectKey") final String projectKey, final ProjectViewDto draft) {

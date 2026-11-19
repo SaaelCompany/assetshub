@@ -5140,6 +5140,59 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public AssetKeyDto restartAssetKeys(ApplicationUser user, String projectKey) {
+        final Project project = requireArrangeProject(user, projectKey);
+        final String prefix = storedAssetPrefix(project.getKey());
+        if (prefix.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.assetKey.required");
+        }
+        Object created = new Object();
+        Object raced = KEY_LOCKS.putIfAbsent(prefix, created);
+        Object lock = raced == null ? created : raced;
+        synchronized (lock) {
+            return ao().executeInTransaction(new TransactionCallback<AssetKeyDto>() {
+                @Override
+                public AssetKeyDto doInTransaction() {
+                    AssetEntity[] rows = assetsAll(project.getKey());
+                    if (rows == null) {
+                        rows = new AssetEntity[0];
+                    }
+                    int[] suffixes = new int[rows.length];
+                    for (int i = 0; i < rows.length; i++) {
+                        suffixes[i] = rows[i] == null ? 0 : ObjectKeys.suffix(prefix, rows[i].getObjectKey());
+                    }
+                    int[] numbers = ObjectKeys.compact(suffixes);
+                    for (int i = 0; i < rows.length; i++) {
+                        if (rows[i] == null) {
+                            continue;
+                        }
+                        rows[i].setObjectKey("!" + rows[i].getID());
+                        rows[i].save();
+                    }
+                    for (int i = 0; i < rows.length; i++) {
+                        if (rows[i] == null) {
+                            continue;
+                        }
+                        String key = prefix + "-" + numbers[i];
+                        if (key.length() > 32) {
+                            throw new AssetException(500, "asset-tree.error.unexpected");
+                        }
+                        rows[i].setObjectKey(key);
+                        rows[i].save();
+                    }
+                    AssetCounterEntity counter = counterFor(prefix);
+                    counter.setNextValue(rows.length + 1);
+                    counter.save();
+                    AssetKeyDto saved = new AssetKeyDto();
+                    saved.setAssetKey(prefix);
+                    saved.setCount(Integer.valueOf(rows.length));
+                    return saved;
+                }
+            });
+        }
+    }
+
+    @Override
     public ProjectViewDto saveProjectView(ApplicationUser user, String projectKey, ProjectViewDto draft) {
         final Project project = requireArrangeProject(user, projectKey);
         final Boolean tree = draft == null ? null : draft.getTreeObjects();

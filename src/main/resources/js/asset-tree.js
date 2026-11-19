@@ -14956,6 +14956,32 @@
         return box;
     }
 
+    function openRestartKeys() {
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('assetKeyRestartTitle')));
+            dialog.appendChild(el('p', null, t('assetKeyRestartText')));
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+            actions.appendChild(button(t('assetKeyRestart'), 'asset-tree-btn danger', function () {
+                setBusy(true);
+                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/asset-key/restart', {}, function (status, payload) {
+                    setBusy(false);
+                    if (status < 200 || status >= 300) {
+                        dialog.appendChild(el('div', 'asset-tree-form-error', (payload && payload.message) || t('errorTitle')));
+                        return;
+                    }
+                    closeAllModals();
+                    notify(t('assetKeyRestarted', payload && payload.count != null ? payload.count : ''));
+                    reloadTree(function () {
+                        assetsChanged();
+                        renderFrame();
+                    });
+                });
+            }));
+            dialog.appendChild(actions);
+        });
+    }
+
     function openAssetKeyEdit() {
         var current = projectAssetKey(currentProject());
         openModal(function (dialog) {
@@ -15022,6 +15048,7 @@
                 else saveTree();
             });
             actions.appendChild(save);
+            actions.appendChild(button(t('assetKeyRestart'), 'asset-tree-btn danger', openRestartKeys));
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
             form.appendChild(actions);
             form.addEventListener('submit', function (event) {
@@ -15938,6 +15965,9 @@
             actions.appendChild(button(t('assetKeySave'), 'asset-tree-btn primary', function () {
                 saveAssetKey(input.value);
             }));
+            if (current) {
+                actions.appendChild(button(t('assetKeyRestart'), 'asset-tree-btn danger', openRestartKeys));
+            }
             keyCard.appendChild(actions);
         }
         stack.appendChild(keyCard);

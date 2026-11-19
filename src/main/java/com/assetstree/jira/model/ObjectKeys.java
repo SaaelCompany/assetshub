@@ -115,4 +115,39 @@ public final class ObjectKeys {
         }
         return highest + 1;
     }
+
+    /**
+     * New numbers from 1 with no gaps. The current order of the numbers is kept.
+     * A value that is not a real number sorts after the numbered keys.
+     */
+    public static int[] compact(int[] suffixes) {
+        int count = suffixes == null ? 0 : suffixes.length;
+        int[] numbers = new int[count];
+        if (count == 0) {
+            return numbers;
+        }
+        Integer[] order = new Integer[count];
+        for (int i = 0; i < count; i++) {
+            order[i] = Integer.valueOf(i);
+        }
+        java.util.Arrays.sort(order, new java.util.Comparator<Integer>() {
+            @Override
+            public int compare(Integer left, Integer right) {
+                int leftNumber = rank(suffixes[left.intValue()]);
+                int rightNumber = rank(suffixes[right.intValue()]);
+                if (leftNumber != rightNumber) {
+                    return leftNumber < rightNumber ? -1 : 1;
+                }
+                return left.intValue() - right.intValue();
+            }
+        });
+        for (int rank = 0; rank < order.length; rank++) {
+            numbers[order[rank].intValue()] = rank + 1;
+        }
+        return numbers;
+    }
+
+    private static int rank(int suffix) {
+        return suffix > 0 ? suffix : Integer.MAX_VALUE;
+    }
 }
