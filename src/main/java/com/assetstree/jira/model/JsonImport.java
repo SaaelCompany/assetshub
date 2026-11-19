@@ -204,6 +204,13 @@ public final class JsonImport {
                 }
                 if (same > 0) {
                     match = byId.get(Integer.valueOf(same));
+                    for (int i = 0; i < hosts.size(); i++) {
+                        TniSame.Card card = hosts.get(i);
+                        if (card != null && card.id == same) {
+                            card.remember(serial, inventory);
+                            break;
+                        }
+                    }
                 }
             }
             if (match != null && !taken.add(Integer.valueOf(match.id))) {

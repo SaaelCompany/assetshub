@@ -477,6 +477,37 @@ public class ProductRulesTest {
         assertEquals("asset-tree.error.import.host", json.getIssues().get(0).getMessageKey());
     }
 
+    @Test
+    public void importKeepsLaterHostNamesWhenTheStoredSerialIsEmpty() {
+        List<EquipmentExchange.FieldRef> fields = Collections.singletonList(
+                new EquipmentExchange.FieldRef("sn", "S/N:", "text", false));
+        List<EquipmentExchange.TypeRef> types = Arrays.asList(
+                new EquipmentExchange.TypeRef("ups", "\u0418\u0411\u041f", false, fields),
+                new EquipmentExchange.TypeRef("printer", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", false, fields),
+                new EquipmentExchange.TypeRef("room", "Room", true, Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(
+                new EquipmentExchange.Named("in_use", "\u0412 \u044d\u043a\u0441\u043f\u043b\u0443\u0430\u0442\u0430\u0446\u0438\u0438"));
+        EquipmentExchange.Node room = new EquipmentExchange.Node(1, null, "Room", "STP-1", true, "room");
+        EquipmentExchange.Node ups = new EquipmentExchange.Node(4, Integer.valueOf(1), "BV500I-GR", "BZ-4", false, "ups", "", "");
+        EquipmentExchange.Node printer = new EquipmentExchange.Node(5, Integer.valueOf(1), "HP2035", "BZ-5", false, "printer", "", "");
+        List<String> headers = Arrays.asList("\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", "\u0422\u0438\u043f", "\u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0430", "S/N:");
+        EquipmentSheet.Sheet sheet = new EquipmentSheet.Sheet("\u041e\u0431\u043e\u0440\u0443\u0434\u043e\u0432\u0430\u043d\u0438\u0435", headers, Arrays.asList(
+                new EquipmentSheet.Record(14, Arrays.asList("BV500I-GR", "\u0418\u0411\u041f", "Room", "9B2138A10791")),
+                new EquipmentSheet.Record(28, Arrays.asList("BV500I-GR", "\u0418\u0411\u041f", "Room", "9B2138A10792")),
+                new EquipmentSheet.Record(32, Arrays.asList("BV500I-GR", "\u0418\u0411\u041f", "Room", "9B2138A10789")),
+                new EquipmentSheet.Record(33, Arrays.asList("HP2035", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "Room", "VNC4D36053")),
+                new EquipmentSheet.Record(36, Arrays.asList("HP2035", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "Room", "VNC4D36054"))));
+        EquipmentExchange.Plan plan = EquipmentExchange.plan(sheet, types, statuses, Arrays.asList(room, ups, printer),
+                "in_use", new HashMap<String, String>(), blankPeople());
+        assertTrue(plan.getIssues().toString(), plan.getIssues().isEmpty());
+        assertEquals(5, plan.getChanges().size());
+        assertEquals(Integer.valueOf(4), plan.getChanges().get(0).getExistingId());
+        assertNull(plan.getChanges().get(1).getExistingId());
+        assertNull(plan.getChanges().get(2).getExistingId());
+        assertEquals(Integer.valueOf(5), plan.getChanges().get(3).getExistingId());
+        assertNull(plan.getChanges().get(4).getExistingId());
+    }
+
     private static EquipmentExchange.Directory servicePeople() {
         return new EquipmentExchange.Directory() {
             @Override

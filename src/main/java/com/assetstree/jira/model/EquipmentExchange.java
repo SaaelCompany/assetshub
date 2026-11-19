@@ -781,6 +781,7 @@ public final class EquipmentExchange {
             }
             if (same > 0 && byId != null) {
                 existing = byId.get(Integer.valueOf(same));
+                rememberMark(hosts, same, serial, inventory);
                 keepType = existing != null && !existing.getTypeKey().isEmpty();
                 if (existing != null && !existing.getObjectKey().isEmpty()) {
                     String marker = norm(existing.getObjectKey());
@@ -924,6 +925,19 @@ public final class EquipmentExchange {
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
                 description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
                 issuedPresent, issuedKey, attributes, wish, lifecycle);
+    }
+
+    private static void rememberMark(List<TniSame.Card> hosts, int id, String serial, String inventory) {
+        if (hosts == null) {
+            return;
+        }
+        for (int i = 0; i < hosts.size(); i++) {
+            TniSame.Card card = hosts.get(i);
+            if (card != null && card.id == id) {
+                card.remember(serial, inventory);
+                return;
+            }
+        }
     }
 
     private static String columnMark(EquipmentSheet.Record record, List<Integer> columns, List<String> headers, boolean serial) {

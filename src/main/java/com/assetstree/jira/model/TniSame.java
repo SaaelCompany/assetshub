@@ -18,8 +18,8 @@ public final class TniSame {
         public final boolean location;
         public final String externalKey;
         public final String watch;
-        public final String serial;
-        public final String inventory;
+        public String serial;
+        public String inventory;
 
         public Card(int id, String name, boolean location, String externalKey, String watch) {
             this(id, name, location, externalKey, watch, "", "");
@@ -34,6 +34,16 @@ public final class TniSame {
             this.watch = watch == null ? "" : watch;
             this.serial = serial == null ? "" : serial;
             this.inventory = inventory == null ? "" : inventory;
+        }
+
+        /** Keeps a number learned from the row that claimed this card, so the next row with another number stays separate. */
+        public void remember(String serial, String inventory) {
+            if (this.serial.isEmpty() && serial != null && !serial.trim().isEmpty()) {
+                this.serial = serial.trim();
+            }
+            if (this.inventory.isEmpty() && inventory != null && !inventory.trim().isEmpty()) {
+                this.inventory = inventory.trim();
+            }
         }
     }
 
