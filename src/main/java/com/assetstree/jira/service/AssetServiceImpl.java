@@ -2611,7 +2611,7 @@ public class AssetServiceImpl implements AssetService {
         if (gone[0] != null) {
             emit(gone[0], "asset.deleted", "{\"event\":\"asset.deleted\",\"project\":\"" + jsonEscape(gone[0])
                     + "\",\"id\":" + id + ",\"key\":\"" + jsonEscape(gone[1]) + "\",\"name\":\"" + jsonEscape(gone[2]) + "\"}");
-            noteIssues(linkedIssues, "asset.deleted", gone[1], gone[2]);
+            noteIssues(gone[0], linkedIssues, "asset.deleted", gone[1], gone[2]);
         }
     }
 
@@ -16306,14 +16306,27 @@ public class AssetServiceImpl implements AssetService {
                     }
                 }
             }
-            noteIssues(issues, event, asset.getObjectKey(), asset.getName());
+            noteIssues(asset.getProjectKey(), issues, event, asset.getObjectKey(), asset.getName());
         } catch (RuntimeException ex) {
             log.warn("Could not note the linked requests for {}", asset.getObjectKey(), ex);
         }
     }
 
-    private void noteIssues(List<Long> issueIds, String event, String objectKey, String name) {
-        if (issueIds == null || issueIds.isEmpty() || Boolean.TRUE.equals(QUIET_NOTES.get())) {
+    private boolean issueNotesOn(String projectKey) {
+        if (projectKey == null || projectKey.trim().isEmpty()) {
+            return true;
+        }
+        try {
+            ModuleSetupDto setup = moduleSetup(projectKey);
+            return setup == null || !Boolean.FALSE.equals(setup.getIssueNotes());
+        } catch (RuntimeException ex) {
+            log.warn("Issue comment setting was not read for {}", projectKey, ex);
+            return true;
+        }
+    }
+
+    private void noteIssues(String projectKey, List<Long> issueIds, String event, String objectKey, String name) {
+        if (issueIds == null || issueIds.isEmpty() || Boolean.TRUE.equals(QUIET_NOTES.get()) || !issueNotesOn(projectKey)) {
             return;
         }
         ApplicationUser author = authenticationContext().getLoggedInUser();
