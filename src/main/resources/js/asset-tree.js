@@ -15878,13 +15878,13 @@
         if (english) {
             return [
                 [t('docGroupCard'), ['name', 'key', 'serial', 'inventory', 'type', 'status', 'description', 'maker', 'model', 'group', 'quantity', 'life', 'year', 'date', 'request']],
-                [t('docGroupPerson'), ['mol', 'issued', 'title', 'phone', 'department', 'email', 'custodian']],
+                [t('docGroupPerson'), ['mol', 'mol title', 'mol department', 'mol email', 'mol phone', 'issued', 'issued title', 'issued department', 'issued email', 'issued phone', 'custodian']],
                 [t('docGroupPlace'), ['place', 'address', 'city', 'project']]
             ];
         }
         return [
             [t('docGroupCard'), ['наименование', 'ключ', 'серийный', 'инвентарный', 'тип', 'статус', 'описание', 'производитель', 'модель', 'группа', 'количество', 'срок', 'год', 'дата', 'заявка']],
-            [t('docGroupPerson'), ['мол', 'кому выдано', 'должность', 'телефон', 'отдел', 'почта', 'ответственный']],
+            [t('docGroupPerson'), ['мол', 'должность мол', 'отдел мол', 'почта мол', 'телефон мол', 'кому выдано', 'должность кому выдано', 'отдел кому выдано', 'почта кому выдано', 'телефон кому выдано', 'должность', 'отдел', 'почта', 'телефон', 'ответственный']],
             [t('docGroupPlace'), ['площадка', 'филиал', 'адрес', 'город', 'организация']]
         ];
     }

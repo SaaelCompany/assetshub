@@ -10060,6 +10060,34 @@ public class AssetServiceImpl implements AssetService {
         return value == null || value.trim().isEmpty();
     }
 
+    private static void writeDocumentPerson(DocFields.Source source, UserProfileDto person, boolean issued) {
+        if (source == null || person == null) {
+            return;
+        }
+        String role = person.getTitle() == null ? "" : person.getTitle().trim();
+        String phone = person.getPhone() == null ? "" : person.getPhone().trim();
+        String email = person.getEmail() == null ? "" : person.getEmail().trim();
+        String department = person.getDepartment() == null ? "" : person.getDepartment().trim();
+        if (issued) {
+            source.issuedRole = firstText(source.issuedRole, role);
+            source.issuedPhone = firstText(source.issuedPhone, phone);
+            source.issuedEmail = firstText(source.issuedEmail, email);
+            source.issuedDepartment = firstText(source.issuedDepartment, department);
+            return;
+        }
+        source.molRole = firstText(source.molRole, role);
+        source.molPhone = firstText(source.molPhone, phone);
+        source.molEmail = firstText(source.molEmail, email);
+        source.molDepartment = firstText(source.molDepartment, department);
+    }
+
+    private static String firstText(String preferred, String fallback) {
+        if (preferred != null && !preferred.trim().isEmpty()) {
+            return preferred;
+        }
+        return fallback == null ? "" : fallback;
+    }
+
     private static void fillDocumentPerson(DocFields.Source source, UserProfileDto person, boolean onlyBlank) {
         if (source == null || person == null) {
             return;
@@ -19104,8 +19132,12 @@ public class AssetServiceImpl implements AssetService {
         source.mol = molName.isEmpty() ? issuedName : molName;
         source.custodian = source.mol;
         source.issued = issuedName;
-        fillDocumentPerson(source, profile(asset.getIssuedKey()), false);
-        fillDocumentPerson(source, profile(asset.getCustodianKey()), true);
+        writeDocumentPerson(source, profile(asset.getIssuedKey()), true);
+        writeDocumentPerson(source, profile(asset.getCustodianKey()), false);
+        source.role = firstText(source.issuedRole, source.molRole);
+        source.phone = firstText(source.issuedPhone, source.molPhone);
+        source.email = firstText(source.issuedEmail, source.molEmail);
+        source.department = firstText(source.issuedDepartment, source.molDepartment);
         Project project = project(asset.getProjectKey());
         source.project = project == null || project.getName() == null ? asset.getProjectKey() : project.getName();
         source.today = DateTimeFormatter.ofPattern("dd.MM.yyyy").format(LocalDate.now(businessZone()));
@@ -19156,6 +19188,7 @@ public class AssetServiceImpl implements AssetService {
                     if (source.issued.isEmpty()) {
                         source.issued = value;
                     }
+                    writeDocumentPerson(source, fieldPerson, true);
                     fillDocumentPerson(source, fieldPerson, true);
                 } else if (folded.contains("должност") || folded.contains("position") || folded.contains("profession")) {
                     source.role = value;
