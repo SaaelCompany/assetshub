@@ -53,4 +53,11 @@ public class DocFieldsTest {
         assertEquals("Бухгалтерия", values.get(DocxFill.normalize("отдел")));
         assertEquals("Кабинет 12", values.get(DocxFill.normalize("Примечание")));
     }
+
+    @Test
+    public void aDepartmentPlaceIsTheDepartmentOnADocument() {
+        assertEquals(true, DocFields.departmentPlace("department", "Отделение"));
+        assertEquals(true, DocFields.departmentPlace("room", "Отдел кадров"));
+        assertEquals(false, DocFields.departmentPlace("branch", "Филиал"));
+    }
 }

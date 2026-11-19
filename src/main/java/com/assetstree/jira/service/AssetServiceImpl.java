@@ -9916,7 +9916,11 @@ public class AssetServiceImpl implements AssetService {
 
     private ApplicationUser lookupUser(String userKey) {
         try {
-            return userManager().getUserByKey(userKey);
+            ApplicationUser user = userManager().getUserByKey(userKey);
+            if (user == null) {
+                user = userManager().getUserByName(userKey);
+            }
+            return user;
         } catch (RuntimeException ex) {
             log.debug("User lookup failed for {}", userKey, ex);
             return null;
@@ -9953,15 +9957,27 @@ public class AssetServiceImpl implements AssetService {
             if (attributes != null) {
                 dto.setPhone(firstValue(attributes, "telephoneNumber", "phone", "mobile", "mobilePhone", "telephone", "ipPhone"));
                 dto.setDepartment(firstValue(attributes, "department", "departmentNumber", "division", "ou"));
-                dto.setTitle(firstValue(attributes, "title", "jobTitle", "jobtitle"));
+                dto.setTitle(firstValue(attributes, "title", "jobTitle", "jobtitle", "position", "employeeType", "profession"));
                 if (dto.getEmail() == null || dto.getEmail().trim().isEmpty()) {
-                    dto.setEmail(firstValue(attributes, "mail", "email", "emailAddress"));
+                    String mail = firstValue(attributes, "mail", "email", "emailAddress", "userPrincipalName");
+                    if (mail.contains("@")) {
+                        dto.setEmail(mail);
+                    }
                 }
                 Set<String> keys = attributes.getKeys();
                 if (keys != null) {
                     for (String key : keys) {
                         readContact(dto, key, attributes.getValue(key));
+                        if (blank(dto.getDepartment())) {
+                            String unit = organizationalUnit(attributes.getValue(key));
+                            if (!unit.isEmpty() && DocxFill.normalize(key).contains("distinguished")) {
+                                dto.setDepartment(unit);
+                            }
+                        }
                     }
+                }
+                if (blank(dto.getDepartment())) {
+                    dto.setDepartment(organizationalUnit(firstValue(attributes, "distinguishedName", "distinguishedname")));
                 }
             }
         } catch (RuntimeException ex) {
@@ -10013,13 +10029,31 @@ public class AssetServiceImpl implements AssetService {
         if (blank(dto.getPhone()) && (norm.contains("phone") || norm.contains("tel") || norm.contains("телефон"))) {
             dto.setPhone(text);
         } else if (blank(dto.getDepartment()) && (norm.contains("department") || norm.contains("division")
-                || norm.contains("отдел") || norm.contains("подраздел"))) {
+                || norm.contains("отдел") || norm.contains("подраздел") || norm.contains("отделени"))) {
             dto.setDepartment(text);
-        } else if (blank(dto.getTitle()) && (norm.contains("title") || norm.contains("position") || norm.contains("должност"))) {
+        } else if (blank(dto.getTitle()) && (norm.contains("title") || norm.contains("position")
+                || norm.contains("должност") || norm.contains("profession") || norm.contains("employeetype"))) {
             dto.setTitle(text);
-        } else if (blank(dto.getEmail()) && (norm.contains("mail") || norm.contains("почт"))) {
-            dto.setEmail(text);
+        } else if (blank(dto.getEmail()) && (norm.contains("mail") || norm.contains("почт") || norm.contains("principal"))) {
+            if (text.contains("@")) {
+                dto.setEmail(text);
+            }
         }
+    }
+
+    /** The first OU in a directory name, which is the person's department when no department attribute is stored. */
+    private static String organizationalUnit(String distinguishedName) {
+        if (distinguishedName == null || distinguishedName.isEmpty()) {
+            return "";
+        }
+        String[] parts = distinguishedName.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i] == null ? "" : parts[i].trim();
+            if (part.length() > 3 && (part.regionMatches(true, 0, "OU=", 0, 3))) {
+                return part.substring(3).trim().replace("\\,", ",");
+            }
+        }
+        return "";
     }
 
     private static boolean blank(String value) {
@@ -19104,24 +19138,30 @@ public class AssetServiceImpl implements AssetService {
         for (int i = 0; i < attributes.size(); i++) {
             AssetAttributeEntity attribute = attributes.get(i);
             AssetFieldEntity field = fieldByKey.get(attribute.getAttrName());
-            String value = attribute.getAttrValue() == null ? "" : attribute.getAttrValue();
+            String raw = attribute.getAttrValue() == null ? "" : attribute.getAttrValue();
+            String value = raw;
+            UserProfileDto fieldPerson = null;
             if (field != null && FieldKinds.USER.equals(field.getKind())) {
-                value = userLabel(value);
+                fieldPerson = profile(raw);
+                value = userLabel(raw);
             } else if (field != null && FieldChoices.handles(field.getKind())) {
                 value = FieldChoices.display(value);
             }
             String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
             source.fields.put(attribute.getAttrName(), value);
             source.labels.put(attribute.getAttrName(), label == null ? "" : label);
-            String folded = DocxFill.normalize(label);
+            String folded = DocxFill.normalize((attribute.getAttrName() == null ? "" : attribute.getAttrName()) + " " + (label == null ? "" : label));
             if (!value.isEmpty()) {
-                if (folded.contains("комувыдано") || "выдано".equals(folded)) {
-                    source.issued = value;
-                } else if (folded.contains("должност")) {
+                if (folded.contains("комувыдано") || folded.contains("получател") || "выдано".equals(DocxFill.normalize(label))) {
+                    if (source.issued.isEmpty()) {
+                        source.issued = value;
+                    }
+                    fillDocumentPerson(source, fieldPerson, true);
+                } else if (folded.contains("должност") || folded.contains("position") || folded.contains("profession")) {
                     source.role = value;
                 } else if (folded.contains("телефон") || folded.contains("phone")) {
                     source.phone = value;
-                } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел")) {
+                } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел") || folded.contains("отделени")) {
                     source.department = value;
                 } else if (folded.contains("почт") || folded.contains("email") || folded.contains("mail")) {
                     source.email = value;
@@ -19140,8 +19180,13 @@ public class AssetServiceImpl implements AssetService {
                 source.place = parent.getName();
             }
             AssetTypeEntity parentType = findType(parent.getTypeKey());
+            String parentTypeLabel = parentType == null ? "" : documentLabel(parentType.getLabel());
             if (parentType != null && "branch".equals(parentType.getTypeKey()) && parent.getName() != null) {
                 source.branch = parent.getName();
+            }
+            if (source.department.isEmpty() && parent.getName() != null
+                    && DocFields.departmentPlace(parent.getTypeKey(), parentTypeLabel)) {
+                source.department = parent.getName();
             }
             List<AssetAttributeEntity> parentAttributes = attributesFor(parent.getID());
             Map<String, AssetFieldEntity> parentFields = new HashMap<String, AssetFieldEntity>();
@@ -19169,6 +19214,18 @@ public class AssetServiceImpl implements AssetService {
                 }
                 if (source.city.isEmpty() && token.contains("город")) {
                     source.city = value;
+                }
+                if (source.email.isEmpty() && (token.contains("email") || token.contains("почт") || token.contains("mail")) && value.contains("@")) {
+                    source.email = value;
+                }
+                if (source.phone.isEmpty() && (token.contains("phone") || token.contains("телефон"))) {
+                    source.phone = value;
+                }
+                if (source.role.isEmpty() && (token.contains("должност") || token.contains("position"))) {
+                    source.role = value;
+                }
+                if (source.department.isEmpty() && (token.contains("отдел") || token.contains("подраздел") || token.contains("department"))) {
+                    source.department = value;
                 }
             }
             parentId = parent.getParentId();

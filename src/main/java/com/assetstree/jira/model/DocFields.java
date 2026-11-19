@@ -130,6 +130,15 @@ public final class DocFields {
         return false;
     }
 
+    /** A place whose name is the department on a document: the department type, or a label that says so. */
+    public static boolean departmentPlace(String typeKey, String typeLabel) {
+        if (typeKey != null && "department".equalsIgnoreCase(typeKey.trim())) {
+            return true;
+        }
+        String token = DocxFill.normalize((typeKey == null ? "" : typeKey) + " " + (typeLabel == null ? "" : typeLabel));
+        return token.contains("отдел") || token.contains("подраздел") || token.contains("department");
+    }
+
     private static String first(String preferred, String fallback) {
         if (preferred != null && !preferred.trim().isEmpty()) {
             return preferred;

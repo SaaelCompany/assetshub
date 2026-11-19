@@ -34,6 +34,18 @@ public class DocxFillTest {
     }
 
     @Test
+    public void aTokenWithANonBreakingSpaceIsFilled() throws Exception {
+        String xml = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"
+                + "<w:p><w:r><w:t>{{кому&#160;выдано}}</w:t></w:r></w:p>"
+                + "</w:body></w:document>";
+        Map<String, String> values = new HashMap<String, String>();
+        values.put(DocxFill.normalize("кому выдано"), "Петров П.П.");
+        String document = documentXml(DocxFill.fill(docx(xml), values));
+        assertTrue(document.contains("Петров П.П."));
+        assertTrue(!document.contains("{{"));
+    }
+
+    @Test
     public void anUnknownTokenStaysVisible() throws Exception {
         String xml = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"
                 + "<w:p><w:r><w:t>{{причина}}</w:t></w:r></w:p></w:body></w:document>";

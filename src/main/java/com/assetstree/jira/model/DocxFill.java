@@ -147,7 +147,42 @@ public final class DocxFill {
     }
 
     private static String unescape(String text) {
-        return text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&");
+        String named = text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&");
+        StringBuilder out = new StringBuilder(named.length());
+        for (int i = 0; i < named.length(); i++) {
+            char current = named.charAt(i);
+            if (current == '&' && i + 3 < named.length() && named.charAt(i + 1) == '#') {
+                int end = named.indexOf(';', i + 2);
+                if (end > i + 2 && end - i <= 10) {
+                    String body = named.substring(i + 2, end);
+                    int code = characterCode(body);
+                    if (code >= 0) {
+                        out.append((char) code);
+                        i = end;
+                        continue;
+                    }
+                }
+            }
+            out.append(current);
+        }
+        return out.toString();
+    }
+
+    private static int characterCode(String body) {
+        try {
+            int code;
+            if (body.length() > 1 && (body.charAt(0) == 'x' || body.charAt(0) == 'X')) {
+                code = Integer.parseInt(body.substring(1), 16);
+            } else {
+                code = Integer.parseInt(body);
+            }
+            if (code >= 0 && code <= 0xFFFF) {
+                return code;
+            }
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+        return -1;
     }
 
     private static byte[] read(InputStream input) throws IOException {
