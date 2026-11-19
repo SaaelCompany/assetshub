@@ -3794,12 +3794,85 @@
             };
         }
 
+        function ringArea(loop) {
+            var sum = 0;
+            var i;
+            for (i = 0; i < loop.length; i++) {
+                var a = loop[i];
+                var b = loop[(i + 1) % loop.length];
+                sum += a.x * b.y - b.x * a.y;
+            }
+            return Math.abs(sum) / 2;
+        }
+
+        function ringHolds(x, y, loop) {
+            var inside = false;
+            var i;
+            for (i = 0; i < loop.length; i++) {
+                var a = loop[i];
+                var b = loop[(i + 1) % loop.length];
+                if (((a.y > y) !== (b.y > y)) && (x < (b.x - a.x) * (y - a.y) / ((b.y - a.y) || 1) + a.x)) inside = !inside;
+            }
+            return inside;
+        }
+
+        function coveredArea(loops) {
+            var parts = [];
+            var i;
+            for (i = 0; i < loops.length; i++) {
+                var loop = loops[i];
+                if (!loop || loop.length < 3) continue;
+                var cx = 0;
+                var cy = 0;
+                var n;
+                for (n = 0; n < loop.length; n++) {
+                    cx += loop[n].x;
+                    cy += loop[n].y;
+                }
+                parts.push({ loop: loop, area: ringArea(loop), x: cx / loop.length, y: cy / loop.length });
+            }
+            parts.sort(function (a, b) { return b.area - a.area; });
+            var total = 0;
+            for (i = 0; i < parts.length; i++) {
+                var hole = false;
+                var j;
+                for (j = 0; j < i; j++) {
+                    if (ringHolds(parts[i].x, parts[i].y, parts[j].loop)) {
+                        hole = true;
+                        break;
+                    }
+                }
+                total += hole ? -parts[i].area : parts[i].area;
+            }
+            return total < 0 ? 0 : total;
+        }
+
+        function wallMaterialArea(segs) {
+            var sum = 0;
+            var i;
+            for (i = 0; i < segs.length; i++) {
+                var dx = segs[i].x2 - segs[i].x1;
+                var dy = segs[i].y2 - segs[i].y1;
+                sum += Math.sqrt(dx * dx + dy * dy) * (segs[i].thick || 15);
+            }
+            return sum;
+        }
+
+        function wallPainted(wall, alpha) {
+            var copy = {};
+            var key;
+            for (key in wall) {
+                if (Object.prototype.hasOwnProperty.call(wall, key)) copy[key] = wall[key];
+            }
+            copy.opacity = (wall.opacity == null ? 1 : wall.opacity) * alpha;
+            return copy;
+        }
+
         function paintWallUnion(ctx, walls, floor) {
             var plan = global.AssetTreePlan;
             if (!plan || !plan.wallLoops || !walls.length) return false;
             var groups = [];
             var byKey = {};
-            var drawn = [];
             var i;
             for (i = 0; i < walls.length; i++) {
                 var wall = walls[i];
@@ -3839,7 +3912,6 @@
                     var hole = wallOpeningHole(wall, opening);
                     if (!hole) continue;
                     group.holes.push(hole.poly);
-                    drawn.push({ opening: opening, a: hole.a, b: hole.b });
                 }
             }
             if (!groups.length) return false;
@@ -3859,22 +3931,15 @@
             }
             var outline = plan.wallLoops(allSegs, allHoles);
             if (!outline || !outline.length) return false;
+            var material = wallMaterialArea(allSegs);
+            var covered = coveredArea(outline);
+            if (!(material > 0) || covered > material * 1.65 || covered < material * 0.2) return false;
             var base = ctx.globalAlpha == null ? 1 : ctx.globalAlpha;
-            for (i = 0; i < ready.length; i++) {
-                var item = ready[i];
-                ctx.save();
-                ctx.globalAlpha = base * item.group.opacity;
-                ctx.fillStyle = item.group.fill;
-                ctx.beginPath();
-                var li;
-                for (li = 0; li < item.loops.length; li++) addRing(ctx, item.loops[li]);
-                ctx.fill('evenodd');
-                if (item.group.hatch !== 'none') hatch(ctx, item.loops, item.group.hatch, item.group.color);
-                ctx.restore();
-            }
+            for (i = 0; i < walls.length; i++) drawWall(ctx, wallPainted(walls[i], base), floor, 'body');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, wallPainted(walls[i], base), floor, 'hatch');
             ctx.save();
-            ctx.globalAlpha = base;
-            ctx.strokeStyle = ready[0].group.color;
+            ctx.globalAlpha = base * groups[0].opacity;
+            ctx.strokeStyle = groups[0].color;
             ctx.lineWidth = 1.2;
             ctx.lineJoin = 'miter';
             ctx.miterLimit = 2;
@@ -3883,7 +3948,6 @@
             for (i = 0; i < outline.length; i++) addRing(ctx, outline[i]);
             ctx.stroke();
             ctx.restore();
-            for (i = 0; i < drawn.length; i++) drawOpening(ctx, drawn[i].a, drawn[i].b, drawn[i].opening);
             return true;
         }
 

@@ -14458,7 +14458,7 @@ button.asset-tree-attach-remove {
     padding: 0 8px;
 }
 
-.asset-tree-scheme-window-menu {
+.asset-tree-scheme-menu.asset-tree-scheme-window-menu {
     z-index: 40;
     display: flex;
     flex-direction: column;
