@@ -94,25 +94,4 @@ public final class ObjectKeys {
         }
         return objectKey.substring(dot + 1);
     }
-
-    /** The smallest positive number whose {@code prefix-number} is not in {@code keys}. */
-    public static int firstFree(String prefix, Iterable<String> keys) {
-        java.util.Set<Integer> used = new java.util.HashSet<Integer>();
-        if (keys != null) {
-            for (String key : keys) {
-                int number = suffix(prefix, key);
-                if (number > 0) {
-                    used.add(Integer.valueOf(number));
-                }
-            }
-        }
-        int value = 1;
-        while (used.contains(Integer.valueOf(value))) {
-            if (value == Integer.MAX_VALUE) {
-                return 1;
-            }
-            value++;
-        }
-        return value;
-    }
 }

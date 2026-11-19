@@ -2598,7 +2598,6 @@ public class AssetServiceImpl implements AssetService {
                     row.setDeletedAt(now);
                     row.setDeletedBy(actorKey);
                     row.setTrashRootId(rootId);
-                    parkKey(row);
                     row.setUpdated(now);
                     row.setUpdatedBy(actorKey);
                     row.save();
@@ -2622,6 +2621,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<List<AssetDto>>() {
             @Override
             public List<AssetDto> doInTransaction() {
+                reclaimParkedKeys(project.getKey());
                 AssetEntity[] all = assetsAll(project.getKey());
                 Map<Integer, AssetEntity> index = indexAssets(all);
                 Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), all));
@@ -2656,9 +2656,7 @@ public class AssetServiceImpl implements AssetService {
                 for (AssetEntity row : roots) {
                     AssetDto dto = new AssetDto();
                     dto.setId(row.getID());
-                    String parked = row.getObjectKey();
-                    String released = ObjectKeys.released(parked);
-                    dto.setObjectKey(released.isEmpty() ? parked : released);
+                    dto.setObjectKey(row.getObjectKey());
                     dto.setName(row.getName());
                     dto.setTypeKey(row.getTypeKey());
                     dto.setProjectKey(row.getProjectKey());
@@ -2701,6 +2699,7 @@ public class AssetServiceImpl implements AssetService {
                         throw new AssetException(409, "asset-tree.error.inTrash");
                     }
                     projectKey[0] = entity.getProjectKey();
+                    reclaimParkedKeys(projectKey[0]);
                     AssetEntity[] all = assetsAll(entity.getProjectKey());
                     Map<Integer, AssetEntity> index = indexAssets(all);
                     Integer oldParent = TreeLogic.normalizeParent(entity.getParentId());
@@ -2726,7 +2725,6 @@ public class AssetServiceImpl implements AssetService {
                         row.setDeletedAt(null);
                         row.setDeletedBy("");
                         row.setTrashRootId(null);
-                        unparkKey(row, projectKey[0]);
                         row.setUpdated(now);
                         row.setUpdatedBy(actorKey);
                         row.save();
@@ -6469,7 +6467,7 @@ public class AssetServiceImpl implements AssetService {
 
     private PreparedImport prepareEquipmentImport(String projectKey, ImportMemory memory) {
         ensureStatuses(projectKey);
-        releaseTrashKeys(projectKey);
+        reclaimParkedKeys(projectKey);
         AssetEntity[] rows = assetsIn(projectKey);
         List<AssetTypeDto> typeDtos = typeDtos(projectKey, rows);
         List<EquipmentExchange.TypeRef> types = new ArrayList<EquipmentExchange.TypeRef>();
@@ -7468,41 +7466,39 @@ public class AssetServiceImpl implements AssetService {
                 || (match.getDisplayName() != null && text.equalsIgnoreCase(match.getDisplayName()));
     }
 
-    /** Keys of objects already in the trash stop blocking the sequence. */
-    private void releaseTrashKeys(String projectKey) {
+    private void reclaimForPrefix(String prefix) {
+        ProjectAssetKeyEntity[] rows = ao().find(ProjectAssetKeyEntity.class, Query.select().where("ASSET_PREFIX = ?", prefix));
+        if (rows == null) {
+            return;
+        }
+        for (ProjectAssetKeyEntity row : rows) {
+            if (row != null && row.getProjectKey() != null) {
+                reclaimParkedKeys(row.getProjectKey());
+            }
+        }
+    }
+
+    /**
+     * Puts a key back on an object that briefly released it. A key stays with its
+     * object after write-off and after the trash, so an old request still names that object.
+     */
+    private void reclaimParkedKeys(String projectKey) {
         AssetEntity[] rows = assetsAll(projectKey);
         if (rows == null) {
             return;
         }
         for (AssetEntity row : rows) {
-            if (row == null || row.getDeletedAt() == null || ObjectKeys.parked(row.getObjectKey())) {
+            if (row == null) {
                 continue;
             }
-            parkKey(row);
-            row.save();
-        }
-    }
-
-    /** Moves the key aside so a new object can use the number. Restore gives the original key back when it is still free. */
-    private void parkKey(AssetEntity row) {
-        if (row == null) {
-            return;
-        }
-        row.setObjectKey(ObjectKeys.park(row.getID(), row.getObjectKey()));
-    }
-
-    private void unparkKey(AssetEntity row, String projectKey) {
-        if (row == null) {
-            return;
-        }
-        String original = ObjectKeys.released(row.getObjectKey());
-        if (original.isEmpty()) {
-            return;
-        }
-        if (ao().count(AssetEntity.class, "OBJECT_KEY = ?", original) == 0) {
-            row.setObjectKey(original);
-        } else {
-            row.setObjectKey(nextKey(projectKey));
+            String original = ObjectKeys.released(row.getObjectKey());
+            if (original.isEmpty()) {
+                continue;
+            }
+            if (ao().count(AssetEntity.class, "OBJECT_KEY = ?", original) == 0) {
+                row.setObjectKey(original);
+                row.save();
+            }
         }
     }
 
@@ -7515,24 +7511,10 @@ public class AssetServiceImpl implements AssetService {
         Object raced = KEY_LOCKS.putIfAbsent(prefix, created);
         Object lock = raced == null ? created : raced;
         synchronized (lock) {
+            reclaimForPrefix(prefix);
             for (int attempt = 0; attempt < 8; attempt++) {
                 AssetCounterEntity counter = counterFor(prefix);
-                AssetEntity[] existing = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY LIKE ?", prefix + "-%"));
-                java.util.List<String> keys = new java.util.ArrayList<String>();
-                if (existing != null) {
-                    for (AssetEntity row : existing) {
-                        if (row == null || row.getObjectKey() == null) {
-                            continue;
-                        }
-                        if (row.getDeletedAt() != null) {
-                            parkKey(row);
-                            row.save();
-                            continue;
-                        }
-                        keys.add(row.getObjectKey());
-                    }
-                }
-                int value = ObjectKeys.firstFree(prefix, keys);
+                int value = Math.max(counter.getNextValue(), 1);
                 counter.setNextValue(value + 1);
                 counter.save();
                 String key = prefix + "-" + value;

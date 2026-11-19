@@ -139,12 +139,11 @@ public class ProductRulesTest {
     }
 
     @Test
-    public void deletedKeyIsFreeForTheNextObject() {
+    public void objectKeyStaysWithItsObject() {
         assertEquals("~4.BZ-4", ObjectKeys.park(4, "BZ-4"));
         assertEquals("BZ-4", ObjectKeys.released("~4.BZ-4"));
         assertEquals("", ObjectKeys.released("BZ-4"));
-        assertEquals(1, ObjectKeys.firstFree("BZ", Arrays.asList("BZ-2", "BZ-3", "~4.BZ-1")));
-        assertEquals(4, ObjectKeys.firstFree("BZ", Arrays.asList("BZ-1", "BZ-2", "BZ-3")));
+        assertEquals(0, ObjectKeys.suffix("BZ", "~4.BZ-4"));
         assertFalse(EquipmentExchange.computerType("\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "printer"));
         assertFalse(EquipmentExchange.computerType("\u0418\u0411\u041f", "ups"));
         assertTrue(EquipmentExchange.computerType("\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "pc"));
