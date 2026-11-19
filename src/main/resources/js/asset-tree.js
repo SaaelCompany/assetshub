@@ -16021,29 +16021,6 @@
         photoCard.appendChild(photoRow);
         stack.appendChild(photoCard);
 
-        var notesCard = el('section', 'asset-tree-project-card');
-        notesCard.appendChild(el('h3', 'asset-tree-settings-title', t('issueNotesTitle')));
-        notesCard.appendChild(el('p', 'asset-tree-hint', t('issueNotesHint')));
-        var notesRow = el('label', 'asset-tree-check-row');
-        var notesBox = el('input');
-        notesBox.type = 'checkbox';
-        notesBox.checked = moduleSetup().issueNotes !== false;
-        notesBox.disabled = !allowed;
-        if (!allowed) notesBox.setAttribute('data-disabled', '1');
-        notesBox.setAttribute('aria-label', t('issueNotesOn'));
-        notesBox.addEventListener('change', function () {
-            var want = notesBox.checked;
-            saveProjectView({ setup: { issueNotes: want } }, function (ok) {
-                if (ok === false) notesBox.checked = !want;
-            });
-        });
-        notesRow.appendChild(notesBox);
-        var notesText = el('span');
-        notesText.appendChild(el('strong', null, t('issueNotesOn')));
-        notesRow.appendChild(notesText);
-        notesCard.appendChild(notesRow);
-        stack.appendChild(notesCard);
-
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
         modules.appendChild(head);
@@ -21601,7 +21578,6 @@
             glyphs: setup.glyphs || '',
             portalMine: !!setup.portalMine,
             photo: !!setup.photo,
-            issueNotes: setup.issueNotes !== false,
             tniKeep: clampNum(setup.tniKeep || 90, 1, 3650),
             tniProbeDays: clampNum(setup.tniProbeDays || 3, 1, 30),
             tniProbeTries: clampNum(setup.tniProbeTries || 3, 1, 30),

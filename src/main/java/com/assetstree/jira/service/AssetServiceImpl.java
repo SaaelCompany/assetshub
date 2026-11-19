@@ -14,8 +14,6 @@ import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.config.ConstantsManager;
 import com.atlassian.jira.config.properties.APKeys;
 import com.atlassian.event.api.EventPublisher;
-import com.atlassian.jira.event.issue.IssueEvent;
-import com.atlassian.jira.event.type.EventType;
 import com.atlassian.jira.issue.CustomFieldManager;
 import com.atlassian.jira.bc.issue.IssueService;
 import com.atlassian.jira.bc.issue.search.SearchService;
@@ -329,6 +327,7 @@ import java.util.Set;
 import com.opensymphony.module.propertyset.PropertySet;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 public class AssetServiceImpl implements AssetService {
@@ -365,6 +364,7 @@ public class AssetServiceImpl implements AssetService {
             aoRef = current;
         }
         SchemaReady.ensure(current);
+        scheduleNoteCleanup();
         return current;
     }
 
@@ -16736,76 +16736,146 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private void noteAsset(String event, AssetDto asset) {
-        if (asset == null || Boolean.TRUE.equals(QUIET_NOTES.get())) {
-            return;
-        }
-        try {
-            AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
-                    Query.select().where("ASSET_ID = ?", asset.getId()));
-            List<Long> issues = new ArrayList<Long>();
-            if (links != null) {
-                for (AssetIssueLinkEntity link : links) {
-                    if (link != null) {
-                        issues.add(Long.valueOf(link.getIssueId()));
-                    }
-                }
-            }
-            noteIssues(asset.getProjectKey(), issues, event, asset.getObjectKey(), asset.getName());
-        } catch (RuntimeException ex) {
-            log.warn("Could not note the linked requests for {}", asset.getObjectKey(), ex);
-        }
-    }
+    private static final AtomicBoolean NOTE_CLEANUP = new AtomicBoolean(false);
 
-    private boolean issueNotesOn(String projectKey) {
-        if (projectKey == null || projectKey.trim().isEmpty()) {
-            return true;
-        }
-        try {
-            ModuleSetupDto setup = moduleSetup(projectKey);
-            return setup == null || !Boolean.FALSE.equals(setup.getIssueNotes());
-        } catch (RuntimeException ex) {
-            log.warn("Issue comment setting was not read for {}", projectKey, ex);
-            return true;
-        }
+    private void noteAsset(String event, AssetDto asset) {
+        scheduleNoteCleanup();
     }
 
     private void noteIssues(String projectKey, List<Long> issueIds, String event, String objectKey, String name) {
-        if (issueIds == null || issueIds.isEmpty() || Boolean.TRUE.equals(QUIET_NOTES.get()) || !issueNotesOn(projectKey)) {
+        scheduleNoteCleanup();
+    }
+
+    /** Drops comments this plugin already wrote on requests. New ones are not written. */
+    private void scheduleNoteCleanup() {
+        if (!NOTE_CLEANUP.compareAndSet(false, true)) {
             return;
         }
-        ApplicationUser author = authenticationContext().getLoggedInUser();
-        if (author == null) {
-            return;
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(4000L);
+                    dropEquipmentNotes();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                } catch (RuntimeException ex) {
+                    log.warn("Equipment comments were not removed", ex);
+                }
+            }
+        }, "asset-tree-note-clear");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void dropEquipmentNotes() {
+        Set<Long> ids = new LinkedHashSet<Long>();
+        try {
+            AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class);
+            if (links != null) {
+                for (int i = 0; i < links.length; i++) {
+                    if (links[i] != null) {
+                        ids.add(Long.valueOf(links[i].getIssueId()));
+                    }
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Linked requests were not listed for comment removal", ex);
         }
-        String verbKey = "asset.created".equals(event) ? "asset-tree.ui.automationCreated"
-                : "asset.deleted".equals(event) ? "asset-tree.ui.automationDeleted"
-                : "asset.restored".equals(event) ? "asset-tree.ui.automationRestored"
-                : "asset-tree.ui.automationUpdated";
-        String body = AutomationNote.text(i18n().getText("asset-tree.ui.automationNote"), objectKey, name,
-                i18n().getText(verbKey));
+        ApplicationUser actor = noteCleaner();
+        if (actor != null) {
+            ids.addAll(issuesMentioningEquipment(actor));
+        }
         CommentManager comments = ComponentAccessor.getCommentManager();
-        EventPublisher events = ComponentAccessor.getComponent(EventPublisher.class);
-        for (Long issueId : issueIds) {
-            if (issueId == null) {
+        if (comments == null) {
+            return;
+        }
+        for (Long id : ids) {
+            if (id == null) {
                 continue;
             }
             try {
-                Issue issue = issueManager().getIssueObject(issueId);
+                Issue issue = issueManager().getIssueObject(id);
                 if (issue == null) {
                     continue;
                 }
-                Map<String, JSONObject> properties = new HashMap<String, JSONObject>();
-                properties.put("sd.public.comment", new JSONObject("{\"internal\":true}"));
-                Comment comment = comments.create(issue, author, body, null, null, new Date(), properties, false);
-                if (events != null && comment != null) {
-                    events.publish(new IssueEvent(issue, author, comment, null, null,
-                            new HashMap<String, Object>(), EventType.ISSUE_COMMENTED_ID, false));
+                List<Comment> rows = comments.getComments(issue);
+                if (rows == null) {
+                    continue;
+                }
+                for (int i = 0; i < rows.size(); i++) {
+                    Comment comment = rows.get(i);
+                    if (comment == null || !AutomationNote.equipmentChange(comment.getBody())) {
+                        continue;
+                    }
+                    ApplicationUser author = comment.getAuthorApplicationUser();
+                    if (author != null) {
+                        comments.delete(comment, false, author);
+                    } else if (actor != null) {
+                        comments.delete(comment, false, actor);
+                    } else {
+                        comments.delete(comment);
+                    }
                 }
             } catch (Exception ex) {
-                log.warn("Could not comment on linked request {}", issueId, ex);
+                log.warn("Could not remove an equipment comment on {}", id, ex);
             }
         }
+    }
+
+    private ApplicationUser noteCleaner() {
+        try {
+            Collection<ApplicationUser> users = userManager().getAllApplicationUsers();
+            if (users == null) {
+                return null;
+            }
+            for (ApplicationUser user : users) {
+                if (user == null || !user.isActive()) {
+                    continue;
+                }
+                if (globalPermissionManager().hasPermission(GlobalPermissionKey.ADMINISTER, user)
+                        || globalPermissionManager().hasPermission(GlobalPermissionKey.SYSTEM_ADMIN, user)) {
+                    return user;
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("No administrator was available to remove equipment comments", ex);
+        }
+        return null;
+    }
+
+    private List<Long> issuesMentioningEquipment(ApplicationUser user) {
+        List<Long> ids = new ArrayList<Long>();
+        try {
+            SearchService search = ComponentAccessor.getComponent(SearchService.class);
+            if (search == null) {
+                return ids;
+            }
+            SearchService.ParseResult parsed = search.parseQuery(user,
+                    "comment ~ \"Оборудование\" OR comment ~ \"Equipment\"");
+            if (parsed == null || !parsed.isValid() || parsed.getQuery() == null) {
+                return ids;
+            }
+            int start = 0;
+            while (start < 5000) {
+                SearchResults<Issue> results = search.search(user, parsed.getQuery(), new PagerFilter<Issue>(start, 100));
+                if (results == null || results.getResults() == null || results.getResults().isEmpty()) {
+                    break;
+                }
+                for (Issue issue : results.getResults()) {
+                    if (issue != null && issue.getId() != null) {
+                        ids.add(issue.getId());
+                    }
+                }
+                if (results.getResults().size() < 100) {
+                    break;
+                }
+                start += 100;
+            }
+        } catch (Exception ex) {
+            log.warn("Equipment comments were not searched", ex);
+        }
+        return ids;
     }
 
 
