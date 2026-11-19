@@ -964,14 +964,22 @@
                 windowMenu.appendChild(row);
             });
         }
-        windowsBtn.addEventListener('click', function (event) {
+        windowsBtn.addEventListener('mousedown', function (event) {
             event.stopPropagation();
+        });
+        windowsBtn.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!windowMenu.parentNode) host.appendChild(windowMenu);
             if (windowMenu.style.display === 'none') {
                 paintWindowMenu();
                 var rect = windowsBtn.getBoundingClientRect();
                 var hostRect = host.getBoundingClientRect();
-                windowMenu.style.left = Math.max(8, rect.left - hostRect.left) + 'px';
-                windowMenu.style.top = Math.max(8, rect.bottom - hostRect.top + 4) + 'px';
+                var left = rect.left - hostRect.left;
+                var top = rect.bottom - hostRect.top + 4;
+                if (left + 220 > host.clientWidth) left = Math.max(8, host.clientWidth - 220);
+                windowMenu.style.left = Math.max(8, left) + 'px';
+                windowMenu.style.top = Math.max(8, top) + 'px';
                 windowMenu.style.display = '';
             } else windowMenu.style.display = 'none';
         });
@@ -7339,8 +7347,12 @@
         }
 
         function hideTemplateMenu() {
-            var old = host.querySelector('.asset-tree-scheme-menu');
-            if (old && old.parentNode) old.parentNode.removeChild(old);
+            var menus = host.querySelectorAll('.asset-tree-scheme-menu');
+            var i;
+            for (i = 0; i < menus.length; i++) {
+                if (menus[i].classList.contains('asset-tree-scheme-window-menu')) continue;
+                if (menus[i].parentNode) menus[i].parentNode.removeChild(menus[i]);
+            }
         }
 
         function partsOf(obj) {
