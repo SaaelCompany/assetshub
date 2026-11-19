@@ -217,6 +217,12 @@
 
     function mount(host, api) {
         var session = global.__assetScheme;
+        var snapPrefs = {};
+        try {
+            snapPrefs = JSON.parse(global.localStorage.getItem('assetshub.schemeSnap') || '{}') || {};
+        } catch (error) {
+            snapPrefs = {};
+        }
         if (!session || session.project !== api.projectKey) {
             var doc = blankDoc(api.t);
             doc.activeFloorId = doc.floors[0].id;
@@ -233,10 +239,12 @@
                 typed: '',
                 mode: 'browse',
                 templateId: '',
-                snapOn: true,
+                snapOn: snapPrefs.snap !== false,
                 orthoOn: false,
                 osnapOn: true,
                 gridOn: true,
+                guidesOn: snapPrefs.guides !== false,
+                guides: [],
                 space: false,
                 stamp: '',
                 symbolId: '',
@@ -257,6 +265,16 @@
             global.__assetScheme = session;
         }
         if (!session.mode) session.mode = 'browse';
+        if (session.guidesOn == null) session.guidesOn = snapPrefs.guides !== false;
+        if (!session.guides) session.guides = [];
+        function rememberSnap() {
+            try {
+                global.localStorage.setItem('assetshub.schemeSnap', JSON.stringify({
+                    snap: session.snapOn !== false,
+                    guides: session.guidesOn !== false
+                }));
+            } catch (error) { /* the choice still applies in this tab */ }
+        }
         if (api.focusId) session.pendingFocus = api.focusId;
 
         host.className = 'asset-tree-schemes';
@@ -571,6 +589,35 @@
         head.appendChild(labeled(api.t('schemePlace'), placePick));
         control.appendChild(unit);
         control.appendChild(measureWrap);
+        var snapWrap = el('label', 'asset-tree-scheme-check asset-tree-scheme-measures');
+        var snapToggle = el('input');
+        snapToggle.type = 'checkbox';
+        snapToggle.checked = session.snapOn !== false;
+        snapToggle.title = api.t('schemeSnapHint');
+        snapWrap.title = api.t('schemeSnapHint');
+        snapWrap.appendChild(snapToggle);
+        snapWrap.appendChild(document.createTextNode(api.t('schemeSnap')));
+        var guideWrap = el('label', 'asset-tree-scheme-check asset-tree-scheme-measures');
+        var guideToggle = el('input');
+        guideToggle.type = 'checkbox';
+        guideToggle.checked = session.guidesOn !== false;
+        guideToggle.title = api.t('schemeGuidesHint');
+        guideWrap.title = api.t('schemeGuidesHint');
+        guideWrap.appendChild(guideToggle);
+        guideWrap.appendChild(document.createTextNode(api.t('schemeGuides')));
+        control.appendChild(snapWrap);
+        control.appendChild(guideWrap);
+        snapToggle.addEventListener('change', function () {
+            session.snapOn = snapToggle.checked;
+            rememberSnap();
+            paint();
+        });
+        guideToggle.addEventListener('change', function () {
+            session.guidesOn = guideToggle.checked;
+            if (!session.guidesOn) session.guides = [];
+            rememberSnap();
+            paint();
+        });
         head.appendChild(newBtn);
         head.appendChild(editBtn);
         head.appendChild(backBtn);
@@ -1468,14 +1515,60 @@
                 }
                 best = nearestAngle(deg, extra, limit);
             }
-            if (best == null) return { point: point, locked: false };
+            if (best == null) return { point: point, locked: false, axis: '' };
             var rad = best * Math.PI / 180;
             var span = len;
             if (session.snapOn) span = Math.max(snapStep(), Math.round(len / snapStep()) * snapStep());
             var next = { x: from.x + Math.cos(rad) * span, y: from.y + Math.sin(rad) * span };
-            if (angleDelta(best, 0) < 0.01 || angleDelta(best, 180) < 0.01) next.y = from.y;
-            if (angleDelta(best, 90) < 0.01 || angleDelta(best, -90) < 0.01) next.x = from.x;
-            return { point: next, locked: true };
+            var axis = '';
+            if (angleDelta(best, 0) < 0.01 || angleDelta(best, 180) < 0.01) {
+                next.y = from.y;
+                axis = 'y';
+            }
+            if (angleDelta(best, 90) < 0.01 || angleDelta(best, -90) < 0.01) {
+                next.x = from.x;
+                axis = 'x';
+            }
+            return { point: next, locked: true, axis: axis };
+        }
+
+        function showGuides(point, move) {
+            if (!session.guidesOn) {
+                session.guides = [];
+                return point;
+            }
+            var tol = 8 / (session.cam.z || 1);
+            var marks = axisAnchors(session.snapSkip).marks;
+            var guideX = null;
+            var guideY = null;
+            var bestX = tol;
+            var bestY = tol;
+            var i;
+            for (i = 0; i < marks.length; i++) {
+                var mark = marks[i];
+                var dx = Math.abs(mark.x - point.x);
+                var dy = Math.abs(mark.y - point.y);
+                if (dx <= bestX && dy > 2) {
+                    bestX = dx;
+                    guideX = mark.x;
+                }
+                if (dy <= bestY && dx > 2) {
+                    bestY = dy;
+                    guideY = mark.y;
+                }
+            }
+            var next = { x: point.x, y: point.y };
+            var guides = [];
+            if (guideX != null) {
+                if (move) next.x = roundCm(guideX);
+                guides.push({ axis: 'x', value: move ? next.x : guideX });
+            }
+            if (guideY != null) {
+                if (move) next.y = roundCm(guideY);
+                guides.push({ axis: 'y', value: move ? next.y : guideY });
+            }
+            session.guides = guides;
+            return next;
         }
 
         function snapPoint(raw, from) {
@@ -1483,7 +1576,7 @@
             var drawingWall = session.tool === 'wall' || (session.draft && session.draft.tool === 'wall');
             var aligned = null;
             if (from && (session.orthoOn || drawingWall)) {
-                aligned = alignRightAngle(point, from, session.orthoOn ? 45 : 6, !session.orthoOn);
+                aligned = alignRightAngle(point, from, session.orthoOn ? 45 : 1, !session.orthoOn);
                 if (aligned.locked) point = aligned.point;
             }
             if (session.snapOn && !(aligned && aligned.locked)) {
@@ -1493,6 +1586,7 @@
             }
             point.x = roundCm(point.x);
             point.y = roundCm(point.y);
+            point = showGuides(point, !(aligned && aligned.locked));
             session.osnap = null;
             if (!session.osnapOn) return point;
             var tol = 12 / session.cam.z;
@@ -1554,6 +1648,7 @@
             session.osnapList = found;
             if (session.osnapIndex >= found.length) session.osnapIndex = 0;
             session.osnap = found[session.osnapIndex];
+            showGuides(session.osnap, false);
             return { x: session.osnap.x, y: session.osnap.y };
         }
 
@@ -1568,9 +1663,11 @@
         function axisAnchors(skip) {
             var xs = [];
             var ys = [];
+            var marks = [];
             function add(x, y) {
                 if (isFinite(x)) xs.push(x);
                 if (isFinite(y)) ys.push(y);
+                if (isFinite(x) && isFinite(y)) marks.push({ x: x, y: y });
             }
             var objects = (activeFloor().objects || []);
             var i;
@@ -1592,7 +1689,7 @@
                     for (k = 0; k < obj.points.length; k++) add(obj.points[k].x, obj.points[k].y);
                 }
             }
-            return { xs: xs, ys: ys };
+            return { xs: xs, ys: ys, marks: marks };
         }
 
         function snapBox(x, y, w, h, skip, hold) {
@@ -1601,6 +1698,9 @@
             var step = session.snapOn ? snapStep() : 0;
             var sx = snapShift1D(x, w || 0.01, session.osnapOn ? anchors.xs : [], step ? gridLines(x, w, step) : [], tol, hold && hold.x);
             var sy = snapShift1D(y, h || 0.01, session.osnapOn ? anchors.ys : [], step ? gridLines(y, h, step) : [], tol, hold && hold.y);
+            session.guides = [];
+            if (session.guidesOn && sx.lock) session.guides.push({ axis: 'x', value: sx.lock.anchor });
+            if (session.guidesOn && sy.lock) session.guides.push({ axis: 'y', value: sy.lock.anchor });
             return { x: roundCm(x + sx.shift), y: roundCm(y + sy.shift), hold: { x: sx.lock, y: sy.lock } };
         }
 
@@ -4343,6 +4443,28 @@
                 if (session.marquee) {
                     ctx.strokeStyle = '#0052cc';
                     ctx.strokeRect(session.marquee.x, session.marquee.y, session.marquee.w, session.marquee.h);
+                }
+                if (session.guidesOn && session.guides && session.guides.length) {
+                    var guideLeft = session.cam.x;
+                    var guideTop = session.cam.y;
+                    var guideRight = session.cam.x + (width - 22) / session.cam.z;
+                    var guideBottom = session.cam.y + (height - 22) / session.cam.z;
+                    ctx.save();
+                    ctx.strokeStyle = '#e200b4';
+                    ctx.lineWidth = 1 / session.cam.z;
+                    ctx.setLineDash([]);
+                    ctx.beginPath();
+                    session.guides.forEach(function (guide) {
+                        if (guide.axis === 'x') {
+                            ctx.moveTo(guide.value, guideTop);
+                            ctx.lineTo(guide.value, guideBottom);
+                        } else {
+                            ctx.moveTo(guideLeft, guide.value);
+                            ctx.lineTo(guideRight, guide.value);
+                        }
+                    });
+                    ctx.stroke();
+                    ctx.restore();
                 }
                 if (session.osnap) {
                     var marker = screenFrom(session.osnap.x, session.osnap.y);
@@ -7160,6 +7282,7 @@
             } else if (session.tool === 'select' && !drag) {
                 session.hover = raw;
                 session.osnap = null;
+                session.guides = [];
                 session.symbolHold = null;
             } else {
                 session.hover = pt;
@@ -7283,7 +7406,7 @@
                     var nextY = roundCm(pt.y);
                     if (target.type === 'wall') {
                         var neighbor = drag.handle.index > 0 ? target.points[drag.handle.index - 1] : target.points[1];
-                        var straightened = alignRightAngle({ x: pt.x, y: pt.y }, neighbor, 6, true);
+                        var straightened = alignRightAngle({ x: pt.x, y: pt.y }, neighbor, 1, true);
                         if (straightened.locked) {
                             nextX = roundCm(straightened.point.x);
                             nextY = roundCm(straightened.point.y);
@@ -7331,6 +7454,7 @@
         global.addEventListener('mouseup', onUp);
         function onUp(event) {
             session.snapSkip = null;
+            session.guides = [];
             if (!drag) return;
             if (drag.mode === 'marker') {
                 var stroke = session.draft && session.draft.points;
@@ -7929,7 +8053,13 @@
             }
             if (event.key === 'F7') { session.gridOn = !session.gridOn; paint(); return; }
             if (event.key === 'F8') { session.orthoOn = !session.orthoOn; paint(); return; }
-            if (event.key === 'F9') { session.snapOn = !session.snapOn; paint(); return; }
+            if (event.key === 'F9') {
+                session.snapOn = !session.snapOn;
+                snapToggle.checked = session.snapOn;
+                rememberSnap();
+                paint();
+                return;
+            }
             if (event.key === 'F3') { session.osnapOn = !session.osnapOn; paint(); return; }
             if (event.key === 'Tab' && session.osnapList && session.osnapList.length) {
                 event.preventDefault();

@@ -1106,7 +1106,7 @@ var AssetTreePlan = (function () {
     function knitPair(list, i, j, snaps, addCut) {
         var left = list[i];
         var right = list[j];
-        if (teeTurn(left, right) < 6) {
+        if (teeTurn(left, right) < 1) {
             knitCollinear(left, right, i, j, snaps, addCut);
             return;
         }
