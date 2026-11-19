@@ -57,4 +57,62 @@ public final class ObjectKeys {
             return 0;
         }
     }
+
+    /** A key parked while its object is in the trash. It does not occupy {@code prefix-number}. */
+    public static boolean parked(String objectKey) {
+        return objectKey != null && objectKey.startsWith("~");
+    }
+
+    /** Hides a live key so a new object can take the same number. The original key is kept after the dot. */
+    public static String park(int id, String objectKey) {
+        String key = objectKey == null ? "" : objectKey.trim();
+        String head = "~" + id;
+        if (key.isEmpty() || parked(key)) {
+            return head.length() <= 32 ? head : head.substring(0, 32);
+        }
+        String parked = head + "." + key;
+        if (parked.length() <= 32) {
+            return parked;
+        }
+        return head.length() <= 32 ? head : head.substring(0, 32);
+    }
+
+    /** The key to give back on restore, or empty when this value is a live key. */
+    public static String released(String objectKey) {
+        if (!parked(objectKey)) {
+            return "";
+        }
+        int dot = objectKey.indexOf('.');
+        if (dot < 2 || dot >= objectKey.length() - 1) {
+            return "";
+        }
+        for (int i = 1; i < dot; i++) {
+            char current = objectKey.charAt(i);
+            if (current < '0' || current > '9') {
+                return "";
+            }
+        }
+        return objectKey.substring(dot + 1);
+    }
+
+    /** The smallest positive number whose {@code prefix-number} is not in {@code keys}. */
+    public static int firstFree(String prefix, Iterable<String> keys) {
+        java.util.Set<Integer> used = new java.util.HashSet<Integer>();
+        if (keys != null) {
+            for (String key : keys) {
+                int number = suffix(prefix, key);
+                if (number > 0) {
+                    used.add(Integer.valueOf(number));
+                }
+            }
+        }
+        int value = 1;
+        while (used.contains(Integer.valueOf(value))) {
+            if (value == Integer.MAX_VALUE) {
+                return 1;
+            }
+            value++;
+        }
+        return value;
+    }
 }

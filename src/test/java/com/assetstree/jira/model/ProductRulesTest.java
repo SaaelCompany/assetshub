@@ -139,6 +139,19 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void deletedKeyIsFreeForTheNextObject() {
+        assertEquals("~4.BZ-4", ObjectKeys.park(4, "BZ-4"));
+        assertEquals("BZ-4", ObjectKeys.released("~4.BZ-4"));
+        assertEquals("", ObjectKeys.released("BZ-4"));
+        assertEquals(1, ObjectKeys.firstFree("BZ", Arrays.asList("BZ-2", "BZ-3", "~4.BZ-1")));
+        assertEquals(4, ObjectKeys.firstFree("BZ", Arrays.asList("BZ-1", "BZ-2", "BZ-3")));
+        assertFalse(EquipmentExchange.computerType("\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "printer"));
+        assertFalse(EquipmentExchange.computerType("\u0418\u0411\u041f", "ups"));
+        assertTrue(EquipmentExchange.computerType("\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "pc"));
+        assertTrue(EquipmentExchange.computerType("Laptop", "laptop"));
+    }
+
+    @Test
     public void markFactorsDoubleNightAndSkipLeave() {
         assertEquals(2, TimesheetMath.factor("night", 8, null));
         assertEquals(0, TimesheetMath.factor("leave", 0, null));
@@ -501,11 +514,23 @@ public class ProductRulesTest {
                 "in_use", new HashMap<String, String>(), blankPeople());
         assertTrue(plan.getIssues().toString(), plan.getIssues().isEmpty());
         assertEquals(5, plan.getChanges().size());
-        assertEquals(Integer.valueOf(4), plan.getChanges().get(0).getExistingId());
-        assertNull(plan.getChanges().get(1).getExistingId());
-        assertNull(plan.getChanges().get(2).getExistingId());
-        assertEquals(Integer.valueOf(5), plan.getChanges().get(3).getExistingId());
-        assertNull(plan.getChanges().get(4).getExistingId());
+        for (int i = 0; i < plan.getChanges().size(); i++) {
+            assertNull(plan.getChanges().get(i).getExistingId());
+        }
+
+        EquipmentExchange.Node computer = new EquipmentExchange.Node(9, Integer.valueOf(1), "HP2035", "BZ-9", false, "server");
+        EquipmentSheet.Sheet printers = new EquipmentSheet.Sheet("\u041f\u0440\u0438\u043d\u0442\u0435\u0440", headers, Arrays.asList(
+                new EquipmentSheet.Record(33, Arrays.asList("HP2035", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "Room", "VNC4D36053")),
+                new EquipmentSheet.Record(36, Arrays.asList("HP2035", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "Room", "VNC4D36054"))));
+        List<EquipmentExchange.TypeRef> withServer = new java.util.ArrayList<EquipmentExchange.TypeRef>(types);
+        withServer.add(new EquipmentExchange.TypeRef("server", "Server", false, fields));
+        EquipmentExchange.Plan kept = EquipmentExchange.plan(printers, withServer, statuses,
+                Arrays.asList(room, computer), "in_use", new HashMap<String, String>(), blankPeople());
+        assertTrue(kept.getIssues().toString(), kept.getIssues().isEmpty());
+        assertEquals(2, kept.getChanges().size());
+        assertNull(kept.getChanges().get(0).getExistingId());
+        assertNull(kept.getChanges().get(1).getExistingId());
+        assertEquals("printer", kept.getChanges().get(0).getTypeKey());
     }
 
     private static EquipmentExchange.Directory servicePeople() {

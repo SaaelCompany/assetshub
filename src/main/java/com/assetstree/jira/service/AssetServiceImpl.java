@@ -2598,6 +2598,7 @@ public class AssetServiceImpl implements AssetService {
                     row.setDeletedAt(now);
                     row.setDeletedBy(actorKey);
                     row.setTrashRootId(rootId);
+                    parkKey(row);
                     row.setUpdated(now);
                     row.setUpdatedBy(actorKey);
                     row.save();
@@ -2655,7 +2656,9 @@ public class AssetServiceImpl implements AssetService {
                 for (AssetEntity row : roots) {
                     AssetDto dto = new AssetDto();
                     dto.setId(row.getID());
-                    dto.setObjectKey(row.getObjectKey());
+                    String parked = row.getObjectKey();
+                    String released = ObjectKeys.released(parked);
+                    dto.setObjectKey(released.isEmpty() ? parked : released);
                     dto.setName(row.getName());
                     dto.setTypeKey(row.getTypeKey());
                     dto.setProjectKey(row.getProjectKey());
@@ -2723,6 +2726,7 @@ public class AssetServiceImpl implements AssetService {
                         row.setDeletedAt(null);
                         row.setDeletedBy("");
                         row.setTrashRootId(null);
+                        unparkKey(row, projectKey[0]);
                         row.setUpdated(now);
                         row.setUpdatedBy(actorKey);
                         row.save();
@@ -6465,6 +6469,7 @@ public class AssetServiceImpl implements AssetService {
 
     private PreparedImport prepareEquipmentImport(String projectKey, ImportMemory memory) {
         ensureStatuses(projectKey);
+        releaseTrashKeys(projectKey);
         AssetEntity[] rows = assetsIn(projectKey);
         List<AssetTypeDto> typeDtos = typeDtos(projectKey, rows);
         List<EquipmentExchange.TypeRef> types = new ArrayList<EquipmentExchange.TypeRef>();
@@ -7463,6 +7468,44 @@ public class AssetServiceImpl implements AssetService {
                 || (match.getDisplayName() != null && text.equalsIgnoreCase(match.getDisplayName()));
     }
 
+    /** Keys of objects already in the trash stop blocking the sequence. */
+    private void releaseTrashKeys(String projectKey) {
+        AssetEntity[] rows = assetsAll(projectKey);
+        if (rows == null) {
+            return;
+        }
+        for (AssetEntity row : rows) {
+            if (row == null || row.getDeletedAt() == null || ObjectKeys.parked(row.getObjectKey())) {
+                continue;
+            }
+            parkKey(row);
+            row.save();
+        }
+    }
+
+    /** Moves the key aside so a new object can use the number. Restore gives the original key back when it is still free. */
+    private void parkKey(AssetEntity row) {
+        if (row == null) {
+            return;
+        }
+        row.setObjectKey(ObjectKeys.park(row.getID(), row.getObjectKey()));
+    }
+
+    private void unparkKey(AssetEntity row, String projectKey) {
+        if (row == null) {
+            return;
+        }
+        String original = ObjectKeys.released(row.getObjectKey());
+        if (original.isEmpty()) {
+            return;
+        }
+        if (ao().count(AssetEntity.class, "OBJECT_KEY = ?", original) == 0) {
+            row.setObjectKey(original);
+        } else {
+            row.setObjectKey(nextKey(projectKey));
+        }
+    }
+
     private String nextKey(String projectKey) {
         String prefix = storedAssetPrefix(projectKey);
         if (prefix.isEmpty()) {
@@ -7474,7 +7517,22 @@ public class AssetServiceImpl implements AssetService {
         synchronized (lock) {
             for (int attempt = 0; attempt < 8; attempt++) {
                 AssetCounterEntity counter = counterFor(prefix);
-                int value = Math.max(counter.getNextValue(), 1);
+                AssetEntity[] existing = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY LIKE ?", prefix + "-%"));
+                java.util.List<String> keys = new java.util.ArrayList<String>();
+                if (existing != null) {
+                    for (AssetEntity row : existing) {
+                        if (row == null || row.getObjectKey() == null) {
+                            continue;
+                        }
+                        if (row.getDeletedAt() != null) {
+                            parkKey(row);
+                            row.save();
+                            continue;
+                        }
+                        keys.add(row.getObjectKey());
+                    }
+                }
+                int value = ObjectKeys.firstFree(prefix, keys);
                 counter.setNextValue(value + 1);
                 counter.save();
                 String key = prefix + "-" + value;

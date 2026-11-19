@@ -172,7 +172,7 @@ public final class JsonImport {
                 }
                 byId.put(Integer.valueOf(row.id), row);
                 hosts.add(new TniSame.Card(row.id, row.name, places.contains(row.typeKey), row.externalKey, "",
-                        row.serial, row.inventory));
+                        row.serial, row.inventory, row.typeKey));
                 if (!row.objectKey.isEmpty()) {
                     byKey.put(row.objectKey.toLowerCase(Locale.ROOT), row);
                 }
@@ -197,7 +197,14 @@ public final class JsonImport {
             String serial = fieldMark(item.fields, true);
             String inventory = fieldMark(item.fields, false);
             if (match == null && item.key.isEmpty() && item.externalId.isEmpty()) {
-                int same = TniSame.pick(hosts, 0, item.name, "", serial, inventory, taken);
+                EquipmentExchange.TypeRef hinted = resolveType(item.type, types);
+                boolean computer = hinted != null && EquipmentExchange.computerType(hinted.getLabel(), hinted.getKey());
+                int same = 0;
+                if (computer) {
+                    same = TniSame.pick(hosts, 0, item.name, "", serial, inventory, taken);
+                } else if (hinted != null) {
+                    same = TniSame.byName(hosts, hinted.getKey(), item.name, serial, inventory, taken);
+                }
                 if (same < 0 || (same > 0 && taken.contains(Integer.valueOf(same)))) {
                     issues.add(new EquipmentExchange.Issue(rowNumber, "asset-tree.error.import.host", item.name));
                     continue;
@@ -349,8 +356,9 @@ public final class JsonImport {
             if (match == null && !externalId.isEmpty()) {
                 byExternal.put(externalId.toLowerCase(Locale.ROOT), new Existing(-1, "", externalId, name, "", type.getKey(), statusKey, parentId, "", ""));
             }
-            if (match == null && (!TniText.shortHost(name).isEmpty() || !serial.isEmpty() || !inventory.isEmpty())) {
-                hosts.add(new TniSame.Card(synthetic[0]--, name, false, "", "", serial, inventory));
+            if (match == null && (!TniText.shortHost(name).isEmpty() || !serial.isEmpty() || !inventory.isEmpty()
+                    || !EquipmentExchange.computerType(type.getLabel(), type.getKey()))) {
+                hosts.add(new TniSame.Card(synthetic[0]--, name, false, "", "", serial, inventory, type.getKey()));
             }
         }
         return new Plan(changes, issues);
