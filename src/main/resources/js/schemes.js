@@ -35,8 +35,8 @@
             nx /= len;
             ny /= len;
             var denom = nx * n2.x + ny * n2.y;
-            var miter = Math.abs(denom) < 0.05 ? dist : dist / denom;
-            var limit = Math.abs(dist) * 6;
+            var miter = Math.abs(denom) < 0.2 ? dist : dist / denom;
+            var limit = Math.abs(dist) * 2.2;
             if (miter > limit) miter = limit;
             if (miter < -limit) miter = -limit;
             out.push({ x: curr.x + nx * miter, y: curr.y + ny * miter });
@@ -217,6 +217,12 @@
 
     function mount(host, api) {
         var session = global.__assetScheme;
+        var snapPrefs = {};
+        try {
+            snapPrefs = JSON.parse(global.localStorage.getItem('assetshub.schemeSnap') || '{}') || {};
+        } catch (error) {
+            snapPrefs = {};
+        }
         if (!session || session.project !== api.projectKey) {
             var doc = blankDoc(api.t);
             doc.activeFloorId = doc.floors[0].id;
@@ -233,10 +239,12 @@
                 typed: '',
                 mode: 'browse',
                 templateId: '',
-                snapOn: true,
+                snapOn: snapPrefs.snap !== false,
                 orthoOn: false,
                 osnapOn: true,
                 gridOn: true,
+                guidesOn: snapPrefs.guides !== false,
+                guides: [],
                 space: false,
                 stamp: '',
                 symbolId: '',
@@ -257,6 +265,16 @@
             global.__assetScheme = session;
         }
         if (!session.mode) session.mode = 'browse';
+        if (session.guidesOn == null) session.guidesOn = snapPrefs.guides !== false;
+        if (!session.guides) session.guides = [];
+        function rememberSnap() {
+            try {
+                global.localStorage.setItem('assetshub.schemeSnap', JSON.stringify({
+                    snap: session.snapOn !== false,
+                    guides: session.guidesOn !== false
+                }));
+            } catch (error) { /* the choice still applies in this tab */ }
+        }
         if (api.focusId) session.pendingFocus = api.focusId;
 
         host.className = 'asset-tree-schemes';
@@ -268,38 +286,46 @@
         var nameInput = el('input', 'asset-tree-scheme-name');
         nameInput.value = session.doc.name || '';
         nameInput.disabled = !api.canEdit;
-        var tools = el('div', 'asset-tree-scheme-tools');
-        var toolDefs = [
-            ['select', 'V', 'schemeToolSelect'],
-            ['line', 'L', 'schemeToolLine'],
-            ['rect', 'R', 'schemeToolRect'],
-            ['ellipse', 'E', 'schemeToolEllipse'],
-            ['polyline', 'P', 'schemeToolPen'],
-            ['wall', 'W', 'schemeToolWall'],
-            ['text', 'T', 'schemeToolText'],
-            ['dimension', 'D', 'schemeToolDim'],
-            ['door', '', 'schemeToolDoor'],
-            ['window', '', 'schemeToolWindow'],
-            ['marker', 'M', 'schemeToolMarker'],
-            ['dropper', 'I', 'schemeToolDropper']
+        var tools = el('div', 'asset-tree-scheme-rail');
+        var control = el('div', 'asset-tree-scheme-control');
+        var toolGroups = [
+            [['select', 'V', 'schemeToolSelect']],
+            [
+                ['line', 'L', 'schemeToolLine'],
+                ['rect', 'R', 'schemeToolRect'],
+                ['ellipse', 'E', 'schemeToolEllipse'],
+                ['polyline', 'P', 'schemeToolPen']
+            ],
+            [
+                ['wall', 'W', 'schemeToolWall'],
+                ['door', '', 'schemeToolDoor'],
+                ['window', '', 'schemeToolWindow']
+            ],
+            [
+                ['text', 'T', 'schemeToolText'],
+                ['dimension', 'D', 'schemeToolDim'],
+                ['marker', 'M', 'schemeToolMarker'],
+                ['dropper', 'I', 'schemeToolDropper']
+            ]
         ];
-        toolDefs.forEach(function (item) {
-            var button = el('button', 'asset-tree-scheme-tool');
-            button.type = 'button';
-            button.title = api.t(item[2]) + (item[1] ? ' (' + item[1] + ')' : '');
-            button.setAttribute('data-tool', item[0]);
-            button.disabled = !api.canEdit && item[0] !== 'select';
-            button.innerHTML = toolIcon(item[0]);
-            var caption = el('span', null, api.t(item[2]));
-            button.appendChild(caption);
-            button.addEventListener('click', function () {
-                session.tool = item[0];
-                session.draft = null;
-                session.typed = '';
-                markTools();
-                paint();
+        toolGroups.forEach(function (group, groupIndex) {
+            if (groupIndex) tools.appendChild(el('div', 'asset-tree-scheme-rail-gap'));
+            group.forEach(function (item) {
+                var button = el('button', 'asset-tree-scheme-tool');
+                button.type = 'button';
+                button.title = api.t(item[2]) + (item[1] ? ' (' + item[1] + ')' : '');
+                button.setAttribute('data-tool', item[0]);
+                button.disabled = !api.canEdit && item[0] !== 'select';
+                button.innerHTML = toolIcon(item[0]);
+                button.addEventListener('click', function () {
+                    session.tool = item[0];
+                    session.draft = null;
+                    session.typed = '';
+                    markTools();
+                    paint();
+                });
+                tools.appendChild(button);
             });
-            tools.appendChild(button);
         });
         if (!session.ink) {
             try {
@@ -328,6 +354,7 @@
             session.ink = color;
             rememberInk();
             markSwatches();
+            paintInkWell();
             if (custom) showCustom(color);
             if (selectedObjects().length) paintSelection(color);
             else paint();
@@ -363,12 +390,47 @@
         fillBox.addEventListener('change', function () {
             session.inkFill = fillBox.checked;
             rememberInk();
+            paintInkWell();
         });
         fillInk.appendChild(fillBox);
         fillInk.appendChild(document.createTextNode(api.t('schemeFill')));
         palette.appendChild(swatches);
         palette.appendChild(fillInk);
-        tools.appendChild(palette);
+        var inkWell = el('div', 'asset-tree-scheme-inkwell');
+        var strokeSq = el('button', 'asset-tree-scheme-ink-stroke');
+        var fillSq = el('button', 'asset-tree-scheme-ink-fill');
+        strokeSq.type = 'button';
+        fillSq.type = 'button';
+        strokeSq.title = api.t('schemeColor');
+        fillSq.title = api.t('schemeFill');
+        function paintInkWell() {
+            var color = session.ink || '#172b4d';
+            strokeSq.style.borderColor = color;
+            if (session.inkFill) {
+                fillSq.style.background = color;
+                fillSq.classList.remove('is-none');
+            } else {
+                fillSq.style.background = '#fff';
+                fillSq.classList.add('is-none');
+            }
+        }
+        function toggleInk() {
+            palette.classList.toggle('is-open');
+        }
+        strokeSq.addEventListener('click', function (event) {
+            event.stopPropagation();
+            toggleInk();
+        });
+        fillSq.addEventListener('click', function (event) {
+            event.stopPropagation();
+            toggleInk();
+        });
+        inkWell.appendChild(strokeSq);
+        inkWell.appendChild(fillSq);
+        inkWell.appendChild(palette);
+        tools.appendChild(el('div', 'asset-tree-scheme-rail-spacer'));
+        tools.appendChild(inkWell);
+        paintInkWell();
         var thickWrap = el('label', 'asset-tree-scheme-tool-field', api.t('schemeThickness'));
         var thickInput = el('input');
         thickInput.type = 'number';
@@ -390,7 +452,7 @@
             paint();
         });
         thickWrap.appendChild(thickInput);
-        tools.appendChild(thickWrap);
+        control.appendChild(thickWrap);
         var scanFile = el('input');
         scanFile.type = 'file';
         scanFile.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
@@ -402,16 +464,16 @@
             if (session.mode !== 'edit') return;
             scanFile.click();
         });
-        tools.appendChild(importBtn);
-        tools.appendChild(scanFile);
+        control.appendChild(importBtn);
+        control.appendChild(scanFile);
         var exportDxfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportDxf'));
         exportDxfBtn.type = 'button';
         exportDxfBtn.addEventListener('click', function () { exportScheme('dxf'); });
         var exportPdfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportPdf'));
         exportPdfBtn.type = 'button';
         exportPdfBtn.addEventListener('click', function () { exportScheme('pdf'); });
-        tools.appendChild(exportDxfBtn);
-        tools.appendChild(exportPdfBtn);
+        control.appendChild(exportDxfBtn);
+        control.appendChild(exportPdfBtn);
         var scaleBtn = el('button', 'asset-tree-scheme-tool', api.t('mapScanScale'));
         scaleBtn.type = 'button';
         scaleBtn.disabled = !api.canEdit;
@@ -429,8 +491,8 @@
             session.dirty = true;
             paint();
         });
-        tools.appendChild(scaleBtn);
-        tools.appendChild(removeScan);
+        control.appendChild(scaleBtn);
+        control.appendChild(removeScan);
         var scanWrap = el('label', 'asset-tree-scheme-tool-field', api.t('mapScanWidth'));
         scanWrap.style.display = 'none';
         var scanWidth = el('input');
@@ -449,7 +511,7 @@
             paint();
         });
         scanWrap.appendChild(scanWidth);
-        tools.appendChild(scanWrap);
+        control.appendChild(scanWrap);
         var imageFile = el('input');
         imageFile.type = 'file';
         imageFile.accept = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif';
@@ -462,8 +524,8 @@
             if (session.mode !== 'edit' || session.guest) return;
             imageFile.click();
         });
-        tools.appendChild(imageBtn);
-        tools.appendChild(imageFile);
+        control.appendChild(imageBtn);
+        control.appendChild(imageFile);
         imageFile.addEventListener('change', function () {
             var picked = imageFile.files && imageFile.files[0];
             imageFile.value = '';
@@ -525,8 +587,37 @@
         head.appendChild(labeled(api.t('schemeList'), schemePick));
         head.appendChild(labeled(api.t('name'), nameInput));
         head.appendChild(labeled(api.t('schemePlace'), placePick));
-        head.appendChild(unit);
-        head.appendChild(measureWrap);
+        control.appendChild(unit);
+        control.appendChild(measureWrap);
+        var snapWrap = el('label', 'asset-tree-scheme-check asset-tree-scheme-measures');
+        var snapToggle = el('input');
+        snapToggle.type = 'checkbox';
+        snapToggle.checked = session.snapOn !== false;
+        snapToggle.title = api.t('schemeSnapHint');
+        snapWrap.title = api.t('schemeSnapHint');
+        snapWrap.appendChild(snapToggle);
+        snapWrap.appendChild(document.createTextNode(api.t('schemeSnap')));
+        var guideWrap = el('label', 'asset-tree-scheme-check asset-tree-scheme-measures');
+        var guideToggle = el('input');
+        guideToggle.type = 'checkbox';
+        guideToggle.checked = session.guidesOn !== false;
+        guideToggle.title = api.t('schemeGuidesHint');
+        guideWrap.title = api.t('schemeGuidesHint');
+        guideWrap.appendChild(guideToggle);
+        guideWrap.appendChild(document.createTextNode(api.t('schemeGuides')));
+        control.appendChild(snapWrap);
+        control.appendChild(guideWrap);
+        snapToggle.addEventListener('change', function () {
+            session.snapOn = snapToggle.checked;
+            rememberSnap();
+            paint();
+        });
+        guideToggle.addEventListener('change', function () {
+            session.guidesOn = guideToggle.checked;
+            if (!session.guidesOn) session.guides = [];
+            rememberSnap();
+            paint();
+        });
         head.appendChild(newBtn);
         head.appendChild(editBtn);
         head.appendChild(backBtn);
@@ -537,6 +628,7 @@
         head.appendChild(deleteBtn);
         head.appendChild(windowsBtn);
         bar.appendChild(head);
+        bar.appendChild(control);
         var body = el('div', 'asset-tree-scheme-body');
         var side = el('div', 'asset-tree-scheme-side');
         var stage = el('div', 'asset-tree-scheme-stage');
@@ -555,6 +647,7 @@
         stage.appendChild(overC);
         canvasWrap.appendChild(stage);
         canvasWrap.appendChild(windows);
+        body.appendChild(tools);
         body.appendChild(dockTop);
         body.appendChild(dockLeft);
         body.appendChild(canvasWrap);
@@ -576,7 +669,7 @@
         var panelNodes = {};
         var panelState = {};
         try {
-            panelState = JSON.parse(global.localStorage.getItem('assetshub.schemeWindows.v2') || '{}') || {};
+            panelState = JSON.parse(global.localStorage.getItem('assetshub.schemeWindows.v3') || '{}') || {};
         } catch (error) {
             panelState = {};
         }
@@ -639,7 +732,7 @@
                 top: parseInt(dockTop.style.height, 10) || 0,
                 bottom: parseInt(dockBottom.style.height, 10) || 0
             };
-            try { global.localStorage.setItem('assetshub.schemeWindows.v2', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
+            try { global.localStorage.setItem('assetshub.schemeWindows.v3', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
         }
         function defaultPanelBox(id) {
             var width = stage.clientWidth || 1100;
@@ -698,10 +791,14 @@
                 var visible = false;
                 var i;
                 for (i = 0; i < dock.children.length; i++) {
-                    if (!dock.children[i].classList.contains('is-closed')) visible = true;
+                    var child = dock.children[i];
+                    if (child.classList.contains('is-closed')) continue;
+                    if (dock === dockRight && child.classList.contains('is-collapsed')) continue;
+                    visible = true;
                 }
                 dock.style.display = visible ? '' : 'none';
             });
+            if (markPanelRail) markPanelRail();
         }
         function placePinned(node) {
             var side = node.getAttribute('data-side');
@@ -762,7 +859,7 @@
                 node.classList.add('is-sized');
             }
             if (saved.wide) node.classList.add('is-wide');
-            if (saved.collapsed) node.classList.add('is-collapsed');
+            if (saved.collapsed || saved.collapsed == null) node.classList.add('is-collapsed');
             if (saved.open === false) node.classList.add('is-closed');
             var titleBar = el('div', 'asset-tree-scheme-window-bar');
             titleBar.appendChild(el('span', 'asset-tree-scheme-window-title', title));
@@ -839,7 +936,7 @@
             node.appendChild(titleBar);
             node.appendChild(inner);
             windows.appendChild(node);
-            var homes = { tools: 'left', symbols: 'left', assets: 'left', props: 'right', floors: 'right', layers: 'right', rooms: 'right' };
+            var homes = { symbols: 'right', assets: 'right', props: 'right', floors: 'right', layers: 'right', rooms: 'right' };
             if (saved.pinned !== false) {
                 var kept = saved.side;
                 if (kept !== 'left' && kept !== 'right' && kept !== 'top' && kept !== 'bottom' && kept !== 'free') kept = homes[id] || 'left';
@@ -933,28 +1030,74 @@
             savePanelState();
             paint();
         });
-        makeWindow('tools', api.t('schemeTools'));
         makeWindow('symbols', api.t('schemeSymbols'));
         makeWindow('assets', api.t('schemeAssets'));
         makeWindow('props', api.t('schemeProps'));
         makeWindow('floors', api.t('schemeFloors'));
         makeWindow('layers', api.t('schemeLayers'));
         makeWindow('rooms', api.t('schemeRooms'));
-        panelBodies.tools.appendChild(tools);
         props = panelBodies.props;
+        var panelRail = el('div', 'asset-tree-scheme-panel-rail');
+        var panelGlyph = {
+            symbols: '<rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/>',
+            assets: '<path d="M4 8l8-4 8 4-8 4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/>',
+            props: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="17" r="2"/>',
+            floors: '<rect x="6" y="4" width="12" height="14"/><path d="M6 9h12M6 13h12"/>',
+            layers: '<path d="M4 8l8-4 8 4-8 4z"/><path d="M4 13l8 4 8-4"/>',
+            rooms: '<rect x="4" y="4" width="16" height="16"/><path d="M4 12h16M12 4v16"/>'
+        };
+        function markPanelRail() {
+            if (!panelRail) return;
+            var buttons = panelRail.querySelectorAll('button');
+            var i;
+            for (i = 0; i < buttons.length; i++) {
+                var id = buttons[i].getAttribute('data-panel');
+                var node = panelNodes[id];
+                var open = node && !node.classList.contains('is-closed') && !node.classList.contains('is-collapsed');
+                buttons[i].classList.toggle('is-on', !!open);
+            }
+        }
+        ['symbols', 'assets', 'props', 'floors', 'layers', 'rooms'].forEach(function (id) {
+            var button = el('button', 'asset-tree-scheme-panel-btn');
+            button.type = 'button';
+            button.setAttribute('data-panel', id);
+            button.title = panelNodes[id].querySelector('.asset-tree-scheme-window-title').textContent;
+            button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + panelGlyph[id] + '</svg>';
+            button.addEventListener('click', function () {
+                var node = panelNodes[id];
+                var open = !node.classList.contains('is-collapsed') && !node.classList.contains('is-closed');
+                var keys = ['symbols', 'assets', 'props', 'floors', 'layers', 'rooms'];
+                var n;
+                for (n = 0; n < keys.length; n++) {
+                    var item = panelNodes[keys[n]];
+                    if (keys[n] === id && !open) {
+                        item.classList.remove('is-collapsed');
+                        item.classList.remove('is-closed');
+                    } else item.classList.add('is-collapsed');
+                }
+                syncDocks();
+                savePanelState();
+                paint();
+            });
+            panelRail.appendChild(button);
+        });
+        body.appendChild(panelRail);
+        markPanelRail();
         var windowMenu = el('div', 'asset-tree-scheme-menu asset-tree-scheme-window-menu');
         windowMenu.style.display = 'none';
         function paintWindowMenu() {
             windowMenu.innerHTML = '';
-            ['tools', 'props', 'floors', 'layers', 'rooms', 'symbols', 'assets'].forEach(function (id) {
+            ['props', 'floors', 'layers', 'rooms', 'symbols', 'assets'].forEach(function (id) {
                 var node = panelNodes[id];
                 var row = el('label', 'asset-tree-scheme-check');
                 var box = el('input');
                 box.type = 'checkbox';
                 box.checked = node && !node.classList.contains('is-closed');
                 box.addEventListener('change', function () {
-                    if (box.checked) node.classList.remove('is-closed');
-                    else node.classList.add('is-closed');
+                    if (box.checked) {
+                        node.classList.remove('is-closed');
+                        node.classList.remove('is-collapsed');
+                    } else node.classList.add('is-closed');
                     syncDocks();
                     savePanelState();
                     paint();
@@ -964,14 +1107,22 @@
                 windowMenu.appendChild(row);
             });
         }
-        windowsBtn.addEventListener('click', function (event) {
+        windowsBtn.addEventListener('mousedown', function (event) {
             event.stopPropagation();
+        });
+        windowsBtn.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!windowMenu.parentNode) host.appendChild(windowMenu);
             if (windowMenu.style.display === 'none') {
                 paintWindowMenu();
                 var rect = windowsBtn.getBoundingClientRect();
                 var hostRect = host.getBoundingClientRect();
-                windowMenu.style.left = Math.max(8, rect.left - hostRect.left) + 'px';
-                windowMenu.style.top = Math.max(8, rect.bottom - hostRect.top + 4) + 'px';
+                var left = rect.left - hostRect.left;
+                var top = rect.bottom - hostRect.top + 4;
+                if (left + 220 > host.clientWidth) left = Math.max(8, host.clientWidth - 220);
+                windowMenu.style.left = Math.max(8, left) + 'px';
+                windowMenu.style.top = Math.max(8, top) + 'px';
                 windowMenu.style.display = '';
             } else windowMenu.style.display = 'none';
         });
@@ -979,6 +1130,7 @@
             if (windowMenu.style.display === 'none') return;
             if (windowMenu.contains(event.target) || event.target === windowsBtn) return;
             windowMenu.style.display = 'none';
+            if (inkWell && !inkWell.contains(event.target)) palette.classList.remove('is-open');
         });
         host.appendChild(windowMenu);
 
@@ -1363,14 +1515,60 @@
                 }
                 best = nearestAngle(deg, extra, limit);
             }
-            if (best == null) return { point: point, locked: false };
+            if (best == null) return { point: point, locked: false, axis: '' };
             var rad = best * Math.PI / 180;
             var span = len;
             if (session.snapOn) span = Math.max(snapStep(), Math.round(len / snapStep()) * snapStep());
             var next = { x: from.x + Math.cos(rad) * span, y: from.y + Math.sin(rad) * span };
-            if (angleDelta(best, 0) < 0.01 || angleDelta(best, 180) < 0.01) next.y = from.y;
-            if (angleDelta(best, 90) < 0.01 || angleDelta(best, -90) < 0.01) next.x = from.x;
-            return { point: next, locked: true };
+            var axis = '';
+            if (angleDelta(best, 0) < 0.01 || angleDelta(best, 180) < 0.01) {
+                next.y = from.y;
+                axis = 'y';
+            }
+            if (angleDelta(best, 90) < 0.01 || angleDelta(best, -90) < 0.01) {
+                next.x = from.x;
+                axis = 'x';
+            }
+            return { point: next, locked: true, axis: axis };
+        }
+
+        function showGuides(point, move) {
+            if (!session.guidesOn) {
+                session.guides = [];
+                return point;
+            }
+            var tol = 8 / (session.cam.z || 1);
+            var marks = axisAnchors(session.snapSkip).marks;
+            var guideX = null;
+            var guideY = null;
+            var bestX = tol;
+            var bestY = tol;
+            var i;
+            for (i = 0; i < marks.length; i++) {
+                var mark = marks[i];
+                var dx = Math.abs(mark.x - point.x);
+                var dy = Math.abs(mark.y - point.y);
+                if (dx <= bestX && dy > 2) {
+                    bestX = dx;
+                    guideX = mark.x;
+                }
+                if (dy <= bestY && dx > 2) {
+                    bestY = dy;
+                    guideY = mark.y;
+                }
+            }
+            var next = { x: point.x, y: point.y };
+            var guides = [];
+            if (guideX != null) {
+                if (move) next.x = roundCm(guideX);
+                guides.push({ axis: 'x', value: move ? next.x : guideX });
+            }
+            if (guideY != null) {
+                if (move) next.y = roundCm(guideY);
+                guides.push({ axis: 'y', value: move ? next.y : guideY });
+            }
+            session.guides = guides;
+            return next;
         }
 
         function snapPoint(raw, from) {
@@ -1378,7 +1576,7 @@
             var drawingWall = session.tool === 'wall' || (session.draft && session.draft.tool === 'wall');
             var aligned = null;
             if (from && (session.orthoOn || drawingWall)) {
-                aligned = alignRightAngle(point, from, session.orthoOn ? 45 : 6, !session.orthoOn);
+                aligned = alignRightAngle(point, from, session.orthoOn ? 45 : 1, !session.orthoOn);
                 if (aligned.locked) point = aligned.point;
             }
             if (session.snapOn && !(aligned && aligned.locked)) {
@@ -1388,6 +1586,7 @@
             }
             point.x = roundCm(point.x);
             point.y = roundCm(point.y);
+            point = showGuides(point, !(aligned && aligned.locked));
             session.osnap = null;
             if (!session.osnapOn) return point;
             var tol = 12 / session.cam.z;
@@ -1449,6 +1648,7 @@
             session.osnapList = found;
             if (session.osnapIndex >= found.length) session.osnapIndex = 0;
             session.osnap = found[session.osnapIndex];
+            showGuides(session.osnap, false);
             return { x: session.osnap.x, y: session.osnap.y };
         }
 
@@ -1463,9 +1663,11 @@
         function axisAnchors(skip) {
             var xs = [];
             var ys = [];
+            var marks = [];
             function add(x, y) {
                 if (isFinite(x)) xs.push(x);
                 if (isFinite(y)) ys.push(y);
+                if (isFinite(x) && isFinite(y)) marks.push({ x: x, y: y });
             }
             var objects = (activeFloor().objects || []);
             var i;
@@ -1487,7 +1689,7 @@
                     for (k = 0; k < obj.points.length; k++) add(obj.points[k].x, obj.points[k].y);
                 }
             }
-            return { xs: xs, ys: ys };
+            return { xs: xs, ys: ys, marks: marks };
         }
 
         function snapBox(x, y, w, h, skip, hold) {
@@ -1496,6 +1698,9 @@
             var step = session.snapOn ? snapStep() : 0;
             var sx = snapShift1D(x, w || 0.01, session.osnapOn ? anchors.xs : [], step ? gridLines(x, w, step) : [], tol, hold && hold.x);
             var sy = snapShift1D(y, h || 0.01, session.osnapOn ? anchors.ys : [], step ? gridLines(y, h, step) : [], tol, hold && hold.y);
+            session.guides = [];
+            if (session.guidesOn && sx.lock) session.guides.push({ axis: 'x', value: sx.lock.anchor });
+            if (session.guidesOn && sy.lock) session.guides.push({ axis: 'y', value: sy.lock.anchor });
             return { x: roundCm(x + sx.shift), y: roundCm(y + sy.shift), hold: { x: sx.lock, y: sy.lock } };
         }
 
@@ -3334,20 +3539,44 @@
         }
 
         function hatch(ctx, poly, kind, color) {
-            var minX = poly[0].x;
-            var minY = poly[0].y;
-            var maxX = poly[0].x;
-            var maxY = poly[0].y;
+            var loops = poly && poly.length && poly[0] && poly[0].x == null ? poly : null;
+            var pts = loops ? [] : poly;
             var i;
-            for (i = 1; i < poly.length; i++) {
-                minX = Math.min(minX, poly[i].x);
-                minY = Math.min(minY, poly[i].y);
-                maxX = Math.max(maxX, poly[i].x);
-                maxY = Math.max(maxY, poly[i].y);
+            if (loops) {
+                var li;
+                for (li = 0; li < loops.length; li++) {
+                    var ring = loops[li];
+                    var pi;
+                    for (pi = 0; pi < ring.length; pi++) pts.push(ring[pi]);
+                }
+            }
+            if (!pts || !pts.length) return;
+            var minX = pts[0].x;
+            var minY = pts[0].y;
+            var maxX = pts[0].x;
+            var maxY = pts[0].y;
+            for (i = 1; i < pts.length; i++) {
+                minX = Math.min(minX, pts[i].x);
+                minY = Math.min(minY, pts[i].y);
+                maxX = Math.max(maxX, pts[i].x);
+                maxY = Math.max(maxY, pts[i].y);
             }
             ctx.save();
-            pathOf(ctx, poly, true);
-            ctx.clip();
+            if (loops) {
+                ctx.beginPath();
+                for (i = 0; i < loops.length; i++) {
+                    var loop = loops[i];
+                    if (!loop.length) continue;
+                    ctx.moveTo(loop[0].x, loop[0].y);
+                    var k;
+                    for (k = 1; k < loop.length; k++) ctx.lineTo(loop[k].x, loop[k].y);
+                    ctx.closePath();
+                }
+                ctx.clip('evenodd');
+            } else {
+                pathOf(ctx, poly, true);
+                ctx.clip();
+            }
             ctx.strokeStyle = color;
             ctx.lineWidth = 0.35;
             ctx.beginPath();
@@ -3714,6 +3943,219 @@
             }
         }
 
+        function previewWalls(points) {
+            var floor = activeFloor();
+            var walls = ((floor && floor.objects) || []).filter(function (obj) {
+                return obj.type === 'wall' && layerVisible(obj.layerId);
+            }).slice();
+            walls.push({
+                id: 'draft-wall',
+                type: 'wall',
+                points: points,
+                thickness: wallDefaults().thickness,
+                fill: '#eef2f6',
+                color: '#172b4d',
+                hatch: 'diagonal',
+                opacity: 1
+            });
+            return walls;
+        }
+
+        function addRing(ctx, loop) {
+            if (!loop || loop.length < 2) return;
+            ctx.moveTo(loop[0].x, loop[0].y);
+            var i;
+            for (i = 1; i < loop.length; i++) ctx.lineTo(loop[i].x, loop[i].y);
+            ctx.closePath();
+        }
+
+        function wallOpeningHole(wall, opening) {
+            var seg = wallSegment(wall, opening.index || 0);
+            if (!seg) return null;
+            var len = dist(seg.a.x, seg.a.y, seg.b.x, seg.b.y) || 1;
+            var half = (opening.width || 90) / 2 / len;
+            var t0 = (opening.t || 0.5) - half;
+            var t1 = (opening.t || 0.5) + half;
+            function at(t) {
+                return {
+                    x: seg.a.x + (seg.b.x - seg.a.x) * t,
+                    y: seg.a.y + (seg.b.y - seg.a.y) * t
+                };
+            }
+            var a = at(t0);
+            var b = at(t1);
+            var n = leftNorm(a, b);
+            var reach = (wall.thickness || 15) / 2 + 2;
+            if (wall.alignment === 'left' || wall.alignment === 'right') reach = (wall.thickness || 15) + 2;
+            return {
+                a: a,
+                b: b,
+                poly: [
+                    { x: a.x + n.x * reach, y: a.y + n.y * reach },
+                    { x: b.x + n.x * reach, y: b.y + n.y * reach },
+                    { x: b.x - n.x * reach, y: b.y - n.y * reach },
+                    { x: a.x - n.x * reach, y: a.y - n.y * reach }
+                ]
+            };
+        }
+
+        function ringArea(loop) {
+            var sum = 0;
+            var i;
+            for (i = 0; i < loop.length; i++) {
+                var a = loop[i];
+                var b = loop[(i + 1) % loop.length];
+                sum += a.x * b.y - b.x * a.y;
+            }
+            return Math.abs(sum) / 2;
+        }
+
+        function ringHolds(x, y, loop) {
+            var inside = false;
+            var i;
+            for (i = 0; i < loop.length; i++) {
+                var a = loop[i];
+                var b = loop[(i + 1) % loop.length];
+                if (((a.y > y) !== (b.y > y)) && (x < (b.x - a.x) * (y - a.y) / ((b.y - a.y) || 1) + a.x)) inside = !inside;
+            }
+            return inside;
+        }
+
+        function coveredArea(loops) {
+            var parts = [];
+            var i;
+            for (i = 0; i < loops.length; i++) {
+                var loop = loops[i];
+                if (!loop || loop.length < 3) continue;
+                var cx = 0;
+                var cy = 0;
+                var n;
+                for (n = 0; n < loop.length; n++) {
+                    cx += loop[n].x;
+                    cy += loop[n].y;
+                }
+                parts.push({ loop: loop, area: ringArea(loop), x: cx / loop.length, y: cy / loop.length });
+            }
+            parts.sort(function (a, b) { return b.area - a.area; });
+            var total = 0;
+            for (i = 0; i < parts.length; i++) {
+                var hole = false;
+                var j;
+                for (j = 0; j < i; j++) {
+                    if (ringHolds(parts[i].x, parts[i].y, parts[j].loop)) {
+                        hole = true;
+                        break;
+                    }
+                }
+                total += hole ? -parts[i].area : parts[i].area;
+            }
+            return total < 0 ? 0 : total;
+        }
+
+        function wallMaterialArea(segs) {
+            var sum = 0;
+            var i;
+            for (i = 0; i < segs.length; i++) {
+                var dx = segs[i].x2 - segs[i].x1;
+                var dy = segs[i].y2 - segs[i].y1;
+                sum += Math.sqrt(dx * dx + dy * dy) * (segs[i].thick || 15);
+            }
+            return sum;
+        }
+
+        function wallPainted(wall, alpha) {
+            var copy = {};
+            var key;
+            for (key in wall) {
+                if (Object.prototype.hasOwnProperty.call(wall, key)) copy[key] = wall[key];
+            }
+            copy.opacity = (wall.opacity == null ? 1 : wall.opacity) * alpha;
+            return copy;
+        }
+
+        function paintWallUnion(ctx, walls, floor) {
+            var plan = global.AssetTreePlan;
+            if (!plan || !plan.wallLoops || !walls.length) return false;
+            var groups = [];
+            var byKey = {};
+            var i;
+            for (i = 0; i < walls.length; i++) {
+                var wall = walls[i];
+                if (!wall.points || wall.points.length < 2) continue;
+                var style = (wall.fill || '#eef2f6') + '|' + (wall.color || '#172b4d') + '|' + (wall.hatch || 'diagonal') + '|' + (wall.opacity == null ? 1 : wall.opacity);
+                var group = byKey[style];
+                if (!group) {
+                    group = {
+                        fill: wall.fill || '#eef2f6',
+                        color: wall.color || '#172b4d',
+                        hatch: wall.hatch || 'diagonal',
+                        opacity: wall.opacity == null ? 1 : wall.opacity,
+                        segs: [],
+                        holes: []
+                    };
+                    byKey[style] = group;
+                    groups.push(group);
+                }
+                var count = wall.points.length - 1;
+                if (wall.closed && wall.points.length > 2) count += 1;
+                var k;
+                for (k = 0; k < count; k++) {
+                    var part = wallSegment(wall, k);
+                    if (!part || dist(part.a.x, part.a.y, part.b.x, part.b.y) < 1) continue;
+                    group.segs.push({
+                        x1: part.a.x, y1: part.a.y, x2: part.b.x, y2: part.b.y,
+                        thick: wall.thickness || 15,
+                        align: wall.alignment || ''
+                    });
+                }
+                var objects = floor.objects || [];
+                var o;
+                for (o = 0; o < objects.length; o++) {
+                    var opening = objects[o];
+                    if (opening.type !== 'opening' || opening.wallId !== wall.id) continue;
+                    if (opening.layerId && !layerVisible(opening.layerId)) continue;
+                    var hole = wallOpeningHole(wall, opening);
+                    if (!hole) continue;
+                    group.holes.push(hole.poly);
+                }
+            }
+            if (!groups.length) return false;
+            var ready = [];
+            for (i = 0; i < groups.length; i++) {
+                if (!groups[i].segs.length) continue;
+                var loops = plan.wallLoops(groups[i].segs, groups[i].holes);
+                if (!loops || !loops.length) return false;
+                ready.push({ group: groups[i], loops: loops });
+            }
+            if (!ready.length) return false;
+            var allSegs = [];
+            var allHoles = [];
+            for (i = 0; i < groups.length; i++) {
+                allSegs = allSegs.concat(groups[i].segs);
+                allHoles = allHoles.concat(groups[i].holes);
+            }
+            var outline = plan.wallLoops(allSegs, allHoles);
+            if (!outline || !outline.length) return false;
+            var material = wallMaterialArea(allSegs);
+            var covered = coveredArea(outline);
+            if (!(material > 0) || covered > material * 1.65 || covered < material * 0.2) return false;
+            var base = ctx.globalAlpha == null ? 1 : ctx.globalAlpha;
+            for (i = 0; i < walls.length; i++) drawWall(ctx, wallPainted(walls[i], base), floor, 'body');
+            for (i = 0; i < walls.length; i++) drawWall(ctx, wallPainted(walls[i], base), floor, 'hatch');
+            ctx.save();
+            ctx.globalAlpha = base * groups[0].opacity;
+            ctx.strokeStyle = groups[0].color;
+            ctx.lineWidth = 1.2;
+            ctx.lineJoin = 'miter';
+            ctx.miterLimit = 2;
+            ctx.lineCap = 'butt';
+            ctx.beginPath();
+            for (i = 0; i < outline.length; i++) addRing(ctx, outline[i]);
+            ctx.stroke();
+            ctx.restore();
+            return true;
+        }
+
         function drawWallLayer(ctx, floor) {
             var objects = floor.objects || [];
             var walls = [];
@@ -3723,6 +4165,11 @@
             }
             if (!walls.length) return;
             var shown = walls.filter(function (wall) { return layerVisible(wall.layerId); });
+            if (global.AssetTreePlan && global.AssetTreePlan.wallLoops) {
+                try {
+                    if (paintWallUnion(ctx, shown, floor)) return;
+                } catch (err) {}
+            }
             for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'body');
             for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'stroke');
             for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'cover');
@@ -3941,13 +4388,15 @@
                             opacity: 0.45
                         });
                     } else if (session.draft.tool === 'wall') {
-                        drawWall(ctx, {
-                            points: session.draft.points,
-                            thickness: wallDefaults().thickness,
-                            color: '#172b4d',
-                            hatch: 'diagonal',
-                            opacity: 1
-                        }, activeFloor());
+                        if (!paintWallUnion(ctx, previewWalls(session.draft.points), activeFloor())) {
+                            drawWall(ctx, {
+                                points: session.draft.points,
+                                thickness: wallDefaults().thickness,
+                                color: '#172b4d',
+                                hatch: 'diagonal',
+                                opacity: 1
+                            }, activeFloor());
+                        }
                     } else {
                         ctx.strokeStyle = '#0052cc';
                         ctx.lineWidth = 1;
@@ -3967,16 +4416,21 @@
                         ctx.lineTo(session.draft.x2, session.draft.y2);
                         ctx.stroke();
                     } else if (session.draft.tool === 'wall') {
-                        drawWall(ctx, {
-                            points: [
-                                { x: session.draft.x1, y: session.draft.y1 },
-                                { x: session.draft.x2, y: session.draft.y2 }
-                            ],
-                            thickness: wallDefaults().thickness,
-                            color: '#172b4d',
-                            hatch: 'diagonal',
-                            opacity: 1
-                        }, activeFloor());
+                        if (!paintWallUnion(ctx, previewWalls([
+                            { x: session.draft.x1, y: session.draft.y1 },
+                            { x: session.draft.x2, y: session.draft.y2 }
+                        ]), activeFloor())) {
+                            drawWall(ctx, {
+                                points: [
+                                    { x: session.draft.x1, y: session.draft.y1 },
+                                    { x: session.draft.x2, y: session.draft.y2 }
+                                ],
+                                thickness: wallDefaults().thickness,
+                                color: '#172b4d',
+                                hatch: 'diagonal',
+                                opacity: 1
+                            }, activeFloor());
+                        }
                     } else {
                         ctx.strokeRect(
                             Math.min(session.draft.x1, session.draft.x2),
@@ -3989,6 +4443,28 @@
                 if (session.marquee) {
                     ctx.strokeStyle = '#0052cc';
                     ctx.strokeRect(session.marquee.x, session.marquee.y, session.marquee.w, session.marquee.h);
+                }
+                if (session.guidesOn && session.guides && session.guides.length) {
+                    var guideLeft = session.cam.x;
+                    var guideTop = session.cam.y;
+                    var guideRight = session.cam.x + (width - 22) / session.cam.z;
+                    var guideBottom = session.cam.y + (height - 22) / session.cam.z;
+                    ctx.save();
+                    ctx.strokeStyle = '#e200b4';
+                    ctx.lineWidth = 1 / session.cam.z;
+                    ctx.setLineDash([]);
+                    ctx.beginPath();
+                    session.guides.forEach(function (guide) {
+                        if (guide.axis === 'x') {
+                            ctx.moveTo(guide.value, guideTop);
+                            ctx.lineTo(guide.value, guideBottom);
+                        } else {
+                            ctx.moveTo(guideLeft, guide.value);
+                            ctx.lineTo(guideRight, guide.value);
+                        }
+                    });
+                    ctx.stroke();
+                    ctx.restore();
                 }
                 if (session.osnap) {
                     var marker = screenFrom(session.osnap.x, session.osnap.y);
@@ -5760,6 +6236,9 @@
             session.future = [];
             session.selection = [];
             session.draft = null;
+            var dirty = session.dirty;
+            (doc.floors || []).forEach(function (floor) { syncRooms(floor); });
+            session.dirty = dirty;
             syncWallField();
         }
 
@@ -6803,6 +7282,7 @@
             } else if (session.tool === 'select' && !drag) {
                 session.hover = raw;
                 session.osnap = null;
+                session.guides = [];
                 session.symbolHold = null;
             } else {
                 session.hover = pt;
@@ -6926,7 +7406,7 @@
                     var nextY = roundCm(pt.y);
                     if (target.type === 'wall') {
                         var neighbor = drag.handle.index > 0 ? target.points[drag.handle.index - 1] : target.points[1];
-                        var straightened = alignRightAngle({ x: pt.x, y: pt.y }, neighbor, 6, true);
+                        var straightened = alignRightAngle({ x: pt.x, y: pt.y }, neighbor, 1, true);
                         if (straightened.locked) {
                             nextX = roundCm(straightened.point.x);
                             nextY = roundCm(straightened.point.y);
@@ -6974,6 +7454,7 @@
         global.addEventListener('mouseup', onUp);
         function onUp(event) {
             session.snapSkip = null;
+            session.guides = [];
             if (!drag) return;
             if (drag.mode === 'marker') {
                 var stroke = session.draft && session.draft.points;
@@ -7087,8 +7568,12 @@
         }
 
         function hideTemplateMenu() {
-            var old = host.querySelector('.asset-tree-scheme-menu');
-            if (old && old.parentNode) old.parentNode.removeChild(old);
+            var menus = host.querySelectorAll('.asset-tree-scheme-menu');
+            var i;
+            for (i = 0; i < menus.length; i++) {
+                if (menus[i].classList.contains('asset-tree-scheme-window-menu')) continue;
+                if (menus[i].parentNode) menus[i].parentNode.removeChild(menus[i]);
+            }
         }
 
         function partsOf(obj) {
@@ -7568,7 +8053,13 @@
             }
             if (event.key === 'F7') { session.gridOn = !session.gridOn; paint(); return; }
             if (event.key === 'F8') { session.orthoOn = !session.orthoOn; paint(); return; }
-            if (event.key === 'F9') { session.snapOn = !session.snapOn; paint(); return; }
+            if (event.key === 'F9') {
+                session.snapOn = !session.snapOn;
+                snapToggle.checked = session.snapOn;
+                rememberSnap();
+                paint();
+                return;
+            }
             if (event.key === 'F3') { session.osnapOn = !session.osnapOn; paint(); return; }
             if (event.key === 'Tab' && session.osnapList && session.osnapList.length) {
                 event.preventDefault();
