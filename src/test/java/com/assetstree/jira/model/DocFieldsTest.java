@@ -30,4 +30,27 @@ public class DocFieldsTest {
         assertEquals("eng@example.com", values.get(DocxFill.normalize("почта")));
         assertEquals("Инженерная служба", values.get(DocxFill.normalize("отдел")));
     }
+
+    @Test
+    public void issuedPersonAndCardFieldsFillTheirOwnTokens() {
+        DocFields.Source source = new DocFields.Source();
+        source.mol = "Иванов И.И.";
+        source.custodian = "Иванов И.И.";
+        source.issued = "Петров П.П.";
+        source.email = "";
+        source.department = "";
+        source.fields.put("mail", "desk@example.com");
+        source.labels.put("mail", "Почта");
+        source.fields.put("unit", "Бухгалтерия");
+        source.labels.put("unit", "Отдел");
+        source.fields.put("note", "Кабинет 12");
+        source.labels.put("note", "Примечание");
+        Map<String, String> values = DocFields.values(source);
+        assertEquals("Иванов И.И.", values.get(DocxFill.normalize("мол")));
+        assertEquals("Иванов И.И.", values.get(DocxFill.normalize("ответственный")));
+        assertEquals("Петров П.П.", values.get(DocxFill.normalize("кому выдано")));
+        assertEquals("desk@example.com", values.get(DocxFill.normalize("почта")));
+        assertEquals("Бухгалтерия", values.get(DocxFill.normalize("отдел")));
+        assertEquals("Кабинет 12", values.get(DocxFill.normalize("Примечание")));
+    }
 }

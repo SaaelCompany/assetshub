@@ -15,6 +15,7 @@ public final class DocFields {
         public String address = "";
         public String city = "";
         public String mol = "";
+        public String issued = "";
         public String role = "";
         public String phone = "";
         public String email = "";
@@ -51,6 +52,7 @@ public final class DocFields {
         put(out, card.address, "address", "адрес");
         put(out, card.city, "city", "город");
         put(out, card.mol, "mol", "мол");
+        put(out, card.issued, "issued", "issuedto", "кому выдано", "выдано");
         put(out, card.role, "должность", "роль", "title");
         put(out, card.phone, "phone", "телефон", "тел");
         put(out, card.email, "email", "почта");
@@ -108,8 +110,13 @@ public final class DocFields {
 
     private static void remember(Map<String, String> out, String key, String value) {
         String token = DocxFill.normalize(key);
-        if (!token.isEmpty() && !out.containsKey(token)) {
-            out.put(token, value == null ? "" : value);
+        if (token.isEmpty()) {
+            return;
+        }
+        String text = value == null ? "" : value;
+        String current = out.get(token);
+        if (current == null || (current.isEmpty() && !text.isEmpty())) {
+            out.put(token, text);
         }
     }
 

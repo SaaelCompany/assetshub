@@ -9803,14 +9803,98 @@ public class AssetServiceImpl implements AssetService {
         try {
             UserWithAttributes attributes = crowdService().getUserWithAttributes(user.getName());
             if (attributes != null) {
-                dto.setPhone(firstValue(attributes, "telephoneNumber", "phone", "mobile", "mobilePhone"));
-                dto.setDepartment(firstValue(attributes, "department", "departmentNumber"));
-                dto.setTitle(firstValue(attributes, "title", "jobTitle"));
+                dto.setPhone(firstValue(attributes, "telephoneNumber", "phone", "mobile", "mobilePhone", "telephone", "ipPhone"));
+                dto.setDepartment(firstValue(attributes, "department", "departmentNumber", "division", "ou"));
+                dto.setTitle(firstValue(attributes, "title", "jobTitle", "jobtitle"));
+                if (dto.getEmail() == null || dto.getEmail().trim().isEmpty()) {
+                    dto.setEmail(firstValue(attributes, "mail", "email", "emailAddress"));
+                }
+                Set<String> keys = attributes.getKeys();
+                if (keys != null) {
+                    for (String key : keys) {
+                        readContact(dto, key, attributes.getValue(key));
+                    }
+                }
             }
         } catch (RuntimeException ex) {
             log.debug("Directory attributes failed for {}", userKey, ex);
         }
+        readUserContact(user, dto);
         return dto;
+    }
+
+    private void readUserContact(ApplicationUser user, UserProfileDto dto) {
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null) {
+                return;
+            }
+            @SuppressWarnings("rawtypes")
+            java.util.Collection keys = set.getKeys();
+            if (keys == null) {
+                return;
+            }
+            for (Object key : keys) {
+                if (key == null) {
+                    continue;
+                }
+                String name = String.valueOf(key);
+                try {
+                    readContact(dto, name, set.getString(name));
+                } catch (RuntimeException ignored) {
+                    // A non-text property is not a contact field.
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.debug("User properties were not read for {}", user == null ? "" : user.getKey(), ex);
+        }
+    }
+
+    private void readContact(UserProfileDto dto, String key, String value) {
+        if (dto == null || key == null || value == null) {
+            return;
+        }
+        String text = value.trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        String norm = DocxFill.normalize(key);
+        if (norm.contains("password") || norm.contains("token") || norm.contains("secret")) {
+            return;
+        }
+        if (blank(dto.getPhone()) && (norm.contains("phone") || norm.contains("tel") || norm.contains("телефон"))) {
+            dto.setPhone(text);
+        } else if (blank(dto.getDepartment()) && (norm.contains("department") || norm.contains("division")
+                || norm.contains("отдел") || norm.contains("подраздел"))) {
+            dto.setDepartment(text);
+        } else if (blank(dto.getTitle()) && (norm.contains("title") || norm.contains("position") || norm.contains("должност"))) {
+            dto.setTitle(text);
+        } else if (blank(dto.getEmail()) && (norm.contains("mail") || norm.contains("почт"))) {
+            dto.setEmail(text);
+        }
+    }
+
+    private static boolean blank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static void fillDocumentPerson(DocFields.Source source, UserProfileDto person, boolean onlyBlank) {
+        if (source == null || person == null) {
+            return;
+        }
+        source.role = documentPersonValue(source.role, person.getTitle(), onlyBlank);
+        source.phone = documentPersonValue(source.phone, person.getPhone(), onlyBlank);
+        source.email = documentPersonValue(source.email, person.getEmail(), onlyBlank);
+        source.department = documentPersonValue(source.department, person.getDepartment(), onlyBlank);
+    }
+
+    private static String documentPersonValue(String current, String incoming, boolean onlyBlank) {
+        String next = incoming == null ? "" : incoming.trim();
+        String kept = current == null ? "" : current;
+        if (next.isEmpty() || (onlyBlank && !kept.trim().isEmpty())) {
+            return kept;
+        }
+        return next;
     }
 
     private String avatarUrl(ApplicationUser user) {
@@ -18813,15 +18897,13 @@ public class AssetServiceImpl implements AssetService {
         AssetTypeEntity type = findType(asset.getTypeKey());
         source.typeLabel = type == null ? "" : documentLabel(type.getLabel());
         source.statusLabel = statusName(asset.getProjectKey(), asset.getStatus());
-        source.mol = userLabel(asset.getIssuedKey());
-        source.custodian = userLabel(asset.getCustodianKey());
-        UserProfileDto issued = profile(asset.getIssuedKey());
-        if (issued != null) {
-            source.role = issued.getTitle() == null ? "" : issued.getTitle();
-            source.phone = issued.getPhone() == null ? "" : issued.getPhone();
-            source.email = issued.getEmail() == null ? "" : issued.getEmail();
-            source.department = issued.getDepartment() == null ? "" : issued.getDepartment();
-        }
+        String molName = userLabel(asset.getCustodianKey());
+        String issuedName = userLabel(asset.getIssuedKey());
+        source.mol = molName.isEmpty() ? issuedName : molName;
+        source.custodian = source.mol;
+        source.issued = issuedName;
+        fillDocumentPerson(source, profile(asset.getIssuedKey()), false);
+        fillDocumentPerson(source, profile(asset.getCustodianKey()), true);
         Project project = project(asset.getProjectKey());
         source.project = project == null || project.getName() == null ? asset.getProjectKey() : project.getName();
         source.today = DateTimeFormatter.ofPattern("dd.MM.yyyy").format(LocalDate.now(businessZone()));
@@ -18857,19 +18939,23 @@ public class AssetServiceImpl implements AssetService {
             String value = attribute.getAttrValue() == null ? "" : attribute.getAttrValue();
             if (field != null && FieldKinds.USER.equals(field.getKind())) {
                 value = userLabel(value);
+            } else if (field != null && FieldChoices.handles(field.getKind())) {
+                value = FieldChoices.display(value);
             }
             String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
             source.fields.put(attribute.getAttrName(), value);
             source.labels.put(attribute.getAttrName(), label == null ? "" : label);
             String folded = DocxFill.normalize(label);
             if (!value.isEmpty()) {
-                if (folded.contains("должност")) {
+                if (folded.contains("комувыдано") || "выдано".equals(folded)) {
+                    source.issued = value;
+                } else if (folded.contains("должност")) {
                     source.role = value;
                 } else if (folded.contains("телефон") || folded.contains("phone")) {
                     source.phone = value;
                 } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел")) {
                     source.department = value;
-                } else if (folded.contains("почт") || folded.contains("email")) {
+                } else if (folded.contains("почт") || folded.contains("email") || folded.contains("mail")) {
                     source.email = value;
                 }
             }
