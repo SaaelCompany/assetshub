@@ -17,6 +17,7 @@ public class BulkDraft {
     private Long statusAt;
     private String custodianKey;
     private Integer parentId;
+    private String typeKey;
     private boolean toRoot;
     private boolean cascade;
 
@@ -82,6 +83,14 @@ public class BulkDraft {
 
     public void setParentId(Integer parentId) {
         this.parentId = parentId;
+    }
+
+    public String getTypeKey() {
+        return typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey;
     }
 
     public boolean isToRoot() {

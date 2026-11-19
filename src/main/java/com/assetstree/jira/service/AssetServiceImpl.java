@@ -76,6 +76,7 @@ import com.assetstree.jira.ao.AssetFieldEntity;
 import com.assetstree.jira.ao.FlowGraphEntity;
 import com.assetstree.jira.ao.FlowRuleEntity;
 import com.assetstree.jira.ao.AssetFileEntity;
+import com.assetstree.jira.ao.DocTemplateEntity;
 import com.assetstree.jira.ao.AssetShareEntity;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetLinkEntity;
@@ -166,6 +167,7 @@ import com.assetstree.jira.dto.ReportLineDto;
 import com.assetstree.jira.dto.ReportVennDto;
 import com.assetstree.jira.dto.ReportViewDto;
 import com.assetstree.jira.dto.RoomDto;
+import com.assetstree.jira.dto.DocTemplateDto;
 import com.assetstree.jira.dto.ReportBoardDto;
 import com.assetstree.jira.dto.ReportBoardPanelDto;
 import com.assetstree.jira.dto.SavedReportDto;
@@ -201,12 +203,17 @@ import com.assetstree.jira.model.FlowBook;
 import com.assetstree.jira.model.FlowGraph;
 import com.assetstree.jira.model.PickerLayout;
 import com.assetstree.jira.model.PlaceArrangeDraft;
+import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceLayout;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.FlowRules;
+import com.assetstree.jira.model.DocFields;
+import com.assetstree.jira.model.DuplicateMarks;
+import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.model.AssetKeyRules;
 import com.assetstree.jira.model.ObjectKeys;
@@ -300,7 +307,10 @@ import java.time.ZoneId;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -2331,7 +2341,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public void storePhoto(ApplicationUser user, int assetId, byte[] data) {
+    public void storePhoto(ApplicationUser user, int assetId, byte[] data, int[] also) {
         if (data == null || data.length == 0) {
             throw new AssetException(400, "asset-tree.error.file.required");
         }
@@ -2347,31 +2357,68 @@ public class AssetServiceImpl implements AssetService {
         } catch (IOException ex) {
             throw new AssetException(400, "asset-tree.error.photo.type");
         }
+        final int[] ids = photoTargets(assetId, also);
         final String kind = "jpeg";
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
-                AssetEntity entity = requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
-                if (!photosOn(entity.getProjectKey())) {
-                    throw new AssetException(403, "asset-tree.error.photo.off");
+                String projectKey = null;
+                for (int i = 0; i < ids.length; i++) {
+                    AssetEntity entity = requireAssetCap(user, ids[i], kindCap(requireAsset(ids[i])));
+                    if (projectKey == null) {
+                        projectKey = entity.getProjectKey();
+                    } else if (entity.getProjectKey() == null || !projectKey.equals(entity.getProjectKey())) {
+                        throw new AssetException(400, "asset-tree.error.photo.place");
+                    }
+                    if (!photosOn(entity.getProjectKey())) {
+                        throw new AssetException(403, "asset-tree.error.photo.off");
+                    }
+                    if (isLocation(entity)) {
+                        throw new AssetException(400, "asset-tree.error.photo.place");
+                    }
+                    entity.setPhoto(kind);
+                    entity.setUpdated(new Date());
+                    entity.setUpdatedBy(user.getKey());
+                    entity.save();
                 }
-                if (isLocation(entity)) {
-                    throw new AssetException(400, "asset-tree.error.photo.place");
-                }
-                entity.setPhoto(kind);
-                entity.setUpdated(new Date());
-                entity.setUpdatedBy(user.getKey());
-                entity.save();
                 return null;
             }
         });
+        int written = 0;
         try {
-            PhotoStore.write(assetId, bytes);
+            for (int i = 0; i < ids.length; i++) {
+                PhotoStore.write(ids[i], bytes);
+                written++;
+            }
         } catch (IOException ex) {
-            clearPhoto(assetId);
+            for (int i = written; i < ids.length; i++) {
+                clearPhoto(ids[i]);
+            }
             throw new AssetException(500, "asset-tree.error.unexpected");
         }
-        logActivity(assetId, user.getKey(), "photo", "", "", "1");
+        for (int i = 0; i < ids.length; i++) {
+            logActivity(ids[i], user.getKey(), "photo", "", "", "1");
+        }
+    }
+
+    private int[] photoTargets(int assetId, int[] also) {
+        ArrayList<Integer> ids = new ArrayList<Integer>();
+        ids.add(Integer.valueOf(assetId));
+        if (also != null) {
+            for (int i = 0; i < also.length; i++) {
+                if (also[i] > 0 && !ids.contains(Integer.valueOf(also[i]))) {
+                    ids.add(Integer.valueOf(also[i]));
+                }
+            }
+        }
+        if (ids.size() > 500) {
+            throw new AssetException(400, "asset-tree.error.photo.many");
+        }
+        int[] out = new int[ids.size()];
+        for (int i = 0; i < ids.size(); i++) {
+            out[i] = ids.get(i).intValue();
+        }
+        return out;
     }
 
     @Override
@@ -2940,6 +2987,192 @@ public class AssetServiceImpl implements AssetService {
                     sibling.save();
                 }
                 return toDto(moving, attributesFor(id), indexTypes(typeDtos(moving.getProjectKey(), all)), indexAssets(all), true);
+            }
+        });
+    }
+
+    @Override
+    public void moveObjects(ApplicationUser user, String projectKey, GroupMoveDraft draft) {
+        if (draft == null || draft.getIds() == null || draft.getIds().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final List<Integer> ids = new ArrayList<Integer>();
+        Set<Integer> unique = new HashSet<Integer>();
+        for (Integer id : draft.getIds()) {
+            if (id != null && id.intValue() > 0 && unique.add(id)) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        if (ids.size() > BulkSelection.MAX_ITEMS) {
+            throw new AssetException(400, "asset-tree.error.bulk.limit", Integer.valueOf(BulkSelection.MAX_ITEMS));
+        }
+        final Integer parentId = TreeLogic.normalizeParent(draft.getParentId());
+        final String requestedType = draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
+        final AssetTypeEntity nextType = requestedType.isEmpty() ? null : requireEquipmentType(project, requestedType);
+        final Integer index = draft.getIndex();
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                if (parentId != null) {
+                    AssetEntity parent = requireReadable(user, parentId.intValue());
+                    if (!ProjectKeys.same(parent.getProjectKey(), project.getKey())) {
+                        throw new AssetException(400, "asset-tree.error.project.mismatch");
+                    }
+                }
+                AssetEntity[] all = assetsIn(project.getKey());
+                Map<Integer, Integer> parents = parentMap(all);
+                Map<Integer, List<Integer>> children = childrenMap(all);
+                if (parentId != null && !parents.containsKey(parentId)) {
+                    throw new AssetException(400, "asset-tree.error.parent");
+                }
+                List<AssetEntity> moving = new ArrayList<AssetEntity>();
+                Set<Integer> movingIds = new HashSet<Integer>();
+                for (Integer id : ids) {
+                    AssetEntity entity = requireAssetCap(user, id.intValue(), kindCap(requireAsset(id.intValue())));
+                    if (!ProjectKeys.same(entity.getProjectKey(), project.getKey())) {
+                        throw new AssetException(400, "asset-tree.error.project.mismatch");
+                    }
+                    if (isLocation(entity)) {
+                        throw new AssetException(400, "asset-tree.error.bulk.place", entity.getName());
+                    }
+                    if (TreeLogic.wouldCycle(parents, id.intValue(), parentId)) {
+                        throw new AssetException(400, "asset-tree.error.cycle");
+                    }
+                    int baseDepth = parentId == null ? 0 : TreeLogic.depth(parents, parentId.intValue()) + 1;
+                    int extra = TreeLogic.subtreeHeight(children, id.intValue());
+                    if (baseDepth >= TreeLogic.MAX_DEPTH || baseDepth + extra >= TreeLogic.MAX_DEPTH) {
+                        throw new AssetException(400, "asset-tree.error.depth");
+                    }
+                    moving.add(entity);
+                    movingIds.add(id);
+                }
+                List<AssetEntity> siblings = new ArrayList<AssetEntity>();
+                for (AssetEntity candidate : all) {
+                    if (movingIds.contains(Integer.valueOf(candidate.getID()))) {
+                        continue;
+                    }
+                    if (TreeLogic.sameParent(candidate.getParentId(), parentId)) {
+                        siblings.add(candidate);
+                    }
+                }
+                Collections.sort(siblings, SIBLING_ORDER);
+                int at = index == null ? siblings.size() : index.intValue();
+                if (at < 0) {
+                    at = 0;
+                }
+                if (at > siblings.size()) {
+                    at = siblings.size();
+                }
+                for (AssetEntity entity : moving) {
+                    Integer previousParent = TreeLogic.normalizeParent(entity.getParentId());
+                    Integer fromPlace = placeContainer(previousParent, all, null);
+                    Integer toPlace = placeContainer(parentId, all, null);
+                    String oldType = entity.getTypeKey() == null ? "" : entity.getTypeKey();
+                    if (nextType != null && !nextType.getTypeKey().equals(oldType)) {
+                        entity.setTypeKey(nextType.getTypeKey());
+                        logActivity(entity.getID(), user.getKey(), "type", "", typeLabel(findType(oldType)), typeLabel(nextType));
+                    }
+                    entity.setParentId(parentId);
+                    entity.setUpdated(new Date());
+                    entity.setUpdatedBy(user.getKey());
+                    if (!TreeLogic.sameParent(previousParent, parentId)) {
+                        logActivity(entity.getID(), user.getKey(), "move", "", parentName(previousParent), parentName(parentId));
+                    }
+                    if (fromPlace != null && !fromPlace.equals(toPlace)) {
+                        logPlaceChange(user, fromPlace, "place_out", entity);
+                    }
+                    if (toPlace != null && !toPlace.equals(fromPlace)) {
+                        logPlaceChange(user, toPlace, "place_in", entity);
+                    }
+                }
+                siblings.addAll(at, moving);
+                for (int i = 0; i < siblings.size(); i++) {
+                    AssetEntity sibling = siblings.get(i);
+                    sibling.setSortOrder(i);
+                    sibling.save();
+                }
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public void sortTypeObjects(ApplicationUser user, final int assetId, final PlaceSortDraft draft) {
+        if (draft == null || draft.getTypeKey() == null || draft.getTypeKey().trim().isEmpty()
+                || draft.getIds() == null || draft.getIds().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        final String typeKey = draft.getTypeKey().trim();
+        final List<Integer> wanted = new ArrayList<Integer>();
+        Set<Integer> seen = new HashSet<Integer>();
+        for (Integer id : draft.getIds()) {
+            if (id != null && id.intValue() > 0 && seen.add(id)) {
+                wanted.add(id);
+            }
+        }
+        if (wanted.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.bulk.empty");
+        }
+        if (wanted.size() > BulkSelection.MAX_ITEMS) {
+            throw new AssetException(400, "asset-tree.error.bulk.limit", Integer.valueOf(BulkSelection.MAX_ITEMS));
+        }
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity place = requireAsset(assetId);
+                requireProjectCap(user, place.getProjectKey(), GrantCaps.OBJECT);
+                if (!isLocation(place)) {
+                    throw new AssetException(400, "asset-tree.error.type.place");
+                }
+                AssetTypeEntity type = requireType(typeKey);
+                if (type.isLocation() || !ProjectKeys.same(type.getProjectKey(), place.getProjectKey())) {
+                    throw new AssetException(400, "asset-tree.error.type");
+                }
+                AssetEntity[] all = assetsIn(place.getProjectKey());
+                List<AssetEntity> siblings = new ArrayList<AssetEntity>();
+                Map<Integer, AssetEntity> ofType = new HashMap<Integer, AssetEntity>();
+                for (AssetEntity candidate : all) {
+                    if (!TreeLogic.sameParent(candidate.getParentId(), Integer.valueOf(place.getID()))) {
+                        continue;
+                    }
+                    siblings.add(candidate);
+                    if (!isLocation(candidate) && typeKey.equals(candidate.getTypeKey())) {
+                        ofType.put(Integer.valueOf(candidate.getID()), candidate);
+                    }
+                }
+                if (ofType.size() != wanted.size()) {
+                    throw new AssetException(400, "asset-tree.error.bulk.action");
+                }
+                List<AssetEntity> ordered = new ArrayList<AssetEntity>();
+                for (Integer id : wanted) {
+                    AssetEntity row = ofType.get(id);
+                    if (row == null) {
+                        throw new AssetException(400, "asset-tree.error.bulk.action");
+                    }
+                    ordered.add(row);
+                }
+                Collections.sort(siblings, SIBLING_ORDER);
+                List<Integer> slots = new ArrayList<Integer>();
+                for (int i = 0; i < siblings.size(); i++) {
+                    if (ofType.containsKey(Integer.valueOf(siblings.get(i).getID()))) {
+                        slots.add(Integer.valueOf(i));
+                    }
+                }
+                for (int i = 0; i < slots.size(); i++) {
+                    siblings.set(slots.get(i).intValue(), ordered.get(i));
+                }
+                for (int i = 0; i < siblings.size(); i++) {
+                    AssetEntity sibling = siblings.get(i);
+                    if (sibling.getSortOrder() != i) {
+                        sibling.setSortOrder(i);
+                        sibling.save();
+                    }
+                }
+                return null;
             }
         });
     }
@@ -6254,14 +6487,25 @@ public class AssetServiceImpl implements AssetService {
         for (AssetTypeDto type : typeDtos) {
             locationByType.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
         }
+        List<Integer> assetIds = new ArrayList<Integer>();
+        for (AssetEntity row : rows) {
+            assetIds.add(Integer.valueOf(row.getID()));
+        }
+        Map<Integer, List<AssetAttributeEntity>> storedAttributes = attributesByAsset(assetIds);
+        Map<String, List<FieldDto>> fieldsByType = new HashMap<String, List<FieldDto>>();
+        for (AssetTypeDto type : typeDtos) {
+            fieldsByType.put(type.getTypeKey(), type.getFields() == null
+                    ? Collections.<FieldDto>emptyList() : type.getFields());
+        }
         List<EquipmentExchange.Node> nodes = new ArrayList<EquipmentExchange.Node>();
         for (AssetEntity row : rows) {
             Boolean location = locationByType.get(row.getTypeKey());
             boolean place = location != null && location.booleanValue();
             Integer id = Integer.valueOf(row.getID());
             Integer parentId = TreeLogic.normalizeParent(row.getParentId());
+            String[] marks = identityMarks(fieldsByType.get(row.getTypeKey()), storedAttributes.get(id));
             nodes.add(new EquipmentExchange.Node(row.getID(), parentId, row.getName(), row.getObjectKey(), place,
-                    row.getTypeKey()));
+                    row.getTypeKey(), marks[0], marks[1]));
             memory.locations.put(id, Boolean.valueOf(place));
             memory.parents.put(id, parentId);
             memory.names.put(id, row.getName() == null ? "" : row.getName());
@@ -6560,7 +6804,7 @@ public class AssetServiceImpl implements AssetService {
 
     private BulkResultDto bulkAssets(ApplicationUser user, Project project, String action, BulkDraft draft) {
         if (!"delete".equals(action) && !"move".equals(action) && !"status".equals(action)
-                && !"custodian".equals(action) && !"copy".equals(action)) {
+                && !"custodian".equals(action) && !"copy".equals(action) && !"type".equals(action)) {
             throw new AssetException(400, "asset-tree.error.bulk.action");
         }
         if ("move".equals(action) && !draft.isToRoot() && TreeLogic.normalizeParent(draft.getParentId()) == null) {
@@ -6588,6 +6832,7 @@ public class AssetServiceImpl implements AssetService {
         if ("move".equals(action)) {
             return moveAssets(user, project, ids, order, draft);
         }
+        final AssetTypeEntity nextType = "type".equals(action) ? requireEquipmentType(project, draft.getTypeKey()) : null;
         Set<Integer> selected = new HashSet<Integer>(ids);
         Set<Integer> covered = new HashSet<Integer>();
         BulkResultDto result = new BulkResultDto();
@@ -6612,6 +6857,8 @@ public class AssetServiceImpl implements AssetService {
                     patchStatus(user, id.intValue(), draft.getStatus(), draft.getStatusAt());
                 } else if ("copy".equals(action)) {
                     copyAsset(user, id.intValue());
+                } else if ("type".equals(action)) {
+                    patchType(user, id.intValue(), nextType);
                 } else {
                     patchCustodian(user, id.intValue(), draft.getCustodianKey());
                 }
@@ -6770,6 +7017,35 @@ public class AssetServiceImpl implements AssetService {
                 entity.setUpdatedBy(user.getKey());
                 entity.save();
                 logActivity(id, user.getKey(), "status", "", oldStatus, next, when);
+                return null;
+            }
+        });
+    }
+
+    private AssetTypeEntity requireEquipmentType(Project project, String typeKey) {
+        AssetTypeEntity type = requireType(typeKey == null ? "" : typeKey.trim());
+        if (type.isLocation() || !ProjectKeys.same(type.getProjectKey(), project.getKey())) {
+            throw new AssetException(400, "asset-tree.error.type");
+        }
+        return type;
+    }
+
+    private void patchType(ApplicationUser user, final int id, final AssetTypeEntity type) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                if (isLocation(entity)) {
+                    throw new AssetException(400, "asset-tree.error.bulk.place", entity.getName());
+                }
+                String oldKey = entity.getTypeKey() == null ? "" : entity.getTypeKey();
+                if (!type.getTypeKey().equals(oldKey)) {
+                    entity.setTypeKey(type.getTypeKey());
+                    entity.setUpdated(new Date());
+                    entity.setUpdatedBy(user.getKey());
+                    entity.save();
+                    logActivity(id, user.getKey(), "type", "", typeLabel(findType(oldKey)), typeLabel(type));
+                }
                 return null;
             }
         });
@@ -7985,6 +8261,36 @@ public class AssetServiceImpl implements AssetService {
         return found.length == 0 ? null : found[0];
     }
 
+    private static String[] identityMarks(List<FieldDto> fields, List<AssetAttributeEntity> attributes) {
+        String serial = "";
+        String inventory = "";
+        if (attributes == null) {
+            return new String[] {serial, inventory};
+        }
+        for (int i = 0; i < attributes.size(); i++) {
+            AssetAttributeEntity attribute = attributes.get(i);
+            if (attribute == null || attribute.getAttrValue() == null || attribute.getAttrValue().trim().isEmpty()) {
+                continue;
+            }
+            String key = attribute.getAttrName() == null ? "" : attribute.getAttrName();
+            String label = key;
+            if (fields != null) {
+                for (int f = 0; f < fields.size(); f++) {
+                    FieldDto field = fields.get(f);
+                    if (field != null && key.equals(field.getFieldKey()) && field.getLabel() != null) {
+                        label = field.getLabel();
+                    }
+                }
+            }
+            if (DuplicateMarks.isSerial(key, label)) {
+                serial = attribute.getAttrValue().trim();
+            } else if (DuplicateMarks.isInventory(key, label)) {
+                inventory = attribute.getAttrValue().trim();
+            }
+        }
+        return new String[] {serial, inventory};
+    }
+
     private Map<Integer, List<AssetAttributeEntity>> attributesByAsset(Collection<Integer> assetIds) {
         try {
             return attributesByAssetOnce(assetIds);
@@ -8751,7 +9057,11 @@ public class AssetServiceImpl implements AssetService {
         String cardImage = entity.getCardImage();
         dto.setCardImage(cardImage != null && !cardImage.isEmpty());
         String photo = entity.getPhoto();
-        dto.setPhoto(photo != null && !photo.isEmpty());
+        boolean ownPhoto = photo != null && !photo.isEmpty();
+        dto.setPhoto(ownPhoto);
+        if (ownPhoto && entity.getUpdated() != null) {
+            dto.setPhotoRev(entity.getUpdated().getTime());
+        }
         dto.setLocation(location(entity, index));
         dto.setCustodian(profile(entity.getCustodianKey()));
         dto.setIssued(profile(entity.getIssuedKey()));
@@ -9535,14 +9845,98 @@ public class AssetServiceImpl implements AssetService {
         try {
             UserWithAttributes attributes = crowdService().getUserWithAttributes(user.getName());
             if (attributes != null) {
-                dto.setPhone(firstValue(attributes, "telephoneNumber", "phone", "mobile", "mobilePhone"));
-                dto.setDepartment(firstValue(attributes, "department", "departmentNumber"));
-                dto.setTitle(firstValue(attributes, "title", "jobTitle"));
+                dto.setPhone(firstValue(attributes, "telephoneNumber", "phone", "mobile", "mobilePhone", "telephone", "ipPhone"));
+                dto.setDepartment(firstValue(attributes, "department", "departmentNumber", "division", "ou"));
+                dto.setTitle(firstValue(attributes, "title", "jobTitle", "jobtitle"));
+                if (dto.getEmail() == null || dto.getEmail().trim().isEmpty()) {
+                    dto.setEmail(firstValue(attributes, "mail", "email", "emailAddress"));
+                }
+                Set<String> keys = attributes.getKeys();
+                if (keys != null) {
+                    for (String key : keys) {
+                        readContact(dto, key, attributes.getValue(key));
+                    }
+                }
             }
         } catch (RuntimeException ex) {
             log.debug("Directory attributes failed for {}", userKey, ex);
         }
+        readUserContact(user, dto);
         return dto;
+    }
+
+    private void readUserContact(ApplicationUser user, UserProfileDto dto) {
+        try {
+            PropertySet set = portalProperties(user);
+            if (set == null) {
+                return;
+            }
+            @SuppressWarnings("rawtypes")
+            java.util.Collection keys = set.getKeys();
+            if (keys == null) {
+                return;
+            }
+            for (Object key : keys) {
+                if (key == null) {
+                    continue;
+                }
+                String name = String.valueOf(key);
+                try {
+                    readContact(dto, name, set.getString(name));
+                } catch (RuntimeException ignored) {
+                    // A non-text property is not a contact field.
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.debug("User properties were not read for {}", user == null ? "" : user.getKey(), ex);
+        }
+    }
+
+    private void readContact(UserProfileDto dto, String key, String value) {
+        if (dto == null || key == null || value == null) {
+            return;
+        }
+        String text = value.trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        String norm = DocxFill.normalize(key);
+        if (norm.contains("password") || norm.contains("token") || norm.contains("secret")) {
+            return;
+        }
+        if (blank(dto.getPhone()) && (norm.contains("phone") || norm.contains("tel") || norm.contains("телефон"))) {
+            dto.setPhone(text);
+        } else if (blank(dto.getDepartment()) && (norm.contains("department") || norm.contains("division")
+                || norm.contains("отдел") || norm.contains("подраздел"))) {
+            dto.setDepartment(text);
+        } else if (blank(dto.getTitle()) && (norm.contains("title") || norm.contains("position") || norm.contains("должност"))) {
+            dto.setTitle(text);
+        } else if (blank(dto.getEmail()) && (norm.contains("mail") || norm.contains("почт"))) {
+            dto.setEmail(text);
+        }
+    }
+
+    private static boolean blank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static void fillDocumentPerson(DocFields.Source source, UserProfileDto person, boolean onlyBlank) {
+        if (source == null || person == null) {
+            return;
+        }
+        source.role = documentPersonValue(source.role, person.getTitle(), onlyBlank);
+        source.phone = documentPersonValue(source.phone, person.getPhone(), onlyBlank);
+        source.email = documentPersonValue(source.email, person.getEmail(), onlyBlank);
+        source.department = documentPersonValue(source.department, person.getDepartment(), onlyBlank);
+    }
+
+    private static String documentPersonValue(String current, String incoming, boolean onlyBlank) {
+        String next = incoming == null ? "" : incoming.trim();
+        String kept = current == null ? "" : current;
+        if (next.isEmpty() || (onlyBlank && !kept.trim().isEmpty())) {
+            return kept;
+        }
+        return next;
     }
 
     private String avatarUrl(ApplicationUser user) {
@@ -16464,11 +16858,18 @@ public class AssetServiceImpl implements AssetService {
     private JsonReady prepareJson(String projectKey, ImportMemory memory) {
         PreparedImport prepared = prepareEquipmentImport(projectKey, memory);
         List<JsonImport.Existing> existing = new ArrayList<JsonImport.Existing>();
+        Map<Integer, EquipmentExchange.Node> nodesById = new HashMap<Integer, EquipmentExchange.Node>();
+        for (EquipmentExchange.Node node : prepared.nodes) {
+            nodesById.put(Integer.valueOf(node.getId()), node);
+        }
         for (AssetEntity row : assetsIn(projectKey)) {
             Integer parent = TreeLogic.normalizeParent(row.getParentId());
+            EquipmentExchange.Node node = nodesById.get(Integer.valueOf(row.getID()));
+            String serial = node == null ? "" : node.getSerial();
+            String inventory = node == null ? "" : node.getInventory();
             existing.add(new JsonImport.Existing(row.getID(), row.getObjectKey(), row.getExternalKey(), row.getName(),
                     row.getDescription(), row.getTypeKey(), row.getStatus(), parent == null ? 0 : parent.intValue(),
-                    row.getCustodianKey(), row.getIssuedKey()));
+                    row.getCustodianKey(), row.getIssuedKey(), serial, inventory));
         }
         return new JsonReady(prepared, existing);
     }
@@ -18370,6 +18771,317 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             return "";
         }
+    }
+
+    @Override
+    public List<DocTemplateDto> documents(ApplicationUser user, String projectKey) {
+        Project project = requireReadableProject(user, projectKey);
+        List<DocTemplateDto> list = new ArrayList<DocTemplateDto>();
+        DocTemplateEntity[] rows = ao().find(DocTemplateEntity.class,
+                Query.select().where("PROJECT_KEY = ?", project.getKey()).order("ID ASC"));
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                list.add(documentDto(rows[i]));
+            }
+        }
+        return list;
+    }
+
+    @Override
+    public DocTemplateDto saveDocument(ApplicationUser user, String projectKey, String name, String fileName, byte[] data) {
+        Project project = requireReadableProject(user, projectKey);
+        if (!canConfigure(user, project)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        String title = name == null ? "" : name.trim();
+        if (title.isEmpty() || title.length() > 120) {
+            throw new AssetException(400, "asset-tree.error.doc.name");
+        }
+        if (!DocxFill.isDocx(data) || data.length > DocxFill.MAX_BYTES) {
+            throw new AssetException(400, data != null && data.length > DocxFill.MAX_BYTES
+                    ? "asset-tree.error.doc.size" : "asset-tree.error.doc.type");
+        }
+        try {
+            DocxFill.fill(data, new HashMap<String, String>());
+        } catch (IOException ex) {
+            throw new AssetException(400, "asset-tree.error.doc.type");
+        }
+        DocTemplateEntity row = ao().create(DocTemplateEntity.class,
+                new DBParam("PROJECT_KEY", project.getKey()),
+                new DBParam("NAME", title));
+        row.setFileName(documentFileName(fileName));
+        row.setCreated(new Date());
+        row.save();
+        try {
+            writeDocument(row.getID(), data);
+        } catch (IOException ex) {
+            ao().delete(row);
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+        return documentDto(row);
+    }
+
+    @Override
+    public void deleteDocument(ApplicationUser user, String projectKey, String templateId) {
+        Project project = requireReadableProject(user, projectKey);
+        if (!canConfigure(user, project)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        int id = documentNumber(templateId);
+        DocTemplateEntity row = id <= 0 ? null : ao().get(DocTemplateEntity.class, id);
+        if (row == null || row.getProjectKey() == null || !row.getProjectKey().equals(project.getKey())) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        ao().delete(row);
+        File stored = documentFile(id);
+        if (stored.isFile()) {
+            stored.delete();
+        }
+    }
+
+    @Override
+    public StoredFile openDocument(ApplicationUser user, int assetId, String templateId) {
+        AssetEntity asset = requireVisible(user, assetId);
+        String title = documentTitle(asset.getProjectKey(), templateId);
+        byte[] template = documentBytes(asset.getProjectKey(), templateId);
+        try {
+            byte[] filled = DocxFill.fill(template, documentValues(asset));
+            String fileName = title + " " + (asset.getObjectKey() == null ? "" : asset.getObjectKey()) + ".docx";
+            return new StoredFile(fileName.trim(),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", filled);
+        } catch (IOException ex) {
+            throw new AssetException(400, "asset-tree.error.doc.type");
+        }
+    }
+
+    private DocTemplateDto documentDto(DocTemplateEntity row) {
+        DocTemplateDto dto = new DocTemplateDto();
+        dto.setId(String.valueOf(row.getID()));
+        dto.setName(row.getName() == null ? "" : row.getName());
+        return dto;
+    }
+
+    private DocTemplateEntity documentRow(String projectKey, String templateId) {
+        int id = documentNumber(templateId);
+        DocTemplateEntity row = id <= 0 ? null : ao().get(DocTemplateEntity.class, id);
+        if (row == null || row.getProjectKey() == null || !row.getProjectKey().equals(projectKey)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        return row;
+    }
+
+    private String documentTitle(String projectKey, String templateId) {
+        String name = documentRow(projectKey, templateId).getName();
+        return name == null || name.trim().isEmpty() ? "document" : name.trim();
+    }
+
+    private byte[] documentBytes(String projectKey, String templateId) {
+        int id = documentRow(projectKey, templateId).getID();
+        File stored = documentFile(id);
+        if (!stored.isFile() || stored.length() > DocxFill.MAX_BYTES) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        try {
+            FileInputStream input = new FileInputStream(stored);
+            try {
+                ByteArrayOutputStream out = new ByteArrayOutputStream((int) stored.length());
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+                return out.toByteArray();
+            } finally {
+                input.close();
+            }
+        } catch (IOException ex) {
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+    }
+
+    private void writeDocument(int id, byte[] data) throws IOException {
+        FileOutputStream out = new FileOutputStream(documentFile(id));
+        try {
+            out.write(data);
+        } finally {
+            out.close();
+        }
+    }
+
+    private File documentFile(int id) {
+        return new File(AssetFileStore.directory(), "doctpl-" + id);
+    }
+
+    private int documentNumber(String templateId) {
+        if (templateId == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(templateId.trim());
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    private String documentFileName(String fileName) {
+        String name = fileName == null ? "" : fileName.trim();
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        if (name.length() > 120) {
+            name = name.substring(name.length() - 120);
+        }
+        if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".docx")) {
+            return "template.docx";
+        }
+        return name;
+    }
+
+    private Map<String, String> documentValues(AssetEntity asset) {
+        DocFields.Source source = new DocFields.Source();
+        source.name = asset.getName() == null ? "" : asset.getName();
+        source.objectKey = asset.getObjectKey() == null ? "" : asset.getObjectKey();
+        source.description = asset.getDescription() == null ? "" : asset.getDescription();
+        AssetTypeEntity type = findType(asset.getTypeKey());
+        source.typeLabel = type == null ? "" : documentLabel(type.getLabel());
+        source.statusLabel = statusName(asset.getProjectKey(), asset.getStatus());
+        String molName = userLabel(asset.getCustodianKey());
+        String issuedName = userLabel(asset.getIssuedKey());
+        source.mol = molName.isEmpty() ? issuedName : molName;
+        source.custodian = source.mol;
+        source.issued = issuedName;
+        fillDocumentPerson(source, profile(asset.getIssuedKey()), false);
+        fillDocumentPerson(source, profile(asset.getCustodianKey()), true);
+        Project project = project(asset.getProjectKey());
+        source.project = project == null || project.getName() == null ? asset.getProjectKey() : project.getName();
+        source.today = DateTimeFormatter.ofPattern("dd.MM.yyyy").format(LocalDate.now(businessZone()));
+        source.quantity = "1";
+        LifecycleEntity life = lifeRow(asset.getID());
+        if (life != null && life.getLifeMonths() > 0) {
+            int months = life.getLifeMonths();
+            boolean english = i18n().getLocale() != null && "en".equals(i18n().getLocale().getLanguage());
+            if (months % 12 == 0) {
+                source.life = (months / 12) + (english ? " years" : " лет");
+            } else {
+                source.life = months + (english ? " mo" : " мес.");
+            }
+        }
+        if (life != null && life.getCommissioned() != null && life.getCommissioned().length() >= 4) {
+            source.year = life.getCommissioned().substring(0, 4);
+        }
+        Map<String, AssetFieldEntity> fieldByKey = new HashMap<String, AssetFieldEntity>();
+        if (asset.getTypeKey() != null) {
+            AssetFieldEntity[] typeFields = fields(asset.getTypeKey());
+            if (typeFields != null) {
+                for (int i = 0; i < typeFields.length; i++) {
+                    if (typeFields[i].getFieldKey() != null) {
+                        fieldByKey.put(typeFields[i].getFieldKey(), typeFields[i]);
+                    }
+                }
+            }
+        }
+        List<AssetAttributeEntity> attributes = attributesFor(asset.getID());
+        for (int i = 0; i < attributes.size(); i++) {
+            AssetAttributeEntity attribute = attributes.get(i);
+            AssetFieldEntity field = fieldByKey.get(attribute.getAttrName());
+            String value = attribute.getAttrValue() == null ? "" : attribute.getAttrValue();
+            if (field != null && FieldKinds.USER.equals(field.getKind())) {
+                value = userLabel(value);
+            } else if (field != null && FieldChoices.handles(field.getKind())) {
+                value = FieldChoices.display(value);
+            }
+            String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
+            source.fields.put(attribute.getAttrName(), value);
+            source.labels.put(attribute.getAttrName(), label == null ? "" : label);
+            String folded = DocxFill.normalize(label);
+            if (!value.isEmpty()) {
+                if (folded.contains("комувыдано") || "выдано".equals(folded)) {
+                    source.issued = value;
+                } else if (folded.contains("должност")) {
+                    source.role = value;
+                } else if (folded.contains("телефон") || folded.contains("phone")) {
+                    source.phone = value;
+                } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел")) {
+                    source.department = value;
+                } else if (folded.contains("почт") || folded.contains("email") || folded.contains("mail")) {
+                    source.email = value;
+                }
+            }
+        }
+        Integer parentId = asset.getParentId();
+        int guard = 0;
+        while (parentId != null && guard < 12) {
+            guard++;
+            AssetEntity parent = ao().get(AssetEntity.class, parentId);
+            if (parent == null) {
+                break;
+            }
+            if (source.place.isEmpty() && parent.getName() != null) {
+                source.place = parent.getName();
+            }
+            AssetTypeEntity parentType = findType(parent.getTypeKey());
+            if (parentType != null && "branch".equals(parentType.getTypeKey()) && parent.getName() != null) {
+                source.branch = parent.getName();
+            }
+            List<AssetAttributeEntity> parentAttributes = attributesFor(parent.getID());
+            Map<String, AssetFieldEntity> parentFields = new HashMap<String, AssetFieldEntity>();
+            if (parent.getTypeKey() != null) {
+                AssetFieldEntity[] rows = fields(parent.getTypeKey());
+                if (rows != null) {
+                    for (int i = 0; i < rows.length; i++) {
+                        if (rows[i].getFieldKey() != null) {
+                            parentFields.put(rows[i].getFieldKey(), rows[i]);
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < parentAttributes.size(); i++) {
+                AssetAttributeEntity attribute = parentAttributes.get(i);
+                String value = attribute.getAttrValue() == null ? "" : attribute.getAttrValue().trim();
+                if (value.isEmpty()) {
+                    continue;
+                }
+                AssetFieldEntity field = parentFields.get(attribute.getAttrName());
+                String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
+                String token = DocxFill.normalize((attribute.getAttrName() == null ? "" : attribute.getAttrName()) + label);
+                if (source.address.isEmpty() && (token.contains("address") || token.contains("адрес"))) {
+                    source.address = value;
+                }
+                if (source.city.isEmpty() && token.contains("город")) {
+                    source.city = value;
+                }
+            }
+            parentId = parent.getParentId();
+        }
+        source.request = documentRequest(asset.getID());
+        return DocFields.values(source);
+    }
+
+    private String documentRequest(int assetId) {
+        AssetIssueLinkEntity[] links = ao().find(AssetIssueLinkEntity.class,
+                Query.select().where("ASSET_ID = ?", assetId).order("ID DESC"));
+        if (links == null || links.length == 0 || issueManager() == null) {
+            return "";
+        }
+        try {
+            Issue issue = issueManager().getIssueObject(Long.valueOf(links[0].getIssueId()));
+            return issue == null || issue.getKey() == null ? "" : issue.getKey();
+        } catch (RuntimeException ex) {
+            return "";
+        }
+    }
+
+    private String documentLabel(String label) {
+        if (label == null) {
+            return "";
+        }
+        String text = label.trim();
+        if (text.startsWith("asset-tree.")) {
+            String translated = i18n().getText(text);
+            return translated == null || translated.isEmpty() ? text : translated;
+        }
+        return text;
     }
 
     private static final class BranchBook {

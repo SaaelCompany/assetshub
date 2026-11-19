@@ -189,18 +189,27 @@ public final class EquipmentExchange {
         private final boolean location;
 
         private final String typeKey;
+        private final String serial;
+        private final String inventory;
 
         public Node(int id, Integer parentId, String name, String objectKey, boolean location) {
             this(id, parentId, name, objectKey, location, "");
         }
 
         public Node(int id, Integer parentId, String name, String objectKey, boolean location, String typeKey) {
+            this(id, parentId, name, objectKey, location, typeKey, "", "");
+        }
+
+        public Node(int id, Integer parentId, String name, String objectKey, boolean location, String typeKey,
+                    String serial, String inventory) {
             this.id = id;
             this.parentId = parentId;
             this.name = name;
             this.objectKey = objectKey;
             this.location = location;
             this.typeKey = typeKey == null ? "" : typeKey;
+            this.serial = serial == null ? "" : serial;
+            this.inventory = inventory == null ? "" : inventory;
         }
 
         public int getId() {
@@ -225,6 +234,14 @@ public final class EquipmentExchange {
 
         public String getTypeKey() {
             return typeKey;
+        }
+
+        public String getSerial() {
+            return serial;
+        }
+
+        public String getInventory() {
+            return inventory;
         }
     }
 
@@ -581,8 +598,13 @@ public final class EquipmentExchange {
             lifecycles.addAll(part.getLifecycles());
             for (int i = 0; i < part.getChanges().size(); i++) {
                 Change change = part.getChanges().get(i);
-                if (change.getExistingId() == null && !TniText.shortHost(change.getName()).isEmpty()) {
-                    known.add(new Node(made[0]--, change.getParentId(), change.getName(), "", false, change.getTypeKey()));
+                if (change.getExistingId() == null) {
+                    String serial = markOf(change, types, true);
+                    String inventory = markOf(change, types, false);
+                    if (!TniText.shortHost(change.getName()).isEmpty() || !serial.isEmpty() || !inventory.isEmpty()) {
+                        known.add(new Node(made[0]--, change.getParentId(), change.getName(), "", false, change.getTypeKey(),
+                                serial, inventory));
+                    }
                 }
             }
         }
@@ -671,7 +693,8 @@ public final class EquipmentExchange {
                     continue;
                 }
                 byId.put(Integer.valueOf(node.getId()), node);
-                hosts.add(new TniSame.Card(node.getId(), node.getName(), node.isLocation(), "", ""));
+                hosts.add(new TniSame.Card(node.getId(), node.getName(), node.isLocation(), "", "",
+                        node.getSerial(), node.getInventory()));
             }
         }
         Set<Integer> taken = new HashSet<Integer>();
@@ -747,8 +770,11 @@ public final class EquipmentExchange {
                 issues.add(new Issue(row, "asset-tree.error.import.key.place", key));
                 return null;
             }
-        } else if (hosts != null) {
-            int same = TniSame.pick(hosts, 0, name, "");
+        }
+        String serial = columnMark(record, fieldColumns, headers, true);
+        String inventory = columnMark(record, fieldColumns, headers, false);
+        if (hosts != null && key.isEmpty()) {
+            int same = TniSame.pick(hosts, 0, name, "", serial, inventory);
             if (same < 0 || (same > 0 && taken != null && taken.contains(Integer.valueOf(same)))) {
                 issues.add(new Issue(row, "asset-tree.error.import.host", name));
                 return null;
@@ -891,12 +917,62 @@ public final class EquipmentExchange {
             }
         }
         LifeBook.Change lifecycle = life ? readLifecycle(record, roleColumn, key) : null;
-        if (existing == null && hosts != null && synthetic != null && !TniText.shortHost(name).isEmpty()) {
-            hosts.add(new TniSame.Card(synthetic[0]--, name.trim(), false, "", ""));
+        if (existing == null && hosts != null && synthetic != null
+                && (!TniText.shortHost(name).isEmpty() || !serial.isEmpty() || !inventory.isEmpty())) {
+            hosts.add(new TniSame.Card(synthetic[0]--, name.trim(), false, "", "", serial, inventory));
         }
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
                 description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
                 issuedPresent, issuedKey, attributes, wish, lifecycle);
+    }
+
+    private static String columnMark(EquipmentSheet.Record record, List<Integer> columns, List<String> headers, boolean serial) {
+        if (record == null || columns == null || headers == null) {
+            return "";
+        }
+        String found = "";
+        for (int i = 0; i < columns.size(); i++) {
+            Integer column = columns.get(i);
+            if (column == null || column.intValue() < 0 || column.intValue() >= headers.size()) {
+                continue;
+            }
+            String header = headers.get(column.intValue());
+            String value = text(record, column.intValue());
+            if (value.isEmpty()) {
+                continue;
+            }
+            if (serial ? DuplicateMarks.isSerial(header, header) : DuplicateMarks.isInventory(header, header)) {
+                found = value;
+            }
+        }
+        return found;
+    }
+
+    private static String markOf(Change change, List<TypeRef> types, boolean serial) {
+        if (change == null || change.getAttributes() == null) {
+            return "";
+        }
+        TypeRef type = typeByKey(change.getTypeKey(), types);
+        String found = "";
+        for (int i = 0; i < change.getAttributes().size(); i++) {
+            Value value = change.getAttributes().get(i);
+            if (value == null || value.getValue() == null || value.getValue().trim().isEmpty()) {
+                continue;
+            }
+            String label = value.getFieldKey();
+            if (type != null && type.getFields() != null) {
+                for (int f = 0; f < type.getFields().size(); f++) {
+                    FieldRef field = type.getFields().get(f);
+                    if (field != null && field.getKey().equals(value.getFieldKey())) {
+                        label = field.getLabel();
+                    }
+                }
+            }
+            if (serial ? DuplicateMarks.isSerial(value.getFieldKey(), label) : DuplicateMarks.isInventory(value.getFieldKey(), label)) {
+                found = value.getValue().trim();
+            }
+        }
+        return found;
     }
 
     private static Map<String, List<Node>> indexPlaces(List<Node> nodes) {

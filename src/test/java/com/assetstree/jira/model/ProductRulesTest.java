@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -301,6 +302,106 @@ public class ProductRulesTest {
         assertTrue(json.getIssues().toString(), json.getIssues().isEmpty());
         assertEquals(Integer.valueOf(4), json.getChanges().get(0).getChange().getExistingId());
         assertEquals("server", json.getChanges().get(0).getChange().getTypeKey());
+    }
+
+    @Test
+    public void importKeepsTwoUpsWhenTheSerialNumbersDiffer() {
+        List<EquipmentExchange.FieldRef> fields = Collections.singletonList(
+                new EquipmentExchange.FieldRef("serial", "Serial", "text", false));
+        List<EquipmentExchange.TypeRef> types = Arrays.asList(
+                new EquipmentExchange.TypeRef("ups", "UPS", false, fields),
+                new EquipmentExchange.TypeRef("room", "Room", true, Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(new EquipmentExchange.Named("in_use", "In use"));
+        List<EquipmentExchange.Node> places = Collections.singletonList(
+                new EquipmentExchange.Node(1, null, "Room", "STP-1", true, "room"));
+        List<String> headers = Arrays.asList("Name", "Type", "Place", "Serial");
+        EquipmentSheet.Sheet sheet = new EquipmentSheet.Sheet("Equipment", headers, Arrays.asList(
+                new EquipmentSheet.Record(2, Arrays.asList("\u0418\u0411\u041f APC", "UPS", "Room", "SN-1")),
+                new EquipmentSheet.Record(3, Arrays.asList("\u0418\u0411\u041f APC", "UPS", "Room", "SN-2"))));
+        EquipmentExchange.Plan created = EquipmentExchange.plan(sheet, types, statuses, places, "in_use",
+                new HashMap<String, String>(), blankPeople());
+        assertTrue(created.getIssues().toString(), created.getIssues().isEmpty());
+        assertEquals(2, created.getChanges().size());
+        assertNull(created.getChanges().get(0).getExistingId());
+        assertNull(created.getChanges().get(1).getExistingId());
+
+        EquipmentSheet.Sheet sameNumber = new EquipmentSheet.Sheet("Equipment", headers, Arrays.asList(
+                new EquipmentSheet.Record(2, Arrays.asList("\u0418\u0411\u041f APC", "UPS", "Room", "SN-1")),
+                new EquipmentSheet.Record(3, Arrays.asList("\u0418\u0411\u041f APC", "UPS", "Room", "SN-1"))));
+        EquipmentExchange.Plan repeated = EquipmentExchange.plan(sameNumber, types, statuses, places, "in_use",
+                new HashMap<String, String>(), blankPeople());
+        assertEquals(1, repeated.getChanges().size());
+        assertEquals("asset-tree.error.import.host", repeated.getIssues().get(0).getMessageKey());
+
+        EquipmentExchange.Node known = new EquipmentExchange.Node(4, Integer.valueOf(1), "\u0418\u0411\u041f APC", "ATD-4",
+                false, "ups", "SN-1", "");
+        List<EquipmentExchange.Node> nodes = Arrays.asList(places.get(0), known);
+        EquipmentSheet.Sheet again = new EquipmentSheet.Sheet("Equipment", headers, Arrays.asList(
+                new EquipmentSheet.Record(2, Arrays.asList("\u0418\u0411\u041f APC", "UPS", "Room", "SN-1")),
+                new EquipmentSheet.Record(3, Arrays.asList("\u0418\u0411\u041f APC", "UPS", "Room", "SN-9"))));
+        EquipmentExchange.Plan updated = EquipmentExchange.plan(again, types, statuses, nodes, "in_use",
+                new HashMap<String, String>(), blankPeople());
+        assertTrue(updated.getIssues().toString(), updated.getIssues().isEmpty());
+        assertEquals(Integer.valueOf(4), updated.getChanges().get(0).getExistingId());
+        assertNull(updated.getChanges().get(1).getExistingId());
+
+        Map<String, String> fieldsOne = new LinkedHashMap<String, String>();
+        fieldsOne.put("serial", "SN-1");
+        Map<String, String> fieldsTwo = new LinkedHashMap<String, String>();
+        fieldsTwo.put("\u0441\u0435\u0440\u0438\u0439\u043d\u044b\u0439 \u043d\u043e\u043c\u0435\u0440", "SN-2");
+        JsonImport.Item first = new JsonImport.Item("", "", "\u0418\u0411\u041f APC", "UPS", "", "Room",
+                "", "", "", false, fieldsOne);
+        JsonImport.Item second = new JsonImport.Item("", "", "\u0418\u0411\u041f APC", "UPS", "", "Room",
+                "", "", "", false, fieldsTwo);
+        JsonImport.Existing stored = new JsonImport.Existing(4, "ATD-4", "", "\u0418\u0411\u041f APC", "", "ups",
+                "in_use", 1, "", "", "SN-1", "");
+        JsonImport.Plan json = JsonImport.plan(Arrays.asList(first, second), Collections.singletonList(stored),
+                places, types, statuses, "in_use", true, blankPeople());
+        assertTrue(json.getIssues().toString(), json.getIssues().isEmpty());
+        assertEquals(Integer.valueOf(4), json.getChanges().get(0).getChange().getExistingId());
+        assertNull(json.getChanges().get(1).getChange().getExistingId());
+    }
+
+    @Test
+    public void importMatchesEachUpsWhenTheSerialColumnIsNamedSn() {
+        assertTrue(DuplicateMarks.isSerial("S/N:", "S/N:"));
+        assertTrue(DuplicateMarks.isSerial("sn", "S/N:"));
+        assertFalse(DuplicateMarks.isSerial("model", "\u041c\u043e\u0434\u0435\u043b\u044c:"));
+        List<EquipmentExchange.FieldRef> fields = Collections.singletonList(
+                new EquipmentExchange.FieldRef("sn", "S/N:", "text", false));
+        List<EquipmentExchange.TypeRef> types = Arrays.asList(
+                new EquipmentExchange.TypeRef("ups", "\u0418\u0411\u041f", false, fields),
+                new EquipmentExchange.TypeRef("room", "Room", true, Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(new EquipmentExchange.Named("in_use", "\u0412 \u044d\u043a\u0441\u043f\u043b\u0443\u0430\u0442\u0430\u0446\u0438\u0438"));
+        EquipmentExchange.Node room = new EquipmentExchange.Node(1, null, "Room", "STP-1", true, "room");
+        List<String> headers = Arrays.asList("\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", "\u0422\u0438\u043f", "\u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0430", "S/N:");
+        List<EquipmentSheet.Record> records = Arrays.asList(
+                new EquipmentSheet.Record(2, Arrays.asList("BV500I-GR", "\u0418\u0411\u041f", "Room", "9B2138A10791")),
+                new EquipmentSheet.Record(3, Arrays.asList("BV500I-GR", "\u0418\u0411\u041f", "Room", "9B2138A10792")),
+                new EquipmentSheet.Record(4, Arrays.asList("Powercom WOW-500U", "\u0418\u0411\u041f", "Room", "20154101006")),
+                new EquipmentSheet.Record(5, Arrays.asList("Powercom WOW-500U", "\u0418\u0411\u041f", "Room", "20161911008")));
+        EquipmentSheet.Sheet sheet = new EquipmentSheet.Sheet("\u0418\u0411\u041f", headers, records);
+        EquipmentExchange.Plan created = EquipmentExchange.plan(sheet, types, statuses,
+                Collections.singletonList(room), "in_use", new HashMap<String, String>(), blankPeople());
+        assertTrue(created.getIssues().toString(), created.getIssues().isEmpty());
+        assertEquals(4, created.getChanges().size());
+        for (EquipmentExchange.Change change : created.getChanges()) {
+            assertNull(change.getExistingId());
+        }
+        List<EquipmentExchange.Node> stored = Arrays.asList(
+                room,
+                new EquipmentExchange.Node(14, Integer.valueOf(1), "BV500I-GR", "BZ-14", false, "ups", "9B2138A10791", ""),
+                new EquipmentExchange.Node(28, Integer.valueOf(1), "BV500I-GR", "BZ-28", false, "ups", "9B2138A10792", ""),
+                new EquipmentExchange.Node(2, Integer.valueOf(1), "Powercom WOW-500U", "BZ-2", false, "ups", "20154101006", ""),
+                new EquipmentExchange.Node(3, Integer.valueOf(1), "Powercom WOW-500U", "BZ-3", false, "ups", "20161911008", ""));
+        EquipmentExchange.Plan again = EquipmentExchange.plan(sheet, types, statuses, stored, "in_use",
+                new HashMap<String, String>(), blankPeople());
+        assertTrue(again.getIssues().toString(), again.getIssues().isEmpty());
+        assertEquals(4, again.getChanges().size());
+        assertEquals(Integer.valueOf(14), again.getChanges().get(0).getExistingId());
+        assertEquals(Integer.valueOf(28), again.getChanges().get(1).getExistingId());
+        assertEquals(Integer.valueOf(2), again.getChanges().get(2).getExistingId());
+        assertEquals(Integer.valueOf(3), again.getChanges().get(3).getExistingId());
     }
 
     private static EquipmentExchange.Directory servicePeople() {

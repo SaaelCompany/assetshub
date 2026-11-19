@@ -254,6 +254,15 @@ public class TniRulesTest {
         assertEquals(6, TniSame.pick(Arrays.asList(watched, other), 0, "", "10.8.0.4"));
         assertEquals(0, TniSame.pick(Arrays.asList(other), 0, "", ""));
         assertEquals(0, TniSame.pick(Arrays.asList(cabinet), 0, "krul-it.budzdorov.ru", ""));
+        TniSame.Card ups = new TniSame.Card(4, "ИБП APC", false, "", "", "SN-1", "");
+        TniSame.Card otherUps = new TniSame.Card(5, "ИБП APC", false, "", "", "SN-2", "INV-2");
+        assertEquals(0, TniSame.pick(Arrays.asList(ups), 0, "ИБП APC", "", "SN-2", ""));
+        assertEquals(4, TniSame.pick(Arrays.asList(ups, otherUps), 0, "ибп apc", "", "sn-1", ""));
+        assertEquals(5, TniSame.pick(Arrays.asList(ups, otherUps), 0, "ИБП APC", "", "", "INV-2"));
+        assertEquals(0, TniSame.pick(Arrays.asList(ups), 0, "ИБП APC", "", "", ""));
+        TniSame.Card smart = new TniSame.Card(7, "SMART-UPS", false, "", "", "AAA", "");
+        assertEquals(0, TniSame.pick(Arrays.asList(smart), 0, "SMART-UPS", "", "BBB", ""));
+        assertEquals(7, TniSame.pick(Arrays.asList(smart), 0, "SMART-UPS", "", "", ""));
         assertTrue(TniSame.claimed("tni:abc", "abc"));
         assertFalse(TniSame.claimed("", "abc"));
         assertFalse(TniSame.claimed("ad:krul-it", "abc"));

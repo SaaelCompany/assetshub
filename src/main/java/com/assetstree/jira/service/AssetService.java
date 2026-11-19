@@ -35,6 +35,7 @@ import com.assetstree.jira.dto.PickerNodeDto;
 import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.LifecycleDto;
+import com.assetstree.jira.dto.DocTemplateDto;
 import com.assetstree.jira.dto.ReportBoardDto;
 import com.assetstree.jira.dto.ReportDto;
 import com.assetstree.jira.dto.ReportViewDto;
@@ -53,8 +54,10 @@ import com.assetstree.jira.dto.FlowRuleDto;
 import com.assetstree.jira.dto.IssueTypeDto;
 import com.assetstree.jira.dto.FlowBookDto;
 import com.assetstree.jira.dto.PortalRuleDto;
+import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
+import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.PortalRequestDraft;
@@ -136,7 +139,7 @@ public interface AssetService {
 
     void deleteCardImage(ApplicationUser user, int assetId);
 
-    void storePhoto(ApplicationUser user, int assetId, byte[] data);
+    void storePhoto(ApplicationUser user, int assetId, byte[] data, int[] also);
 
     StoredFile openPhoto(ApplicationUser user, int assetId);
 
@@ -153,6 +156,9 @@ public interface AssetService {
     int emptyTrash(ApplicationUser user, String projectKey);
 
     AssetDto moveAsset(ApplicationUser user, int id, MoveDraft move);
+
+    /** Drops several equipment rows onto one place, keeping their order. */
+    void moveObjects(ApplicationUser user, String projectKey, GroupMoveDraft draft);
 
     AssetTypeDto createType(ApplicationUser user, TypeDraft draft);
 
@@ -325,6 +331,9 @@ public interface AssetService {
     /** Moves a type up, down, into the type above, or back onto the place. */
     AssetDto arrangeType(ApplicationUser user, int assetId, PlaceArrangeDraft draft);
 
+    /** Puts one type's equipment on a place into the given order. */
+    void sortTypeObjects(ApplicationUser user, int assetId, PlaceSortDraft draft);
+
     ServicePlanDto updatePlan(ApplicationUser user, int assetId, int planId, ServicePlanDraft draft);
 
     void deletePlan(ApplicationUser user, int assetId, int planId);
@@ -480,4 +489,14 @@ public interface AssetService {
 
     /** Queues one plain letter about this equipment. Returns 1 when the queue accepted it. */
     int mailEquipment(ApplicationUser user, int assetId, AssetMailDraft draft);
+
+    /** Built-in act forms plus the Word templates uploaded for this project. */
+    List<DocTemplateDto> documents(ApplicationUser user, String projectKey);
+
+    DocTemplateDto saveDocument(ApplicationUser user, String projectKey, String name, String fileName, byte[] data);
+
+    void deleteDocument(ApplicationUser user, String projectKey, String templateId);
+
+    /** A filled .docx for one piece of equipment. */
+    StoredFile openDocument(ApplicationUser user, int assetId, String templateId);
 }

@@ -42,6 +42,7 @@
         <entity>com.assetstree.jira.ao.SchemePlacementEntity</entity>
         <entity>com.assetstree.jira.ao.SavedReportEntity</entity>
         <entity>com.assetstree.jira.ao.ReportBoardEntity</entity>
+        <entity>com.assetstree.jira.ao.DocTemplateEntity</entity>
         <entity>com.assetstree.jira.ao.LifecycleEntity</entity>
         <entity>com.assetstree.jira.ao.CardTemplateEntity</entity>
         <entity>com.assetstree.jira.ao.TypeSchemaEntity</entity>

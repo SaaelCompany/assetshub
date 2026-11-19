@@ -27,6 +27,7 @@ import com.assetstree.jira.model.ImportDraft;
 import com.assetstree.jira.model.JsonImportDraft;
 import com.assetstree.jira.model.IssueLinkDraft;
 import com.assetstree.jira.model.LinkDraft;
+import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.dto.PortalFieldsDto;
 import com.assetstree.jira.dto.PortalLayoutDto;
@@ -36,6 +37,7 @@ import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
+import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
 import com.assetstree.jira.model.LifecycleDraft;
 import com.assetstree.jira.model.ReportBoardDraft;
@@ -148,6 +150,18 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.updateAsset(user(), id, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/types/sort")
+    public Response sortType(@PathParam("id") final int id, final PlaceSortDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.sortTypeObjects(user(), id, draft);
+                return Response.noContent().build();
             }
         });
     }
@@ -766,6 +780,30 @@ public class AssetResource {
         });
     }
 
+    @GET
+    @Path("projects/{projectKey}/documents")
+    public Response documents(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.documents(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/documents/{templateId}")
+    public Response deleteDocument(@PathParam("projectKey") final String projectKey,
+                                   @PathParam("templateId") final String templateId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteDocument(user(), projectKey, templateId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
     @DELETE
     @Path("projects/{projectKey}/boards/{boardId}")
     public Response deleteReportBoard(@PathParam("projectKey") final String projectKey, @PathParam("boardId") final int boardId) {
@@ -945,6 +983,18 @@ public class AssetResource {
                 return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                         .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
                         .build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/move-objects")
+    public Response moveObjects(@PathParam("projectKey") final String projectKey, final GroupMoveDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.moveObjects(user(), projectKey, draft);
+                return Response.noContent().build();
             }
         });
     }

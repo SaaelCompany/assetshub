@@ -29,6 +29,7 @@ public class AssetDto {
     private boolean editable;
     private boolean cardImage;
     private boolean photo;
+    private long photoRev;
     private UserProfileDto custodian;
     private UserProfileDto issued;
     private UserProfileDto author;
@@ -216,6 +217,14 @@ public class AssetDto {
 
     public void setPhoto(boolean photo) {
         this.photo = photo;
+    }
+
+    public long getPhotoRev() {
+        return photoRev;
+    }
+
+    public void setPhotoRev(long photoRev) {
+        this.photoRev = photoRev;
     }
 
     public UserProfileDto getCustodian() {

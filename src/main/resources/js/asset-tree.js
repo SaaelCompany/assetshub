@@ -397,6 +397,7 @@
         issueTypes: null,
         issueStatuses: null,
         selectedId: null,
+        treePicked: {},
         dirty: false,
         expanded: {},
         expansionReady: false,
@@ -3058,6 +3059,7 @@
     function openTrash() {
         if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
         state.trashOpen = true;
+        state.treePicked = {};
         state.selectedId = null;
         state.typeGroup = null;
         state.pane = 'list';
@@ -3095,6 +3097,7 @@
             if (state.dirty && !window.confirm(t('confirmDiscard'))) {
                 return;
             }
+            state.treePicked = {};
             state.selectedId = null;
             state.typeGroup = null;
             state.trashOpen = false;
@@ -3220,6 +3223,7 @@
             if (queued) row.appendChild(el('span', 'asset-tree-qcount', '(' + queued + ')'));
             row.appendChild(nestButton(asset.id));
             row.addEventListener('click', function () {
+                state.treePicked = {};
                 state.pane = 'list';
                 selectAsset(asset.id);
             });
@@ -3382,6 +3386,102 @@
         return mode + ':' + targetKey;
     }
 
+    function closeTreeMenu() {
+        var menu = document.getElementById('asset-tree-context');
+        if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+        document.removeEventListener('mousedown', onTreeMenuDown, true);
+        document.removeEventListener('keydown', onTreeMenuKey, true);
+    }
+
+    function onTreeMenuDown(event) {
+        var menu = document.getElementById('asset-tree-context');
+        if (menu && menu.contains(event.target)) return;
+        closeTreeMenu();
+    }
+
+    function onTreeMenuKey(event) {
+        if (event.key === 'Escape' || event.keyCode === 27) closeTreeMenu();
+    }
+
+    function openTreeMenu(x, y, items) {
+        closeTreeMenu();
+        var menu = el('div', 'asset-tree-context');
+        menu.id = 'asset-tree-context';
+        var arrows = items.length && items.every(function (item) { return item.arrow; });
+        if (arrows) menu.classList.add('is-arrows');
+        items.forEach(function (item) {
+            var entry = el('button', 'asset-tree-context-item' + (item.arrow ? ' is-arrow' : ''), item.label);
+            entry.type = 'button';
+            if (item.title) {
+                entry.title = item.title;
+                entry.setAttribute('aria-label', item.title);
+            }
+            entry.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                closeTreeMenu();
+                item.onClick();
+            });
+            menu.appendChild(entry);
+        });
+        document.body.appendChild(menu);
+        var pad = 8;
+        var box = menu.getBoundingClientRect();
+        var left = x;
+        var top = y;
+        var viewW = window.innerWidth || 0;
+        var viewH = window.innerHeight || 0;
+        if (viewW && left + box.width > viewW - pad) left = viewW - pad - box.width;
+        if (viewH && top + box.height > viewH - pad) top = viewH - pad - box.height;
+        if (left < pad) left = pad;
+        if (top < pad) top = pad;
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+        setTimeout(function () {
+            document.addEventListener('mousedown', onTreeMenuDown, true);
+            document.addEventListener('keydown', onTreeMenuKey, true);
+        }, 0);
+    }
+
+    function nameSortWay(objects) {
+        var index;
+        for (index = 1; index < objects.length; index++) {
+            var cmp = compareNames(objects[index - 1].name, objects[index].name);
+            if (!cmp) cmp = objects[index - 1].id - objects[index].id;
+            if (cmp > 0) return 1;
+        }
+        return objects.length > 1 ? -1 : 1;
+    }
+
+    function sortTypeByName(placeId, typeKey, direction) {
+        var objects = equipmentIn(placeId, typeKey).slice();
+        var way = direction < 0 ? -1 : 1;
+        objects.sort(function (left, right) {
+            var cmp = compareNames(left.name, right.name);
+            if (!cmp) cmp = left.id - right.id;
+            return cmp * way;
+        });
+        ajax('POST', '/assets/' + placeId + '/types/sort', {
+            typeKey: typeKey,
+            ids: objects.map(function (asset) { return asset.id; })
+        }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            reloadTree(function () {
+                state.expanded[placeId] = true;
+                state.expanded[typeExpandKey(placeId, typeKey)] = true;
+                var local = localParent(placeId, typeKey);
+                if (local) state.expanded[typeExpandKey(placeId, local)] = true;
+                rememberExpanded();
+                renderNodes();
+                replaceDetail();
+                notify(t('saved'));
+            });
+        });
+    }
+
     function typeGroupRow(placeId, type) {
         var nestedHere = !!localParent(placeId, type.typeKey);
         var kids = nestedHere ? [] : subtypesAt(placeId, type.typeKey);
@@ -3432,6 +3532,19 @@
         row.addEventListener('click', function () {
             selectTypeGroup(placeId, type.typeKey);
         });
+        row.addEventListener('contextmenu', function (event) {
+            var objects = equipmentIn(placeId, type.typeKey);
+            if (!state.canObjects || !objects.length) return;
+            event.preventDefault();
+            event.stopPropagation();
+            var way = nameSortWay(objects);
+            openTreeMenu(event.clientX, event.clientY, [{
+                arrow: true,
+                label: way < 0 ? '\u2193' : '\u2191',
+                title: t(way < 0 ? 'sortNameDown' : 'sortNameUp'),
+                onClick: function () { sortTypeByName(placeId, type.typeKey, way); }
+            }]);
+        });
         branch.appendChild(row);
         if (open) {
             var nested = el('div', 'asset-tree-children');
@@ -3456,6 +3569,7 @@
         row.setAttribute('role', 'treeitem');
         row.setAttribute('data-asset-id', String(asset.id));
         if (state.selectedId === asset.id) row.classList.add('is-selected');
+        if (state.treePicked && state.treePicked[asset.id]) row.classList.add('is-picked');
         if (mayEdit(asset)) {
             row.classList.add('is-movable');
             bindObjectDrag(row, asset);
@@ -3471,7 +3585,18 @@
         name.appendChild(el('span', 'asset-tree-object-name', asset.name));
         row.appendChild(name);
         if (asset.objectKey) row.appendChild(el('span', 'asset-tree-object-key', asset.objectKey));
-        row.addEventListener('click', function () {
+        row.addEventListener('click', function (event) {
+            if (event.ctrlKey || event.metaKey) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!mayEdit(asset)) return;
+                if (!state.treePicked) state.treePicked = {};
+                if (state.treePicked[asset.id]) delete state.treePicked[asset.id];
+                else state.treePicked[asset.id] = true;
+                renderNodes();
+                return;
+            }
+            state.treePicked = {};
             state.pane = 'card';
             selectAsset(asset.id);
         });
@@ -3687,6 +3812,7 @@
 
     function selectTypeGroup(placeId, typeKey, scope) {
         if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        state.treePicked = {};
         state.typeGroup = { placeId: placeId, typeKey: typeKey, scope: scope || 'direct' };
         state.trashOpen = false;
         state.selectedId = null;
@@ -3707,11 +3833,30 @@
 
     var pointerDrag = null;
 
+    function pickedObjectIds() {
+        var ids = [];
+        function walk(parentId) {
+            childrenOf(parentId).forEach(function (asset) {
+                if (isFolder(asset)) walk(asset.id);
+                else if (state.treePicked && state.treePicked[asset.id] && mayEdit(asset)) ids.push(asset.id);
+            });
+        }
+        walk(null);
+        return ids;
+    }
+
     function beginAssetDrag(asset, event) {
         if (event.button !== 0 || !mayEdit(asset) || pointerDrag) return;
+        if (event.ctrlKey || event.metaKey) return;
         event.preventDefault();
+        var ids = [asset.id];
+        if (!isFolder(asset) && state.treePicked && state.treePicked[asset.id]) {
+            var picked = pickedObjectIds();
+            if (picked.length > 1) ids = picked;
+        }
         pointerDrag = {
             id: asset.id,
+            ids: ids,
             object: !isFolder(asset),
             pointerId: event.pointerId,
             startX: event.clientX,
@@ -3764,7 +3909,12 @@
             clearTextSelection();
             var moving = byId()[pointerDrag.id];
             var ghostLabel = '';
-            if (moving) ghostLabel = moving.objectKey && !isFolder(moving) ? moving.objectKey + '  ' + (moving.name || '') : (moving.name || '');
+            var dragged = pointerDrag.ids && pointerDrag.ids.length > 1 ? pointerDrag.ids.length : 0;
+            if (moving && dragged) {
+                ghostLabel = t('treeDragCount', moving.name || '').split('{1}').join(String(dragged));
+            } else if (moving) {
+                ghostLabel = moving.objectKey && !isFolder(moving) ? moving.objectKey + '  ' + (moving.name || '') : (moving.name || '');
+            }
             var ghost = el('div', 'asset-tree-drag-ghost', ghostLabel);
             ghost.id = 'asset-tree-drag-ghost';
             document.body.appendChild(ghost);
@@ -3792,11 +3942,13 @@
         var commit = event.type !== 'pointercancel' && pointerDrag.active;
         var plan = commit ? (pointerDrag.plan || planDrop(event.clientX, event.clientY, pointerDrag.id)) : null;
         var movingId = pointerDrag.id;
+        var movingIds = pointerDrag.ids && pointerDrag.ids.length ? pointerDrag.ids.slice() : [movingId];
         var objectDrag = !!pointerDrag.object;
         if (pointerDrag.active) suppressNextClick();
         endPointerDrag();
         if (!plan) return;
-        if (objectDrag) relocateObject(movingId, plan);
+        if (objectDrag && movingIds.length > 1) relocateObjects(movingIds, plan);
+        else if (objectDrag) relocateObject(movingId, plan);
         else moveAsset(movingId, plan.parentId, plan.index);
     }
 
@@ -3824,7 +3976,7 @@
 
     function planDrop(x, y, movingId) {
         var moving = byId()[movingId];
-        if (moving && !isFolder(moving)) return planObjectDrop(x, y, moving);
+        if (moving && !isFolder(moving)) return planObjectDrop(x, y, moving, pointerDrag && pointerDrag.ids);
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
         if (root) root.classList.remove('is-over');
@@ -3871,7 +4023,7 @@
         return { parentId: parentId, index: destinationIndex(parentId, targetId, mode, movingId) };
     }
 
-    function planObjectDrop(x, y, moving) {
+    function planObjectDrop(x, y, moving, ids) {
         clearDropClasses();
         var root = document.getElementById('asset-tree-rootdrop');
         if (root) root.classList.remove('is-over');
@@ -3889,10 +4041,11 @@
             }
         }
         if (!row || !moving) return null;
+        var group = ids && ids.length ? ids : [moving.id];
         var assetId = row.getAttribute('data-asset-id');
         if (assetId) {
             var targetId = parseInt(assetId, 10);
-            if (targetId === moving.id) return null;
+            if (movingSkip(group)[targetId]) return null;
             var target = byId()[targetId];
             if (!target || isFolder(target)) return null;
             var rect = row.getBoundingClientRect();
@@ -3901,7 +4054,7 @@
             var parentId = target.parentId ? target.parentId : null;
             return {
                 parentId: parentId,
-                index: destinationIndex(parentId, targetId, mode, moving.id),
+                index: destinationIndex(parentId, targetId, mode, group),
                 typeKey: target.typeKey
             };
         }
@@ -3916,7 +4069,7 @@
             row.classList.add(slot === 'before' ? 'is-drop-before' : (ratio > 0.72 ? 'is-drop-after' : 'is-drop-inside'));
             return {
                 parentId: placeId,
-                index: typeSlotIndex(placeId, typeKey, slot, moving.id),
+                index: typeSlotIndex(placeId, typeKey, slot, group),
                 typeKey: typeKey
             };
         }
@@ -3926,16 +4079,24 @@
         var place = byId()[into];
         if (!place || !isFolder(place)) return null;
         row.classList.add('is-drop-inside');
+        if (group.length > 1) {
+            return {
+                parentId: into,
+                index: childrenOf(into).filter(function (asset) { return !movingSkip(group)[asset.id]; }).length,
+                typeKey: ''
+            };
+        }
         return {
             parentId: into,
-            index: typeSlotIndex(into, moving.typeKey, 'after', moving.id),
+            index: typeSlotIndex(into, moving.typeKey, 'after', group),
             typeKey: moving.typeKey
         };
     }
 
     function typeSlotIndex(parentId, typeKey, mode, movingId) {
+        var skip = movingSkip(movingId);
         var siblings = childrenOf(parentId).filter(function (asset) {
-            return asset.id !== movingId;
+            return !skip[asset.id];
         });
         var first = -1;
         var last = -1;
@@ -4003,6 +4164,52 @@
                 return;
             }
             send(payload);
+        });
+    }
+
+    function relocateObjects(ids, plan) {
+        var rows = [];
+        (ids || []).forEach(function (id) {
+            var asset = byId()[id];
+            if (asset && !isFolder(asset) && mayEdit(asset)) rows.push(asset);
+        });
+        if (!rows.length || !plan) return;
+        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        var nextType = plan.typeKey || '';
+        var changes = 0;
+        if (nextType) {
+            rows.forEach(function (asset) {
+                if (asset.typeKey !== nextType) changes += 1;
+            });
+        }
+        if (changes) {
+            var label = typeOf(nextType).label || nextType;
+            if (!window.confirm(t('confirmTypeMoveMany', rows.length).split('{1}').join(label))) return;
+        }
+        if (wouldCycle(rows[0].id, plan.parentId)) {
+            notify(t('errorTitle'));
+            return;
+        }
+        state.dirty = false;
+        setBusy(true);
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/move-objects', {
+            ids: rows.map(function (asset) { return asset.id; }),
+            parentId: plan.parentId,
+            index: plan.index,
+            typeKey: nextType
+        }, function (status, payload) {
+            setBusy(false);
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            assetsChanged();
+            reloadTree(function () {
+                var placed = byId()[rows[0].id];
+                if (placed) expandObjectBranch(placed.parentId, nextType || placed.typeKey);
+                selectAsset(rows[0].id, true);
+                notify(t('moved'));
+            });
         });
     }
 
@@ -4079,9 +4286,20 @@
         }
     }
 
+    function movingSkip(movingId) {
+        var skip = {};
+        if (movingId && movingId.length) {
+            for (var i = 0; i < movingId.length; i++) skip[movingId[i]] = true;
+        } else if (movingId) {
+            skip[movingId] = true;
+        }
+        return skip;
+    }
+
     function destinationIndex(parentId, targetId, mode, movingId) {
+        var skip = movingSkip(movingId);
         var siblings = childrenOf(parentId).filter(function (asset) {
-            return asset.id !== movingId;
+            return !skip[asset.id];
         });
         var index = siblings.length;
         for (var i = 0; i < siblings.length; i++) {
@@ -4362,6 +4580,9 @@
             lock: 'M17 10h-1V8a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm-7-2a2 2 0 0 1 4 0v2h-4V8zm7 11H7v-7h10v7z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
             trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 7h12l-1 14H7L6 7z',
+            image: 'M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5L19 18H5l3.5-4.5z',
+            back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
+            qr: 'M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm13-2h3v3h-3v-3zm-4 4h3v3h-3v-3zm4 4h3v3h-3v-3z',
             cloud: 'M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 8.6 3.5 3.5 0 0 0 7 18z',
             issue: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 13h8v1.6H8V13zm0 4h5v1.6H8V17z'
         };
@@ -4540,9 +4761,11 @@
         if (!state.moreBound) {
             state.moreBound = true;
             document.addEventListener('mousedown', function (event) {
-                var wrap = document.querySelector('.asset-tree-more');
-                var menu = document.querySelector('.asset-tree-more-menu');
-                if (menu && wrap && !wrap.contains(event.target)) menu.hidden = true;
+                var menus = document.querySelectorAll('.asset-tree-more-menu');
+                for (var i = 0; i < menus.length; i++) {
+                    var wrap = menus[i].parentNode;
+                    if (wrap && !wrap.contains(event.target)) menus[i].hidden = true;
+                }
             });
         }
         var wrap = el('div', 'asset-tree-more');
@@ -4563,6 +4786,7 @@
             }
             var entry = el('button', 'asset-tree-more-item' + (item.danger ? ' is-danger' : ''));
             entry.type = 'button';
+            entry.appendChild(toolIcon(item.icon || 'more'));
             if (item.mark) entry.appendChild(pingDot(item.mark));
             entry.appendChild(document.createTextNode(item.label));
             entry.addEventListener('click', function () {
@@ -4570,6 +4794,62 @@
                 item.onClick();
             });
             menu.appendChild(entry);
+        });
+        wrap.appendChild(toggle);
+        wrap.appendChild(menu);
+        return wrap;
+    }
+
+    function documentButton(asset) {
+        if (!state.moreBound) {
+            state.moreBound = true;
+            document.addEventListener('mousedown', function (event) {
+                var menus = document.querySelectorAll('.asset-tree-more-menu');
+                for (var i = 0; i < menus.length; i++) {
+                    var holder = menus[i].parentNode;
+                    if (holder && !holder.contains(event.target)) menus[i].hidden = true;
+                }
+            });
+        }
+        var wrap = el('div', 'asset-tree-more');
+        var menu = el('div', 'asset-tree-more-menu');
+        menu.hidden = true;
+        var toggle = toolButton(t('docButton'), 'issue', function (event) {
+            event.stopPropagation();
+            if (!menu.hidden) {
+                menu.hidden = true;
+                return;
+            }
+            menu.innerHTML = '';
+            menu.classList.add('is-note');
+            menu.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            menu.hidden = false;
+            placeMoreMenu(menu);
+            ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
+                if (!menu.parentNode) return;
+                menu.innerHTML = '';
+                var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
+                if (!rows.length) {
+                    menu.classList.add('is-note');
+                    menu.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('docEmpty')));
+                    placeMoreMenu(menu);
+                    return;
+                }
+                menu.classList.remove('is-note');
+                rows.forEach(function (row) {
+                    var entry = el('button', 'asset-tree-more-item');
+                    entry.type = 'button';
+                    entry.appendChild(toolIcon('issue'));
+                    entry.appendChild(document.createTextNode(row.name || row.id));
+                    entry.addEventListener('click', function () {
+                        menu.hidden = true;
+                        window.location.href = contextPath() + '/plugins/servlet/asset-tree-file?assetId=' + asset.id
+                            + '&document=' + encodeURIComponent(row.id);
+                    });
+                    menu.appendChild(entry);
+                });
+                placeMoreMenu(menu);
+            });
         });
         wrap.appendChild(toggle);
         wrap.appendChild(menu);
@@ -4724,7 +5004,7 @@
             ops.appendChild(toolButton(t('addHere'), 'plus', function () {
                 openCreate(asset.id);
             }));
-            ops.appendChild(moreMenu([{ label: t('trashMove'), danger: true, onClick: function () { openDelete(full); } }]));
+            ops.appendChild(moreMenu([{ icon: 'trash', label: t('trashMove'), danger: true, onClick: function () { openDelete(full); } }]));
         }
         main.appendChild(ops);
         if (asset.parentId && crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
@@ -5928,8 +6208,9 @@
 
     function bulkBar() {
         var bar = el('div', 'asset-tree-bulk');
+        var row = el('div', 'asset-tree-bulk-row');
         var items = pickedItems();
-        bar.appendChild(el('span', 'asset-tree-bulk-count', t('bulkSelected', items.length)));
+        row.appendChild(el('span', 'asset-tree-bulk-count', t('bulkSelected', items.length)));
         var kinds = {};
         items.forEach(function (item) { kinds[item.kind] = true; });
         var onlyObjects = kinds.object && !kinds.place && !kinds.type;
@@ -5937,29 +6218,45 @@
         var assetsOnly = !kinds.type && (kinds.object || kinds.place);
         if (items.length) {
             if (onlyObjects) {
-                bar.appendChild(button(t('status'), 'asset-tree-btn', function () { openBulkStatus(); }));
-                bar.appendChild(button(t('custodian'), 'asset-tree-btn', function () { openBulkCustodian(); }));
+                row.appendChild(button(t('status'), 'asset-tree-btn', function () { openBulkStatus(); }));
+                row.appendChild(button(t('type'), 'asset-tree-btn', function () { openBulkType(); }));
+                row.appendChild(button(t('custodian'), 'asset-tree-btn', function () { openBulkCustodian(); }));
                 if (moduleOn('card')) {
-                    bar.appendChild(button(t('printCards'), 'asset-tree-btn', function () {
+                    row.appendChild(button(t('printCards'), 'asset-tree-btn', function () {
                         printCards(items.map(function (item) {
                             return item.asset || assetByAnyId(parseInt(item.key, 10));
                         }));
                     }));
                 }
-                bar.appendChild(button(t('copy'), 'asset-tree-btn', function () { postBulk('copy'); }));
+                if (photoEnabled()) {
+                    row.appendChild(button(t('photoAdd'), 'asset-tree-btn', function () {
+                        var chosen = [];
+                        items.forEach(function (item) {
+                            var row = item.asset || assetByAnyId(parseInt(item.key, 10));
+                            if (row && row.id && !isFolder(row)) chosen.push(row);
+                        });
+                        if (!chosen.length) return;
+                        var rest = [];
+                        var n;
+                        for (n = 1; n < chosen.length; n++) rest.push(chosen[n].id);
+                        pickPhoto(chosen[0], rest, true);
+                    }));
+                }
+                row.appendChild(button(t('copy'), 'asset-tree-btn', function () { postBulk('copy'); }));
             }
             if (assetsOnly) {
-                bar.appendChild(button(t('bulkMove'), 'asset-tree-btn', function () { openBulkMove(); }));
+                row.appendChild(button(t('bulkMove'), 'asset-tree-btn', function () { openBulkMove(); }));
             }
             if (assetsOnly || onlyTypes) {
-                bar.appendChild(button(t('trashMove'), 'asset-tree-btn danger', openBulkDelete));
+                row.appendChild(button(t('trashMove'), 'asset-tree-btn danger', openBulkDelete));
             }
-            bar.appendChild(button(t('bulkClear'), 'asset-tree-btn', function () {
+            row.appendChild(button(t('bulkClear'), 'asset-tree-btn', function () {
                 state.picked = {};
                 state.bulkErrors = [];
                 refreshPick();
             }));
         }
+        bar.appendChild(row);
         var errors = state.bulkErrors || [];
         if (errors.length) {
             var list = el('ul', 'asset-tree-bulk-errors');
@@ -6032,6 +6329,39 @@
             }
         }
         setTimeout(next, 40);
+    }
+
+    function openBulkType() {
+        var options = [];
+        (state.types || []).forEach(function (type) {
+            if (!type || type.location || !type.typeKey) return;
+            options.push({ value: type.typeKey, label: type.label || type.typeKey });
+        });
+        options.sort(function (a, b) {
+            return String(a.label).localeCompare(String(b.label));
+        });
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('type')));
+            if (!options.length) {
+                dialog.appendChild(el('p', 'asset-tree-hint', t('needType')));
+                var empty = el('div', 'asset-tree-dialog-actions');
+                empty.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+                dialog.appendChild(empty);
+                return;
+            }
+            var select = selectBox('asset-tree-bulk-type', options, options[0].value, false);
+            dialog.appendChild(field(t('type'), select, true));
+            var actions = el('div', 'asset-tree-dialog-actions');
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+            actions.appendChild(button(t('bulkApply'), 'asset-tree-btn primary', function () {
+                if (!select.value) {
+                    notify(t('needType'));
+                    return;
+                }
+                postBulk('type', { typeKey: select.value });
+            }));
+            dialog.appendChild(actions);
+        });
     }
 
     function openBulkStatus() {
@@ -7580,8 +7910,8 @@
     }
 
     function photoUrl(asset) {
-        var stamp = asset && asset.updated ? encodeURIComponent(asset.updated) : '';
-        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id + (stamp ? '&v=' + stamp : '');
+        var stamp = asset && asset.photoRev ? String(asset.photoRev) : (asset && asset.updated ? asset.updated : '');
+        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id + (stamp ? '&v=' + encodeURIComponent(stamp) : '');
     }
 
     function showPhotoError(message) {
@@ -7594,7 +7924,7 @@
         node.textContent = message || '';
     }
 
-    function uploadPhoto(asset, file) {
+    function uploadPhoto(asset, file, ids, stay) {
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
             showPhotoError(t('photoSize'));
@@ -7604,13 +7934,19 @@
         var xhr = new XMLHttpRequest();
         var data = new FormData();
         data.append('file', file, file.name || 'photo.jpg');
-        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id, true);
+        var url = contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + asset.id;
+        if (ids && ids.length) url += '&also=' + ids.join(',');
+        xhr.open('POST', url, true);
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) return;
             if (xhr.status >= 200 && xhr.status < 300) {
                 notify(t('saved'));
+                if (stay) {
+                    reloadTree(function () { renderFrame(); });
+                    return;
+                }
                 selectAsset(asset.id, true);
                 return;
             }
@@ -7621,7 +7957,7 @@
         xhr.send(data);
     }
 
-    function pickPhoto(asset) {
+    function pickPhoto(asset, ids, stay) {
         var input = document.getElementById('asset-tree-photo-file');
         if (!input) {
             input = el('input');
@@ -7634,7 +7970,7 @@
         input.onchange = function () {
             var chosen = input.files && input.files[0];
             input.value = '';
-            if (chosen) openPhotoCrop(asset, chosen);
+            if (chosen) openPhotoCrop(asset, chosen, ids, stay);
         };
         input.click();
     }
@@ -7736,7 +8072,7 @@
         return canvas;
     }
 
-    function openPhotoCrop(asset, file) {
+    function openPhotoCrop(asset, file, ids, stay) {
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
             showPhotoError(t('photoSize'));
@@ -7755,7 +8091,7 @@
                     showPhotoError(t('errorTitle'));
                     return;
                 }
-                showPhotoCrop(asset, uprightPhoto(img, orientation));
+                showPhotoCrop(asset, uprightPhoto(img, orientation), ids, stay);
             };
             img.onerror = function () {
                 URL.revokeObjectURL(url);
@@ -7768,58 +8104,93 @@
         reader.readAsArrayBuffer(file);
     }
 
-    function showPhotoCrop(asset, source) {
-        var viewW = 0;
-        var viewH = 0;
+    function showPhotoCrop(asset, source, alsoIds, stay) {
         var srcW = source.width;
         var srcH = source.height;
-        var cover = 1;
-        var zoom = 1;
-        var dispW = 0;
-        var dispH = 0;
-        var offsetX = 0;
-        var offsetY = 0;
+        var viewW = 1;
+        var viewH = 1;
+        var crop = { x: 0, y: 0, w: 1, h: 1 };
         var drag = null;
-        var placed = false;
         var closed = false;
+        var frame = null;
         var stage = null;
-        var slider = null;
-        source.className = 'asset-tree-crop-image';
-        function clampShift() {
-            if (offsetX > 0) offsetX = 0;
-            if (offsetY > 0) offsetY = 0;
-            if (offsetX < viewW - dispW) offsetX = viewW - dispW;
-            if (offsetY < viewH - dispH) offsetY = viewH - dispH;
+        source.className = 'asset-tree-frame-source';
+        function pointOf(event) {
+            return event.touches && event.touches.length ? event.touches[0] : event;
         }
-        function paintShift(keepCenter) {
-            var prevW = dispW;
-            var prevH = dispH;
-            dispW = srcW * cover * zoom;
-            dispH = srcH * cover * zoom;
-            if (keepCenter && prevW) {
-                var cx = (viewW / 2 - offsetX) / prevW;
-                var cy = (viewH / 2 - offsetY) / prevH;
-                offsetX = viewW / 2 - cx * dispW;
-                offsetY = viewH / 2 - cy * dispH;
-            } else if (!placed) {
-                offsetX = (viewW - dispW) / 2;
-                offsetY = (viewH - dispH) / 2;
-                placed = true;
+        function fitSource() {
+            var maxW = 1040;
+            var maxH = 640;
+            if (window.innerHeight) maxH = Math.max(360, window.innerHeight - 180);
+            if (stage && stage.clientWidth > 80) {
+                maxW = stage.clientWidth - 16;
+            } else if (window.innerWidth) {
+                maxW = Math.max(360, Math.min(1040, window.innerWidth - 96));
             }
-            clampShift();
-            source.style.width = dispW + 'px';
-            source.style.height = dispH + 'px';
-            source.style.left = offsetX + 'px';
-            source.style.top = offsetY + 'px';
+            var scale = Math.min(maxW / srcW, maxH / srcH);
+            if (!isFinite(scale) || scale <= 0) scale = 1;
+            viewW = Math.max(1, Math.round(srcW * scale));
+            viewH = Math.max(1, Math.round(srcH * scale));
+            source.style.width = viewW + 'px';
+            source.style.height = viewH + 'px';
+        }
+        function placeFrame() {
+            var aspect = 3 / 2;
+            var w;
+            var h;
+            if (viewW / viewH > aspect) {
+                h = viewH;
+                w = h * aspect;
+            } else {
+                w = viewW;
+                h = w / aspect;
+            }
+            crop = { x: (viewW - w) / 2, y: (viewH - h) / 2, w: w, h: h };
+        }
+        function paintFrame() {
+            if (!frame) return;
+            frame.style.left = crop.x + 'px';
+            frame.style.top = crop.y + 'px';
+            frame.style.width = crop.w + 'px';
+            frame.style.height = crop.h + 'px';
+        }
+        function applyCorner(start, dx) {
+            var minW = Math.min(48, start.availW);
+            var grow = start.corner === 'se' || start.corner === 'ne' ? dx : -dx;
+            var w = start.w + grow;
+            if (w < minW) w = minW;
+            if (w > start.availW) w = start.availW;
+            var h = w * 2 / 3;
+            if (h > start.availH) {
+                h = start.availH;
+                w = h * 3 / 2;
+            }
+            if (w < 1) w = 1;
+            if (h < 1) h = 1;
+            var x = start.cx;
+            var y = start.cy;
+            if (start.corner === 'nw' || start.corner === 'sw') x = start.right - w;
+            if (start.corner === 'nw' || start.corner === 'ne') y = start.bottom - h;
+            crop = { x: x, y: y, w: w, h: h };
         }
         function onMove(event) {
             if (!drag) return;
-            var point = event.touches && event.touches.length ? event.touches[0] : event;
-            offsetX = drag.ox + point.clientX - drag.x;
-            offsetY = drag.oy + point.clientY - drag.y;
-            clampShift();
-            source.style.left = offsetX + 'px';
-            source.style.top = offsetY + 'px';
+            var point = pointOf(event);
+            var dx = point.clientX - drag.x;
+            var dy = point.clientY - drag.y;
+            if (drag.mode === 'move') {
+                var nx = drag.cx + dx;
+                var ny = drag.cy + dy;
+                if (nx < 0) nx = 0;
+                if (ny < 0) ny = 0;
+                if (nx + crop.w > viewW) nx = viewW - crop.w;
+                if (ny + crop.h > viewH) ny = viewH - crop.h;
+                crop.x = nx;
+                crop.y = ny;
+            } else {
+                applyCorner(drag, dx);
+            }
+            paintFrame();
             if (event.preventDefault) event.preventDefault();
         }
         function onUp() { drag = null; }
@@ -7832,6 +8203,39 @@
             document.removeEventListener('touchend', onUp);
             if (backdrop && backdrop.parentNode) closeModal(backdrop);
         }
+        function startDrag(event) {
+            var point = pointOf(event);
+            var node = event.target;
+            var corner = node && node.getAttribute ? (node.getAttribute('data-corner') || '') : '';
+            drag = {
+                mode: corner ? corner : 'move',
+                corner: corner,
+                x: point.clientX,
+                y: point.clientY,
+                cx: crop.x,
+                cy: crop.y,
+                w: crop.w,
+                right: crop.x + crop.w,
+                bottom: crop.y + crop.h,
+                availW: viewW,
+                availH: viewH
+            };
+            if (corner === 'se') {
+                drag.availW = viewW - crop.x;
+                drag.availH = viewH - crop.y;
+            } else if (corner === 'nw') {
+                drag.availW = crop.x + crop.w;
+                drag.availH = crop.y + crop.h;
+            } else if (corner === 'ne') {
+                drag.availW = viewW - crop.x;
+                drag.availH = crop.y + crop.h;
+            } else if (corner === 'sw') {
+                drag.availW = crop.x + crop.w;
+                drag.availH = viewH - crop.y;
+            }
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopPropagation) event.stopPropagation();
+        }
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
         document.addEventListener('touchmove', onMove);
@@ -7840,29 +8244,30 @@
             dialog.className += ' is-crop';
             dialog.appendChild(el('h2', null, t('photoCropTitle')));
             dialog.appendChild(el('p', 'asset-tree-hint', t('photoCropHint')));
-            stage = el('div', 'asset-tree-crop');
-            stage.appendChild(source);
+            stage = el('div', 'asset-tree-frame-stage');
+            var picture = el('div', 'asset-tree-frame-picture');
+            picture.appendChild(source);
+            frame = el('div', 'asset-tree-frame-window');
+            var corners = ['nw', 'ne', 'sw', 'se'];
+            var n;
+            for (n = 0; n < corners.length; n++) {
+                var handle = el('span', 'asset-tree-frame-handle is-' + corners[n]);
+                handle.setAttribute('data-corner', corners[n]);
+                frame.appendChild(handle);
+            }
+            picture.appendChild(frame);
+            stage.appendChild(picture);
             dialog.appendChild(stage);
-            var zoomLabel = el('label', 'asset-tree-crop-zoom-label');
-            zoomLabel.appendChild(el('span', null, t('photoCropZoom')));
-            slider = el('input', 'asset-tree-crop-zoom');
-            slider.type = 'range';
-            slider.min = '1';
-            slider.max = '3';
-            slider.step = '0.01';
-            slider.value = '1';
-            zoomLabel.appendChild(slider);
-            dialog.appendChild(zoomLabel);
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', release));
             actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
                 var out = document.createElement('canvas');
                 out.width = 960;
                 out.height = 640;
-                var sx = -offsetX / dispW * srcW;
-                var sy = -offsetY / dispH * srcH;
-                var sw = viewW / dispW * srcW;
-                var sh = viewH / dispH * srcH;
+                var sx = crop.x / viewW * srcW;
+                var sy = crop.y / viewH * srcH;
+                var sw = crop.w / viewW * srcW;
+                var sh = crop.h / viewH * srcH;
                 out.getContext('2d').drawImage(source, sx, sy, sw, sh, 0, 0, 960, 640);
                 function send(blob) {
                     if (!blob) {
@@ -7870,7 +8275,7 @@
                         return;
                     }
                     release();
-                    uploadPhoto(asset, blob);
+                    uploadPhoto(asset, blob, alsoIds || [], !!stay);
                 }
                 if (out.toBlob) {
                     out.toBlob(send, 'image/jpeg', 0.9);
@@ -7884,26 +8289,8 @@
                 send(new Blob([list], { type: 'image/jpeg' }));
             }));
             dialog.appendChild(actions);
-            slider.addEventListener('input', function () {
-                zoom = parseFloat(slider.value) || 1;
-                paintShift(true);
-            });
-            function startDrag(event) {
-                var point = event.touches && event.touches.length ? event.touches[0] : event;
-                drag = { x: point.clientX, y: point.clientY, ox: offsetX, oy: offsetY };
-                if (event.preventDefault) event.preventDefault();
-            }
-            stage.addEventListener('mousedown', startDrag);
-            stage.addEventListener('touchstart', startDrag);
-            stage.addEventListener('wheel', function (event) {
-                if (event.preventDefault) event.preventDefault();
-                var next = (parseFloat(slider.value) || 1) + (event.deltaY < 0 ? 0.08 : -0.08);
-                if (next < 1) next = 1;
-                if (next > 3) next = 3;
-                slider.value = String(next);
-                zoom = next;
-                paintShift(true);
-            });
+            frame.addEventListener('mousedown', startDrag);
+            frame.addEventListener('touchstart', startDrag);
         });
         if (backdrop) {
             backdrop.addEventListener('click', function (event) {
@@ -7913,11 +8300,9 @@
                 }
             }, true);
         }
-        viewW = stage ? stage.clientWidth : 0;
-        viewH = viewW ? Math.round(viewW * 2 / 3) : 0;
-        if (stage && viewH) stage.style.height = viewH + 'px';
-        cover = viewW && viewH ? Math.max(viewW / srcW, viewH / srcH) : 1;
-        paintShift(false);
+        fitSource();
+        placeFrame();
+        paintFrame();
     }
 
     function deletePhoto(asset) {
@@ -8752,19 +9137,20 @@
         if (mayEdit(asset) && !isFolder(asset) && moduleOn('card')) {
             var current = state.detail && state.detail.id === asset.id ? state.detail : asset;
             if (current.cardImage) {
-                extra.push({ label: t('cardQrRemove'), onClick: function () { deleteCardImage(current); } });
+                extra.push({ icon: 'trash', label: t('cardQrRemove'), onClick: function () { deleteCardImage(current); } });
             } else {
-                extra.push({ label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
+                extra.push({ icon: 'qr', label: t('cardQrUpload'), onClick: function () { pickCardImage(current); } });
             }
         }
         if (mayEdit(asset) && !isFolder(asset) && photoEnabled()) {
             var pictured = state.detail && state.detail.id === asset.id ? state.detail : asset;
             if (pictured.photo) {
-                extra.push({ label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
+                extra.push({ icon: 'trash', label: t('photoRemove'), onClick: function () { deletePhoto(pictured); } });
             } else {
-                extra.push({ label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
+                extra.push({ icon: 'image', label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
             }
         }
+        if (!isFolder(asset)) ops.appendChild(documentButton(asset));
         if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
             var ping = toolButton(t('tniPing'), 'ping', function () { pingAsset(asset); });
             var pingState = pingMark(asset);
@@ -8776,6 +9162,7 @@
         }
         if (childrenOf(asset.id).length || !showsInTree(asset)) {
             extra.push({
+                icon: 'back',
                 label: t('backToList'),
                 onClick: function () {
                     state.pane = 'list';
@@ -8793,13 +9180,14 @@
             if (lifeRow && lifeRow.writeoffState !== 'approved' && lifeRow.writeoffState !== 'pending') {
                 var directWriteoff = !moduleSetup().lifeApproval;
                 extra.push({
+                    icon: 'issue',
                     label: directWriteoff ? t('lifeWriteoffNow') : t('lifeAsk'),
                     danger: true,
                     onClick: function () { openWriteoffDialog(asset, lifeRow, directWriteoff); }
                 });
             }
         }
-        if (mayEdit(asset)) extra.push({ label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
+        if (mayEdit(asset)) extra.push({ icon: 'trash', label: t('trashMove'), danger: true, onClick: function () { openDelete(asset); } });
         if (extra.length) ops.appendChild(moreMenu(extra));
         main.appendChild(ops);
         if (crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
@@ -15304,6 +15692,7 @@
         var sections = [];
         if (state.canConfigure) {
             sections.push(['project', t('projectSection'), null]);
+            sections.push(['documents', t('docSection'), null]);
         }
         if (state.canConfigure) {
             sections.push(['types', t('typesSection'), state.types.length]);
@@ -15352,6 +15741,8 @@
             renderExchangeSettings(panel);
         } else if (state.schemaTab === 'access') {
             renderAccessSettings(panel);
+        } else if (state.schemaTab === 'documents') {
+            renderDocumentSettings(panel);
         } else if (state.schemaTab === 'project') {
             renderProjectSettings(panel);
         } else if (state.schemaTab === 'portal') {
@@ -15362,6 +15753,147 @@
             renderStatusSettings(panel);
         }
         return panel;
+    }
+
+    function renderDocumentSettings(panel) {
+        var stack = el('div', 'asset-tree-project-stack');
+        var templates = el('section', 'asset-tree-project-card');
+        templates.appendChild(el('h3', 'asset-tree-settings-title', t('docTemplates')));
+        templates.appendChild(el('p', 'asset-tree-hint', t('docSectionHint')));
+        var form = el('div', 'asset-tree-doc-form');
+        var name = input('asset-tree-doc-name', '');
+        name.autocomplete = 'off';
+        name.maxLength = 120;
+        form.appendChild(field(t('docName'), name));
+        var file = el('input');
+        file.type = 'file';
+        file.className = 'asset-tree-doc-file';
+        file.accept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        var pick = el('span', 'asset-tree-doc-pick');
+        var fileName = el('span', 'asset-tree-doc-pick-name', t('docFileEmpty'));
+        pick.appendChild(file);
+        pick.appendChild(fileName);
+        file.addEventListener('change', function () {
+            var chosen = file.files && file.files[0];
+            fileName.textContent = chosen ? chosen.name : t('docFileEmpty');
+            if (chosen) fileName.classList.add('is-set');
+            else fileName.classList.remove('is-set');
+        });
+        form.appendChild(field(t('docFile'), pick));
+        form.appendChild(button(t('docAdd'), 'asset-tree-btn primary', function () {
+            var chosen = file.files && file.files[0];
+            if (!name.value.trim() || !chosen) {
+                notify(t('errorTitle'));
+                return;
+            }
+            uploadDocument(name.value.trim(), chosen);
+        }));
+        templates.appendChild(form);
+        var list = el('div', 'asset-tree-doc-list');
+        list.appendChild(el('p', 'asset-tree-hint', t('loading')));
+        templates.appendChild(list);
+        stack.appendChild(templates);
+
+        var marks = el('section', 'asset-tree-project-card');
+        marks.appendChild(el('h3', 'asset-tree-settings-title', t('docMarks')));
+        marks.appendChild(el('p', 'asset-tree-hint', t('docTokens')));
+        docTokenGroups().forEach(function (group) {
+            var block = el('div', 'asset-tree-doc-group');
+            block.appendChild(el('div', 'asset-tree-doc-group-title', group[0]));
+            var chips = el('div', 'asset-tree-doc-tokens');
+            group[1].forEach(function (token) {
+                var text = '{{' + token + '}}';
+                var chip = el('button', 'asset-tree-doc-token', text);
+                chip.type = 'button';
+                chip.title = t('copy');
+                chip.addEventListener('click', function () {
+                    copyPlain(text);
+                    notify(t('docCopied'));
+                });
+                chips.appendChild(chip);
+            });
+            block.appendChild(chips);
+            marks.appendChild(block);
+        });
+        stack.appendChild(marks);
+        panel.appendChild(stack);
+
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/documents', null, function (status, payload) {
+            if (!list.parentNode) return;
+            list.innerHTML = '';
+            var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
+            if (status < 200 || status >= 300) {
+                list.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('errorTitle')));
+                return;
+            }
+            if (!rows.length) {
+                list.appendChild(el('p', 'asset-tree-hint', t('docEmpty')));
+                return;
+            }
+            rows.forEach(function (row) {
+                var line = el('div', 'asset-tree-doc-row');
+                line.appendChild(el('span', 'asset-tree-doc-name', row.name || row.id));
+                line.appendChild(button(t('docDelete'), 'asset-tree-btn', function () {
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/documents/' + encodeURIComponent(row.id), null, function () {
+                        renderFrame();
+                    });
+                }));
+                list.appendChild(line);
+            });
+        });
+    }
+
+    function docTokenGroups() {
+        var english = String(state.locale || 'ru').toLowerCase().indexOf('en') === 0;
+        if (english) {
+            return [
+                [t('docGroupCard'), ['name', 'key', 'serial', 'inventory', 'type', 'status', 'description', 'maker', 'model', 'group', 'quantity', 'life', 'year', 'date', 'request']],
+                [t('docGroupPerson'), ['mol', 'issued', 'title', 'phone', 'department', 'email', 'custodian']],
+                [t('docGroupPlace'), ['place', 'address', 'city', 'project']]
+            ];
+        }
+        return [
+            [t('docGroupCard'), ['наименование', 'ключ', 'серийный', 'инвентарный', 'тип', 'статус', 'описание', 'производитель', 'модель', 'группа', 'количество', 'срок', 'год', 'дата', 'заявка']],
+            [t('docGroupPerson'), ['мол', 'кому выдано', 'должность', 'телефон', 'отдел', 'почта', 'ответственный']],
+            [t('docGroupPlace'), ['площадка', 'филиал', 'адрес', 'город', 'организация']]
+        ];
+    }
+
+    function copyPlain(text) {
+        var area = el('textarea');
+        area.value = text;
+        area.setAttribute('readonly', 'readonly');
+        area.style.position = 'fixed';
+        area.style.left = '-9999px';
+        document.body.appendChild(area);
+        area.select();
+        try {
+            document.execCommand('copy');
+        } catch (error) {
+            /* The chip still shows the token when the browser blocks the copy. */
+        }
+        document.body.removeChild(area);
+    }
+
+    function uploadDocument(name, file) {
+        var xhr = new XMLHttpRequest();
+        var data = new FormData();
+        data.append('file', file, file.name || 'template.docx');
+        xhr.open('POST', contextPath() + '/plugins/servlet/asset-tree-file?documents=1&projectKey='
+            + encodeURIComponent(state.projectKey) + '&name=' + encodeURIComponent(name), true);
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                renderFrame();
+                return;
+            }
+            var payload = null;
+            try { payload = JSON.parse(xhr.responseText); } catch (error) { payload = null; }
+            notify((payload && payload.message) || t('errorTitle'));
+        };
+        xhr.send(data);
     }
 
     function renderProjectSettings(panel) {
