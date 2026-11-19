@@ -13855,11 +13855,12 @@ button.asset-tree-attach-remove {
 
 #asset-tree-app .asset-tree-frame.is-plain > .asset-tree-schemes {
     position: relative;
+    box-sizing: border-box;
     height: calc(100vh - 210px);
     min-height: 520px;
     display: flex;
     flex-direction: column;
-    background: #e6e6e6;
+    background: #f4f5f7;
     border: 1px solid var(--line, #dfe1e6);
     border-radius: 3px;
     overflow: hidden;
@@ -13879,29 +13880,32 @@ button.asset-tree-attach-remove {
     align-items: stretch;
     gap: 0;
     padding: 0;
-    background: #f3f3f3;
-    border-bottom: 1px solid #c6c6c6;
+    background: #f4f5f7;
+    border-bottom: 1px solid #dfe1e6;
 }
 
 .asset-tree-scheme-head {
+    flex-wrap: nowrap;
     align-items: center;
+    justify-content: flex-start;
     width: 100%;
     box-sizing: border-box;
-    min-height: 36px;
-    padding: 4px 8px;
-    background: #f6f6f6;
-    border-bottom: 1px solid #d5d5d5;
+    min-height: 0;
+    padding: 3px 8px;
+    background: #fff;
+    border-bottom: 1px solid #dfe1e6;
 }
 
 .asset-tree-scheme-control {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: 8px;
+    justify-content: flex-start;
+    gap: 6px;
     box-sizing: border-box;
-    min-height: 36px;
-    padding: 4px 8px;
-    background: #efefef;
+    min-height: 0;
+    padding: 3px 8px;
+    background: #f4f5f7;
 }
 
 .asset-tree-scheme-control-gap {
@@ -13918,16 +13922,16 @@ button.asset-tree-attach-remove {
     width: 40px;
     box-sizing: border-box;
     padding: 4px 0;
-    background: #f5f5f5;
-    border-right: 1px solid #c6c6c6;
-    overflow: auto;
+    background: #f4f5f7;
+    border-right: 1px solid #dfe1e6;
+    overflow: hidden;
 }
 
 .asset-tree-scheme-rail-gap {
     width: 18px;
     height: 1px;
     margin: 4px 0;
-    background: #555;
+    background: #dfe1e6;
     flex: 0 0 auto;
 }
 
@@ -13980,9 +13984,9 @@ button.asset-tree-attach-remove {
     width: 168px;
     margin: 0;
     padding: 8px;
-    background: #3a3a3a;
-    border: 1px solid #1b1b1b;
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.35);
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    box-shadow: 0 4px 8px rgba(9, 30, 66, 0.16);
 }
 
 .asset-tree-scheme-rail .asset-tree-scheme-palette.is-open {
@@ -14000,9 +14004,9 @@ button.asset-tree-attach-remove {
     width: 40px;
     box-sizing: border-box;
     padding: 4px 0;
-    background: #323232;
-    border-left: 1px solid #1b1b1b;
-    overflow: auto;
+    background: #f4f5f7;
+    border-left: 1px solid #dfe1e6;
+    overflow: hidden;
 }
 
 #asset-tree-app .asset-tree-scheme-panel-btn {
@@ -14016,7 +14020,7 @@ button.asset-tree-attach-remove {
     border: 0;
     border-radius: 2px;
     background: transparent;
-    color: #d5d5d5;
+    color: #42526e;
     cursor: pointer;
 }
 
@@ -14032,8 +14036,8 @@ button.asset-tree-attach-remove {
 
 #asset-tree-app .asset-tree-scheme-panel-btn:hover,
 #asset-tree-app .asset-tree-scheme-panel-btn.is-on {
-    background: #505050;
-    color: #fff;
+    background: #deebff;
+    color: #0052cc;
 }
 
 .asset-tree-scheme-head .asset-tree-scheme-mini,
@@ -14126,27 +14130,48 @@ button.asset-tree-attach-remove {
     height: 28px;
     padding: 0;
     justify-content: center;
-    border-radius: 2px;
-    color: #2c2c2c;
+    border-radius: 3px;
+    color: #42526e;
 }
 
 #asset-tree-app .asset-tree-scheme-rail .asset-tree-scheme-tool:hover {
-    background: #e8e8e8;
+    background: #ebecf0;
 }
 
 #asset-tree-app .asset-tree-scheme-rail .asset-tree-scheme-tool.is-on {
-    background: #d6d6d6;
-    box-shadow: inset 0 0 0 1px #6e6e6e;
+    background: #deebff;
+    color: #0052cc;
+    box-shadow: none;
 }
 
 #asset-tree-app .asset-tree-scheme-control .asset-tree-scheme-tool {
-    height: 26px;
+    height: 24px;
     padding: 0 8px;
-    border: 1px solid #c6c6c6;
-    border-radius: 2px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
     background: #fff;
+    color: #172b4d;
     font-size: 12px;
     font-weight: 400;
+}
+
+#asset-tree-app .asset-tree-scheme-head .asset-tree-scheme-save,
+#asset-tree-app .asset-tree-scheme-head .asset-tree-scheme-new,
+#asset-tree-app .asset-tree-scheme-head .asset-tree-scheme-danger,
+#asset-tree-app .asset-tree-scheme-head .asset-tree-scheme-pick,
+#asset-tree-app .asset-tree-scheme-head .asset-tree-scheme-name {
+    height: 24px;
+    font-size: 12px;
+}
+
+.asset-tree-scheme-control .asset-tree-scheme-tool-field,
+.asset-tree-scheme-control .asset-tree-scheme-check {
+    margin: 0;
+}
+
+.asset-tree-scheme-control .asset-tree-scheme-tool-field input,
+.asset-tree-scheme-control .asset-tree-scheme-unit {
+    height: 24px;
 }
 
 #asset-tree-app .asset-tree-scheme-tool span {
@@ -14182,7 +14207,7 @@ button.asset-tree-attach-remove {
         "scheme-rail scheme-left scheme-canvas scheme-right scheme-panels"
         "scheme-rail scheme-bottom scheme-bottom scheme-bottom scheme-panels";
     position: relative;
-    background: #535353;
+    background: #f4f5f7;
 }
 
 .asset-tree-scheme-canvas-wrap {
@@ -14190,18 +14215,18 @@ button.asset-tree-attach-remove {
     grid-area: scheme-canvas;
     min-width: 0;
     min-height: 0;
-    background: #535353;
+    overflow: hidden;
+    background: #fff;
 }
 
 .asset-tree-scheme-canvas-wrap > .asset-tree-scheme-stage {
     position: absolute;
-    left: 36px;
-    top: 28px;
-    right: 36px;
-    bottom: 28px;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
     z-index: 0;
     background: #fff;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65), 0 10px 28px rgba(0, 0, 0, 0.28);
 }
 
 .asset-tree-scheme-dock {
@@ -14224,8 +14249,8 @@ button.asset-tree-attach-remove {
     grid-area: scheme-right;
     flex-direction: column;
     width: 260px;
-    background: #f7f7f7;
-    border-left: 1px solid #c6c6c6;
+    background: #fff;
+    border-left: 1px solid #dfe1e6;
 }
 
 .asset-tree-scheme-dock.is-top,
@@ -14375,8 +14400,8 @@ button.asset-tree-attach-remove {
     gap: 4px;
     height: 24px;
     padding: 0 4px 0 8px;
-    background: #e8e8e8;
-    border-bottom: 1px solid #c6c6c6;
+    background: #f4f5f7;
+    border-bottom: 1px solid #dfe1e6;
     border-radius: 0;
     cursor: move;
     user-select: none;
@@ -14395,7 +14420,7 @@ button.asset-tree-attach-remove {
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: #4a4a4a;
+    color: #6b778c;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -14979,92 +15004,12 @@ button.asset-tree-attach-remove {
 }
 
 .asset-tree-scheme-status {
-    min-height: 28px;
-    padding: 6px 10px;
-    border-top: 1px solid #1b1b1b;
-    background: #323232;
-    color: #c8c8c8;
+    min-height: 24px;
+    padding: 4px 10px;
+    border-top: 1px solid #dfe1e6;
+    background: #f4f5f7;
+    color: #6b778c;
     font-size: 12px;
-}
-
-.asset-tree-schemes,
-.asset-tree-scheme-bar,
-.asset-tree-scheme-head,
-.asset-tree-scheme-control,
-.asset-tree-scheme-rail {
-    background: #323232;
-    color: #e4e4e4;
-    border-color: #1b1b1b;
-}
-
-.asset-tree-scheme-field-inline,
-.asset-tree-scheme-measures,
-.asset-tree-scheme-ink,
-.asset-tree-scheme-tool-field {
-    color: #c8c8c8;
-}
-
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-pick,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-name,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-unit,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-save,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-new,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-control .asset-tree-scheme-tool,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-tool-field input {
-    height: 24px;
-    background: #3e3e3e;
-    color: #f2f2f2;
-    border: 1px solid #2a2a2a;
-    border-radius: 2px;
-}
-
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-rail .asset-tree-scheme-tool {
-    color: #d6d6d6;
-    background: transparent;
-    border-color: transparent;
-}
-
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-rail .asset-tree-scheme-tool:hover,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-rail .asset-tree-scheme-tool.is-on {
-    background: #505050;
-    color: #fff;
-    box-shadow: none;
-}
-
-.asset-tree-scheme-dock,
-.asset-tree-scheme-dock.is-right,
-.asset-tree-scheme-window,
-.asset-tree-scheme-window-body {
-    background: #323232;
-    color: #e6e6e6;
-    border-color: #1b1b1b;
-}
-
-.asset-tree-scheme-window-bar {
-    background: #3a3a3a;
-    border-bottom-color: #1b1b1b;
-}
-
-.asset-tree-scheme-window-title,
-.asset-tree-scheme-label,
-.asset-tree-scheme-muted {
-    color: #d0d0d0;
-}
-
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-window .asset-tree-scheme-row,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-window .asset-tree-scheme-mini,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-window .asset-tree-scheme-name,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-window select,
-#asset-tree-app .asset-tree-schemes .asset-tree-scheme-window input {
-    background: #3e3e3e;
-    color: #f2f2f2;
-    border-color: #2a2a2a;
-}
-
-#asset-tree-app .asset-tree-scheme-danger {
-    background: transparent;
-    color: #ff8f8f;
-    border-color: #8a3b3b;
 }
 
 .asset-tree-scheme-field {

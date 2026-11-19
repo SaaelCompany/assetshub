@@ -446,7 +446,6 @@
             if (session.mode !== 'edit') return;
             scanFile.click();
         });
-        control.appendChild(el('div', 'asset-tree-scheme-control-gap'));
         control.appendChild(importBtn);
         control.appendChild(scanFile);
         var exportDxfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportDxf'));
