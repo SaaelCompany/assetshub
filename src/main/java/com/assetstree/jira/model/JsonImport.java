@@ -65,9 +65,17 @@ public final class JsonImport {
         private final int parentId;
         private final String custodianKey;
         private final String issuedKey;
+        private final String serial;
+        private final String inventory;
 
         public Existing(int id, String objectKey, String externalKey, String name, String description, String typeKey,
                         String statusKey, int parentId, String custodianKey, String issuedKey) {
+            this(id, objectKey, externalKey, name, description, typeKey, statusKey, parentId, custodianKey, issuedKey, "", "");
+        }
+
+        public Existing(int id, String objectKey, String externalKey, String name, String description, String typeKey,
+                        String statusKey, int parentId, String custodianKey, String issuedKey,
+                        String serial, String inventory) {
             this.id = id;
             this.objectKey = objectKey == null ? "" : objectKey;
             this.externalKey = externalKey == null ? "" : externalKey;
@@ -78,6 +86,8 @@ public final class JsonImport {
             this.parentId = parentId;
             this.custodianKey = custodianKey == null ? "" : custodianKey;
             this.issuedKey = issuedKey == null ? "" : issuedKey;
+            this.serial = serial == null ? "" : serial;
+            this.inventory = inventory == null ? "" : inventory;
         }
 
         public int getId() {
@@ -161,7 +171,8 @@ public final class JsonImport {
                     continue;
                 }
                 byId.put(Integer.valueOf(row.id), row);
-                hosts.add(new TniSame.Card(row.id, row.name, places.contains(row.typeKey), row.externalKey, ""));
+                hosts.add(new TniSame.Card(row.id, row.name, places.contains(row.typeKey), row.externalKey, "",
+                        row.serial, row.inventory));
                 if (!row.objectKey.isEmpty()) {
                     byKey.put(row.objectKey.toLowerCase(Locale.ROOT), row);
                 }
@@ -183,8 +194,10 @@ public final class JsonImport {
             if (issues.size() > before) {
                 continue;
             }
+            String serial = fieldMark(item.fields, true);
+            String inventory = fieldMark(item.fields, false);
             if (match == null && item.key.isEmpty() && item.externalId.isEmpty()) {
-                int same = TniSame.pick(hosts, 0, item.name, "");
+                int same = TniSame.pick(hosts, 0, item.name, "", serial, inventory);
                 if (same < 0 || (same > 0 && taken.contains(Integer.valueOf(same)))) {
                     issues.add(new EquipmentExchange.Issue(rowNumber, "asset-tree.error.import.host", item.name));
                     continue;
@@ -329,11 +342,28 @@ public final class JsonImport {
             if (match == null && !externalId.isEmpty()) {
                 byExternal.put(externalId.toLowerCase(Locale.ROOT), new Existing(-1, "", externalId, name, "", type.getKey(), statusKey, parentId, "", ""));
             }
-            if (match == null && !TniText.shortHost(name).isEmpty()) {
-                hosts.add(new TniSame.Card(synthetic[0]--, name, false, "", ""));
+            if (match == null && (!TniText.shortHost(name).isEmpty() || !serial.isEmpty() || !inventory.isEmpty())) {
+                hosts.add(new TniSame.Card(synthetic[0]--, name, false, "", "", serial, inventory));
             }
         }
         return new Plan(changes, issues);
+    }
+
+    private static String fieldMark(Map<String, String> fields, boolean serial) {
+        if (fields == null) {
+            return "";
+        }
+        String found = "";
+        for (Map.Entry<String, String> entry : fields.entrySet()) {
+            if (entry == null || entry.getValue() == null || entry.getValue().trim().isEmpty()) {
+                continue;
+            }
+            String key = entry.getKey() == null ? "" : entry.getKey();
+            if (serial ? DuplicateMarks.isSerial(key, key) : DuplicateMarks.isInventory(key, key)) {
+                found = entry.getValue().trim();
+            }
+        }
+        return found;
     }
 
     private static Existing match(Item item, Map<String, Existing> byKey, Map<String, Existing> byExternal, int row,

@@ -208,6 +208,7 @@ import com.assetstree.jira.model.PlaceLayout;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.FlowRules;
 import com.assetstree.jira.model.DocFields;
+import com.assetstree.jira.model.DuplicateMarks;
 import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
@@ -6486,14 +6487,25 @@ public class AssetServiceImpl implements AssetService {
         for (AssetTypeDto type : typeDtos) {
             locationByType.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
         }
+        List<Integer> assetIds = new ArrayList<Integer>();
+        for (AssetEntity row : rows) {
+            assetIds.add(Integer.valueOf(row.getID()));
+        }
+        Map<Integer, List<AssetAttributeEntity>> storedAttributes = attributesByAsset(assetIds);
+        Map<String, List<FieldDto>> fieldsByType = new HashMap<String, List<FieldDto>>();
+        for (AssetTypeDto type : typeDtos) {
+            fieldsByType.put(type.getTypeKey(), type.getFields() == null
+                    ? Collections.<FieldDto>emptyList() : type.getFields());
+        }
         List<EquipmentExchange.Node> nodes = new ArrayList<EquipmentExchange.Node>();
         for (AssetEntity row : rows) {
             Boolean location = locationByType.get(row.getTypeKey());
             boolean place = location != null && location.booleanValue();
             Integer id = Integer.valueOf(row.getID());
             Integer parentId = TreeLogic.normalizeParent(row.getParentId());
+            String[] marks = identityMarks(fieldsByType.get(row.getTypeKey()), storedAttributes.get(id));
             nodes.add(new EquipmentExchange.Node(row.getID(), parentId, row.getName(), row.getObjectKey(), place,
-                    row.getTypeKey()));
+                    row.getTypeKey(), marks[0], marks[1]));
             memory.locations.put(id, Boolean.valueOf(place));
             memory.parents.put(id, parentId);
             memory.names.put(id, row.getName() == null ? "" : row.getName());
@@ -8247,6 +8259,36 @@ public class AssetServiceImpl implements AssetService {
         AssetFieldEntity[] found = ao().find(AssetFieldEntity.class,
                 Query.select().where("TYPE_KEY = ? AND FIELD_KEY = ?", typeKey, fieldKey));
         return found.length == 0 ? null : found[0];
+    }
+
+    private static String[] identityMarks(List<FieldDto> fields, List<AssetAttributeEntity> attributes) {
+        String serial = "";
+        String inventory = "";
+        if (attributes == null) {
+            return new String[] {serial, inventory};
+        }
+        for (int i = 0; i < attributes.size(); i++) {
+            AssetAttributeEntity attribute = attributes.get(i);
+            if (attribute == null || attribute.getAttrValue() == null || attribute.getAttrValue().trim().isEmpty()) {
+                continue;
+            }
+            String key = attribute.getAttrName() == null ? "" : attribute.getAttrName();
+            String label = key;
+            if (fields != null) {
+                for (int f = 0; f < fields.size(); f++) {
+                    FieldDto field = fields.get(f);
+                    if (field != null && key.equals(field.getFieldKey()) && field.getLabel() != null) {
+                        label = field.getLabel();
+                    }
+                }
+            }
+            if (DuplicateMarks.isSerial(key, label)) {
+                serial = attribute.getAttrValue().trim();
+            } else if (DuplicateMarks.isInventory(key, label)) {
+                inventory = attribute.getAttrValue().trim();
+            }
+        }
+        return new String[] {serial, inventory};
     }
 
     private Map<Integer, List<AssetAttributeEntity>> attributesByAsset(Collection<Integer> assetIds) {
@@ -16816,11 +16858,18 @@ public class AssetServiceImpl implements AssetService {
     private JsonReady prepareJson(String projectKey, ImportMemory memory) {
         PreparedImport prepared = prepareEquipmentImport(projectKey, memory);
         List<JsonImport.Existing> existing = new ArrayList<JsonImport.Existing>();
+        Map<Integer, EquipmentExchange.Node> nodesById = new HashMap<Integer, EquipmentExchange.Node>();
+        for (EquipmentExchange.Node node : prepared.nodes) {
+            nodesById.put(Integer.valueOf(node.getId()), node);
+        }
         for (AssetEntity row : assetsIn(projectKey)) {
             Integer parent = TreeLogic.normalizeParent(row.getParentId());
+            EquipmentExchange.Node node = nodesById.get(Integer.valueOf(row.getID()));
+            String serial = node == null ? "" : node.getSerial();
+            String inventory = node == null ? "" : node.getInventory();
             existing.add(new JsonImport.Existing(row.getID(), row.getObjectKey(), row.getExternalKey(), row.getName(),
                     row.getDescription(), row.getTypeKey(), row.getStatus(), parent == null ? 0 : parent.intValue(),
-                    row.getCustodianKey(), row.getIssuedKey()));
+                    row.getCustodianKey(), row.getIssuedKey(), serial, inventory));
         }
         return new JsonReady(prepared, existing);
     }
