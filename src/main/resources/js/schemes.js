@@ -268,38 +268,46 @@
         var nameInput = el('input', 'asset-tree-scheme-name');
         nameInput.value = session.doc.name || '';
         nameInput.disabled = !api.canEdit;
-        var tools = el('div', 'asset-tree-scheme-tools');
-        var toolDefs = [
-            ['select', 'V', 'schemeToolSelect'],
-            ['line', 'L', 'schemeToolLine'],
-            ['rect', 'R', 'schemeToolRect'],
-            ['ellipse', 'E', 'schemeToolEllipse'],
-            ['polyline', 'P', 'schemeToolPen'],
-            ['wall', 'W', 'schemeToolWall'],
-            ['text', 'T', 'schemeToolText'],
-            ['dimension', 'D', 'schemeToolDim'],
-            ['door', '', 'schemeToolDoor'],
-            ['window', '', 'schemeToolWindow'],
-            ['marker', 'M', 'schemeToolMarker'],
-            ['dropper', 'I', 'schemeToolDropper']
+        var tools = el('div', 'asset-tree-scheme-rail');
+        var control = el('div', 'asset-tree-scheme-control');
+        var toolGroups = [
+            [['select', 'V', 'schemeToolSelect']],
+            [
+                ['line', 'L', 'schemeToolLine'],
+                ['rect', 'R', 'schemeToolRect'],
+                ['ellipse', 'E', 'schemeToolEllipse'],
+                ['polyline', 'P', 'schemeToolPen']
+            ],
+            [
+                ['wall', 'W', 'schemeToolWall'],
+                ['door', '', 'schemeToolDoor'],
+                ['window', '', 'schemeToolWindow']
+            ],
+            [
+                ['text', 'T', 'schemeToolText'],
+                ['dimension', 'D', 'schemeToolDim'],
+                ['marker', 'M', 'schemeToolMarker'],
+                ['dropper', 'I', 'schemeToolDropper']
+            ]
         ];
-        toolDefs.forEach(function (item) {
-            var button = el('button', 'asset-tree-scheme-tool');
-            button.type = 'button';
-            button.title = api.t(item[2]) + (item[1] ? ' (' + item[1] + ')' : '');
-            button.setAttribute('data-tool', item[0]);
-            button.disabled = !api.canEdit && item[0] !== 'select';
-            button.innerHTML = toolIcon(item[0]);
-            var caption = el('span', null, api.t(item[2]));
-            button.appendChild(caption);
-            button.addEventListener('click', function () {
-                session.tool = item[0];
-                session.draft = null;
-                session.typed = '';
-                markTools();
-                paint();
+        toolGroups.forEach(function (group, groupIndex) {
+            if (groupIndex) tools.appendChild(el('div', 'asset-tree-scheme-rail-gap'));
+            group.forEach(function (item) {
+                var button = el('button', 'asset-tree-scheme-tool');
+                button.type = 'button';
+                button.title = api.t(item[2]) + (item[1] ? ' (' + item[1] + ')' : '');
+                button.setAttribute('data-tool', item[0]);
+                button.disabled = !api.canEdit && item[0] !== 'select';
+                button.innerHTML = toolIcon(item[0]);
+                button.addEventListener('click', function () {
+                    session.tool = item[0];
+                    session.draft = null;
+                    session.typed = '';
+                    markTools();
+                    paint();
+                });
+                tools.appendChild(button);
             });
-            tools.appendChild(button);
         });
         if (!session.ink) {
             try {
@@ -368,7 +376,7 @@
         fillInk.appendChild(document.createTextNode(api.t('schemeFill')));
         palette.appendChild(swatches);
         palette.appendChild(fillInk);
-        tools.appendChild(palette);
+        control.appendChild(palette);
         var thickWrap = el('label', 'asset-tree-scheme-tool-field', api.t('schemeThickness'));
         var thickInput = el('input');
         thickInput.type = 'number';
@@ -390,7 +398,7 @@
             paint();
         });
         thickWrap.appendChild(thickInput);
-        tools.appendChild(thickWrap);
+        control.appendChild(thickWrap);
         var scanFile = el('input');
         scanFile.type = 'file';
         scanFile.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
@@ -402,16 +410,17 @@
             if (session.mode !== 'edit') return;
             scanFile.click();
         });
-        tools.appendChild(importBtn);
-        tools.appendChild(scanFile);
+        control.appendChild(el('div', 'asset-tree-scheme-control-gap'));
+        control.appendChild(importBtn);
+        control.appendChild(scanFile);
         var exportDxfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportDxf'));
         exportDxfBtn.type = 'button';
         exportDxfBtn.addEventListener('click', function () { exportScheme('dxf'); });
         var exportPdfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportPdf'));
         exportPdfBtn.type = 'button';
         exportPdfBtn.addEventListener('click', function () { exportScheme('pdf'); });
-        tools.appendChild(exportDxfBtn);
-        tools.appendChild(exportPdfBtn);
+        control.appendChild(exportDxfBtn);
+        control.appendChild(exportPdfBtn);
         var scaleBtn = el('button', 'asset-tree-scheme-tool', api.t('mapScanScale'));
         scaleBtn.type = 'button';
         scaleBtn.disabled = !api.canEdit;
@@ -429,8 +438,8 @@
             session.dirty = true;
             paint();
         });
-        tools.appendChild(scaleBtn);
-        tools.appendChild(removeScan);
+        control.appendChild(scaleBtn);
+        control.appendChild(removeScan);
         var scanWrap = el('label', 'asset-tree-scheme-tool-field', api.t('mapScanWidth'));
         scanWrap.style.display = 'none';
         var scanWidth = el('input');
@@ -449,7 +458,7 @@
             paint();
         });
         scanWrap.appendChild(scanWidth);
-        tools.appendChild(scanWrap);
+        control.appendChild(scanWrap);
         var imageFile = el('input');
         imageFile.type = 'file';
         imageFile.accept = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif';
@@ -462,8 +471,8 @@
             if (session.mode !== 'edit' || session.guest) return;
             imageFile.click();
         });
-        tools.appendChild(imageBtn);
-        tools.appendChild(imageFile);
+        control.appendChild(imageBtn);
+        control.appendChild(imageFile);
         imageFile.addEventListener('change', function () {
             var picked = imageFile.files && imageFile.files[0];
             imageFile.value = '';
@@ -525,8 +534,8 @@
         head.appendChild(labeled(api.t('schemeList'), schemePick));
         head.appendChild(labeled(api.t('name'), nameInput));
         head.appendChild(labeled(api.t('schemePlace'), placePick));
-        head.appendChild(unit);
-        head.appendChild(measureWrap);
+        control.appendChild(unit);
+        control.appendChild(measureWrap);
         head.appendChild(newBtn);
         head.appendChild(editBtn);
         head.appendChild(backBtn);
@@ -537,6 +546,7 @@
         head.appendChild(deleteBtn);
         head.appendChild(windowsBtn);
         bar.appendChild(head);
+        bar.appendChild(control);
         var body = el('div', 'asset-tree-scheme-body');
         var side = el('div', 'asset-tree-scheme-side');
         var stage = el('div', 'asset-tree-scheme-stage');
@@ -555,6 +565,7 @@
         stage.appendChild(overC);
         canvasWrap.appendChild(stage);
         canvasWrap.appendChild(windows);
+        body.appendChild(tools);
         body.appendChild(dockTop);
         body.appendChild(dockLeft);
         body.appendChild(canvasWrap);
@@ -576,7 +587,7 @@
         var panelNodes = {};
         var panelState = {};
         try {
-            panelState = JSON.parse(global.localStorage.getItem('assetshub.schemeWindows.v2') || '{}') || {};
+            panelState = JSON.parse(global.localStorage.getItem('assetshub.schemeWindows.v3') || '{}') || {};
         } catch (error) {
             panelState = {};
         }
@@ -639,7 +650,7 @@
                 top: parseInt(dockTop.style.height, 10) || 0,
                 bottom: parseInt(dockBottom.style.height, 10) || 0
             };
-            try { global.localStorage.setItem('assetshub.schemeWindows.v2', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
+            try { global.localStorage.setItem('assetshub.schemeWindows.v3', JSON.stringify(next)); } catch (error) { /* keep drawing */ }
         }
         function defaultPanelBox(id) {
             var width = stage.clientWidth || 1100;
@@ -762,7 +773,7 @@
                 node.classList.add('is-sized');
             }
             if (saved.wide) node.classList.add('is-wide');
-            if (saved.collapsed) node.classList.add('is-collapsed');
+            if (saved.collapsed || (saved.collapsed == null && id !== 'props')) node.classList.add('is-collapsed');
             if (saved.open === false) node.classList.add('is-closed');
             var titleBar = el('div', 'asset-tree-scheme-window-bar');
             titleBar.appendChild(el('span', 'asset-tree-scheme-window-title', title));
@@ -839,7 +850,7 @@
             node.appendChild(titleBar);
             node.appendChild(inner);
             windows.appendChild(node);
-            var homes = { tools: 'left', symbols: 'left', assets: 'left', props: 'right', floors: 'right', layers: 'right', rooms: 'right' };
+            var homes = { symbols: 'right', assets: 'right', props: 'right', floors: 'right', layers: 'right', rooms: 'right' };
             if (saved.pinned !== false) {
                 var kept = saved.side;
                 if (kept !== 'left' && kept !== 'right' && kept !== 'top' && kept !== 'bottom' && kept !== 'free') kept = homes[id] || 'left';
@@ -933,20 +944,18 @@
             savePanelState();
             paint();
         });
-        makeWindow('tools', api.t('schemeTools'));
         makeWindow('symbols', api.t('schemeSymbols'));
         makeWindow('assets', api.t('schemeAssets'));
         makeWindow('props', api.t('schemeProps'));
         makeWindow('floors', api.t('schemeFloors'));
         makeWindow('layers', api.t('schemeLayers'));
         makeWindow('rooms', api.t('schemeRooms'));
-        panelBodies.tools.appendChild(tools);
         props = panelBodies.props;
         var windowMenu = el('div', 'asset-tree-scheme-menu asset-tree-scheme-window-menu');
         windowMenu.style.display = 'none';
         function paintWindowMenu() {
             windowMenu.innerHTML = '';
-            ['tools', 'props', 'floors', 'layers', 'rooms', 'symbols', 'assets'].forEach(function (id) {
+            ['props', 'floors', 'layers', 'rooms', 'symbols', 'assets'].forEach(function (id) {
                 var node = panelNodes[id];
                 var row = el('label', 'asset-tree-scheme-check');
                 var box = el('input');

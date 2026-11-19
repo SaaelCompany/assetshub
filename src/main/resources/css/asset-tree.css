@@ -13859,7 +13859,7 @@ button.asset-tree-attach-remove {
     min-height: 520px;
     display: flex;
     flex-direction: column;
-    background: var(--surface, #fff);
+    background: #e6e6e6;
     border: 1px solid var(--line, #dfe1e6);
     border-radius: 3px;
     overflow: hidden;
@@ -13877,13 +13877,58 @@ button.asset-tree-attach-remove {
 .asset-tree-scheme-bar {
     flex-direction: column;
     align-items: stretch;
-    padding: 8px 10px;
-    border-bottom: 1px solid #dfe1e6;
+    gap: 0;
+    padding: 0;
+    background: #f3f3f3;
+    border-bottom: 1px solid #c6c6c6;
 }
 
 .asset-tree-scheme-head {
-    align-items: flex-end;
+    align-items: center;
     width: 100%;
+    box-sizing: border-box;
+    min-height: 36px;
+    padding: 4px 8px;
+    background: #f6f6f6;
+    border-bottom: 1px solid #d5d5d5;
+}
+
+.asset-tree-scheme-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    min-height: 36px;
+    padding: 4px 8px;
+    background: #efefef;
+}
+
+.asset-tree-scheme-control-gap {
+    flex: 1 1 12px;
+    min-width: 8px;
+}
+
+.asset-tree-scheme-rail {
+    grid-area: scheme-rail;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    width: 40px;
+    box-sizing: border-box;
+    padding: 4px 0;
+    background: #f5f5f5;
+    border-right: 1px solid #c6c6c6;
+    overflow: auto;
+}
+
+.asset-tree-scheme-rail-gap {
+    width: 18px;
+    height: 1px;
+    margin: 4px 0;
+    background: #c6c6c6;
+    flex: 0 0 auto;
 }
 
 .asset-tree-scheme-head .asset-tree-scheme-mini,
@@ -13894,9 +13939,10 @@ button.asset-tree-attach-remove {
 
 .asset-tree-scheme-field-inline {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 140px;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
     font-size: 11px;
     color: #6b778c;
 }
@@ -13970,6 +14016,34 @@ button.asset-tree-attach-remove {
     stroke-linejoin: round;
 }
 
+#asset-tree-app .asset-tree-scheme-rail .asset-tree-scheme-tool {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 2px;
+    color: #2c2c2c;
+}
+
+#asset-tree-app .asset-tree-scheme-rail .asset-tree-scheme-tool:hover {
+    background: #e8e8e8;
+}
+
+#asset-tree-app .asset-tree-scheme-rail .asset-tree-scheme-tool.is-on {
+    background: #d6d6d6;
+    box-shadow: inset 0 0 0 1px #6e6e6e;
+}
+
+#asset-tree-app .asset-tree-scheme-control .asset-tree-scheme-tool {
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid #c6c6c6;
+    border-radius: 2px;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 400;
+}
+
 #asset-tree-app .asset-tree-scheme-tool span {
     max-width: none;
     font-size: 13px;
@@ -13996,13 +14070,14 @@ button.asset-tree-attach-remove {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: 40px auto minmax(0, 1fr) auto;
     grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas:
-        "scheme-top scheme-top scheme-top"
-        "scheme-left scheme-canvas scheme-right"
-        "scheme-bottom scheme-bottom scheme-bottom";
+        "scheme-rail scheme-top scheme-top scheme-top"
+        "scheme-rail scheme-left scheme-canvas scheme-right"
+        "scheme-rail scheme-bottom scheme-bottom scheme-bottom";
     position: relative;
+    background: #d4d4d4;
 }
 
 .asset-tree-scheme-canvas-wrap {
@@ -14040,7 +14115,9 @@ button.asset-tree-attach-remove {
 .asset-tree-scheme-dock.is-right {
     grid-area: scheme-right;
     flex-direction: column;
-    width: 268px;
+    width: 260px;
+    background: #f7f7f7;
+    border-left: 1px solid #c6c6c6;
 }
 
 .asset-tree-scheme-dock.is-top,
@@ -14113,6 +14190,7 @@ button.asset-tree-attach-remove {
     flex: 0 1 auto;
     min-width: 0;
     min-height: 0;
+    border-radius: 0;
     box-shadow: none;
 }
 
@@ -14183,11 +14261,11 @@ button.asset-tree-attach-remove {
     display: flex;
     align-items: center;
     gap: 4px;
-    height: 28px;
+    height: 24px;
     padding: 0 4px 0 8px;
-    background: #f4f5f7;
-    border-bottom: 1px solid #dfe1e6;
-    border-radius: 4px 4px 0 0;
+    background: #e8e8e8;
+    border-bottom: 1px solid #c6c6c6;
+    border-radius: 0;
     cursor: move;
     user-select: none;
 }
@@ -14201,9 +14279,11 @@ button.asset-tree-attach-remove {
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
-    color: #172b4d;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #4a4a4a;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
