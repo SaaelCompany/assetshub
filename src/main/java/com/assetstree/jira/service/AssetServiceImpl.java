@@ -6226,7 +6226,6 @@ public class AssetServiceImpl implements AssetService {
             }
             byType.put(type.getTypeKey(), new ArrayList<AssetEntity>());
         }
-        List<Integer> exportedIds = new ArrayList<Integer>();
         for (AssetEntity row : rows) {
             List<AssetEntity> bucket = byType.get(row.getTypeKey());
             if (bucket == null) {
@@ -6237,7 +6236,6 @@ public class AssetServiceImpl implements AssetService {
             }
             if (!blank) {
                 bucket.add(row);
-                exportedIds.add(Integer.valueOf(row.getID()));
             }
         }
         Comparator<AssetEntity> byKey = new Comparator<AssetEntity>() {
@@ -6355,8 +6353,151 @@ public class AssetServiceImpl implements AssetService {
         if (serviceOn && !blank) {
             pages.add(servicePage(types, byType, plans, serviceHeaders, kindLabels, labels, dayFirst));
         }
-        pages.add(linkPage(projectKey, exportedIds, index, labels));
         return WorkbookSheet.write(pages);
+    }
+
+    private byte[] buildLinksBook(String projectKey, String typeKey, int placeId) {
+        AssetEntity[] rows = assetsIn(projectKey);
+        List<AssetTypeDto> types = typeDtos(projectKey, rows);
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        Map<String, Boolean> locations = new HashMap<String, Boolean>();
+        for (AssetTypeDto type : types) {
+            locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+        }
+        String wantedType = typeKey == null ? "" : typeKey.trim();
+        List<AssetEntity> equipment = new ArrayList<AssetEntity>();
+        List<Integer> ids = new ArrayList<Integer>();
+        if (rows != null) {
+            for (AssetEntity row : rows) {
+                if (row == null || row.getDeletedAt() != null) {
+                    continue;
+                }
+                Boolean location = locations.get(row.getTypeKey());
+                if (location != null && location.booleanValue()) {
+                    continue;
+                }
+                if (!wantedType.isEmpty() && !wantedType.equals(row.getTypeKey())) {
+                    continue;
+                }
+                if (placeId > 0 && !underPlace(row, placeId, index)) {
+                    continue;
+                }
+                equipment.add(row);
+                ids.add(Integer.valueOf(row.getID()));
+            }
+        }
+        Collections.sort(equipment, new Comparator<AssetEntity>() {
+            @Override
+            public int compare(AssetEntity left, AssetEntity right) {
+                String leftKey = left.getObjectKey() == null ? "" : left.getObjectKey();
+                String rightKey = right.getObjectKey() == null ? "" : right.getObjectKey();
+                return leftKey.compareToIgnoreCase(rightKey);
+            }
+        });
+        I18nHelper labels = i18n();
+        String[] phrases = { "linkCarries", "linkInstalled", "linkIncludes", "linkPart", "linkNeeded", "linkDepends" };
+        String[] stored = { LinkRules.INSTALLED, LinkRules.INSTALLED, LinkRules.PART, LinkRules.PART,
+                LinkRules.DEPENDS, LinkRules.DEPENDS };
+        boolean[] inbound = { true, false, true, false, true, false };
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+        headers.add(labels.getText("asset-tree.ui.name"));
+        for (int i = 0; i < phrases.length; i++) {
+            headers.add(labels.getText("asset-tree.ui." + phrases[i]));
+        }
+        List<String> custom = new ArrayList<String>();
+        Map<Integer, List<String>> cells = new HashMap<Integer, List<String>>();
+        for (AssetEntity asset : equipment) {
+            List<String> line = new ArrayList<String>();
+            for (int i = 0; i < phrases.length; i++) {
+                line.add("");
+            }
+            cells.put(Integer.valueOf(asset.getID()), line);
+        }
+        if (!ids.isEmpty()) {
+            Set<Integer> seen = new HashSet<Integer>();
+            List<AssetLinkEntity> relations = new ArrayList<AssetLinkEntity>();
+            relations.addAll(findIn(AssetLinkEntity.class, "FROM_ID", ids, null));
+            relations.addAll(findIn(AssetLinkEntity.class, "TO_ID", ids, null));
+            for (int i = 0; i < relations.size(); i++) {
+                AssetLinkEntity relation = relations.get(i);
+                if (relation == null || !seen.add(Integer.valueOf(relation.getID()))) {
+                    continue;
+                }
+                AssetEntity from = index.get(Integer.valueOf(relation.getFromId()));
+                AssetEntity to = index.get(Integer.valueOf(relation.getToId()));
+                if (from == null || to == null || from.getDeletedAt() != null || to.getDeletedAt() != null) {
+                    continue;
+                }
+                String type = relation.getLinkType() == null ? "" : relation.getLinkType();
+                writeLinkCells(cells, custom, from, to, type, inbound, stored);
+            }
+        }
+        for (int i = 0; i < custom.size(); i++) {
+            headers.add(custom.get(i));
+        }
+        List<List<String>> lines = new ArrayList<List<String>>();
+        for (AssetEntity asset : equipment) {
+            List<String> line = new ArrayList<String>();
+            line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+            line.add(asset.getName() == null ? "" : asset.getName());
+            List<String> values = cells.get(Integer.valueOf(asset.getID()));
+            if (values != null) {
+                line.addAll(values);
+            }
+            lines.add(line);
+        }
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(new WorkbookSheet.Page(labels.getText("asset-tree.ui.linkSheet"), headers, lines));
+        return WorkbookSheet.write(pages);
+    }
+
+    private void writeLinkCells(Map<Integer, List<String>> cells, List<String> custom, AssetEntity from, AssetEntity to,
+                                String type, boolean[] inbound, String[] stored) {
+        int built = -1;
+        for (int column = 0; column < stored.length; column++) {
+            if (stored[column].equals(type) && !inbound[column]) {
+                built = column;
+                break;
+            }
+        }
+        if (built >= 0) {
+            appendLinkCell(cells, from.getID(), built, to);
+            for (int column = 0; column < stored.length; column++) {
+                if (stored[column].equals(type) && inbound[column]) {
+                    appendLinkCell(cells, to.getID(), column, from);
+                }
+            }
+            return;
+        }
+        if (!custom.contains(type)) {
+            custom.add(type);
+            for (List<String> line : cells.values()) {
+                line.add("");
+            }
+        }
+        appendLinkCell(cells, from.getID(), stored.length + custom.indexOf(type), to);
+    }
+
+    private void appendLinkCell(Map<Integer, List<String>> cells, int assetId, int column, AssetEntity other) {
+        List<String> line = cells.get(Integer.valueOf(assetId));
+        if (line == null || column < 0 || column >= line.size() || other == null) {
+            return;
+        }
+        String mark = ((other.getObjectKey() == null ? "" : other.getObjectKey()) + " "
+                + (other.getName() == null ? "" : other.getName())).trim();
+        if (mark.isEmpty()) {
+            return;
+        }
+        String current = line.get(column);
+        if (current == null || current.isEmpty()) {
+            line.set(column, mark);
+            return;
+        }
+        if (("; " + current + "; ").contains("; " + mark + "; ")) {
+            return;
+        }
+        line.set(column, current + "; " + mark);
     }
 
     private boolean underPlace(AssetEntity row, int placeId, Map<Integer, AssetEntity> index) {
@@ -6370,48 +6511,6 @@ public class AssetServiceImpl implements AssetService {
             cursor = parentId == null ? null : index.get(parentId);
         }
         return false;
-    }
-
-    private WorkbookSheet.Page linkPage(String projectKey, List<Integer> assetIds, Map<Integer, AssetEntity> index,
-                                        I18nHelper labels) {
-        List<String> headers = new ArrayList<String>();
-        headers.add(labels.getText("asset-tree.ui.keyLabel"));
-        headers.add(labels.getText("asset-tree.ui.linkTo"));
-        headers.add(labels.getText("asset-tree.ui.linkKind"));
-        headers.add(labels.getText("asset-tree.ui.linkInbound"));
-        headers.add(labels.getText("asset-tree.ui.linkAttrs"));
-        List<List<String>> lines = new ArrayList<List<String>>();
-        if (assetIds != null && !assetIds.isEmpty()) {
-            Set<Integer> seen = new HashSet<Integer>();
-            List<AssetLinkEntity> rows = new ArrayList<AssetLinkEntity>();
-            rows.addAll(findIn(AssetLinkEntity.class, "FROM_ID", assetIds, null));
-            rows.addAll(findIn(AssetLinkEntity.class, "TO_ID", assetIds, null));
-            for (int i = 0; i < rows.size(); i++) {
-                AssetLinkEntity row = rows.get(i);
-                if (row == null || !seen.add(Integer.valueOf(row.getID()))) {
-                    continue;
-                }
-                AssetEntity from = index.get(Integer.valueOf(row.getFromId()));
-                AssetEntity to = index.get(Integer.valueOf(row.getToId()));
-                if (from == null || to == null || from.getDeletedAt() != null || to.getDeletedAt() != null) {
-                    continue;
-                }
-                if (!ProjectKeys.same(from.getProjectKey(), projectKey) || !ProjectKeys.same(to.getProjectKey(), projectKey)) {
-                    continue;
-                }
-                String phraseKey = LinkRules.phraseKey(row.getLinkType(), false);
-                String phrase = phraseKey.isEmpty() ? (row.getLinkType() == null ? "" : row.getLinkType())
-                        : labels.getText("asset-tree.ui." + phraseKey);
-                List<String> line = new ArrayList<String>();
-                line.add(from.getObjectKey() == null ? "" : from.getObjectKey());
-                line.add(to.getObjectKey() == null ? "" : to.getObjectKey());
-                line.add(phrase);
-                line.add(row.getInbound() == null ? "" : row.getInbound());
-                line.add(LinkRules.attrsToCell(row.getAttrs()));
-                lines.add(line);
-            }
-        }
-        return new WorkbookSheet.Page(labels.getText("asset-tree.ui.linkSheet"), headers, lines);
     }
 
     private List<String> lifeColumnLabels(I18nHelper labels) {
@@ -17670,7 +17769,7 @@ public class AssetServiceImpl implements AssetService {
             project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
             requireModule(project.getKey(), ProjectModules.REPORTS);
             reports = true;
-        } else if ("equipment".equals(kind)) {
+        } else if ("equipment".equals(kind) || "links".equals(kind)) {
             project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
             reports = false;
         } else {
@@ -17678,7 +17777,8 @@ public class AssetServiceImpl implements AssetService {
         }
         final String storedKey = project.getKey();
         final ApplicationUser actor = user;
-        final String fileName = (reports ? "reports-" : "equipment-") + storedKey + ".xlsx";
+        final boolean links = "links".equals(kind);
+        final String fileName = (reports ? "reports-" : links ? "links-" : "equipment-") + storedKey + ".xlsx";
         final String exportType = draft == null || draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
         final int exportPlace = draft == null || draft.getPlaceId() == null ? 0 : Math.max(0, draft.getPlaceId().intValue());
         final boolean exportBlank = draft != null && Boolean.TRUE.equals(draft.getBlank());
@@ -17694,6 +17794,9 @@ public class AssetServiceImpl implements AssetService {
                             if (reports) {
                                 Project current = project(storedKey);
                                 return reportBook(current);
+                            }
+                            if (links) {
+                                return buildLinksBook(storedKey, exportType, exportPlace);
                             }
                             return buildEquipmentBook(storedKey, exportType, exportPlace, exportBlank);
                         }

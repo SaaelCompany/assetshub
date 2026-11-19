@@ -639,6 +639,16 @@ public final class EquipmentExchange {
             if (sheet == null || (sheet.getHeaders().isEmpty() && sheet.getRecords().isEmpty())) {
                 continue;
             }
+            if (wideLinkSheet(sheet, labels)) {
+                if (sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readWideLinkSheet(sheet, known, labels, links, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
+                continue;
+            }
             if (linkSheet(sheet, labels)) {
                 if (sheet.getRecords().isEmpty()) {
                     continue;
@@ -1510,6 +1520,196 @@ public final class EquipmentExchange {
         return sense;
     }
 
+    /** One row per object. Each relation is its own column, and a cell lists the other objects. */
+    private static boolean wideLinkSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean key = false;
+        boolean name = false;
+        boolean type = false;
+        boolean place = false;
+        boolean linkTo = false;
+        boolean phrase = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String header = headers.get(i);
+            String role = known.get(norm(header));
+            if ("key".equals(role)) {
+                key = true;
+            } else if ("name".equals(role)) {
+                name = true;
+            } else if ("type".equals(role)) {
+                type = true;
+            } else if ("place".equals(role)) {
+                place = true;
+            } else if ("linkTo".equals(role)) {
+                linkTo = true;
+            } else if (linkSense(header, labels) != null) {
+                phrase = true;
+            }
+        }
+        return key && name && phrase && !type && !place && !linkTo;
+    }
+
+    private static void readWideLinkSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
+                                          List<Link> links, List<Issue> issues) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int nameColumn = columnFor(sheet.getHeaders(), labels, "name");
+        List<Integer> columns = new ArrayList<Integer>();
+        List<LinkRules.Sense> senses = new ArrayList<LinkRules.Sense>();
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            if (i == keyColumn || i == nameColumn) {
+                continue;
+            }
+            LinkRules.Sense sense = linkSense(headers.get(i), labels);
+            if (sense == null) {
+                continue;
+            }
+            columns.add(Integer.valueOf(i));
+            senses.add(sense);
+        }
+        Map<String, Node> byKey = new HashMap<String, Node>();
+        Map<String, List<Node>> byName = new HashMap<String, List<Node>>();
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node == null || node.isLocation()) {
+                    continue;
+                }
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+                String name = norm(node.getName());
+                if (!name.isEmpty()) {
+                    List<Node> bucket = byName.get(name);
+                    if (bucket == null) {
+                        bucket = new ArrayList<Node>();
+                        byName.put(name, bucket);
+                    }
+                    bucket.add(node);
+                }
+            }
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            boolean touched = false;
+            for (int i = 0; i < columns.size(); i++) {
+                if (!text(record, columns.get(i).intValue()).isEmpty()) {
+                    touched = true;
+                    break;
+                }
+            }
+            if (!touched) {
+                continue;
+            }
+            int row = record.getRow();
+            String fromKey = resolveRef(text(record, keyColumn), text(record, nameColumn), byKey, byName, row, issues);
+            if (fromKey.isEmpty()) {
+                continue;
+            }
+            for (int i = 0; i < columns.size(); i++) {
+                String cell = text(record, columns.get(i).intValue());
+                if (cell.isEmpty()) {
+                    continue;
+                }
+                String[] pieces = cell.split("[;\\n]");
+                LinkRules.Sense sense = senses.get(i);
+                for (int p = 0; p < pieces.length; p++) {
+                    String piece = pieces[p] == null ? "" : pieces[p].trim();
+                    if (piece.isEmpty()) {
+                        continue;
+                    }
+                    String toKey = resolveRef(piece, "", byKey, byName, row, issues);
+                    if (toKey.isEmpty()) {
+                        continue;
+                    }
+                    if (norm(fromKey).equals(norm(toKey))) {
+                        issues.add(new Issue(row, "asset-tree.error.peer.self", ""));
+                        continue;
+                    }
+                    links.add(new Link(row, sheet.getName(), fromKey, toKey, sense.getType(), sense.isReverse(), "", ""));
+                }
+            }
+        }
+    }
+
+    private static String resolveRef(String written, String name, Map<String, Node> byKey, Map<String, List<Node>> byName,
+                                     int row, List<Issue> issues) {
+        String raw = written == null ? "" : written.trim();
+        if (!raw.isEmpty()) {
+            Node direct = byKey.get(norm(raw));
+            if (direct != null) {
+                return direct.getObjectKey();
+            }
+            int space = raw.indexOf(' ');
+            if (space > 0) {
+                Node head = byKey.get(norm(raw.substring(0, space)));
+                if (head != null) {
+                    return head.getObjectKey();
+                }
+            }
+        }
+        String label = raw.isEmpty() ? (name == null ? "" : name.trim()) : raw;
+        if (label.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.key", ""));
+            return "";
+        }
+        List<Node> hits = byName.get(norm(label));
+        if ((hits == null || hits.isEmpty()) && raw.indexOf(' ') > 0) {
+            hits = byName.get(norm(raw.substring(raw.indexOf(' ') + 1).trim()));
+        }
+        if (hits == null || hits.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.key", label));
+            return "";
+        }
+        if (hits.size() > 1) {
+            issues.add(new Issue(row, "asset-tree.error.import.link.who", label));
+            return "";
+        }
+        return hits.get(0).getObjectKey();
+    }
+
+    private static EquipmentSheet.Sheet filterWide(EquipmentSheet.Sheet sheet, Map<String, String> labels, String typeKey,
+                                                   Set<Integer> places, Map<Integer, Node> byId, Map<String, Node> byKey) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int nameColumn = columnFor(sheet.getHeaders(), labels, "name");
+        Map<String, List<Node>> byName = new HashMap<String, List<Node>>();
+        for (Node node : byId.values()) {
+            if (node == null || node.isLocation()) {
+                continue;
+            }
+            String name = norm(node.getName());
+            if (name.isEmpty()) {
+                continue;
+            }
+            List<Node> bucket = byName.get(name);
+            if (bucket == null) {
+                bucket = new ArrayList<Node>();
+                byName.put(name, bucket);
+            }
+            bucket.add(node);
+        }
+        List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, keyColumn);
+            String name = text(record, nameColumn);
+            if (key.isEmpty() && name.isEmpty()) {
+                continue;
+            }
+            Node node = key.isEmpty() ? null : byKey.get(norm(key));
+            if (node == null && key.indexOf(' ') > 0) {
+                node = byKey.get(norm(key.substring(0, key.indexOf(' '))));
+            }
+            if (node == null && !name.isEmpty()) {
+                List<Node> hits = byName.get(norm(name));
+                node = hits != null && hits.size() == 1 ? hits.get(0) : null;
+            }
+            if (node == null || nodeInScope(node, typeKey, places, byId)) {
+                records.add(record);
+            }
+        }
+        return new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records);
+    }
+
     /**
      * Keeps rows of one type and one place. An empty place cell on a new row
      * is filled with that place, so the row is created there. Cards that are
@@ -1560,6 +1760,10 @@ public final class EquipmentExchange {
         for (int i = 0; i < sheets.size(); i++) {
             EquipmentSheet.Sheet sheet = sheets.get(i);
             if (sheet == null) {
+                continue;
+            }
+            if (wideLinkSheet(sheet, labels)) {
+                out.add(filterWide(sheet, labels, wanted, places, byId, byKey));
                 continue;
             }
             if (linkSheet(sheet, labels) || serviceSheet(sheet, labels) || lifeSheet(sheet, labels)) {

@@ -239,6 +239,40 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void wideLinkColumnsNameEachSideOnce() {
+        List<EquipmentExchange.TypeRef> types = Arrays.asList(
+                new EquipmentExchange.TypeRef("printer", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", false,
+                        Collections.<EquipmentExchange.FieldRef>emptyList()),
+                new EquipmentExchange.TypeRef("pc", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", false,
+                        Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(
+                new EquipmentExchange.Named("in_use", "\u0412 \u0440\u0430\u0431\u043e\u0442\u0435"));
+        List<EquipmentExchange.Node> nodes = Arrays.asList(
+                new EquipmentExchange.Node(3, Integer.valueOf(2), "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "P-3", false, "pc"),
+                new EquipmentExchange.Node(4, Integer.valueOf(1), "\u0421\u0442\u0430\u0440\u044b\u0439", "P-4", false, "printer"),
+                new EquipmentExchange.Node(5, Integer.valueOf(1), "\u0421\u0442\u0430\u0440\u044b\u0439", "P-5", false, "printer"));
+        Map<String, String> labels = new HashMap<String, String>();
+        labels.put("key", "\u041a\u043b\u044e\u0447");
+        labels.put("name", "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435");
+        labels.put("linkCarries", "\u041d\u0435\u0441\u0451\u0442");
+        EquipmentSheet.Sheet wide = new EquipmentSheet.Sheet("\u0421\u0432\u044f\u0437\u0438",
+                Arrays.asList("\u041a\u043b\u044e\u0447", "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", "\u041d\u0435\u0441\u0451\u0442"),
+                Arrays.asList(
+                        new EquipmentSheet.Record(2, Arrays.asList("P-3", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "P-4 \u0421\u0442\u0430\u0440\u044b\u0439")),
+                        new EquipmentSheet.Record(3, Arrays.asList("P-4", "\u0421\u0442\u0430\u0440\u044b\u0439", "")),
+                        new EquipmentSheet.Record(4, Arrays.asList("P-3", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "\u0421\u0442\u0430\u0440\u044b\u0439"))));
+        EquipmentExchange.Plan plan = EquipmentExchange.planBook(
+                Collections.singletonList(wide), types, statuses, nodes, "in_use", labels, blankPeople());
+        assertEquals(1, plan.getLinks().size());
+        assertEquals("P-3", plan.getLinks().get(0).getFromKey());
+        assertEquals("P-4", plan.getLinks().get(0).getToKey());
+        assertEquals(LinkRules.INSTALLED, plan.getLinks().get(0).getType());
+        assertTrue(plan.getLinks().get(0).isReverse());
+        assertEquals(1, plan.getIssues().size());
+        assertEquals("asset-tree.error.import.link.who", plan.getIssues().get(0).getMessageKey());
+    }
+
+    @Test
     public void statusProcessFollowsADirectLineAndARequestStatus() {
         FlowGraphDto direct = graph(
                 node("req1", FlowGraph.REQUEST, "100", "", ""),
