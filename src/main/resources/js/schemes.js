@@ -336,6 +336,7 @@
             session.ink = color;
             rememberInk();
             markSwatches();
+            paintInkWell();
             if (custom) showCustom(color);
             if (selectedObjects().length) paintSelection(color);
             else paint();
@@ -371,12 +372,47 @@
         fillBox.addEventListener('change', function () {
             session.inkFill = fillBox.checked;
             rememberInk();
+            paintInkWell();
         });
         fillInk.appendChild(fillBox);
         fillInk.appendChild(document.createTextNode(api.t('schemeFill')));
         palette.appendChild(swatches);
         palette.appendChild(fillInk);
-        control.appendChild(palette);
+        var inkWell = el('div', 'asset-tree-scheme-inkwell');
+        var strokeSq = el('button', 'asset-tree-scheme-ink-stroke');
+        var fillSq = el('button', 'asset-tree-scheme-ink-fill');
+        strokeSq.type = 'button';
+        fillSq.type = 'button';
+        strokeSq.title = api.t('schemeColor');
+        fillSq.title = api.t('schemeFill');
+        function paintInkWell() {
+            var color = session.ink || '#172b4d';
+            strokeSq.style.borderColor = color;
+            if (session.inkFill) {
+                fillSq.style.background = color;
+                fillSq.classList.remove('is-none');
+            } else {
+                fillSq.style.background = '#fff';
+                fillSq.classList.add('is-none');
+            }
+        }
+        function toggleInk() {
+            palette.classList.toggle('is-open');
+        }
+        strokeSq.addEventListener('click', function (event) {
+            event.stopPropagation();
+            toggleInk();
+        });
+        fillSq.addEventListener('click', function (event) {
+            event.stopPropagation();
+            toggleInk();
+        });
+        inkWell.appendChild(strokeSq);
+        inkWell.appendChild(fillSq);
+        inkWell.appendChild(palette);
+        tools.appendChild(el('div', 'asset-tree-scheme-rail-spacer'));
+        tools.appendChild(inkWell);
+        paintInkWell();
         var thickWrap = el('label', 'asset-tree-scheme-tool-field', api.t('schemeThickness'));
         var thickInput = el('input');
         thickInput.type = 'number';
@@ -709,10 +745,14 @@
                 var visible = false;
                 var i;
                 for (i = 0; i < dock.children.length; i++) {
-                    if (!dock.children[i].classList.contains('is-closed')) visible = true;
+                    var child = dock.children[i];
+                    if (child.classList.contains('is-closed')) continue;
+                    if (dock === dockRight && child.classList.contains('is-collapsed')) continue;
+                    visible = true;
                 }
                 dock.style.display = visible ? '' : 'none';
             });
+            if (markPanelRail) markPanelRail();
         }
         function placePinned(node) {
             var side = node.getAttribute('data-side');
@@ -773,7 +813,7 @@
                 node.classList.add('is-sized');
             }
             if (saved.wide) node.classList.add('is-wide');
-            if (saved.collapsed || (saved.collapsed == null && id !== 'props')) node.classList.add('is-collapsed');
+            if (saved.collapsed || saved.collapsed == null) node.classList.add('is-collapsed');
             if (saved.open === false) node.classList.add('is-closed');
             var titleBar = el('div', 'asset-tree-scheme-window-bar');
             titleBar.appendChild(el('span', 'asset-tree-scheme-window-title', title));
@@ -951,6 +991,52 @@
         makeWindow('layers', api.t('schemeLayers'));
         makeWindow('rooms', api.t('schemeRooms'));
         props = panelBodies.props;
+        var panelRail = el('div', 'asset-tree-scheme-panel-rail');
+        var panelGlyph = {
+            symbols: '<rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/>',
+            assets: '<path d="M4 8l8-4 8 4-8 4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/>',
+            props: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="17" r="2"/>',
+            floors: '<rect x="6" y="4" width="12" height="14"/><path d="M6 9h12M6 13h12"/>',
+            layers: '<path d="M4 8l8-4 8 4-8 4z"/><path d="M4 13l8 4 8-4"/>',
+            rooms: '<rect x="4" y="4" width="16" height="16"/><path d="M4 12h16M12 4v16"/>'
+        };
+        function markPanelRail() {
+            if (!panelRail) return;
+            var buttons = panelRail.querySelectorAll('button');
+            var i;
+            for (i = 0; i < buttons.length; i++) {
+                var id = buttons[i].getAttribute('data-panel');
+                var node = panelNodes[id];
+                var open = node && !node.classList.contains('is-closed') && !node.classList.contains('is-collapsed');
+                buttons[i].classList.toggle('is-on', !!open);
+            }
+        }
+        ['symbols', 'assets', 'props', 'floors', 'layers', 'rooms'].forEach(function (id) {
+            var button = el('button', 'asset-tree-scheme-panel-btn');
+            button.type = 'button';
+            button.setAttribute('data-panel', id);
+            button.title = panelNodes[id].querySelector('.asset-tree-scheme-window-title').textContent;
+            button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + panelGlyph[id] + '</svg>';
+            button.addEventListener('click', function () {
+                var node = panelNodes[id];
+                var open = !node.classList.contains('is-collapsed') && !node.classList.contains('is-closed');
+                var keys = ['symbols', 'assets', 'props', 'floors', 'layers', 'rooms'];
+                var n;
+                for (n = 0; n < keys.length; n++) {
+                    var item = panelNodes[keys[n]];
+                    if (keys[n] === id && !open) {
+                        item.classList.remove('is-collapsed');
+                        item.classList.remove('is-closed');
+                    } else item.classList.add('is-collapsed');
+                }
+                syncDocks();
+                savePanelState();
+                paint();
+            });
+            panelRail.appendChild(button);
+        });
+        body.appendChild(panelRail);
+        markPanelRail();
         var windowMenu = el('div', 'asset-tree-scheme-menu asset-tree-scheme-window-menu');
         windowMenu.style.display = 'none';
         function paintWindowMenu() {
@@ -962,8 +1048,10 @@
                 box.type = 'checkbox';
                 box.checked = node && !node.classList.contains('is-closed');
                 box.addEventListener('change', function () {
-                    if (box.checked) node.classList.remove('is-closed');
-                    else node.classList.add('is-closed');
+                    if (box.checked) {
+                        node.classList.remove('is-closed');
+                        node.classList.remove('is-collapsed');
+                    } else node.classList.add('is-closed');
                     syncDocks();
                     savePanelState();
                     paint();
@@ -996,6 +1084,7 @@
             if (windowMenu.style.display === 'none') return;
             if (windowMenu.contains(event.target) || event.target === windowsBtn) return;
             windowMenu.style.display = 'none';
+            if (inkWell && !inkWell.contains(event.target)) palette.classList.remove('is-open');
         });
         host.appendChild(windowMenu);
 
