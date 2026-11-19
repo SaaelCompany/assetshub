@@ -2621,6 +2621,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<List<AssetDto>>() {
             @Override
             public List<AssetDto> doInTransaction() {
+                reclaimParkedKeys(project.getKey());
                 AssetEntity[] all = assetsAll(project.getKey());
                 Map<Integer, AssetEntity> index = indexAssets(all);
                 Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), all));
@@ -2698,6 +2699,7 @@ public class AssetServiceImpl implements AssetService {
                         throw new AssetException(409, "asset-tree.error.inTrash");
                     }
                     projectKey[0] = entity.getProjectKey();
+                    reclaimParkedKeys(projectKey[0]);
                     AssetEntity[] all = assetsAll(entity.getProjectKey());
                     Map<Integer, AssetEntity> index = indexAssets(all);
                     Integer oldParent = TreeLogic.normalizeParent(entity.getParentId());
@@ -5138,6 +5140,59 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public AssetKeyDto restartAssetKeys(ApplicationUser user, String projectKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
+        final String prefix = storedAssetPrefix(project.getKey());
+        if (prefix.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.assetKey.required");
+        }
+        Object created = new Object();
+        Object raced = KEY_LOCKS.putIfAbsent(prefix, created);
+        Object lock = raced == null ? created : raced;
+        synchronized (lock) {
+            return ao().executeInTransaction(new TransactionCallback<AssetKeyDto>() {
+                @Override
+                public AssetKeyDto doInTransaction() {
+                    AssetEntity[] rows = assetsAll(project.getKey());
+                    if (rows == null) {
+                        rows = new AssetEntity[0];
+                    }
+                    int[] suffixes = new int[rows.length];
+                    for (int i = 0; i < rows.length; i++) {
+                        suffixes[i] = rows[i] == null ? 0 : ObjectKeys.suffix(prefix, rows[i].getObjectKey());
+                    }
+                    int[] numbers = ObjectKeys.compact(suffixes);
+                    for (int i = 0; i < rows.length; i++) {
+                        if (rows[i] == null) {
+                            continue;
+                        }
+                        rows[i].setObjectKey("!" + rows[i].getID());
+                        rows[i].save();
+                    }
+                    for (int i = 0; i < rows.length; i++) {
+                        if (rows[i] == null) {
+                            continue;
+                        }
+                        String key = prefix + "-" + numbers[i];
+                        if (key.length() > 32) {
+                            throw new AssetException(500, "asset-tree.error.unexpected");
+                        }
+                        rows[i].setObjectKey(key);
+                        rows[i].save();
+                    }
+                    AssetCounterEntity counter = counterFor(prefix);
+                    counter.setNextValue(rows.length + 1);
+                    counter.save();
+                    AssetKeyDto saved = new AssetKeyDto();
+                    saved.setAssetKey(prefix);
+                    saved.setCount(Integer.valueOf(rows.length));
+                    return saved;
+                }
+            });
+        }
+    }
+
+    @Override
     public ProjectViewDto saveProjectView(ApplicationUser user, String projectKey, ProjectViewDto draft) {
         final Project project = requireArrangeProject(user, projectKey);
         final Boolean tree = draft == null ? null : draft.getTreeObjects();
@@ -6465,6 +6520,7 @@ public class AssetServiceImpl implements AssetService {
 
     private PreparedImport prepareEquipmentImport(String projectKey, ImportMemory memory) {
         ensureStatuses(projectKey);
+        reclaimParkedKeys(projectKey);
         AssetEntity[] rows = assetsIn(projectKey);
         List<AssetTypeDto> typeDtos = typeDtos(projectKey, rows);
         List<EquipmentExchange.TypeRef> types = new ArrayList<EquipmentExchange.TypeRef>();
@@ -7463,6 +7519,42 @@ public class AssetServiceImpl implements AssetService {
                 || (match.getDisplayName() != null && text.equalsIgnoreCase(match.getDisplayName()));
     }
 
+    private void reclaimForPrefix(String prefix) {
+        ProjectAssetKeyEntity[] rows = ao().find(ProjectAssetKeyEntity.class, Query.select().where("ASSET_PREFIX = ?", prefix));
+        if (rows == null) {
+            return;
+        }
+        for (ProjectAssetKeyEntity row : rows) {
+            if (row != null && row.getProjectKey() != null) {
+                reclaimParkedKeys(row.getProjectKey());
+            }
+        }
+    }
+
+    /**
+     * Puts a key back on an object that briefly released it. A key stays with its
+     * object after write-off and after the trash, so an old request still names that object.
+     */
+    private void reclaimParkedKeys(String projectKey) {
+        AssetEntity[] rows = assetsAll(projectKey);
+        if (rows == null) {
+            return;
+        }
+        for (AssetEntity row : rows) {
+            if (row == null) {
+                continue;
+            }
+            String original = ObjectKeys.released(row.getObjectKey());
+            if (original.isEmpty()) {
+                continue;
+            }
+            if (ao().count(AssetEntity.class, "OBJECT_KEY = ?", original) == 0) {
+                row.setObjectKey(original);
+                row.save();
+            }
+        }
+    }
+
     private String nextKey(String projectKey) {
         String prefix = storedAssetPrefix(projectKey);
         if (prefix.isEmpty()) {
@@ -7472,15 +7564,29 @@ public class AssetServiceImpl implements AssetService {
         Object raced = KEY_LOCKS.putIfAbsent(prefix, created);
         Object lock = raced == null ? created : raced;
         synchronized (lock) {
+            reclaimForPrefix(prefix);
+            AssetEntity[] existing = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY LIKE ?", prefix + "-%"));
+            java.util.List<String> held = new java.util.ArrayList<String>();
+            if (existing != null) {
+                for (AssetEntity row : existing) {
+                    if (row != null && row.getObjectKey() != null) {
+                        held.add(row.getObjectKey());
+                    }
+                }
+            }
+            int value = ObjectKeys.nextNumber(prefix, held);
             for (int attempt = 0; attempt < 8; attempt++) {
-                AssetCounterEntity counter = counterFor(prefix);
-                int value = Math.max(counter.getNextValue(), 1);
-                counter.setNextValue(value + 1);
-                counter.save();
                 String key = prefix + "-" + value;
                 if (key.length() <= 32 && ao().count(AssetEntity.class, "OBJECT_KEY = ?", key) == 0) {
+                    AssetCounterEntity counter = counterFor(prefix);
+                    counter.setNextValue(value + 1);
+                    counter.save();
                     return key;
                 }
+                if (value == Integer.MAX_VALUE) {
+                    break;
+                }
+                value++;
             }
         }
         throw new AssetException(500, "asset-tree.error.unexpected");
@@ -9810,7 +9916,11 @@ public class AssetServiceImpl implements AssetService {
 
     private ApplicationUser lookupUser(String userKey) {
         try {
-            return userManager().getUserByKey(userKey);
+            ApplicationUser user = userManager().getUserByKey(userKey);
+            if (user == null) {
+                user = userManager().getUserByName(userKey);
+            }
+            return user;
         } catch (RuntimeException ex) {
             log.debug("User lookup failed for {}", userKey, ex);
             return null;
@@ -9847,15 +9957,27 @@ public class AssetServiceImpl implements AssetService {
             if (attributes != null) {
                 dto.setPhone(firstValue(attributes, "telephoneNumber", "phone", "mobile", "mobilePhone", "telephone", "ipPhone"));
                 dto.setDepartment(firstValue(attributes, "department", "departmentNumber", "division", "ou"));
-                dto.setTitle(firstValue(attributes, "title", "jobTitle", "jobtitle"));
+                dto.setTitle(firstValue(attributes, "title", "jobTitle", "jobtitle", "position", "employeeType", "profession"));
                 if (dto.getEmail() == null || dto.getEmail().trim().isEmpty()) {
-                    dto.setEmail(firstValue(attributes, "mail", "email", "emailAddress"));
+                    String mail = firstValue(attributes, "mail", "email", "emailAddress", "userPrincipalName");
+                    if (mail.contains("@")) {
+                        dto.setEmail(mail);
+                    }
                 }
                 Set<String> keys = attributes.getKeys();
                 if (keys != null) {
                     for (String key : keys) {
                         readContact(dto, key, attributes.getValue(key));
+                        if (blank(dto.getDepartment())) {
+                            String unit = organizationalUnit(attributes.getValue(key));
+                            if (!unit.isEmpty() && DocxFill.normalize(key).contains("distinguished")) {
+                                dto.setDepartment(unit);
+                            }
+                        }
                     }
+                }
+                if (blank(dto.getDepartment())) {
+                    dto.setDepartment(organizationalUnit(firstValue(attributes, "distinguishedName", "distinguishedname")));
                 }
             }
         } catch (RuntimeException ex) {
@@ -9907,17 +10029,63 @@ public class AssetServiceImpl implements AssetService {
         if (blank(dto.getPhone()) && (norm.contains("phone") || norm.contains("tel") || norm.contains("телефон"))) {
             dto.setPhone(text);
         } else if (blank(dto.getDepartment()) && (norm.contains("department") || norm.contains("division")
-                || norm.contains("отдел") || norm.contains("подраздел"))) {
+                || norm.contains("отдел") || norm.contains("подраздел") || norm.contains("отделени"))) {
             dto.setDepartment(text);
-        } else if (blank(dto.getTitle()) && (norm.contains("title") || norm.contains("position") || norm.contains("должност"))) {
+        } else if (blank(dto.getTitle()) && (norm.contains("title") || norm.contains("position")
+                || norm.contains("должност") || norm.contains("profession") || norm.contains("employeetype"))) {
             dto.setTitle(text);
-        } else if (blank(dto.getEmail()) && (norm.contains("mail") || norm.contains("почт"))) {
-            dto.setEmail(text);
+        } else if (blank(dto.getEmail()) && (norm.contains("mail") || norm.contains("почт") || norm.contains("principal"))) {
+            if (text.contains("@")) {
+                dto.setEmail(text);
+            }
         }
+    }
+
+    /** The first OU in a directory name, which is the person's department when no department attribute is stored. */
+    private static String organizationalUnit(String distinguishedName) {
+        if (distinguishedName == null || distinguishedName.isEmpty()) {
+            return "";
+        }
+        String[] parts = distinguishedName.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i] == null ? "" : parts[i].trim();
+            if (part.length() > 3 && (part.regionMatches(true, 0, "OU=", 0, 3))) {
+                return part.substring(3).trim().replace("\\,", ",");
+            }
+        }
+        return "";
     }
 
     private static boolean blank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static void writeDocumentPerson(DocFields.Source source, UserProfileDto person, boolean issued) {
+        if (source == null || person == null) {
+            return;
+        }
+        String role = person.getTitle() == null ? "" : person.getTitle().trim();
+        String phone = person.getPhone() == null ? "" : person.getPhone().trim();
+        String email = person.getEmail() == null ? "" : person.getEmail().trim();
+        String department = person.getDepartment() == null ? "" : person.getDepartment().trim();
+        if (issued) {
+            source.issuedRole = firstText(source.issuedRole, role);
+            source.issuedPhone = firstText(source.issuedPhone, phone);
+            source.issuedEmail = firstText(source.issuedEmail, email);
+            source.issuedDepartment = firstText(source.issuedDepartment, department);
+            return;
+        }
+        source.molRole = firstText(source.molRole, role);
+        source.molPhone = firstText(source.molPhone, phone);
+        source.molEmail = firstText(source.molEmail, email);
+        source.molDepartment = firstText(source.molDepartment, department);
+    }
+
+    private static String firstText(String preferred, String fallback) {
+        if (preferred != null && !preferred.trim().isEmpty()) {
+            return preferred;
+        }
+        return fallback == null ? "" : fallback;
     }
 
     private static void fillDocumentPerson(DocFields.Source source, UserProfileDto person, boolean onlyBlank) {
@@ -18964,8 +19132,12 @@ public class AssetServiceImpl implements AssetService {
         source.mol = molName.isEmpty() ? issuedName : molName;
         source.custodian = source.mol;
         source.issued = issuedName;
-        fillDocumentPerson(source, profile(asset.getIssuedKey()), false);
-        fillDocumentPerson(source, profile(asset.getCustodianKey()), true);
+        writeDocumentPerson(source, profile(asset.getIssuedKey()), true);
+        writeDocumentPerson(source, profile(asset.getCustodianKey()), false);
+        source.role = firstText(source.issuedRole, source.molRole);
+        source.phone = firstText(source.issuedPhone, source.molPhone);
+        source.email = firstText(source.issuedEmail, source.molEmail);
+        source.department = firstText(source.issuedDepartment, source.molDepartment);
         Project project = project(asset.getProjectKey());
         source.project = project == null || project.getName() == null ? asset.getProjectKey() : project.getName();
         source.today = DateTimeFormatter.ofPattern("dd.MM.yyyy").format(LocalDate.now(businessZone()));
@@ -18998,24 +19170,31 @@ public class AssetServiceImpl implements AssetService {
         for (int i = 0; i < attributes.size(); i++) {
             AssetAttributeEntity attribute = attributes.get(i);
             AssetFieldEntity field = fieldByKey.get(attribute.getAttrName());
-            String value = attribute.getAttrValue() == null ? "" : attribute.getAttrValue();
+            String raw = attribute.getAttrValue() == null ? "" : attribute.getAttrValue();
+            String value = raw;
+            UserProfileDto fieldPerson = null;
             if (field != null && FieldKinds.USER.equals(field.getKind())) {
-                value = userLabel(value);
+                fieldPerson = profile(raw);
+                value = userLabel(raw);
             } else if (field != null && FieldChoices.handles(field.getKind())) {
                 value = FieldChoices.display(value);
             }
             String label = field == null ? attribute.getAttrName() : documentLabel(field.getLabel());
             source.fields.put(attribute.getAttrName(), value);
             source.labels.put(attribute.getAttrName(), label == null ? "" : label);
-            String folded = DocxFill.normalize(label);
+            String folded = DocxFill.normalize((attribute.getAttrName() == null ? "" : attribute.getAttrName()) + " " + (label == null ? "" : label));
             if (!value.isEmpty()) {
-                if (folded.contains("комувыдано") || "выдано".equals(folded)) {
-                    source.issued = value;
-                } else if (folded.contains("должност")) {
+                if (folded.contains("комувыдано") || folded.contains("получател") || "выдано".equals(DocxFill.normalize(label))) {
+                    if (source.issued.isEmpty()) {
+                        source.issued = value;
+                    }
+                    writeDocumentPerson(source, fieldPerson, true);
+                    fillDocumentPerson(source, fieldPerson, true);
+                } else if (folded.contains("должност") || folded.contains("position") || folded.contains("profession")) {
                     source.role = value;
                 } else if (folded.contains("телефон") || folded.contains("phone")) {
                     source.phone = value;
-                } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел")) {
+                } else if (folded.contains("отдел") || folded.contains("department") || folded.contains("подраздел") || folded.contains("отделени")) {
                     source.department = value;
                 } else if (folded.contains("почт") || folded.contains("email") || folded.contains("mail")) {
                     source.email = value;
@@ -19034,8 +19213,13 @@ public class AssetServiceImpl implements AssetService {
                 source.place = parent.getName();
             }
             AssetTypeEntity parentType = findType(parent.getTypeKey());
+            String parentTypeLabel = parentType == null ? "" : documentLabel(parentType.getLabel());
             if (parentType != null && "branch".equals(parentType.getTypeKey()) && parent.getName() != null) {
                 source.branch = parent.getName();
+            }
+            if (source.department.isEmpty() && parent.getName() != null
+                    && DocFields.departmentPlace(parent.getTypeKey(), parentTypeLabel)) {
+                source.department = parent.getName();
             }
             List<AssetAttributeEntity> parentAttributes = attributesFor(parent.getID());
             Map<String, AssetFieldEntity> parentFields = new HashMap<String, AssetFieldEntity>();
@@ -19063,6 +19247,18 @@ public class AssetServiceImpl implements AssetService {
                 }
                 if (source.city.isEmpty() && token.contains("город")) {
                     source.city = value;
+                }
+                if (source.email.isEmpty() && (token.contains("email") || token.contains("почт") || token.contains("mail")) && value.contains("@")) {
+                    source.email = value;
+                }
+                if (source.phone.isEmpty() && (token.contains("phone") || token.contains("телефон"))) {
+                    source.phone = value;
+                }
+                if (source.role.isEmpty() && (token.contains("должност") || token.contains("position"))) {
+                    source.role = value;
+                }
+                if (source.department.isEmpty() && (token.contains("отдел") || token.contains("подраздел") || token.contains("department"))) {
+                    source.department = value;
                 }
             }
             parentId = parent.getParentId();

@@ -1,6 +1,7 @@
 package com.assetstree.jira.model;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Decides whether a portal sighting is a computer the project already has.
@@ -17,8 +18,9 @@ public final class TniSame {
         public final boolean location;
         public final String externalKey;
         public final String watch;
-        public final String serial;
-        public final String inventory;
+        public String serial;
+        public String inventory;
+        public final String typeKey;
 
         public Card(int id, String name, boolean location, String externalKey, String watch) {
             this(id, name, location, externalKey, watch, "", "");
@@ -26,6 +28,11 @@ public final class TniSame {
 
         public Card(int id, String name, boolean location, String externalKey, String watch,
                     String serial, String inventory) {
+            this(id, name, location, externalKey, watch, serial, inventory, "");
+        }
+
+        public Card(int id, String name, boolean location, String externalKey, String watch,
+                    String serial, String inventory, String typeKey) {
             this.id = id;
             this.name = name == null ? "" : name;
             this.location = location;
@@ -33,6 +40,17 @@ public final class TniSame {
             this.watch = watch == null ? "" : watch;
             this.serial = serial == null ? "" : serial;
             this.inventory = inventory == null ? "" : inventory;
+            this.typeKey = typeKey == null ? "" : typeKey;
+        }
+
+        /** Keeps a number learned from the row that claimed this card, so the next row with another number stays separate. */
+        public void remember(String serial, String inventory) {
+            if (this.serial.isEmpty() && serial != null && !serial.trim().isEmpty()) {
+                this.serial = serial.trim();
+            }
+            if (this.inventory.isEmpty() && inventory != null && !inventory.trim().isEmpty()) {
+                this.inventory = inventory.trim();
+            }
         }
     }
 
@@ -49,6 +67,15 @@ public final class TniSame {
      * @param inventory filled inventory number of the incoming card, or empty when it should not be compared
      */
     public static int pick(List<Card> cards, int pointed, String host, String address, String serial, String inventory) {
+        return pick(cards, pointed, host, address, serial, inventory, null);
+    }
+
+    /**
+     * @param taken cards already claimed by an earlier row; a later row takes the next free card
+     *        with the same name, and when every match is claimed the claimed id is returned
+     */
+    public static int pick(List<Card> cards, int pointed, String host, String address, String serial, String inventory,
+                           Set<Integer> taken) {
         if (cards == null) {
             return 0;
         }
@@ -61,10 +88,17 @@ public final class TniSame {
         int hand = 0;
         int hands = 0;
         int pointedHit = 0;
+        int blocked = 0;
         if (!(station.isEmpty() && fqdn.isEmpty() && ip.isEmpty())) {
             for (int i = 0; i < cards.size(); i++) {
                 Card card = cards.get(i);
                 if (!same(card, station, fqdn, ip, serial, inventory)) {
+                    continue;
+                }
+                if (busy(taken, card.id)) {
+                    if (blocked == 0) {
+                        blocked = card.id;
+                    }
                     continue;
                 }
                 int[] score = score(card, pointed, count, only, oldest, hand, hands, pointedHit);
@@ -80,10 +114,37 @@ public final class TniSame {
         if (chosen != 0) {
             return chosen;
         }
-        return sameName(cards, pointed, host, serial, inventory);
+        if (blocked != 0) {
+            return blocked;
+        }
+        return sameName(cards, pointed, host, serial, inventory, taken);
     }
 
-    private static int sameName(List<Card> cards, int pointed, String name, String serial, String inventory) {
+    /**
+     * The same name and the same filled numbers, limited to one equipment type.
+     * A printer named like a computer is not that computer.
+     */
+    public static int byName(List<Card> cards, String typeKey, String name, String serial, String inventory,
+                             Set<Integer> taken) {
+        return sameName(ofType(cards, typeKey), 0, name, serial, inventory, taken);
+    }
+
+    private static List<Card> ofType(List<Card> cards, String typeKey) {
+        if (cards == null || typeKey == null || typeKey.isEmpty()) {
+            return cards;
+        }
+        List<Card> same = new java.util.ArrayList<Card>();
+        for (int i = 0; i < cards.size(); i++) {
+            Card card = cards.get(i);
+            if (card != null && typeKey.equals(card.typeKey)) {
+                same.add(card);
+            }
+        }
+        return same;
+    }
+
+    private static int sameName(List<Card> cards, int pointed, String name, String serial, String inventory,
+                                Set<Integer> taken) {
         String wanted = plain(name);
         if (wanted.isEmpty()) {
             return 0;
@@ -94,12 +155,19 @@ public final class TniSame {
         int hand = 0;
         int hands = 0;
         int pointedHit = 0;
+        int blocked = 0;
         for (int i = 0; i < cards.size(); i++) {
             Card card = cards.get(i);
             if (card == null || card.location || card.id == 0 || !wanted.equals(plain(card.name))) {
                 continue;
             }
-            if (!DuplicateMarks.shares(card.serial, serial, card.inventory, inventory)) {
+            if (!DuplicateMarks.sameObject(card.serial, serial, card.inventory, inventory)) {
+                continue;
+            }
+            if (busy(taken, card.id)) {
+                if (blocked == 0) {
+                    blocked = card.id;
+                }
                 continue;
             }
             int[] score = score(card, pointed, count, only, oldest, hand, hands, pointedHit);
@@ -110,7 +178,12 @@ public final class TniSame {
             hands = score[4];
             pointedHit = score[5];
         }
-        return choose(pointedHit, count, only, hands, hand, oldest);
+        int chosen = choose(pointedHit, count, only, hands, hand, oldest);
+        return chosen != 0 ? chosen : blocked;
+    }
+
+    private static boolean busy(Set<Integer> taken, int id) {
+        return taken != null && taken.contains(Integer.valueOf(id));
     }
 
     private static int[] score(Card card, int pointed, int count, int only, int oldest, int hand, int hands, int pointedHit) {

@@ -269,6 +269,9 @@ public interface AssetService {
     /** Stores the prefix used by future object keys. Keys already issued stay unchanged. */
     AssetKeyDto saveAssetKey(ApplicationUser user, String projectKey, AssetKeyDto draft);
 
+    /** Gives every card in the project a new key from 1, in the order of the current keys. */
+    AssetKeyDto restartAssetKeys(ApplicationUser user, String projectKey);
+
     ProjectViewDto saveProjectView(ApplicationUser user, String projectKey, ProjectViewDto draft);
 
     List<UserProfileDto> searchUsers(ApplicationUser user, String query);

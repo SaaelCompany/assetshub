@@ -6,6 +6,7 @@ import javax.xml.bind.annotation.XmlAccessorType;
 @XmlAccessorType(XmlAccessType.PROPERTY)
 public class AssetKeyDto {
     private String assetKey;
+    private Integer count;
 
     public String getAssetKey() {
         return assetKey;
@@ -13,5 +14,13 @@ public class AssetKeyDto {
 
     public void setAssetKey(String assetKey) {
         this.assetKey = assetKey;
+    }
+
+    public Integer getCount() {
+        return count;
+    }
+
+    public void setCount(Integer count) {
+        this.count = count;
     }
 }

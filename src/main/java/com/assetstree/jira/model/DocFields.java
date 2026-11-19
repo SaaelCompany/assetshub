@@ -20,6 +20,14 @@ public final class DocFields {
         public String phone = "";
         public String email = "";
         public String department = "";
+        public String molRole = "";
+        public String molPhone = "";
+        public String molEmail = "";
+        public String molDepartment = "";
+        public String issuedRole = "";
+        public String issuedPhone = "";
+        public String issuedEmail = "";
+        public String issuedDepartment = "";
         public String custodian = "";
         public String description = "";
         public String project = "";
@@ -57,6 +65,14 @@ public final class DocFields {
         put(out, card.phone, "phone", "телефон", "тел");
         put(out, card.email, "email", "почта");
         put(out, card.department, "department", "отдел", "подразделение");
+        put(out, card.molRole, "должность мол", "mol title");
+        put(out, card.molPhone, "телефон мол", "mol phone");
+        put(out, card.molEmail, "почта мол", "mol email");
+        put(out, card.molDepartment, "отдел мол", "mol department");
+        put(out, card.issuedRole, "должность кому выдано", "issued title");
+        put(out, card.issuedPhone, "телефон кому выдано", "issued phone");
+        put(out, card.issuedEmail, "почта кому выдано", "issued email");
+        put(out, card.issuedDepartment, "отдел кому выдано", "issued department");
         put(out, card.custodian, "custodian", "ответственный");
         put(out, card.description, "description", "описание");
         put(out, card.project, "project", "организация", "клиника");
@@ -128,6 +144,15 @@ public final class DocFields {
             }
         }
         return false;
+    }
+
+    /** A place whose name is the department on a document: the department type, or a label that says so. */
+    public static boolean departmentPlace(String typeKey, String typeLabel) {
+        if (typeKey != null && "department".equalsIgnoreCase(typeKey.trim())) {
+            return true;
+        }
+        String token = DocxFill.normalize((typeKey == null ? "" : typeKey) + " " + (typeLabel == null ? "" : typeLabel));
+        return token.contains("отдел") || token.contains("подраздел") || token.contains("department");
     }
 
     private static String first(String preferred, String fallback) {

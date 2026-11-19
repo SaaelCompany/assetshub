@@ -694,7 +694,7 @@ public final class EquipmentExchange {
                 }
                 byId.put(Integer.valueOf(node.getId()), node);
                 hosts.add(new TniSame.Card(node.getId(), node.getName(), node.isLocation(), "", "",
-                        node.getSerial(), node.getInventory()));
+                        node.getSerial(), node.getInventory(), node.getTypeKey()));
             }
         }
         Set<Integer> taken = new HashSet<Integer>();
@@ -774,13 +774,21 @@ public final class EquipmentExchange {
         String serial = columnMark(record, fieldColumns, headers, true);
         String inventory = columnMark(record, fieldColumns, headers, false);
         if (hosts != null && key.isEmpty()) {
-            int same = TniSame.pick(hosts, 0, name, "", serial, inventory);
+            TypeRef hinted = matchType(typeName, types);
+            boolean computer = hinted != null && computerType(hinted.getLabel(), hinted.getKey());
+            int same = 0;
+            if (computer) {
+                same = TniSame.pick(hosts, 0, name, "", serial, inventory, taken);
+            } else if (hinted != null) {
+                same = TniSame.byName(hosts, hinted.getKey(), name, serial, inventory, taken);
+            }
             if (same < 0 || (same > 0 && taken != null && taken.contains(Integer.valueOf(same)))) {
                 issues.add(new Issue(row, "asset-tree.error.import.host", name));
                 return null;
             }
             if (same > 0 && byId != null) {
                 existing = byId.get(Integer.valueOf(same));
+                rememberMark(hosts, same, serial, inventory);
                 keepType = existing != null && !existing.getTypeKey().isEmpty();
                 if (existing != null && !existing.getObjectKey().isEmpty()) {
                     String marker = norm(existing.getObjectKey());
@@ -917,13 +925,26 @@ public final class EquipmentExchange {
             }
         }
         LifeBook.Change lifecycle = life ? readLifecycle(record, roleColumn, key) : null;
-        if (existing == null && hosts != null && synthetic != null
-                && (!TniText.shortHost(name).isEmpty() || !serial.isEmpty() || !inventory.isEmpty())) {
-            hosts.add(new TniSame.Card(synthetic[0]--, name.trim(), false, "", "", serial, inventory));
+        if (existing == null && hosts != null && synthetic != null && type != null
+                && (!TniText.shortHost(name).isEmpty() || !serial.isEmpty() || !inventory.isEmpty() || !computerType(type.getLabel(), type.getKey()))) {
+            hosts.add(new TniSame.Card(synthetic[0]--, name.trim(), false, "", "", serial, inventory, type.getKey()));
         }
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
                 description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
                 issuedPresent, issuedKey, attributes, wish, lifecycle);
+    }
+
+    private static void rememberMark(List<TniSame.Card> hosts, int id, String serial, String inventory) {
+        if (hosts == null) {
+            return;
+        }
+        for (int i = 0; i < hosts.size(); i++) {
+            TniSame.Card card = hosts.get(i);
+            if (card != null && card.id == id) {
+                card.remember(serial, inventory);
+                return;
+            }
+        }
     }
 
     private static String columnMark(EquipmentSheet.Record record, List<Integer> columns, List<String> headers, boolean serial) {
@@ -1272,6 +1293,28 @@ public final class EquipmentExchange {
         for (String name : names) {
             roles.put(norm(name), role);
         }
+    }
+
+    /** A computer, laptop, monoblock, server or terminal. A printer or a UPS is not one of these. */
+    public static boolean computerType(String label, String key) {
+        return computerWord(label) || computerWord(key);
+    }
+
+    private static boolean computerWord(String raw) {
+        String text = norm(raw);
+        if (text.isEmpty()) {
+            return false;
+        }
+        String[] words = {
+                "computer", "laptop", "notebook", "server", "desktop", "monoblock", "terminal",
+                "компьютер", "ноутбук", "моноблок", "сервер", "терминал"
+        };
+        for (int i = 0; i < words.length; i++) {
+            if (text.contains(words[i])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static String norm(String value) {

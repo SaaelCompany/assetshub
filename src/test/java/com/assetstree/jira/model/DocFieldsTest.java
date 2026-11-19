@@ -52,5 +52,25 @@ public class DocFieldsTest {
         assertEquals("desk@example.com", values.get(DocxFill.normalize("почта")));
         assertEquals("Бухгалтерия", values.get(DocxFill.normalize("отдел")));
         assertEquals("Кабинет 12", values.get(DocxFill.normalize("Примечание")));
+        source.molRole = "Заведующий";
+        source.molEmail = "mol@example.com";
+        source.molDepartment = "Аптека";
+        source.issuedRole = "Инженер";
+        source.issuedEmail = "eng@example.com";
+        source.issuedDepartment = "ИТ";
+        values = DocFields.values(source);
+        assertEquals("Заведующий", values.get(DocxFill.normalize("должность мол")));
+        assertEquals("mol@example.com", values.get(DocxFill.normalize("почта мол")));
+        assertEquals("Аптека", values.get(DocxFill.normalize("отдел мол")));
+        assertEquals("Инженер", values.get(DocxFill.normalize("должность кому выдано")));
+        assertEquals("eng@example.com", values.get(DocxFill.normalize("почта кому выдано")));
+        assertEquals("ИТ", values.get(DocxFill.normalize("отдел кому выдано")));
+    }
+
+    @Test
+    public void aDepartmentPlaceIsTheDepartmentOnADocument() {
+        assertEquals(true, DocFields.departmentPlace("department", "Отделение"));
+        assertEquals(true, DocFields.departmentPlace("room", "Отдел кадров"));
+        assertEquals(false, DocFields.departmentPlace("branch", "Филиал"));
     }
 }
