@@ -35,8 +35,8 @@
             nx /= len;
             ny /= len;
             var denom = nx * n2.x + ny * n2.y;
-            var miter = Math.abs(denom) < 0.05 ? dist : dist / denom;
-            var limit = Math.abs(dist) * 6;
+            var miter = Math.abs(denom) < 0.2 ? dist : dist / denom;
+            var limit = Math.abs(dist) * 2.2;
             if (miter > limit) miter = limit;
             if (miter < -limit) miter = -limit;
             out.push({ x: curr.x + nx * miter, y: curr.y + ny * miter });
@@ -3334,20 +3334,44 @@
         }
 
         function hatch(ctx, poly, kind, color) {
-            var minX = poly[0].x;
-            var minY = poly[0].y;
-            var maxX = poly[0].x;
-            var maxY = poly[0].y;
+            var loops = poly && poly.length && poly[0] && poly[0].x == null ? poly : null;
+            var pts = loops ? [] : poly;
             var i;
-            for (i = 1; i < poly.length; i++) {
-                minX = Math.min(minX, poly[i].x);
-                minY = Math.min(minY, poly[i].y);
-                maxX = Math.max(maxX, poly[i].x);
-                maxY = Math.max(maxY, poly[i].y);
+            if (loops) {
+                var li;
+                for (li = 0; li < loops.length; li++) {
+                    var ring = loops[li];
+                    var pi;
+                    for (pi = 0; pi < ring.length; pi++) pts.push(ring[pi]);
+                }
+            }
+            if (!pts || !pts.length) return;
+            var minX = pts[0].x;
+            var minY = pts[0].y;
+            var maxX = pts[0].x;
+            var maxY = pts[0].y;
+            for (i = 1; i < pts.length; i++) {
+                minX = Math.min(minX, pts[i].x);
+                minY = Math.min(minY, pts[i].y);
+                maxX = Math.max(maxX, pts[i].x);
+                maxY = Math.max(maxY, pts[i].y);
             }
             ctx.save();
-            pathOf(ctx, poly, true);
-            ctx.clip();
+            if (loops) {
+                ctx.beginPath();
+                for (i = 0; i < loops.length; i++) {
+                    var loop = loops[i];
+                    if (!loop.length) continue;
+                    ctx.moveTo(loop[0].x, loop[0].y);
+                    var k;
+                    for (k = 1; k < loop.length; k++) ctx.lineTo(loop[k].x, loop[k].y);
+                    ctx.closePath();
+                }
+                ctx.clip('evenodd');
+            } else {
+                pathOf(ctx, poly, true);
+                ctx.clip();
+            }
             ctx.strokeStyle = color;
             ctx.lineWidth = 0.35;
             ctx.beginPath();
@@ -3714,6 +3738,155 @@
             }
         }
 
+        function previewWalls(points) {
+            var floor = activeFloor();
+            var walls = ((floor && floor.objects) || []).filter(function (obj) {
+                return obj.type === 'wall' && layerVisible(obj.layerId);
+            }).slice();
+            walls.push({
+                id: 'draft-wall',
+                type: 'wall',
+                points: points,
+                thickness: wallDefaults().thickness,
+                fill: '#eef2f6',
+                color: '#172b4d',
+                hatch: 'diagonal',
+                opacity: 1
+            });
+            return walls;
+        }
+
+        function addRing(ctx, loop) {
+            if (!loop || loop.length < 2) return;
+            ctx.moveTo(loop[0].x, loop[0].y);
+            var i;
+            for (i = 1; i < loop.length; i++) ctx.lineTo(loop[i].x, loop[i].y);
+            ctx.closePath();
+        }
+
+        function wallOpeningHole(wall, opening) {
+            var seg = wallSegment(wall, opening.index || 0);
+            if (!seg) return null;
+            var len = dist(seg.a.x, seg.a.y, seg.b.x, seg.b.y) || 1;
+            var half = (opening.width || 90) / 2 / len;
+            var t0 = (opening.t || 0.5) - half;
+            var t1 = (opening.t || 0.5) + half;
+            function at(t) {
+                return {
+                    x: seg.a.x + (seg.b.x - seg.a.x) * t,
+                    y: seg.a.y + (seg.b.y - seg.a.y) * t
+                };
+            }
+            var a = at(t0);
+            var b = at(t1);
+            var n = leftNorm(a, b);
+            var reach = (wall.thickness || 15) / 2 + 2;
+            if (wall.alignment === 'left' || wall.alignment === 'right') reach = (wall.thickness || 15) + 2;
+            return {
+                a: a,
+                b: b,
+                poly: [
+                    { x: a.x + n.x * reach, y: a.y + n.y * reach },
+                    { x: b.x + n.x * reach, y: b.y + n.y * reach },
+                    { x: b.x - n.x * reach, y: b.y - n.y * reach },
+                    { x: a.x - n.x * reach, y: a.y - n.y * reach }
+                ]
+            };
+        }
+
+        function paintWallUnion(ctx, walls, floor) {
+            var plan = global.AssetTreePlan;
+            if (!plan || !plan.wallLoops || !walls.length) return false;
+            var groups = [];
+            var byKey = {};
+            var drawn = [];
+            var i;
+            for (i = 0; i < walls.length; i++) {
+                var wall = walls[i];
+                if (!wall.points || wall.points.length < 2) continue;
+                var style = (wall.fill || '#eef2f6') + '|' + (wall.color || '#172b4d') + '|' + (wall.hatch || 'diagonal') + '|' + (wall.opacity == null ? 1 : wall.opacity);
+                var group = byKey[style];
+                if (!group) {
+                    group = {
+                        fill: wall.fill || '#eef2f6',
+                        color: wall.color || '#172b4d',
+                        hatch: wall.hatch || 'diagonal',
+                        opacity: wall.opacity == null ? 1 : wall.opacity,
+                        segs: [],
+                        holes: []
+                    };
+                    byKey[style] = group;
+                    groups.push(group);
+                }
+                var count = wall.points.length - 1;
+                if (wall.closed && wall.points.length > 2) count += 1;
+                var k;
+                for (k = 0; k < count; k++) {
+                    var part = wallSegment(wall, k);
+                    if (!part || dist(part.a.x, part.a.y, part.b.x, part.b.y) < 1) continue;
+                    group.segs.push({
+                        x1: part.a.x, y1: part.a.y, x2: part.b.x, y2: part.b.y,
+                        thick: wall.thickness || 15,
+                        align: wall.alignment || ''
+                    });
+                }
+                var objects = floor.objects || [];
+                var o;
+                for (o = 0; o < objects.length; o++) {
+                    var opening = objects[o];
+                    if (opening.type !== 'opening' || opening.wallId !== wall.id) continue;
+                    if (opening.layerId && !layerVisible(opening.layerId)) continue;
+                    var hole = wallOpeningHole(wall, opening);
+                    if (!hole) continue;
+                    group.holes.push(hole.poly);
+                    drawn.push({ opening: opening, a: hole.a, b: hole.b });
+                }
+            }
+            if (!groups.length) return false;
+            var ready = [];
+            for (i = 0; i < groups.length; i++) {
+                if (!groups[i].segs.length) continue;
+                var loops = plan.wallLoops(groups[i].segs, groups[i].holes);
+                if (!loops || !loops.length) return false;
+                ready.push({ group: groups[i], loops: loops });
+            }
+            if (!ready.length) return false;
+            var allSegs = [];
+            var allHoles = [];
+            for (i = 0; i < groups.length; i++) {
+                allSegs = allSegs.concat(groups[i].segs);
+                allHoles = allHoles.concat(groups[i].holes);
+            }
+            var outline = plan.wallLoops(allSegs, allHoles);
+            if (!outline || !outline.length) return false;
+            var base = ctx.globalAlpha == null ? 1 : ctx.globalAlpha;
+            for (i = 0; i < ready.length; i++) {
+                var item = ready[i];
+                ctx.save();
+                ctx.globalAlpha = base * item.group.opacity;
+                ctx.fillStyle = item.group.fill;
+                ctx.beginPath();
+                var li;
+                for (li = 0; li < item.loops.length; li++) addRing(ctx, item.loops[li]);
+                ctx.fill('evenodd');
+                if (item.group.hatch !== 'none') hatch(ctx, item.loops, item.group.hatch, item.group.color);
+                ctx.restore();
+            }
+            ctx.save();
+            ctx.globalAlpha = base;
+            ctx.strokeStyle = ready[0].group.color;
+            ctx.lineWidth = 1.2;
+            ctx.lineJoin = 'miter';
+            ctx.miterLimit = 2;
+            ctx.lineCap = 'butt';
+            ctx.beginPath();
+            for (i = 0; i < outline.length; i++) addRing(ctx, outline[i]);
+            ctx.stroke();
+            ctx.restore();
+            for (i = 0; i < drawn.length; i++) drawOpening(ctx, drawn[i].a, drawn[i].b, drawn[i].opening);
+            return true;
+        }
+
         function drawWallLayer(ctx, floor) {
             var objects = floor.objects || [];
             var walls = [];
@@ -3723,6 +3896,11 @@
             }
             if (!walls.length) return;
             var shown = walls.filter(function (wall) { return layerVisible(wall.layerId); });
+            if (global.AssetTreePlan && global.AssetTreePlan.wallLoops) {
+                try {
+                    if (paintWallUnion(ctx, shown, floor)) return;
+                } catch (err) {}
+            }
             for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'body');
             for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'stroke');
             for (i = 0; i < shown.length; i++) drawWall(ctx, shown[i], floor, 'cover');
@@ -3941,13 +4119,15 @@
                             opacity: 0.45
                         });
                     } else if (session.draft.tool === 'wall') {
-                        drawWall(ctx, {
-                            points: session.draft.points,
-                            thickness: wallDefaults().thickness,
-                            color: '#172b4d',
-                            hatch: 'diagonal',
-                            opacity: 1
-                        }, activeFloor());
+                        if (!paintWallUnion(ctx, previewWalls(session.draft.points), activeFloor())) {
+                            drawWall(ctx, {
+                                points: session.draft.points,
+                                thickness: wallDefaults().thickness,
+                                color: '#172b4d',
+                                hatch: 'diagonal',
+                                opacity: 1
+                            }, activeFloor());
+                        }
                     } else {
                         ctx.strokeStyle = '#0052cc';
                         ctx.lineWidth = 1;
@@ -3967,16 +4147,21 @@
                         ctx.lineTo(session.draft.x2, session.draft.y2);
                         ctx.stroke();
                     } else if (session.draft.tool === 'wall') {
-                        drawWall(ctx, {
-                            points: [
-                                { x: session.draft.x1, y: session.draft.y1 },
-                                { x: session.draft.x2, y: session.draft.y2 }
-                            ],
-                            thickness: wallDefaults().thickness,
-                            color: '#172b4d',
-                            hatch: 'diagonal',
-                            opacity: 1
-                        }, activeFloor());
+                        if (!paintWallUnion(ctx, previewWalls([
+                            { x: session.draft.x1, y: session.draft.y1 },
+                            { x: session.draft.x2, y: session.draft.y2 }
+                        ]), activeFloor())) {
+                            drawWall(ctx, {
+                                points: [
+                                    { x: session.draft.x1, y: session.draft.y1 },
+                                    { x: session.draft.x2, y: session.draft.y2 }
+                                ],
+                                thickness: wallDefaults().thickness,
+                                color: '#172b4d',
+                                hatch: 'diagonal',
+                                opacity: 1
+                            }, activeFloor());
+                        }
                     } else {
                         ctx.strokeRect(
                             Math.min(session.draft.x1, session.draft.x2),
@@ -5760,6 +5945,9 @@
             session.future = [];
             session.selection = [];
             session.draft = null;
+            var dirty = session.dirty;
+            (doc.floors || []).forEach(function (floor) { syncRooms(floor); });
+            session.dirty = dirty;
             syncWallField();
         }
 

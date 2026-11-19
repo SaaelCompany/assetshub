@@ -987,7 +987,8 @@ var AssetTreePlan = (function () {
         var sx = b.x2 - b.x1;
         var sy = b.y2 - b.y1;
         var den = rx * sy - ry * sx;
-        if (Math.abs(den) < 1) return null;
+        var span = Math.sqrt((rx * rx + ry * ry) * (sx * sx + sy * sy)) || 1;
+        if (Math.abs(den) <= 1e-8 * span) return null;
         var t = ((b.x1 - a.x1) * sy - (b.y1 - a.y1) * sx) / den;
         var u = ((b.x1 - a.x1) * ry - (b.y1 - a.y1) * rx) / den;
         return { t: t, u: u, x: a.x1 + t * rx, y: a.y1 + t * ry };
@@ -999,113 +1000,177 @@ var AssetTreePlan = (function () {
         return Math.sqrt(dx * dx + dy * dy) || 1;
     }
 
-    function cutTees(segments) {
-        if (!segments || segments.length > 1400) return null;
-        var list = segments.map(function (seg) {
-            return {
-                x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2,
-                kind: seg.kind || 'wall', thick: seg.thick || 8,
-                name: seg.name || '', color: seg.color || '',
-                source: seg.source != null ? seg.source : (seg.index != null ? seg.index : -1)
-            };
-        });
+    function copySeg(seg) {
+        return {
+            x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2,
+            kind: seg.kind || 'wall', thick: seg.thick || 8,
+            name: seg.name || '', color: seg.color || '',
+            source: seg.source != null ? seg.source : (seg.index != null ? seg.index : -1)
+        };
+    }
+
+    function pushSnap(snaps, seg, end, x, y) {
+        var ox = end ? seg.x2 : seg.x1;
+        var oy = end ? seg.y2 : seg.y1;
+        var dx = ox - x;
+        var dy = oy - y;
+        var gap = dx * dx + dy * dy;
+        if (gap < 0.16) return;
+        var i;
+        for (i = 0; i < snaps.length; i++) {
+            if (snaps[i].seg === seg && snaps[i].end === end) {
+                if (gap < snaps[i].gap) {
+                    snaps[i].x = x;
+                    snaps[i].y = y;
+                    snaps[i].gap = gap;
+                }
+                return;
+            }
+        }
+        snaps.push({ seg: seg, end: end, x: x, y: y, gap: gap });
+    }
+
+    function knitCollinear(a, b, ia, ib, snaps, addCut) {
+        var axis = a;
+        var other = b;
+        var axisIndex = ia;
+        if (segLen(b) > segLen(a) + 0.01) {
+            axis = b;
+            other = a;
+            axisIndex = ib;
+        }
+        var p1 = teeProject(axis.x1, axis.y1, axis.x2, axis.y2, other.x1, other.y1);
+        var p2 = teeProject(axis.x1, axis.y1, axis.x2, axis.y2, other.x2, other.y2);
+        if (!p1 || !p2) return;
+        var axisLen = segLen(axis);
+        function pull(p, otherEnd) {
+            if (!p || p.dist > 4) return;
+            var past = p.t < 0 ? -p.t * axisLen : (p.t > 1 ? (p.t - 1) * axisLen : 0);
+            if (past <= 0.4 || past > 18) return;
+            var end = p.t < 0 ? 0 : 1;
+            var x = p.x;
+            var y = p.y;
+            pushSnap(snaps, axis, end, x, y);
+            pushSnap(snaps, other, otherEnd, x, y);
+        }
+        if (p1.dist > 4 || p2.dist > 4) {
+            pull(p1, 0);
+            pull(p2, 1);
+            return;
+        }
+        if (p1.dist > 0.4) pushSnap(snaps, other, 0, p1.x, p1.y);
+        if (p2.dist > 0.4) pushSnap(snaps, other, 1, p2.x, p2.y);
+        if (p1.t > 0 && p1.t < 1) addCut(axisIndex, p1.t, p1.x, p1.y);
+        if (p2.t > 0 && p2.t < 1) addCut(axisIndex, p2.t, p2.x, p2.y);
+        pull(p1, 0);
+        pull(p2, 1);
+    }
+
+    function reachEnd(stem, bar, barIndex, snaps, addCut) {
+        var meet = lineCross(stem, bar);
+        if (!meet) return;
+        var stemLen = segLen(stem);
+        var barLen = segLen(bar);
+        var stemPast = meet.t < -0.001 || meet.t > 1.001;
+        var stemGap = meet.t < 0 ? -meet.t * stemLen : (meet.t > 1 ? (meet.t - 1) * stemLen : 0);
+        var onStem = meet.t <= 1.5 / stemLen || meet.t >= 1 - 1.5 / stemLen;
+        var barInterior = meet.u > 1.5 / barLen && meet.u < 1 - 1.5 / barLen;
+        if ((stemPast || onStem) && stemGap <= 18 && barInterior) {
+            if (stemPast) pushSnap(snaps, stem, meet.t < 0 ? 0 : 1, meet.x, meet.y);
+            addCut(barIndex, meet.u, meet.x, meet.y);
+            return;
+        }
+        if (!stemPast || stemGap > 18) return;
+        var barGap = meet.u < 0 ? -meet.u * barLen : (meet.u > 1 ? (meet.u - 1) * barLen : 0);
+        var barPast = meet.u < -0.001 || meet.u > 1.001;
+        var onBar = meet.u <= 1.5 / barLen || meet.u >= 1 - 1.5 / barLen;
+        if (barGap <= 18 && (barPast || onBar)) {
+            pushSnap(snaps, stem, meet.t < 0 ? 0 : 1, meet.x, meet.y);
+            if (barPast) pushSnap(snaps, bar, meet.u < 0 ? 0 : 1, meet.x, meet.y);
+        }
+    }
+
+    function touchCut(stem, bar, barIndex, snaps, addCut) {
+        var ends = [0, 1];
+        var n;
+        for (n = 0; n < ends.length; n++) {
+            var x = ends[n] ? stem.x2 : stem.x1;
+            var y = ends[n] ? stem.y2 : stem.y1;
+            var p = teeProject(bar.x1, bar.y1, bar.x2, bar.y2, x, y);
+            if (!p || p.dist > 2 || p.t <= 0.002 || p.t >= 0.998) continue;
+            if (p.dist > 0.4) pushSnap(snaps, stem, ends[n], p.x, p.y);
+            addCut(barIndex, p.t, p.x, p.y);
+        }
+    }
+
+    function knitPair(list, i, j, snaps, addCut) {
+        var left = list[i];
+        var right = list[j];
+        if (teeTurn(left, right) < 6) {
+            knitCollinear(left, right, i, j, snaps, addCut);
+            return;
+        }
+        var meet = lineCross(left, right);
+        if (meet) {
+            var leftLen = segLen(left);
+            var rightLen = segLen(right);
+            var leftIn = meet.t > 1.5 / leftLen && meet.t < 1 - 1.5 / leftLen;
+            var rightIn = meet.u > 1.5 / rightLen && meet.u < 1 - 1.5 / rightLen;
+            if (leftIn && rightIn) {
+                var leftTail = Math.min(meet.t, 1 - meet.t) * leftLen;
+                var rightTail = Math.min(meet.u, 1 - meet.u) * rightLen;
+                if (leftTail <= 18) pushSnap(snaps, left, meet.t < 0.5 ? 0 : 1, meet.x, meet.y);
+                else addCut(i, meet.t, meet.x, meet.y);
+                if (rightTail <= 18) pushSnap(snaps, right, meet.u < 0.5 ? 0 : 1, meet.x, meet.y);
+                else addCut(j, meet.u, meet.x, meet.y);
+                return;
+            }
+        }
+        reachEnd(left, right, j, snaps, addCut);
+        reachEnd(right, left, i, snaps, addCut);
+        touchCut(left, right, j, snaps, addCut);
+        touchCut(right, left, i, snaps, addCut);
+    }
+
+    function knitWalls(segments) {
+        var list = [];
         var changed = false;
         var real = false;
+        var i;
+        if (!segments) return { list: list, changed: false, real: false };
+        for (i = 0; i < segments.length && list.length < 1600; i++) {
+            var src = segments[i];
+            if (!src) continue;
+            var dx0 = src.x2 - src.x1;
+            var dy0 = src.y2 - src.y1;
+            if (dx0 * dx0 + dy0 * dy0 < 1) continue;
+            list.push(copySeg(src));
+        }
         var guard = 0;
-        while (guard < 6) {
+        while (guard < 8) {
             guard += 1;
             var snaps = [];
             var cuts = {};
             function addCut(index, t, x, y) {
                 if (index < 0 || !list[index]) return;
                 var host = list[index];
-                var span = Math.sqrt((host.x2 - host.x1) * (host.x2 - host.x1) + (host.y2 - host.y1) * (host.y2 - host.y1)) || 1;
-                var edge = 2 / span;
+                var span = segLen(host);
+                var edge = 1.5 / span;
                 if (t <= edge || t >= 1 - edge) return;
                 var bucket = cuts[index] || (cuts[index] = []);
                 var n;
                 for (n = 0; n < bucket.length; n++) {
-                    if (Math.abs(bucket[n].t - t) * span < 2) return;
+                    if (Math.abs(bucket[n].t - t) * span < 1.5) return;
                 }
                 bucket.push({ t: t, x: x, y: y });
             }
-            var i;
             var j;
             for (i = 0; i < list.length; i++) {
-                for (j = i + 1; j < list.length; j++) {
-                    var left = list[i];
-                    var right = list[j];
-                    [[right, left, i], [left, right, j]].forEach(function (pair) {
-                        var stem = pair[0];
-                        var bar = pair[1];
-                        var barIndex = pair[2];
-                        var parallel = teeTurn(stem, bar) < 12;
-                        if (parallel) {
-                            if (segLen(stem) + 0.01 < segLen(bar)) return;
-                            if (Math.abs(segLen(stem) - segLen(bar)) <= 0.01 && barIndex !== i) return;
-                            var axis = stem;
-                            var other = bar;
-                            var project = function (x, y) {
-                                return teeProject(axis.x1, axis.y1, axis.x2, axis.y2, x, y);
-                            };
-                            var p1 = project(other.x1, other.y1);
-                            var p2 = project(other.x2, other.y2);
-                            if (!p1 || !p2 || p1.dist > 4 || p2.dist > 4) return;
-                            var choices = [
-                                { aEnd: 0, oEnd: 0, ax: axis.x1, ay: axis.y1, ox: p1.x, oy: p1.y },
-                                { aEnd: 0, oEnd: 1, ax: axis.x1, ay: axis.y1, ox: p2.x, oy: p2.y },
-                                { aEnd: 1, oEnd: 0, ax: axis.x2, ay: axis.y2, ox: p1.x, oy: p1.y },
-                                { aEnd: 1, oEnd: 1, ax: axis.x2, ay: axis.y2, ox: p2.x, oy: p2.y }
-                            ];
-                            var best = choices[0];
-                            var n;
-                            var bestD = (best.ax - best.ox) * (best.ax - best.ox) + (best.ay - best.oy) * (best.ay - best.oy);
-                            for (n = 1; n < choices.length; n++) {
-                                var pick = choices[n];
-                                var pickD = (pick.ax - pick.ox) * (pick.ax - pick.ox) + (pick.ay - pick.oy) * (pick.ay - pick.oy);
-                                if (pickD < bestD) {
-                                    best = pick;
-                                    bestD = pickD;
-                                }
-                            }
-                            if (bestD > 22 * 22) return;
-                            var mx = (best.ax + best.ox) / 2;
-                            var my = (best.ay + best.oy) / 2;
-                            snaps.push({ seg: other, end: 0, x: best.oEnd === 0 ? mx : p1.x, y: best.oEnd === 0 ? my : p1.y });
-                            snaps.push({ seg: other, end: 1, x: best.oEnd === 1 ? mx : p2.x, y: best.oEnd === 1 ? my : p2.y });
-                            snaps.push({ seg: axis, end: best.aEnd, x: mx, y: my });
-                            return;
-                        }
-                        var meet = lineCross(stem, bar);
-                        if (!meet) return;
-                        var stemLen = segLen(stem);
-                        var barLen = segLen(bar);
-                        var stemPast = meet.t < 0 || meet.t > 1;
-                        var stemGap = stemPast ? (meet.t < 0 ? -meet.t : meet.t - 1) * stemLen : 0;
-                        var barInterior = meet.u > 2 / barLen && meet.u < 1 - 2 / barLen;
-                        if (barInterior && stemGap <= 22 && (stemPast || meet.t <= 0.001 || meet.t >= 0.999)) {
-                            if (stemPast) snaps.push({ seg: stem, end: meet.t < 0 ? 0 : 1, x: meet.x, y: meet.y });
-                            var fromStart = meet.u * barLen;
-                            var fromEnd = (1 - meet.u) * barLen;
-                            if (stemPast && (fromStart <= 22 || fromEnd <= 22)) {
-                                snaps.push({ seg: bar, end: fromStart < fromEnd ? 0 : 1, x: meet.x, y: meet.y });
-                            } else addCut(barIndex, meet.u, meet.x, meet.y);
-                            return;
-                        }
-                        if (stemPast && stemGap <= 22) {
-                            var barGap = meet.u < 0 ? -meet.u * barLen : (meet.u > 1 ? (meet.u - 1) * barLen : 0);
-                            if (barGap <= 22) snaps.push({ seg: stem, end: meet.t < 0 ? 0 : 1, x: meet.x, y: meet.y });
-                        }
-                    });
-                    var cross = teeCross(left, right);
-                    if (cross) {
-                        addCut(i, cross.t, cross.x, cross.y);
-                        addCut(j, cross.u, cross.x, cross.y);
-                    }
-                }
+                for (j = i + 1; j < list.length; j++) knitPair(list, i, j, snaps, addCut);
             }
             var cutKeys = [];
-            for (var key in cuts) {
+            var key;
+            for (key in cuts) {
                 if (Object.prototype.hasOwnProperty.call(cuts, key)) cutKeys.push(key);
             }
             if (!snaps.length && !cutKeys.length) break;
@@ -1133,7 +1198,7 @@ var AssetTreePlan = (function () {
                     var ay = points[k].y;
                     var bx = points[k + 1].x;
                     var by = points[k + 1].y;
-                    if ((ax - bx) * (ax - bx) + (ay - by) * (ay - by) < 4) continue;
+                    if ((ax - bx) * (ax - bx) + (ay - by) * (ay - by) < 1) continue;
                     pieces.push({
                         x1: ax, y1: ay, x2: bx, y2: by,
                         kind: seg.kind, thick: seg.thick, name: seg.name, color: seg.color, source: seg.source
@@ -1144,8 +1209,21 @@ var AssetTreePlan = (function () {
                 var args = [index, 1].concat(pieces);
                 Array.prototype.splice.apply(list, args);
             });
+            var kept = [];
+            for (i = 0; i < list.length; i++) {
+                var sdx = list[i].x2 - list[i].x1;
+                var sdy = list[i].y2 - list[i].y1;
+                if (sdx * sdx + sdy * sdy >= 1) kept.push(list[i]);
+            }
+            list = kept;
         }
-        return changed && real ? list : null;
+        return { list: list, changed: changed, real: real };
+    }
+
+    function cutTees(segments) {
+        if (!segments || segments.length > 1400) return null;
+        var knit = knitWalls(segments);
+        return knit.changed && knit.real ? knit.list : null;
     }
 
     function planArea(points) {
@@ -1180,6 +1258,7 @@ var AssetTreePlan = (function () {
 
     function planFaces(segments) {
         if (!segments || segments.length > 1400) return [];
+        var knitted = knitWalls(segments).list;
         var nodes = [];
         var adj = [];
         function nodeAt(x, y) {
@@ -1187,13 +1266,13 @@ var AssetTreePlan = (function () {
             for (i = 0; i < nodes.length; i++) {
                 var dx = nodes[i].x - x;
                 var dy = nodes[i].y - y;
-                if (dx * dx + dy * dy <= 16 * 16) return i;
+                if (dx * dx + dy * dy <= 2 * 2) return i;
             }
             nodes.push({ x: x, y: y });
             adj.push([]);
             return nodes.length - 1;
         }
-        (segments || []).forEach(function (seg) {
+        (knitted || []).forEach(function (seg) {
             var a = nodeAt(seg.x1, seg.y1);
             var b = nodeAt(seg.x2, seg.y2);
             if (a === b) return;
@@ -1248,7 +1327,7 @@ var AssetTreePlan = (function () {
             }
             if (!closed || loop.length < 3) return;
             var pts = loop.map(function (nid) { return { x: nodes[nid].x, y: nodes[nid].y }; });
-            if (planSigned(pts) > 2500 && faceBreadth(pts) >= 24) faces.push(pts);
+            if (planSigned(pts) >= 3000 && faceBreadth(pts) >= 16) faces.push(pts);
         });
         return faces.filter(function (face, index) {
             var area = planArea(face);
@@ -1276,6 +1355,335 @@ var AssetTreePlan = (function () {
             if (((a.y > y) !== (b.y > y)) && (x < (b.x - a.x) * (y - a.y) / ((b.y - a.y) || 1) + a.x)) inside = !inside;
         }
         return inside;
+    }
+
+    function ringKey(x, y) {
+        return (Math.round(x * 5) / 5) + ',' + (Math.round(y * 5) / 5);
+    }
+
+    function sideAmounts(seg) {
+        var thick = seg.thick || 15;
+        if (thick < 1) thick = 1;
+        if (seg.align === 'left') return { left: thick, right: 0 };
+        if (seg.align === 'right') return { left: 0, right: thick };
+        return { left: thick / 2, right: thick / 2 };
+    }
+
+    function unitAway(seg, atStart) {
+        var dx = seg.x2 - seg.x1;
+        var dy = seg.y2 - seg.y1;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (atStart) return { x: dx / len, y: dy / len };
+        return { x: -dx / len, y: -dy / len };
+    }
+
+    function lineHit(p, d, q, e) {
+        var den = d.x * e.y - d.y * e.x;
+        if (Math.abs(den) < 1e-9) return null;
+        var s = ((q.x - p.x) * e.y - (q.y - p.y) * e.x) / den;
+        return { x: p.x + d.x * s, y: p.y + d.y * s };
+    }
+
+    function miterCaps(a, aStart, b, bStart) {
+        var sa = sideAmounts(a);
+        var sb = sideAmounts(b);
+        var vx = aStart ? a.x1 : a.x2;
+        var vy = aStart ? a.y1 : a.y2;
+        var dOut = unitAway(a, aStart);
+        var dAwayB = unitAway(b, bStart);
+        var dIn = { x: -dAwayB.x, y: -dAwayB.y };
+        var nOut = { x: dOut.y, y: -dOut.x };
+        var nIn = { x: dIn.y, y: -dIn.x };
+        var outLeft = aStart ? sa.left : sa.right;
+        var outRight = aStart ? sa.right : sa.left;
+        var inLeft = bStart ? sb.right : sb.left;
+        var inRight = bStart ? sb.left : sb.right;
+        function hit(outAmt, inAmt) {
+            var pOut = { x: vx + nOut.x * outAmt, y: vy + nOut.y * outAmt };
+            var pIn = { x: vx + nIn.x * inAmt, y: vy + nIn.y * inAmt };
+            return lineHit(pOut, dOut, pIn, dIn);
+        }
+        var leftHit = hit(outLeft, inLeft);
+        var rightHit = hit(-outRight, -inRight);
+        if (!leftHit || !rightHit) return null;
+        var limit = Math.max(outLeft, outRight, inLeft, inRight, 1) * 2.4;
+        function near(p) {
+            var dx = p.x - vx;
+            var dy = p.y - vy;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            return dist >= 0.2 && dist <= limit;
+        }
+        if (!near(leftHit) || !near(rightHit)) return null;
+        var sdx = leftHit.x - rightHit.x;
+        var sdy = leftHit.y - rightHit.y;
+        if (sdx * sdx + sdy * sdy < 1) return null;
+        return {
+            a: {
+                left: aStart ? leftHit : rightHit,
+                right: aStart ? rightHit : leftHit
+            },
+            b: {
+                left: bStart ? rightHit : leftHit,
+                right: bStart ? leftHit : rightHit
+            }
+        };
+    }
+
+    function wallQuad(seg, startCap, endCap) {
+        var dx = seg.x2 - seg.x1;
+        var dy = seg.y2 - seg.y1;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var nx = dy / len;
+        var ny = -dx / len;
+        var side = sideAmounts(seg);
+        var aL = startCap ? startCap.left : { x: seg.x1 + nx * side.left, y: seg.y1 + ny * side.left };
+        var aR = startCap ? startCap.right : { x: seg.x1 - nx * side.right, y: seg.y1 - ny * side.right };
+        var bL = endCap ? endCap.left : { x: seg.x2 + nx * side.left, y: seg.y2 + ny * side.left };
+        var bR = endCap ? endCap.right : { x: seg.x2 - nx * side.right, y: seg.y2 - ny * side.right };
+        return [aL, bL, bR, aR];
+    }
+
+    function wallPolys(segments) {
+        var segs = [];
+        var i;
+        for (i = 0; i < (segments || []).length; i++) {
+            var src = segments[i];
+            if (!src) continue;
+            var dx = src.x2 - src.x1;
+            var dy = src.y2 - src.y1;
+            if (dx * dx + dy * dy < 1) continue;
+            segs.push(src);
+        }
+        var buckets = {};
+        function addEnd(x, y, index, atStart) {
+            var key = ringKey(x, y);
+            (buckets[key] || (buckets[key] = [])).push({ i: index, start: atStart });
+        }
+        for (i = 0; i < segs.length; i++) {
+            addEnd(segs[i].x1, segs[i].y1, i, true);
+            addEnd(segs[i].x2, segs[i].y2, i, false);
+        }
+        var caps = [];
+        for (i = 0; i < segs.length; i++) caps.push({ start: null, end: null });
+        var key;
+        for (key in buckets) {
+            if (!Object.prototype.hasOwnProperty.call(buckets, key)) continue;
+            var ends = buckets[key];
+            if (ends.length !== 2) continue;
+            var first = ends[0];
+            var second = ends[1];
+            var mit = miterCaps(segs[first.i], first.start, segs[second.i], second.start);
+            if (!mit) continue;
+            if (first.start) caps[first.i].start = mit.a;
+            else caps[first.i].end = mit.a;
+            if (second.start) caps[second.i].start = mit.b;
+            else caps[second.i].end = mit.b;
+        }
+        var polys = [];
+        for (i = 0; i < segs.length; i++) polys.push(wallQuad(segs[i], caps[i].start, caps[i].end));
+        return polys;
+    }
+
+    function addEdgeCut(cuts, index, t, x, y, host) {
+        var span = segLen(host);
+        if (t <= 0.8 / span || t >= 1 - 0.8 / span) return;
+        var bucket = cuts[index] || (cuts[index] = []);
+        var n;
+        for (n = 0; n < bucket.length; n++) {
+            if (Math.abs(bucket[n].t - t) * span < 0.6) return;
+        }
+        bucket.push({ t: t, x: x, y: y });
+    }
+
+    function markEdgeCuts(list, i, j, cuts) {
+        var a = list[i];
+        var b = list[j];
+        var any = false;
+        var hit = lineCross(a, b);
+        if (hit && hit.t > 0.001 && hit.t < 0.999 && hit.u > 0.001 && hit.u < 0.999) {
+            addEdgeCut(cuts, i, hit.t, hit.x, hit.y, a);
+            addEdgeCut(cuts, j, hit.u, hit.x, hit.y, b);
+            return true;
+        }
+        function project(host, index, x, y) {
+            var p = teeProject(host.x1, host.y1, host.x2, host.y2, x, y);
+            if (!p || p.dist > 0.35 || p.t <= 0.001 || p.t >= 0.999) return false;
+            addEdgeCut(cuts, index, p.t, p.x, p.y, host);
+            return true;
+        }
+        any = project(a, i, b.x1, b.y1) || any;
+        any = project(a, i, b.x2, b.y2) || any;
+        any = project(b, j, a.x1, a.y1) || any;
+        any = project(b, j, a.x2, a.y2) || any;
+        return any;
+    }
+
+    function splitEdgeList(list) {
+        var guard = 0;
+        while (guard < 5 && list.length && list.length < 5000) {
+            guard += 1;
+            var cuts = {};
+            var i;
+            var j;
+            var any = false;
+            for (i = 0; i < list.length; i++) {
+                for (j = i + 1; j < list.length; j++) {
+                    if (markEdgeCuts(list, i, j, cuts)) any = true;
+                }
+            }
+            if (!any) break;
+            var keys = [];
+            var key;
+            for (key in cuts) {
+                if (Object.prototype.hasOwnProperty.call(cuts, key)) keys.push(key);
+            }
+            keys.map(Number).sort(function (p, q) { return q - p; }).forEach(function (index) {
+                var edge = list[index];
+                if (!edge) return;
+                var points = [{ x: edge.x1, y: edge.y1 }].concat(cuts[index].slice().sort(function (p, q) {
+                    return p.t - q.t;
+                })).concat([{ x: edge.x2, y: edge.y2 }]);
+                var pieces = [];
+                var k;
+                for (k = 0; k < points.length - 1; k++) {
+                    var dx = points[k + 1].x - points[k].x;
+                    var dy = points[k + 1].y - points[k].y;
+                    if (dx * dx + dy * dy < 0.16) continue;
+                    pieces.push({ x1: points[k].x, y1: points[k].y, x2: points[k + 1].x, y2: points[k + 1].y });
+                }
+                if (pieces.length < 2) return;
+                var args = [index, 1].concat(pieces);
+                Array.prototype.splice.apply(list, args);
+            });
+        }
+        var seen = {};
+        var out = [];
+        var n;
+        for (n = 0; n < list.length; n++) {
+            var edge = list[n];
+            var dx2 = edge.x2 - edge.x1;
+            var dy2 = edge.y2 - edge.y1;
+            if (dx2 * dx2 + dy2 * dy2 < 0.16) continue;
+            var k1 = ringKey(edge.x1, edge.y1);
+            var k2 = ringKey(edge.x2, edge.y2);
+            if (k1 === k2) continue;
+            var token = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
+            if (seen[token]) continue;
+            seen[token] = true;
+            out.push(edge);
+        }
+        return out;
+    }
+
+    function coverPoint(x, y, polys, holes) {
+        var i;
+        var hit = false;
+        for (i = 0; i < polys.length; i++) {
+            if (planInside(x, y, polys[i])) {
+                hit = true;
+                break;
+            }
+        }
+        if (!hit) return false;
+        for (i = 0; i < holes.length; i++) {
+            if (planInside(x, y, holes[i])) return false;
+        }
+        return true;
+    }
+
+    function stitchLoops(edges) {
+        var map = {};
+        var i;
+        for (i = 0; i < edges.length; i++) {
+            var key = ringKey(edges[i].x1, edges[i].y1);
+            (map[key] || (map[key] = [])).push(i);
+        }
+        var used = {};
+        var loops = [];
+        for (i = 0; i < edges.length; i++) {
+            if (used[i] || loops.length >= 80) continue;
+            var loop = [];
+            var id = i;
+            var guard = 0;
+            var closed = false;
+            while (guard < edges.length + 2) {
+                if (used[id]) break;
+                used[id] = true;
+                loop.push({ x: edges[id].x1, y: edges[id].y1 });
+                var nextKey = ringKey(edges[id].x2, edges[id].y2);
+                if (loop.length >= 3 && nextKey === ringKey(loop[0].x, loop[0].y)) {
+                    closed = true;
+                    break;
+                }
+                var opts = map[nextKey] || [];
+                var next = -1;
+                var o;
+                var inx = edges[id].x2 - edges[id].x1;
+                var iny = edges[id].y2 - edges[id].y1;
+                var best = 1e9;
+                for (o = 0; o < opts.length; o++) {
+                    if (used[opts[o]]) continue;
+                    var edge = edges[opts[o]];
+                    var ang = Math.atan2(edge.y2 - edge.y1, edge.x2 - edge.x1) - Math.atan2(iny, inx);
+                    while (ang <= -Math.PI) ang += Math.PI * 2;
+                    while (ang > Math.PI) ang -= Math.PI * 2;
+                    if (ang < best) {
+                        best = ang;
+                        next = opts[o];
+                    }
+                }
+                if (next < 0) break;
+                id = next;
+                guard += 1;
+            }
+            if (closed && loop.length >= 3 && planArea(loop) >= 2) loops.push(loop);
+        }
+        return loops;
+    }
+
+    function polygonUnion(polys, holes) {
+        var edges = [];
+        function pushRing(poly) {
+            if (!poly || poly.length < 3) return;
+            var i;
+            for (i = 0; i < poly.length; i++) {
+                var a = poly[i];
+                var b = poly[(i + 1) % poly.length];
+                var dx = b.x - a.x;
+                var dy = b.y - a.y;
+                if (dx * dx + dy * dy < 0.25) continue;
+                edges.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+            }
+        }
+        var i;
+        for (i = 0; i < polys.length; i++) pushRing(polys[i]);
+        for (i = 0; i < holes.length; i++) pushRing(holes[i]);
+        if (edges.length > 2400) return [];
+        var atoms = splitEdgeList(edges);
+        var kept = [];
+        for (i = 0; i < atoms.length; i++) {
+            var edge = atoms[i];
+            var dx = edge.x2 - edge.x1;
+            var dy = edge.y2 - edge.y1;
+            var len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 0.4) continue;
+            var nx = dy / len;
+            var ny = -dx / len;
+            var mx = (edge.x1 + edge.x2) / 2;
+            var my = (edge.y1 + edge.y2) / 2;
+            var left = coverPoint(mx + nx * 0.35, my + ny * 0.35, polys, holes);
+            var right = coverPoint(mx - nx * 0.35, my - ny * 0.35, polys, holes);
+            if (left === right) continue;
+            if (left) kept.push(edge);
+            else kept.push({ x1: edge.x2, y1: edge.y2, x2: edge.x1, y2: edge.y1 });
+        }
+        return stitchLoops(kept);
+    }
+
+    function wallLoops(segments, holes) {
+        var polys = wallPolys(segments);
+        if (!polys.length) return [];
+        return polygonUnion(polys, holes || []);
     }
 
     function importPdfFlate(raw, plain) {
@@ -1410,7 +1818,9 @@ var AssetTreePlan = (function () {
         importDrawing: importDrawing,
         cutTees: cutTees,
         planFaces: planFaces,
+        wallLoops: wallLoops,
         scanJpeg: scanJpeg,
         bytesOf: bytesOf
     };
 }());
+if (typeof module !== 'undefined' && module.exports) module.exports = AssetTreePlan;
