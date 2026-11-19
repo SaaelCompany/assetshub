@@ -374,9 +374,11 @@
         userKey: '',
         displayName: '',
         pane: 'list',
-        trail: [],
-        trailSeen: null,
-        trailHold: false,
+        historyReady: false,
+        historyKey: '',
+        historyTimer: null,
+        historyHold: false,
+        pendingPlace: null,
         activityTab: 'all',
         mineAssets: null,
         mineQuery: '',
@@ -585,16 +587,7 @@
 
     function rememberView(view) {
         state.view = view;
-        if (!window.history || !window.history.replaceState) {
-            return;
-        }
-        var params = [];
-        if (state.projectKey) {
-            params.push('project=' + encodeURIComponent(state.projectKey));
-        }
-        params.push('view=' + encodeURIComponent(view || 'all'));
-        var hash = window.location.hash || '';
-        window.history.replaceState(null, '', window.location.pathname + '?' + params.join('&') + hash);
+        rememberPlace();
     }
 
     function t(key, arg) {
@@ -2409,6 +2402,7 @@
             state.editing = false;
             state.dirty = false;
             renderFrame();
+            rememberPlace();
         });
         var detail = document.getElementById('asset-tree-detail');
         if (detail && detail.parentNode === frame) frame.insertBefore(back, detail);
@@ -2972,7 +2966,6 @@
         }
         if (foot.childNodes.length) side.appendChild(foot);
         renderNodesInto(nodes);
-        if (phoneLayout() && state.pane !== 'card' && !state.trashOpen) prependReturn(side);
         return side;
     }
 
@@ -3060,62 +3053,176 @@
         }
     }
 
-    function sameSpot(left, right) {
-        if (!left || !right || left.kind !== right.kind) return false;
-        if (left.kind === 'asset') return left.id === right.id;
-        if (left.kind === 'type') {
-            return left.placeId === right.placeId && left.typeKey === right.typeKey && (left.scope || 'direct') === (right.scope || 'direct');
-        }
-        return true;
+    function placeKey(spot) {
+        var group = spot.tg ? (spot.tg.placeId + ':' + spot.tg.typeKey + ':' + (spot.tg.scope || 'direct')) : '';
+        return [spot.v || '', spot.p || '', spot.tab || '', spot.id || 0, group, spot.trash ? 1 : 0, spot.report || ''].join('|');
     }
 
-    function noteVisit(next) {
-        if (!next) return;
-        if (!state.trail) state.trail = [];
-        if (state.trailHold) {
-            state.trailSeen = next;
-            return;
-        }
-        if (state.trailSeen && !sameSpot(state.trailSeen, next)) {
-            state.trail.push(state.trailSeen);
-            if (state.trail.length > 40) state.trail.shift();
-        }
-        state.trailSeen = next;
-    }
-
-    function spotName(spot) {
-        if (!spot) return '';
-        if (spot.kind === 'asset') {
-            var asset = byId()[spot.id];
-            return asset ? (asset.name || asset.objectKey || '') : '';
-        }
-        if (spot.kind === 'type') {
-            var type = typeOf(spot.typeKey);
-            var place = byId()[spot.placeId];
-            var label = (type && type.label) || spot.typeKey;
-            return place && place.name ? (label + ' · ' + place.name) : label;
-        }
-        if (spot.kind === 'trash') return t('trash');
-        var project = currentProject();
-        return project ? (project.name || project.key) : '';
-    }
-
-    function previousSpot() {
-        if (!state.trail) return null;
-        var index;
-        for (index = state.trail.length - 1; index >= 0; index--) {
-            var spot = state.trail[index];
-            if (spot.kind === 'asset' && !byId()[spot.id]) continue;
-            if (spot.kind === 'type' && !byId()[spot.placeId]) continue;
-            if (state.trailSeen && sameSpot(spot, state.trailSeen)) continue;
+    function currentPlace() {
+        var view = state.view || 'all';
+        var spot = { v: view, p: state.projectKey || '', tab: '', id: 0, tg: null, trash: 0, report: '' };
+        if (view === 'settings') {
+            spot.tab = state.schemaTab || 'project';
             return spot;
         }
-        return null;
+        if (view === 'reports') {
+            spot.report = state.reportKey || '';
+            return spot;
+        }
+        if (view !== 'all') return spot;
+        if (state.trashOpen) {
+            spot.trash = 1;
+            return spot;
+        }
+        var asset = state.selectedId ? byId()[state.selectedId] : null;
+        if (state.pane === 'card' && asset && !isFolder(asset)) {
+            spot.id = asset.id;
+            return spot;
+        }
+        if (state.typeGroup && byId()[state.typeGroup.placeId]) {
+            spot.tg = {
+                placeId: state.typeGroup.placeId,
+                typeKey: state.typeGroup.typeKey,
+                scope: state.typeGroup.scope || 'direct'
+            };
+            return spot;
+        }
+        if (asset) spot.id = asset.id;
+        return spot;
+    }
+
+    function placeUrl(spot) {
+        var params = [];
+        if (spot.p) params.push('project=' + encodeURIComponent(spot.p));
+        params.push('view=' + encodeURIComponent(spot.v || 'all'));
+        if (spot.tab) params.push('tab=' + encodeURIComponent(spot.tab));
+        if (spot.report) params.push('report=' + encodeURIComponent(spot.report));
+        var hash = '';
+        if (spot.v === 'all') {
+            if (spot.trash) hash = '#trash';
+            else if (spot.tg) hash = '#t:' + spot.tg.placeId + ':' + encodeURIComponent(spot.tg.typeKey) + ':' + (spot.tg.scope || 'direct');
+            else if (spot.id) hash = '#' + spot.id;
+        }
+        return window.location.pathname + '?' + params.join('&') + hash;
+    }
+
+    function placeFromLocation() {
+        var view = queryValue('view') || state.view || 'all';
+        var hash = String(window.location.hash || '').replace(/^#/, '');
+        var spot = {
+            v: view,
+            p: queryValue('project') || state.projectKey || '',
+            tab: queryValue('tab') || '',
+            id: 0,
+            tg: null,
+            trash: hash === 'trash' ? 1 : 0,
+            report: queryValue('report') || ''
+        };
+        if (view === 'all' && !spot.trash) {
+            var group = /^t:(\d+):([^:]+)(?::(direct|under))?$/.exec(hash);
+            if (group) {
+                spot.tg = {
+                    placeId: parseInt(group[1], 10),
+                    typeKey: decodeURIComponent(group[2]),
+                    scope: group[3] || 'direct'
+                };
+            } else if (/^\d+$/.test(hash)) spot.id = parseInt(hash, 10);
+        }
+        if (view === 'settings' && !spot.tab) spot.tab = state.schemaTab || 'project';
+        return spot;
+    }
+
+    function commitPlace() {
+        if (state.historyHold || !window.history || !window.history.replaceState) return;
+        var spot = currentPlace();
+        var key = placeKey(spot);
+        var url = placeUrl(spot);
+        if (!state.historyReady) {
+            state.historyReady = true;
+            state.historyKey = key;
+            window.history.replaceState(spot, '', url);
+            return;
+        }
+        if (key === state.historyKey) {
+            window.history.replaceState(spot, '', url);
+            return;
+        }
+        state.historyKey = key;
+        window.history.pushState(spot, '', url);
+    }
+
+    function rememberPlace() {
+        if (state.historyHold) return;
+        if (state.historyTimer) return;
+        state.historyTimer = setTimeout(function () {
+            state.historyTimer = null;
+            commitPlace();
+        }, 0);
+    }
+
+    function noteVisit() {
+        rememberPlace();
+    }
+
+    function finishPlace(spot) {
+        state.view = spot.v || 'all';
+        state.trashOpen = false;
+        state.typeGroup = null;
+        if (spot.v === 'settings') state.schemaTab = spot.tab || 'project';
+        if (spot.v === 'reports' && spot.report) state.reportKey = spot.report;
+        if (spot.v === 'mine') {
+            state.mineAssets = null;
+            mount();
+            loadMine();
+            return;
+        }
+        if (spot.v === 'all') {
+            if (spot.trash) {
+                state.trashOpen = true;
+                state.selectedId = null;
+                state.pane = 'list';
+                mount();
+                loadTrash();
+                return;
+            }
+            if (spot.tg && byId()[spot.tg.placeId]) {
+                selectTypeGroup(spot.tg.placeId, spot.tg.typeKey, spot.tg.scope || 'direct');
+                return;
+            }
+            if (spot.id && byId()[spot.id]) {
+                selectAsset(spot.id, true);
+                return;
+            }
+            state.selectedId = null;
+            state.pane = 'list';
+        }
+        mount();
+    }
+
+    function restorePlace(spot) {
+        if (state.historyTimer) {
+            clearTimeout(state.historyTimer);
+            state.historyTimer = null;
+        }
+        state.historyHold = true;
+        state.historyKey = placeKey(spot);
+        state.dirty = false;
+        state.editing = false;
+        if (spot.p && spot.p !== state.projectKey) {
+            state.pendingPlace = spot;
+            state.view = spot.v || 'all';
+            if (spot.v === 'settings') state.schemaTab = spot.tab || 'project';
+            if (spot.v === 'reports' && spot.report) state.reportKey = spot.report;
+            switchProject(spot.p, spot.id || null);
+            return;
+        }
+        finishPlace(spot);
+        state.historyHold = false;
     }
 
     function openRoot() {
-        if (!state.trailHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
-        noteVisit({ kind: 'root' });
+        if (!state.historyHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        noteVisit();
         state.treePicked = {};
         state.selectedId = null;
         state.typeGroup = null;
@@ -3127,45 +3234,8 @@
         replaceDetail();
     }
 
-    function goBack() {
-        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
-        var spot = null;
-        while (state.trail && state.trail.length && !spot) {
-            var next = state.trail.pop();
-            if (next.kind === 'asset' && !byId()[next.id]) continue;
-            if (next.kind === 'type' && !byId()[next.placeId]) continue;
-            if (state.trailSeen && sameSpot(next, state.trailSeen)) continue;
-            spot = next;
-        }
-        if (!spot) return;
-        state.trailHold = true;
-        state.dirty = false;
-        if (spot.kind === 'asset') selectAsset(spot.id, true);
-        else if (spot.kind === 'type') selectTypeGroup(spot.placeId, spot.typeKey, spot.scope);
-        else if (spot.kind === 'trash') openTrash();
-        else openRoot();
-        state.trailHold = false;
-    }
-
-    function returnButton() {
-        var spot = previousSpot();
-        if (!spot) return null;
-        var name = spotName(spot) || t('returnBack');
-        var node = button('', 'asset-tree-return', goBack);
-        node.title = t('returnTo', name);
-        node.setAttribute('aria-label', node.title);
-        node.appendChild(toolIcon('back'));
-        node.appendChild(el('span', null, name));
-        return node;
-    }
-
-    function prependReturn(node) {
-        var back = returnButton();
-        if (back && node) node.insertBefore(back, node.firstChild);
-    }
-
     function openTrash() {
-        if (!state.trailHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        if (!state.historyHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
         noteVisit({ kind: 'trash' });
         state.trashOpen = true;
         state.treePicked = {};
@@ -3910,8 +3980,8 @@
     }
 
     function selectTypeGroup(placeId, typeKey, scope) {
-        if (!state.trailHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
-        noteVisit({ kind: 'type', placeId: placeId, typeKey: typeKey, scope: scope || 'direct' });
+        if (!state.historyHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        noteVisit();
         state.treePicked = {};
         state.typeGroup = { placeId: placeId, typeKey: typeKey, scope: scope || 'direct' };
         state.trashOpen = false;
@@ -3921,12 +3991,6 @@
         state.pane = 'list';
         state.expanded[placeId] = true;
         rememberExpanded();
-        if (window.history && window.history.replaceState) {
-            var params = [];
-            if (state.projectKey) params.push('project=' + encodeURIComponent(state.projectKey));
-            params.push('view=' + encodeURIComponent(state.view || 'all'));
-            window.history.replaceState(null, '', window.location.pathname + '?' + params.join('&') + '#t:' + placeId + ':' + encodeURIComponent(typeKey));
-        }
         renderNodes();
         replaceDetail();
     }
@@ -4457,10 +4521,10 @@
     }
 
     function selectAsset(id, force) {
-        if (!state.trailHold && !force && state.dirty && state.selectedId !== id && !window.confirm(t('confirmDiscard'))) {
+        if (!state.historyHold && !force && state.dirty && state.selectedId !== id && !window.confirm(t('confirmDiscard'))) {
             return;
         }
-        noteVisit({ kind: 'asset', id: id });
+        noteVisit();
         if (state.selectedId !== id) {
             state.editing = false;
             state.serviceOpen = null;
@@ -4473,15 +4537,6 @@
         expandPath(id);
         var asset = byId()[id];
         var folder = asset && (childrenOf(id).length || isFolder(asset));
-        if (window.history && window.history.replaceState) {
-            var hash = '#' + id;
-            var params = [];
-            if (state.projectKey) params.push('project=' + encodeURIComponent(state.projectKey));
-            params.push('view=' + encodeURIComponent(state.view || 'all'));
-            window.history.replaceState(null, '', window.location.pathname + '?' + params.join('&') + hash);
-        } else {
-            window.location.hash = String(id);
-        }
         state.assetFetch = (state.assetFetch || 0) + 1;
         var fetchId = state.assetFetch;
         if (folder) {
@@ -4519,6 +4574,7 @@
                 state.selectedId = null;
                 state.dirty = false;
                 renderFrame();
+                rememberPlace();
             } else {
                 setFormError((payload && payload.message) || t('errorTitle'));
             }
@@ -4569,7 +4625,6 @@
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
         section.setAttribute('data-list-key', listContext());
-        prependReturn(section);
         var source = group.scope === 'under' ? equipmentUnder(group.placeId) : equipmentIn(group.placeId, group.typeKey);
         if (group.scope === 'under') {
             source = source.filter(function (asset) { return asset.typeKey === group.typeKey; });
@@ -5085,7 +5140,6 @@
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
 
-        prependReturn(main);
         main.appendChild(issueCrumb(full));
         main.appendChild(el('h1', 'asset-tree-issue-title', asset.name || ''));
         var ops = el('div', 'asset-tree-ops');
@@ -5243,7 +5297,6 @@
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
         section.setAttribute('data-list-key', listContext());
-        prependReturn(section);
         var project = currentProject();
         var title = asset ? asset.name : (project ? project.name : state.projectKey);
         var parentId = asset ? asset.id : null;
@@ -9219,7 +9272,6 @@
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
 
-        prependReturn(main);
         main.appendChild(issueCrumb(asset));
         main.appendChild(el('h1', 'asset-tree-issue-title', asset.name || ''));
         var ops = el('div', 'asset-tree-ops');
@@ -9398,7 +9450,6 @@
         form.id = 'asset-detail-form';
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
-        prependReturn(main);
 
         var top = el('div', 'asset-tree-request-top');
         var kicker = el('div', 'asset-tree-kicker');
@@ -12544,9 +12595,17 @@
 
     function hashGroup() {
         var raw = String(window.location.hash || '').replace(/^#/, '');
+        var scoped = /^t:(\d+):([^:]+):(direct|under)$/.exec(raw);
+        if (scoped) {
+            return {
+                placeId: parseInt(scoped[1], 10),
+                typeKey: decodeURIComponent(scoped[2]),
+                scope: scoped[3]
+            };
+        }
         var match = /^t:(\d+):(.+)$/.exec(raw);
         if (!match) return null;
-        return { placeId: parseInt(match[1], 10), typeKey: decodeURIComponent(match[2]) };
+        return { placeId: parseInt(match[1], 10), typeKey: decodeURIComponent(match[2]), scope: 'direct' };
     }
 
     function kindLabel(kind) {
@@ -12603,9 +12662,6 @@
     function switchProject(key, selectedId) {
         state.projectKey = key;
         state.columnDraft = null;
-        state.trail = [];
-        state.trailSeen = null;
-        state.trailHold = false;
         state.selectedId = selectedId || null;
         state.query = '';
         state.rules = [];
@@ -12709,6 +12765,13 @@
         watchTree();
         reloadTree(function () {
             state.loading = false;
+            if (state.pendingPlace) {
+                var pending = state.pendingPlace;
+                state.pendingPlace = null;
+                finishPlace(pending);
+                state.historyHold = false;
+                return;
+            }
             renderFrame();
             if (state.view === 'mine') {
                 loadMine();
@@ -12932,7 +12995,6 @@
     function renderTrash() {
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
-        prependReturn(section);
         var head = el('div', 'asset-tree-queue-head');
         var titles = el('div', 'asset-tree-queue-titles');
         var titleRow = el('div', 'asset-tree-queue-title is-trash');
@@ -15879,6 +15941,7 @@
                 state.schemaTab = item[0];
                 state.schemaAdding = false;
                 renderFrame();
+                rememberPlace();
             });
             tab.setAttribute('role', 'tab');
             tab.setAttribute('aria-selected', active ? 'true' : 'false');
@@ -19806,6 +19869,7 @@
         state.reportKey = id;
         state.reportBucket = '';
         highlightReport(id);
+        rememberPlace();
         if (state.reportCatalog == null) return;
         var token = ++state.galleryToken;
         fetchGalleryView(token);
@@ -31385,23 +31449,31 @@
                 if (state.mineColumns) rememberMinePrefs();
             }
             chooseProject();
+            var openedTab = queryValue('tab');
+            if (openedTab) state.schemaTab = openedTab;
+            var openedReport = queryValue('report');
+            if (openedReport) state.reportKey = openedReport;
+            if (window.location.hash === '#trash') state.trashOpen = true;
             if (state.canView === false) {
                 state.loading = false;
                 if (state.canReports && moduleOn('reports')) state.view = 'reports';
                 else if (state.canMap && moduleOn('map')) state.view = 'map';
                 mount();
+                rememberPlace();
                 return;
             }
             if (!state.canRemove) state.trashOpen = false;
             if (state.view === 'mine') {
                 mount();
                 loadMine();
+                rememberPlace();
                 return;
             }
             mount();
             if (!state.projectKey) {
                 state.loading = false;
                 renderFrame();
+                rememberPlace();
                 return;
             }
             reloadTree(function () {
@@ -31410,7 +31482,7 @@
                 if (state.view === 'all') {
                     var grouped = hashGroup();
                     if (grouped && byId()[grouped.placeId]) {
-                        selectTypeGroup(grouped.placeId, grouped.typeKey);
+                        selectTypeGroup(grouped.placeId, grouped.typeKey, grouped.scope);
                     }
                     var wantedKey = queryValue('key');
                     var openedByKey = false;
@@ -31439,9 +31511,23 @@
                         state.focusSearch = false;
                     }
                 }
+                rememberPlace();
             });
         });
     }
+
+    window.addEventListener('popstate', function (event) {
+        var spot = event.state && event.state.v ? event.state : placeFromLocation();
+        if (state.dirty && !window.confirm(t('confirmDiscard'))) {
+            var back = currentPlace();
+            state.historyKey = placeKey(back);
+            if (window.history && window.history.pushState) {
+                window.history.pushState(back, '', placeUrl(back));
+            }
+            return;
+        }
+        restorePlace(spot);
+    });
 
     document.addEventListener('keydown', function (event) {
         if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S')) {

@@ -5136,42 +5136,6 @@ a.asset-tree-url {
     color: #172b4d !important;
 }
 
-#asset-tree-app button.asset-tree-return {
-    display: inline-flex !important;
-    align-items: center;
-    gap: 4px;
-    max-width: min(100%, 360px);
-    height: 28px !important;
-    min-height: 0 !important;
-    margin: 0 0 8px;
-    padding: 0 8px 0 2px !important;
-    border: 0 !important;
-    border-radius: 3px;
-    background: transparent !important;
-    color: #0052cc !important;
-    font-size: 14px !important;
-    font-weight: 500 !important;
-    line-height: 1.2 !important;
-    box-shadow: none !important;
-    cursor: pointer;
-}
-
-#asset-tree-app button.asset-tree-return span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-#asset-tree-app button.asset-tree-return svg {
-    width: 16px;
-    height: 16px;
-    flex: none;
-}
-
-#asset-tree-app button.asset-tree-return:hover {
-    background: #deebff !important;
-}
-
 #asset-tree-app button.asset-tree-tool svg,
 #asset-tree-app .asset-tree-drop svg {
     width: 16px;

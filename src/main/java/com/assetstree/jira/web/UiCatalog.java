@@ -534,8 +534,6 @@ public final class UiCatalog {
             "cardSampleProject",
             "cardSampleDescription",
             "backToList",
-            "returnBack",
-            "returnTo",
             "mineHint",
             "mineEmpty",
             "mineSearch",
