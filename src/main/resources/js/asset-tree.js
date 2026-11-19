@@ -374,6 +374,9 @@
         userKey: '',
         displayName: '',
         pane: 'list',
+        trail: [],
+        trailSeen: null,
+        trailHold: false,
         activityTab: 'all',
         mineAssets: null,
         mineQuery: '',
@@ -2969,6 +2972,7 @@
         }
         if (foot.childNodes.length) side.appendChild(foot);
         renderNodesInto(nodes);
+        if (phoneLayout() && state.pane !== 'card' && !state.trashOpen) prependReturn(side);
         return side;
     }
 
@@ -3056,8 +3060,113 @@
         }
     }
 
-    function openTrash() {
+    function sameSpot(left, right) {
+        if (!left || !right || left.kind !== right.kind) return false;
+        if (left.kind === 'asset') return left.id === right.id;
+        if (left.kind === 'type') {
+            return left.placeId === right.placeId && left.typeKey === right.typeKey && (left.scope || 'direct') === (right.scope || 'direct');
+        }
+        return true;
+    }
+
+    function noteVisit(next) {
+        if (!next) return;
+        if (!state.trail) state.trail = [];
+        if (state.trailHold) {
+            state.trailSeen = next;
+            return;
+        }
+        if (state.trailSeen && !sameSpot(state.trailSeen, next)) {
+            state.trail.push(state.trailSeen);
+            if (state.trail.length > 40) state.trail.shift();
+        }
+        state.trailSeen = next;
+    }
+
+    function spotName(spot) {
+        if (!spot) return '';
+        if (spot.kind === 'asset') {
+            var asset = byId()[spot.id];
+            return asset ? (asset.name || asset.objectKey || '') : '';
+        }
+        if (spot.kind === 'type') {
+            var type = typeOf(spot.typeKey);
+            var place = byId()[spot.placeId];
+            var label = (type && type.label) || spot.typeKey;
+            return place && place.name ? (label + ' · ' + place.name) : label;
+        }
+        if (spot.kind === 'trash') return t('trash');
+        var project = currentProject();
+        return project ? (project.name || project.key) : '';
+    }
+
+    function previousSpot() {
+        if (!state.trail) return null;
+        var index;
+        for (index = state.trail.length - 1; index >= 0; index--) {
+            var spot = state.trail[index];
+            if (spot.kind === 'asset' && !byId()[spot.id]) continue;
+            if (spot.kind === 'type' && !byId()[spot.placeId]) continue;
+            if (state.trailSeen && sameSpot(spot, state.trailSeen)) continue;
+            return spot;
+        }
+        return null;
+    }
+
+    function openRoot() {
+        if (!state.trailHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        noteVisit({ kind: 'root' });
+        state.treePicked = {};
+        state.selectedId = null;
+        state.typeGroup = null;
+        state.trashOpen = false;
+        state.dirty = false;
+        state.editing = false;
+        state.pane = 'list';
+        renderNodes();
+        replaceDetail();
+    }
+
+    function goBack() {
         if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        var spot = null;
+        while (state.trail && state.trail.length && !spot) {
+            var next = state.trail.pop();
+            if (next.kind === 'asset' && !byId()[next.id]) continue;
+            if (next.kind === 'type' && !byId()[next.placeId]) continue;
+            if (state.trailSeen && sameSpot(next, state.trailSeen)) continue;
+            spot = next;
+        }
+        if (!spot) return;
+        state.trailHold = true;
+        state.dirty = false;
+        if (spot.kind === 'asset') selectAsset(spot.id, true);
+        else if (spot.kind === 'type') selectTypeGroup(spot.placeId, spot.typeKey, spot.scope);
+        else if (spot.kind === 'trash') openTrash();
+        else openRoot();
+        state.trailHold = false;
+    }
+
+    function returnButton() {
+        var spot = previousSpot();
+        if (!spot) return null;
+        var name = spotName(spot) || t('returnBack');
+        var node = button('', 'asset-tree-return', goBack);
+        node.title = t('returnTo', name);
+        node.setAttribute('aria-label', node.title);
+        node.appendChild(toolIcon('back'));
+        node.appendChild(el('span', null, name));
+        return node;
+    }
+
+    function prependReturn(node) {
+        var back = returnButton();
+        if (back && node) node.insertBefore(back, node.firstChild);
+    }
+
+    function openTrash() {
+        if (!state.trailHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        noteVisit({ kind: 'trash' });
         state.trashOpen = true;
         state.treePicked = {};
         state.selectedId = null;
@@ -3094,17 +3203,7 @@
         if (hidden) row.appendChild(el('span', 'asset-tree-qcount', '(' + hidden + ')'));
         row.appendChild(nestButton(null));
         row.addEventListener('click', function () {
-            if (state.dirty && !window.confirm(t('confirmDiscard'))) {
-                return;
-            }
-            state.treePicked = {};
-            state.selectedId = null;
-            state.typeGroup = null;
-            state.trashOpen = false;
-            state.dirty = false;
-            state.pane = 'list';
-            renderNodes();
-            replaceDetail();
+            openRoot();
         });
         return row;
     }
@@ -3811,7 +3910,8 @@
     }
 
     function selectTypeGroup(placeId, typeKey, scope) {
-        if (state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        if (!state.trailHold && state.dirty && !window.confirm(t('confirmDiscard'))) return;
+        noteVisit({ kind: 'type', placeId: placeId, typeKey: typeKey, scope: scope || 'direct' });
         state.treePicked = {};
         state.typeGroup = { placeId: placeId, typeKey: typeKey, scope: scope || 'direct' };
         state.trashOpen = false;
@@ -4357,9 +4457,10 @@
     }
 
     function selectAsset(id, force) {
-        if (!force && state.dirty && state.selectedId !== id && !window.confirm(t('confirmDiscard'))) {
+        if (!state.trailHold && !force && state.dirty && state.selectedId !== id && !window.confirm(t('confirmDiscard'))) {
             return;
         }
+        noteVisit({ kind: 'asset', id: id });
         if (state.selectedId !== id) {
             state.editing = false;
             state.serviceOpen = null;
@@ -4468,6 +4569,7 @@
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
         section.setAttribute('data-list-key', listContext());
+        prependReturn(section);
         var source = group.scope === 'under' ? equipmentUnder(group.placeId) : equipmentIn(group.placeId, group.typeKey);
         if (group.scope === 'under') {
             source = source.filter(function (asset) { return asset.typeKey === group.typeKey; });
@@ -4983,6 +5085,7 @@
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
 
+        prependReturn(main);
         main.appendChild(issueCrumb(full));
         main.appendChild(el('h1', 'asset-tree-issue-title', asset.name || ''));
         var ops = el('div', 'asset-tree-ops');
@@ -5140,6 +5243,7 @@
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
         section.setAttribute('data-list-key', listContext());
+        prependReturn(section);
         var project = currentProject();
         var title = asset ? asset.name : (project ? project.name : state.projectKey);
         var parentId = asset ? asset.id : null;
@@ -9115,6 +9219,7 @@
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
 
+        prependReturn(main);
         main.appendChild(issueCrumb(asset));
         main.appendChild(el('h1', 'asset-tree-issue-title', asset.name || ''));
         var ops = el('div', 'asset-tree-ops');
@@ -9169,6 +9274,14 @@
                     if (!state.typeGroup) {
                         var parent = asset.parentId ? byId()[asset.parentId] : null;
                         state.selectedId = parent ? parent.id : null;
+                        noteVisit(parent ? { kind: 'asset', id: parent.id } : { kind: 'root' });
+                    } else {
+                        noteVisit({
+                            kind: 'type',
+                            placeId: state.typeGroup.placeId,
+                            typeKey: state.typeGroup.typeKey,
+                            scope: state.typeGroup.scope || 'direct'
+                        });
                     }
                     renderNodes();
                     replaceDetail();
@@ -9285,6 +9398,7 @@
         form.id = 'asset-detail-form';
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
+        prependReturn(main);
 
         var top = el('div', 'asset-tree-request-top');
         var kicker = el('div', 'asset-tree-kicker');
@@ -9301,6 +9415,14 @@
                 var parent = asset.parentId ? byId()[asset.parentId] : null;
                 if (!showsInTree(asset)) {
                     state.selectedId = parent ? parent.id : null;
+                    noteVisit(parent ? { kind: 'asset', id: parent.id } : { kind: 'root' });
+                } else if (state.typeGroup) {
+                    noteVisit({
+                        kind: 'type',
+                        placeId: state.typeGroup.placeId,
+                        typeKey: state.typeGroup.typeKey,
+                        scope: state.typeGroup.scope || 'direct'
+                    });
                 }
                 renderNodes();
                 replaceDetail();
@@ -12481,6 +12603,9 @@
     function switchProject(key, selectedId) {
         state.projectKey = key;
         state.columnDraft = null;
+        state.trail = [];
+        state.trailSeen = null;
+        state.trailHold = false;
         state.selectedId = selectedId || null;
         state.query = '';
         state.rules = [];
@@ -12807,6 +12932,7 @@
     function renderTrash() {
         var section = el('section', 'asset-tree-detail is-queue');
         section.id = 'asset-tree-detail';
+        prependReturn(section);
         var head = el('div', 'asset-tree-queue-head');
         var titles = el('div', 'asset-tree-queue-titles');
         var titleRow = el('div', 'asset-tree-queue-title is-trash');
