@@ -197,7 +197,7 @@ public final class JsonImport {
             String serial = fieldMark(item.fields, true);
             String inventory = fieldMark(item.fields, false);
             if (match == null && item.key.isEmpty() && item.externalId.isEmpty()) {
-                int same = TniSame.pick(hosts, 0, item.name, "", serial, inventory);
+                int same = TniSame.pick(hosts, 0, item.name, "", serial, inventory, taken);
                 if (same < 0 || (same > 0 && taken.contains(Integer.valueOf(same)))) {
                     issues.add(new EquipmentExchange.Issue(rowNumber, "asset-tree.error.import.host", item.name));
                     continue;

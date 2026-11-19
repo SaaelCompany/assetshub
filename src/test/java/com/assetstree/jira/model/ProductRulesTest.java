@@ -422,6 +422,61 @@ public class ProductRulesTest {
         assertEquals(Integer.valueOf(3), again.getChanges().get(3).getExistingId());
     }
 
+    @Test
+    public void importUpdatesEachNamedObjectWhenNoSerialIsFilled() {
+        List<EquipmentExchange.FieldRef> fields = Collections.singletonList(
+                new EquipmentExchange.FieldRef("sn", "S/N:", "text", false));
+        List<EquipmentExchange.TypeRef> types = Arrays.asList(
+                new EquipmentExchange.TypeRef("printer", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", false, fields),
+                new EquipmentExchange.TypeRef("mfp", "\u041c\u0424\u0423", false, fields),
+                new EquipmentExchange.TypeRef("computer", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", false, fields),
+                new EquipmentExchange.TypeRef("room", "Room", true, Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(
+                new EquipmentExchange.Named("in_use", "\u0412 \u044d\u043a\u0441\u043f\u043b\u0443\u0430\u0442\u0430\u0446\u0438\u0438"));
+        EquipmentExchange.Node room = new EquipmentExchange.Node(1, null, "Room", "STP-1", true, "room");
+        List<String> headers = Arrays.asList("\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", "\u0422\u0438\u043f", "\u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0430", "S/N:");
+        List<EquipmentExchange.Node> stored = Arrays.asList(
+                room,
+                new EquipmentExchange.Node(4, Integer.valueOf(1), "HP LaserJet M111a", "BZ-4", false, "printer", "VNCV", ""),
+                new EquipmentExchange.Node(5, Integer.valueOf(1), "\u0411\u0410\u041d\u041a", "BZ-5", false, "computer", "", ""),
+                new EquipmentExchange.Node(6, Integer.valueOf(1), "HP Color LaserJet Pro MFP M479dw", "BZ-6", false, "mfp", "", ""),
+                new EquipmentExchange.Node(7, Integer.valueOf(1), "HP Color LaserJet Pro MFP M479dw", "BZ-7", false, "mfp", "", ""),
+                new EquipmentExchange.Node(8, Integer.valueOf(1), "HP Color LaserJet Pro MFP M479dw", "BZ-8", false, "mfp", "", ""),
+                new EquipmentExchange.Node(9, Integer.valueOf(1), "HP Color LaserJet Pro MFP M479dw", "BZ-9", false, "mfp", "", ""));
+        EquipmentSheet.Sheet sheet = new EquipmentSheet.Sheet("\u041e\u0431\u043e\u0440\u0443\u0434\u043e\u0432\u0430\u043d\u0438\u0435", headers, Arrays.asList(
+                new EquipmentSheet.Record(2, Arrays.asList("HP LaserJet M111a", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "Room", "")),
+                new EquipmentSheet.Record(3, Arrays.asList("\u0411\u0410\u041d\u041a", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "Room", "")),
+                new EquipmentSheet.Record(4, Arrays.asList("HP Color LaserJet Pro MFP M479dw", "\u041c\u0424\u0423", "Room", "")),
+                new EquipmentSheet.Record(5, Arrays.asList("HP Color LaserJet Pro MFP M479dw", "\u041c\u0424\u0423", "Room", "")),
+                new EquipmentSheet.Record(6, Arrays.asList("HP Color LaserJet Pro MFP M479dw", "\u041c\u0424\u0423", "Room", "")),
+                new EquipmentSheet.Record(7, Arrays.asList("HP Color LaserJet Pro MFP M479dw", "\u041c\u0424\u0423", "Room", "")),
+                new EquipmentSheet.Record(8, Arrays.asList("HP Color LaserJet Pro MFP M479dw", "\u041c\u0424\u0423", "Room", ""))));
+        EquipmentExchange.Plan plan = EquipmentExchange.plan(sheet, types, statuses, stored, "in_use",
+                new HashMap<String, String>(), blankPeople());
+        assertEquals(1, plan.getIssues().size());
+        assertEquals("asset-tree.error.import.host", plan.getIssues().get(0).getMessageKey());
+        assertEquals(6, plan.getChanges().size());
+        assertNull(plan.getChanges().get(0).getExistingId());
+        assertEquals(Integer.valueOf(5), plan.getChanges().get(1).getExistingId());
+        Set<Integer> updated = new HashSet<Integer>();
+        for (int i = 2; i < plan.getChanges().size(); i++) {
+            updated.add(plan.getChanges().get(i).getExistingId());
+        }
+        assertEquals(new HashSet<Integer>(Arrays.asList(Integer.valueOf(6), Integer.valueOf(7), Integer.valueOf(8), Integer.valueOf(9))), updated);
+
+        JsonImport.Item bank = new JsonImport.Item("", "", "\u0411\u0410\u041d\u041a", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "", "Room",
+                "", "", "", false, Collections.<String, String>emptyMap());
+        JsonImport.Item again = new JsonImport.Item("", "", "\u0411\u0410\u041d\u041a", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "", "Room",
+                "", "", "", false, Collections.<String, String>emptyMap());
+        JsonImport.Existing computer = new JsonImport.Existing(5, "BZ-5", "", "\u0411\u0410\u041d\u041a", "", "computer",
+                "in_use", 1, "", "", "", "");
+        JsonImport.Plan json = JsonImport.plan(Arrays.asList(bank, again), Collections.singletonList(computer),
+                Collections.singletonList(room), types, statuses, "in_use", true, blankPeople());
+        assertEquals(1, json.getChanges().size());
+        assertEquals(Integer.valueOf(5), json.getChanges().get(0).getChange().getExistingId());
+        assertEquals("asset-tree.error.import.host", json.getIssues().get(0).getMessageKey());
+    }
+
     private static EquipmentExchange.Directory servicePeople() {
         return new EquipmentExchange.Directory() {
             @Override

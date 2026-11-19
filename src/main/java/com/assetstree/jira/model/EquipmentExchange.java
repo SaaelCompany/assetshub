@@ -774,7 +774,7 @@ public final class EquipmentExchange {
         String serial = columnMark(record, fieldColumns, headers, true);
         String inventory = columnMark(record, fieldColumns, headers, false);
         if (hosts != null && key.isEmpty()) {
-            int same = TniSame.pick(hosts, 0, name, "", serial, inventory);
+            int same = TniSame.pick(hosts, 0, name, "", serial, inventory, taken);
             if (same < 0 || (same > 0 && taken != null && taken.contains(Integer.valueOf(same)))) {
                 issues.add(new Issue(row, "asset-tree.error.import.host", name));
                 return null;

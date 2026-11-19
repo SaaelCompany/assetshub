@@ -1,6 +1,7 @@
 package com.assetstree.jira.model;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Decides whether a portal sighting is a computer the project already has.
@@ -49,6 +50,15 @@ public final class TniSame {
      * @param inventory filled inventory number of the incoming card, or empty when it should not be compared
      */
     public static int pick(List<Card> cards, int pointed, String host, String address, String serial, String inventory) {
+        return pick(cards, pointed, host, address, serial, inventory, null);
+    }
+
+    /**
+     * @param taken cards already claimed by an earlier row; a later row takes the next free card
+     *        with the same name, and when every match is claimed the claimed id is returned
+     */
+    public static int pick(List<Card> cards, int pointed, String host, String address, String serial, String inventory,
+                           Set<Integer> taken) {
         if (cards == null) {
             return 0;
         }
@@ -61,10 +71,17 @@ public final class TniSame {
         int hand = 0;
         int hands = 0;
         int pointedHit = 0;
+        int blocked = 0;
         if (!(station.isEmpty() && fqdn.isEmpty() && ip.isEmpty())) {
             for (int i = 0; i < cards.size(); i++) {
                 Card card = cards.get(i);
                 if (!same(card, station, fqdn, ip, serial, inventory)) {
+                    continue;
+                }
+                if (busy(taken, card.id)) {
+                    if (blocked == 0) {
+                        blocked = card.id;
+                    }
                     continue;
                 }
                 int[] score = score(card, pointed, count, only, oldest, hand, hands, pointedHit);
@@ -80,10 +97,14 @@ public final class TniSame {
         if (chosen != 0) {
             return chosen;
         }
-        return sameName(cards, pointed, host, serial, inventory);
+        if (blocked != 0) {
+            return blocked;
+        }
+        return sameName(cards, pointed, host, serial, inventory, taken);
     }
 
-    private static int sameName(List<Card> cards, int pointed, String name, String serial, String inventory) {
+    private static int sameName(List<Card> cards, int pointed, String name, String serial, String inventory,
+                                Set<Integer> taken) {
         String wanted = plain(name);
         if (wanted.isEmpty()) {
             return 0;
@@ -94,12 +115,19 @@ public final class TniSame {
         int hand = 0;
         int hands = 0;
         int pointedHit = 0;
+        int blocked = 0;
         for (int i = 0; i < cards.size(); i++) {
             Card card = cards.get(i);
             if (card == null || card.location || card.id == 0 || !wanted.equals(plain(card.name))) {
                 continue;
             }
-            if (!DuplicateMarks.shares(card.serial, serial, card.inventory, inventory)) {
+            if (!DuplicateMarks.sameObject(card.serial, serial, card.inventory, inventory)) {
+                continue;
+            }
+            if (busy(taken, card.id)) {
+                if (blocked == 0) {
+                    blocked = card.id;
+                }
                 continue;
             }
             int[] score = score(card, pointed, count, only, oldest, hand, hands, pointedHit);
@@ -110,7 +138,12 @@ public final class TniSame {
             hands = score[4];
             pointedHit = score[5];
         }
-        return choose(pointedHit, count, only, hands, hand, oldest);
+        int chosen = choose(pointedHit, count, only, hands, hand, oldest);
+        return chosen != 0 ? chosen : blocked;
+    }
+
+    private static boolean busy(Set<Integer> taken, int id) {
+        return taken != null && taken.contains(Integer.valueOf(id));
     }
 
     private static int[] score(Card card, int pointed, int count, int only, int oldest, int hand, int hands, int pointedHit) {

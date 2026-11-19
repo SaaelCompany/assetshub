@@ -20,6 +20,21 @@ public final class DuplicateMarks {
                 && (equalFilled(leftSerial, rightSerial) || equalFilled(leftInventory, rightInventory));
     }
 
+    /**
+     * A printer, phone, laptop or any other card with the same name.
+     * A shared number agrees. Both sides empty also agree, so the next import updates that card.
+     * A number on only one side does not, so an empty row leaves a numbered card alone.
+     */
+    public static boolean sameObject(String leftSerial, String rightSerial, String leftInventory, String rightInventory) {
+        if (!agrees(leftSerial, rightSerial, leftInventory, rightInventory)) {
+            return false;
+        }
+        if (shares(leftSerial, rightSerial, leftInventory, rightInventory)) {
+            return true;
+        }
+        return blank(leftSerial) && blank(rightSerial) && blank(leftInventory) && blank(rightInventory);
+    }
+
     public static boolean isSerial(String key, String label) {
         String bareKey = bare(key);
         String bareLabel = bare(label);
@@ -47,6 +62,10 @@ public final class DuplicateMarks {
             return true;
         }
         return one.equals(other);
+    }
+
+    private static boolean blank(String raw) {
+        return fold(raw).isEmpty();
     }
 
     private static boolean equalFilled(String left, String right) {
