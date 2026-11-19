@@ -28,7 +28,8 @@ public final class EquipmentExchange {
             "serviceKind", "serviceName", "serviceDate", "serviceEvery", "serviceUnit", "serviceWho",
             "lifePurchased", "lifeSupplier", "lifeDocument", "lifePrice", "lifeCurrency", "lifeCommissioned",
             "lifeWarranty", "lifeWarrantyService", "lifeContractor", "lifeContractNo", "lifeContractFrom",
-            "lifeContractUntil", "lifeMonths", "lifeResidual"
+            "lifeContractUntil", "lifeMonths", "lifeResidual",
+            "linkTo", "linkType", "linkInbound", "linkAttrs"
     };
     private static final String[] LIFE_FIELDS = {
             "purchased", "supplier", "document", "price", "currency", "commissioned",
@@ -43,6 +44,10 @@ public final class EquipmentExchange {
     private static final int ROLE_SERVICE_EVERY = 11;
     private static final int ROLE_SERVICE_UNIT = 12;
     private static final int ROLE_SERVICE_WHO = 13;
+    private static final int ROLE_LINK_TO = 28;
+    private static final int ROLE_LINK_TYPE = 29;
+    private static final int ROLE_LINK_IN = 30;
+    private static final int ROLE_LINK_ATTRS = 31;
 
     private EquipmentExchange() {
     }
@@ -431,6 +436,62 @@ public final class EquipmentExchange {
         }
     }
 
+    /** One directed relation. {@code reverse} stores the sentence on the other card. */
+    public static final class Link {
+        private final int row;
+        private final String sheet;
+        private final String fromKey;
+        private final String toKey;
+        private final String type;
+        private final boolean reverse;
+        private final String inbound;
+        private final String attrs;
+
+        public Link(int row, String sheet, String fromKey, String toKey, String type, boolean reverse,
+                    String inbound, String attrs) {
+            this.row = row;
+            this.sheet = sheet == null ? "" : sheet;
+            this.fromKey = fromKey == null ? "" : fromKey;
+            this.toKey = toKey == null ? "" : toKey;
+            this.type = type == null ? "" : type;
+            this.reverse = reverse;
+            this.inbound = inbound == null ? "" : inbound;
+            this.attrs = attrs == null ? "" : attrs;
+        }
+
+        public int getRow() {
+            return row;
+        }
+
+        public String getSheet() {
+            return sheet;
+        }
+
+        public String getFromKey() {
+            return fromKey;
+        }
+
+        public String getToKey() {
+            return toKey;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public boolean isReverse() {
+            return reverse;
+        }
+
+        public String getInbound() {
+            return inbound;
+        }
+
+        public String getAttrs() {
+            return attrs;
+        }
+    }
+
     public static final class Issue {
         private final int row;
         private final String messageKey;
@@ -470,6 +531,7 @@ public final class EquipmentExchange {
         private final List<Issue> issues;
         private final List<Service> services;
         private final List<LifeBook.Change> lifecycles;
+        private final List<Link> links;
 
         Plan(List<Change> changes, List<Issue> issues) {
             this(changes, issues, new ArrayList<Service>());
@@ -480,10 +542,16 @@ public final class EquipmentExchange {
         }
 
         Plan(List<Change> changes, List<Issue> issues, List<Service> services, List<LifeBook.Change> lifecycles) {
+            this(changes, issues, services, lifecycles, new ArrayList<Link>());
+        }
+
+        Plan(List<Change> changes, List<Issue> issues, List<Service> services, List<LifeBook.Change> lifecycles,
+             List<Link> links) {
             this.changes = changes;
             this.issues = issues;
             this.services = services == null ? new ArrayList<Service>() : services;
             this.lifecycles = lifecycles == null ? new ArrayList<LifeBook.Change>() : lifecycles;
+            this.links = links == null ? new ArrayList<Link>() : links;
         }
 
         public List<Change> getChanges() {
@@ -500,6 +568,10 @@ public final class EquipmentExchange {
 
         public List<LifeBook.Change> getLifecycles() {
             return lifecycles;
+        }
+
+        public List<Link> getLinks() {
+            return links;
         }
     }
 
@@ -541,6 +613,7 @@ public final class EquipmentExchange {
         List<Issue> issues = new ArrayList<Issue>();
         List<Service> services = new ArrayList<Service>();
         List<LifeBook.Change> lifecycles = new ArrayList<LifeBook.Change>();
+        List<Link> links = new ArrayList<Link>();
         if (sheets == null || sheets.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
             return new Plan(changes, issues, services);
@@ -564,6 +637,16 @@ public final class EquipmentExchange {
         boolean anyData = false;
         for (EquipmentSheet.Sheet sheet : sheets) {
             if (sheet == null || (sheet.getHeaders().isEmpty() && sheet.getRecords().isEmpty())) {
+                continue;
+            }
+            if (linkSheet(sheet, labels)) {
+                if (sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readLinkSheet(sheet, known, labels, links, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
                 continue;
             }
             if (serviceSheet(sheet, labels)) {
@@ -611,7 +694,7 @@ public final class EquipmentExchange {
         if (!anyData && issues.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
         }
-        return new Plan(changes, issues, services, lifecycles);
+        return new Plan(changes, issues, services, lifecycles, links);
     }
 
     public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
@@ -1279,6 +1362,10 @@ public final class EquipmentExchange {
         alias(roles, "lifeContractUntil", "lifecycle: contract ends", "жизненный цикл: окончание договора");
         alias(roles, "lifeMonths", "lifecycle: useful life", "жизненный цикл: срок службы");
         alias(roles, "lifeResidual", "lifecycle: residual value", "жизненный цикл: остаточная стоимость");
+        alias(roles, "linkTo", "linked to", "связан с");
+        alias(roles, "linkType", "relation", "связь");
+        alias(roles, "linkInbound", "reverse phrase", "обратная подпись");
+        alias(roles, "linkAttrs", "attributes", "атрибуты");
         if (labels != null) {
             for (Map.Entry<String, String> entry : labels.entrySet()) {
                 if (entry.getKey() != null && entry.getValue() != null && !entry.getValue().trim().isEmpty()) {
@@ -1341,6 +1428,333 @@ public final class EquipmentExchange {
 
     private static boolean same(String left, String right) {
         return norm(left).equals(norm(right));
+    }
+
+    private static boolean linkSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean to = false;
+        boolean type = false;
+        boolean name = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String role = known.get(norm(headers.get(i)));
+            if ("linkTo".equals(role)) {
+                to = true;
+            }
+            if ("linkType".equals(role)) {
+                type = true;
+            }
+            if ("name".equals(role)) {
+                name = true;
+            }
+        }
+        return to && type && !name;
+    }
+
+    private static void readLinkSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
+                                      List<Link> links, List<Issue> issues) {
+        int[] roleColumn = roleColumns(sheet.getHeaders(), labels, issues);
+        if (roleColumn == null) {
+            return;
+        }
+        if (roleColumn[ROLE_KEY] < 0 || roleColumn[ROLE_LINK_TO] < 0 || roleColumn[ROLE_LINK_TYPE] < 0) {
+            issues.add(new Issue(1, "asset-tree.error.import.header", ""));
+            return;
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String from = text(record, roleColumn[ROLE_KEY]);
+            String to = text(record, roleColumn[ROLE_LINK_TO]);
+            String kind = text(record, roleColumn[ROLE_LINK_TYPE]);
+            if (from.isEmpty() && to.isEmpty() && kind.isEmpty()) {
+                continue;
+            }
+            int row = record.getRow();
+            if (from.isEmpty() || to.isEmpty()) {
+                issues.add(new Issue(row, "asset-tree.error.import.key", from.isEmpty() ? to : from));
+                continue;
+            }
+            if (norm(from).equals(norm(to))) {
+                issues.add(new Issue(row, "asset-tree.error.peer.self", ""));
+                continue;
+            }
+            LinkRules.Sense sense = linkSense(kind, labels);
+            if (sense == null) {
+                issues.add(new Issue(row, "asset-tree.error.link.type", kind));
+                continue;
+            }
+            String inbound = text(record, roleColumn[ROLE_LINK_IN]);
+            String attrs = LinkRules.attrsFromCell(text(record, roleColumn[ROLE_LINK_ATTRS]));
+            links.add(new Link(row, sheet.getName(), from, to, sense.getType(), sense.isReverse(), inbound, attrs));
+        }
+    }
+
+    private static LinkRules.Sense linkSense(String raw, Map<String, String> labels) {
+        LinkRules.Sense sense = LinkRules.phrase(raw);
+        if (sense != null && LinkRules.typeKey(raw).isEmpty()) {
+            return sense;
+        }
+        if (sense != null && (LinkRules.builtIn(sense.getType()) || sense.isReverse())) {
+            return sense;
+        }
+        if (labels != null) {
+            String folded = norm(raw);
+            String[] keys = { "linkPart", "linkDepends", "linkInstalled", "linkIncludes", "linkNeeded", "linkCarries" };
+            String[] types = { "part", "depends", "installed", "includes", "needed", "carries" };
+            for (int i = 0; i < keys.length; i++) {
+                String label = labels.get(keys[i]);
+                if (label != null && folded.equals(norm(label))) {
+                    return LinkRules.sense(types[i]);
+                }
+            }
+        }
+        return sense;
+    }
+
+    /**
+     * Keeps rows of one type and one place. An empty place cell on a new row
+     * is filled with that place, so the row is created there. Cards that are
+     * outside the selection are left out of the book and are not updated.
+     */
+    public static List<EquipmentSheet.Sheet> limit(List<EquipmentSheet.Sheet> sheets, String typeKey, int placeId,
+                                                   List<TypeRef> types, List<Node> nodes, Map<String, String> labels) {
+        String wanted = typeKey == null ? "" : typeKey.trim();
+        if (wanted.isEmpty() && placeId <= 0) {
+            return sheets == null ? new ArrayList<EquipmentSheet.Sheet>() : sheets;
+        }
+        String typeLabel = "";
+        if (!wanted.isEmpty() && types != null) {
+            for (int i = 0; i < types.size(); i++) {
+                TypeRef type = types.get(i);
+                if (type != null && wanted.equals(type.getKey())) {
+                    typeLabel = type.getLabel() == null ? "" : type.getLabel();
+                    break;
+                }
+            }
+            if (typeLabel.isEmpty()) {
+                wanted = "";
+            }
+        }
+        Map<Integer, Node> byId = new HashMap<Integer, Node>();
+        Map<String, Node> byKey = new HashMap<String, Node>();
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node == null) {
+                    continue;
+                }
+                byId.put(Integer.valueOf(node.getId()), node);
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+            }
+        }
+        Set<Integer> places = placeId <= 0 || byId.get(Integer.valueOf(placeId)) == null
+                ? null : placeTree(placeId, byId);
+        if (wanted.isEmpty() && places == null) {
+            return sheets == null ? new ArrayList<EquipmentSheet.Sheet>() : sheets;
+        }
+        List<EquipmentSheet.Sheet> out = new ArrayList<EquipmentSheet.Sheet>();
+        if (sheets == null) {
+            return out;
+        }
+        for (int i = 0; i < sheets.size(); i++) {
+            EquipmentSheet.Sheet sheet = sheets.get(i);
+            if (sheet == null) {
+                continue;
+            }
+            if (linkSheet(sheet, labels) || serviceSheet(sheet, labels) || lifeSheet(sheet, labels)) {
+                out.add(filterKeyed(sheet, labels, wanted, places, byId, byKey));
+                continue;
+            }
+            TypeRef bound = uniqueSheetType(sheet.getName(), types);
+            if (!wanted.isEmpty() && bound != null && !wanted.equals(bound.getKey())) {
+                continue;
+            }
+            out.add(filterEquipment(sheet, labels, wanted, typeLabel, bound != null, places, byId, byKey));
+        }
+        return out;
+    }
+
+    private static EquipmentSheet.Sheet filterKeyed(EquipmentSheet.Sheet sheet, Map<String, String> labels,
+                                                    String typeKey, Set<Integer> places, Map<Integer, Node> byId,
+                                                    Map<String, Node> byKey) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int toColumn = columnFor(sheet.getHeaders(), labels, "linkTo");
+        List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, keyColumn);
+            String other = text(record, toColumn);
+            if (key.isEmpty() && other.isEmpty()) {
+                continue;
+            }
+            if (keyedInScope(key, typeKey, places, byId, byKey) || keyedInScope(other, typeKey, places, byId, byKey)) {
+                records.add(record);
+            }
+        }
+        return new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records);
+    }
+
+    private static boolean keyedInScope(String key, String typeKey, Set<Integer> places, Map<Integer, Node> byId,
+                                        Map<String, Node> byKey) {
+        if (key == null || key.trim().isEmpty()) {
+            return false;
+        }
+        Node node = byKey.get(norm(key));
+        if (node == null) {
+            return true;
+        }
+        return nodeInScope(node, typeKey, places, byId);
+    }
+
+    private static EquipmentSheet.Sheet filterEquipment(EquipmentSheet.Sheet sheet, Map<String, String> labels,
+                                                        String typeKey, String typeLabel, boolean bound,
+                                                        Set<Integer> places, Map<Integer, Node> byId,
+                                                        Map<String, Node> byKey) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int typeColumn = columnFor(sheet.getHeaders(), labels, "type");
+        int placeColumn = columnFor(sheet.getHeaders(), labels, "place");
+        String placeText = places == null ? "" : placePath(byId.get(firstPlace(places, byId)), byId);
+        List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, keyColumn);
+            Node node = key.isEmpty() ? null : byKey.get(norm(key));
+            if (node != null) {
+                if (!nodeInScope(node, typeKey, places, byId)) {
+                    continue;
+                }
+                records.add(record);
+                continue;
+            }
+            if (!typeKey.isEmpty() && !bound) {
+                String written = text(record, typeColumn);
+                if (!written.isEmpty() && !same(written, typeLabel) && !same(written, typeKey)) {
+                    continue;
+                }
+            }
+            if (places != null) {
+                String written = text(record, placeColumn);
+                if (written.isEmpty()) {
+                    if (placeColumn >= 0 && !placeText.isEmpty()) {
+                        records.add(typed(record, placeColumn, placeText));
+                    } else {
+                        records.add(record);
+                    }
+                    continue;
+                }
+                if (!placeTextMatches(written, places, byId)) {
+                    continue;
+                }
+            }
+            records.add(record);
+        }
+        return new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records);
+    }
+
+    private static boolean nodeInScope(Node node, String typeKey, Set<Integer> places, Map<Integer, Node> byId) {
+        if (node == null || node.isLocation()) {
+            return false;
+        }
+        if (typeKey != null && !typeKey.isEmpty() && !typeKey.equals(node.getTypeKey())) {
+            return false;
+        }
+        if (places == null) {
+            return true;
+        }
+        Node cursor = node;
+        int guard = 0;
+        while (cursor != null && guard++ < 80) {
+            if (places.contains(Integer.valueOf(cursor.getId()))) {
+                return true;
+            }
+            Integer parent = cursor.getParentId();
+            cursor = parent == null ? null : byId.get(parent);
+        }
+        return false;
+    }
+
+    private static boolean placeTextMatches(String written, Set<Integer> places, Map<Integer, Node> byId) {
+        String folded = norm(written);
+        if (folded.isEmpty()) {
+            return false;
+        }
+        for (Integer id : places) {
+            Node place = byId.get(id);
+            if (place == null || !place.isLocation()) {
+                continue;
+            }
+            String path = norm(placePath(place, byId));
+            if (path.isEmpty()) {
+                continue;
+            }
+            if (folded.equals(path) || folded.startsWith(path + " / ")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<Integer> placeTree(int placeId, Map<Integer, Node> byId) {
+        Set<Integer> ids = new HashSet<Integer>();
+        ids.add(Integer.valueOf(placeId));
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (Node node : byId.values()) {
+                if (node == null || !node.isLocation() || node.getParentId() == null) {
+                    continue;
+                }
+                if (ids.contains(node.getParentId()) && ids.add(Integer.valueOf(node.getId()))) {
+                    grew = true;
+                }
+            }
+        }
+        return ids;
+    }
+
+    private static int firstPlace(Set<Integer> places, Map<Integer, Node> byId) {
+        int root = 0;
+        int depth = Integer.MAX_VALUE;
+        for (Integer id : places) {
+            Node node = byId.get(id);
+            if (node == null || !node.isLocation()) {
+                continue;
+            }
+            int steps = 0;
+            Node cursor = node;
+            while (cursor != null && cursor.getParentId() != null && steps < 80) {
+                if (!places.contains(cursor.getParentId())) {
+                    break;
+                }
+                cursor = byId.get(cursor.getParentId());
+                steps++;
+            }
+            if (steps < depth) {
+                depth = steps;
+                root = id.intValue();
+            }
+        }
+        return root;
+    }
+
+    private static String placePath(Node node, Map<Integer, Node> byId) {
+        List<String> names = new ArrayList<String>();
+        Node cursor = node;
+        int guard = 0;
+        while (cursor != null && guard++ < 80) {
+            if (cursor.getName() != null && !cursor.getName().trim().isEmpty()) {
+                names.add(0, cursor.getName().trim());
+            }
+            Integer parent = cursor.getParentId();
+            cursor = parent == null ? null : byId.get(parent);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) {
+                builder.append(" / ");
+            }
+            builder.append(names.get(i));
+        }
+        return builder.toString();
     }
 
     private static boolean lifeSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {

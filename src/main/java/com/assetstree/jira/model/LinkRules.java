@@ -22,6 +22,126 @@ public final class LinkRules {
         return PART.equals(key) || DEPENDS.equals(key) || INSTALLED.equals(key);
     }
 
+    /** Stored type, and whether the sentence is read from the other card. */
+    public static final class Sense {
+        private final String type;
+        private final boolean reverse;
+
+        public Sense(String type, boolean reverse) {
+            this.type = type == null ? "" : type;
+            this.reverse = reverse;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public boolean isReverse() {
+            return reverse;
+        }
+    }
+
+    /**
+     * {@code carries} is «несёт»: the other object is installed on this one.
+     * {@code includes} and {@code needed} are the reverse of part and depends.
+     */
+    public static Sense sense(String raw) {
+        String key = typeKey(raw);
+        if (key.isEmpty()) {
+            return null;
+        }
+        if ("carries".equals(key)) {
+            return new Sense(INSTALLED, true);
+        }
+        if ("includes".equals(key)) {
+            return new Sense(PART, true);
+        }
+        if ("needed".equals(key) || "needed-by".equals(key)) {
+            return new Sense(DEPENDS, true);
+        }
+        return new Sense(key, false);
+    }
+
+    /** A phrase from the card or from Excel. A latin slug is a custom type. */
+    public static Sense phrase(String raw) {
+        String text = fold(raw);
+        if (text.isEmpty()) {
+            return null;
+        }
+        if (text.equals("несет") || text.equals("carries")) {
+            return sense("carries");
+        }
+        if (text.equals("установлено на") || text.equals("установлен на") || text.equals("installed on")
+                || text.equals("installed")) {
+            return sense(INSTALLED);
+        }
+        if (text.equals("включает") || text.equals("includes")) {
+            return sense("includes");
+        }
+        if (text.equals("входит в") || text.equals("part of") || text.equals("part")) {
+            return sense(PART);
+        }
+        if (text.equals("нужен для") || text.equals("needed by") || text.equals("needed")) {
+            return sense("needed");
+        }
+        if (text.equals("зависит от") || text.equals("depends on") || text.equals("depends")) {
+            return sense(DEPENDS);
+        }
+        return sense(raw);
+    }
+
+    /** {@code port=1; vlan=10} becomes the stored attribute lines. */
+    public static String attrsFromCell(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        List<Attr> rows = new ArrayList<Attr>();
+        String[] parts = raw.split("[;\\n]");
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i] == null ? "" : parts[i].trim();
+            int mark = part.indexOf('=');
+            if (mark <= 0) {
+                continue;
+            }
+            rows.add(new Attr(part.substring(0, mark).trim(), part.substring(mark + 1).trim()));
+        }
+        return write(rows);
+    }
+
+    public static String attrsToCell(String stored) {
+        List<Attr> rows = read(stored);
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < rows.size(); i++) {
+            if (out.length() > 0) {
+                out.append("; ");
+            }
+            out.append(rows.get(i).getKey()).append('=').append(rows.get(i).getValue());
+        }
+        return out.toString();
+    }
+
+    private static String fold(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String text = raw.trim().toLowerCase(Locale.ROOT).replace('ё', 'е');
+        StringBuilder builder = new StringBuilder();
+        boolean space = false;
+        for (int i = 0; i < text.length(); i++) {
+            char current = text.charAt(i);
+            if (Character.isWhitespace(current)) {
+                space = builder.length() > 0;
+                continue;
+            }
+            if (space) {
+                builder.append(' ');
+                space = false;
+            }
+            builder.append(current);
+        }
+        return builder.toString();
+    }
+
     public static String inbound(String raw) {
         if (raw == null) {
             return "";

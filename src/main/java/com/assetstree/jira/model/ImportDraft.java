@@ -12,6 +12,8 @@ public class ImportDraft {
     private String uploadId;
     private String idempotencyKey;
     private Boolean chunked;
+    private String typeKey;
+    private Integer placeId;
 
     public String getCsv() {
         return csv;
@@ -69,5 +71,23 @@ public class ImportDraft {
 
     public void setChunked(Boolean chunked) {
         this.chunked = chunked;
+    }
+
+    /** When set, only this equipment type is read. Other sheets stay untouched. */
+    public String getTypeKey() {
+        return typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey;
+    }
+
+    /** When set, only equipment in this place, and new rows without a place land here. */
+    public Integer getPlaceId() {
+        return placeId;
+    }
+
+    public void setPlaceId(Integer placeId) {
+        this.placeId = placeId;
     }
 }

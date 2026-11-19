@@ -9750,7 +9750,7 @@
         var box = el('div', 'asset-tree-link-form');
         var type = document.createElement('select');
         type.className = 'asset-tree-filter';
-        [['peer', 'linkRelated'], ['part', 'linkPart'], ['depends', 'linkDepends'], ['installed', 'linkInstalled'], ['custom', 'linkCustom']].forEach(function (pair) {
+        [['peer', 'linkRelated'], ['part', 'linkPart'], ['includes', 'linkIncludes'], ['depends', 'linkDepends'], ['needed', 'linkNeeded'], ['installed', 'linkInstalled'], ['carries', 'linkCarries'], ['custom', 'linkCustom']].forEach(function (pair) {
             var option = document.createElement('option');
             option.value = pair[0];
             option.textContent = t(pair[1]);
@@ -18455,9 +18455,13 @@
         return (name || 'report') + '.csv';
     }
 
-    function startWorkbook(kind) {
+    function startWorkbook(kind, extra) {
         notify(t('exportQueued'));
-        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/exports', { kind: kind }, function (status, payload) {
+        var body = { kind: kind };
+        if (extra && extra.typeKey) body.typeKey = extra.typeKey;
+        if (extra && extra.placeId) body.placeId = extra.placeId;
+        if (extra && extra.blank) body.blank = true;
+        ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/exports', body, function (status, payload) {
             if (status < 200 || status >= 300 || !payload || !payload.id) {
                 notify((payload && payload.message) || t('exportFailed'));
                 return;
@@ -29589,6 +29593,44 @@
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('exchangeSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('exchangeHint')));
+        var typeSelect = document.createElement('select');
+        typeSelect.className = 'asset-tree-filter';
+        var allTypes = document.createElement('option');
+        allTypes.value = '';
+        allTypes.textContent = t('exchangeAllTypes');
+        typeSelect.appendChild(allTypes);
+        (state.types || []).forEach(function (type) {
+            if (!type || type.location) return;
+            var option = document.createElement('option');
+            option.value = type.typeKey || '';
+            option.textContent = type.label || type.typeKey || '';
+            typeSelect.appendChild(option);
+        });
+        var placeSelect = document.createElement('select');
+        placeSelect.className = 'asset-tree-filter';
+        var allPlaces = document.createElement('option');
+        allPlaces.value = '';
+        allPlaces.textContent = t('exchangeAllPlaces');
+        placeSelect.appendChild(allPlaces);
+        (state.assets || []).filter(isFolder).forEach(function (place) {
+            var option = document.createElement('option');
+            option.value = String(place.id);
+            var depth = 0;
+            var cursor = place;
+            var guard = 0;
+            while (cursor && cursor.parentId && guard < 12) {
+                depth += 1;
+                cursor = byId()[cursor.parentId];
+                guard += 1;
+            }
+            option.textContent = new Array(depth + 1).join('\u00b7 ') + (place.name || place.objectKey || '');
+            placeSelect.appendChild(option);
+        });
+        var scope = el('div', 'asset-tree-life-grid');
+        scope.appendChild(planField(t('exchangeType'), typeSelect));
+        scope.appendChild(planField(t('exchangePlace'), placeSelect));
+        block.appendChild(scope);
+        block.appendChild(el('p', 'asset-tree-hint', t('exchangeScope')));
         var file = el('input', 'asset-tree-import-file');
         file.type = 'file';
         file.id = 'asset-tree-import-file';
@@ -29607,7 +29649,17 @@
         block.appendChild(picker);
         var actions = el('div', 'asset-tree-inline-actions');
         actions.appendChild(button(t('exchangeExport'), 'asset-tree-btn', function () {
-            startWorkbook('equipment');
+            startWorkbook('equipment', {
+                typeKey: typeSelect.value,
+                placeId: parseInt(placeSelect.value, 10) || 0
+            });
+        }));
+        actions.appendChild(button(t('exchangeBlank'), 'asset-tree-btn', function () {
+            startWorkbook('equipment', {
+                typeKey: typeSelect.value,
+                placeId: parseInt(placeSelect.value, 10) || 0,
+                blank: true
+            });
         }));
         actions.appendChild(button(t('exchangeImport'), 'asset-tree-btn primary', function () {
             if (needsAssetKey()) {
@@ -29631,9 +29683,13 @@
                     return;
                 }
                 var token = 'excel-' + Date.now();
+                var scopeType = typeSelect.value || '';
+                var scopePlace = parseInt(placeSelect.value, 10) || 0;
                 var body = excel
                     ? { name: name, content: bytesToBase64(bytes), chunked: true, idempotencyKey: token + ':0' }
                     : { name: name, csv: decodeSheet(reader.result), chunked: true, idempotencyKey: token + ':0' };
+                if (scopeType) body.typeKey = scopeType;
+                if (scopePlace) body.placeId = scopePlace;
                 var totals = { created: 0, updated: 0, errors: [] };
                 setBusy(true);
                 function sendChunk(part) {
