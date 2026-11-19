@@ -48,7 +48,7 @@ public class ModuleSetupDto {
     private String portalColumns;
     /** True when an equipment card can show one photo. */
     private Boolean photo;
-    /** True when a linked request receives an internal comment about equipment changes. */
+    /** Kept so an older saved project still reads. Requests no longer receive these comments. */
     private Boolean issueNotes;
     private Integer tniKeep;
     private Integer tniProbeDays;
