@@ -21,22 +21,23 @@ public final class DuplicateMarks {
     }
 
     public static boolean isSerial(String key, String label) {
-        String foldedKey = fold(key);
-        String foldedLabel = fold(label);
-        if ("serial".equals(foldedKey) || "sn".equals(foldedKey) || "s/n".equals(foldedKey)) {
+        String bareKey = bare(key);
+        String bareLabel = bare(label);
+        if ("serial".equals(bareKey) || "sn".equals(bareKey) || "s/n".equals(bareKey)) {
             return true;
         }
-        return foldedLabel.contains("serial") || foldedLabel.contains("серийн") || foldedLabel.contains("заводск")
-                || "sn".equals(foldedLabel) || "s/n".equals(foldedLabel);
+        return bareLabel.contains("serial") || bareLabel.contains("серийн") || bareLabel.contains("заводск")
+                || "sn".equals(bareLabel) || "s/n".equals(bareLabel) || bareLabel.startsWith("s/n");
     }
 
     public static boolean isInventory(String key, String label) {
-        String foldedKey = fold(key);
-        String foldedLabel = fold(label);
-        if ("inventory".equals(foldedKey) || "inv".equals(foldedKey)) {
+        String bareKey = bare(key);
+        String bareLabel = bare(label);
+        if ("inventory".equals(bareKey) || "inv".equals(bareKey) || "инв".equals(bareKey)) {
             return true;
         }
-        return foldedLabel.contains("inventory") || foldedLabel.contains("инвентар");
+        return bareLabel.contains("inventory") || bareLabel.contains("инвентар")
+                || "inv".equals(bareLabel) || "инв".equals(bareLabel);
     }
 
     private static boolean same(String left, String right) {
@@ -59,5 +60,20 @@ public final class DuplicateMarks {
             return "";
         }
         return raw.trim().toLowerCase(Locale.ROOT).replace('ё', 'е');
+    }
+
+    /** Lower case, without spaces or trailing punctuation such as the colon in {@code S/N:}. */
+    private static String bare(String raw) {
+        String folded = fold(raw);
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < folded.length(); i++) {
+            char current = folded.charAt(i);
+            if (Character.isWhitespace(current) || current == ':' || current == '.' || current == ';'
+                    || current == ',' || current == '#' || current == '№') {
+                continue;
+            }
+            builder.append(current);
+        }
+        return builder.toString();
     }
 }
