@@ -146,6 +146,59 @@ public final class DocFields {
         return false;
     }
 
+    /**
+     * A card field named as a job or a phone fills that token.
+     * A name that also says whose it is fills that person's own token.
+     * A value already taken from the person stays.
+     */
+    public static void keepContact(Source source, String label, String value) {
+        if (source == null) {
+            return;
+        }
+        String text = value == null ? "" : value.trim();
+        String folded = DocxFill.normalize(label);
+        if (text.isEmpty() || folded.isEmpty()) {
+            return;
+        }
+        boolean mol = folded.contains("мол") || folded.contains("custodian");
+        boolean issued = folded.contains("комувыдано") || folded.contains("получател") || folded.contains("issued");
+        if (titleLabel(folded)) {
+            if (mol) {
+                source.molRole = first(source.molRole, text);
+            }
+            if (issued) {
+                source.issuedRole = first(source.issuedRole, text);
+            }
+            source.role = first(source.role, text);
+        }
+        if (phoneLabel(folded)) {
+            if (mol) {
+                source.molPhone = first(source.molPhone, text);
+            }
+            if (issued) {
+                source.issuedPhone = first(source.issuedPhone, text);
+            }
+            source.phone = first(source.phone, text);
+        }
+    }
+
+    private static boolean titleLabel(String folded) {
+        if (folded.contains("composition") || folded.contains("disposition") || folded.contains("entitlement")) {
+            return false;
+        }
+        return folded.contains("должност") || folded.contains("профес") || folded.contains("position")
+                || folded.contains("profession") || folded.contains("jobtitle")
+                || (folded.contains("title") && !folded.contains("untitled"));
+    }
+
+    private static boolean phoneLabel(String folded) {
+        if (folded.contains("microphone") || folded.contains("headphone") || folded.contains("микрофон")
+                || folded.contains("fax") || folded.contains("факс")) {
+            return false;
+        }
+        return folded.contains("телефон") || folded.contains("phone") || folded.contains("мобил") || folded.contains("сотов");
+    }
+
     /** A place whose name is the department on a document: the department type, or a label that says so. */
     public static boolean departmentPlace(String typeKey, String typeLabel) {
         if (typeKey != null && "department".equalsIgnoreCase(typeKey.trim())) {
