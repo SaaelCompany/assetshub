@@ -4007,8 +4007,8 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public AssetLinkDto addLink(ApplicationUser user, final int assetId, final LinkDraft draft) {
         final int otherId = draft == null || draft.getAssetId() == null ? 0 : draft.getAssetId().intValue();
-        final String type = LinkRules.typeKey(draft == null ? "" : draft.getType());
-        if (type.isEmpty()) {
+        final LinkRules.Sense sense = LinkRules.sense(draft == null ? "" : draft.getType());
+        if (sense == null || sense.getType().isEmpty()) {
             throw new AssetException(400, "asset-tree.error.link.type");
         }
         if (otherId <= 0) {
@@ -4028,18 +4028,28 @@ public class AssetServiceImpl implements AssetService {
                 if (isLocation(target)) {
                     throw new AssetException(400, "asset-tree.error.peer.place");
                 }
-                if (sameLink(assetId, otherId, type, 0) != null) {
+                if (sense.isReverse()) {
+                    requireAssetCap(user, otherId, GrantCaps.OBJECT);
+                }
+                int fromId = sense.isReverse() ? otherId : assetId;
+                int toId = sense.isReverse() ? assetId : otherId;
+                AssetEntity owner = fromId == assetId ? source : target;
+                AssetEntity pointed = fromId == assetId ? target : source;
+                if (sameLink(fromId, toId, sense.getType(), 0) != null) {
                     throw new AssetException(409, "asset-tree.error.link.exists");
                 }
                 AssetLinkEntity row = ao().create(AssetLinkEntity.class,
-                        new DBParam("FROM_ID", Integer.valueOf(assetId)),
-                        new DBParam("TO_ID", Integer.valueOf(otherId)),
-                        new DBParam("LINK_TYPE", type));
+                        new DBParam("FROM_ID", Integer.valueOf(fromId)),
+                        new DBParam("TO_ID", Integer.valueOf(toId)),
+                        new DBParam("LINK_TYPE", sense.getType()));
                 row.setAttrs(LinkRules.merge("", linkAttrs(draft), true));
                 row.setInbound(LinkRules.inbound(draft == null ? null : draft.getInbound()));
                 row.save();
-                recordActivity(source.getID(), user.getKey(), "link_add", type, "", objectKey(target));
-                return linkDto(user, row, target, "out");
+                recordActivity(owner.getID(), user.getKey(), "link_add", sense.getType(), "", objectKey(pointed));
+                if (owner.getID() != assetId) {
+                    recordActivity(assetId, user.getKey(), "link_add", sense.getType(), "", objectKey(owner));
+                }
+                return linkDto(user, row, pointed, fromId == assetId ? "out" : "in");
             }
         });
     }
@@ -4491,7 +4501,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<byte[]>() {
             @Override
             public byte[] doInTransaction() {
-                return buildEquipmentBook(project.getKey());
+                return buildEquipmentBook(project.getKey(), "", 0, false);
             }
         });
     }
@@ -4567,6 +4577,21 @@ public class AssetServiceImpl implements AssetService {
                     ? equipmentSheets(draft) : ImportSessions.sheets(uploadId);
             if (sheets == null) {
                 throw new AssetException(400, "asset-tree.error.import.workbook");
+            }
+            String scopeType = draft == null || draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
+            int scopePlace = draft == null || draft.getPlaceId() == null ? 0 : Math.max(0, draft.getPlaceId().intValue());
+            if (uploadId.isEmpty() && (!scopeType.isEmpty() || scopePlace > 0)) {
+                final List<EquipmentSheet.Sheet> incoming = sheets;
+                final String wantedType = scopeType;
+                final int wantedPlace = scopePlace;
+                sheets = ao().executeInTransaction(new TransactionCallback<List<EquipmentSheet.Sheet>>() {
+                    @Override
+                    public List<EquipmentSheet.Sheet> doInTransaction() {
+                        PreparedImport prepared = prepareEquipmentImport(storedKey, new ImportMemory());
+                        return EquipmentExchange.limit(incoming, wantedType, wantedPlace, prepared.types,
+                                prepared.nodes, prepared.headerLabels);
+                    }
+                });
             }
             int total = EquipmentExchange.countRows(sheets);
             if (total > EquipmentExchange.MAX_ROWS) {
@@ -6166,6 +6191,10 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private byte[] buildEquipmentBook(String projectKey) {
+        return buildEquipmentBook(projectKey, "", 0, false);
+    }
+
+    private byte[] buildEquipmentBook(String projectKey, String typeKey, int placeId, boolean blank) {
         ensureStatuses(projectKey);
         AssetEntity[] rows = assetsIn(projectKey);
         List<AssetTypeDto> types = typeDtos(projectKey, rows);
@@ -6186,15 +6215,26 @@ public class AssetServiceImpl implements AssetService {
         common.add(labels.getText("asset-tree.ui.custodian"));
         common.add(labels.getText("asset-tree.ui.issuedTo"));
         common.add(labels.getText("asset-tree.ui.description"));
+        String wantedType = typeKey == null ? "" : typeKey.trim();
         Map<String, List<AssetEntity>> byType = new LinkedHashMap<String, List<AssetEntity>>();
         for (AssetTypeDto type : types) {
-            if (!type.isLocation()) {
-                byType.put(type.getTypeKey(), new ArrayList<AssetEntity>());
+            if (type.isLocation()) {
+                continue;
             }
+            if (!wantedType.isEmpty() && !wantedType.equals(type.getTypeKey())) {
+                continue;
+            }
+            byType.put(type.getTypeKey(), new ArrayList<AssetEntity>());
         }
         for (AssetEntity row : rows) {
             List<AssetEntity> bucket = byType.get(row.getTypeKey());
-            if (bucket != null) {
+            if (bucket == null) {
+                continue;
+            }
+            if (placeId > 0 && !underPlace(row, placeId, index)) {
+                continue;
+            }
+            if (!blank) {
                 bucket.add(row);
             }
         }
@@ -6216,7 +6256,7 @@ public class AssetServiceImpl implements AssetService {
         Map<String, String> kindLabels = serviceOn ? kindNames(projectKey) : new HashMap<String, String>();
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
         for (AssetTypeDto type : types) {
-            if (type.isLocation()) {
+            if (type.isLocation() || !byType.containsKey(type.getTypeKey())) {
                 continue;
             }
             List<String> headers = new ArrayList<String>(common);
@@ -6310,10 +6350,167 @@ public class AssetServiceImpl implements AssetService {
         if (pages.isEmpty()) {
             pages.add(new WorkbookSheet.Page("Equipment", common, new ArrayList<List<String>>()));
         }
-        if (serviceOn) {
+        if (serviceOn && !blank) {
             pages.add(servicePage(types, byType, plans, serviceHeaders, kindLabels, labels, dayFirst));
         }
         return WorkbookSheet.write(pages);
+    }
+
+    private byte[] buildLinksBook(String projectKey, String typeKey, int placeId) {
+        AssetEntity[] rows = assetsIn(projectKey);
+        List<AssetTypeDto> types = typeDtos(projectKey, rows);
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        Map<String, Boolean> locations = new HashMap<String, Boolean>();
+        for (AssetTypeDto type : types) {
+            locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+        }
+        String wantedType = typeKey == null ? "" : typeKey.trim();
+        List<AssetEntity> equipment = new ArrayList<AssetEntity>();
+        List<Integer> ids = new ArrayList<Integer>();
+        if (rows != null) {
+            for (AssetEntity row : rows) {
+                if (row == null || row.getDeletedAt() != null) {
+                    continue;
+                }
+                Boolean location = locations.get(row.getTypeKey());
+                if (location != null && location.booleanValue()) {
+                    continue;
+                }
+                if (!wantedType.isEmpty() && !wantedType.equals(row.getTypeKey())) {
+                    continue;
+                }
+                if (placeId > 0 && !underPlace(row, placeId, index)) {
+                    continue;
+                }
+                equipment.add(row);
+                ids.add(Integer.valueOf(row.getID()));
+            }
+        }
+        Collections.sort(equipment, new Comparator<AssetEntity>() {
+            @Override
+            public int compare(AssetEntity left, AssetEntity right) {
+                String leftKey = left.getObjectKey() == null ? "" : left.getObjectKey();
+                String rightKey = right.getObjectKey() == null ? "" : right.getObjectKey();
+                return leftKey.compareToIgnoreCase(rightKey);
+            }
+        });
+        I18nHelper labels = i18n();
+        String[] phrases = { "linkCarries", "linkInstalled", "linkIncludes", "linkPart", "linkNeeded", "linkDepends" };
+        String[] stored = { LinkRules.INSTALLED, LinkRules.INSTALLED, LinkRules.PART, LinkRules.PART,
+                LinkRules.DEPENDS, LinkRules.DEPENDS };
+        boolean[] inbound = { true, false, true, false, true, false };
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+        headers.add(labels.getText("asset-tree.ui.name"));
+        for (int i = 0; i < phrases.length; i++) {
+            headers.add(labels.getText("asset-tree.ui." + phrases[i]));
+        }
+        List<String> custom = new ArrayList<String>();
+        Map<Integer, List<String>> cells = new HashMap<Integer, List<String>>();
+        for (AssetEntity asset : equipment) {
+            List<String> line = new ArrayList<String>();
+            for (int i = 0; i < phrases.length; i++) {
+                line.add("");
+            }
+            cells.put(Integer.valueOf(asset.getID()), line);
+        }
+        if (!ids.isEmpty()) {
+            Set<Integer> seen = new HashSet<Integer>();
+            List<AssetLinkEntity> relations = new ArrayList<AssetLinkEntity>();
+            relations.addAll(findIn(AssetLinkEntity.class, "FROM_ID", ids, null));
+            relations.addAll(findIn(AssetLinkEntity.class, "TO_ID", ids, null));
+            for (int i = 0; i < relations.size(); i++) {
+                AssetLinkEntity relation = relations.get(i);
+                if (relation == null || !seen.add(Integer.valueOf(relation.getID()))) {
+                    continue;
+                }
+                AssetEntity from = index.get(Integer.valueOf(relation.getFromId()));
+                AssetEntity to = index.get(Integer.valueOf(relation.getToId()));
+                if (from == null || to == null || from.getDeletedAt() != null || to.getDeletedAt() != null) {
+                    continue;
+                }
+                String type = relation.getLinkType() == null ? "" : relation.getLinkType();
+                writeLinkCells(cells, custom, from, to, type, inbound, stored);
+            }
+        }
+        for (int i = 0; i < custom.size(); i++) {
+            headers.add(custom.get(i));
+        }
+        List<List<String>> lines = new ArrayList<List<String>>();
+        for (AssetEntity asset : equipment) {
+            List<String> line = new ArrayList<String>();
+            line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+            line.add(asset.getName() == null ? "" : asset.getName());
+            List<String> values = cells.get(Integer.valueOf(asset.getID()));
+            if (values != null) {
+                line.addAll(values);
+            }
+            lines.add(line);
+        }
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(new WorkbookSheet.Page(labels.getText("asset-tree.ui.linkSheet"), headers, lines));
+        return WorkbookSheet.write(pages);
+    }
+
+    private void writeLinkCells(Map<Integer, List<String>> cells, List<String> custom, AssetEntity from, AssetEntity to,
+                                String type, boolean[] inbound, String[] stored) {
+        int built = -1;
+        for (int column = 0; column < stored.length; column++) {
+            if (stored[column].equals(type) && !inbound[column]) {
+                built = column;
+                break;
+            }
+        }
+        if (built >= 0) {
+            appendLinkCell(cells, from.getID(), built, to);
+            for (int column = 0; column < stored.length; column++) {
+                if (stored[column].equals(type) && inbound[column]) {
+                    appendLinkCell(cells, to.getID(), column, from);
+                }
+            }
+            return;
+        }
+        if (!custom.contains(type)) {
+            custom.add(type);
+            for (List<String> line : cells.values()) {
+                line.add("");
+            }
+        }
+        appendLinkCell(cells, from.getID(), stored.length + custom.indexOf(type), to);
+    }
+
+    private void appendLinkCell(Map<Integer, List<String>> cells, int assetId, int column, AssetEntity other) {
+        List<String> line = cells.get(Integer.valueOf(assetId));
+        if (line == null || column < 0 || column >= line.size() || other == null) {
+            return;
+        }
+        String mark = ((other.getObjectKey() == null ? "" : other.getObjectKey()) + " "
+                + (other.getName() == null ? "" : other.getName())).trim();
+        if (mark.isEmpty()) {
+            return;
+        }
+        String current = line.get(column);
+        if (current == null || current.isEmpty()) {
+            line.set(column, mark);
+            return;
+        }
+        if (("; " + current + "; ").contains("; " + mark + "; ")) {
+            return;
+        }
+        line.set(column, current + "; " + mark);
+    }
+
+    private boolean underPlace(AssetEntity row, int placeId, Map<Integer, AssetEntity> index) {
+        AssetEntity cursor = row;
+        int guard = 0;
+        while (cursor != null && guard++ < 80) {
+            if (cursor.getID() == placeId) {
+                return true;
+            }
+            Integer parentId = TreeLogic.normalizeParent(cursor.getParentId());
+            cursor = parentId == null ? null : index.get(parentId);
+        }
+        return false;
     }
 
     private List<String> lifeColumnLabels(I18nHelper labels) {
@@ -6602,6 +6799,16 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("lifeContractUntil", labels.getText("asset-tree.ui.lifeColUntil"));
         headerLabels.put("lifeMonths", labels.getText("asset-tree.ui.lifeColMonths"));
         headerLabels.put("lifeResidual", labels.getText("asset-tree.ui.lifeColResidual"));
+        headerLabels.put("linkTo", labels.getText("asset-tree.ui.linkTo"));
+        headerLabels.put("linkType", labels.getText("asset-tree.ui.linkKind"));
+        headerLabels.put("linkInbound", labels.getText("asset-tree.ui.linkInbound"));
+        headerLabels.put("linkAttrs", labels.getText("asset-tree.ui.linkAttrs"));
+        headerLabels.put("linkPart", labels.getText("asset-tree.ui.linkPart"));
+        headerLabels.put("linkDepends", labels.getText("asset-tree.ui.linkDepends"));
+        headerLabels.put("linkInstalled", labels.getText("asset-tree.ui.linkInstalled"));
+        headerLabels.put("linkIncludes", labels.getText("asset-tree.ui.linkIncludes"));
+        headerLabels.put("linkNeeded", labels.getText("asset-tree.ui.linkNeeded"));
+        headerLabels.put("linkCarries", labels.getText("asset-tree.ui.linkCarries"));
         boolean service = moduleOn(projectKey, ProjectModules.SERVICE)
                 && ModuleSetup.calendarOn(moduleSetup(projectKey).getScheduleBoards());
         boolean life = moduleOn(projectKey, ProjectModules.LIFE);
@@ -6680,6 +6887,21 @@ public class AssetServiceImpl implements AssetService {
                 errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), labels.getText("asset-tree.error.unexpected"))));
             }
         }
+        for (EquipmentExchange.Link wish : plan.getLinks()) {
+            try {
+                int flag = applyImportedLink(user, projectKey, wish);
+                if (flag > 0) {
+                    created++;
+                } else if (flag == 0) {
+                    updated++;
+                }
+            } catch (AssetException ex) {
+                errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), exceptionText(labels, ex))));
+            } catch (RuntimeException ex) {
+                log.warn("Equipment import link row {} failed", Integer.valueOf(wish.getRow()), ex);
+                errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), labels.getText("asset-tree.error.unexpected"))));
+            }
+        }
         for (LifeBook.Change wish : plan.getLifecycles()) {
             try {
                 AssetEntity asset = assetByKey(projectKey, wish.getKey());
@@ -6699,6 +6921,61 @@ public class AssetServiceImpl implements AssetService {
         result.setUpdated(updated);
         result.setErrors(errors);
         return result;
+    }
+
+    /**
+     * @return 1 when the relation is new, 0 when a phrase or attributes changed it,
+     *         and -1 when the same relation was already stored.
+     */
+    private int applyImportedLink(final ApplicationUser user, final String projectKey, final EquipmentExchange.Link wish) {
+        return ao().executeInTransaction(new TransactionCallback<Integer>() {
+            @Override
+            public Integer doInTransaction() {
+                AssetEntity from = assetByKey(projectKey, wish.getFromKey());
+                AssetEntity to = assetByKey(projectKey, wish.getToKey());
+                if (from == null || from.getDeletedAt() != null) {
+                    throw new AssetException(400, "asset-tree.error.import.key", wish.getFromKey());
+                }
+                if (to == null || to.getDeletedAt() != null) {
+                    throw new AssetException(400, "asset-tree.error.import.key", wish.getToKey());
+                }
+                if (isLocation(from) || isLocation(to)) {
+                    throw new AssetException(400, "asset-tree.error.peer.place");
+                }
+                if (from.getID() == to.getID()) {
+                    throw new AssetException(400, "asset-tree.error.peer.self");
+                }
+                int fromId = wish.isReverse() ? to.getID() : from.getID();
+                int toId = wish.isReverse() ? from.getID() : to.getID();
+                AssetLinkEntity existing = sameLink(fromId, toId, wish.getType(), 0);
+                if (existing != null) {
+                    boolean inbound = wish.getInbound() != null && !wish.getInbound().trim().isEmpty();
+                    boolean attrs = wish.getAttrs() != null && !wish.getAttrs().isEmpty();
+                    if (!inbound && !attrs) {
+                        return Integer.valueOf(-1);
+                    }
+                    if (inbound) {
+                        existing.setInbound(LinkRules.inbound(wish.getInbound()));
+                    }
+                    if (attrs) {
+                        existing.setAttrs(LinkRules.merge(existing.getAttrs(), LinkRules.read(wish.getAttrs()), true));
+                    }
+                    existing.save();
+                    return Integer.valueOf(0);
+                }
+                AssetLinkEntity row = ao().create(AssetLinkEntity.class,
+                        new DBParam("FROM_ID", Integer.valueOf(fromId)),
+                        new DBParam("TO_ID", Integer.valueOf(toId)),
+                        new DBParam("LINK_TYPE", wish.getType()));
+                row.setInbound(LinkRules.inbound(wish.getInbound()));
+                row.setAttrs(wish.getAttrs() == null ? "" : wish.getAttrs());
+                row.save();
+                AssetEntity owner = fromId == from.getID() ? from : to;
+                AssetEntity pointed = fromId == from.getID() ? to : from;
+                recordActivity(owner.getID(), user.getKey(), "link_add", wish.getType(), "", objectKey(pointed));
+                return Integer.valueOf(1);
+            }
+        }).intValue();
     }
 
     private void applyImportedChange(final ApplicationUser user, final String projectKey,
@@ -17492,7 +17769,7 @@ public class AssetServiceImpl implements AssetService {
             project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
             requireModule(project.getKey(), ProjectModules.REPORTS);
             reports = true;
-        } else if ("equipment".equals(kind)) {
+        } else if ("equipment".equals(kind) || "links".equals(kind)) {
             project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
             reports = false;
         } else {
@@ -17500,7 +17777,11 @@ public class AssetServiceImpl implements AssetService {
         }
         final String storedKey = project.getKey();
         final ApplicationUser actor = user;
-        final String fileName = (reports ? "reports-" : "equipment-") + storedKey + ".xlsx";
+        final boolean links = "links".equals(kind);
+        final String fileName = (reports ? "reports-" : links ? "links-" : "equipment-") + storedKey + ".xlsx";
+        final String exportType = draft == null || draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
+        final int exportPlace = draft == null || draft.getPlaceId() == null ? 0 : Math.max(0, draft.getPlaceId().intValue());
+        final boolean exportBlank = draft != null && Boolean.TRUE.equals(draft.getBlank());
         ExportJobDto job = ExportJobs.start(fileName, new ExportJobs.Work() {
             @Override
             public byte[] build() {
@@ -17514,7 +17795,10 @@ public class AssetServiceImpl implements AssetService {
                                 Project current = project(storedKey);
                                 return reportBook(current);
                             }
-                            return buildEquipmentBook(storedKey);
+                            if (links) {
+                                return buildLinksBook(storedKey, exportType, exportPlace);
+                            }
+                            return buildEquipmentBook(storedKey, exportType, exportPlace, exportBlank);
                         }
                     });
                 } finally {

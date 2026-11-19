@@ -393,9 +393,9 @@
         tools.appendChild(thickWrap);
         var scanFile = el('input');
         scanFile.type = 'file';
-        scanFile.accept = '.dxf,.dwg,.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
+        scanFile.accept = '.png,.jpg,.jpeg,image/png,image/jpeg';
         scanFile.style.display = 'none';
-        var importBtn = el('button', 'asset-tree-scheme-tool', api.t('mapImport'));
+        var importBtn = el('button', 'asset-tree-scheme-tool', api.t('schemeUnderlay'));
         importBtn.type = 'button';
         importBtn.disabled = !api.canEdit;
         importBtn.addEventListener('click', function () {
@@ -404,14 +404,6 @@
         });
         tools.appendChild(importBtn);
         tools.appendChild(scanFile);
-        var exportDxfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportDxf'));
-        exportDxfBtn.type = 'button';
-        exportDxfBtn.addEventListener('click', function () { exportScheme('dxf'); });
-        var exportPdfBtn = el('button', 'asset-tree-scheme-tool', api.t('mapExportPdf'));
-        exportPdfBtn.type = 'button';
-        exportPdfBtn.addEventListener('click', function () { exportScheme('pdf'); });
-        tools.appendChild(exportDxfBtn);
-        tools.appendChild(exportPdfBtn);
         var scaleBtn = el('button', 'asset-tree-scheme-tool', api.t('mapScanScale'));
         scaleBtn.type = 'button';
         scaleBtn.disabled = !api.canEdit;
