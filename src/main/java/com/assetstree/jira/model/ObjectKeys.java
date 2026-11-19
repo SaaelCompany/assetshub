@@ -94,4 +94,25 @@ public final class ObjectKeys {
         }
         return objectKey.substring(dot + 1);
     }
+
+    /**
+     * The next number to issue. It is one past the highest key that still belongs
+     * to an object. A counter that ran ahead of deleted objects comes back.
+     * A hole between two keys that still exist stays unused.
+     */
+    public static int nextNumber(String prefix, Iterable<String> keys) {
+        int highest = 0;
+        if (keys != null) {
+            for (String key : keys) {
+                int number = suffix(prefix, key);
+                if (number > highest) {
+                    highest = number;
+                }
+            }
+        }
+        if (highest == Integer.MAX_VALUE) {
+            return highest;
+        }
+        return highest + 1;
+    }
 }

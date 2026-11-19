@@ -7512,15 +7512,28 @@ public class AssetServiceImpl implements AssetService {
         Object lock = raced == null ? created : raced;
         synchronized (lock) {
             reclaimForPrefix(prefix);
+            AssetEntity[] existing = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY LIKE ?", prefix + "-%"));
+            java.util.List<String> held = new java.util.ArrayList<String>();
+            if (existing != null) {
+                for (AssetEntity row : existing) {
+                    if (row != null && row.getObjectKey() != null) {
+                        held.add(row.getObjectKey());
+                    }
+                }
+            }
+            int value = ObjectKeys.nextNumber(prefix, held);
             for (int attempt = 0; attempt < 8; attempt++) {
-                AssetCounterEntity counter = counterFor(prefix);
-                int value = Math.max(counter.getNextValue(), 1);
-                counter.setNextValue(value + 1);
-                counter.save();
                 String key = prefix + "-" + value;
                 if (key.length() <= 32 && ao().count(AssetEntity.class, "OBJECT_KEY = ?", key) == 0) {
+                    AssetCounterEntity counter = counterFor(prefix);
+                    counter.setNextValue(value + 1);
+                    counter.save();
                     return key;
                 }
+                if (value == Integer.MAX_VALUE) {
+                    break;
+                }
+                value++;
             }
         }
         throw new AssetException(500, "asset-tree.error.unexpected");
