@@ -5141,7 +5141,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public AssetKeyDto restartAssetKeys(ApplicationUser user, String projectKey) {
-        final Project project = requireArrangeProject(user, projectKey);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ADMIN);
         final String prefix = storedAssetPrefix(project.getKey());
         if (prefix.isEmpty()) {
             throw new AssetException(400, "asset-tree.error.assetKey.required");

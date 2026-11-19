@@ -14957,6 +14957,7 @@
     }
 
     function openRestartKeys() {
+        if (!state.canAdmin) return;
         openModal(function (dialog) {
             dialog.appendChild(el('h2', null, t('assetKeyRestartTitle')));
             dialog.appendChild(el('p', null, t('assetKeyRestartText')));
@@ -15048,7 +15049,9 @@
                 else saveTree();
             });
             actions.appendChild(save);
-            actions.appendChild(button(t('assetKeyRestart'), 'asset-tree-btn danger', openRestartKeys));
+            if (state.canAdmin) {
+                actions.appendChild(button(t('assetKeyRestart'), 'asset-tree-btn danger', openRestartKeys));
+            }
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
             form.appendChild(actions);
             form.addEventListener('submit', function (event) {
@@ -15965,7 +15968,7 @@
             actions.appendChild(button(t('assetKeySave'), 'asset-tree-btn primary', function () {
                 saveAssetKey(input.value);
             }));
-            if (current) {
+            if (current && state.canAdmin) {
                 actions.appendChild(button(t('assetKeyRestart'), 'asset-tree-btn danger', openRestartKeys));
             }
             keyCard.appendChild(actions);
