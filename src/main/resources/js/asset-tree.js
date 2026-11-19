@@ -15719,68 +15719,88 @@
             panel.appendChild(el('p', 'asset-tree-hint', t('settingsDenied')));
             return panel;
         }
-        var sections = [];
+        var items = [];
         if (state.canConfigure) {
-            sections.push(['project', t('projectSection'), null]);
-            sections.push(['documents', t('docSection'), null]);
-        }
-        if (state.canConfigure) {
-            sections.push(['types', t('typesSection'), state.types.length]);
-            sections.push(['statuses', t('statusSection'), (state.statuses || []).length]);
-            if (moduleOn('portal')) sections.push(['portal', t('portalSection'), null]);
-        }
-        if (state.canObjects) {
-            sections.push(['exchange', t('exchangeSection'), null]);
+            items.push({ id: 'project', group: 'settingsGroupProject', title: t('projectSection'), blurb: t('settingsBlurbProject') });
+            items.push({ id: 'types', group: 'settingsGroupCatalog', title: t('typesSection'), blurb: t('settingsBlurbTypes'), count: state.types.length });
+            items.push({ id: 'statuses', group: 'settingsGroupCatalog', title: t('statusSection'), blurb: t('settingsBlurbStatuses'), count: (state.statuses || []).length });
         }
         if (state.canGrant) {
-            sections.push(['access', t('accessSection'), state.grants ? state.grants.length : null]);
+            items.push({ id: 'access', group: 'settingsGroupPeople', title: t('accessSection'), blurb: t('settingsBlurbAccess'), count: state.grants ? state.grants.length : null });
         }
-        if (!sections.length) {
+        if (state.canConfigure) {
+            items.push({ id: 'documents', group: 'settingsGroupPeople', title: t('docSection'), blurb: t('settingsBlurbDocuments') });
+        }
+        if (state.canObjects) {
+            items.push({ id: 'exchange', group: 'settingsGroupData', title: t('exchangeSection'), blurb: t('settingsBlurbExchange') });
+        }
+        if (state.canConfigure && moduleOn('portal')) {
+            items.push({ id: 'portal', group: 'settingsGroupClients', title: t('portalSection'), blurb: t('settingsBlurbPortal') });
+        }
+        if (!items.length) {
             panel.appendChild(el('p', 'asset-tree-hint', t('settingsDenied')));
             return panel;
         }
         var allowed = {};
-        sections.forEach(function (item) {
-            allowed[item[0]] = true;
+        items.forEach(function (item) {
+            allowed[item.id] = true;
         });
-        if (!allowed[state.schemaTab]) state.schemaTab = sections[0][0];
-        var tabs = el('div', 'asset-tree-viewtabs asset-tree-schema-tabs');
-        tabs.setAttribute('role', 'tablist');
-        sections.forEach(function (item) {
-            var active = state.schemaTab === item[0];
-            var tab = button('', 'asset-tree-viewtab asset-tree-schema-tab' + (active ? ' is-active' : ''), function () {
-                if (state.schemaTab === item[0]) return;
-                state.schemaTab = item[0];
+        if (!allowed[state.schemaTab]) state.schemaTab = items[0].id;
+        var current = items[0];
+        items.forEach(function (item) {
+            if (item.id === state.schemaTab) current = item;
+        });
+        var layout = el('div', 'asset-tree-settings-layout');
+        var nav = el('nav', 'asset-tree-settings-nav');
+        nav.setAttribute('aria-label', t('menuSettings'));
+        var lastGroup = '';
+        items.forEach(function (item) {
+            if (item.group !== lastGroup) {
+                lastGroup = item.group;
+                nav.appendChild(el('div', 'asset-tree-settings-group', t(item.group)));
+            }
+            var active = state.schemaTab === item.id;
+            var link = button('', 'asset-tree-settings-link' + (active ? ' is-active' : ''), function () {
+                if (state.schemaTab === item.id) return;
+                state.schemaTab = item.id;
                 state.schemaAdding = false;
                 renderFrame();
             });
-            tab.setAttribute('role', 'tab');
-            tab.setAttribute('aria-selected', active ? 'true' : 'false');
-            tab.appendChild(document.createTextNode(item[1]));
-            if (item[2] !== null) {
-                tab.appendChild(el('span', 'asset-tree-schema-count', String(item[2])));
-            }
-            tabs.appendChild(tab);
+            link.setAttribute('role', 'tab');
+            link.setAttribute('aria-selected', active ? 'true' : 'false');
+            var title = el('span', 'asset-tree-settings-link-title');
+            title.appendChild(document.createTextNode(item.title));
+            if (item.count != null) title.appendChild(el('span', 'asset-tree-schema-count', String(item.count)));
+            link.appendChild(title);
+            link.appendChild(el('span', 'asset-tree-settings-link-blurb', item.blurb));
+            nav.appendChild(link);
         });
-        panel.appendChild(tabs);
+        var main = el('div', 'asset-tree-settings-main');
+        var head = el('div', 'asset-tree-settings-head');
+        head.appendChild(el('h3', 'asset-tree-settings-title', current.title));
+        head.appendChild(el('p', 'asset-tree-hint', current.blurb));
+        main.appendChild(head);
+        layout.appendChild(nav);
+        layout.appendChild(main);
+        panel.appendChild(layout);
         if (state.schemaTab === 'types') {
             var types = el('div', 'asset-tree-settings-block');
-            panel.appendChild(types);
+            main.appendChild(types);
             appendConstructor(types, false);
         } else if (state.schemaTab === 'exchange') {
-            renderExchangeSettings(panel);
+            renderExchangeSettings(main);
         } else if (state.schemaTab === 'access') {
-            renderAccessSettings(panel);
+            renderAccessSettings(main);
         } else if (state.schemaTab === 'documents') {
-            renderDocumentSettings(panel);
+            renderDocumentSettings(main);
         } else if (state.schemaTab === 'project') {
-            renderProjectSettings(panel);
+            renderProjectSettings(main);
         } else if (state.schemaTab === 'portal') {
             panel.classList.add('is-portal');
-            renderPortalSettings(panel);
+            renderPortalSettings(main);
             fitPortalPanel(panel);
         } else {
-            renderStatusSettings(panel);
+            renderStatusSettings(main);
         }
         return panel;
     }
@@ -29567,7 +29587,6 @@
     function renderExchangeSettings(panel) {
         var stack = el('div', 'asset-tree-project-stack');
         var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('exchangeSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('exchangeHint')));
         var typeSelect = document.createElement('select');
         typeSelect.className = 'asset-tree-filter';
@@ -30725,7 +30744,6 @@
         panel.appendChild(stack);
         stack.appendChild(schemaSettings());
         var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
         block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
         if (state.grants === null) {
             state.grants = [];

@@ -7183,9 +7183,150 @@ a.asset-tree-preview-icon:focus {
     background: var(--surface);
 }
 
-/* Settings tabs run across the whole panel */
-#asset-tree-app .asset-tree-schema-tabs {
+/* Settings: grouped list on the left, the open section on the right */
+#asset-tree-app .asset-tree-settings-layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+    margin-top: 12px;
+}
+
+#asset-tree-app .asset-tree-settings-nav {
+    position: sticky;
+    top: 8px;
+    padding: 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+#asset-tree-app .asset-tree-settings-group {
+    margin: 10px 8px 4px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+#asset-tree-app .asset-tree-settings-group:first-child {
+    margin-top: 4px;
+}
+
+#asset-tree-app button.asset-tree-settings-link {
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 8px 10px !important;
+    border: 0 !important;
+    border-radius: 3px;
+    background: transparent !important;
+    color: #172b4d !important;
+    text-align: left;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-settings-link:hover {
+    background: #f4f5f7 !important;
+}
+
+#asset-tree-app button.asset-tree-settings-link.is-active {
+    background: #deebff !important;
+    color: #0052cc !important;
+}
+
+#asset-tree-app .asset-tree-settings-link-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+#asset-tree-app .asset-tree-settings-link-blurb {
+    margin-top: 2px;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.35;
+}
+
+#asset-tree-app button.asset-tree-settings-link.is-active .asset-tree-settings-link-blurb,
+#asset-tree-app button.asset-tree-settings-link.is-active .asset-tree-schema-count {
+    color: #0747a6;
+}
+
+#asset-tree-app .asset-tree-settings-head {
+    margin: 0 0 4px;
+}
+
+#asset-tree-app .asset-tree-settings-head .asset-tree-hint {
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-settings-main .asset-tree-project-stack {
     max-width: none;
+}
+
+@media (max-width: 900px) {
+    #asset-tree-app .asset-tree-settings-layout {
+        grid-template-columns: 1fr;
+    }
+
+    #asset-tree-app .asset-tree-settings-nav {
+        position: static;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    #asset-tree-app .asset-tree-settings-group {
+        flex: 1 0 100%;
+        margin-bottom: 0;
+    }
+
+    #asset-tree-app button.asset-tree-settings-link {
+        width: auto;
+        flex: 1 1 auto;
+        padding: 6px 10px !important;
+    }
+
+    #asset-tree-app .asset-tree-settings-link-blurb {
+        display: none;
+    }
+}
+
+#asset-tree-app.is-phone .asset-tree-settings-layout {
+    grid-template-columns: 1fr;
+}
+
+#asset-tree-app.is-phone .asset-tree-settings-nav {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+#asset-tree-app.is-phone .asset-tree-settings-group {
+    flex: 1 0 100%;
+    margin-bottom: 0;
+}
+
+#asset-tree-app.is-phone button.asset-tree-settings-link {
+    width: auto;
+    flex: 1 1 auto;
+    padding: 6px 10px !important;
+}
+
+#asset-tree-app.is-phone .asset-tree-settings-link-blurb {
+    display: none;
 }
 
 /* Dialogs: 24px padding, footer on the right, primary button first, Cancel as a link last (Jira dialogs) */
