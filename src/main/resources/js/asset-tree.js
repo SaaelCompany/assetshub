@@ -4821,6 +4821,7 @@
                 return;
             }
             menu.innerHTML = '';
+            menu.classList.add('is-note');
             menu.appendChild(el('p', 'asset-tree-hint', t('loading')));
             menu.hidden = false;
             placeMoreMenu(menu);
@@ -4829,9 +4830,12 @@
                 menu.innerHTML = '';
                 var rows = status >= 200 && status < 300 && payload && payload.length ? payload : [];
                 if (!rows.length) {
+                    menu.classList.add('is-note');
                     menu.appendChild(el('p', 'asset-tree-hint', (payload && payload.message) || t('docEmpty')));
+                    placeMoreMenu(menu);
                     return;
                 }
+                menu.classList.remove('is-note');
                 rows.forEach(function (row) {
                     var entry = el('button', 'asset-tree-more-item');
                     entry.type = 'button';

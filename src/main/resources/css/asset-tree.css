@@ -5189,6 +5189,24 @@ a.asset-tree-url {
     padding: 4px 12px 8px;
 }
 
+#asset-tree-app .asset-tree-more-menu.is-note {
+    width: max-content;
+    min-width: 0;
+    max-width: min(360px, calc(100vw - 16px));
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-more-menu.is-note .asset-tree-hint {
+    margin: 0;
+    padding: 8px 12px;
+    line-height: 1.35;
+}
+
+#asset-tree-app.is-phone .asset-tree-more-menu.is-note .asset-tree-hint {
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
 #asset-tree-app .asset-tree-module {
     margin: 8px 0 0;
 }
