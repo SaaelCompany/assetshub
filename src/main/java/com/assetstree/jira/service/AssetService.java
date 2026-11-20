@@ -30,6 +30,7 @@ import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.IssueContextDto;
 import com.assetstree.jira.dto.IssueRefDto;
+import com.assetstree.jira.dto.CardFoldDto;
 import com.assetstree.jira.dto.MetaDto;
 import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.dto.PickerNodeDto;
@@ -89,6 +90,8 @@ public interface AssetService {
     MetaDto meta(ApplicationUser user);
 
     MineViewDto saveMineView(ApplicationUser user, MineViewDto draft);
+
+    CardFoldDto saveCardFolds(ApplicationUser user, CardFoldDto draft);
 
     AssetListDto listAssets(ApplicationUser user, String projectKey, String query);
 

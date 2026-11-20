@@ -150,6 +150,7 @@ import com.assetstree.jira.dto.ImportIssueDto;
 import com.assetstree.jira.dto.ImportResultDto;
 import com.assetstree.jira.dto.IssueContextDto;
 import com.assetstree.jira.dto.IssueRefDto;
+import com.assetstree.jira.dto.CardFoldDto;
 import com.assetstree.jira.dto.MetaDto;
 import com.assetstree.jira.dto.MineViewDto;
 import com.assetstree.jira.dto.PickerNodeDto;
@@ -178,6 +179,7 @@ import com.assetstree.jira.dto.ScheduleRowDto;
 import com.assetstree.jira.dto.ServicePlanDto;
 import com.assetstree.jira.dto.StatusDto;
 import com.assetstree.jira.dto.UserProfileDto;
+import com.assetstree.jira.model.CardFolds;
 import com.assetstree.jira.model.MineColumns;
 import com.assetstree.jira.model.AssetDraft;
 import com.assetstree.jira.model.StatusMoment;
@@ -512,6 +514,7 @@ public class AssetServiceImpl implements AssetService {
         attachAssetKeys(projects);
         attachViews(projects);
         attachMine(meta, user);
+        attachCardFolds(meta, user);
         meta.setPortalLayout(readPortalLayoutOutside());
         meta.setProjects(projects);
         return meta;
@@ -591,6 +594,50 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(500, "asset-tree.error.unexpected");
         }
         return stored == null ? new MineViewDto() : stored;
+    }
+
+    @Override
+    public CardFoldDto saveCardFolds(ApplicationUser user, CardFoldDto draft) {
+        requireUser(user);
+        String encoded = CardFolds.clean(draft == null ? "" : draft.getFolds());
+        try {
+            PropertySet set = userProperties().getPropertySet(user);
+            set.setText(CardFolds.KEY, encoded);
+        } catch (RuntimeException ex) {
+            log.warn("Could not store card folds for {}", user.getKey(), ex);
+            throw new AssetException(500, "asset-tree.error.unexpected");
+        }
+        CardFoldDto stored = new CardFoldDto();
+        stored.setFolds(encoded);
+        return stored;
+    }
+
+    private void attachCardFolds(MetaDto meta, ApplicationUser user) {
+        String raw = readCardFolds(user);
+        if (raw == null) {
+            return;
+        }
+        meta.setCardFoldsSaved(true);
+        meta.setCardFolds(raw);
+    }
+
+    private String readCardFolds(ApplicationUser user) {
+        try {
+            PropertySet set = userProperties().getPropertySet(user);
+            if (set == null || !set.exists(CardFolds.KEY)) {
+                return null;
+            }
+            String raw;
+            try {
+                raw = set.getText(CardFolds.KEY);
+            } catch (RuntimeException ex) {
+                raw = set.getString(CardFolds.KEY);
+            }
+            return CardFolds.clean(raw == null ? "" : raw);
+        } catch (RuntimeException ex) {
+            log.warn("Could not read card folds for {}", user.getKey(), ex);
+            return null;
+        }
     }
 
     private void attachMine(MetaDto meta, ApplicationUser user) {

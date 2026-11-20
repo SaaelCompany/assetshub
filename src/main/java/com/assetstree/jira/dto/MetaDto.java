@@ -22,6 +22,8 @@ public class MetaDto {
     private List<String> mineColumns;
     private String mineSortKey;
     private String mineSortDir;
+    private boolean cardFoldsSaved;
+    private String cardFolds;
     private String portalLayout;
     private Map<String, String> i18n = new LinkedHashMap<String, String>();
     private List<ProjectDto> projects = new ArrayList<ProjectDto>();
@@ -136,6 +138,22 @@ public class MetaDto {
 
     public void setMineSortDir(String mineSortDir) {
         this.mineSortDir = mineSortDir;
+    }
+
+    public boolean isCardFoldsSaved() {
+        return cardFoldsSaved;
+    }
+
+    public void setCardFoldsSaved(boolean cardFoldsSaved) {
+        this.cardFoldsSaved = cardFoldsSaved;
+    }
+
+    public String getCardFolds() {
+        return cardFolds;
+    }
+
+    public void setCardFolds(String cardFolds) {
+        this.cardFolds = cardFolds;
     }
 
     public String getPortalLayout() {

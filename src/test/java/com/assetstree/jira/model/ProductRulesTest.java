@@ -140,6 +140,24 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void hiddenPlacesStayASeparateRight() {
+        assertFalse(GrantCaps.allows(GrantCaps.normalize("projectAdmin"), GrantCaps.SECRET));
+        assertFalse(GrantCaps.allows(GrantCaps.normalize("assets,places,object"), GrantCaps.SECRET));
+        String caps = GrantCaps.normalize("view,secret");
+        assertTrue(caps.contains("secret"));
+        assertTrue(GrantCaps.allows(caps, GrantCaps.SECRET));
+        assertFalse(GrantCaps.allows(GrantCaps.normalize("view"), GrantCaps.SECRET));
+    }
+
+    @Test
+    public void cardFoldsStayWithThePerson() {
+        assertEquals("", CardFolds.clean(null));
+        assertEquals("", CardFolds.clean("nope=1"));
+        assertEquals("description=0,life=1", CardFolds.clean("life=1,description=0,details=2"));
+        assertEquals("details=0", CardFolds.clean("details=1,details=0"));
+    }
+
+    @Test
     public void issueNotesStayOnUntilTheProjectTurnsThemOff() {
         assertEquals(Boolean.TRUE, ModuleSetup.read("").getIssueNotes());
         ModuleSetupDto off = new ModuleSetupDto();
