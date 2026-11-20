@@ -8776,6 +8776,9 @@ public class AssetServiceImpl implements AssetService {
                 builder.append(',');
             }
             builder.append(keys[i]);
+            if (GrantCaps.bounded(keys[i]) && "own".equals(writeReach(user, project, keys[i]))) {
+                builder.append(":own");
+            }
         }
         return builder.toString();
     }
@@ -9696,7 +9699,8 @@ public class AssetServiceImpl implements AssetService {
                     continue;
                 }
                 matched = true;
-                if (!"own".equals(storedReach(row, roles))) {
+                String reach = GrantCaps.actionReach(storedCaps(row, roles), cap, storedReach(row, roles));
+                if (!"own".equals(reach)) {
                     return "all";
                 }
             }

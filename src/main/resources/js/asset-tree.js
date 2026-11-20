@@ -447,6 +447,7 @@
         typeQuery: '',
         fieldQuery: '',
         grantQuery: '',
+        accessPick: '',
         picked: {},
         pickScope: '',
         bulkErrors: [],
@@ -966,9 +967,12 @@
         state.canScheme = present('canScheme') ? !!project.canScheme : !!(state.canView || state.canMap);
         state.canSchemeEdit = present('canSchemeEdit') ? !!project.canSchemeEdit : false;
         state.acts = {};
+        state.actReach = {};
         String(project && project.acts || '').split(',').forEach(function (item) {
-            var key = item.trim();
-            if (key) state.acts[key] = true;
+            var token = capToken(item);
+            if (!token.base) return;
+            state.acts[token.base] = true;
+            if (token.reach) state.actReach[token.base] = token.reach;
         });
         state.reach = project && project.reach === 'own' ? 'own' : 'all';
         if (state.acts.objCreate) state.canCreate = true;
@@ -997,30 +1001,51 @@
         return false;
     }
 
-    function ownLimited(asset) {
-        return state.reach === 'own' && asset && !ownsAsset(asset);
+    function ownLimited(asset, action) {
+        var key = action || (!asset || isFolder(asset) ? 'placeEdit' : 'objEdit');
+        var marked = false;
+        if (state.actReach) {
+            for (var name in state.actReach) {
+                if (Object.prototype.hasOwnProperty.call(state.actReach, name)) marked = true;
+            }
+        }
+        var reach = marked ? ((state.actReach && state.actReach[key]) || 'all') : state.reach;
+        if (reach !== 'own') return false;
+        return !!(asset && !ownsAsset(asset));
     }
 
     function mayEdit(asset) {
+        var action = !asset || isFolder(asset) ? 'placeEdit' : 'objEdit';
         var allowed = !asset ? !!(state.canPlaces || state.canObjects) : (isFolder(asset) ? !!state.canPlaces : !!state.canObjects);
-        if (!allowed || ownLimited(asset)) return false;
+        if (!allowed || ownLimited(asset, action)) return false;
         return true;
     }
 
     function mayRemove(asset) {
-        if (!state.canRemove || ownLimited(asset)) return false;
+        var action = asset && isFolder(asset) ? 'placeDel' : 'objRemove';
+        if (!state.canRemove || ownLimited(asset, action)) return false;
         return true;
     }
 
     function mayNote(asset) {
-        if (!state.canComment || ownLimited(asset)) return false;
+        if (!state.canComment || ownLimited(asset, 'note')) return false;
         return true;
+    }
+
+    function capToken(raw) {
+        var text = String(raw || '').trim();
+        var cut = text.indexOf(':');
+        var base = cut > 0 ? text.slice(0, cut) : text;
+        var reach = cut > 0 ? text.slice(cut + 1) : '';
+        return { base: base, reach: reach === 'own' || reach === 'all' ? reach : '' };
     }
 
     function grantCaps(grant) {
         if (grant && grant.caps) {
-            var listed = String(grant.caps).split(',').map(function (item) { return item.trim(); }).filter(function (item) {
-                return CAP_KEYS.indexOf(item) >= 0;
+            var listed = [];
+            String(grant.caps).split(',').forEach(function (item) {
+                var base = capToken(item).base;
+                if (CAP_KEYS.indexOf(base) >= 0 && listed.indexOf(base) < 0) listed.push(base);
             });
             function add(key) {
                 if (listed.indexOf(key) < 0) listed.push(key);
@@ -31108,111 +31133,217 @@
         });
     }
 
-    function renderRoleBlock() {
-        var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('roleSection')));
-        block.appendChild(el('p', 'asset-tree-hint', t('roleHint')));
-        (state.roles || []).forEach(function (role) {
-            if (!role || !role.name) return;
-            var row = el('div', 'asset-tree-grant');
-            var head = el('div', 'asset-tree-grant-head');
-            head.appendChild(el('strong', 'asset-tree-grant-title', role.name));
-            head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/roles?name=' + encodeURIComponent(role.name), null, function (status, payload) {
-                    if (status >= 200 && status < 300) {
-                        state.roles = (state.roles || []).filter(function (item) { return !item || item.name !== role.name; });
-                        (state.grants || []).forEach(function (grant) {
-                            if (grant && grant.roleName === role.name) grant.roleName = '';
-                        });
-                        renderFrame();
-                    } else notify((payload && payload.message) || t('errorTitle'));
-                });
-            }));
-            row.appendChild(head);
-            row.appendChild(reachField(role.reach, function (reach) {
-                postRole(role.name, capsJoined(grantCaps(role)), reach);
-            }));
-            row.appendChild(capGrid(grantCaps(role), function (key, checked) {
-                var chosen = {};
-                grantCaps(role).forEach(function (item) { chosen[item] = true; });
-                roleOn(chosen, key, checked);
-                var caps = capsJoined(CAP_KEYS.filter(function (item) { return chosen[item]; }));
-                if (!caps || caps === capsJoined(grantCaps(role))) {
-                    renderFrame();
-                    return;
-                }
-                postRole(role.name, caps, role.reach || 'all');
-            }));
-            block.appendChild(row);
+    var ACCESS_MATRIX = [
+        ['capGroupLook', [
+            ['view', false],
+            ['reports', false],
+            ['map', false],
+            ['scheme', false],
+            ['plan', false]
+        ]],
+        ['capGroupObjects', [
+            ['objCreate', true],
+            ['objEdit', true],
+            ['objMove', true],
+            ['objRemove', true],
+            ['note', true],
+            ['share', true],
+            ['life', true]
+        ]],
+        ['capGroupPlaces', [
+            ['placeAdd', true],
+            ['placeEdit', true],
+            ['placeDel', true]
+        ]],
+        ['capGroupCatalog', [
+            ['types', false],
+            ['status', false],
+            ['exchange', false],
+            ['portal', false]
+        ]],
+        ['capGroupModules', [
+            ['reportEdit', false],
+            ['schemeEdit', false],
+            ['planEdit', false]
+        ]],
+        ['capGroupManage', [
+            ['grants', false],
+            ['projectAdmin', false],
+            ['admin', false]
+        ]]
+    ];
+
+    function accessKeys() {
+        var keys = [];
+        ACCESS_MATRIX.forEach(function (group) {
+            group[1].forEach(function (row) {
+                if (keys.indexOf(row[0]) < 0) keys.push(row[0]);
+            });
         });
-        var form = el('form', 'asset-tree-grant asset-tree-grant-add');
-        var name = input('role-name', '', false);
-        name.placeholder = t('roleName');
-        name.maxLength = 80;
-        form.appendChild(field(t('roleName'), name, true));
-        var chosen = { view: true };
-        var reach = 'all';
-        var boxes = {};
-        function paint() {
-            CAP_KEYS.forEach(function (key) {
-                if (boxes[key]) boxes[key].checked = !!chosen[key];
+        return keys;
+    }
+
+    function territoryOf(key) {
+        var territory = false;
+        ACCESS_MATRIX.forEach(function (group) {
+            group[1].forEach(function (row) {
+                if (row[0] === key) territory = row[1];
+            });
+        });
+        return territory;
+    }
+
+    function reachMap(source) {
+        var explicit = {};
+        String(source && source.caps || '').split(',').forEach(function (item) {
+            var token = capToken(item);
+            if (token.base && token.reach) explicit[token.base] = token.reach;
+        });
+        var expanded = grantCaps(source || {});
+        var fallback = source && source.reach === 'own' ? 'own' : 'all';
+        var map = {};
+        accessKeys().forEach(function (key) {
+            if (key === 'admin' && !state.canAdmin && expanded.indexOf(key) < 0 && !explicit[key]) return;
+            if (explicit[key]) {
+                map[key] = territoryOf(key) ? explicit[key] : 'all';
+                return;
+            }
+            if (expanded.indexOf(key) < 0) {
+                map[key] = 'none';
+                return;
+            }
+            map[key] = territoryOf(key) ? fallback : 'all';
+        });
+        if (expanded.indexOf('view') >= 0 || map.view === 'all') {
+            ['reports', 'map', 'scheme', 'plan'].forEach(function (key) {
+                if (map[key] === 'none') map[key] = 'all';
             });
         }
-        form.appendChild(reachField('all', function (value) { reach = value; }));
-        var grid = el('div', 'asset-tree-cap-groups');
-        CAP_GROUPS.forEach(function (group) {
-            var part = el('div', 'asset-tree-cap-group');
-            part.appendChild(el('div', 'asset-tree-cap-group-title', t(group[0])));
-            group[1].forEach(function (key) {
-                if (key === 'admin' && !state.canAdmin) return;
-                var label = el('label', 'asset-tree-check');
-                label.title = capHint(key);
-                var box = document.createElement('input');
-                box.type = 'checkbox';
-                box.checked = key === 'view';
-                boxes[key] = box;
-                box.addEventListener('change', function () {
-                    roleOn(chosen, key, box.checked);
-                    paint();
-                });
-                label.appendChild(box);
-                label.appendChild(document.createTextNode(capLabel(key)));
-                part.appendChild(label);
-            });
-            grid.appendChild(part);
+        if (expanded.indexOf('types') >= 0 || map.types === 'all') {
+            if (map.status === 'none') map.status = 'all';
+            if (map.portal === 'none') map.portal = 'all';
+        }
+        return map;
+    }
+
+    function matrixCaps(map) {
+        var parts = [];
+        var anyOwn = false;
+        accessKeys().forEach(function (key) {
+            var value = map[key];
+            if (!value || value === 'none') return;
+            if (key === 'admin' && !state.canAdmin) return;
+            if (territoryOf(key)) {
+                var reach = value === 'own' ? 'own' : 'all';
+                parts.push(key + ':' + reach);
+                if (reach === 'own') anyOwn = true;
+            } else {
+                parts.push(key);
+            }
         });
-        form.appendChild(grid);
-        var error = el('div', 'asset-tree-form-error');
-        error.hidden = true;
-        form.appendChild(error);
-        form.appendChild(button(t('roleAdd'), 'asset-tree-btn primary', function () {
-            var title = name.value.trim();
-            var caps = capsJoined(CAP_KEYS.filter(function (key) { return chosen[key]; }));
-            if (!title) {
-                error.hidden = false;
-                error.textContent = t('roleName');
-                return;
-            }
-            if (!caps) {
-                error.hidden = false;
-                error.textContent = t('capRequired');
-                return;
-            }
-            error.hidden = true;
-            postRole(title, caps, reach);
-        }));
-        form.addEventListener('submit', function (event) { event.preventDefault(); });
-        block.appendChild(form);
-        return block;
+        return { caps: parts.join(','), reach: anyOwn ? 'own' : 'all' };
+    }
+
+    function accessSummary(source) {
+        var map = reachMap(source);
+        var count = 0;
+        var own = false;
+        var write = false;
+        accessKeys().forEach(function (key) {
+            if (!map[key] || map[key] === 'none') return;
+            count += 1;
+            if (map[key] === 'own') own = true;
+            if (territoryOf(key)) write = true;
+        });
+        if (!count) return t('accessSummaryEmpty');
+        if (!write && !own) return t('accessSummaryView');
+        if (own) return t('accessSummaryOwn', count);
+        return t('accessSummaryAll', count);
+    }
+
+    function presetMatrix(kind) {
+        var map = {};
+        accessKeys().forEach(function (key) { map[key] = 'none'; });
+        function on(keys, reach) {
+            keys.forEach(function (key) { map[key] = reach; });
+        }
+        if (kind === 'view') {
+            on(['view', 'reports', 'map', 'scheme', 'plan'], 'all');
+        } else if (kind === 'engineer') {
+            on(['view', 'reports', 'map', 'scheme', 'plan'], 'all');
+            on(['objCreate', 'objEdit', 'objMove', 'note', 'life', 'placeEdit'], 'own');
+        } else if (kind === 'lead') {
+            on(['view', 'reports', 'reportEdit', 'map', 'scheme', 'schemeEdit', 'plan', 'planEdit', 'portal', 'types', 'status', 'exchange', 'grants'], 'all');
+            on(['placeAdd', 'placeEdit', 'placeDel', 'objCreate', 'objEdit', 'objMove', 'objRemove', 'note', 'share', 'life'], 'all');
+        }
+        return map;
+    }
+
+    function paintMatrix(host, map) {
+        host.innerHTML = '';
+        if (map.view === 'all') {
+            ['reports', 'map', 'scheme', 'plan'].forEach(function (key) {
+                if (map[key] === 'none') map[key] = 'all';
+            });
+        }
+        if (map.types === 'all') {
+            if (map.status === 'none') map.status = 'all';
+            if (map.portal === 'none') map.portal = 'all';
+        }
+        ACCESS_MATRIX.forEach(function (group) {
+            var rows = group[1].filter(function (row) {
+                return row[0] !== 'admin' || state.canAdmin || map.admin === 'all';
+            });
+            if (!rows.length) return;
+            var block = el('div', 'asset-tree-access-family');
+            block.appendChild(el('div', 'asset-tree-access-family-title', t(group[0])));
+            rows.forEach(function (row) {
+                var key = row[0];
+                var line = el('div', 'asset-tree-access-row');
+                var name = el('span', 'asset-tree-access-name', capLabel(key));
+                name.title = capHint(key);
+                line.appendChild(name);
+                var choice = el('div', 'asset-tree-access-choice');
+                var options = row[1]
+                    ? [['none', 'reachNone'], ['own', 'reachOwnShort'], ['all', 'reachAllShort']]
+                    : [['none', 'reachNone'], ['all', 'reachYes']];
+                var current = map[key] === 'own' || map[key] === 'all' ? map[key] : 'none';
+                if (!row[1] && current === 'own') current = 'all';
+                options.forEach(function (pair) {
+                    var item = button(t(pair[1]), 'asset-tree-access-opt' + (current === pair[0] ? ' is-on' : ''), function () {
+                        map[key] = pair[0];
+                        if ((key === 'projectAdmin' || key === 'admin') && pair[0] === 'all') {
+                            accessKeys().forEach(function (other) { map[other] = 'all'; });
+                        } else if (pair[0] !== 'all') {
+                            map.projectAdmin = 'none';
+                            map.admin = 'none';
+                        }
+                        if (key === 'view' && pair[0] === 'all') {
+                            ['reports', 'map', 'scheme', 'plan'].forEach(function (itemKey) { map[itemKey] = 'all'; });
+                        }
+                        if (['reports', 'map', 'scheme', 'plan'].indexOf(key) >= 0 && pair[0] === 'none') map.view = 'none';
+                        if (key === 'types' && pair[0] === 'all') {
+                            map.status = 'all';
+                            map.portal = 'all';
+                        }
+                        if ((key === 'status' || key === 'portal') && pair[0] === 'none') map.types = 'none';
+                        paintMatrix(host, map);
+                    });
+                    choice.appendChild(item);
+                });
+                line.appendChild(choice);
+                block.appendChild(line);
+            });
+            host.appendChild(block);
+        });
     }
 
     function renderAccessSettings(panel) {
         var stack = el('div', 'asset-tree-settings-block asset-tree-project-stack asset-tree-access-stack');
         panel.appendChild(stack);
-        stack.appendChild(schemaSettings());
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
-        block.appendChild(el('p', 'asset-tree-hint', t('accessHint')));
+        block.appendChild(el('p', 'asset-tree-hint', t('roleHint')));
         if (state.grants === null || state.roles === null) {
             var waitGrants = state.grants === null;
             var waitRoles = state.roles === null;
@@ -31236,124 +31367,204 @@
             });
             return;
         }
-        stack.appendChild(renderRoleBlock());
-        var grantRows = [];
-        var grantList = el('div', 'asset-tree-grant-list');
-        var grantEmpty = el('p', 'asset-tree-schema-empty', t('schemaNoMatch'));
-        grantEmpty.hidden = true;
-        var grantSearch = schemaSearchInput(state.grantQuery, function () {
-            state.grantQuery = grantSearch.value;
-            applyListFilter(grantSearch.value, grantRows, grantEmpty);
+        if (!state.accessPick && (state.roles || []).length) state.accessPick = 'role:' + state.roles[0].name;
+        var board = el('div', 'asset-tree-access-board');
+        var list = el('div', 'asset-tree-access-list');
+        (state.roles || []).forEach(function (role) {
+            if (!role || !role.name) return;
+            var item = button('', 'asset-tree-access-item' + (state.accessPick === 'role:' + role.name ? ' is-on' : ''), function () {
+                state.accessPick = 'role:' + role.name;
+                renderFrame();
+            });
+            item.appendChild(el('strong', null, role.name));
+            item.appendChild(el('span', null, accessSummary(role)));
+            list.appendChild(item);
         });
-        block.appendChild(grantSearch);
-        if (!state.grants.length) {
-            block.appendChild(el('p', 'asset-tree-hint', t('accessEmpty')));
+        list.appendChild(button(t('accessNew'), 'asset-tree-btn' + (state.accessPick === 'new' ? ' primary' : ''), function () {
+            state.accessPick = 'new';
+            renderFrame();
+        }));
+        board.appendChild(list);
+        board.appendChild(renderAccessEditor());
+        block.appendChild(board);
+        stack.appendChild(block);
+        stack.appendChild(renderAccessPeople());
+        var schemas = el('details', 'asset-tree-access-schemas');
+        schemas.appendChild(el('summary', null, t('schemaTitle')));
+        schemas.appendChild(schemaSettings());
+        stack.appendChild(schemas);
+    }
+
+    function renderAccessEditor() {
+        var editor = el('div', 'asset-tree-access-editor');
+        var grant = pickedGrant();
+        if (state.accessPick === 'draft') {
+            editor.appendChild(el('h3', 'asset-tree-settings-title', t('roleCustom')));
+            editor.appendChild(el('p', 'asset-tree-hint', t('accessCustomHint', draftLabel())));
+            appendMatrixEditor(editor, presetMatrix('engineer'), function (packed) {
+                issueDraft(packed);
+            }, t('accessGive'));
+            return editor;
         }
-        state.grants.forEach(function (grant) {
-            var row = el('div', 'asset-tree-grant');
-            var label = grantLabel(grant);
-            row.setAttribute('data-name', [label, grant.username, grant.groupName, grant.userKey].filter(Boolean).join(' '));
-            var head = el('div', 'asset-tree-grant-head');
-            var title = el('span', 'asset-tree-grant-title');
-            title.appendChild(el('strong', null, label));
-            if (grant.userKey && grant.username && grant.username !== label) {
-                title.appendChild(el('span', null, grant.username));
-            }
-            head.appendChild(title);
-            head.appendChild(el('span', 'asset-tree-key', grant.userKey ? t('accessUser') : t('accessGroup')));
-            head.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-                var suffix = grant.userKey
-                    ? '?user=' + encodeURIComponent(grant.userKey)
-                    : '?group=' + encodeURIComponent(grant.groupName || '');
-                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/grants' + suffix, null, function (status, payload) {
-                    if (status >= 200 && status < 300) {
-                        state.grants = (state.grants || []).filter(function (item) {
-                            return grantIdentity(item) !== grantIdentity(grant);
-                        });
-                        renderFrame();
-                    } else {
-                        notify((payload && payload.message) || t('errorTitle'));
-                    }
-                });
-            }));
-            row.appendChild(head);
-            var roleLine = el('div', 'asset-tree-grant-role');
-            var rolePick = document.createElement('select');
-            var ownOption = document.createElement('option');
-            ownOption.value = '';
-            ownOption.textContent = t('roleCustom');
-            rolePick.appendChild(ownOption);
-            (state.roles || []).forEach(function (role) {
-                if (!role || !role.name) return;
-                var option = document.createElement('option');
-                option.value = role.name;
-                option.textContent = role.name;
-                rolePick.appendChild(option);
-            });
-            rolePick.value = grant.roleName || '';
-            rolePick.addEventListener('change', function () {
-                var picked = null;
-                (state.roles || []).forEach(function (role) {
-                    if (role && role.name === rolePick.value) picked = role;
-                });
-                postGrant(grant, picked ? (picked.caps || '') : capsJoined(grantCaps(grant)), null, {
+        if (grant) {
+            editor.appendChild(el('h3', 'asset-tree-settings-title', grantLabel(grant)));
+            editor.appendChild(el('p', 'asset-tree-hint', t('accessCustomHint', grantLabel(grant))));
+            appendMatrixEditor(editor, reachMap(grant), function (packed) {
+                postGrant(grant, packed.caps, null, {
                     typeScope: grant.typeScope || '',
                     fieldScope: grant.fieldScope || '',
                     schemaName: grant.schemaName || '',
-                    reach: picked ? (picked.reach || 'all') : (grant.reach || 'all'),
-                    roleName: rolePick.value
-                });
-            });
-            roleLine.appendChild(el('span', null, t('roleUse')));
-            roleLine.appendChild(rolePick);
-            if (grant.roleName) roleLine.appendChild(el('p', 'asset-tree-hint', t('roleShared', grant.roleName)));
-            row.appendChild(roleLine);
-            row.appendChild(reachField(grant.reach, function (reach) {
-                var caps = capsJoined(grantCaps(grant));
-                if (grant.roleName) {
-                    postRole(grant.roleName, caps, reach);
-                    return;
-                }
-                postGrant(grant, caps, null, {
-                    typeScope: grant.typeScope || '',
-                    fieldScope: grant.fieldScope || '',
-                    schemaName: grant.schemaName || '',
-                    reach: reach,
+                    reach: packed.reach,
                     roleName: ''
                 });
-            }));
-            row.appendChild(capGrid(grantCaps(grant), function (key, checked) {
-                var chosen = {};
-                grantCaps(grant).forEach(function (item) { chosen[item] = true; });
-                roleOn(chosen, key, checked);
-                var caps = capsJoined(CAP_KEYS.filter(function (item) { return chosen[item]; }));
-                if (!caps || caps === capsJoined(grantCaps(grant))) {
-                    renderFrame();
-                    return;
-                }
-                if (grant.roleName) {
-                    postRole(grant.roleName, caps, grant.reach || 'all');
-                    return;
-                }
-                postGrant(grant, caps, null, {
-                    typeScope: grant.typeScope || '',
-                    fieldScope: grant.fieldScope || '',
-                    schemaName: grant.schemaName || '',
-                    reach: grant.reach || 'all',
-                    roleName: ''
-                });
-            }));
-            row.appendChild(scopeDisclosure(grant, function (scope) {
+            }, t('accessSave'));
+            editor.appendChild(scopeDisclosure(grant, function (scope) {
                 scope.reach = grant.reach || 'all';
-                scope.roleName = grant.roleName || '';
-                postGrant(grant, capsJoined(grantCaps(grant)), null, scope);
+                scope.roleName = '';
+                postGrant(grant, grant.caps || '', null, scope);
             }));
-            grantList.appendChild(row);
-            grantRows.push(row);
+            return editor;
+        }
+        var role = pickedRole();
+        if (state.accessPick === 'new' || !role) {
+            editor.appendChild(el('h3', 'asset-tree-settings-title', t('accessNew')));
+            editor.appendChild(el('p', 'asset-tree-hint', t('matrixHint')));
+            var name = input('role-name', '', false);
+            name.placeholder = t('roleName');
+            name.maxLength = 80;
+            editor.appendChild(field(t('roleName'), name, true));
+            appendMatrixEditor(editor, presetMatrix('engineer'), function (packed) {
+                var title = name.value.trim();
+                if (!title) {
+                    notify(t('roleName'));
+                    return;
+                }
+                postRole(title, packed.caps, packed.reach, '');
+                state.accessPick = 'role:' + title;
+            }, t('roleAdd'));
+            return editor;
+        }
+        editor.appendChild(el('h3', 'asset-tree-settings-title', role.name));
+        editor.appendChild(el('p', 'asset-tree-hint', t('matrixHint')));
+        var rename = input('role-name', role.name, false);
+        rename.maxLength = 80;
+        editor.appendChild(field(t('roleName'), rename, true));
+        appendMatrixEditor(editor, reachMap(role), function (packed) {
+            var title = rename.value.trim();
+            if (!title) {
+                notify(t('roleName'));
+                return;
+            }
+            state.accessPick = 'role:' + title;
+            postRole(title, packed.caps, packed.reach, role.name);
+        }, t('accessSave'));
+        editor.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
+            ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/roles?name=' + encodeURIComponent(role.name), null, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    state.roles = (state.roles || []).filter(function (item) { return !item || item.name !== role.name; });
+                    (state.grants || []).forEach(function (item) {
+                        if (item && item.roleName === role.name) item.roleName = '';
+                    });
+                    state.accessPick = '';
+                    renderFrame();
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        return editor;
+    }
+
+    function appendMatrixEditor(editor, map, onSave, saveLabel) {
+        var presets = el('div', 'asset-tree-cap-presets');
+        [['view', 'accessPresetView'], ['engineer', 'accessPresetEngineer'], ['lead', 'accessPresetLead'], ['clear', 'accessPresetClear']].forEach(function (pair) {
+            presets.appendChild(button(t(pair[1]), 'asset-tree-btn', function () {
+                var next = pair[0] === 'clear' ? presetMatrix('clear') : presetMatrix(pair[0]);
+                accessKeys().forEach(function (key) { map[key] = next[key] || 'none'; });
+                paintMatrix(host, map);
+            }));
         });
-        grantList.appendChild(grantEmpty);
-        applyListFilter(state.grantQuery, grantRows, grantEmpty);
-        var form = el('form', 'asset-tree-grant asset-tree-grant-add');
+        editor.appendChild(presets);
+        var host = el('div', 'asset-tree-access-matrix');
+        paintMatrix(host, map);
+        editor.appendChild(host);
+        var error = el('div', 'asset-tree-form-error');
+        error.hidden = true;
+        editor.appendChild(error);
+        editor.appendChild(button(saveLabel, 'asset-tree-btn primary', function () {
+            var packed = matrixCaps(map);
+            if (!packed.caps) {
+                error.hidden = false;
+                error.textContent = t('capRequired');
+                return;
+            }
+            error.hidden = true;
+            onSave(packed);
+        }));
+    }
+
+    function pickedRole() {
+        if (!state.accessPick || state.accessPick.indexOf('role:') !== 0) return null;
+        var name = state.accessPick.slice(5);
+        var found = null;
+        (state.roles || []).forEach(function (role) {
+            if (role && role.name === name) found = role;
+        });
+        return found;
+    }
+
+    function pickedGrant() {
+        if (!state.accessPick || state.accessPick.indexOf('grant:') !== 0) return null;
+        var id = state.accessPick.slice(6);
+        var found = null;
+        (state.grants || []).forEach(function (grant) {
+            if (grantIdentity(grant) === id) found = grant;
+        });
+        return found;
+    }
+
+    function draftLabel() {
+        var draft = state.accessDraft || {};
+        return draft.display || draft.text || t('accessUser');
+    }
+
+    function issueDraft(packed) {
+        var draft = state.accessDraft || {};
+        var scope = draft.scope || { typeScope: '', fieldScope: '', schemaName: '' };
+        if (draft.mode === 'user') {
+            if (!draft.userKey) {
+                notify(t('userSearch'));
+                return;
+            }
+            state.accessPick = 'grant:user:' + draft.userKey;
+            postGrant({
+                userKey: draft.userKey,
+                typeScope: scope.typeScope,
+                fieldScope: scope.fieldScope,
+                schemaName: scope.schemaName,
+                reach: packed.reach,
+                roleName: ''
+            }, packed.caps, null);
+            return;
+        }
+        if (!draft.text) {
+            notify(t('groupSearch'));
+            return;
+        }
+        state.accessPick = 'grant:group:' + draft.text;
+        postGrant({
+            groupName: draft.text,
+            typeScope: scope.typeScope,
+            fieldScope: scope.fieldScope,
+            schemaName: scope.schemaName,
+            reach: packed.reach,
+            roleName: ''
+        }, packed.caps, null);
+    }
+
+    function renderAccessPeople() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessPeople')));
+        card.appendChild(el('p', 'asset-tree-hint', t('accessPeopleHint')));
+        var form = el('form', 'asset-tree-access-give');
         var mode = 'group';
         var pickedUser = null;
         var kind = el('div', 'asset-tree-grant-kind');
@@ -31369,15 +31580,6 @@
         form.appendChild(principalField);
         var suggest = el('div', 'asset-tree-suggest');
         form.appendChild(suggest);
-        var chosen = { view: true };
-        var grantReach = 'all';
-        var grantRole = '';
-        var boxes = {};
-        function paintChosen() {
-            CAP_KEYS.forEach(function (key) {
-                if (boxes[key]) boxes[key].checked = !!chosen[key];
-            });
-        }
         var rolePick = document.createElement('select');
         var customOption = document.createElement('option');
         customOption.value = '';
@@ -31390,55 +31592,11 @@
             option.textContent = role.name;
             rolePick.appendChild(option);
         });
+        if ((state.roles || []).length) rolePick.value = state.roles[0].name;
         var roleField = el('label', 'asset-tree-field asset-tree-reach');
         roleField.appendChild(el('span', null, t('roleUse')));
         roleField.appendChild(rolePick);
         form.appendChild(roleField);
-        rolePick.addEventListener('change', function () {
-            grantRole = rolePick.value;
-            var picked = null;
-            (state.roles || []).forEach(function (role) {
-                if (role && role.name === grantRole) picked = role;
-            });
-            if (!picked) return;
-            chosen = {};
-            grantCaps(picked).forEach(function (key) { chosen[key] = true; });
-            grantReach = picked.reach === 'own' ? 'own' : 'all';
-            if (reachBox) reachBox.value = grantReach;
-            paintChosen();
-        });
-        var reachBox = null;
-        form.appendChild(reachField('all', function (value) { grantReach = value; }));
-        reachBox = form.querySelector('.asset-tree-reach select');
-        var grid = el('div', 'asset-tree-cap-groups');
-        CAP_GROUPS.forEach(function (group) {
-            var block = el('div', 'asset-tree-cap-group');
-            block.appendChild(el('div', 'asset-tree-cap-group-title', t(group[0])));
-            group[1].forEach(function (key) {
-                if (key === 'admin' && !state.canAdmin) return;
-                var label = el('label', 'asset-tree-check');
-                label.title = capHint(key);
-                var box = document.createElement('input');
-                box.type = 'checkbox';
-                box.checked = key === 'view';
-                boxes[key] = box;
-                box.addEventListener('change', function () {
-                    roleOn(chosen, key, box.checked);
-                    paintChosen();
-                });
-                label.appendChild(box);
-                label.appendChild(document.createTextNode(capLabel(key)));
-                block.appendChild(label);
-            });
-            grid.appendChild(block);
-        });
-        form.appendChild(grid);
-        var scopeDraft = { typeScope: '', fieldScope: '', schemaName: '' };
-        form.appendChild(scopeDisclosure(scopeDraft, function (scope) {
-            scopeDraft.typeScope = scope.typeScope;
-            scopeDraft.fieldScope = scope.fieldScope;
-            scopeDraft.schemaName = scope.schemaName;
-        }));
         var error = el('div', 'asset-tree-form-error');
         error.hidden = true;
         form.appendChild(error);
@@ -31474,31 +31632,34 @@
                 if (mode !== 'group' || principalInput.value.trim() !== query) return;
                 suggest.innerHTML = '';
                 (payload || []).forEach(function (item) {
-                    var name = typeof item === 'string' ? item : (item.groupName || item.name || '');
-                    if (!name) return;
-                    suggest.appendChild(button(name, 'asset-tree-btn', function () {
-                        principalInput.value = name;
+                    var groupName = typeof item === 'string' ? item : (item.groupName || item.name || '');
+                    if (!groupName) return;
+                    suggest.appendChild(button(groupName, 'asset-tree-btn', function () {
+                        principalInput.value = groupName;
                         suggest.innerHTML = '';
                     }));
                 });
             });
         });
-        var addButton = button(t('accessAdd'), 'asset-tree-btn primary', function () {
-            var caps = capsJoined(CAP_KEYS.filter(function (key) { return chosen[key]; }));
+        form.appendChild(button(t('accessGive'), 'asset-tree-btn primary', function () {
+            var role = null;
+            (state.roles || []).forEach(function (item) {
+                if (item && item.name === rolePick.value) role = item;
+            });
             if (mode === 'user') {
-                var userKey = pickedUser && pickedUser.userKey ? pickedUser.userKey : principalInput.value.trim();
+                var userKey = pickedUser && pickedUser.userKey ? pickedUser.userKey : '';
                 if (!userKey) {
                     error.hidden = false;
                     error.textContent = t('userSearch');
                     return;
                 }
-                if (!caps) {
-                    error.hidden = false;
-                    error.textContent = t('capRequired');
+                if (!role) {
+                    state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '' };
+                    state.accessPick = 'draft';
+                    renderFrame();
                     return;
                 }
-                error.hidden = true;
-                postGrant({ userKey: userKey, typeScope: scopeDraft.typeScope, fieldScope: scopeDraft.fieldScope, schemaName: scopeDraft.schemaName, reach: grantReach, roleName: grantRole }, caps, error);
+                postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
                 return;
             }
             var groupName = principalInput.value.trim();
@@ -31507,20 +31668,19 @@
                 error.textContent = t('groupSearch');
                 return;
             }
-            if (!caps) {
-                error.hidden = false;
-                error.textContent = t('capRequired');
+            if (!role) {
+                state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '' };
+                state.accessPick = 'draft';
+                renderFrame();
                 return;
             }
-            error.hidden = true;
-            postGrant({ groupName: groupName, typeScope: scopeDraft.typeScope, fieldScope: scopeDraft.fieldScope, schemaName: scopeDraft.schemaName, reach: grantReach, roleName: grantRole }, caps, error);
-        });
+            postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
+        }));
         function paintMode() {
             groupMode.className = 'asset-tree-btn' + (mode === 'group' ? ' primary' : '');
             userMode.className = 'asset-tree-btn' + (mode === 'user' ? ' primary' : '');
             principalInput.placeholder = mode === 'user' ? t('userSearch') : t('groupSearch');
             if (principalLabel) principalLabel.textContent = mode === 'user' ? t('accessUser') : t('accessGroup');
-            addButton.textContent = mode === 'user' ? t('accessAddUser') : t('accessAdd');
         }
         function setMode(next) {
             if (mode === next) return;
@@ -31532,14 +31692,85 @@
             paintMode();
         }
         paintMode();
-        form.appendChild(addButton);
-        form.addEventListener('submit', function (event) {
-            event.preventDefault();
+        form.addEventListener('submit', function (event) { event.preventDefault(); });
+        card.appendChild(form);
+        if (!(state.grants || []).length) card.appendChild(el('p', 'asset-tree-hint', t('accessEmpty')));
+        var rows = [];
+        var list = el('div', 'asset-tree-access-people');
+        var empty = el('p', 'asset-tree-schema-empty', t('schemaNoMatch'));
+        empty.hidden = true;
+        var search = schemaSearchInput(state.grantQuery, function () {
+            state.grantQuery = search.value;
+            applyListFilter(search.value, rows, empty);
         });
-        block.appendChild(form);
-        if (state.grants.length) block.appendChild(grantList);
-        stack.appendChild(block);
+        if ((state.grants || []).length) card.appendChild(search);
+        (state.grants || []).forEach(function (grant) {
+            var row = el('div', 'asset-tree-access-person');
+            var label = grantLabel(grant);
+            row.setAttribute('data-name', [label, grant.username, grant.groupName, grant.userKey, grant.roleName].filter(Boolean).join(' '));
+            var title = el('div', 'asset-tree-access-person-title');
+            title.appendChild(el('strong', null, label));
+            title.appendChild(el('span', null, grant.userKey ? t('accessUser') : t('accessGroup')));
+            row.appendChild(title);
+            var summary = el('div', 'asset-tree-access-person-summary');
+            summary.appendChild(el('span', null, grant.roleName ? grant.roleName : t('roleCustom')));
+            summary.appendChild(el('span', null, accessSummary(grant.roleName ? roleByName(grant.roleName) || grant : grant)));
+            row.appendChild(summary);
+            var actions = el('div', 'asset-tree-access-person-actions');
+            if (grant.roleName) {
+                actions.appendChild(button(t('accessOpenGroup'), 'asset-tree-btn', function () {
+                    state.accessPick = 'role:' + grant.roleName;
+                    renderFrame();
+                }));
+                actions.appendChild(button(t('accessDetach'), 'asset-tree-btn', function () {
+                    var source = roleByName(grant.roleName) || grant;
+                    postGrant(grant, source.caps || grant.caps || '', null, {
+                        typeScope: grant.typeScope || '',
+                        fieldScope: grant.fieldScope || '',
+                        schemaName: grant.schemaName || '',
+                        reach: source.reach || grant.reach || 'all',
+                        roleName: ''
+                    });
+                    state.accessPick = 'grant:' + grantIdentity(grant);
+                }));
+            } else {
+                actions.appendChild(button(t('accessEditCustom'), 'asset-tree-btn', function () {
+                    state.accessPick = 'grant:' + grantIdentity(grant);
+                    renderFrame();
+                }));
+            }
+            actions.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
+                var suffix = grant.userKey
+                    ? '?user=' + encodeURIComponent(grant.userKey)
+                    : '?group=' + encodeURIComponent(grant.groupName || '');
+                ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/grants' + suffix, null, function (status, payload) {
+                    if (status >= 200 && status < 300) {
+                        state.grants = (state.grants || []).filter(function (item) {
+                            return grantIdentity(item) !== grantIdentity(grant);
+                        });
+                        if (state.accessPick === 'grant:' + grantIdentity(grant)) state.accessPick = '';
+                        renderFrame();
+                    } else notify((payload && payload.message) || t('errorTitle'));
+                });
+            }));
+            row.appendChild(actions);
+            list.appendChild(row);
+            rows.push(row);
+        });
+        list.appendChild(empty);
+        applyListFilter(state.grantQuery, rows, empty);
+        if ((state.grants || []).length) card.appendChild(list);
+        return card;
     }
+
+    function roleByName(name) {
+        var found = null;
+        (state.roles || []).forEach(function (role) {
+            if (role && role.name === name) found = role;
+        });
+        return found;
+    }
+
 
     function renderReport() {
         var panel = el('section', 'asset-tree-report');
