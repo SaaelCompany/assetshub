@@ -608,6 +608,10 @@
         xhr.setRequestHeader('Content-Type', 'application/json');
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        if (method === 'GET') {
+            xhr.setRequestHeader('Cache-Control', 'no-cache');
+            xhr.setRequestHeader('Pragma', 'no-cache');
+        }
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) {
                 return;
@@ -2396,6 +2400,7 @@
 
     function setBusy(busy) {
         state.busy = busy;
+        state.busySince = busy ? Date.now() : 0;
         var buttons = app.querySelectorAll('button');
         for (var i = 0; i < buttons.length; i++) {
             if (buttons[i].getAttribute('data-keep') === '1') {
@@ -12767,29 +12772,104 @@
         return String(mark || '').split('.')[index] || '';
     }
 
+    /* A stuck busy flag after a failed request must not stop sync for the whole session. */
+    function syncHeld() {
+        if (state.busy && Date.now() - (state.busySince || 0) < 30000) return true;
+        if (state.dirty || state.loading || document.hidden) return true;
+        if (document.querySelector('.asset-tree-backdrop')) return true;
+        return typingInside(document.getElementById('asset-tree-app'));
+    }
+
+    function typingInside(root) {
+        var active = document.activeElement;
+        if (!root || !active || !root.contains(active)) return false;
+        var tag = String(active.tagName || '').toLowerCase();
+        if (tag === 'textarea' || tag === 'select' || active.isContentEditable) return true;
+        return tag === 'input' && !/^(button|checkbox|radio|submit|reset|file|range|color)$/i.test(active.type || '');
+    }
+
+    function openCardId() {
+        if (state.view !== 'all' || !state.selectedId || !state.detail || state.detail.id !== state.selectedId) return 0;
+        return state.selectedId;
+    }
+
+    function cardHeld(detail) {
+        if (state.dirty || state.editing || state.busy) return true;
+        if (document.querySelector('.asset-tree-inline.is-editing')) return true;
+        if (typingInside(detail)) return true;
+        var drafts = detail ? detail.querySelectorAll('textarea') : [];
+        for (var i = 0; i < drafts.length; i++) {
+            if (!drafts[i].readOnly && !drafts[i].disabled && drafts[i].value.trim()) return true;
+        }
+        return false;
+    }
+
+    /** Reloads the open card and repaints it only when the server copy differs. */
+    function refreshOpenCard() {
+        var id = openCardId();
+        if (!id) return;
+        var fetchId = state.assetFetch || 0;
+        ajax('GET', '/assets/' + id, null, function (status, payload) {
+            if (fetchId !== (state.assetFetch || 0) || openCardId() !== id) return;
+            var detail = document.getElementById('asset-tree-detail');
+            if (cardHeld(detail)) return;
+            if (status === 404) {
+                state.selectedId = null;
+                state.detail = null;
+                state.pane = 'list';
+                renderFrame();
+                return;
+            }
+            if (status !== 200 || !payload) return;
+            if (JSON.stringify(payload) === JSON.stringify(state.detail)) return;
+            stampCardImage(payload);
+            if (state.pane === 'card') showDetail(payload, false);
+            else {
+                state.detail = payload;
+                replaceDetail();
+            }
+        });
+    }
+
     function pullTreeStamp() {
-        if (!state.projectKey || state.busy || state.dirty || state.loading || document.hidden) return;
+        if (!state.projectKey || syncHeld()) return;
         if (pullTreeStamp.waiting) return;
-        if (document.querySelector('.asset-tree-backdrop')) return;
         var key = state.projectKey;
+        var open = openCardId();
         pullTreeStamp.waiting = true;
-        ajax('GET', '/projects/' + encodeURIComponent(key) + '/tree-stamp', null, function (status, payload) {
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/tree-stamp' + (open ? '?open=' + open : ''), null, function (status, payload) {
             pullTreeStamp.waiting = false;
             if (status !== 200 || !payload || key !== state.projectKey) return;
-            var mark = payload.message == null ? '' : String(payload.message);
+            var full = payload.message == null ? '' : String(payload.message);
+            var cut = full.indexOf('~');
+            var mark = cut >= 0 ? full.slice(0, cut) : full;
+            var card = cut >= 0 ? open + ':' + full.slice(cut + 1) : '';
             if (!mark) return;
             if (!state.treeMark) {
                 state.treeMark = mark;
+                state.cardMark = card;
                 return;
             }
-            if (mark === state.treeMark) return;
-            if (state.busy || state.dirty || state.loading) return;
-            if (document.querySelector('.asset-tree-backdrop')) return;
-            var objectsMoved = markPart(mark, 0) !== markPart(state.treeMark, 0);
+            if (syncHeld()) return;
+            var cardMoved = !!card && card !== state.cardMark;
+            var knownCard = !!state.cardMark && state.cardMark.split(':')[0] === String(open);
+            state.cardMark = card;
+            if (mark === state.treeMark) {
+                if (cardMoved && knownCard) refreshOpenCard();
+                return;
+            }
+            var plansMoved = markPart(mark, 2) !== markPart(state.treeMark, 2);
+            var objectsMoved = plansMoved || markPart(mark, 0) !== markPart(state.treeMark, 0);
             var repaint = function () {
+                if (plansMoved && state.view === 'schedules') loadSchedules(true);
                 if (state.view === 'all') {
+                    if (cardHeld(document.getElementById('asset-tree-detail'))) {
+                        renderNodes();
+                        return;
+                    }
                     renderFrame();
                     if (objectsMoved && state.canRemove) loadTrash();
+                    refreshOpenCard();
                 } else if (state.view === 'mine') {
                     if (objectsMoved) loadMine();
                     else renderFrame();
@@ -17108,13 +17188,14 @@
         return head;
     }
 
-    function loadSchedules() {
+    function loadSchedules(quiet) {
         if (state.scheduleLoading) return;
         state.scheduleLoading = true;
         var token = ++state.scheduleToken;
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schedule', null, function (status, payload) {
             if (token !== state.scheduleToken) return;
             state.scheduleLoading = false;
+            if (quiet && status !== 200 && state.scheduleRows) return;
             if (status === 200 && Object.prototype.toString.call(payload) === '[object Array]') {
                 state.scheduleRows = payload;
                 state.scheduleError = '';

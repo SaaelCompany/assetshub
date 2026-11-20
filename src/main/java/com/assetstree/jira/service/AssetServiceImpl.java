@@ -762,6 +762,58 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
+    /**
+     * Notes, files, links, plans and the life card change without touching the
+     * object row, so an open card is compared by its own small fingerprint.
+     */
+    @Override
+    public String cardMark(ApplicationUser user, String projectKey, final int assetId) {
+        final Project project = requireReadableProject(user, projectKey);
+        final String key = project.getKey();
+        return ao().executeInTransaction(new TransactionCallback<String>() {
+            @Override
+            public String doInTransaction() {
+                AssetEntity asset = ao().get(AssetEntity.class, assetId);
+                if (asset == null || !ProjectKeys.same(asset.getProjectKey(), key)) {
+                    return "0";
+                }
+                Integer id = Integer.valueOf(assetId);
+                long mark = asset.getUpdated() == null ? 0L : asset.getUpdated().getTime();
+                mark = mark * 31L + (asset.getDeletedAt() == null ? 0 : 1);
+                mark = mark * 31L + rowsMark(AssetActivityEntity.class, "ASSET_ID = ?", id);
+                mark = mark * 31L + rowsMark(AssetCommentEntity.class, "ASSET_ID = ?", id);
+                mark = mark * 31L + rowsMark(AssetFileEntity.class, "ASSET_ID = ?", id);
+                mark = mark * 31L + rowsMark(AssetShareEntity.class, "ASSET_ID = ?", id);
+                mark = mark * 31L + rowsMark(AssetIssueLinkEntity.class, "ASSET_ID = ?", id);
+                mark = mark * 31L + rowsMark(AssetPeerEntity.class, "LOW_ID = ? OR HIGH_ID = ?", id, id);
+                mark = mark * 31L + rowsMark(AssetLinkEntity.class, "FROM_ID = ? OR TO_ID = ?", id, id);
+                for (ServicePlanEntity plan : ao().find(ServicePlanEntity.class, Query.select().where("ASSET_ID = ?", id))) {
+                    mark += spread(Arrays.asList(Integer.valueOf(plan.getID()), plan.getName(), plan.getLastDone(),
+                            String.valueOf(plan.getEveryCount()), plan.getEveryUnit(), plan.getStatusKey(), plan.getKind(),
+                            plan.getAssigneeKey(), plan.getNote(), String.valueOf(plan.getStartTime()), String.valueOf(plan.getEndTime()),
+                            String.valueOf(plan.getCompletedOn()), String.valueOf(plan.getAppliedFor())).hashCode());
+                }
+                for (LifecycleEntity life : ao().find(LifecycleEntity.class, Query.select().where("ASSET_ID = ?", id))) {
+                    mark += spread(Arrays.asList(String.valueOf(life.getPurchased()), life.getSupplier(), String.valueOf(life.getPriceMinor()),
+                            String.valueOf(life.getWarrantyUntil()), String.valueOf(life.getLifeMonths()), life.getWriteoffState(),
+                            life.getWriteoffReason(), life.getDocument(), String.valueOf(life.getCommissioned()),
+                            String.valueOf(life.getReplaceOn()), life.getContractor(), life.getContractNo(),
+                            String.valueOf(life.getContractFrom()), String.valueOf(life.getContractUntil())).hashCode());
+                }
+                for (TniWatchEntity watch : ao().find(TniWatchEntity.class, Query.select().where("ASSET_ID = ?", id))) {
+                    mark = mark * 31L + watch.getUp() * 7L + watch.getExempt();
+                }
+                return Long.toString(mark, 36);
+            }
+        });
+    }
+
+    private <T extends net.java.ao.Entity> long rowsMark(Class<T> type, String where, Object... args) {
+        long count = ao().count(type, Query.select().where(where, args));
+        T[] top = ao().find(type, Query.select("ID").where(where, args).order("ID DESC").limit(1));
+        return count * 1000003L + (top != null && top.length > 0 ? top[0].getID() : 0);
+    }
+
     @Override
     public AssetListDto catalog(ApplicationUser user, String projectKey) {
         Project project = requireReadableProject(user, projectKey);
@@ -788,11 +840,11 @@ public class AssetServiceImpl implements AssetService {
     }
 
     /**
-     * Two parts joined by a dot: objects, then types, fields and statuses.
-     * Each part reads a few small rows, never the whole tree.
+     * Three parts joined by dots: objects, then types, fields and statuses,
+     * then service plans. None of them reads the whole tree.
      */
     private String freshTreeMark(String projectKey) {
-        String mark = assetMark(projectKey) + "." + catalogMark(projectKey);
+        String mark = assetMark(projectKey) + "." + catalogMark(projectKey) + "." + planMark(projectKey);
         TREE_MARKS.put(projectKey, new Object[] { Long.valueOf(System.currentTimeMillis()), mark });
         return mark;
     }
@@ -836,6 +888,18 @@ public class AssetServiceImpl implements AssetService {
         for (ProjectStatusEntity row : projectStatuses(projectKey)) {
             mark += spread(Arrays.asList(row.getStatusKey(), row.getLabel(), row.getCategory(),
                     Integer.valueOf(row.getSortOrder()), Integer.valueOf(row.getSummaryMode())).hashCode());
+        }
+        return Long.toString(mark, 36);
+    }
+
+    private String planMark(String projectKey) {
+        long mark = 0L;
+        for (ServicePlanEntity plan : ao().find(ServicePlanEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey))) {
+            mark += spread(Arrays.asList(Integer.valueOf(plan.getID()), Integer.valueOf(plan.getAssetId()), plan.getName(),
+                    plan.getLastDone(), String.valueOf(plan.getEveryCount()), plan.getEveryUnit(), plan.getStatusKey(),
+                    plan.getKind(), plan.getAssigneeKey(), plan.getNote(), String.valueOf(plan.getStartTime()),
+                    String.valueOf(plan.getEndTime()), String.valueOf(plan.getCompletedOn()),
+                    String.valueOf(plan.getAppliedFor())).hashCode());
         }
         return Long.toString(mark, 36);
     }
