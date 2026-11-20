@@ -61,6 +61,9 @@ public final class ModuleSetup {
         setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
         setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
         setup.setPhoto(Boolean.valueOf("1".equals(values.get("photo"))));
+        if (values.containsKey("copen")) {
+            setup.setCardOpen(cardOpen(values.get("copen")));
+        }
         setup.setIssueNotes(Boolean.valueOf(!"0".equals(values.get("inote"))));
         setup.setTniKeep(Integer.valueOf(TniPolicy.keepDays(number(values.get("tkeep")))));
         setup.setTniProbeDays(Integer.valueOf(TniPolicy.probeDays(number(values.get("tdays")))));
@@ -121,6 +124,10 @@ public final class ModuleSetup {
         append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
         append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
         append(stored, "photo", Boolean.TRUE.equals(value.getPhoto()) ? "1" : "0");
+        String blocks = cardOpen(value.getCardOpen());
+        if (blocks != null) {
+            append(stored, "copen", blocks);
+        }
         append(stored, "inote", Boolean.FALSE.equals(value.getIssueNotes()) ? "0" : "1");
         append(stored, "tkeep", String.valueOf(TniPolicy.keepDays(value.getTniKeep() == null ? 0 : value.getTniKeep().intValue())));
         append(stored, "tdays", String.valueOf(TniPolicy.probeDays(value.getTniProbeDays() == null ? 0 : value.getTniProbeDays().intValue())));
@@ -137,6 +144,36 @@ public final class ModuleSetup {
         append(stored, "tping", on(value.getTniPing()));
         append(stored, "tsite", TniSites.store(value.getTniSites()));
         return stored.toString();
+    }
+
+    private static final List<String> CARD_BLOCKS = Arrays.asList(
+            "details", "description", "service", "life", "issues", "files", "activity",
+            "people", "links", "dates", "schemes", "inside", "types");
+
+    /** Empty keeps the usual card. "-" collapses every block. Other values are a comma list. */
+    static String cardOpen(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = raw.trim().toLowerCase(Locale.ROOT);
+        if (text.isEmpty() || "*".equals(text)) {
+            return null;
+        }
+        if ("-".equals(text)) {
+            return "-";
+        }
+        StringBuilder kept = new StringBuilder();
+        for (String part : text.split(",")) {
+            String token = part == null ? "" : part.trim();
+            if (!CARD_BLOCKS.contains(token) || containsToken(kept, token)) {
+                continue;
+            }
+            if (kept.length() > 0) {
+                kept.append(',');
+            }
+            kept.append(token);
+        }
+        return kept.length() == 0 ? "-" : kept.toString();
     }
 
     private static final List<String> PORTAL_FIELDS = Arrays.asList(
@@ -385,6 +422,7 @@ public final class ModuleSetup {
         merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
         merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
         merged.setPhoto(incoming.getPhoto() != null ? incoming.getPhoto() : base.getPhoto());
+        merged.setCardOpen(incoming.getCardOpen() != null ? cardOpen(incoming.getCardOpen()) : base.getCardOpen());
         merged.setIssueNotes(incoming.getIssueNotes() != null ? incoming.getIssueNotes() : base.getIssueNotes());
         merged.setTniKeep(incoming.getTniKeep() != null ? incoming.getTniKeep() : base.getTniKeep());
         merged.setTniProbeDays(incoming.getTniProbeDays() != null ? incoming.getTniProbeDays() : base.getTniProbeDays());

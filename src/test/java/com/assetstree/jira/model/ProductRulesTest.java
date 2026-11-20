@@ -121,6 +121,25 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void cardBlocksStayWithTheProject() {
+        assertEquals(null, ModuleSetup.read("").getCardOpen());
+        ModuleSetupDto open = new ModuleSetupDto();
+        open.setCardOpen("details, activity, nope");
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(open));
+        assertEquals("details,activity", read.getCardOpen());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setPhoto(Boolean.TRUE);
+        ModuleSetupDto merged = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(read, patch)));
+        assertEquals("details,activity", merged.getCardOpen());
+        assertEquals(Boolean.TRUE, merged.getPhoto());
+        ModuleSetupDto none = new ModuleSetupDto();
+        none.setCardOpen("-");
+        ModuleSetupDto collapsed = ModuleSetup.read(ModuleSetup.write(ModuleSetup.merge(merged, none)));
+        assertEquals("-", collapsed.getCardOpen());
+        assertEquals(Boolean.TRUE, collapsed.getPhoto());
+    }
+
+    @Test
     public void issueNotesStayOnUntilTheProjectTurnsThemOff() {
         assertEquals(Boolean.TRUE, ModuleSetup.read("").getIssueNotes());
         ModuleSetupDto off = new ModuleSetupDto();

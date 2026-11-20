@@ -1213,6 +1213,8 @@ public final class UiCatalog {
             "photoTitle",
             "photoHint",
             "photoShow",
+            "cardOpenTitle",
+            "cardOpenHint",
             "photoAdd",
             "photoCropTitle",
             "photoCropHint",
