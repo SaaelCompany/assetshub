@@ -88,7 +88,6 @@
                     init = init ? init : {};
                     var headers = new window.Headers(init.headers || (input && input.headers) || undefined);
                     headers.set('X-Asset-Tree-Tni', payload);
-                    init = init;
                     var next = {};
                     for (var key in init) {
                         if (Object.prototype.hasOwnProperty.call(init, key)) next[key] = init[key];

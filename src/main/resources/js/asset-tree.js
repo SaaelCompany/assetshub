@@ -1326,33 +1326,6 @@
         return wrap;
     }
 
-    function reachField(value, onChange) {
-        var field = el('label', 'asset-tree-field asset-tree-reach');
-        field.appendChild(el('span', null, t('reachLabel')));
-        var select = document.createElement('select');
-        [['all', 'reachAll'], ['own', 'reachOwn']].forEach(function (pair) {
-            var option = document.createElement('option');
-            option.value = pair[0];
-            option.textContent = t(pair[1]);
-            select.appendChild(option);
-        });
-        select.value = value === 'own' ? 'own' : 'all';
-        select.addEventListener('change', function () { onChange(select.value); });
-        field.appendChild(select);
-        field.appendChild(el('p', 'asset-tree-hint', t('reachHint')));
-        return field;
-    }
-
-    function capPresets(onPick) {
-        var row = el('div', 'asset-tree-cap-presets');
-        [['view', 'capPresetView'], ['tree', 'capPresetTree'], ['all', 'capPresetAll']].forEach(function (pair) {
-            row.appendChild(button(t(pair[1]), 'asset-tree-btn', function () {
-                onPick(presetCaps(pair[0]));
-            }));
-        });
-        return row;
-    }
-
     function currentProject() {
         for (var i = 0; i < state.projects.length; i++) {
             if (state.projects[i].key === state.projectKey) return state.projects[i];
@@ -11709,6 +11682,14 @@
                 state.expanded[payload.id] = true;
                 state.pane = place ? 'list' : 'card';
                 assetsChanged();
+                if (state.treeReady && payload.id && typeByKey(payload.typeKey)) {
+                    state.assets = (state.assets || []).filter(function (item) { return item.id !== payload.id; }).concat([payload]);
+                    invalidate();
+                    renderFrame();
+                    selectAsset(payload.id, true);
+                    notify(t('saved'));
+                    return;
+                }
                 reloadTree(function () {
                     selectAsset(payload.id, true);
                     notify(t('saved'));
@@ -12034,8 +12015,8 @@
         });
     }
 
-    function refreshSchema() {
-        reloadTree(function () {
+    function refreshSchema(full) {
+        (full ? reloadTree : reloadCatalog)(function () {
             if (state.view === 'settings') {
                 closeAllModals();
                 renderFrame();
@@ -12233,7 +12214,7 @@
                 ajax('DELETE', '/types/' + encodeURIComponent(type.typeKey), null, function (status, payload) {
                     if (status >= 200 && status < 300) {
                         state.schemaTypeKey = '';
-                        refreshSchema();
+                        refreshSchema(true);
                     } else notify((payload && payload.message) || t('errorTitle'));
                 });
             }));
@@ -12495,7 +12476,7 @@
                 actions.appendChild(editField);
                 actions.appendChild(button(t('deleteField'), 'asset-tree-btn', function () {
                     ajax('DELETE', '/types/' + encodeURIComponent(type.typeKey) + '/fields/' + encodeURIComponent(fieldDef.fieldKey), null, function (status, payload) {
-                        if (status >= 200 && status < 300) refreshSchema();
+                        if (status >= 200 && status < 300) refreshSchema(true);
                         else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
@@ -12731,6 +12712,7 @@
             state.types = payload.types || [];
             state.statuses = payload.statuses || [];
             if (payload.mark != null && payload.mark !== '') state.treeMark = String(payload.mark);
+            watchTree();
             invalidate();
             ensureExpandedDefaults();
             if (done) {
@@ -12744,14 +12726,26 @@
     function watchTree() {
         if (watchTree.started) return;
         watchTree.started = true;
-        setInterval(pullTreeStamp, 12000);
+        setInterval(pullTreeStamp, 4000);
+        var soon = function () {
+            if (!document.hidden) pullTreeStamp();
+        };
+        document.addEventListener('visibilitychange', soon);
+        window.addEventListener('focus', soon);
+    }
+
+    function markPart(mark, index) {
+        return String(mark || '').split('.')[index] || '';
     }
 
     function pullTreeStamp() {
         if (!state.projectKey || state.busy || state.dirty || state.loading || document.hidden) return;
+        if (pullTreeStamp.waiting) return;
         if (document.querySelector('.asset-tree-backdrop')) return;
         var key = state.projectKey;
+        pullTreeStamp.waiting = true;
         ajax('GET', '/projects/' + encodeURIComponent(key) + '/tree-stamp', null, function (status, payload) {
+            pullTreeStamp.waiting = false;
             if (status !== 200 || !payload || key !== state.projectKey) return;
             var mark = payload.message == null ? '' : String(payload.message);
             if (!mark) return;
@@ -12760,12 +12754,40 @@
                 return;
             }
             if (mark === state.treeMark) return;
-            state.treeMark = mark;
             if (state.busy || state.dirty || state.loading) return;
-            reloadTree(function () {
-                if (state.view === 'all' || state.view === 'mine') renderFrame();
-                if (state.canRemove && state.view === 'all') loadTrash();
-            });
+            if (document.querySelector('.asset-tree-backdrop')) return;
+            var objectsMoved = markPart(mark, 0) !== markPart(state.treeMark, 0);
+            var repaint = function () {
+                if (state.view === 'all') {
+                    renderFrame();
+                    if (objectsMoved && state.canRemove) loadTrash();
+                } else if (state.view === 'mine') {
+                    if (objectsMoved) loadMine();
+                    else renderFrame();
+                }
+            };
+            if (objectsMoved) reloadTree(repaint);
+            else reloadCatalog(repaint);
+        });
+    }
+
+    /** Types, fields and statuses only. Falls back to the whole tree when objects changed too. */
+    function reloadCatalog(done) {
+        var key = state.projectKey;
+        var token = treeToken;
+        ajax('GET', '/projects/' + encodeURIComponent(key) + '/catalog', null, function (status, payload) {
+            if (key !== state.projectKey || token !== treeToken) return;
+            var mark = payload && payload.mark != null ? String(payload.mark) : '';
+            if (status !== 200 || !payload || !state.treeReady || !mark || markPart(mark, 0) !== markPart(state.treeMark, 0)) {
+                reloadTree(done);
+                return;
+            }
+            state.types = payload.types || [];
+            state.statuses = payload.statuses || [];
+            state.treeMark = mark;
+            invalidate();
+            if (done) done();
+            else renderFrame();
         });
     }
 
@@ -30374,8 +30396,8 @@
         }
     }
 
-    function refreshSettings() {
-        reloadTree(function () {
+    function refreshSettings(full) {
+        (full ? reloadTree : reloadCatalog)(function () {
             renderFrame();
         });
     }
@@ -30792,7 +30814,7 @@
                 row.appendChild(button(t('deleteType'), 'asset-tree-btn', function () {
                     if (!window.confirm(t('statusDeleteConfirm', item.label))) return;
                     ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/statuses/' + encodeURIComponent(item.statusKey), null, function (status, payload) {
-                        if (status >= 200 && status < 300) refreshSettings();
+                        if (status >= 200 && status < 300) refreshSettings(true);
                         else notify((payload && payload.message) || t('errorTitle'));
                     });
                 }));
