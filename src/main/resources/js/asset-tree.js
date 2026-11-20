@@ -3019,8 +3019,19 @@
         }
         frame.appendChild(renderSide());
         frame.appendChild(panelSplit('side'));
-        frame.appendChild(renderDetail());
+        var detail = renderDetail();
+        frame.appendChild(detail);
         applyPanels();
+        paintOpenCard(detail);
+    }
+
+    /* A card pane is an empty section until showDetail fills it. A tree reload
+       while a card is open used to leave that section blank. */
+    function paintOpenCard(detail) {
+        if (!detail || detail.id !== 'asset-tree-detail' || detail.firstChild) return;
+        if (state.pane !== 'card' || !state.detail || state.detail.id !== state.selectedId) return;
+        if (isFolder(state.detail)) return;
+        showDetail(state.detail, state.detail.issues == null, detail);
     }
 
     function panelStore() {
@@ -12824,7 +12835,8 @@
                 return;
             }
             if (status !== 200 || !payload) return;
-            if (JSON.stringify(payload) === JSON.stringify(state.detail)) return;
+            var blank = detail && !detail.firstChild;
+            if (!blank && JSON.stringify(payload) === JSON.stringify(state.detail)) return;
             stampCardImage(payload);
             if (state.pane === 'card') showDetail(payload, false);
             else {
