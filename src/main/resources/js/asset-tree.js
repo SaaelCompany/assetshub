@@ -423,6 +423,7 @@
         columnScope: '',
         rules: [],
         objectsOnly: false,
+        reportBrowse: false,
         savedFilters: [],
         activeFilterId: '',
         focusSearch: String(app.getAttribute('data-view') || '').toLowerCase() === 'search',
@@ -2615,6 +2616,14 @@
             return;
         }
         if (view === 'reports') forgetReports();
+        if (state.reportBrowse && view !== 'reports') {
+            var stay = state.view === view;
+            clearReportBrowse();
+            if (stay) {
+                refreshBrowse();
+                return;
+            }
+        }
         if (state.view === view) {
             if (view === 'reports') mount();
             return;
@@ -6959,6 +6968,7 @@
     }
 
     function goToAsset(projectKey, id) {
+        if (state.view === 'reports') clearReportBrowse();
         state.pane = 'list';
         if (projectKey && projectKey !== state.projectKey) {
             state.view = 'all';
@@ -7189,6 +7199,7 @@
     function staticPeople(asset) {
         var box = el('div');
         box.appendChild(personField(t('custodian'), asset.custodian));
+        box.appendChild(shareField(asset));
         box.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
         return box;
     }
@@ -8072,6 +8083,7 @@
     function shareField(asset) {
         var field = el('div', 'asset-tree-people-field asset-tree-share');
         field.appendChild(el('div', 'asset-tree-people-label', t('shareTitle')));
+        if (isFolder(asset)) field.appendChild(el('p', 'asset-tree-hint', t('sharePlaceHint')));
         var people = asset.shares || [];
         function grant(userKey) {
             ajax('POST', '/assets/' + asset.id + '/shares', { userKey: userKey }, function (code, body) {
@@ -13715,7 +13727,18 @@
         showAssetRules(rule ? [rule] : [], false);
     }
 
-    function showAssetRules(rules, objectsOnly) {
+    function clearReportBrowse() {
+        state.reportBrowse = false;
+        state.rules = [];
+        state.objectsOnly = false;
+        state.activeFilterId = '';
+        state.query = '';
+        state.searchHits = null;
+        state.searching = false;
+    }
+
+    function showAssetRules(rules, objectsOnly, fromReport) {
+        state.reportBrowse = !!fromReport;
         state.rules = rules || [];
         state.objectsOnly = !!objectsOnly;
         state.activeFilterId = '';
@@ -17032,6 +17055,11 @@
         rememberView('all');
         mount();
         selectAsset(asset.id, true);
+    }
+
+    function openAssetFromReport(id) {
+        clearReportBrowse();
+        openListedAsset({ id: id });
     }
 
     function schemeAssetAllowed(asset) {
@@ -21160,7 +21188,7 @@
         if (!view || !row) return;
         var saved = reportSavedItem(view);
         if (!reportNeedsLines(view, saved)) {
-            showAssetRules(reportAssetRules(view, row, saved), true);
+            showAssetRules(reportAssetRules(view, row, saved), true, true);
             return;
         }
         var key = row.key == null ? '' : String(row.key);
@@ -21178,7 +21206,7 @@
             ((payload && payload.lines) || []).forEach(function (line) {
                 if (line && line.assetId) ids[line.assetId] = true;
             });
-            showAssetRules([{ ids: ids, caption: reportValueCaption(view, row) }], true);
+            showAssetRules([{ ids: ids, caption: reportValueCaption(view, row) }], true, true);
         });
     }
 
@@ -21763,10 +21791,7 @@
                 if (row.assetId) {
                     item.tabIndex = 0;
                     item.addEventListener('click', function () {
-                        state.view = 'all';
-                        state.pane = 'card';
-                        selectAsset(row.assetId, true);
-                        renderFrame();
+                        openAssetFromReport(row.assetId);
                     });
                 }
                 item.appendChild(el('td', null, row.objectKey || ''));

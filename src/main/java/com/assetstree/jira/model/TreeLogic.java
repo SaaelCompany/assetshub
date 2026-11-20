@@ -22,6 +22,31 @@ public final class TreeLogic {
         return parentId;
     }
 
+    /**
+     * A share on the asset itself or on any place above it.
+     * A cycle stops the walk and does not count as a share.
+     */
+    public static boolean coveredByShare(int assetId, Map<Integer, Integer> parentById, Set<Integer> sharedIds) {
+        if (sharedIds == null || sharedIds.isEmpty() || assetId <= 0) {
+            return false;
+        }
+        Integer cursor = Integer.valueOf(assetId);
+        Set<Integer> seen = new HashSet<Integer>();
+        while (cursor != null) {
+            if (!seen.add(cursor)) {
+                return false;
+            }
+            if (sharedIds.contains(cursor)) {
+                return true;
+            }
+            if (parentById == null) {
+                return false;
+            }
+            cursor = normalizeParent(parentById.get(cursor));
+        }
+        return false;
+    }
+
     public static boolean sameParent(Integer left, Integer right) {
         Integer a = normalizeParent(left);
         Integer b = normalizeParent(right);
