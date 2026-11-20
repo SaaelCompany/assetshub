@@ -22,6 +22,7 @@ import com.assetstree.jira.dto.FileDto;
 import com.assetstree.jira.dto.ExportJobDto;
 import com.assetstree.jira.dto.ForecastRowDto;
 import com.assetstree.jira.dto.GrantDto;
+import com.assetstree.jira.dto.RoleDto;
 import com.assetstree.jira.dto.SchemaDto;
 import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.dto.WebhookProbeDto;
@@ -47,6 +48,7 @@ import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkDraft;
 import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.model.RoleDraft;
 import com.assetstree.jira.model.ExportDraft;
 import com.assetstree.jira.model.ImportDraft;
 import com.assetstree.jira.model.JsonImportDraft;
@@ -191,6 +193,12 @@ public interface AssetService {
     void deleteUserGrant(ApplicationUser user, String projectKey, String userKey);
 
     List<GrantDto> searchGroups(ApplicationUser user, String query);
+
+    List<RoleDto> listRoles(ApplicationUser user, String projectKey);
+
+    RoleDto saveRole(ApplicationUser user, String projectKey, RoleDraft draft);
+
+    void deleteRole(ApplicationUser user, String projectKey, String name);
 
     IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey);
 

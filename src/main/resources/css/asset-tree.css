@@ -4631,6 +4631,44 @@ a.asset-tree-url {
     gap: 4px 16px;
 }
 
+.asset-tree-cap-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 8px 0 12px;
+}
+
+.asset-tree-cap-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+}
+
+.asset-tree-cap-group-title {
+    flex: 0 0 100%;
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.asset-tree-reach {
+    max-width: 460px;
+}
+
+.asset-tree-grant-role {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+}
+
+.asset-tree-grant-role select,
+.asset-tree-reach select {
+    min-width: 220px;
+}
+
 .asset-tree-caps .asset-tree-check {
     margin: 0;
     font-size: 13px;

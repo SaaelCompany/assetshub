@@ -82,6 +82,7 @@ import com.assetstree.jira.ao.AssetPeerEntity;
 import com.assetstree.jira.ao.PortalRuleConditionEntity;
 import com.assetstree.jira.ao.PortalRuleEntity;
 import com.assetstree.jira.ao.ProjectAssetKeyEntity;
+import com.assetstree.jira.ao.AccessRoleEntity;
 import com.assetstree.jira.ao.ProjectGrantEntity;
 import com.assetstree.jira.ao.ProjectStatusEntity;
 import com.assetstree.jira.ao.PortalLayoutEntity;
@@ -141,6 +142,7 @@ import com.assetstree.jira.dto.FileDto;
 import com.assetstree.jira.dto.ExportJobDto;
 import com.assetstree.jira.dto.ForecastRowDto;
 import com.assetstree.jira.dto.GrantDto;
+import com.assetstree.jira.dto.RoleDto;
 import com.assetstree.jira.dto.SchemaDto;
 import com.assetstree.jira.dto.WebhookDto;
 import com.assetstree.jira.dto.WebhookProbeDto;
@@ -212,6 +214,8 @@ import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.model.OwnReach;
+import com.assetstree.jira.model.RoleDraft;
 import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.model.AssetKeyRules;
@@ -785,7 +789,7 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(400, error);
         }
         AssetTypeEntity previewType = findType(draft.getTypeKey());
-        String createCap = previewType != null && previewType.isLocation() ? GrantCaps.PLACES : GrantCaps.OBJECT;
+        String createCap = previewType != null && previewType.isLocation() ? GrantCaps.PLACE_ADD : GrantCaps.OBJ_CREATE;
         Project project = requireProjectCap(user, draft.getProjectKey(), createCap);
         if (storedAssetPrefix(project.getKey()).isEmpty()) {
             throw new AssetException(400, "asset-tree.error.assetKey.required");
@@ -825,6 +829,7 @@ public class AssetServiceImpl implements AssetService {
                     }
                 }
                 String issued = type.isLocation() ? null : normalizeCustodian(draft.getIssuedKey());
+                assertCreateReach(user, project, type.isLocation(), parentId, custodian);
                 Date now = new Date();
                 AssetEntity entity = ao().create(AssetEntity.class,
                         new DBParam("NAME", draft.getName().trim()),
@@ -871,7 +876,7 @@ public class AssetServiceImpl implements AssetService {
                 if (type == null || type.isLocation()) {
                     throw new AssetException(400, "asset-tree.error.copy");
                 }
-                requireProjectCap(user, source.getProjectKey(), GrantCaps.OBJECT);
+                requireProjectCap(user, source.getProjectKey(), GrantCaps.OBJ_CREATE);
                 Set<String> taken = new HashSet<String>();
                 for (AssetEntity row : assetsIn(source.getProjectKey())) {
                     if (row.getName() != null) {
@@ -985,7 +990,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public CommentDto addComment(ApplicationUser user, int id, String body, boolean internal) {
-        requireAssetCap(user, id, kindCap(requireAsset(id)));
+        requireAssetCap(user, id, GrantCaps.NOTE);
         return writeComment(user, id, body, internal);
     }
 
@@ -1022,12 +1027,12 @@ public class AssetServiceImpl implements AssetService {
         AssetEntity asset = requireAsset(assetId);
         AssetCommentEntity comment = ao().get(AssetCommentEntity.class, commentId);
         if (comment == null || comment.getAssetId() != assetId) {
-            requireAssetCap(user, assetId, kindCap(asset));
+            requireAssetCap(user, assetId, GrantCaps.NOTE);
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         boolean admin = canArrangeTypes(user, project(asset.getProjectKey()));
         if (!admin) {
-            requireAssetCap(user, assetId, kindCap(asset));
+            requireAssetCap(user, assetId, GrantCaps.NOTE);
             if (comment.getAuthorKey() == null || !comment.getAuthorKey().equals(user.getKey())) {
                 throw new AssetException(403, "asset-tree.error.forbidden");
             }
@@ -1072,7 +1077,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public FileDto storeFile(ApplicationUser user, int assetId, String fileName, String contentType, byte[] data, boolean internal, String slot) {
-        requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        requireAssetCap(user, assetId, GrantCaps.NOTE);
         return writeFile(user, assetId, fileName, contentType, data, internal, slot);
     }
 
@@ -1154,7 +1159,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteFile(ApplicationUser user, int assetId, int fileId) {
-        requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        requireAssetCap(user, assetId, GrantCaps.NOTE);
         removeFile(user, assetId, fileId);
     }
 
@@ -1176,7 +1181,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public UserProfileDto shareAsset(ApplicationUser user, int assetId, String userKey) {
-        AssetEntity asset = requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.SHARE);
         return grantShare(user, asset, userKey);
     }
 
@@ -1206,7 +1211,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void unshareAsset(ApplicationUser user, int assetId, String userKey) {
-        requireAssetCap(user, assetId, kindCap(requireAsset(assetId)));
+        requireAssetCap(user, assetId, GrantCaps.SHARE);
         dropShare(user, assetId, userKey);
     }
 
@@ -2558,7 +2563,7 @@ public class AssetServiceImpl implements AssetService {
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
-                AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                AssetEntity entity = requireAssetCap(user, id, removeCap(requireAsset(id)));
                 if (entity.getDeletedAt() != null) {
                     throw new AssetException(409, "asset-tree.error.inTrash");
                 }
@@ -2691,7 +2696,7 @@ public class AssetServiceImpl implements AssetService {
             public Void doInTransaction() {
                 TRASH_WRITE.set(Boolean.TRUE);
                 try {
-                    AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                    AssetEntity entity = requireAssetCap(user, id, removeCap(requireAsset(id)));
                     if (entity.getDeletedAt() == null) {
                         throw new AssetException(409, "asset-tree.error.notInTrash");
                     }
@@ -2763,7 +2768,7 @@ public class AssetServiceImpl implements AssetService {
             public Void doInTransaction() {
                 TRASH_WRITE.set(Boolean.TRUE);
                 try {
-                    AssetEntity entity = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                    AssetEntity entity = requireAssetCap(user, id, removeCap(requireAsset(id)));
                     if (entity.getDeletedAt() == null) {
                         throw new AssetException(409, "asset-tree.error.notInTrash");
                     }
@@ -2930,7 +2935,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<AssetDto>() {
             @Override
             public AssetDto doInTransaction() {
-                AssetEntity moving = requireAssetCap(user, id, kindCap(requireAsset(id)));
+                AssetEntity moving = requireAssetCap(user, id, moveCap(requireAsset(id)));
                 Integer parentId = TreeLogic.normalizeParent(move.getParentId());
                 if (parentId != null) {
                     AssetEntity parent = requireReadable(user, parentId.intValue());
@@ -2999,7 +3004,7 @@ public class AssetServiceImpl implements AssetService {
         if (draft == null || draft.getIds() == null || draft.getIds().isEmpty()) {
             throw new AssetException(400, "asset-tree.error.bulk.empty");
         }
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJ_MOVE);
         final List<Integer> ids = new ArrayList<Integer>();
         Set<Integer> unique = new HashSet<Integer>();
         for (Integer id : draft.getIds()) {
@@ -3035,7 +3040,7 @@ public class AssetServiceImpl implements AssetService {
                 List<AssetEntity> moving = new ArrayList<AssetEntity>();
                 Set<Integer> movingIds = new HashSet<Integer>();
                 for (Integer id : ids) {
-                    AssetEntity entity = requireAssetCap(user, id.intValue(), kindCap(requireAsset(id.intValue())));
+                    AssetEntity entity = requireAssetCap(user, id.intValue(), moveCap(requireAsset(id.intValue())));
                     if (!ProjectKeys.same(entity.getProjectKey(), project.getKey())) {
                         throw new AssetException(400, "asset-tree.error.project.mismatch");
                     }
@@ -3529,7 +3534,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public StatusDto createStatus(ApplicationUser user, String projectKey, final StatusDraft draft) {
-        final Project project = requireConfigurableProject(user, projectKey);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.STATUS);
         if (draft == null || draft.getLabel() == null || draft.getLabel().trim().isEmpty()) {
             throw new AssetException(400, "asset-tree.error.status");
         }
@@ -3565,7 +3570,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public StatusDto updateStatus(ApplicationUser user, String projectKey, final String statusKey, final StatusDraft draft) {
-        final Project project = requireConfigurableProject(user, projectKey);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.STATUS);
         if (draft == null) {
             throw new AssetException(400, "asset-tree.error.status");
         }
@@ -3598,7 +3603,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteStatus(ApplicationUser user, String projectKey, final String statusKey) {
-        final Project project = requireConfigurableProject(user, projectKey);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.STATUS);
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
             public Void doInTransaction() {
@@ -3653,7 +3658,20 @@ public class AssetServiceImpl implements AssetService {
         if (!forUser && groupName.isEmpty()) {
             throw new AssetException(400, "asset-tree.error.group");
         }
-        final String caps = resolveCaps(draft);
+        final String requestedRole = draft.getRoleName() == null ? "" : draft.getRoleName().trim();
+        final String caps;
+        final String reach;
+        if (!requestedRole.isEmpty()) {
+            AccessRoleEntity role = findRole(project.getKey(), requestedRole);
+            if (role == null || role.getRights() == null || role.getRights().trim().isEmpty()) {
+                throw new AssetException(400, "asset-tree.error.role.missing");
+            }
+            caps = role.getRights();
+            reach = "own".equals(role.getReach()) ? "own" : "all";
+        } else {
+            caps = resolveCaps(draft);
+            reach = "own".equals(draft.getReach()) ? "own" : "all";
+        }
         final String level = GrantCaps.levelOf(caps);
         final String userKey;
         if (forUser) {
@@ -3676,7 +3694,8 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public GrantDto doInTransaction() {
                 ProjectGrantEntity global = findPrincipal(GrantCaps.ALL_PROJECTS, groupName, userKey);
-                if (global != null && GrantCaps.has(global.getCaps(), GrantCaps.ADMIN) && !hasCap(user, project, GrantCaps.ADMIN)) {
+                if (global != null && GrantCaps.has(storedCaps(global, roleIndex(GrantCaps.ALL_PROJECTS)), GrantCaps.ADMIN)
+                        && !hasCap(user, project, GrantCaps.ADMIN)) {
                     throw new AssetException(403, "asset-tree.error.forbidden");
                 }
                 String storedKey = administrator ? GrantCaps.ALL_PROJECTS : project.getKey();
@@ -3699,19 +3718,21 @@ public class AssetServiceImpl implements AssetService {
                                 new DBParam("PROJECT_KEY", storedKey),
                                 new DBParam("GROUP_NAME", userKey),
                                 new DBParam("LEVEL", level),
-                                new DBParam("CAPS", caps),
+                                new DBParam("CAPS", GrantCaps.coarse(caps).isEmpty() ? GrantCaps.VIEW : GrantCaps.coarse(caps)),
                                 new DBParam("USER_KEY", userKey));
                     } else {
                         row = ao().create(ProjectGrantEntity.class,
                                 new DBParam("PROJECT_KEY", storedKey),
                                 new DBParam("GROUP_NAME", groupName),
                                 new DBParam("LEVEL", level),
-                                new DBParam("CAPS", caps));
+                                new DBParam("CAPS", GrantCaps.coarse(caps).isEmpty() ? GrantCaps.VIEW : GrantCaps.coarse(caps)));
                     }
                 } else {
                     row.setLevel(level);
-                    row.setCaps(caps);
                 }
+                storeRights(row, caps);
+                row.setRoleName(requestedRole);
+                row.setReach(reach);
                 applyGrantScope(project.getKey(), row, draft);
                 row.save();
                 return toGrantDto(row);
@@ -3727,6 +3748,149 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void deleteUserGrant(ApplicationUser user, String projectKey, String userKey) {
         deletePrincipal(user, projectKey, "", userKey);
+    }
+
+    @Override
+    public List<RoleDto> listRoles(ApplicationUser user, final String projectKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        return ao().executeInTransaction(new TransactionCallback<List<RoleDto>>() {
+            @Override
+            public List<RoleDto> doInTransaction() {
+                List<RoleDto> result = new ArrayList<RoleDto>();
+                for (AccessRoleEntity row : roleIndex(project.getKey()).values()) {
+                    result.add(roleDto(row));
+                }
+                Collections.sort(result, new Comparator<RoleDto>() {
+                    @Override
+                    public int compare(RoleDto left, RoleDto right) {
+                        String a = left.getName() == null ? "" : left.getName();
+                        String b = right.getName() == null ? "" : right.getName();
+                        return a.compareToIgnoreCase(b);
+                    }
+                });
+                return result;
+            }
+        });
+    }
+
+    @Override
+    public RoleDto saveRole(ApplicationUser user, String projectKey, final RoleDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        if (draft == null || draft.getName() == null || draft.getName().trim().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.role");
+        }
+        final String name = draft.getName().trim();
+        if (name.length() > 80) {
+            throw new AssetException(400, "asset-tree.error.role");
+        }
+        final String previous = draft.getPrevious() == null ? "" : draft.getPrevious().trim();
+        GrantDraft probe = new GrantDraft();
+        probe.setCaps(draft.getCaps());
+        final String caps = resolveCaps(probe);
+        if (GrantCaps.has(caps, GrantCaps.ADMIN) && !hasCap(user, project, GrantCaps.ADMIN)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+        final String reach = "own".equals(draft.getReach()) ? "own" : "all";
+        return ao().executeInTransaction(new TransactionCallback<RoleDto>() {
+            @Override
+            public RoleDto doInTransaction() {
+                AccessRoleEntity row = findRole(project.getKey(), previous.isEmpty() ? name : previous);
+                if (row == null) {
+                    row = findRole(project.getKey(), name);
+                }
+                if (row == null) {
+                    row = ao().create(AccessRoleEntity.class,
+                            new DBParam("PROJECT_KEY", project.getKey()),
+                            new DBParam("NAME", name));
+                }
+                row.setName(name);
+                row.setRights(caps);
+                row.setReach(reach);
+                row.save();
+                retitleRole(project.getKey(), previous.isEmpty() ? name : previous, name, caps, reach);
+                return roleDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void deleteRole(ApplicationUser user, String projectKey, final String name) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        if (name == null || name.trim().isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.role");
+        }
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AccessRoleEntity row = findRole(project.getKey(), name.trim());
+                if (row == null) {
+                    throw new AssetException(404, "asset-tree.error.role.missing");
+                }
+                detachRole(project.getKey(), row.getName(), row.getRights(), row.getReach());
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    private RoleDto roleDto(AccessRoleEntity row) {
+        RoleDto dto = new RoleDto();
+        dto.setName(row.getName());
+        String caps = row.getRights() == null ? "" : GrantCaps.normalize(row.getRights());
+        dto.setCaps(caps);
+        dto.setReach("own".equals(row.getReach()) ? "own" : "all");
+        return dto;
+    }
+
+    private AccessRoleEntity findRole(String projectKey, String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return null;
+        }
+        AccessRoleEntity[] rows = ao().find(AccessRoleEntity.class,
+                Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return null;
+        }
+        String wanted = name.trim().toLowerCase(Locale.ROOT);
+        for (int i = 0; i < rows.length; i++) {
+            String current = rows[i].getName() == null ? "" : rows[i].getName().trim().toLowerCase(Locale.ROOT);
+            if (wanted.equals(current)) {
+                return rows[i];
+            }
+        }
+        return null;
+    }
+
+    private void retitleRole(String projectKey, String previous, String name, String caps, String reach) {
+        copyRole(projectKey, previous, name, caps, reach, false);
+        if (!GrantCaps.ALL_PROJECTS.equals(projectKey)) {
+            copyRole(GrantCaps.ALL_PROJECTS, previous, name, caps, reach, false);
+        }
+    }
+
+    private void detachRole(String projectKey, String name, String caps, String reach) {
+        copyRole(projectKey, name, "", caps, reach, true);
+        copyRole(GrantCaps.ALL_PROJECTS, name, "", caps, reach, true);
+    }
+
+    private void copyRole(String projectKey, String previous, String name, String caps, String reach, boolean clear) {
+        ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class,
+                Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null || previous == null) {
+            return;
+        }
+        String wanted = previous.trim().toLowerCase(Locale.ROOT);
+        for (int i = 0; i < rows.length; i++) {
+            String current = rows[i].getRoleName() == null ? "" : rows[i].getRoleName().trim().toLowerCase(Locale.ROOT);
+            if (!wanted.equals(current) || current.isEmpty()) {
+                continue;
+            }
+            storeRights(rows[i], caps);
+            rows[i].setReach(reach);
+            rows[i].setRoleName(clear ? "" : name);
+            rows[i].setLevel(GrantCaps.levelOf(caps));
+            rows[i].save();
+        }
     }
 
     private void deletePrincipal(ApplicationUser user, String projectKey, final String groupName, final String userKey) {
@@ -4498,7 +4662,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public byte[] exportEquipment(ApplicationUser user, String projectKey) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.EXCHANGE);
         return ao().executeInTransaction(new TransactionCallback<byte[]>() {
             @Override
             public byte[] doInTransaction() {
@@ -4548,7 +4712,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ImportResultDto importEquipment(ApplicationUser user, final String projectKey, final ImportDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.EXCHANGE);
         if (storedAssetPrefix(project.getKey()).isEmpty()) {
             throw new AssetException(400, "asset-tree.error.assetKey.required");
         }
@@ -4739,7 +4903,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public PortalRuleDto addPortalRule(ApplicationUser user, String projectKey, PortalRuleDraft draft) {
-        final Project project = requireConfigurableProject(user, projectKey);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.PORTAL);
         requireModule(project.getKey(), ProjectModules.PORTAL);
         if (draft == null || draft.getAssetId() <= 0) {
             throw new AssetException(400, "asset-tree.error.portal.target");
@@ -4777,7 +4941,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deletePortalRule(ApplicationUser user, String projectKey, int ruleId) {
-        final Project project = requireConfigurableProject(user, projectKey);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.PORTAL);
         requireModule(project.getKey(), ProjectModules.PORTAL);
         ao().executeInTransaction(new TransactionCallback<Void>() {
             @Override
@@ -4795,7 +4959,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public PortalRuleDto updatePortalRule(ApplicationUser user, String projectKey, final int ruleId, PortalRuleDraft draft) {
-        final Project project = requireConfigurableProject(user, projectKey);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.PORTAL);
         requireModule(project.getKey(), ProjectModules.PORTAL);
         if (draft == null || draft.getAssetId() <= 0) {
             throw new AssetException(400, "asset-tree.error.portal.target");
@@ -8242,8 +8406,15 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private String kindCap(AssetEntity entity) {
-        AssetTypeEntity type = entity == null ? null : findType(entity.getTypeKey());
-        return type != null && type.isLocation() ? GrantCaps.PLACES : GrantCaps.OBJECT;
+        return isLocation(entity) ? GrantCaps.PLACE_EDIT : GrantCaps.OBJ_EDIT;
+    }
+
+    private String removeCap(AssetEntity entity) {
+        return isLocation(entity) ? GrantCaps.PLACE_DEL : GrantCaps.OBJ_REMOVE;
+    }
+
+    private String moveCap(AssetEntity entity) {
+        return isLocation(entity) ? GrantCaps.PLACE_EDIT : GrantCaps.OBJ_MOVE;
     }
 
     private AssetEntity requireAsset(int id) {
@@ -8409,8 +8580,10 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void applyRights(ProjectDto dto, ApplicationUser user, Project project) {
-        boolean places = hasCap(user, project, GrantCaps.PLACES);
-        boolean objects = hasCap(user, project, GrantCaps.OBJECT);
+        boolean placeBundle = hasCap(user, project, GrantCaps.PLACES);
+        boolean objectBundle = hasCap(user, project, GrantCaps.OBJECT);
+        boolean places = placeBundle || hasCap(user, project, GrantCaps.PLACE_EDIT) || hasCap(user, project, GrantCaps.PLACE_ADD);
+        boolean objects = objectBundle || hasCap(user, project, GrantCaps.OBJ_EDIT);
         boolean types = hasCap(user, project, GrantCaps.TYPES);
         boolean assets = hasCap(user, project, GrantCaps.ASSETS);
         boolean admin = hasCap(user, project, GrantCaps.ADMIN);
@@ -8421,12 +8594,14 @@ public class AssetServiceImpl implements AssetService {
         dto.setCanAdmin(admin);
         dto.setCanEdit(objects);
         dto.setCanChange(objects);
-        dto.setCanCreate(objects);
-        dto.setCanMove(places || objects);
-        dto.setCanRemove(places || objects);
-        dto.setCanComment(places || objects);
+        dto.setCanCreate(objectBundle || placeBundle || hasCap(user, project, GrantCaps.OBJ_CREATE) || hasCap(user, project, GrantCaps.PLACE_ADD));
+        dto.setCanMove(placeBundle || objectBundle || hasCap(user, project, GrantCaps.OBJ_MOVE) || hasCap(user, project, GrantCaps.PLACE_EDIT));
+        dto.setCanRemove(placeBundle || objectBundle || hasCap(user, project, GrantCaps.OBJ_REMOVE) || hasCap(user, project, GrantCaps.PLACE_DEL));
+        dto.setCanComment(placeBundle || objectBundle || hasCap(user, project, GrantCaps.NOTE));
         dto.setCanConfigure(types);
-        dto.setCanGrant(assets || admin);
+        dto.setCanGrant(assets || admin || hasCap(user, project, GrantCaps.GRANTS));
+        dto.setActs(actsFor(user, project));
+        dto.setReach(writeReach(user, project));
         dto.setCanArrange(canArrangeTypes(user, project));
         boolean open = canOpen(user, project);
         dto.setCanView(open);
@@ -8511,7 +8686,161 @@ public class AssetServiceImpl implements AssetService {
             }
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
+        assertReach(user, project, entity, cap);
         return entity;
+    }
+
+    private void assertReach(ApplicationUser user, Project project, AssetEntity asset, String cap) {
+        if (user == null || project == null || asset == null || !GrantCaps.bounded(cap) || reachFree(user, project)) {
+            return;
+        }
+        if (!"own".equals(writeReach(user, project, cap))) {
+            return;
+        }
+        if (!inTerritory(user, asset)) {
+            throw new AssetException(403, "asset-tree.error.forbidden");
+        }
+    }
+
+    private void assertCreateReach(ApplicationUser user, Project project, boolean place, Integer parentId, String custodian) {
+        String cap = place ? GrantCaps.PLACE_ADD : GrantCaps.OBJ_CREATE;
+        if (user == null || project == null || reachFree(user, project) || !"own".equals(writeReach(user, project, cap))) {
+            return;
+        }
+        if (user.getKey() != null && user.getKey().equals(custodian)) {
+            return;
+        }
+        if (parentId != null) {
+            AssetEntity parent = ao().get(AssetEntity.class, parentId.intValue());
+            if (parent != null && inTerritory(user, parent)) {
+                return;
+            }
+        }
+        throw new AssetException(403, "asset-tree.error.forbidden");
+    }
+
+    private boolean reachFree(ApplicationUser user, Project project) {
+        if (user == null || project == null) {
+            return true;
+        }
+        if (isAdmin(user) || hasGlobalManage(user)) {
+            return true;
+        }
+        if (permissionManager().hasPermission(ProjectPermissions.ADMINISTER_PROJECTS, project, user)) {
+            return true;
+        }
+        return permissionManager().hasPermission(EDIT_ASSETS, project, user);
+    }
+
+    private String writeReach(ApplicationUser user, Project project) {
+        if (reachFree(user, project)) {
+            return "all";
+        }
+        String edit = writeReach(user, project, GrantCaps.OBJ_EDIT);
+        if ("own".equals(edit)) {
+            return "own";
+        }
+        String place = writeReach(user, project, GrantCaps.PLACE_EDIT);
+        return "own".equals(place) ? "own" : "all";
+    }
+
+    private String writeReach(ApplicationUser user, Project project, String cap) {
+        if (user == null || project == null || project.getKey() == null) {
+            return "all";
+        }
+        String local = rowsReach(user, project.getKey(), cap);
+        String global = rowsReach(user, GrantCaps.ALL_PROJECTS, cap);
+        if ("all".equals(local) || "all".equals(global)) {
+            return "all";
+        }
+        if ("own".equals(local) || "own".equals(global)) {
+            return "own";
+        }
+        return "all";
+    }
+
+    private String actsFor(ApplicationUser user, Project project) {
+        String[] keys = new String[] {
+                GrantCaps.OBJ_CREATE, GrantCaps.OBJ_EDIT, GrantCaps.OBJ_MOVE, GrantCaps.OBJ_REMOVE,
+                GrantCaps.NOTE, GrantCaps.SHARE, GrantCaps.LIFE,
+                GrantCaps.PLACE_ADD, GrantCaps.PLACE_EDIT, GrantCaps.PLACE_DEL,
+                GrantCaps.STATUS, GrantCaps.EXCHANGE, GrantCaps.REPORT_EDIT,
+                GrantCaps.PLAN, GrantCaps.PLAN_EDIT, GrantCaps.PORTAL, GrantCaps.GRANTS
+        };
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < keys.length; i++) {
+            if (!hasCap(user, project, keys[i])) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(keys[i]);
+        }
+        return builder.toString();
+    }
+
+    private boolean inTerritory(ApplicationUser user, AssetEntity asset) {
+        if (user == null || user.getKey() == null || asset == null) {
+            return false;
+        }
+        String key = user.getKey();
+        AssetEntity[] rows = assetsAll(asset.getProjectKey());
+        Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+        Map<Integer, String> custodians = new HashMap<Integer, String>();
+        Set<Integer> held = new HashSet<Integer>();
+        Set<String> locations = new HashSet<String>();
+        AssetTypeEntity[] types = ao().find(AssetTypeEntity.class,
+                Query.select().where("PROJECT_KEY = ?", asset.getProjectKey()));
+        if (types != null) {
+            for (int i = 0; i < types.length; i++) {
+                if (types[i].isLocation() && types[i].getTypeKey() != null) {
+                    locations.add(types[i].getTypeKey());
+                }
+            }
+        }
+        Set<Integer> assigned = assignedPlaces(asset.getProjectKey(), key);
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                AssetEntity row = rows[i];
+                if (row == null) {
+                    continue;
+                }
+                parents.put(Integer.valueOf(row.getID()), TreeLogic.normalizeParent(row.getParentId()));
+                String mol = row.getCustodianKey() == null ? "" : row.getCustodianKey().trim();
+                custodians.put(Integer.valueOf(row.getID()), mol);
+                if (locations.contains(row.getTypeKey()) && (key.equals(mol) || assigned.contains(Integer.valueOf(row.getID())))) {
+                    held.add(Integer.valueOf(row.getID()));
+                }
+            }
+        }
+        parents.put(Integer.valueOf(asset.getID()), TreeLogic.normalizeParent(asset.getParentId()));
+        String mine = asset.getCustodianKey() == null ? "" : asset.getCustodianKey().trim();
+        custodians.put(Integer.valueOf(asset.getID()), mine);
+        return OwnReach.covers(key, asset.getID(), parents, custodians, held);
+    }
+
+    private Set<Integer> assignedPlaces(String projectKey, String userKey) {
+        Set<Integer> ids = new HashSet<Integer>();
+        ModuleSetupDto setup = moduleSetup(projectKey);
+        String raw = setup == null || setup.getLifePlaces() == null ? "" : setup.getLifePlaces();
+        String[] parts = raw.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i] == null ? "" : parts[i].trim();
+            int colon = part.indexOf(':');
+            if (colon <= 0) {
+                continue;
+            }
+            if (!userKey.equals(part.substring(colon + 1).trim())) {
+                continue;
+            }
+            try {
+                ids.add(Integer.valueOf(part.substring(0, colon).trim()));
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+        }
+        return ids;
     }
 
     private Project requireTrashProject(ApplicationUser user, String projectKey) {
@@ -9190,14 +9519,12 @@ public class AssetServiceImpl implements AssetService {
         } else {
             dto.setGroupName(row.getGroupName());
         }
-        String caps = row.getCaps();
-        if (caps == null || caps.trim().isEmpty()) {
-            caps = GrantCaps.fromLevel(row.getLevel());
-        } else {
-            caps = GrantCaps.normalize(caps);
-        }
+        Map<String, AccessRoleEntity> roles = roleIndex(row.getProjectKey());
+        String caps = GrantCaps.normalize(storedCaps(row, roles));
         dto.setCaps(caps);
         dto.setLevel(GrantCaps.levelOf(caps));
+        dto.setRoleName(row.getRoleName() == null ? "" : row.getRoleName());
+        dto.setReach(storedReach(row, roles));
         dto.setTypeScope(row.getTypeScope() == null ? "" : row.getTypeScope());
         dto.setFieldScope(row.getFieldScope() == null ? "" : row.getFieldScope());
         dto.setSchemaName(row.getSchemaName() == null ? "" : row.getSchemaName());
@@ -9341,20 +9668,42 @@ public class AssetServiceImpl implements AssetService {
     private boolean grantRowsAllow(ApplicationUser user, String projectKey, String cap) {
         ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class,
                 Query.select().where("PROJECT_KEY = ?", projectKey));
+        Map<String, AccessRoleEntity> roles = roleIndex(projectKey);
         for (int i = 0; i < rows.length; i++) {
             ProjectGrantEntity row = rows[i];
             if (!grantApplies(user, row)) {
                 continue;
             }
-            String caps = row.getCaps();
-            if (caps == null || caps.trim().isEmpty()) {
-                caps = GrantCaps.fromLevel(row.getLevel());
-            }
-            if (GrantCaps.has(caps, cap)) {
+            if (GrantCaps.allows(storedCaps(row, roles), cap)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private String rowsReach(ApplicationUser user, String projectKey, String cap) {
+        try {
+            ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class,
+                    Query.select().where("PROJECT_KEY = ?", projectKey));
+            Map<String, AccessRoleEntity> roles = roleIndex(projectKey);
+            boolean matched = false;
+            if (rows == null) {
+                return "";
+            }
+            for (int i = 0; i < rows.length; i++) {
+                ProjectGrantEntity row = rows[i];
+                if (!grantApplies(user, row) || !GrantCaps.allows(storedCaps(row, roles), cap)) {
+                    continue;
+                }
+                matched = true;
+                if (!"own".equals(storedReach(row, roles))) {
+                    return "all";
+                }
+            }
+            return matched ? "own" : "";
+        } catch (RuntimeException ex) {
+            return "";
+        }
     }
 
     private boolean grantApplies(ApplicationUser user, ProjectGrantEntity row) {
@@ -9366,6 +9715,69 @@ public class AssetServiceImpl implements AssetService {
             return user.getKey() != null && userKey.trim().equals(user.getKey());
         }
         return inGroup(user, row.getGroupName());
+    }
+
+    private String storedCaps(ProjectGrantEntity row, Map<String, AccessRoleEntity> roles) {
+        AccessRoleEntity role = linkedRole(row, roles);
+        if (role != null && role.getRights() != null && !role.getRights().trim().isEmpty()) {
+            return role.getRights();
+        }
+        String rights = row.getRights();
+        if (rights != null && !rights.trim().isEmpty()) {
+            return rights;
+        }
+        String caps = row.getCaps();
+        if (caps == null || caps.trim().isEmpty()) {
+            return GrantCaps.fromLevel(row.getLevel());
+        }
+        return caps;
+    }
+
+    private String storedReach(ProjectGrantEntity row, Map<String, AccessRoleEntity> roles) {
+        AccessRoleEntity role = linkedRole(row, roles);
+        String reach = role != null ? role.getReach() : row.getReach();
+        return "own".equals(reach) ? "own" : "all";
+    }
+
+    private AccessRoleEntity linkedRole(ProjectGrantEntity row, Map<String, AccessRoleEntity> roles) {
+        if (row == null || roles == null) {
+            return null;
+        }
+        String name = row.getRoleName();
+        if (name == null || name.trim().isEmpty()) {
+            return null;
+        }
+        return roles.get(name.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private Map<String, AccessRoleEntity> roleIndex(String projectKey) {
+        Map<String, AccessRoleEntity> index = new HashMap<String, AccessRoleEntity>();
+        try {
+            AccessRoleEntity[] rows = ao().find(AccessRoleEntity.class,
+                    Query.select().where("PROJECT_KEY = ?", projectKey));
+            if (rows == null) {
+                return index;
+            }
+            for (int i = 0; i < rows.length; i++) {
+                String name = rows[i].getName();
+                if (name != null && !name.trim().isEmpty()) {
+                    index.put(name.trim().toLowerCase(Locale.ROOT), rows[i]);
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.debug("Access roles are not ready yet", ex);
+        }
+        return index;
+    }
+
+    private void storeRights(ProjectGrantEntity row, String caps) {
+        String full = GrantCaps.normalize(caps);
+        String coarse = GrantCaps.coarse(full);
+        if (coarse.isEmpty()) {
+            coarse = GrantCaps.VIEW;
+        }
+        row.setCaps(coarse);
+        row.setRights(full);
     }
 
     private boolean inGroup(ApplicationUser user, String groupName) {
@@ -11548,7 +11960,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public List<ScheduleRowDto> createSchedule(ApplicationUser user, String projectKey, final ScheduleDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.PLAN_EDIT);
         requireModule(project.getKey(), ProjectModules.SERVICE);
         if (draft == null || draft.getAssetIds() == null || draft.getAssetIds().size() > 40) {
             throw new AssetException(400, "asset-tree.error.service");
@@ -12519,7 +12931,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public SavedReportDto createReport(ApplicationUser user, String projectKey, final SavedReportDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.REPORT_EDIT);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         if (draft == null) {
             throw new AssetException(400, "asset-tree.error.report");
@@ -12575,7 +12987,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public SavedReportDto updateSavedReport(ApplicationUser user, String projectKey, final String reportKey, final SavedReportDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.REPORT_EDIT);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         if (draft == null) {
             throw new AssetException(400, "asset-tree.error.report");
@@ -12687,7 +13099,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public SavedReportDto updateReportChart(ApplicationUser user, String projectKey, final String reportKey, String chartRaw) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.REPORT_EDIT);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         final String chart = ReportCatalog.chart(chartRaw);
         if (chart.isEmpty()) {
@@ -12730,7 +13142,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteReport(ApplicationUser user, String projectKey, String reportKey) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.REPORT_EDIT);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         final int id = ReportCatalog.savedId(reportKey);
         if (id <= 0) {
@@ -12764,7 +13176,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ReportBoardDto createReportBoard(ApplicationUser user, String projectKey, final ReportBoardDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.REPORT_EDIT);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         SchemaReady.ensure(ao());
         final String title = ReportBoards.name(draft == null ? "" : draft.getName());
@@ -12795,7 +13207,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ReportBoardDto updateReportBoard(ApplicationUser user, String projectKey, final int boardId, final ReportBoardDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.REPORT_EDIT);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         final String title = ReportBoards.name(draft == null ? "" : draft.getName());
         if (boardId <= 0 || title.isEmpty()) {
@@ -12819,7 +13231,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteReportBoard(ApplicationUser user, String projectKey, final int boardId) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.REPORT_EDIT);
         requireModule(project.getKey(), ProjectModules.REPORTS);
         if (boardId <= 0) {
             throw new AssetException(400, "asset-tree.error.report");
@@ -16353,7 +16765,7 @@ public class AssetServiceImpl implements AssetService {
 
     private AssetEntity equipmentForLife(ApplicationUser user, int assetId, boolean edit) {
         AssetEntity asset = edit
-                ? requireAssetCap(user, assetId, GrantCaps.OBJECT)
+                ? requireAssetCap(user, assetId, GrantCaps.LIFE)
                 : requireAsset(assetId);
         if (!edit) {
             requireReadableProject(user, asset.getProjectKey());
@@ -17459,7 +17871,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public ImportResultDto importJson(ApplicationUser user, final String projectKey, final JsonImportDraft draft) {
-        final Project project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.EXCHANGE);
         if (storedAssetPrefix(project.getKey()).isEmpty()) {
             throw new AssetException(400, "asset-tree.error.assetKey.required");
         }

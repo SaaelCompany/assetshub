@@ -29,6 +29,7 @@
         <entity>com.assetstree.jira.ao.AssetActivityEntity</entity>
         <entity>com.assetstree.jira.ao.ProjectStatusEntity</entity>
         <entity>com.assetstree.jira.ao.ProjectGrantEntity</entity>
+        <entity>com.assetstree.jira.ao.AccessRoleEntity</entity>
         <entity>com.assetstree.jira.ao.PortalRuleEntity</entity>
         <entity>com.assetstree.jira.ao.PortalRuleConditionEntity</entity>
         <entity>com.assetstree.jira.ao.FlowRuleEntity</entity>
