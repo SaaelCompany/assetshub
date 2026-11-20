@@ -48,6 +48,8 @@ public final class GrantCaps {
     public static final String PORTAL = "portal";
     /** Manage the access list without the rest of the assets bundle. */
     public static final String GRANTS = "grants";
+    /** See places marked hidden, and everything stored inside them. */
+    public static final String SECRET = "secret";
     public static final String ALL_PROJECTS = "*";
 
     public static final String CREATE = "create";
@@ -64,7 +66,7 @@ public final class GrantCaps {
     private static final String[] FINE = new String[] {
             OBJ_CREATE, OBJ_EDIT, OBJ_MOVE, OBJ_REMOVE, NOTE, SHARE, LIFE,
             PLACE_ADD, PLACE_EDIT, PLACE_DEL, STATUS, EXCHANGE,
-            REPORT_EDIT, PLAN, PLAN_EDIT, PORTAL, GRANTS
+            REPORT_EDIT, PLAN, PLAN_EDIT, PORTAL, GRANTS, SECRET
     };
 
     private GrantCaps() {

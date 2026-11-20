@@ -107,6 +107,11 @@ public interface AssetEntity extends Entity {
 
     void setPhoto(String photo);
 
+    /** 1 when this place and everything inside it is hidden from people without the secret right. */
+    int getSecret();
+
+    void setSecret(int secret);
+
     /** Id from an external CMDB. Empty until a discovery import sets it. */
     @Indexed
     @StringLength(120)

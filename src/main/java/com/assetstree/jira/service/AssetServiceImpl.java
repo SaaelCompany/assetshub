@@ -660,7 +660,7 @@ public class AssetServiceImpl implements AssetService {
                 notices.clear();
                 startListMemo();
                 try {
-                    return listInside(key, needle, notices);
+                    return listInside(key, needle, notices, user, project);
                 } finally {
                     endListMemo();
                 }
@@ -680,10 +680,12 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private AssetListDto listInside(String key, String needle, List<ServiceNotice> notices) {
+    private AssetListDto listInside(String key, String needle, List<ServiceNotice> notices,
+                                    ApplicationUser user, Project project) {
         String mark = freshTreeMark(key);
-        AssetEntity[] rows = assetsIn(key);
-        applyDueFor(key, rows, notices);
+        AssetEntity[] stored = assetsIn(key);
+        applyDueFor(key, stored, notices);
+        AssetEntity[] rows = forViewer(user, project, stored);
         Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
         Map<String, String[]> holders = new HashMap<String, String[]>();
         List<AssetEntity> matched = new ArrayList<AssetEntity>();
@@ -1894,6 +1896,9 @@ public class AssetServiceImpl implements AssetService {
             if (asset == null || asset.getDeletedAt() != null || !seen.add(Integer.valueOf(asset.getID()))) {
                 continue;
             }
+            if (concealedFrom(authenticationContext().getLoggedInUser(), project(asset.getProjectKey()), asset)) {
+                continue;
+            }
             rows.add(new AssetFieldMatch.Row(asset.getID(), asset.getName(), asset.getObjectKey(),
                     asset.getProjectKey(), isLocation(asset), placeOf(asset, index)));
         }
@@ -2408,6 +2413,10 @@ public class AssetServiceImpl implements AssetService {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
         AssetEntity[] rows = assetsIn(projectKey);
+        Project project = project(projectKey);
+        if (concealedFrom(user, project, asset)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(projectKey, rows));
         AssetTypeDto type = types.get(asset.getTypeKey());
         boolean shared = shareIds(user.getKey()).contains(Integer.valueOf(assetId));
@@ -2801,7 +2810,7 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public List<AssetDto> doInTransaction() {
                 reclaimParkedKeys(project.getKey());
-                AssetEntity[] all = assetsAll(project.getKey());
+                AssetEntity[] all = forViewer(user, project, assetsAll(project.getKey()));
                 Map<Integer, AssetEntity> index = indexAssets(all);
                 Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), all));
                 Map<Integer, Integer> nested = new HashMap<Integer, Integer>();
@@ -4645,6 +4654,9 @@ public class AssetServiceImpl implements AssetService {
         if (row == null || row.getDeletedAt() != null) {
             return shown;
         }
+        if (concealedFrom(authenticationContext().getLoggedInUser(), project(row.getProjectKey()), row)) {
+            return shown;
+        }
         AssetDto dto = chosenAsset(row.getID());
         dto.setLocation(placeOf(row, new HashMap<Integer, AssetEntity>()));
         dto.setAttributes(new ArrayList<AttributeDto>());
@@ -4674,6 +4686,9 @@ public class AssetServiceImpl implements AssetService {
         }
         for (AssetEntity row : rows) {
             if (row == null || row.getDeletedAt() != null) {
+                continue;
+            }
+            if (concealedFrom(authenticationContext().getLoggedInUser(), project(row.getProjectKey()), row)) {
                 continue;
             }
             found.add(chosenAsset(row.getID()));
@@ -4718,7 +4733,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<ReportDto>() {
             @Override
             public ReportDto doInTransaction() {
-                AssetEntity[] rows = assetsIn(project.getKey());
+                AssetEntity[] rows = forViewer(user, project, assetsIn(project.getKey()));
                 List<AssetTypeDto> types = typeDtos(project.getKey(), rows);
                 Map<String, AssetTypeDto> typeIndex = indexTypes(types);
                 ReportDto report = new ReportDto();
@@ -5005,7 +5020,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<List<PickerNodeDto>>() {
             @Override
             public List<PickerNodeDto> doInTransaction() {
-                AssetEntity[] rows = assetsIn(project.getKey());
+                AssetEntity[] rows = forViewer(user, project, assetsIn(project.getKey()));
                 Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
                 List<AssetEntity> ordered = new ArrayList<AssetEntity>();
                 Collections.addAll(ordered, rows);
@@ -6197,7 +6212,8 @@ public class AssetServiceImpl implements AssetService {
                 startListMemo();
                 try {
                     for (ProjectDto project : visibleProjects(user)) {
-                        AssetEntity[] rows = assetsIn(project.getKey());
+                        Project live = project(project.getKey());
+                        AssetEntity[] rows = forViewer(user, live, assetsIn(project.getKey()));
                         applyDueFor(project.getKey(), rows, notices);
                         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
                         Map<Integer, AssetEntity> index = indexAssets(rows);
@@ -6284,7 +6300,7 @@ public class AssetServiceImpl implements AssetService {
                         continue;
                     }
                     List<String> columns = ModuleSetup.portalColumnList(setup.getPortalColumns());
-                    AssetEntity[] rows = assetsIn(project.getKey());
+                    AssetEntity[] rows = forViewer(user, project, assetsIn(project.getKey()));
                     Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
                     Map<Integer, AssetEntity> index = indexAssets(rows);
                     Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
@@ -6475,6 +6491,9 @@ public class AssetServiceImpl implements AssetService {
                         if (!onRequest && !canOpen(user, project) && !canSee(user, project)) {
                             continue;
                         }
+                        if (concealedFrom(user, project, entity)) {
+                            continue;
+                        }
                         visible.add(entity);
                         if (!rowsByProject.containsKey(entity.getProjectKey())) {
                             rowsByProject.put(entity.getProjectKey(), assetsIn(entity.getProjectKey()));
@@ -6539,7 +6558,7 @@ public class AssetServiceImpl implements AssetService {
 
     private byte[] buildEquipmentBook(String projectKey, String typeKey, int placeId, boolean blank) {
         ensureStatuses(projectKey);
-        AssetEntity[] rows = assetsIn(projectKey);
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
         List<AssetTypeDto> types = typeDtos(projectKey, rows);
         Map<Integer, AssetEntity> index = indexAssets(rows);
         List<StatusDto> statuses = statusDtos(projectKey, rows);
@@ -6700,7 +6719,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private byte[] buildLinksBook(String projectKey, String typeKey, int placeId) {
-        AssetEntity[] rows = assetsIn(projectKey);
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
         List<AssetTypeDto> types = typeDtos(projectKey, rows);
         Map<Integer, AssetEntity> index = indexAssets(rows);
         Map<String, Boolean> locations = new HashMap<String, Boolean>();
@@ -8631,7 +8650,8 @@ public class AssetServiceImpl implements AssetService {
 
     private AssetEntity requireReadable(ApplicationUser user, int id) {
         AssetEntity entity = requireAsset(id);
-        if (!canOpen(user, project(entity.getProjectKey()))) {
+        Project project = project(entity.getProjectKey());
+        if (!canOpen(user, project) || concealedFrom(user, project, entity)) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         return entity;
@@ -8639,10 +8659,116 @@ public class AssetServiceImpl implements AssetService {
 
     private AssetEntity requireVisible(ApplicationUser user, int id) {
         AssetEntity entity = requireAsset(id);
-        if (!canSee(user, project(entity.getProjectKey()))) {
+        Project project = project(entity.getProjectKey());
+        if (!canSee(user, project) || concealedFrom(user, project, entity)) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         return entity;
+    }
+
+    @Override
+    public AssetDto setSecret(ApplicationUser user, final int id, final boolean on) {
+        requireUser(user);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity entity = requireAsset(id);
+                Project project = project(entity.getProjectKey());
+                if (project == null || !seesSecret(user, project)) {
+                    throw new AssetException(403, "asset-tree.error.forbidden");
+                }
+                if (!isLocation(entity)) {
+                    throw new AssetException(400, "asset-tree.error.secret.place");
+                }
+                int next = on ? 1 : 0;
+                if (entity.getSecret() == next) {
+                    return null;
+                }
+                entity.setSecret(next);
+                entity.setUpdated(new Date());
+                entity.setUpdatedBy(user.getKey());
+                entity.save();
+                return null;
+            }
+        });
+        return getAsset(user, id);
+    }
+
+    /** A hidden place and every row under it. People with the secret right, and project administrators, keep the full list. */
+    private AssetEntity[] forViewer(ApplicationUser user, Project project, AssetEntity[] rows) {
+        if (rows == null) {
+            return new AssetEntity[0];
+        }
+        if (seesSecret(user, project)) {
+            return rows;
+        }
+        Set<Integer> hidden = concealedIds(rows);
+        if (hidden.isEmpty()) {
+            return rows;
+        }
+        List<AssetEntity> kept = new ArrayList<AssetEntity>();
+        for (int i = 0; i < rows.length; i++) {
+            AssetEntity row = rows[i];
+            if (row != null && !hidden.contains(Integer.valueOf(row.getID()))) {
+                kept.add(row);
+            }
+        }
+        return kept.toArray(new AssetEntity[kept.size()]);
+    }
+
+    private boolean concealedFrom(ApplicationUser user, Project project, AssetEntity entity) {
+        if (entity == null || project == null || seesSecret(user, project)) {
+            return false;
+        }
+        if (entity.getSecret() != 0) {
+            return true;
+        }
+        return concealedIds(assetsAll(entity.getProjectKey())).contains(Integer.valueOf(entity.getID()));
+    }
+
+    private Set<Integer> concealedIds(AssetEntity[] rows) {
+        Set<Integer> secret = new HashSet<Integer>();
+        Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+        if (rows != null) {
+            for (int i = 0; i < rows.length; i++) {
+                AssetEntity row = rows[i];
+                if (row == null) {
+                    continue;
+                }
+                Integer id = Integer.valueOf(row.getID());
+                parents.put(id, TreeLogic.normalizeParent(row.getParentId()));
+                if (row.getSecret() != 0) {
+                    secret.add(id);
+                }
+            }
+        }
+        Set<Integer> hidden = new HashSet<Integer>();
+        for (Integer id : parents.keySet()) {
+            Integer cursor = id;
+            int guard = 0;
+            while (cursor != null && guard < 80) {
+                if (secret.contains(cursor)) {
+                    hidden.add(id);
+                    break;
+                }
+                cursor = parents.get(cursor);
+                guard++;
+            }
+        }
+        return hidden;
+    }
+
+    private boolean seesSecret(ApplicationUser user, Project project) {
+        if (user == null || project == null) {
+            return false;
+        }
+        if (isAdmin(user)) {
+            return true;
+        }
+        if (permissionManager().hasPermission(ProjectPermissions.ADMINISTER_PROJECTS, project, user)) {
+            return true;
+        }
+        return grantHas(user, project, GrantCaps.SECRET);
     }
 
     private AssetEntity requireWritable(ApplicationUser user, int id) {
@@ -8924,6 +9050,9 @@ public class AssetServiceImpl implements AssetService {
             return entity;
         }
         Project project = project(entity.getProjectKey());
+        if (concealedFrom(user, project, entity)) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
         if (!hasCap(user, project, cap)) {
             if (!canOpen(user, project)) {
                 throw new AssetException(404, "asset-tree.error.notFound");
@@ -9023,6 +9152,12 @@ public class AssetServiceImpl implements AssetService {
             if (GrantCaps.bounded(keys[i]) && "own".equals(writeReach(user, project, keys[i]))) {
                 builder.append(":own");
             }
+        }
+        if (seesSecret(user, project)) {
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(GrantCaps.SECRET);
         }
         return builder.toString();
     }
@@ -10106,6 +10241,7 @@ public class AssetServiceImpl implements AssetService {
         if (ownPhoto && entity.getUpdated() != null) {
             dto.setPhotoRev(entity.getUpdated().getTime());
         }
+        dto.setSecret(entity.getSecret() != 0);
         dto.setLocation(location(entity, index));
         dto.setCustodian(profile(entity.getCustodianKey()));
         dto.setIssued(profile(entity.getIssuedKey()));
@@ -12228,7 +12364,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<List<ScheduleRowDto>>() {
             @Override
             public List<ScheduleRowDto> doInTransaction() {
-                return scheduleRows(project.getKey());
+                return scheduleRows(user, project);
             }
         });
     }
@@ -12368,9 +12504,10 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
-    private List<ScheduleRowDto> scheduleRows(String projectKey) {
+    private List<ScheduleRowDto> scheduleRows(ApplicationUser user, Project project) {
+        String projectKey = project.getKey();
         Map<Integer, AssetEntity> assets = new HashMap<Integer, AssetEntity>();
-        for (AssetEntity asset : assetsIn(projectKey)) {
+        for (AssetEntity asset : forViewer(user, project, assetsIn(projectKey))) {
             assets.put(Integer.valueOf(asset.getID()), asset);
         }
         ServicePlanEntity[] plans = ao().find(ServicePlanEntity.class);
@@ -13123,8 +13260,14 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private List<FloorDto> floorDtos(String projectKey) {
+        Project project = project(projectKey);
+        Set<Integer> hidden = seesSecret(authenticationContext().getLoggedInUser(), project)
+                ? Collections.<Integer>emptySet() : concealedIds(assetsIn(projectKey));
         List<FloorDto> result = new ArrayList<FloorDto>();
         for (FloorEntity row : floorsOf(projectKey)) {
+            if (row.getPlaceId() > 0 && hidden.contains(Integer.valueOf(row.getPlaceId()))) {
+                continue;
+            }
             result.add(floorDto(row));
         }
         return result;
@@ -13828,7 +13971,7 @@ public class AssetServiceImpl implements AssetService {
     private ReportViewDto buildReport(Project project, String key, String title, boolean standard,
             String group, String filter, String value, String metric, int lineFrom, boolean allLines, String onlyBucket,
             String fieldKey, String attrKey, String attrValue, String chartList, String start, String end, Integer branchScope) {
-        AssetEntity[] assets = assetsIn(project.getKey());
+        AssetEntity[] assets = forViewer(authenticationContext().getLoggedInUser(), project, assetsIn(project.getKey()));
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), assets));
         Map<Integer, AssetEntity> index = new HashMap<Integer, AssetEntity>();
         for (AssetEntity asset : assets) {
@@ -18660,7 +18803,7 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<List<ForecastRowDto>>() {
             @Override
             public List<ForecastRowDto> doInTransaction() {
-                AssetEntity[] rows = assetsIn(project.getKey());
+                AssetEntity[] rows = forViewer(user, project, assetsIn(project.getKey()));
                 Map<Integer, LifecycleEntity> lives = lifeIndex(idsOf(rows));
                 LocalDate today = businessToday();
                 List<ForecastRowDto> list = new ArrayList<ForecastRowDto>();

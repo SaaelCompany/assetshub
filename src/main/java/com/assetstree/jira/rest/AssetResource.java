@@ -157,6 +157,17 @@ public class AssetResource {
     }
 
     @POST
+    @Path("assets/{id}/secret")
+    public Response secret(@PathParam("id") final int id, @QueryParam("on") final boolean on) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.setSecret(user(), id, on)).build();
+            }
+        });
+    }
+
+    @POST
     @Path("assets/{id}/types/sort")
     public Response sortType(@PathParam("id") final int id, final PlaceSortDraft draft) {
         return invoke(new Callable<Response>() {

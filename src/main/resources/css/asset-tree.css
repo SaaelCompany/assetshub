@@ -683,6 +683,14 @@
     flex: 0 0 auto;
 }
 
+.asset-tree-secret {
+    margin-left: 6px;
+    color: #6b778c;
+    font-size: 11px;
+    font-weight: 600;
+    flex: 0 0 auto;
+}
+
 .asset-tree-nest {
     width: 22px;
     height: 22px;
