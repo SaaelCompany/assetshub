@@ -2760,12 +2760,14 @@ public class AssetServiceImpl implements AssetService {
                 List<Integer> toTrash = TrashBin.branch(childrenMap(live), id);
                 Map<Integer, AssetEntity> index = indexAssets(live);
                 Set<Integer> doomed = new HashSet<Integer>(toTrash);
+                Map<Integer, Boolean> locations = locationMap(live);
+                Map<Integer, Integer> parents = parentMap(live);
                 for (Integer assetId : toTrash) {
                     AssetEntity row = index.get(assetId);
                     if (row == null) {
                         continue;
                     }
-                    logPlaceChange(user, placeContainer(TreeLogic.normalizeParent(row.getParentId()), live, doomed), "place_remove", row);
+                    logPlaceChange(user, PlaceHistory.container(TreeLogic.normalizeParent(row.getParentId()), locations, parents, doomed), "place_remove", row);
                 }
                 AssetIssueLinkEntity[] noted = ao().find(AssetIssueLinkEntity.class,
                         Query.select().where("ASSET_ID = ?", id));
@@ -7571,6 +7573,9 @@ public class AssetServiceImpl implements AssetService {
         if ("move".equals(action)) {
             return moveAssets(user, project, ids, order, draft);
         }
+        if ("delete".equals(action)) {
+            return trashBulk(user, project, ids, order, draft.isCascade());
+        }
         final AssetTypeEntity nextType = "type".equals(action) ? requireEquipmentType(project, draft.getTypeKey()) : null;
         Set<Integer> selected = new HashSet<Integer>(ids);
         Set<Integer> covered = new HashSet<Integer>();
@@ -7590,9 +7595,7 @@ public class AssetServiceImpl implements AssetService {
                 if (!ProjectKeys.same(entity.getProjectKey(), project.getKey())) {
                     throw new AssetException(400, "asset-tree.error.project.mismatch");
                 }
-                if ("delete".equals(action)) {
-                    deleteAsset(user, id.intValue(), draft.isCascade());
-                } else if ("status".equals(action)) {
+                if ("status".equals(action)) {
                     patchStatus(user, id.intValue(), draft.getStatus(), draft.getStatusAt());
                 } else if ("copy".equals(action)) {
                     copyAsset(user, id.intValue());
@@ -7613,6 +7616,125 @@ public class AssetServiceImpl implements AssetService {
                 errors.add(new BulkIssueDto(label, exceptionText(labels, ex)));
             }
         }
+        result.setDone(covered.size());
+        result.setErrors(errors);
+        return result;
+    }
+
+    /** One read of the tree, then every selected object goes to the trash together. */
+    private BulkResultDto trashBulk(final ApplicationUser user, final Project project, final List<Integer> ids,
+                                     final List<Integer> order, final boolean cascade) {
+        final Set<Integer> selected = new HashSet<Integer>(ids);
+        final List<String[]> gone = new ArrayList<String[]>();
+        final List<Long> linkedIssues = new ArrayList<Long>();
+        final List<BulkIssueDto> errors = new ArrayList<BulkIssueDto>();
+        final Set<Integer> covered = new HashSet<Integer>();
+        final String actorKey = user == null ? "" : user.getKey();
+        final I18nHelper labels = i18n();
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity[] live = assetsIn(project.getKey());
+                Map<Integer, AssetEntity> index = indexAssets(live);
+                Map<Integer, Boolean> locations = locationMap(live);
+                Map<Integer, Integer> parents = parentMap(live);
+                Set<Integer> removed = new HashSet<Integer>();
+                Date now = new Date();
+                for (Integer id : order) {
+                    if (id == null) {
+                        continue;
+                    }
+                    if (removed.contains(id)) {
+                        covered.add(id);
+                        continue;
+                    }
+                    AssetEntity entity = index.get(id);
+                    String label = entity == null || entity.getName() == null || entity.getName().trim().isEmpty()
+                            ? String.valueOf(id.intValue()) : entity.getName();
+                    try {
+                        if (entity == null || entity.getDeletedAt() != null) {
+                            if (cascade) {
+                                covered.add(id);
+                            }
+                            continue;
+                        }
+                        if (!ProjectKeys.same(entity.getProjectKey(), project.getKey())) {
+                            throw new AssetException(400, "asset-tree.error.project.mismatch");
+                        }
+                        requireAssetCap(user, id.intValue(), removeCap(entity));
+                        Map<Integer, List<Integer>> children = new HashMap<Integer, List<Integer>>();
+                        for (AssetEntity row : live) {
+                            if (row == null || removed.contains(Integer.valueOf(row.getID()))) {
+                                continue;
+                            }
+                            Integer parentId = TreeLogic.normalizeParent(row.getParentId());
+                            if (parentId == null) {
+                                continue;
+                            }
+                            List<Integer> bucket = children.get(parentId);
+                            if (bucket == null) {
+                                bucket = new ArrayList<Integer>();
+                                children.put(parentId, bucket);
+                            }
+                            bucket.add(Integer.valueOf(row.getID()));
+                        }
+                        List<Integer> descendants = TreeLogic.descendants(children, id.intValue());
+                        if (!descendants.isEmpty() && !cascade) {
+                            throw new AssetException(409, "asset-tree.error.hasChildren", Integer.valueOf(descendants.size()));
+                        }
+                        List<Integer> toTrash = TrashBin.branch(children, id.intValue());
+                        Set<Integer> doomed = new HashSet<Integer>(toTrash);
+                        for (Integer assetId : toTrash) {
+                            AssetEntity row = index.get(assetId);
+                            if (row == null) {
+                                continue;
+                            }
+                            logPlaceChange(user, PlaceHistory.container(TreeLogic.normalizeParent(row.getParentId()), locations, parents, doomed), "place_remove", row);
+                        }
+                        AssetIssueLinkEntity[] noted = ao().find(AssetIssueLinkEntity.class, Query.select().where("ASSET_ID = ?", id));
+                        if (noted != null) {
+                            for (AssetIssueLinkEntity link : noted) {
+                                if (link != null) {
+                                    linkedIssues.add(Long.valueOf(link.getIssueId()));
+                                }
+                            }
+                        }
+                        for (Integer assetId : toTrash) {
+                            AssetEntity row = index.get(assetId);
+                            if (row == null) {
+                                continue;
+                            }
+                            row.setDeletedAt(now);
+                            row.setDeletedBy(actorKey);
+                            row.setTrashRootId(id);
+                            row.setUpdated(now);
+                            row.setUpdatedBy(actorKey);
+                            row.save();
+                            removed.add(assetId);
+                            if (selected.contains(assetId)) {
+                                covered.add(assetId);
+                            }
+                        }
+                        covered.add(id);
+                        if (!actorKey.isEmpty()) {
+                            recordActivity(id.intValue(), actorKey, "trash", "", "", "");
+                        }
+                        gone.add(new String[] { entity.getProjectKey(), entity.getObjectKey(), entity.getName(), String.valueOf(id.intValue()) });
+                    } catch (AssetException ex) {
+                        errors.add(new BulkIssueDto(label, exceptionText(labels, ex)));
+                    }
+                }
+                return null;
+            }
+        });
+        for (String[] row : gone) {
+            emit(row[0], "asset.deleted", "{\"event\":\"asset.deleted\",\"project\":\"" + jsonEscape(row[0])
+                    + "\",\"id\":" + row[3] + ",\"key\":\"" + jsonEscape(row[1]) + "\",\"name\":\"" + jsonEscape(row[2]) + "\"}");
+        }
+        if (!gone.isEmpty()) {
+            noteIssues(project.getKey(), linkedIssues, "asset.deleted", gone.get(0)[1], gone.get(0)[2]);
+        }
+        BulkResultDto result = new BulkResultDto();
         result.setDone(covered.size());
         result.setErrors(errors);
         return result;
@@ -7810,14 +7932,32 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
-    private Integer placeContainer(Integer startId, AssetEntity[] rows, Set<Integer> skip) {
+    /** One type lookup per kind, not one lookup per object. */
+    private Map<Integer, Boolean> locationMap(AssetEntity[] rows) {
+        Map<String, Boolean> byType = new HashMap<String, Boolean>();
         Map<Integer, Boolean> locations = new HashMap<Integer, Boolean>();
-        if (rows != null) {
-            for (AssetEntity row : rows) {
-                locations.put(Integer.valueOf(row.getID()), Boolean.valueOf(isLocation(row)));
-            }
+        if (rows == null) {
+            return locations;
         }
-        return PlaceHistory.container(startId, locations, parentMap(rows == null ? new AssetEntity[0] : rows), skip);
+        for (AssetEntity row : rows) {
+            if (row == null) {
+                continue;
+            }
+            String key = row.getTypeKey() == null ? "" : row.getTypeKey().trim();
+            Boolean location = byType.get(key);
+            if (location == null) {
+                AssetTypeEntity type = key.isEmpty() ? null : findType(key);
+                location = Boolean.valueOf(type != null && type.isLocation());
+                byType.put(key, location);
+            }
+            locations.put(Integer.valueOf(row.getID()), location);
+        }
+        return locations;
+    }
+
+    private Integer placeContainer(Integer startId, AssetEntity[] rows, Set<Integer> skip) {
+        AssetEntity[] source = rows == null ? new AssetEntity[0] : rows;
+        return PlaceHistory.container(startId, locationMap(source), parentMap(source), skip);
     }
 
     private void logPlaceChange(ApplicationUser user, Integer placeId, String kind, AssetEntity child) {
