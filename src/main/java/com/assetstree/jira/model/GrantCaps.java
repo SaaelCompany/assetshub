@@ -6,7 +6,8 @@ package com.assetstree.jira.model;
  * An object is the equipment itself. Assets is every kind inside one project.
  * Project administrator has that full access, including settings and modules
  * except TNI, and only inside the one project the grant names.
- * Administrator covers every project.
+ * Administrator is the same project, plus TNI. It does not open other projects.
+ * A Jira administrator covers every project without a grant row.
  * Older rows used view, create, edit, move, schema, and access. Those expand
  * to the same kind of work they allowed before.
  */
