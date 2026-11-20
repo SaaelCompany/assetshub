@@ -7196,6 +7196,8 @@ public class AssetServiceImpl implements AssetService {
         }
         int created = 0;
         int updated = 0;
+        Map<String, int[]> tally = new LinkedHashMap<String, int[]>();
+        Map<String, String> typeNames = new HashMap<String, String>();
         boolean headerOnly = false;
         for (EquipmentExchange.Issue issue : plan.getIssues()) {
             if (issue.getRow() <= 1 && plan.getChanges().isEmpty()) {
@@ -7206,11 +7208,13 @@ public class AssetServiceImpl implements AssetService {
             for (EquipmentExchange.Change change : plan.getChanges()) {
                 try {
                     applyImportedChange(user, projectKey, change, memory);
-                    if (change.getExistingId() == null) {
+                    boolean fresh = change.getExistingId() == null;
+                    if (fresh) {
                         created++;
                     } else {
                         updated++;
                     }
+                    noteImport(tally, importTypeName(change.getTypeKey(), typeNames), fresh);
                 } catch (AssetException ex) {
                     errors.add(new ImportIssueDto(change.getRow(), exceptionText(labels, ex)));
                 } catch (RuntimeException ex) {
@@ -7223,6 +7227,7 @@ public class AssetServiceImpl implements AssetService {
             try {
                 applyImportedService(projectKey, wish);
                 updated++;
+                noteImport(tally, labels.getText("asset-tree.ui.serviceTitle"), false);
             } catch (AssetException ex) {
                 errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), exceptionText(labels, ex))));
             } catch (RuntimeException ex) {
@@ -7235,8 +7240,10 @@ public class AssetServiceImpl implements AssetService {
                 int flag = applyImportedLink(user, projectKey, wish);
                 if (flag > 0) {
                     created++;
+                    noteImport(tally, labels.getText("asset-tree.ui.links"), true);
                 } else if (flag == 0) {
                     updated++;
+                    noteImport(tally, labels.getText("asset-tree.ui.links"), false);
                 }
             } catch (AssetException ex) {
                 errors.add(new ImportIssueDto(wish.getRow(), sheetText(wish.getSheet(), exceptionText(labels, ex))));
@@ -7253,6 +7260,7 @@ public class AssetServiceImpl implements AssetService {
                 }
                 attachImportedLife(asset, wish);
                 updated++;
+                noteImport(tally, labels.getText("asset-tree.ui.lifeTitle"), false);
             } catch (AssetException ex) {
                 errors.add(new ImportIssueDto(wish.getRow(), exceptionText(labels, ex)));
             } catch (RuntimeException ex) {
@@ -7262,8 +7270,44 @@ public class AssetServiceImpl implements AssetService {
         }
         result.setCreated(created);
         result.setUpdated(updated);
+        result.setLines(importLines(tally));
         result.setErrors(errors);
         return result;
+    }
+
+    private static void noteImport(Map<String, int[]> tally, String label, boolean created) {
+        String name = label == null ? "" : label.trim();
+        if (name.isEmpty()) {
+            name = "\u2014";
+        }
+        int[] pair = tally.get(name);
+        if (pair == null) {
+            pair = new int[2];
+            tally.put(name, pair);
+        }
+        pair[created ? 0 : 1]++;
+    }
+
+    private String importTypeName(String typeKey, Map<String, String> cache) {
+        String key = typeKey == null ? "" : typeKey.trim();
+        String known = cache.get(key);
+        if (known != null) {
+            return known;
+        }
+        String label = typeLabel(findType(key));
+        if (label.isEmpty()) {
+            label = key;
+        }
+        cache.put(key, label);
+        return label;
+    }
+
+    private static List<ImportResultDto.Line> importLines(Map<String, int[]> tally) {
+        List<ImportResultDto.Line> lines = new ArrayList<ImportResultDto.Line>();
+        for (Map.Entry<String, int[]> entry : tally.entrySet()) {
+            lines.add(new ImportResultDto.Line(entry.getKey(), entry.getValue()[0], entry.getValue()[1]));
+        }
+        return lines;
     }
 
     /**

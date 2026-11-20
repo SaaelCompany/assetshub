@@ -314,6 +314,7 @@ public final class UiCatalog {
             "exchangeEmpty",
             "exchangeCreated",
             "exchangeUpdated",
+            "exchangeLine",
             "exchangeRow",
             "exchangePlace",
             "bulkSelected",
