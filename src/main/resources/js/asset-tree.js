@@ -1284,6 +1284,7 @@
         ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', body, function (status, payload) {
             if (status >= 200 && status < 300) {
                 rememberGrant(payload);
+                closeAllModals();
                 renderFrame();
             } else if (errorNode) {
                 errorNode.hidden = false;
@@ -31126,6 +31127,7 @@
                         grant.reach = payload.reach;
                     }
                 });
+                closeAllModals();
                 renderFrame();
             } else {
                 notify((payload && payload.message) || t('errorTitle'));
@@ -31191,6 +31193,24 @@
             });
         });
         return territory;
+    }
+
+    function ownLine(key, value) {
+        var table = {
+            placeAdd: { none: 'reachPlaceAddNone', own: 'reachPlaceAddOwn', all: 'reachPlaceAddAll' },
+            placeEdit: { none: 'reachPlaceEditNone', own: 'reachPlaceEditOwn', all: 'reachPlaceEditAll' },
+            placeDel: { none: 'reachPlaceDelNone', own: 'reachPlaceDelOwn', all: 'reachPlaceDelAll' },
+            objCreate: { none: 'reachObjCreateNone', own: 'reachObjCreateOwn', all: 'reachObjCreateAll' },
+            objEdit: { none: 'reachObjEditNone', own: 'reachObjEditOwn', all: 'reachObjEditAll' },
+            objMove: { none: 'reachObjMoveNone', own: 'reachObjMoveOwn', all: 'reachObjMoveAll' },
+            objRemove: { none: 'reachObjRemoveNone', own: 'reachObjRemoveOwn', all: 'reachObjRemoveAll' },
+            note: { none: 'reachNoteNone', own: 'reachNoteOwn', all: 'reachNoteAll' },
+            share: { none: 'reachShareNone', own: 'reachShareOwn', all: 'reachShareAll' },
+            life: { none: 'reachLifeNone', own: 'reachLifeOwn', all: 'reachLifeAll' }
+        };
+        var set = table[key];
+        if (!set) return '';
+        return t(set[value] || set.none);
     }
 
     function reachMap(source) {
@@ -31332,7 +31352,10 @@
                     choice.appendChild(item);
                 });
                 line.appendChild(choice);
-                block.appendChild(line);
+                var wrap = el('div', 'asset-tree-access-line');
+                wrap.appendChild(line);
+                if (row[1]) wrap.appendChild(el('p', 'asset-tree-access-note', ownLine(key, current)));
+                block.appendChild(wrap);
             });
             host.appendChild(block);
         });
@@ -31367,26 +31390,25 @@
             });
             return;
         }
-        if (!state.accessPick && (state.roles || []).length) state.accessPick = 'role:' + state.roles[0].name;
-        var board = el('div', 'asset-tree-access-board');
-        var list = el('div', 'asset-tree-access-list');
+        var groups = el('div', 'asset-tree-access-groups');
         (state.roles || []).forEach(function (role) {
             if (!role || !role.name) return;
-            var item = button('', 'asset-tree-access-item' + (state.accessPick === 'role:' + role.name ? ' is-on' : ''), function () {
-                state.accessPick = 'role:' + role.name;
-                renderFrame();
-            });
-            item.appendChild(el('strong', null, role.name));
-            item.appendChild(el('span', null, accessSummary(role)));
-            list.appendChild(item);
+            var row = el('div', 'asset-tree-access-person');
+            var title = el('div', 'asset-tree-access-person-title');
+            title.appendChild(el('strong', null, role.name));
+            row.appendChild(title);
+            row.appendChild(el('div', 'asset-tree-access-person-summary', accessSummary(role)));
+            var actions = el('div', 'asset-tree-access-person-actions');
+            actions.appendChild(button(t('accessEditGroup'), 'asset-tree-btn', function () {
+                openRoleModal(role);
+            }));
+            row.appendChild(actions);
+            groups.appendChild(row);
         });
-        list.appendChild(button(t('accessNew'), 'asset-tree-btn' + (state.accessPick === 'new' ? ' primary' : ''), function () {
-            state.accessPick = 'new';
-            renderFrame();
+        block.appendChild(groups);
+        block.appendChild(button(t('accessNew'), 'asset-tree-btn primary', function () {
+            openRoleModal(null);
         }));
-        board.appendChild(list);
-        board.appendChild(renderAccessEditor());
-        block.appendChild(board);
         stack.appendChild(block);
         stack.appendChild(renderAccessPeople());
         var schemas = el('details', 'asset-tree-access-schemas');
@@ -31395,21 +31417,53 @@
         stack.appendChild(schemas);
     }
 
-    function renderAccessEditor() {
-        var editor = el('div', 'asset-tree-access-editor');
-        var grant = pickedGrant();
-        if (state.accessPick === 'draft') {
-            editor.appendChild(el('h3', 'asset-tree-settings-title', t('roleCustom')));
-            editor.appendChild(el('p', 'asset-tree-hint', t('accessCustomHint', draftLabel())));
-            appendMatrixEditor(editor, presetMatrix('engineer'), function (packed) {
-                issueDraft(packed);
-            }, t('accessGive'));
-            return editor;
-        }
-        if (grant) {
-            editor.appendChild(el('h3', 'asset-tree-settings-title', grantLabel(grant)));
-            editor.appendChild(el('p', 'asset-tree-hint', t('accessCustomHint', grantLabel(grant))));
-            appendMatrixEditor(editor, reachMap(grant), function (packed) {
+    function openRoleModal(role) {
+        openModal(function (dialog) {
+            dialog.classList.add('is-wide', 'asset-tree-access-dialog');
+            var creating = !role;
+            dialog.appendChild(el('h2', null, creating ? t('accessNew') : role.name));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('ownLegend')));
+            var name = input('role-name', creating ? '' : role.name, false);
+            name.placeholder = t('roleName');
+            name.maxLength = 80;
+            dialog.appendChild(field(t('roleName'), name, true));
+            var actions = appendMatrixEditor(dialog, creating ? presetMatrix('engineer') : reachMap(role), function (packed) {
+                var title = name.value.trim();
+                if (!title) {
+                    notify(t('roleName'));
+                    return;
+                }
+                postRole(title, packed.caps, packed.reach, creating ? '' : role.name);
+            }, creating ? t('roleAdd') : t('accessSave'));
+            if (!creating) {
+                dialog.insertBefore(button(t('accessRemove'), 'asset-tree-btn', function () {
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/roles?name=' + encodeURIComponent(role.name), null, function (status, payload) {
+                        if (status >= 200 && status < 300) {
+                            state.roles = (state.roles || []).filter(function (item) { return !item || item.name !== role.name; });
+                            (state.grants || []).forEach(function (item) {
+                                if (item && item.roleName === role.name) item.roleName = '';
+                            });
+                            closeAllModals();
+                            renderFrame();
+                        } else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }), actions);
+            }
+        });
+    }
+
+    function openGrantModal(grant, draftMap, saveLabel, onSave) {
+        openModal(function (dialog) {
+            dialog.classList.add('is-wide', 'asset-tree-access-dialog');
+            var title = grant ? grantLabel(grant) : draftLabel();
+            dialog.appendChild(el('h2', null, title));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('ownLegend')));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('accessCustomHint', title)));
+            var actions = appendMatrixEditor(dialog, draftMap || (grant ? reachMap(grant) : presetMatrix('engineer')), function (packed) {
+                if (onSave) {
+                    onSave(packed);
+                    return;
+                }
                 postGrant(grant, packed.caps, null, {
                     typeScope: grant.typeScope || '',
                     fieldScope: grant.fieldScope || '',
@@ -31417,60 +31471,15 @@
                     reach: packed.reach,
                     roleName: ''
                 });
-            }, t('accessSave'));
-            editor.appendChild(scopeDisclosure(grant, function (scope) {
-                scope.reach = grant.reach || 'all';
-                scope.roleName = '';
-                postGrant(grant, grant.caps || '', null, scope);
-            }));
-            return editor;
-        }
-        var role = pickedRole();
-        if (state.accessPick === 'new' || !role) {
-            editor.appendChild(el('h3', 'asset-tree-settings-title', t('accessNew')));
-            editor.appendChild(el('p', 'asset-tree-hint', t('matrixHint')));
-            var name = input('role-name', '', false);
-            name.placeholder = t('roleName');
-            name.maxLength = 80;
-            editor.appendChild(field(t('roleName'), name, true));
-            appendMatrixEditor(editor, presetMatrix('engineer'), function (packed) {
-                var title = name.value.trim();
-                if (!title) {
-                    notify(t('roleName'));
-                    return;
-                }
-                postRole(title, packed.caps, packed.reach, '');
-                state.accessPick = 'role:' + title;
-            }, t('roleAdd'));
-            return editor;
-        }
-        editor.appendChild(el('h3', 'asset-tree-settings-title', role.name));
-        editor.appendChild(el('p', 'asset-tree-hint', t('matrixHint')));
-        var rename = input('role-name', role.name, false);
-        rename.maxLength = 80;
-        editor.appendChild(field(t('roleName'), rename, true));
-        appendMatrixEditor(editor, reachMap(role), function (packed) {
-            var title = rename.value.trim();
-            if (!title) {
-                notify(t('roleName'));
-                return;
+            }, saveLabel || t('accessSave'));
+            if (grant) {
+                dialog.insertBefore(scopeDisclosure(grant, function (scope) {
+                    scope.reach = grant.reach || 'all';
+                    scope.roleName = grant.roleName || '';
+                    postGrant(grant, grant.caps || '', null, scope);
+                }), actions);
             }
-            state.accessPick = 'role:' + title;
-            postRole(title, packed.caps, packed.reach, role.name);
-        }, t('accessSave'));
-        editor.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
-            ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/roles?name=' + encodeURIComponent(role.name), null, function (status, payload) {
-                if (status >= 200 && status < 300) {
-                    state.roles = (state.roles || []).filter(function (item) { return !item || item.name !== role.name; });
-                    (state.grants || []).forEach(function (item) {
-                        if (item && item.roleName === role.name) item.roleName = '';
-                    });
-                    state.accessPick = '';
-                    renderFrame();
-                } else notify((payload && payload.message) || t('errorTitle'));
-            });
-        }));
-        return editor;
+        });
     }
 
     function appendMatrixEditor(editor, map, onSave, saveLabel) {
@@ -31489,7 +31498,9 @@
         var error = el('div', 'asset-tree-form-error');
         error.hidden = true;
         editor.appendChild(error);
-        editor.appendChild(button(saveLabel, 'asset-tree-btn primary', function () {
+        var actions = el('div', 'asset-tree-dialog-actions is-footer');
+        actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
+        actions.appendChild(button(saveLabel, 'asset-tree-btn primary', function () {
             var packed = matrixCaps(map);
             if (!packed.caps) {
                 error.hidden = false;
@@ -31499,26 +31510,8 @@
             error.hidden = true;
             onSave(packed);
         }));
-    }
-
-    function pickedRole() {
-        if (!state.accessPick || state.accessPick.indexOf('role:') !== 0) return null;
-        var name = state.accessPick.slice(5);
-        var found = null;
-        (state.roles || []).forEach(function (role) {
-            if (role && role.name === name) found = role;
-        });
-        return found;
-    }
-
-    function pickedGrant() {
-        if (!state.accessPick || state.accessPick.indexOf('grant:') !== 0) return null;
-        var id = state.accessPick.slice(6);
-        var found = null;
-        (state.grants || []).forEach(function (grant) {
-            if (grantIdentity(grant) === id) found = grant;
-        });
-        return found;
+        editor.appendChild(actions);
+        return actions;
     }
 
     function draftLabel() {
@@ -31655,8 +31648,9 @@
                 }
                 if (!role) {
                     state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '' };
-                    state.accessPick = 'draft';
-                    renderFrame();
+                    openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
+                        issueDraft(packed);
+                    });
                     return;
                 }
                 postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
@@ -31670,8 +31664,9 @@
             }
             if (!role) {
                 state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '' };
-                state.accessPick = 'draft';
-                renderFrame();
+                openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
+                    issueDraft(packed);
+                });
                 return;
             }
             postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
@@ -31719,24 +31714,24 @@
             var actions = el('div', 'asset-tree-access-person-actions');
             if (grant.roleName) {
                 actions.appendChild(button(t('accessOpenGroup'), 'asset-tree-btn', function () {
-                    state.accessPick = 'role:' + grant.roleName;
-                    renderFrame();
+                    var role = roleByName(grant.roleName);
+                    if (role) openRoleModal(role);
                 }));
                 actions.appendChild(button(t('accessDetach'), 'asset-tree-btn', function () {
                     var source = roleByName(grant.roleName) || grant;
-                    postGrant(grant, source.caps || grant.caps || '', null, {
-                        typeScope: grant.typeScope || '',
-                        fieldScope: grant.fieldScope || '',
-                        schemaName: grant.schemaName || '',
-                        reach: source.reach || grant.reach || 'all',
-                        roleName: ''
+                    openGrantModal(grant, reachMap(source), t('accessDetach'), function (packed) {
+                        postGrant(grant, packed.caps, null, {
+                            typeScope: grant.typeScope || '',
+                            fieldScope: grant.fieldScope || '',
+                            schemaName: grant.schemaName || '',
+                            reach: packed.reach,
+                            roleName: ''
+                        });
                     });
-                    state.accessPick = 'grant:' + grantIdentity(grant);
                 }));
             } else {
                 actions.appendChild(button(t('accessEditCustom'), 'asset-tree-btn', function () {
-                    state.accessPick = 'grant:' + grantIdentity(grant);
-                    renderFrame();
+                    openGrantModal(grant);
                 }));
             }
             actions.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {

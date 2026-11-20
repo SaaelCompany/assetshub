@@ -7459,6 +7459,78 @@ a.asset-tree-preview-icon:focus {
     width: auto;
 }
 
+#asset-tree-app .asset-tree-access-groups {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+}
+
+.asset-tree-dialog.asset-tree-access-dialog {
+    width: min(820px, 100%);
+}
+
+.asset-tree-access-dialog .asset-tree-access-family-title {
+    margin: 14px 0 2px;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.asset-tree-access-dialog .asset-tree-access-line {
+    padding: 8px 0 10px;
+    border-bottom: 1px solid #f4f5f7;
+}
+
+.asset-tree-access-dialog .asset-tree-access-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.asset-tree-access-dialog .asset-tree-access-name {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.asset-tree-access-dialog .asset-tree-access-choice {
+    display: inline-flex;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.asset-tree-access-dialog button.asset-tree-access-opt {
+    width: auto;
+    margin: 0;
+    padding: 4px 10px;
+    border: 0;
+    border-right: 1px solid #dfe1e6;
+    background: #fff;
+    color: #42526e;
+    font: inherit;
+    font-size: 12px;
+    line-height: 16px;
+    cursor: pointer;
+}
+
+.asset-tree-access-dialog button.asset-tree-access-opt:last-child {
+    border-right: 0;
+}
+
+.asset-tree-access-dialog button.asset-tree-access-opt.is-on {
+    background: #0052cc;
+    color: #fff;
+}
+
+.asset-tree-access-dialog .asset-tree-access-note {
+    margin: 4px 0 0;
+    color: #6b778c;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
 #asset-tree-app .asset-tree-access-stack .asset-tree-schema-search,
 #asset-tree-app .asset-tree-access-stack .asset-tree-key-field,
 #asset-tree-app .asset-tree-access-stack .asset-tree-key-field.wide,
