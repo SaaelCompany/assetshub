@@ -18,6 +18,7 @@ import com.assetstree.jira.model.ShareDraft;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.model.RoleDraft;
 import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.dto.SchemeDocumentDto;
 import com.assetstree.jira.dto.SchemaDto;
@@ -1268,6 +1269,40 @@ public class AssetResource {
                 } else {
                     assetService.deleteGrant(user(), projectKey, group);
                 }
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/roles")
+    public Response roles(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listRoles(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/roles")
+    public Response saveRole(@PathParam("projectKey") final String projectKey, final RoleDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveRole(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/roles")
+    public Response deleteRole(@PathParam("projectKey") final String projectKey, @QueryParam("name") final String name) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteRole(user(), projectKey, name);
                 return Response.noContent().build();
             }
         });

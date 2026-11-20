@@ -52,6 +52,40 @@ public class ScaleRulesTest {
     }
 
     @Test
+    public void fineActionsStayInsideTheOldBundle() {
+        assertEquals("reports", GrantCaps.normalize("reports"));
+        assertTrue(GrantCaps.normalize("object").contains("view"));
+        assertFalse(GrantCaps.normalize("object").contains("objEdit"));
+        assertTrue(GrantCaps.allows("object", GrantCaps.OBJ_EDIT));
+        assertTrue(GrantCaps.allows("object", GrantCaps.OBJ_REMOVE));
+        assertTrue(GrantCaps.allows("objEdit", GrantCaps.OBJ_EDIT));
+        assertFalse(GrantCaps.allows("objEdit", GrantCaps.OBJ_REMOVE));
+        assertFalse(GrantCaps.allows("objEdit", GrantCaps.OBJECT));
+        assertTrue(GrantCaps.allows("view", GrantCaps.PLAN));
+        assertFalse(GrantCaps.has("reports", GrantCaps.VIEW));
+        assertTrue(GrantCaps.normalize("objEdit").contains("view"));
+        assertEquals("edit", GrantCaps.levelOf("objEdit"));
+    }
+
+    @Test
+    public void ownReachCoversThePlaceAndTheCustodian() {
+        Map<Integer, Integer> parents = new LinkedHashMap<Integer, Integer>();
+        parents.put(Integer.valueOf(1), null);
+        parents.put(Integer.valueOf(2), Integer.valueOf(1));
+        parents.put(Integer.valueOf(3), Integer.valueOf(2));
+        Map<Integer, String> custodians = new LinkedHashMap<Integer, String>();
+        custodians.put(Integer.valueOf(1), "place-mol");
+        custodians.put(Integer.valueOf(2), "");
+        custodians.put(Integer.valueOf(3), "asset-mol");
+        Set<Integer> held = new LinkedHashSet<Integer>();
+        held.add(Integer.valueOf(1));
+        assertTrue(OwnReach.covers("place-mol", 2, parents, custodians, held));
+        assertTrue(OwnReach.covers("asset-mol", 3, parents, custodians, Collections.<Integer>emptySet()));
+        assertFalse(OwnReach.covers("other", 3, parents, custodians, Collections.<Integer>emptySet()));
+        assertTrue(OwnReach.covers("other", 2, parents, custodians, Collections.singleton(Integer.valueOf(1))));
+    }
+
+    @Test
     public void lifeBookFillsOnlyTheCellsThatArePresent() {
         assertTrue(LifeBook.template().length > 100);
         List<String> headers = Arrays.asList("Key", "Contractor", "Contract", "Contract from", "Price");

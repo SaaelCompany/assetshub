@@ -14,6 +14,8 @@ public class GrantDto {
     private String typeScope;
     private String fieldScope;
     private String schemaName;
+    private String roleName;
+    private String reach;
 
     public String getGroupName() {
         return groupName;
@@ -69,4 +71,8 @@ public class GrantDto {
     public void setFieldScope(String fieldScope) { this.fieldScope = fieldScope; }
     public String getSchemaName() { return schemaName; }
     public void setSchemaName(String schemaName) { this.schemaName = schemaName; }
+    public String getRoleName() { return roleName; }
+    public void setRoleName(String roleName) { this.roleName = roleName; }
+    public String getReach() { return reach; }
+    public void setReach(String reach) { this.reach = reach; }
 }

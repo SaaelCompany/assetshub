@@ -30,6 +30,8 @@ public class ProjectDto {
     private boolean canMap = true;
     private boolean canScheme = true;
     private boolean canSchemeEdit;
+    private String reach;
+    private String acts;
     private String assetKey;
     private boolean treeObjects;
     private List<String> columns = new ArrayList<String>();
@@ -175,6 +177,10 @@ public class ProjectDto {
     public void setCanScheme(boolean canScheme) { this.canScheme = canScheme; }
     public boolean isCanSchemeEdit() { return canSchemeEdit; }
     public void setCanSchemeEdit(boolean canSchemeEdit) { this.canSchemeEdit = canSchemeEdit; }
+    public String getReach() { return reach; }
+    public void setReach(String reach) { this.reach = reach; }
+    public String getActs() { return acts; }
+    public void setActs(String acts) { this.acts = acts; }
 
     public String getAssetKey() {
         return assetKey;

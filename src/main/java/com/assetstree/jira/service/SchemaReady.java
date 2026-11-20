@@ -1,5 +1,6 @@
 package com.assetstree.jira.service;
 
+import com.assetstree.jira.ao.AccessRoleEntity;
 import com.assetstree.jira.ao.AssetActivityEntity;
 import com.assetstree.jira.ao.AssetAttributeEntity;
 import com.assetstree.jira.ao.AssetCommentEntity;
@@ -92,6 +93,7 @@ public final class SchemaReady {
             AssetActivityEntity.class,
             ProjectStatusEntity.class,
             ProjectGrantEntity.class,
+            AccessRoleEntity.class,
             PortalRuleEntity.class,
             PortalRuleConditionEntity.class,
             FlowRuleEntity.class,
