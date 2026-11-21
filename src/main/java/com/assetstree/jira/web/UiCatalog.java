@@ -183,6 +183,8 @@ public final class UiCatalog {
             "editFieldTitle",
             "fieldDragHint",
             "fieldInherited",
+            "fieldUnlockHint",
+            "fieldRelockHint",
             "fieldNameRequired",
             "locationType",
             "placeCaption",

@@ -5,11 +5,13 @@ import com.assetstree.jira.dto.FieldDto;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-/** One level: a subtype shows its parent's fields. The child's own key wins. */
+/** One level: a subtype shows its parent's fields. The child's own key stays in that slot. */
 public final class FieldInheritance {
     private FieldInheritance() {
     }
@@ -38,13 +40,21 @@ public final class FieldInheritance {
             List<FieldDto> parentFields = parent.getFields() == null
                     ? Collections.<FieldDto>emptyList() : parent.getFields();
             List<FieldDto> merged = new ArrayList<FieldDto>();
+            Set<String> placed = new HashSet<String>();
             int position = 0;
             for (int f = 0; f < parentFields.size(); f++) {
                 FieldDto field = parentFields.get(f);
                 if (field == null || field.isInherited() || field.getFieldKey() == null || field.getFieldKey().isEmpty()) {
                     continue;
                 }
-                if (owns(own, field.getFieldKey())) {
+                FieldDto ownField = owned(own, field.getFieldKey());
+                if (ownField != null) {
+                    ownField.setInherited(false);
+                    ownField.setInheritedFrom("");
+                    ownField.setPosition(position);
+                    position++;
+                    merged.add(ownField);
+                    placed.add(field.getFieldKey());
                     continue;
                 }
                 FieldDto copy = copyOf(field);
@@ -57,7 +67,7 @@ public final class FieldInheritance {
             }
             for (int f = 0; f < own.size(); f++) {
                 FieldDto field = own.get(f);
-                if (field == null || field.isInherited()) {
+                if (field == null || field.isInherited() || placed.contains(field.getFieldKey())) {
                     continue;
                 }
                 field.setInherited(false);
@@ -69,14 +79,14 @@ public final class FieldInheritance {
         }
     }
 
-    private static boolean owns(List<FieldDto> fields, String key) {
+    private static FieldDto owned(List<FieldDto> fields, String key) {
         for (int i = 0; i < fields.size(); i++) {
             FieldDto field = fields.get(i);
             if (field != null && !field.isInherited() && key.equals(field.getFieldKey())) {
-                return true;
+                return field;
             }
         }
-        return false;
+        return null;
     }
 
     private static FieldDto copyOf(FieldDto field) {

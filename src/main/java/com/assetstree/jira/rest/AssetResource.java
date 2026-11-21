@@ -613,6 +613,30 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("types/{typeKey}/fields/{fieldKey}/own")
+    public Response ownField(@PathParam("typeKey") final String typeKey, @PathParam("fieldKey") final String fieldKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED)
+                        .entity(assetService.ownField(user(), typeKey, fieldKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("types/{typeKey}/fields/{fieldKey}/own")
+    public Response inheritField(@PathParam("typeKey") final String typeKey, @PathParam("fieldKey") final String fieldKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.inheritField(user(), typeKey, fieldKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
     @PUT
     @Path("types/{typeKey}/fields/{fieldKey}")
     public Response updateField(@PathParam("typeKey") final String typeKey, @PathParam("fieldKey") final String fieldKey,

@@ -184,6 +184,12 @@ public interface AssetService {
 
     FieldDto updateField(ApplicationUser user, String typeKey, String fieldKey, FieldDraft draft);
 
+    /** Copies one inherited field onto the subtype so its label, kind, and choices can differ. */
+    FieldDto ownField(ApplicationUser user, String typeKey, String fieldKey);
+
+    /** Drops the subtype copy and shows the parent field again. Values already stored on cards stay. */
+    void inheritField(ApplicationUser user, String typeKey, String fieldKey);
+
     void deleteField(ApplicationUser user, String typeKey, String fieldKey);
 
     List<FieldDto> reorderFields(ApplicationUser user, String typeKey, FieldOrderDto order);

@@ -763,6 +763,26 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void unlockedParentFieldKeepsItsPlace() {
+        AssetTypeDto parent = typeDto("dental", "\u0421\u0442\u043e\u043c\u0430\u0442\u043e\u043b\u043e\u0433\u0438\u044f", "");
+        parent.setFields(Arrays.asList(
+                fieldDto("model", "\u041c\u043e\u0434\u0435\u043b\u044c"),
+                fieldDto("maker", "\u041f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0438\u0442\u0435\u043b\u044c"),
+                fieldDto("room", "\u041a\u0430\u0431\u0438\u043d\u0435\u0442")));
+        AssetTypeDto child = typeDto("tip", "\u041d\u0430\u043a\u043e\u043d\u0435\u0447\u043d\u0438\u043a", "dental");
+        child.setFields(new ArrayList<FieldDto>(Collections.singletonList(fieldDto("maker", "\u0421\u0432\u043e\u0439 \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0438\u0442\u0435\u043b\u044c"))));
+        FieldInheritance.apply(Arrays.asList(parent, child));
+        assertEquals(3, child.getFields().size());
+        assertTrue(child.getFields().get(0).isInherited());
+        assertEquals("model", child.getFields().get(0).getFieldKey());
+        assertFalse(child.getFields().get(1).isInherited());
+        assertEquals("\u0421\u0432\u043e\u0439 \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0438\u0442\u0435\u043b\u044c", child.getFields().get(1).getLabel());
+        assertTrue(child.getFields().get(2).isInherited());
+        assertEquals("room", child.getFields().get(2).getFieldKey());
+        assertEquals(3, parent.getFields().size());
+    }
+
+    @Test
     public void exportKeepsFiftyThousandRows() {
         assertFalse(ReportLines.cutsExport(50000));
         assertTrue(ReportLines.cutsExport(50001));

@@ -4500,7 +4500,8 @@ a.asset-tree-url {
 }
 
 .asset-tree-field-list .asset-tree-type-field.is-editable,
-.asset-tree-field-list .asset-tree-type-field.is-inherited {
+.asset-tree-field-list .asset-tree-type-field.is-inherited,
+.asset-tree-field-list .asset-tree-type-field.is-released {
     grid-template-columns: 16px minmax(0, 1fr) max-content 280px;
 }
 
@@ -11763,8 +11764,24 @@ a.asset-tree-preview-icon:focus {
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
     color: #6b778c;
-    cursor: default;
+    cursor: pointer;
+}
+
+#asset-tree-app button.asset-tree-field-grip.is-locked:hover,
+.asset-tree-backdrop button.asset-tree-field-grip.is-locked:hover {
+    color: #0052cc;
+}
+
+#asset-tree-app .asset-tree-field-grip.is-locked.is-open,
+.asset-tree-backdrop .asset-tree-field-grip.is-locked.is-open {
+    color: #006644;
 }
 
 #asset-tree-app .asset-tree-field-grip.is-locked svg,
