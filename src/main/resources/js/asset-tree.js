@@ -16883,10 +16883,7 @@
 
         var photoCard = el('section', 'asset-tree-project-card');
         photoCard.appendChild(el('h3', 'asset-tree-settings-title', t('photoTitle')));
-        var photoMore = el('details', 'asset-tree-photo-more');
-        photoMore.appendChild(el('summary', null, t('photoMore')));
-        photoMore.appendChild(el('p', 'asset-tree-hint', t('photoHint')));
-        photoCard.appendChild(photoMore);
+        photoCard.appendChild(el('p', 'asset-tree-hint', t('photoHint')));
         var photoRow = el('label', 'asset-tree-check-row');
         var photoBox = el('input');
         photoBox.type = 'checkbox';
@@ -16955,14 +16952,6 @@
             cardGrid.appendChild(row);
         });
         cardCard.appendChild(cardGrid);
-        var top = el('div', 'asset-tree-project-top');
-        var side = el('div', 'asset-tree-project-side');
-        top.appendChild(keyCard);
-        side.appendChild(treeCard);
-        side.appendChild(photoCard);
-        top.appendChild(side);
-        top.appendChild(cardCard);
-        stack.appendChild(top);
 
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
@@ -17028,7 +17017,19 @@
             grid.appendChild(option);
         });
         modules.appendChild(grid);
-        stack.appendChild(modules);
+        var board = el('div', 'asset-tree-project-board');
+        var main = el('div', 'asset-tree-project-main');
+        var pair = el('div', 'asset-tree-project-pair');
+        var side = el('div', 'asset-tree-project-side');
+        side.appendChild(treeCard);
+        side.appendChild(photoCard);
+        pair.appendChild(keyCard);
+        pair.appendChild(side);
+        main.appendChild(pair);
+        main.appendChild(modules);
+        board.appendChild(main);
+        board.appendChild(cardCard);
+        stack.appendChild(board);
         if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniRemovalCard(allowed));
         panel.appendChild(stack);
     }
