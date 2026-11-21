@@ -658,6 +658,7 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public AssetListDto doInTransaction() {
                 notices.clear();
+                String mark = freshTreeMark(key);
                 AssetEntity[] rows = assetsIn(key);
                 applyDueFor(key, rows, notices);
                 Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
@@ -690,7 +691,7 @@ public class AssetServiceImpl implements AssetService {
                 list.setAssets(assets);
                 list.setTypes(visibleTypes(types));
                 list.setStatuses(statusDtos(key, rows));
-                list.setMark(treeMark(rows));
+                list.setMark(mark);
                 return list;
             }
         };
@@ -711,28 +712,100 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public String treeMark(ApplicationUser user, String projectKey) {
         final Project project = requireReadableProject(user, projectKey);
+        final String key = project.getKey();
+        Object[] cached = TREE_MARKS.get(key);
+        if (cached != null && System.currentTimeMillis() - ((Long) cached[0]).longValue() < TREE_MARK_TTL_MS) {
+            return (String) cached[1];
+        }
         return ao().executeInTransaction(new TransactionCallback<String>() {
             @Override
             public String doInTransaction() {
-                return treeMark(assetsIn(project.getKey()));
+                return freshTreeMark(key);
             }
         });
     }
 
-    private String treeMark(AssetEntity[] rows) {
-        long mark = 0L;
-        if (rows != null) {
-            for (int i = 0; i < rows.length; i++) {
-                AssetEntity row = rows[i];
-                if (row == null) {
-                    continue;
+    @Override
+    public AssetListDto catalog(ApplicationUser user, String projectKey) {
+        Project project = requireReadableProject(user, projectKey);
+        bindScope(user, project);
+        try {
+            final String key = project.getKey();
+            return readRepairing("Catalog " + key, new TransactionCallback<AssetListDto>() {
+                @Override
+                public AssetListDto doInTransaction() {
+                    String mark = freshTreeMark(key);
+                    AssetEntity[] rows = ao().find(AssetEntity.class,
+                            Query.select("ID, TYPE_KEY, STATUS").where("PROJECT_KEY = ? AND DELETED_AT IS NULL", key));
+                    AssetListDto list = new AssetListDto();
+                    list.setAssets(new ArrayList<AssetDto>());
+                    list.setTypes(visibleTypes(typeDtos(key, rows)));
+                    list.setStatuses(statusDtos(key, rows));
+                    list.setMark(mark);
+                    return list;
                 }
-                long when = row.getUpdated() == null ? 0L : row.getUpdated().getTime();
-                mark = mark * 1315423911L + row.getID() * 31L + when;
-            }
-            mark = mark * 31L + rows.length;
+            });
+        } finally {
+            clearScope();
         }
-        return Long.toString(mark);
+    }
+
+    /**
+     * Two parts joined by a dot: objects, then types, fields and statuses.
+     * Each part reads a few small rows, never the whole tree.
+     */
+    private String freshTreeMark(String projectKey) {
+        String mark = assetMark(projectKey) + "." + catalogMark(projectKey);
+        TREE_MARKS.put(projectKey, new Object[] { Long.valueOf(System.currentTimeMillis()), mark });
+        return mark;
+    }
+
+    private String assetMark(String projectKey) {
+        long mark = ao().count(AssetEntity.class, Query.select().where("PROJECT_KEY = ? AND DELETED_AT IS NULL", projectKey));
+        mark = mark * 31L + ao().count(AssetEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        AssetEntity[] latest = ao().find(AssetEntity.class, Query.select("ID, UPDATED")
+                .where("PROJECT_KEY = ? AND UPDATED IS NOT NULL", projectKey).order("UPDATED DESC").limit(1));
+        if (latest != null && latest.length > 0 && latest[0].getUpdated() != null) {
+            mark = mark * 1315423911L + latest[0].getUpdated().getTime();
+        }
+        AssetEntity[] top = ao().find(AssetEntity.class, Query.select("ID")
+                .where("PROJECT_KEY = ?", projectKey).order("ID DESC").limit(1));
+        if (top != null && top.length > 0) {
+            mark = mark * 31L + top[0].getID();
+        }
+        return Long.toString(mark, 36);
+    }
+
+    private String catalogMark(String projectKey) {
+        long mark = 0L;
+        List<String> typeKeys = new ArrayList<String>();
+        AssetTypeEntity[] types = ao().find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (types != null) {
+            for (AssetTypeEntity type : types) {
+                typeKeys.add(type.getTypeKey());
+                mark += spread(Arrays.asList(type.getTypeKey(), type.getLabel(), type.getColor(), type.getIcon(),
+                        Integer.valueOf(type.getSortOrder()), Boolean.valueOf(type.isLocation()), Boolean.valueOf(type.isShowInTree()),
+                        Boolean.valueOf(type.isService()), Boolean.valueOf(type.isReach()), type.getPlaceCaption(),
+                        type.getParentTypeKey(), type.getBaseKey(), Boolean.valueOf(type.isSystemType())).hashCode());
+            }
+        }
+        if (!typeKeys.isEmpty()) {
+            for (AssetFieldEntity field : findIn(AssetFieldEntity.class, "TYPE_KEY", typeKeys, "POSITION ASC")) {
+                mark += spread(Arrays.asList(field.getTypeKey(), field.getFieldKey(), field.getLabel(), field.getKind(),
+                        Boolean.valueOf(field.isRequired()), field.getOptions(), Integer.valueOf(field.getPosition()),
+                        Boolean.valueOf(field.isIssueHidden())).hashCode());
+            }
+        }
+        for (ProjectStatusEntity row : projectStatuses(projectKey)) {
+            mark += spread(Arrays.asList(row.getStatusKey(), row.getLabel(), row.getCategory(),
+                    Integer.valueOf(row.getSortOrder()), Integer.valueOf(row.getSummaryMode())).hashCode());
+        }
+        return Long.toString(mark, 36);
+    }
+
+    private static long spread(int hash) {
+        long value = hash * 0x9E3779B97F4A7C15L;
+        return value ^ (value >>> 29);
     }
 
     @Override
@@ -813,13 +886,12 @@ public class AssetServiceImpl implements AssetService {
                     if (!ProjectKeys.same(parent.getProjectKey(), project.getKey())) {
                         throw new AssetException(400, "asset-tree.error.project.mismatch");
                     }
-                }
-                Map<Integer, Integer> parents = parentMap(assetsIn(project.getKey()));
-                if (parentId != null && !parents.containsKey(parentId)) {
-                    throw new AssetException(400, "asset-tree.error.parent");
-                }
-                if (parentId != null && TreeLogic.depth(parents, parentId.intValue()) + 1 >= TreeLogic.MAX_DEPTH) {
-                    throw new AssetException(400, "asset-tree.error.depth");
+                    if (parent.getDeletedAt() != null) {
+                        throw new AssetException(400, "asset-tree.error.parent");
+                    }
+                    if (ancestorDepth(parent, project.getKey()) + 1 >= TreeLogic.MAX_DEPTH) {
+                        throw new AssetException(400, "asset-tree.error.depth");
+                    }
                 }
                 String custodian = normalizeCustodian(draft.getCustodianKey());
                 if (!type.isLocation() && draft.getCustodianKey() == null && parentId != null) {
@@ -7978,7 +8050,8 @@ public class AssetServiceImpl implements AssetService {
      * object after write-off and after the trash, so an old request still names that object.
      */
     private void reclaimParkedKeys(String projectKey) {
-        AssetEntity[] rows = assetsAll(projectKey);
+        AssetEntity[] rows = ao().find(AssetEntity.class,
+                Query.select("ID, OBJECT_KEY").where("PROJECT_KEY = ? AND OBJECT_KEY LIKE ?", projectKey, "~%"));
         if (rows == null) {
             return;
         }
@@ -8007,7 +8080,8 @@ public class AssetServiceImpl implements AssetService {
         Object lock = raced == null ? created : raced;
         synchronized (lock) {
             reclaimForPrefix(prefix);
-            AssetEntity[] existing = ao().find(AssetEntity.class, Query.select().where("OBJECT_KEY LIKE ?", prefix + "-%"));
+            AssetEntity[] existing = ao().find(AssetEntity.class,
+                    Query.select("ID, OBJECT_KEY").where("OBJECT_KEY LIKE ?", prefix + "-%"));
             java.util.List<String> held = new java.util.ArrayList<String>();
             if (existing != null) {
                 for (AssetEntity row : existing) {
@@ -8066,13 +8140,33 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private int nextSort(Integer parentId, String projectKey) {
-        int max = -1;
-        for (AssetEntity asset : assetsIn(projectKey)) {
-            if (TreeLogic.sameParent(asset.getParentId(), parentId) && asset.getSortOrder() > max) {
-                max = asset.getSortOrder();
-            }
-        }
+        Integer parent = TreeLogic.normalizeParent(parentId);
+        Query query = parent == null
+                ? Query.select("ID, SORT_ORDER").where("PROJECT_KEY = ? AND DELETED_AT IS NULL AND (PARENT_ID IS NULL OR PARENT_ID <= 0)", projectKey)
+                : Query.select("ID, SORT_ORDER").where("PROJECT_KEY = ? AND DELETED_AT IS NULL AND PARENT_ID = ?", projectKey, parent);
+        AssetEntity[] last = ao().find(AssetEntity.class, query.order("SORT_ORDER DESC").limit(1));
+        int max = last == null || last.length == 0 ? -1 : Math.max(-1, last[0].getSortOrder());
         return max + 1;
+    }
+
+    /** Levels above this row inside its project, the way the tree counts them. */
+    private int ancestorDepth(AssetEntity row, String projectKey) {
+        int level = 0;
+        Set<Integer> seen = new HashSet<Integer>();
+        seen.add(Integer.valueOf(row.getID()));
+        Integer cursor = TreeLogic.normalizeParent(row.getParentId());
+        while (cursor != null) {
+            if (!seen.add(cursor) || level >= TreeLogic.MAX_DEPTH) {
+                return TreeLogic.MAX_DEPTH;
+            }
+            level++;
+            AssetEntity up = ao().get(AssetEntity.class, cursor.intValue());
+            if (up == null || up.getDeletedAt() != null || !ProjectKeys.same(up.getProjectKey(), projectKey)) {
+                return level;
+            }
+            cursor = TreeLogic.normalizeParent(up.getParentId());
+        }
+        return level;
     }
 
     private void replaceAttributes(AssetEntity entity, List<AttributeDraft> attributes) {
@@ -11381,6 +11475,9 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private void applyDueFor(String projectKey, AssetEntity[] rows, List<ServiceNotice> notices) {
+        if (projectKey != null && dueReadRecently(projectKey)) {
+            return;
+        }
         Map<Integer, AssetEntity> known = new HashMap<Integer, AssetEntity>();
         if (rows != null) {
             for (AssetEntity row : rows) {
@@ -11392,6 +11489,17 @@ public class AssetServiceImpl implements AssetService {
         } catch (RuntimeException ex) {
             log.warn("Service dates were not applied", ex);
         }
+    }
+
+    private boolean dueReadRecently(String projectKey) {
+        long day = businessToday().toEpochDay();
+        long now = System.currentTimeMillis();
+        long[] seen = DUE_READS.get(projectKey);
+        if (seen != null && seen[0] == day && now - seen[1] < DUE_READ_GAP_MS) {
+            return true;
+        }
+        DUE_READS.put(projectKey, new long[] { day, now });
+        return false;
     }
 
     private void applyDueInside(String projectKey, Map<Integer, AssetEntity> known, List<ServiceNotice> notices) {
@@ -17182,6 +17290,13 @@ public class AssetServiceImpl implements AssetService {
     private static final ThreadLocal<Boolean> TRASH_WRITE = new ThreadLocal<Boolean>();
     private static final java.util.concurrent.ConcurrentHashMap<String, Long> TNI_SEEN =
             new java.util.concurrent.ConcurrentHashMap<String, Long>();
+    private static final long TREE_MARK_TTL_MS = 1500L;
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object[]> TREE_MARKS =
+            new java.util.concurrent.ConcurrentHashMap<String, Object[]>();
+    /** Service dates move by the day, and a saved plan applies its own dates at once. */
+    private static final long DUE_READ_GAP_MS = 60000L;
+    private static final java.util.concurrent.ConcurrentHashMap<String, long[]> DUE_READS =
+            new java.util.concurrent.ConcurrentHashMap<String, long[]>();
 
     private void quietNotes(boolean quiet) {
         if (quiet) {

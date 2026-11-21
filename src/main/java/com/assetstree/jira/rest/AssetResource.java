@@ -386,6 +386,17 @@ public class AssetResource {
         });
     }
 
+    @GET
+    @Path("projects/{projectKey}/catalog")
+    public Response catalog(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.catalog(user(), projectKey)).build();
+            }
+        });
+    }
+
     @POST
     @Path("assets/{id}/copy")
     public Response copy(@PathParam("id") final int id) {
