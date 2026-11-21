@@ -7219,10 +7219,12 @@ public class AssetServiceImpl implements AssetService {
         if (line == null || column < 0 || column >= line.size() || other == null) {
             return;
         }
-        String mark = other.getObjectKey() == null ? "" : other.getObjectKey().trim();
-        if (mark.isEmpty()) {
+        String key = other.getObjectKey() == null ? "" : other.getObjectKey().trim();
+        if (key.isEmpty()) {
             return;
         }
+        String name = other.getName() == null ? "" : other.getName().trim().replace(';', ',').replace('\n', ' ');
+        String mark = name.isEmpty() || name.equals(key) ? key : key + " " + name;
         String current = line.get(column);
         if (current == null || current.isEmpty()) {
             line.set(column, mark);
@@ -11977,11 +11979,28 @@ public class AssetServiceImpl implements AssetService {
         if (rows == null) {
             return;
         }
+        Map<Integer, List<AssetAttributeEntity>> attributes = null;
+        Map<String, String[]> holders = null;
+        Map<Integer, AssetEntity> index = null;
+        Map<String, String> typeLabels = null;
+        if (!keyOnly) {
+            attributes = attributesByAsset(idsOf(rows));
+            holders = new HashMap<String, String[]>();
+            index = indexAssets(rows);
+            typeLabels = new HashMap<String, String>();
+            for (AssetTypeDto type : typeDtos(visible.getKey(), rows)) {
+                if (type != null && type.getTypeKey() != null) {
+                    typeLabels.put(type.getTypeKey(), type.getLabel() == null ? "" : type.getLabel());
+                }
+            }
+        }
         for (AssetEntity row : rows) {
             if (row == null || row.getID() == assetId || linked.contains(Integer.valueOf(row.getID())) || isLocation(row)) {
                 continue;
             }
-            boolean match = keyOnly ? contains(row.getObjectKey(), needle) : peerMatches(row, visible, needle);
+            boolean match = keyOnly
+                    ? contains(row.getObjectKey(), needle)
+                    : peerMatches(row, visible, needle, attributes, holders, index, typeLabels);
             if (!match) {
                 continue;
             }
@@ -11992,11 +12011,22 @@ public class AssetServiceImpl implements AssetService {
         }
     }
 
-    private boolean peerMatches(AssetEntity row, ProjectDto visible, String needle) {
-        return contains(row.getName(), needle)
-                || contains(row.getObjectKey(), needle)
-                || contains(row.getProjectKey(), needle)
-                || (visible != null && (contains(visible.getName(), needle) || contains(visible.getKey(), needle)));
+    /** Name, key, place, type, description, people and every field value. Hidden projects stay on the key. */
+    private boolean peerMatches(AssetEntity row, ProjectDto visible, String needle,
+            Map<Integer, List<AssetAttributeEntity>> attributes, Map<String, String[]> holders,
+            Map<Integer, AssetEntity> index, Map<String, String> typeLabels) {
+        List<AssetAttributeEntity> fields = attributes == null ? null : attributes.get(Integer.valueOf(row.getID()));
+        if (matches(row, fields, needle, holders)) {
+            return true;
+        }
+        if (contains(row.getProjectKey(), needle)
+                || (visible != null && (contains(visible.getName(), needle) || contains(visible.getKey(), needle)))) {
+            return true;
+        }
+        if (typeLabels != null && contains(typeLabels.get(row.getTypeKey()), needle)) {
+            return true;
+        }
+        return index != null && contains(location(row, index), needle);
     }
 
     private void sortPeers(List<AssetPeerDto> peers) {

@@ -591,17 +591,19 @@
 
 .asset-tree-context.is-arrows {
     display: flex;
-    min-width: 0;
-    padding: 4px;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    padding: 0;
 }
 
 .asset-tree-context-item.is-arrow {
-    width: 48px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     padding: 0;
-    font-size: 16px;
-    line-height: 32px;
-    letter-spacing: 1px;
+    font-size: 13px;
+    line-height: 36px;
+    letter-spacing: 0;
     text-align: center;
     white-space: nowrap;
 }
