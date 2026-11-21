@@ -1492,7 +1492,7 @@
     }
 
     function mineSortMode() {
-        return mineStored('asset-tree.portalMineSort', ['name', 'place', 'type'], 'name');
+        return mineStored('asset-tree.portalMineSort', ['name', 'place', 'type', 'status'], 'name');
     }
 
     function chooseMineOption(key, value) {
@@ -1505,6 +1505,7 @@
     function mineText(card, kind) {
         if (kind === 'place') return card.place || 'Без площадки';
         if (kind === 'type') return card.typeName || 'Без типа';
+        if (kind === 'status') return card.statusLabel || 'Без статуса';
         return card.name || '';
     }
 
@@ -1811,7 +1812,8 @@
         quiet.appendChild(mineQuietSelect('Сортировка', mineSortMode(), [
             ['name', 'Имя'],
             ['place', 'Площадка'],
-            ['type', 'Тип']
+            ['type', 'Тип'],
+            ['status', 'Статус']
         ], function (value) { chooseMineOption('asset-tree.portalMineSort', value); }));
         bar.appendChild(search);
         bar.appendChild(quiet);
@@ -1825,7 +1827,11 @@
             });
             if (!cards.length) return;
             var sort = mineSortMode();
-            cards.sort(function (left, right) { return mineText(left, sort).localeCompare(mineText(right, sort), 'ru'); });
+            cards.sort(function (left, right) {
+                var compared = mineText(left, sort).localeCompare(mineText(right, sort), 'ru');
+                if (compared) return compared;
+                return (left.name || '').localeCompare(right.name || '', 'ru');
+            });
             var mode = mineGroupMode();
             var buckets = [];
             var bucketIndex = {};
