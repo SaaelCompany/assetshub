@@ -10513,8 +10513,31 @@
                 open: !!peer.open,
                 projectKey: peer.projectKey,
                 kind: 'peer',
-                typeKey: (peer.id && byId()[peer.id] && byId()[peer.id].typeKey) || '',
+                typeKey: (peer.id && byId()[peer.id] && byId()[peer.id].typeKey) || peer.typeKey || '',
                 peer: peer
+            });
+        });
+        var seen = {};
+        seen[asset.id] = true;
+        nodes.forEach(function (node) {
+            if (node && node.id) seen[node.id] = true;
+        });
+        (asset.mesh || []).forEach(function (tie) {
+            if (!tie) return;
+            [tie.from, tie.to].forEach(function (end) {
+                if (!end || !end.id || seen[end.id]) return;
+                seen[end.id] = true;
+                nodes.push({
+                    id: end.id,
+                    name: end.name || end.objectKey || '',
+                    key: end.objectKey || '',
+                    phrase: tie.type === 'peer' ? t('linkRelated') : linkPhrase({ type: tie.type, direction: tie.direction }),
+                    open: !!end.open,
+                    projectKey: end.projectKey,
+                    kind: 'mesh',
+                    typeKey: end.typeKey || (byId()[end.id] && byId()[end.id].typeKey) || '',
+                    peer: end
+                });
             });
         });
         return nodes;
@@ -10596,7 +10619,7 @@
 
     function linkNodeKey(node, self) {
         if (self) return 'self';
-        if (node && node.kind === 'peer') return 'peer:' + node.id;
+        if (node && (node.kind === 'peer' || node.kind === 'mesh')) return node.kind + ':' + node.id;
         return 'link:' + (node ? node.linkId : '');
     }
 
@@ -10672,8 +10695,10 @@
             placed.push({ node: node, card: card });
             if (!firstCard) firstCard = card;
         });
-        function placeCard(card, key, index, self) {
-            var fallback = { x: self && nodes.length ? 28 : 0, y: index * 58 };
+        function placeCard(card, key, index, self, mesh) {
+            var fallback = self
+                ? { x: nodes.length ? 28 : 0, y: 0 }
+                : { x: mesh ? 48 : 4 + (index % 2) * 22, y: index * 52 };
             var spot = linkSpot(saved, key, fallback);
             card.style.left = spot.x + 'px';
             card.style.top = spot.y + 'px';
@@ -10743,7 +10768,7 @@
         }
         placeCard(selfCard, 'self', 0, true);
         placed.forEach(function (item, index) {
-            placeCard(item.card, linkNodeKey(item.node, false), index + 1, false);
+            placeCard(item.card, linkNodeKey(item.node, false), index + 1, false, item.node && item.node.kind === 'mesh');
         });
         var laidBottom = 36;
         for (var spotKey in spots) {
@@ -10798,11 +10823,14 @@
             if (origin.width < 40 || origin.height < 20) return;
             svg.setAttribute('viewBox', '0 0 ' + origin.width + ' ' + origin.height);
             while (svg.firstChild) svg.removeChild(svg.firstChild);
-            var hub = iconCenter(selfCard, origin);
-            placed.forEach(function (item) {
-                var other = iconCenter(item.card, origin);
-                var from = along(hub.x, hub.y, other.x, other.y, hub);
-                var to = along(other.x, other.y, hub.x, hub.y, other);
+            var cards = {};
+            cards[String(asset.id)] = selfCard;
+            function stroke(left, right) {
+                if (!left || !right || left === right) return;
+                var fromCenter = iconCenter(left, origin);
+                var toCenter = iconCenter(right, origin);
+                var from = along(fromCenter.x, fromCenter.y, toCenter.x, toCenter.y, fromCenter);
+                var to = along(toCenter.x, toCenter.y, fromCenter.x, fromCenter.y, toCenter);
                 var line = svgEl('line');
                 line.setAttribute('x1', String(Math.round(from.x)));
                 line.setAttribute('y1', String(Math.round(from.y)));
@@ -10812,6 +10840,15 @@
                 line.setAttribute('stroke-width', '1.5');
                 line.setAttribute('stroke-linecap', 'round');
                 svg.appendChild(line);
+            }
+            placed.forEach(function (item) {
+                if (item.node && item.node.id) cards[String(item.node.id)] = item.card;
+                if (item.node && item.node.kind === 'mesh') return;
+                stroke(selfCard, item.card);
+            });
+            (asset.mesh || []).forEach(function (tie) {
+                if (!tie) return;
+                stroke(cards[String(tie.fromId)], cards[String(tie.toId)]);
             });
         }
         window.addEventListener('resize', paintWires);
@@ -30679,6 +30716,22 @@
                 placeId: parseInt(placeSelect.value, 10) || 0
             });
         }));
+        if (moduleOn('life')) {
+            downloads.appendChild(button(t('exchangeLifeExport'), 'asset-tree-btn', function () {
+                startWorkbook('life', {
+                    typeKey: typeSelect.value,
+                    placeId: parseInt(placeSelect.value, 10) || 0
+                });
+            }));
+        }
+        if (moduleOn('service')) {
+            downloads.appendChild(button(t('exchangeServiceExport'), 'asset-tree-btn', function () {
+                startWorkbook('service', {
+                    typeKey: typeSelect.value,
+                    placeId: parseInt(placeSelect.value, 10) || 0
+                });
+            }));
+        }
         block.appendChild(downloads);
         var upload = el('div', 'asset-tree-exchange-upload');
         upload.appendChild(picker);

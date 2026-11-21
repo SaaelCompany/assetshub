@@ -39,6 +39,7 @@ public class AssetDto {
     private List<IssueRefDto> issues;
     private List<AssetPeerDto> peers;
     private List<AssetLinkDto> links;
+    private List<GraphTieDto> mesh;
     private List<CommentDto> comments;
     private List<FileDto> files;
     private List<UserProfileDto> shares;
@@ -299,6 +300,14 @@ public class AssetDto {
 
     public void setLinks(List<AssetLinkDto> links) {
         this.links = links;
+    }
+
+    public List<GraphTieDto> getMesh() {
+        return mesh;
+    }
+
+    public void setMesh(List<GraphTieDto> mesh) {
+        this.mesh = mesh;
     }
 
     public List<CommentDto> getComments() {

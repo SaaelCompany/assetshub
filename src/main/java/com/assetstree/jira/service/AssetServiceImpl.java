@@ -111,6 +111,7 @@ import com.assetstree.jira.ao.AssetTypeEntity;
 import com.assetstree.jira.dto.ActivityDto;
 import com.assetstree.jira.dto.AssetDto;
 import com.assetstree.jira.dto.AssetLinkDto;
+import com.assetstree.jira.dto.GraphTieDto;
 import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.LinkAttrDto;
 import com.assetstree.jira.dto.AssetKeyDto;
@@ -4589,6 +4590,100 @@ public class AssetServiceImpl implements AssetService {
         return dto;
     }
 
+    private List<GraphTieDto> meshFor(int assetId, List<AssetPeerDto> peers, List<AssetLinkDto> links) {
+        Map<Integer, AssetPeerDto> cards = new LinkedHashMap<Integer, AssetPeerDto>();
+        if (peers != null) {
+            for (int i = 0; i < peers.size(); i++) {
+                AssetPeerDto peer = peers.get(i);
+                if (peer != null && peer.getId() > 0 && peer.getId() != assetId) {
+                    cards.put(Integer.valueOf(peer.getId()), peer);
+                }
+            }
+        }
+        if (links != null) {
+            for (int i = 0; i < links.size(); i++) {
+                AssetLinkDto link = links.get(i);
+                if (link == null) {
+                    continue;
+                }
+                int other = "in".equals(link.getDirection()) ? link.getFromId() : link.getToId();
+                if (other <= 0 || other == assetId || cards.containsKey(Integer.valueOf(other))) {
+                    continue;
+                }
+                AssetPeerDto card = link.getCard();
+                if (card == null) {
+                    card = new AssetPeerDto();
+                    card.setId(other);
+                    card.setObjectKey(link.getObjectKey() == null ? "" : link.getObjectKey());
+                    card.setName(link.getName() == null ? "" : link.getName());
+                    card.setProjectKey(link.getProjectKey() == null ? "" : link.getProjectKey());
+                    card.setOpen(link.isOpen());
+                }
+                cards.put(Integer.valueOf(other), card);
+            }
+        }
+        List<Integer> neighbors = new ArrayList<Integer>(cards.keySet());
+        Set<String> pairs = new HashSet<String>();
+        List<GraphTieDto> ties = new ArrayList<GraphTieDto>();
+        int[] extra = new int[] { 0 };
+        int limit = Math.min(neighbors.size(), 40);
+        for (int n = 0; n < limit; n++) {
+            int neighbor = neighbors.get(n).intValue();
+            AssetPeerDto near = cards.get(Integer.valueOf(neighbor));
+            List<AssetLinkDto> theirs = linksFor(neighbor);
+            for (int i = 0; i < theirs.size(); i++) {
+                AssetLinkDto link = theirs.get(i);
+                if (link == null) {
+                    continue;
+                }
+                int other = "in".equals(link.getDirection()) ? link.getFromId() : link.getToId();
+                addMeshTie(ties, pairs, cards, extra, assetId, neighbor, near, other, link.getCard(),
+                        link.getType(), link.getDirection());
+            }
+            List<AssetPeerDto> theirPeers = peersFor(neighbor);
+            for (int i = 0; i < theirPeers.size(); i++) {
+                AssetPeerDto peer = theirPeers.get(i);
+                if (peer == null) {
+                    continue;
+                }
+                addMeshTie(ties, pairs, cards, extra, assetId, neighbor, near, peer.getId(), peer, "peer", "out");
+            }
+        }
+        return ties;
+    }
+
+    private void addMeshTie(List<GraphTieDto> ties, Set<String> pairs, Map<Integer, AssetPeerDto> cards, int[] extra,
+                            int assetId, int neighbor, AssetPeerDto near, int other, AssetPeerDto far,
+                            String type, String direction) {
+        if (other <= 0 || other == assetId || other == neighbor || near == null) {
+            return;
+        }
+        int low = other < neighbor ? other : neighbor;
+        int high = other < neighbor ? neighbor : other;
+        String pair = low + ":" + high;
+        if (pairs.contains(pair)) {
+            return;
+        }
+        AssetPeerDto known = cards.get(Integer.valueOf(other));
+        if (known == null) {
+            if (extra[0] >= 24 || far == null || far.getId() <= 0) {
+                return;
+            }
+            cards.put(Integer.valueOf(other), far);
+            extra[0]++;
+            known = far;
+        }
+        pairs.add(pair);
+        GraphTieDto tie = new GraphTieDto();
+        tie.setFromId(neighbor);
+        tie.setToId(other);
+        tie.setType(type);
+        tie.setDirection(direction);
+        tie.setFrom(near);
+        tie.setTo(known);
+        ties.add(tie);
+    }
+
     @Override
     public List<AssetPeerDto> searchPeers(ApplicationUser user, int assetId, String query) {
         AssetEntity source = requireVisible(user, assetId);
@@ -6659,14 +6754,6 @@ public class AssetServiceImpl implements AssetService {
                 return leftKey.compareToIgnoreCase(rightKey);
             }
         };
-        boolean serviceOn = moduleOn(projectKey, ProjectModules.SERVICE);
-        boolean lifeOn = moduleOn(projectKey, ProjectModules.LIFE);
-        List<String> serviceHeaders = serviceColumnLabels(labels);
-        List<String> lifeHeaders = lifeColumnLabels(labels);
-        Map<Integer, LifecycleEntity> lives = lifeOn ? livesByAsset(byType) : new HashMap<Integer, LifecycleEntity>();
-        Map<Integer, List<ServicePlanEntity>> plans = serviceOn
-                ? plansByAsset(byType) : new HashMap<Integer, List<ServicePlanEntity>>();
-        Map<String, String> kindLabels = serviceOn ? kindNames(projectKey) : new HashMap<String, String>();
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
         for (AssetTypeDto type : types) {
             if (type.isLocation() || !byType.containsKey(type.getTypeKey())) {
@@ -6686,30 +6773,6 @@ public class AssetServiceImpl implements AssetService {
                     }
                     columns.add(field);
                     headers.add(field.getLabel());
-                }
-            }
-            List<Integer> addedService = new ArrayList<Integer>();
-            if (serviceOn) {
-                for (int slot = 0; slot < serviceHeaders.size(); slot++) {
-                    String header = serviceHeaders.get(slot);
-                    String marker = EquipmentExchange.norm(header);
-                    if (marker.isEmpty() || !taken.add(marker)) {
-                        continue;
-                    }
-                    addedService.add(Integer.valueOf(slot));
-                    headers.add(header);
-                }
-            }
-            List<Integer> addedLife = new ArrayList<Integer>();
-            if (lifeOn) {
-                for (int slot = 0; slot < lifeHeaders.size(); slot++) {
-                    String header = lifeHeaders.get(slot);
-                    String marker = EquipmentExchange.norm(header);
-                    if (marker.isEmpty() || !taken.add(marker)) {
-                        continue;
-                    }
-                    addedLife.add(Integer.valueOf(slot));
-                    headers.add(header);
                 }
             }
             List<AssetEntity> equipment = byType.get(type.getTypeKey());
@@ -6743,19 +6806,6 @@ public class AssetServiceImpl implements AssetService {
                     }
                     line.add(value == null ? "" : value);
                 }
-                if (serviceOn) {
-                    List<ServicePlanEntity> owned = plans.get(Integer.valueOf(row.getID()));
-                    ServicePlanEntity one = owned != null && owned.size() == 1 ? owned.get(0) : null;
-                    for (Integer slot : addedService) {
-                        line.add(one == null ? "" : serviceCell(one, slot.intValue(), kindLabels, labels, dayFirst));
-                    }
-                }
-                if (lifeOn) {
-                    LifecycleEntity life = lives.get(Integer.valueOf(row.getID()));
-                    for (Integer slot : addedLife) {
-                        line.add(lifeCell(life, slot.intValue(), dayFirst));
-                    }
-                }
                 lines.add(line);
             }
             pages.add(new WorkbookSheet.Page(type.getLabel(), headers, lines));
@@ -6763,50 +6813,17 @@ public class AssetServiceImpl implements AssetService {
         if (pages.isEmpty()) {
             pages.add(new WorkbookSheet.Page("Equipment", common, new ArrayList<List<String>>()));
         }
-        if (serviceOn && !blank) {
-            pages.add(servicePage(types, byType, plans, serviceHeaders, kindLabels, labels, dayFirst));
-        }
         return WorkbookSheet.write(pages);
     }
 
     private byte[] buildLinksBook(String projectKey, String typeKey, int placeId) {
         AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
-        List<AssetTypeDto> types = typeDtos(projectKey, rows);
         Map<Integer, AssetEntity> index = indexAssets(rows);
-        Map<String, Boolean> locations = new HashMap<String, Boolean>();
-        for (AssetTypeDto type : types) {
-            locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
-        }
-        String wantedType = typeKey == null ? "" : typeKey.trim();
-        List<AssetEntity> equipment = new ArrayList<AssetEntity>();
+        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
         List<Integer> ids = new ArrayList<Integer>();
-        if (rows != null) {
-            for (AssetEntity row : rows) {
-                if (row == null || row.getDeletedAt() != null) {
-                    continue;
-                }
-                Boolean location = locations.get(row.getTypeKey());
-                if (location != null && location.booleanValue()) {
-                    continue;
-                }
-                if (!wantedType.isEmpty() && !wantedType.equals(row.getTypeKey())) {
-                    continue;
-                }
-                if (placeId > 0 && !underPlace(row, placeId, index)) {
-                    continue;
-                }
-                equipment.add(row);
-                ids.add(Integer.valueOf(row.getID()));
-            }
+        for (int i = 0; i < equipment.size(); i++) {
+            ids.add(Integer.valueOf(equipment.get(i).getID()));
         }
-        Collections.sort(equipment, new Comparator<AssetEntity>() {
-            @Override
-            public int compare(AssetEntity left, AssetEntity right) {
-                String leftKey = left.getObjectKey() == null ? "" : left.getObjectKey();
-                String rightKey = right.getObjectKey() == null ? "" : right.getObjectKey();
-                return leftKey.compareToIgnoreCase(rightKey);
-            }
-        });
         I18nHelper labels = i18n();
         String[] phrases = { "linkCarries", "linkInstalled", "linkIncludes", "linkPart", "linkNeeded", "linkDepends" };
         String[] stored = { LinkRules.INSTALLED, LinkRules.INSTALLED, LinkRules.PART, LinkRules.PART,
@@ -6924,6 +6941,85 @@ public class AssetServiceImpl implements AssetService {
             cursor = parentId == null ? null : index.get(parentId);
         }
         return false;
+    }
+
+    private List<AssetEntity> exchangeRows(String projectKey, String typeKey, int placeId) {
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
+        List<AssetTypeDto> types = typeDtos(projectKey, rows);
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        Map<String, Boolean> locations = new HashMap<String, Boolean>();
+        for (AssetTypeDto type : types) {
+            locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+        }
+        String wantedType = typeKey == null ? "" : typeKey.trim();
+        List<AssetEntity> equipment = new ArrayList<AssetEntity>();
+        if (rows != null) {
+            for (AssetEntity row : rows) {
+                if (row == null || row.getDeletedAt() != null) {
+                    continue;
+                }
+                Boolean location = locations.get(row.getTypeKey());
+                if (location != null && location.booleanValue()) {
+                    continue;
+                }
+                if (!wantedType.isEmpty() && !wantedType.equals(row.getTypeKey())) {
+                    continue;
+                }
+                if (placeId > 0 && !underPlace(row, placeId, index)) {
+                    continue;
+                }
+                equipment.add(row);
+            }
+        }
+        Collections.sort(equipment, new Comparator<AssetEntity>() {
+            @Override
+            public int compare(AssetEntity left, AssetEntity right) {
+                String leftKey = left.getObjectKey() == null ? "" : left.getObjectKey();
+                String rightKey = right.getObjectKey() == null ? "" : right.getObjectKey();
+                return leftKey.compareToIgnoreCase(rightKey);
+            }
+        });
+        return equipment;
+    }
+
+    private byte[] buildLifeBook(String projectKey, String typeKey, int placeId) {
+        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
+        Map<String, List<AssetEntity>> byType = new HashMap<String, List<AssetEntity>>();
+        byType.put("all", equipment);
+        Map<Integer, LifecycleEntity> lives = livesByAsset(byType);
+        I18nHelper labels = i18n();
+        boolean dayFirst = labels.getLocale() != null && "ru".equalsIgnoreCase(labels.getLocale().getLanguage());
+        List<String> lifeHeaders = lifeColumnLabels(labels);
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+        headers.addAll(lifeHeaders);
+        List<List<String>> lines = new ArrayList<List<String>>();
+        for (int i = 0; i < equipment.size(); i++) {
+            AssetEntity asset = equipment.get(i);
+            LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
+            List<String> line = new ArrayList<String>();
+            line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+            for (int slot = 0; slot < lifeHeaders.size(); slot++) {
+                line.add(lifeCell(life, slot, dayFirst));
+            }
+            lines.add(line);
+        }
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(new WorkbookSheet.Page(labels.getText("asset-tree.ui.lifeTitle"), headers, lines));
+        return WorkbookSheet.write(pages);
+    }
+
+    private byte[] buildServiceBook(String projectKey, String typeKey, int placeId) {
+        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
+        Map<String, List<AssetEntity>> byType = new HashMap<String, List<AssetEntity>>();
+        byType.put("all", equipment);
+        Map<Integer, List<ServicePlanEntity>> plans = plansByAsset(byType);
+        I18nHelper labels = i18n();
+        boolean dayFirst = labels.getLocale() != null && "ru".equalsIgnoreCase(labels.getLocale().getLanguage());
+        List<String> serviceHeaders = serviceColumnLabels(labels);
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(servicePage(equipment, plans, serviceHeaders, kindNames(projectKey), labels, dayFirst));
+        return WorkbookSheet.write(pages);
     }
 
     private List<String> lifeColumnLabels(I18nHelper labels) {
@@ -7095,27 +7191,22 @@ public class AssetServiceImpl implements AssetService {
         return unit == null ? "" : unit;
     }
 
-    private WorkbookSheet.Page servicePage(List<AssetTypeDto> types, Map<String, List<AssetEntity>> byType,
-                                           Map<Integer, List<ServicePlanEntity>> plans, List<String> serviceHeaders,
-                                           Map<String, String> kindLabels, I18nHelper labels, boolean dayFirst) {
+    private WorkbookSheet.Page servicePage(List<AssetEntity> equipment, Map<Integer, List<ServicePlanEntity>> plans,
+                                           List<String> serviceHeaders, Map<String, String> kindLabels,
+                                           I18nHelper labels, boolean dayFirst) {
         List<String> headers = new ArrayList<String>();
         headers.add(labels.getText("asset-tree.ui.keyLabel"));
         headers.addAll(serviceHeaders);
         List<List<String>> lines = new ArrayList<List<String>>();
-        for (AssetTypeDto type : types) {
-            if (type.isLocation()) {
-                continue;
-            }
-            List<AssetEntity> equipment = byType.get(type.getTypeKey());
-            if (equipment == null) {
-                continue;
-            }
-            for (AssetEntity asset : equipment) {
+        if (equipment != null) {
+            for (int i = 0; i < equipment.size(); i++) {
+                AssetEntity asset = equipment.get(i);
                 List<ServicePlanEntity> owned = plans.get(Integer.valueOf(asset.getID()));
-                if (owned == null || owned.size() < 2) {
+                if (owned == null || owned.isEmpty()) {
                     continue;
                 }
-                for (ServicePlanEntity plan : owned) {
+                for (int planIndex = 0; planIndex < owned.size(); planIndex++) {
+                    ServicePlanEntity plan = owned.get(planIndex);
                     List<String> line = new ArrayList<String>();
                     line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
                     for (int index = 0; index < serviceHeaders.size(); index++) {
@@ -10676,6 +10767,7 @@ public class AssetServiceImpl implements AssetService {
             dto.setActivities(activityDtos(entity.getID()));
             dto.setPlans(planDtos(plans, businessToday()));
             dto.setLinks(linksFor(entity.getID()));
+            dto.setMesh(meshFor(entity.getID(), dto.getPeers(), dto.getLinks()));
             TniWatchEntity watch = tniWatchRow(entity.getID());
             dto.setPingUp(watch == null ? 0 : watch.getUp());
             dto.setPingExempt(watch != null && watch.getExempt() != 0);
@@ -11497,6 +11589,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setProjectName(owner == null || owner.getName() == null ? dto.getProjectKey() : owner.getName());
         AssetTypeEntity type = findType(entity.getTypeKey());
         dto.setTypeLabel(typeLabel(type));
+        dto.setTypeKey(entity.getTypeKey() == null ? "" : entity.getTypeKey());
         dto.setLocation(locationChain(entity));
         dto.setOpen(canOpen(user, owner));
         if (type == null) {
@@ -19453,20 +19546,29 @@ public class AssetServiceImpl implements AssetService {
         String kind = draft == null || draft.getKind() == null ? "" : draft.getKind().trim();
         final Project project;
         final boolean reports;
+        final boolean links = "links".equals(kind);
+        final boolean lifeBook = "life".equals(kind);
+        final boolean serviceBook = "service".equals(kind);
         if ("reports".equals(kind)) {
             project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
             requireModule(project.getKey(), ProjectModules.REPORTS);
             reports = true;
-        } else if ("equipment".equals(kind) || "links".equals(kind)) {
+        } else if ("equipment".equals(kind) || links || lifeBook || serviceBook) {
             project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+            if (lifeBook) {
+                requireModule(project.getKey(), ProjectModules.LIFE);
+            }
+            if (serviceBook) {
+                requireModule(project.getKey(), ProjectModules.SERVICE);
+            }
             reports = false;
         } else {
             throw new AssetException(400, "asset-tree.error.export");
         }
         final String storedKey = project.getKey();
         final ApplicationUser actor = user;
-        final boolean links = "links".equals(kind);
-        final String fileName = (reports ? "reports-" : links ? "links-" : "equipment-") + storedKey + ".xlsx";
+        final String fileName = (reports ? "reports-" : links ? "links-" : lifeBook ? "life-" : serviceBook ? "service-" : "equipment-")
+                + storedKey + ".xlsx";
         final String exportType = draft == null || draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
         final int exportPlace = draft == null || draft.getPlaceId() == null ? 0 : Math.max(0, draft.getPlaceId().intValue());
         final boolean exportBlank = draft != null && Boolean.TRUE.equals(draft.getBlank());
@@ -19485,6 +19587,12 @@ public class AssetServiceImpl implements AssetService {
                             }
                             if (links) {
                                 return buildLinksBook(storedKey, exportType, exportPlace);
+                            }
+                            if (lifeBook) {
+                                return buildLifeBook(storedKey, exportType, exportPlace);
+                            }
+                            if (serviceBook) {
+                                return buildServiceBook(storedKey, exportType, exportPlace);
                             }
                             return buildEquipmentBook(storedKey, exportType, exportPlace, exportBlank);
                         }

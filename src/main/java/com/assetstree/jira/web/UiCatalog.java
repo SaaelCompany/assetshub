@@ -313,6 +313,8 @@ public final class UiCatalog {
             "exchangeAllPlaces",
             "exchangeScope",
             "exchangeLinksExport",
+            "exchangeLifeExport",
+            "exchangeServiceExport",
             "exchangeImport",
             "linkSheet",
             "linkTo",
