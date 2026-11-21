@@ -3565,37 +3565,6 @@
         return nest;
     }
 
-    function sortGlyph() {
-        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 16 16');
-        svg.setAttribute('aria-hidden', 'true');
-        ['M8 2.2v5.1M5.3 4.7 8 2.2l2.7 2.5', 'M8 13.8V8.7M5.3 11.3 8 13.8l2.7-2.5'].forEach(function (shape) {
-            var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('d', shape);
-            path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'currentColor');
-            path.setAttribute('stroke-width', '1.6');
-            path.setAttribute('stroke-linecap', 'round');
-            path.setAttribute('stroke-linejoin', 'round');
-            svg.appendChild(path);
-        });
-        return svg;
-    }
-
-    function sortButton(title, onClick) {
-        var button = el('button', 'asset-tree-sort');
-        button.type = 'button';
-        button.title = title;
-        button.setAttribute('aria-label', title);
-        button.appendChild(sortGlyph());
-        button.addEventListener('click', function (event) {
-            event.preventDefault();
-            event.stopPropagation();
-            onClick();
-        });
-        return button;
-    }
-
     function labeledWay(names) {
         var rows = [];
         for (var i = 0; i < names.length; i++) rows.push({ name: names[i] || '', id: i });
@@ -3710,15 +3679,6 @@
             row.appendChild(chevron);
             row.appendChild(name);
             if (asset.secret) row.appendChild(el('span', 'asset-tree-secret', t('secretBadge')));
-            if ((state.canPlaces || state.canObjects || state.canArrange) && isFolder(asset)) {
-                var sortNames = placeSortNames(asset.id);
-                if (sortNames.length > 1) {
-                    var sortWay = labeledWay(sortNames);
-                    row.appendChild(sortButton(t(sortWay < 0 ? 'sortNameDown' : 'sortNameUp'), function () {
-                        sortPlaceByName(asset.id, sortWay);
-                    }));
-                }
-            }
             var queued = equipmentCount(asset.id);
             if (queued) row.appendChild(el('span', 'asset-tree-qcount', '(' + queued + ')'));
             row.appendChild(nestButton(asset.id));
@@ -3726,6 +3686,20 @@
                 state.treePicked = {};
                 state.pane = 'list';
                 selectAsset(asset.id);
+            });
+            row.addEventListener('contextmenu', function (event) {
+                if (!isFolder(asset) || !(state.canPlaces || state.canObjects || state.canArrange)) return;
+                var names = placeSortNames(asset.id);
+                if (names.length < 2) return;
+                event.preventDefault();
+                event.stopPropagation();
+                var way = labeledWay(names);
+                openTreeMenu(event.clientX, event.clientY, [{
+                    arrow: true,
+                    label: '\u2191\u2193',
+                    title: t(way < 0 ? 'sortNameDown' : 'sortNameUp'),
+                    onClick: function () { sortPlaceByName(asset.id, way); }
+                }]);
             });
             branch.appendChild(row);
             if (expandable && isExpanded(asset.id)) {
@@ -4028,13 +4002,6 @@
         var name = el('span', 'asset-tree-name', type.label);
         name.insertBefore(typeTile(type, 'sm'), name.firstChild);
         row.appendChild(name);
-        var sortable = equipmentIn(placeId, type.typeKey);
-        if (state.canObjects && sortable.length > 1) {
-            var sortWay = nameSortWay(sortable);
-            row.appendChild(sortButton(t(sortWay < 0 ? 'sortNameDown' : 'sortNameUp'), function () {
-                sortTypeByName(placeId, type.typeKey, sortWay);
-            }));
-        }
         var count = typeFolderCount(placeId, type);
         if (count) row.appendChild(el('span', 'asset-tree-qcount', '(' + count + ')'));
         if (state.canArrange) {
@@ -4063,7 +4030,7 @@
             var way = nameSortWay(objects);
             openTreeMenu(event.clientX, event.clientY, [{
                 arrow: true,
-                label: way < 0 ? '\u2193' : '\u2191',
+                label: '\u2191\u2193',
                 title: t(way < 0 ? 'sortNameDown' : 'sortNameUp'),
                 onClick: function () { sortTypeByName(placeId, type.typeKey, way); }
             }]);
@@ -31642,6 +31609,49 @@
         return names.join(' / ');
     }
 
+    function portalTargetValue(assetId, typeKey) {
+        return typeKey ? String(assetId) + '|' + typeKey : String(assetId || '');
+    }
+
+    function parsePortalTarget(value) {
+        var raw = String(value || '');
+        var mark = raw.indexOf('|');
+        if (mark < 0) return { assetId: parseInt(raw, 10) || 0, typeKey: '' };
+        return { assetId: parseInt(raw.slice(0, mark), 10) || 0, typeKey: raw.slice(mark + 1) };
+    }
+
+    /** Place, then its types and objects, then the places inside it. */
+    function portalTargets() {
+        var rows = [];
+        var seen = {};
+        function add(value, label) {
+            if (!value || seen[value]) return;
+            seen[value] = true;
+            rows.push({ value: value, label: label });
+        }
+        function walk(place) {
+            add(String(place.id), assetPath(place));
+            var typePath = {};
+            placeSlots(place.id).forEach(function (slot) {
+                var type = typeByKey(slot.typeKey);
+                if (!type) return;
+                var above = slot.parentKey ? typePath[slot.parentKey] : assetPath(place);
+                var label = (above || assetPath(place)) + ' / ' + (type.label || type.typeKey);
+                typePath[slot.typeKey] = label;
+                add(portalTargetValue(place.id, slot.typeKey), label);
+                equipmentIn(place.id, slot.typeKey).forEach(function (asset) {
+                    add(String(asset.id), label + ' / ' + (asset.name || ''));
+                });
+            });
+            treeChildren(place.id).forEach(walk);
+        }
+        treeChildren(null).forEach(walk);
+        childrenOf(null).forEach(function (asset) {
+            if (!isFolder(asset)) add(String(asset.id), assetPath(asset));
+        });
+        return rows;
+    }
+
     function renderFlowSettings(host) {
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('flowSection')));
@@ -32030,7 +32040,7 @@
             actions.appendChild(button(t('portalEditRule'), 'asset-tree-btn', function () {
                 state.portalDraft = {
                     id: rule.id,
-                    assetId: String(rule.assetId || ''),
+                    assetId: portalTargetValue(rule.assetId, rule.typeKey),
                     conditions: (rule.conditions || []).map(function (condition) {
                         return { field: condition.field || '', option: condition.option || '' };
                     })
@@ -32094,11 +32104,9 @@
         var emptyOption = el('option', null, '—');
         emptyOption.value = '';
         target.appendChild(emptyOption);
-        state.assets.slice().sort(function (left, right) {
-            return assetPath(left).localeCompare(assetPath(right));
-        }).forEach(function (asset) {
-            var option = el('option', null, assetPath(asset));
-            option.value = String(asset.id);
+        portalTargets().forEach(function (row) {
+            var option = el('option', null, row.label);
+            option.value = row.value;
             target.appendChild(option);
         });
         target.value = draft.assetId || '';
@@ -32128,7 +32136,8 @@
                 error.textContent = t('portalConditionRequired');
                 return;
             }
-            var body = { assetId: parseInt(target.value, 10), conditions: cleaned };
+            var picked = parsePortalTarget(target.value);
+            var body = { assetId: picked.assetId, typeKey: picked.typeKey, conditions: cleaned };
             var editingId = draft.id;
             var method = editingId ? 'PUT' : 'POST';
             var path = '/projects/' + encodeURIComponent(state.projectKey) + '/portal-rules' + (editingId ? '/' + editingId : '');

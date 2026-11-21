@@ -625,7 +625,7 @@
             });
             if (!ok) return;
             var score = rule.conditions.length;
-            var depth = depthOf(rule.assetId, byId);
+            var depth = depthOf(rule.assetId, byId) + (rule.typeKey ? 1 : 0);
             if (score > bestScore || (score === bestScore && depth > bestDepth)) {
                 best = rule;
                 bestScore = score;
@@ -633,6 +633,17 @@
             }
         });
         return best;
+    }
+
+    function typeGroupId(nodes, placeId, typeKey) {
+        if (!placeId || !typeKey) return null;
+        var byId = indexOf(nodes);
+        var found = null;
+        (nodes || []).forEach(function (node) {
+            if (found || !node || !node.group || node.typeKey !== typeKey) return;
+            if (contains(byId, placeId, node.id)) found = node.id;
+        });
+        return found;
     }
 
     function depthOf(id, byId) {
@@ -743,6 +754,10 @@
             var locked = rules.length > 0;
             var rule = locked ? chooseRule(rules, readAnswers(picker), byId) : null;
             var rootId = rule ? rule.assetId : null;
+            if (rule && rule.typeKey) {
+                var typed = typeGroupId(nodes, rule.assetId, rule.typeKey);
+                if (typed) rootId = typed;
+            }
             if (!force && rootId === appliedRoot && locked === appliedLock) return;
             appliedRoot = rootId;
             appliedLock = locked;

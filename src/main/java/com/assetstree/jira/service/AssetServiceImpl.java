@@ -5413,6 +5413,7 @@ public class AssetServiceImpl implements AssetService {
                     node.setObjectKey(laid.getObjectKey());
                     node.setStatus(laid.getStatus());
                     node.setTypeLabel(laid.getTypeLabel());
+                    node.setTypeKey(laid.getTypeKey());
                     node.setGroup(laid.isGroup());
                     if (!laid.isGroup()) {
                         String extra = searchText.get(Integer.valueOf(laid.getId()));
@@ -5461,6 +5462,7 @@ public class AssetServiceImpl implements AssetService {
                 PortalRuleEntity rule = ao().create(PortalRuleEntity.class,
                         new DBParam("PROJECT_KEY", project.getKey()),
                         new DBParam("ASSET_ID", draft.getAssetId()),
+                        new DBParam("TYPE_KEY", portalTypeKey(asset, draft.getTypeKey())),
                         new DBParam("POSITION", position));
                 for (int i = 0; i < conditions.size(); i++) {
                     PortalConditionDraft condition = conditions.get(i);
@@ -5513,6 +5515,7 @@ public class AssetServiceImpl implements AssetService {
                     throw new AssetException(400, "asset-tree.error.portal.target");
                 }
                 rule.setAssetId(draft.getAssetId());
+                rule.setTypeKey(portalTypeKey(asset, draft.getTypeKey()));
                 rule.save();
                 ao().deleteWithSQL(PortalRuleConditionEntity.class, "RULE_ID = ?", ruleId);
                 for (int i = 0; i < conditions.size(); i++) {
@@ -6184,11 +6187,12 @@ public class AssetServiceImpl implements AssetService {
         PortalRuleDto dto = new PortalRuleDto();
         dto.setId(rule.getID());
         dto.setAssetId(rule.getAssetId());
+        dto.setTypeKey(rule.getTypeKey() == null ? "" : rule.getTypeKey().trim());
         dto.setPosition(rule.getPosition());
         AssetEntity asset = ao().get(AssetEntity.class, rule.getAssetId());
         if (asset != null) {
             dto.setAssetName(asset.getName());
-            dto.setAssetPath(portalPath(asset));
+            dto.setAssetPath(portalTargetPath(asset, dto.getTypeKey()));
         }
         PortalRuleConditionEntity[] conditions = ao().find(PortalRuleConditionEntity.class,
                 Query.select().where("RULE_ID = ?", rule.getID()));
@@ -6493,6 +6497,31 @@ public class AssetServiceImpl implements AssetService {
                 when == null ? new Date() : when);
     }
 
+    /** A type target is stored only on a place. An object keeps its own type in the path. */
+    private String portalTypeKey(AssetEntity asset, String raw) {
+        String key = raw == null ? "" : raw.trim();
+        if (key.isEmpty() || asset == null || !isLocation(asset)) {
+            return "";
+        }
+        AssetTypeEntity type = findType(key);
+        if (type == null || type.isLocation() || !ProjectKeys.same(type.getProjectKey(), asset.getProjectKey())) {
+            throw new AssetException(400, "asset-tree.error.portal.target");
+        }
+        return type.getTypeKey();
+    }
+
+    private String portalTargetPath(AssetEntity asset, String typeKey) {
+        String path = portalPath(asset);
+        if (typeKey == null || typeKey.trim().isEmpty() || asset == null || !isLocation(asset)) {
+            return path;
+        }
+        String extra = joinNames(typeChain(typeKey));
+        if (extra.isEmpty()) {
+            return path;
+        }
+        return path.isEmpty() ? extra : path + " / " + extra;
+    }
+
     private String portalPath(AssetEntity entity) {
         List<String> names = new ArrayList<String>();
         AssetEntity cursor = entity;
@@ -6503,9 +6532,48 @@ public class AssetServiceImpl implements AssetService {
             cursor = parentId == null ? null : ao().get(AssetEntity.class, parentId.intValue());
             guard++;
         }
+        if (entity != null && !isLocation(entity) && !names.isEmpty()) {
+            names.addAll(names.size() - 1, typeChain(entity.getTypeKey()));
+        }
+        return joinNames(names);
+    }
+
+    private List<String> typeChain(String typeKey) {
+        List<String> labels = new ArrayList<String>();
+        if (typeKey == null || typeKey.trim().isEmpty()) {
+            return labels;
+        }
+        AssetTypeEntity type = findType(typeKey.trim());
+        if (type == null || type.isLocation()) {
+            return labels;
+        }
+        String parentKey = type.getParentTypeKey() == null ? "" : type.getParentTypeKey().trim();
+        if (!parentKey.isEmpty() && !parentKey.equals(type.getTypeKey())) {
+            AssetTypeEntity parent = findType(parentKey);
+            if (parent != null && !parent.isLocation()) {
+                String parentLabel = typeLabel(parent);
+                if (!parentLabel.isEmpty()) {
+                    labels.add(parentLabel);
+                }
+            }
+        }
+        String label = typeLabel(type);
+        if (!label.isEmpty()) {
+            labels.add(label);
+        }
+        return labels;
+    }
+
+    private String joinNames(List<String> names) {
         StringBuilder builder = new StringBuilder();
+        if (names == null) {
+            return "";
+        }
         for (int i = 0; i < names.size(); i++) {
-            if (i > 0) {
+            if (names.get(i) == null || names.get(i).isEmpty()) {
+                continue;
+            }
+            if (builder.length() > 0) {
                 builder.append(" / ");
             }
             builder.append(names.get(i));

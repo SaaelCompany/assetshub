@@ -596,12 +596,14 @@
 }
 
 .asset-tree-context-item.is-arrow {
-    width: 36px;
+    width: 48px;
     height: 32px;
     padding: 0;
-    font-size: 18px;
+    font-size: 16px;
     line-height: 32px;
+    letter-spacing: 1px;
     text-align: center;
+    white-space: nowrap;
 }
 
 .asset-tree-row.is-match .asset-tree-name {
@@ -2089,7 +2091,6 @@ a.asset-tree-url {
 }
 
 #asset-tree-app button.asset-tree-nest,
-#asset-tree-app button.asset-tree-sort,
 #asset-tree-app button.asset-tree-chevron,
 #asset-tree-app button.asset-tree-row-copy,
 #asset-tree-app button.asset-tree-swatch,
@@ -2116,23 +2117,6 @@ a.asset-tree-url {
     border: 1px solid #dfe1e6 !important;
     color: #0052cc !important;
     font-size: 16px;
-}
-
-#asset-tree-app button.asset-tree-sort {
-    background: #ffffff !important;
-    border: 1px solid #dfe1e6 !important;
-    color: #5e6c84 !important;
-}
-
-#asset-tree-app button.asset-tree-sort:hover {
-    color: #0052cc !important;
-    background: #f4f5f7 !important;
-}
-
-#asset-tree-app button.asset-tree-sort svg {
-    display: block;
-    width: 14px;
-    height: 14px;
 }
 
 #asset-tree-app button.asset-tree-chevron,
@@ -2423,8 +2407,7 @@ a.asset-tree-url {
     font-variant-numeric: tabular-nums;
 }
 
-#asset-tree-app .asset-tree-row button.asset-tree-nest,
-#asset-tree-app .asset-tree-row button.asset-tree-sort {
+#asset-tree-app .asset-tree-row button.asset-tree-nest {
     width: 0 !important;
     min-width: 0 !important;
     border-width: 0 !important;
@@ -2434,10 +2417,7 @@ a.asset-tree-url {
 
 #asset-tree-app .asset-tree-row:hover button.asset-tree-nest,
 #asset-tree-app .asset-tree-row.is-selected button.asset-tree-nest,
-#asset-tree-app .asset-tree-row:focus-within button.asset-tree-nest,
-#asset-tree-app .asset-tree-row:hover button.asset-tree-sort,
-#asset-tree-app .asset-tree-row.is-selected button.asset-tree-sort,
-#asset-tree-app .asset-tree-row:focus-within button.asset-tree-sort {
+#asset-tree-app .asset-tree-row:focus-within button.asset-tree-nest {
     width: 22px !important;
     min-width: 22px !important;
     border-width: 1px !important;
@@ -3091,8 +3071,7 @@ a.asset-tree-url {
         aspect-ratio: 3 / 2;
     }
 
-    #asset-tree-app .asset-tree-row button.asset-tree-nest,
-    #asset-tree-app .asset-tree-row button.asset-tree-sort {
+    #asset-tree-app .asset-tree-row button.asset-tree-nest {
         width: 22px !important;
         min-width: 22px !important;
         border-width: 1px !important;

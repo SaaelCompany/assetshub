@@ -68,8 +68,9 @@ public final class PickerLayout {
         private final String typeLabel;
         private final String status;
         private final boolean group;
+        private final String typeKey;
 
-        private Node(int id, Integer parentId, String name, String objectKey, String typeLabel, String status, boolean group) {
+        private Node(int id, Integer parentId, String name, String objectKey, String typeLabel, String status, boolean group, String typeKey) {
             this.id = id;
             this.parentId = parentId;
             this.name = name;
@@ -77,6 +78,7 @@ public final class PickerLayout {
             this.typeLabel = typeLabel == null ? "" : typeLabel;
             this.status = status == null ? "" : status;
             this.group = group;
+            this.typeKey = typeKey == null ? "" : typeKey;
         }
 
         public int getId() {
@@ -105,6 +107,10 @@ public final class PickerLayout {
 
         public boolean isGroup() {
             return group;
+        }
+
+        public String getTypeKey() {
+            return typeKey;
         }
     }
 
@@ -216,7 +222,7 @@ public final class PickerLayout {
             }
             int rootId = nextGroup[0];
             nextGroup[0] = rootId - 1;
-            nodes.add(group(rootId, Integer.valueOf(placeId), labelOf(root, labels)));
+            nodes.add(group(rootId, Integer.valueOf(placeId), labelOf(root, labels), root));
             addGear(nodes, byType.get(root), Integer.valueOf(rootId), placed);
             List<String> nested = children.get(root);
             if (nested == null) {
@@ -228,7 +234,7 @@ public final class PickerLayout {
                 }
                 int childId = nextGroup[0];
                 nextGroup[0] = childId - 1;
-                nodes.add(group(childId, Integer.valueOf(rootId), labelOf(child, labels)));
+                nodes.add(group(childId, Integer.valueOf(rootId), labelOf(child, labels), child));
                 addGear(nodes, byType.get(child), Integer.valueOf(childId), placed);
             }
         }
@@ -283,7 +289,7 @@ public final class PickerLayout {
             String rootLabel = rootLabel(entry.getKey(), items);
             int rootId = nextGroup[0];
             nextGroup[0] = rootId - 1;
-            nodes.add(group(rootId, Integer.valueOf(placeId), rootLabel));
+            nodes.add(group(rootId, Integer.valueOf(placeId), rootLabel, entry.getKey()));
             List<Source> direct = new ArrayList<Source>();
             Map<String, List<Source>> bySubtype = new LinkedHashMap<String, List<Source>>();
             for (Source item : items) {
@@ -306,7 +312,7 @@ public final class PickerLayout {
                 List<Source> children = subtype.getValue();
                 int subtypeId = nextGroup[0];
                 nextGroup[0] = subtypeId - 1;
-                nodes.add(group(subtypeId, Integer.valueOf(rootId), children.get(0).typeLabel));
+                nodes.add(group(subtypeId, Integer.valueOf(rootId), children.get(0).typeLabel, subtype.getKey()));
                 for (Source item : children) {
                     nodes.add(asset(item, Integer.valueOf(subtypeId)));
                     placed.add(Integer.valueOf(item.id));
@@ -325,10 +331,10 @@ public final class PickerLayout {
     }
 
     private static Node asset(Source source, Integer parentId) {
-        return new Node(source.id, parentId, source.name, source.objectKey, source.typeLabel, source.status, false);
+        return new Node(source.id, parentId, source.name, source.objectKey, source.typeLabel, source.status, false, "");
     }
 
-    private static Node group(int id, Integer parentId, String label) {
-        return new Node(id, parentId, label, "", label, "", true);
+    private static Node group(int id, Integer parentId, String label, String typeKey) {
+        return new Node(id, parentId, label, "", label, "", true, typeKey);
     }
 }
