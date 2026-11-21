@@ -1508,6 +1508,31 @@
         return card.name || '';
     }
 
+    function mineFoldMap() {
+        try {
+            var parsed = JSON.parse(localStorage.getItem('asset-tree.portalMineFold') || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function mineFoldKey(project, mode, name) {
+        return mode + '\u0001' + (project || '') + '\u0001' + name;
+    }
+
+    function mineFolded(project, mode, name) {
+        return !!mineFoldMap()[mineFoldKey(project, mode, name)];
+    }
+
+    function rememberMineFold(project, mode, name, folded) {
+        var map = mineFoldMap();
+        var key = mineFoldKey(project, mode, name);
+        if (folded) map[key] = 1;
+        else delete map[key];
+        try { localStorage.setItem('asset-tree.portalMineFold', JSON.stringify(map)); } catch (error) {}
+    }
+
     function mineSelect(label, value, options, onChange) {
         var wrap = el('label', 'asset-tree-portal-mine-pick');
         wrap.appendChild(el('span', null, label));
@@ -1667,6 +1692,8 @@
     function applyMineFilter(root) {
         if (!root) return;
         var needle = norm(mineState.query);
+        if (needle) root.classList.add('is-searching');
+        else root.classList.remove('is-searching');
         var cards = root.querySelectorAll('.asset-tree-portal-mine-card');
         var shown = 0;
         for (var i = 0; i < cards.length; i++) {
@@ -1789,12 +1816,26 @@
             }
             buckets.forEach(function (bucket) {
                 var section = el('div', 'asset-tree-portal-mine-bucket');
+                var grid = el('div', 'asset-tree-portal-mine-grid');
                 if (bucket.name) {
-                    var heading = el('h4', null, bucket.name);
-                    heading.appendChild(el('span', null, String(bucket.cards.length)));
+                    var folded = mineFolded(group.key, mode, bucket.name);
+                    if (folded) section.classList.add('is-collapsed');
+                    var heading = el('h4');
+                    var toggle = el('button', 'asset-tree-portal-mine-fold');
+                    toggle.type = 'button';
+                    toggle.setAttribute('aria-expanded', folded ? 'false' : 'true');
+                    toggle.appendChild(el('i', 'asset-tree-portal-mine-chevron'));
+                    toggle.appendChild(el('span', 'asset-tree-portal-mine-fold-name', bucket.name));
+                    toggle.appendChild(el('span', 'asset-tree-portal-mine-fold-count', String(bucket.cards.length)));
+                    toggle.addEventListener('click', function () {
+                        var next = !section.classList.contains('is-collapsed');
+                        section.classList.toggle('is-collapsed', next);
+                        toggle.setAttribute('aria-expanded', next ? 'false' : 'true');
+                        rememberMineFold(group.key, mode, bucket.name, next);
+                    });
+                    heading.appendChild(toggle);
                     section.appendChild(heading);
                 }
-                var grid = el('div', 'asset-tree-portal-mine-grid');
                 bucket.cards.forEach(function (card) {
                 var item = el('article', 'asset-tree-portal-mine-card');
                 item.setAttribute('data-hay', cardHaystack(group, card));
