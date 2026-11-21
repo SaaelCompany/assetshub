@@ -31098,18 +31098,17 @@
 
     function portalMineSettings() {
         var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
-        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineTitle')));
-        box.appendChild(el('p', 'asset-tree-hint', t('portalMineHint')));
-        var show = el('label', 'asset-tree-check-row');
+        var head = el('div', 'asset-tree-portal-head');
+        head.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineTitle')));
+        var show = el('label', 'asset-tree-portal-switch');
         var toggle = el('input');
         toggle.type = 'checkbox';
         toggle.checked = !!moduleSetup().portalMine;
         toggle.setAttribute('aria-label', t('portalMineShow'));
         show.appendChild(toggle);
-        var showText = el('span');
-        showText.appendChild(el('strong', null, t('portalMineShow')));
-        show.appendChild(showText);
-        box.appendChild(show);
+        head.appendChild(show);
+        box.appendChild(head);
+        box.appendChild(el('p', 'asset-tree-hint', t('portalMineHint')));
         var fields = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
         fields.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineFields')));
         fields.appendChild(el('p', 'asset-tree-hint', t('portalMineFieldsHint')));
@@ -31370,14 +31369,12 @@
     function renderPortalSettings(panel) {
         panel.appendChild(el('p', 'asset-tree-hint', t('portalSectionHint')));
         var bundle = el('section', 'asset-tree-project-card asset-tree-portal-bundle');
-        bundle.appendChild(el('h3', 'asset-tree-settings-title', t('portalBundleTitle')));
-        bundle.appendChild(el('p', 'asset-tree-hint', t('portalBundleHint')));
         var mine = portalMineSettings();
         bundle.appendChild(mine.show);
         if (state.canAdmin) bundle.appendChild(portalLayoutSettings());
         bundle.appendChild(mine.fields);
         panel.appendChild(bundle);
-        var portalGroups = el('div', 'asset-tree-project-stack is-wide');
+        var portalGroups = el('div', 'asset-tree-project-stack');
         portalGroups.appendChild(renderClinicAccess());
         panel.appendChild(portalGroups);
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
