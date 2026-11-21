@@ -21180,6 +21180,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public List<DocTemplateDto> documents(ApplicationUser user, String projectKey) {
         Project project = requireReadableProject(user, projectKey);
+        requireModule(project.getKey(), ProjectModules.DOCS);
         List<DocTemplateDto> list = new ArrayList<DocTemplateDto>();
         DocTemplateEntity[] rows = ao().find(DocTemplateEntity.class,
                 Query.select().where("PROJECT_KEY = ?", project.getKey()).order("ID ASC"));
@@ -21194,6 +21195,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public DocTemplateDto saveDocument(ApplicationUser user, String projectKey, String name, String fileName, byte[] data) {
         Project project = requireReadableProject(user, projectKey);
+        requireModule(project.getKey(), ProjectModules.DOCS);
         if (!canConfigure(user, project)) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
@@ -21228,6 +21230,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void deleteDocument(ApplicationUser user, String projectKey, String templateId) {
         Project project = requireReadableProject(user, projectKey);
+        requireModule(project.getKey(), ProjectModules.DOCS);
         if (!canConfigure(user, project)) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
@@ -21246,6 +21249,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public StoredFile openDocument(ApplicationUser user, int assetId, String templateId) {
         AssetEntity asset = requireVisible(user, assetId);
+        requireModule(asset.getProjectKey(), ProjectModules.DOCS);
         String title = documentTitle(asset.getProjectKey(), templateId);
         byte[] template = documentBytes(asset.getProjectKey(), templateId);
         try {

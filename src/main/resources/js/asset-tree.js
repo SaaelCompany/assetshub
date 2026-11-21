@@ -9752,7 +9752,7 @@
                 extra.push({ icon: 'image', label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
             }
         }
-        if (!isFolder(asset)) ops.appendChild(documentButton(asset));
+        if (!isFolder(asset) && moduleOn('docs')) ops.appendChild(documentButton(asset));
         if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
             var ping = toolButton(t('tniPing'), 'ping', function () { pingAsset(asset); });
             var pingState = pingMark(asset);
@@ -16423,6 +16423,7 @@
         if (moduleKey === 'life') return 'moduleLife';
         if (moduleKey === 'portal') return 'modulePortal';
         if (moduleKey === 'card') return 'moduleCard';
+        if (moduleKey === 'docs') return 'moduleDocs';
         if (moduleKey === 'tni') return 'moduleTni';
         return 'setupTitle';
     }
@@ -16451,10 +16452,10 @@
     }
 
     function openModuleSetup(moduleKey) {
-        if (moduleKey === 'portal' || moduleKey === 'tni') {
+        if (moduleKey === 'portal' || moduleKey === 'tni' || moduleKey === 'docs') {
             closeAllModals();
             state.view = 'settings';
-            state.schemaTab = moduleKey === 'tni' ? (state.canObjects ? 'exchange' : 'project') : 'portal';
+            state.schemaTab = moduleKey === 'tni' ? (state.canObjects ? 'exchange' : 'project') : (moduleKey === 'docs' ? 'documents' : 'portal');
             rememberView('settings');
             renderFrame();
             return;
@@ -17056,7 +17057,7 @@
         var sections = [];
         if (state.canConfigure) {
             sections.push(['project', t('projectSection'), null]);
-            sections.push(['documents', t('docSection'), null]);
+            if (moduleOn('docs')) sections.push(['documents', t('docSection'), null]);
         }
         if (state.canConfigure) {
             sections.push(['types', t('typesSection'), state.types.length]);
@@ -17215,13 +17216,13 @@
         if (english) {
             return [
                 [t('docGroupCard'), ['name', 'key', 'serial', 'inventory', 'type', 'status', 'description', 'maker', 'model', 'group', 'quantity', 'life', 'year', 'date', 'request']],
-                [t('docGroupPerson'), ['mol', 'mol title', 'mol department', 'mol email', 'mol phone', 'issued', 'issued title', 'issued department', 'issued email', 'issued phone', 'custodian']],
+                [t('docGroupPerson'), ['mol', 'mol short', 'mol title', 'mol department', 'mol email', 'mol phone', 'issued', 'issued short', 'issued title', 'issued department', 'issued email', 'issued phone', 'name short', 'custodian', 'custodian short']],
                 [t('docGroupPlace'), ['place', 'address', 'city', 'project']]
             ];
         }
         return [
             [t('docGroupCard'), ['наименование', 'ключ', 'серийный', 'инвентарный', 'тип', 'статус', 'описание', 'производитель', 'модель', 'группа', 'количество', 'срок', 'год', 'дата', 'заявка']],
-            [t('docGroupPerson'), ['мол', 'должность мол', 'отдел мол', 'почта мол', 'телефон мол', 'кому выдано', 'должность кому выдано', 'отдел кому выдано', 'почта кому выдано', 'телефон кому выдано', 'должность', 'отдел', 'почта', 'телефон', 'ответственный']],
+            [t('docGroupPerson'), ['мол', 'мол кратко', 'должность мол', 'отдел мол', 'почта мол', 'телефон мол', 'кому выдано', 'кому выдано кратко', 'должность кому выдано', 'отдел кому выдано', 'почта кому выдано', 'телефон кому выдано', 'должность', 'отдел', 'почта', 'телефон', 'фио кратко', 'ответственный', 'ответственный кратко']],
             [t('docGroupPlace'), ['площадка', 'филиал', 'адрес', 'город', 'организация']]
         ];
     }
@@ -17416,6 +17417,7 @@
             ['life', 'moduleLife', 'moduleLifeHint', '', 'beta'],
             ['portal', 'modulePortal', 'modulePortalHint', '', 'beta'],
             ['card', 'moduleCard', 'moduleCardHint', '', 'beta'],
+            ['docs', 'moduleDocs', 'moduleDocsHint', '', 'beta'],
             ['tni', 'moduleTni', 'moduleTniHint', '', 'beta']
         ].forEach(function (item) {
             if (item[0] === 'tni' && !state.canAdmin) return;
@@ -17430,7 +17432,7 @@
             box.addEventListener('change', function () {
                 var want = box.checked;
                 var next = [];
-                var order = ['service', 'map', 'reports', 'life', 'portal', 'card', 'tni'];
+                var order = ['service', 'map', 'reports', 'life', 'portal', 'card', 'docs', 'tni'];
                 order.forEach(function (key) {
                     var on = key === item[0] ? want : moduleOn(key);
                     if (on) next.push(key);

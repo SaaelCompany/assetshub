@@ -125,8 +125,15 @@ public final class PersonContact {
         if (norm.contains("title") && !norm.contains("untitled")) {
             return 3;
         }
-        if (contains(norm, "position", "profession", "профес", "специальн", "звание")) {
+        if (contains(norm, "position", "profession", "профес", "специальн", "звание", "employeetype")) {
             return 2;
+        }
+        if (norm.contains("job") && !norm.contains("jobid")) {
+            return 2;
+        }
+        if ((norm.equals("description") || norm.equals("info") || norm.equals("comment"))
+                && value.length() <= 80 && value.indexOf('@') < 0 && value.indexOf('\n') < 0 && value.indexOf('\r') < 0) {
+            return 1;
         }
         return 0;
     }

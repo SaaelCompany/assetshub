@@ -1324,6 +1324,8 @@ public final class UiCatalog {
             "modulePortalHint",
             "moduleCard",
             "moduleCardHint",
+            "moduleDocs",
+            "moduleDocsHint",
             "moduleTni",
             "moduleTniHint",
             "tniTitle",

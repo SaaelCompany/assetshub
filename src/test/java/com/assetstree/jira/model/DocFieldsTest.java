@@ -8,6 +8,20 @@ import static org.junit.Assert.assertEquals;
 
 public class DocFieldsTest {
     @Test
+    public void aFullNameKeepsAShortFormBesideIt() {
+        DocFields.Source source = new DocFields.Source();
+        source.mol = "Бондаренко Олег Сергеевич";
+        source.issued = "Хуснуллин Никита Рустамович";
+        source.custodian = "Бондаренко Олег Сергеевич";
+        Map<String, String> values = DocFields.values(source);
+        assertEquals("Бондаренко Олег Сергеевич", values.get(DocxFill.normalize("мол")));
+        assertEquals("Бондаренко О.С.", values.get(DocxFill.normalize("мол кратко")));
+        assertEquals("Хуснуллин Н.Р.", values.get(DocxFill.normalize("кому выдано кратко")));
+        assertEquals("Хуснуллин Н.Р.", values.get(DocxFill.normalize("фио кратко")));
+        assertEquals("Бондаренко О.С.", values.get(DocxFill.normalize("ответственный кратко")));
+    }
+
+    @Test
     public void aSerialFieldFillsTheRussianToken() {
         DocFields.Source source = new DocFields.Source();
         source.name = "Атол 55Ф";
