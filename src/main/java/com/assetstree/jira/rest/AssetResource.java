@@ -69,6 +69,7 @@ import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.servlet.http.HttpServletRequest;
+import javax.ws.rs.core.CacheControl;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -117,7 +118,7 @@ public class AssetResource {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.listAssets(user(), projectKey, query)).build();
+                return fresh(Response.ok(assetService.listAssets(user(), projectKey, query)));
             }
         });
     }
@@ -139,7 +140,7 @@ public class AssetResource {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.getAsset(user(), id)).build();
+                return fresh(Response.ok(assetService.getAsset(user(), id)));
             }
         });
     }
@@ -376,14 +377,24 @@ public class AssetResource {
 
     @GET
     @Path("projects/{projectKey}/tree-stamp")
-    public Response treeStamp(@PathParam("projectKey") final String projectKey) {
+    public Response treeStamp(@PathParam("projectKey") final String projectKey, @QueryParam("open") final Integer open) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                MessageDto mark = new MessageDto(assetService.treeMark(user(), projectKey));
-                return Response.ok(mark).build();
+                String mark = assetService.treeMark(user(), projectKey);
+                if (open != null && open.intValue() > 0) {
+                    mark = mark + "~" + assetService.cardMark(user(), projectKey, open.intValue());
+                }
+                return fresh(Response.ok(new MessageDto(mark)));
             }
         });
+    }
+
+    private static Response fresh(Response.ResponseBuilder builder) {
+        CacheControl never = new CacheControl();
+        never.setNoCache(true);
+        never.setNoStore(true);
+        return builder.cacheControl(never).header("Pragma", "no-cache").build();
     }
 
     @GET
@@ -392,7 +403,7 @@ public class AssetResource {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.catalog(user(), projectKey)).build();
+                return fresh(Response.ok(assetService.catalog(user(), projectKey)));
             }
         });
     }

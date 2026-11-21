@@ -94,6 +94,8 @@ public interface AssetService {
 
     String treeMark(ApplicationUser user, String projectKey);
 
+    String cardMark(ApplicationUser user, String projectKey, int assetId);
+
     /** Types and statuses of a project without its objects, plus the current tree mark. */
     AssetListDto catalog(ApplicationUser user, String projectKey);
 
