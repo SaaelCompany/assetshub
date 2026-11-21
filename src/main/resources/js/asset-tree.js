@@ -1030,7 +1030,7 @@
             if (isFolder(current)) {
                 if (current.custodian && current.custodian.userKey === state.userKey) return true;
                 if (placeApproverKey(current.id) === state.userKey) return true;
-                if (state.editPlaces && state.editPlaces[String(current.id)]) return true;
+                if (state.editPlaces && (state.editPlaces['*'] || state.editPlaces[String(current.id)])) return true;
             }
             if (!current.parentId) break;
             current = byId()[current.parentId];
@@ -33169,11 +33169,21 @@
         return name;
     }
 
+    function placeScopeValue(picked) {
+        if (picked && picked['*']) return '*';
+        var ids = [];
+        Object.keys(picked || {}).forEach(function (key) {
+            if (key && key !== '*') ids.push(key);
+        });
+        return ids.join(',');
+    }
+
     function grantPlaceNames(grant) {
         var picked = {};
         String(grant && grant.placeScope || '').split(',').forEach(function (part) {
             if (part) picked[part] = true;
         });
+        if (picked['*']) return t('accessPlacesEvery');
         var names = [];
         placeChoices().forEach(function (asset) {
             if (picked[String(asset.id)]) names.push(asset.name || asset.objectKey || String(asset.id));
@@ -33184,6 +33194,32 @@
     function placeChecklist(picked) {
         var list = el('div', 'asset-tree-check-list asset-tree-access-places');
         var places = placeChoices();
+        var boxes = [];
+        var allLabel = el('label', 'asset-tree-check asset-tree-access-places-all');
+        var allBox = document.createElement('input');
+        allBox.type = 'checkbox';
+        allBox.checked = !!picked['*'];
+        allBox.addEventListener('change', function () {
+            if (allBox.checked) {
+                picked['*'] = true;
+            } else {
+                delete picked['*'];
+                boxes.forEach(function (box) {
+                    box.checked = false;
+                    delete picked[box.getAttribute('data-place')];
+                });
+            }
+            paintAll();
+        });
+        allLabel.appendChild(allBox);
+        allLabel.appendChild(document.createTextNode(t('accessPlacesAll')));
+        list.appendChild(allLabel);
+        function paintAll() {
+            boxes.forEach(function (box) {
+                box.disabled = !!picked['*'];
+                if (picked['*']) box.checked = true;
+            });
+        }
         if (!places.length) {
             list.appendChild(el('p', 'asset-tree-hint', t('accessPlacesNone')));
             return list;
@@ -33192,15 +33228,19 @@
             var label = el('label', 'asset-tree-check');
             var box = document.createElement('input');
             box.type = 'checkbox';
-            box.checked = !!picked[String(asset.id)];
+            box.setAttribute('data-place', String(asset.id));
+            box.checked = !!picked['*'] || !!picked[String(asset.id)];
             box.addEventListener('change', function () {
+                if (picked['*']) return;
                 if (box.checked) picked[String(asset.id)] = true;
                 else delete picked[String(asset.id)];
             });
             label.appendChild(box);
             label.appendChild(document.createTextNode(placeLabel(asset)));
             list.appendChild(label);
+            boxes.push(box);
         });
+        paintAll();
         return list;
     }
 
@@ -33221,7 +33261,7 @@
                     schemaName: grant.schemaName || '',
                     reach: grant.reach || 'all',
                     roleName: grant.roleName || '',
-                    placeScope: Object.keys(picked).join(',')
+                    placeScope: placeScopeValue(picked)
                 });
             }));
             actions.appendChild(button(t('cancel'), 'asset-tree-btn', closeModal));
@@ -33336,13 +33376,13 @@
                     return;
                 }
                 if (!role) {
-                    state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '', placeScope: Object.keys(pickedPlaces).join(',') };
+                    state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '', placeScope: placeScopeValue(pickedPlaces) };
                     openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
                         issueDraft(packed);
                     });
                     return;
                 }
-                postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name, placeScope: Object.keys(pickedPlaces).join(',') }, role.caps || '', error);
+                postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name, placeScope: placeScopeValue(pickedPlaces) }, role.caps || '', error);
                 return;
             }
             var groupName = principalInput.value.trim();
@@ -33352,13 +33392,13 @@
                 return;
             }
             if (!role) {
-                state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '', placeScope: Object.keys(pickedPlaces).join(',') };
+                state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '', placeScope: placeScopeValue(pickedPlaces) };
                 openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
                     issueDraft(packed);
                 });
                 return;
             }
-            postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name, placeScope: Object.keys(pickedPlaces).join(',') }, role.caps || '', error);
+            postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name, placeScope: placeScopeValue(pickedPlaces) }, role.caps || '', error);
         }));
         function paintMode() {
             groupMode.className = 'asset-tree-btn' + (mode === 'group' ? ' primary' : '');

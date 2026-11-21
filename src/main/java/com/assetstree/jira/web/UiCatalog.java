@@ -758,6 +758,8 @@ public final class UiCatalog {
             "accessGive",
             "accessPlaces",
             "accessPlacesHint",
+            "accessPlacesAll",
+            "accessPlacesEvery",
             "accessPlacesEdit",
             "accessPlacesNone",
             "accessPresetView",

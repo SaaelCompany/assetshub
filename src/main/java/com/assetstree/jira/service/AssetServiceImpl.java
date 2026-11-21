@@ -9651,6 +9651,7 @@ public class AssetServiceImpl implements AssetService {
         }
         Set<Integer> assigned = assignedPlaces(asset.getProjectKey(), key);
         Set<Integer> granted = grantedPlaces(user, asset.getProjectKey());
+        boolean everyPlace = grantedAllPlaces(user, asset.getProjectKey());
         if (rows != null) {
             for (int i = 0; i < rows.length; i++) {
                 AssetEntity row = rows[i];
@@ -9660,8 +9661,9 @@ public class AssetServiceImpl implements AssetService {
                 parents.put(Integer.valueOf(row.getID()), TreeLogic.normalizeParent(row.getParentId()));
                 String mol = row.getCustodianKey() == null ? "" : row.getCustodianKey().trim();
                 custodians.put(Integer.valueOf(row.getID()), mol);
-                if (locations.contains(row.getTypeKey()) && (key.equals(mol) || assigned.contains(Integer.valueOf(row.getID())) || granted.contains(Integer.valueOf(row.getID())))) {
-                    held.add(Integer.valueOf(row.getID()));
+                Integer id = Integer.valueOf(row.getID());
+                if (locations.contains(row.getTypeKey()) && (key.equals(mol) || assigned.contains(id) || everyPlace || granted.contains(id))) {
+                    held.add(id);
                 }
             }
         }
@@ -18298,25 +18300,46 @@ public class AssetServiceImpl implements AssetService {
 
     private Set<Integer> grantedPlaces(ApplicationUser user, String projectKey) {
         Set<Integer> ids = new HashSet<Integer>();
-        if (user == null || projectKey == null) {
-            return ids;
-        }
-        ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
-        if (rows == null) {
-            return ids;
-        }
+        ProjectGrantEntity[] rows = grantsFor(user, projectKey);
         for (int i = 0; i < rows.length; i++) {
-            if (!grantApplies(user, rows[i])) {
-                continue;
-            }
             ids.addAll(PlaceScope.read(rows[i].getPlaceScope()));
         }
         return ids;
     }
 
+    private boolean grantedAllPlaces(ApplicationUser user, String projectKey) {
+        ProjectGrantEntity[] rows = grantsFor(user, projectKey);
+        for (int i = 0; i < rows.length; i++) {
+            if (PlaceScope.all(rows[i].getPlaceScope())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ProjectGrantEntity[] grantsFor(ApplicationUser user, String projectKey) {
+        if (user == null || projectKey == null) {
+            return new ProjectGrantEntity[0];
+        }
+        ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return new ProjectGrantEntity[0];
+        }
+        List<ProjectGrantEntity> mine = new ArrayList<ProjectGrantEntity>();
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null && grantApplies(user, rows[i])) {
+                mine.add(rows[i]);
+            }
+        }
+        return mine.toArray(new ProjectGrantEntity[mine.size()]);
+    }
+
     private String editPlaces(ApplicationUser user, Project project) {
         if (user == null || project == null) {
             return "";
+        }
+        if (grantedAllPlaces(user, project.getKey())) {
+            return PlaceScope.ALL;
         }
         StringBuilder out = new StringBuilder();
         for (Integer id : grantedPlaces(user, project.getKey())) {
