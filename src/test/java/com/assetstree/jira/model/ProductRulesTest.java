@@ -343,6 +343,41 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void oneCellCarriesAMonitorAndAPrinter() {
+        List<EquipmentExchange.TypeRef> types = Arrays.asList(
+                new EquipmentExchange.TypeRef("pc", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", false,
+                        Collections.<EquipmentExchange.FieldRef>emptyList()),
+                new EquipmentExchange.TypeRef("monitor", "\u041c\u043e\u043d\u0438\u0442\u043e\u0440", false,
+                        Collections.<EquipmentExchange.FieldRef>emptyList()),
+                new EquipmentExchange.TypeRef("printer", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", false,
+                        Collections.<EquipmentExchange.FieldRef>emptyList()));
+        List<EquipmentExchange.Named> statuses = Collections.singletonList(
+                new EquipmentExchange.Named("in_use", "\u0412 \u0440\u0430\u0431\u043e\u0442\u0435"));
+        List<EquipmentExchange.Node> nodes = Arrays.asList(
+                new EquipmentExchange.Node(1, null, "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440", "BZSO-1", false, "pc"),
+                new EquipmentExchange.Node(2, null, "\u041c\u043e\u043d\u0438\u0442\u043e\u0440", "BZSO-2", false, "monitor"),
+                new EquipmentExchange.Node(3, null, "\u041f\u0440\u0438\u043d\u0442\u0435\u0440", "BZSO-3", false, "printer"));
+        Map<String, String> labels = new HashMap<String, String>();
+        labels.put("key", "\u041a\u043b\u044e\u0447");
+        labels.put("name", "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435");
+        labels.put("linkCarries", "\u041d\u0435\u0441\u0451\u0442");
+        EquipmentSheet.Sheet wide = new EquipmentSheet.Sheet("\u0421\u0432\u044f\u0437\u0438",
+                Arrays.asList("\u041a\u043b\u044e\u0447", "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", "\u041d\u0435\u0441\u0451\u0442"),
+                Collections.singletonList(new EquipmentSheet.Record(2, Arrays.asList(
+                        "BZSO-1", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440",
+                        "BZSO-2 \u041c\u043e\u043d\u0438\u0442\u043e\u0440; BZSO-3 \u041f\u0440\u0438\u043d\u0442\u0435\u0440"))));
+        EquipmentExchange.Plan plan = EquipmentExchange.planBook(
+                Collections.singletonList(wide), types, statuses, nodes, "in_use", labels, blankPeople());
+        assertTrue(plan.getIssues().isEmpty());
+        assertEquals(2, plan.getLinks().size());
+        assertEquals("BZSO-2", plan.getLinks().get(0).getToKey());
+        assertEquals("BZSO-3", plan.getLinks().get(1).getToKey());
+        assertEquals(LinkRules.INSTALLED, plan.getLinks().get(0).getType());
+        assertTrue(plan.getLinks().get(0).isReverse());
+        assertTrue(plan.getLinks().get(1).isReverse());
+    }
+
+    @Test
     public void statusProcessFollowsADirectLineAndARequestStatus() {
         FlowGraphDto direct = graph(
                 node("req1", FlowGraph.REQUEST, "100", "", ""),

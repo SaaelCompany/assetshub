@@ -10729,6 +10729,55 @@
         document.addEventListener('mousedown', graphMenuAway, true);
     }
 
+    function graphSearchText(item) {
+        if (!item) return '';
+        var type = item.typeLabel || '';
+        if (!type && item.typeKey) {
+            var known = typeFor(item);
+            type = known && known.label ? known.label : '';
+        }
+        var parts = [item.name, item.objectKey, item.projectName, item.projectKey, type, item.location, item.description];
+        if (item.custodian && item.custodian.displayName) parts.push(item.custodian.displayName);
+        if (item.issued && item.issued.displayName) parts.push(item.issued.displayName);
+        (item.attributes || []).forEach(function (attr) {
+            if (!attr) return;
+            parts.push(attr.name, attr.value, attr.displayValue);
+        });
+        return parts.join(' ').toLowerCase();
+    }
+
+    function graphFieldHint(item, needle) {
+        if (!needle) return '';
+        var attrs = item.attributes || [];
+        var i;
+        for (i = 0; i < attrs.length; i++) {
+            var attr = attrs[i];
+            if (!attr) continue;
+            var shown = String(attr.displayValue || attr.value || '');
+            var name = String(attr.name || '');
+            if (shown.toLowerCase().indexOf(needle) >= 0 || name.toLowerCase().indexOf(needle) >= 0) {
+                return name ? name + ': ' + shown : shown;
+            }
+        }
+        return '';
+    }
+
+    function graphPickLabel(item, needle) {
+        var name = item.name || item.objectKey || '';
+        var type = item.typeLabel || '';
+        if (!type && item.typeKey) {
+            var known = typeFor(item);
+            type = known && known.label && known.label !== item.typeKey ? known.label : '';
+        }
+        var parts = [];
+        if (type) parts.push(type);
+        if (item.location) parts.push(item.location);
+        if (item.objectKey && item.objectKey !== name) parts.push(item.objectKey);
+        var hint = graphFieldHint(item, needle);
+        if (hint) parts.push(hint);
+        return parts.length ? name + ' \u00b7 ' + parts.join(' \u00b7 ') : name;
+    }
+
     function graphObjects(asset) {
         var rows = [];
         (state.assets || []).forEach(function (item) {
@@ -10839,16 +10888,15 @@
         var list = el('div', 'asset-tree-graph-pick-list');
         panel.appendChild(list);
         var seq = 0;
-        function paint(rows) {
+        var timer = null;
+        function paint(rows, needle) {
             list.innerHTML = '';
             if (!rows.length) {
                 list.appendChild(el('p', 'asset-tree-hint', t('noResults')));
                 return;
             }
             rows.forEach(function (item) {
-                var caption = item.name || item.objectKey || '';
-                if (item.objectKey && item.objectKey !== caption) caption += ' \u00b7 ' + item.objectKey;
-                list.appendChild(button(caption, 'asset-tree-user-hit', function () {
+                list.appendChild(button(graphPickLabel(item, needle), 'asset-tree-user-hit', function () {
                     onChoose(item);
                 }));
             });
@@ -10857,30 +10905,32 @@
             var needle = query.toLowerCase();
             return graphObjects(asset).filter(function (item) {
                 if (!needle) return true;
-                var blob = ((item.name || '') + ' ' + (item.objectKey || '')).toLowerCase();
-                return blob.indexOf(needle) >= 0;
+                return graphSearchText(item).indexOf(needle) >= 0;
             });
         }
         function refresh() {
+            clearTimeout(timer);
             var query = search.value.trim();
             var rows = localRows(query);
-            paint(rows);
+            paint(rows, query.toLowerCase());
             if (query.length < 2) return;
             var token = ++seq;
-            ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
-                if (token !== seq || search.value.trim() !== query || status !== 200 || !payload) return;
-                var seen = {};
-                rows.forEach(function (item) { seen[item.id] = true; });
-                payload.forEach(function (item) {
-                    if (!item || item.id === asset.id || seen[item.id]) return;
-                    seen[item.id] = true;
-                    rows.push(item);
+            timer = setTimeout(function () {
+                ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                    if (token !== seq || search.value.trim() !== query || status !== 200 || !payload) return;
+                    var seen = {};
+                    rows.forEach(function (item) { seen[item.id] = true; });
+                    payload.forEach(function (item) {
+                        if (!item || item.id === asset.id || seen[item.id]) return;
+                        seen[item.id] = true;
+                        rows.push(item);
+                    });
+                    paint(rows, query.toLowerCase());
                 });
-                paint(rows);
-            });
+            }, 220);
         }
         search.addEventListener('input', refresh);
-        paint(localRows(''));
+        paint(localRows(''), '');
         dialog.appendChild(panel);
         search.focus();
     }
