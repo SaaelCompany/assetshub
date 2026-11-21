@@ -7476,6 +7476,28 @@ a.asset-tree-preview-icon:focus {
     align-items: start;
 }
 
+#asset-tree-app .asset-tree-project-top > .asset-tree-project-card,
+#asset-tree-app .asset-tree-project-side,
+#asset-tree-app .asset-tree-project-side > .asset-tree-project-card {
+    align-self: start;
+    height: auto;
+}
+
+#asset-tree-app .asset-tree-photo-more {
+    margin: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-photo-more summary {
+    color: #0052cc;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#asset-tree-app .asset-tree-photo-more .asset-tree-hint {
+    margin: 6px 0 0;
+}
+
 #asset-tree-app .asset-tree-project-side {
     display: flex;
     flex-direction: column;
@@ -7817,7 +7839,7 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-module-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 0 28px;
 }
 
 #asset-tree-app .asset-tree-module-option {
@@ -7825,10 +7847,11 @@ a.asset-tree-preview-icon:focus {
     align-items: flex-start;
     gap: 8px;
     margin: 0;
-    padding: 12px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fff;
+    padding: 6px 0;
+    border: 0;
+    border-bottom: 1px solid #f4f5f7;
+    border-radius: 0;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-module-option > label {
@@ -7874,13 +7897,15 @@ a.asset-tree-preview-icon:focus {
     flex-wrap: wrap;
     gap: 8px;
     color: #172b4d;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
 }
 
 #asset-tree-app .asset-tree-module-option .asset-tree-hint {
     margin: 0;
+    font-size: 12px;
     font-weight: 400;
+    line-height: 1.35;
 }
 
 #asset-tree-app .asset-tree-module-list {

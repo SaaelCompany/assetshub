@@ -16883,7 +16883,10 @@
 
         var photoCard = el('section', 'asset-tree-project-card');
         photoCard.appendChild(el('h3', 'asset-tree-settings-title', t('photoTitle')));
-        photoCard.appendChild(el('p', 'asset-tree-hint', t('photoHint')));
+        var photoMore = el('details', 'asset-tree-photo-more');
+        photoMore.appendChild(el('summary', null, t('photoMore')));
+        photoMore.appendChild(el('p', 'asset-tree-hint', t('photoHint')));
+        photoCard.appendChild(photoMore);
         var photoRow = el('label', 'asset-tree-check-row');
         var photoBox = el('input');
         photoBox.type = 'checkbox';

@@ -1273,6 +1273,7 @@ public final class UiCatalog {
             "treeObjectsHint",
             "photoTitle",
             "photoHint",
+            "photoMore",
             "photoShow",
             "cardOpenTitle",
             "cardOpenHint",
