@@ -1749,12 +1749,12 @@
         count.setAttribute('data-label', countLabel);
         count.setAttribute('data-total', String(split ? visibleTotal : (data.total || 0)));
         if (!split) titles.appendChild(count);
-        if (pane === 'clinic' && !split) titles.appendChild(el('span', 'asset-tree-portal-mine-note', 'Оборудование клиники'));
+        if (pane === 'clinic' && !split) titles.appendChild(el('span', 'asset-tree-portal-mine-note', 'Оборудование группы'));
         head.appendChild(titles);
         if (split) {
             var panes = el('div', 'asset-tree-portal-mine-panes');
             panes.setAttribute('role', 'tablist');
-            [['own', 'Моё', counts.own], ['clinic', 'Клиника', counts.clinic]].forEach(function (item) {
+            [['own', 'Моё', counts.own], ['clinic', 'Группа', counts.clinic]].forEach(function (item) {
                 var active = item[0] === pane;
                 var pick = el('button', 'asset-tree-portal-mine-pane' + (active ? ' is-active' : ''));
                 pick.type = 'button';
