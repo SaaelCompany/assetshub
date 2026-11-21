@@ -107,6 +107,9 @@ public interface AssetService {
 
     AssetDto updateAsset(ApplicationUser user, int id, AssetDraft draft);
 
+    /** Marks a place hidden, or opens it again. Only a person who can see hidden places may call this. */
+    AssetDto setSecret(ApplicationUser user, int id, boolean on);
+
     CommentDto addComment(ApplicationUser user, int id, String body, boolean internal);
 
     void deleteComment(ApplicationUser user, int assetId, int commentId);

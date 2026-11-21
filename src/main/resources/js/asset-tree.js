@@ -933,7 +933,7 @@
 
     var CAP_GROUPS = [
         ['capGroupGeneral', ['view']],
-        ['capGroupPlaces', ['places', 'placeAdd', 'placeEdit', 'placeDel']],
+        ['capGroupPlaces', ['places', 'placeAdd', 'placeEdit', 'placeDel', 'secret']],
         ['capGroupObjects', ['object', 'objCreate', 'objEdit', 'objMove', 'objRemove', 'note', 'share', 'life']],
         ['capGroupCatalog', ['types', 'status', 'exchange']],
         ['capGroupModules', ['reports', 'reportEdit', 'map', 'scheme', 'schemeEdit', 'plan', 'planEdit', 'portal']],
@@ -1103,6 +1103,7 @@
             placeAdd: 'rolePlaceAdd',
             placeEdit: 'rolePlaceEdit',
             placeDel: 'rolePlaceDel',
+            secret: 'roleSecret',
             objCreate: 'roleObjCreate',
             objEdit: 'roleObjEdit',
             objMove: 'roleObjMove',
@@ -1137,6 +1138,7 @@
             placeAdd: 'rolePlaceAddHint',
             placeEdit: 'rolePlaceEditHint',
             placeDel: 'rolePlaceDelHint',
+            secret: 'roleSecretHint',
             objCreate: 'roleObjCreateHint',
             objEdit: 'roleObjEditHint',
             objMove: 'roleObjMoveHint',
@@ -3599,6 +3601,7 @@
             name.title = asset.name;
             row.appendChild(chevron);
             row.appendChild(name);
+            if (asset.secret) row.appendChild(el('span', 'asset-tree-secret', t('secretBadge')));
             var queued = equipmentCount(asset.id);
             if (queued) row.appendChild(el('span', 'asset-tree-qcount', '(' + queued + ')'));
             row.appendChild(nestButton(asset.id));
@@ -5323,6 +5326,28 @@
         return moduleBlock(t('menuMap'), box);
     }
 
+    function toggleSecret(asset) {
+        if (!asset || !state.acts.secret) return;
+        var on = !asset.secret;
+        ajax('POST', '/assets/' + asset.id + '/secret?on=' + (on ? 'true' : 'false'), {}, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            var secret = !!(payload && payload.secret);
+            [state.assets, state.searchHits, state.mineAssets, state.holderAssets].forEach(function (pool) {
+                if (!pool) return;
+                for (var i = 0; i < pool.length; i++) {
+                    if (pool[i] && pool[i].id === asset.id) pool[i].secret = secret;
+                }
+            });
+            if (state.detail && state.detail.id === asset.id) state.detail.secret = secret;
+            state.treeSketch = treeSketch();
+            renderNodes();
+            replaceDetail();
+        });
+    }
+
     function renderPlaceHome(asset) {
         var full = (state.detail && state.detail.id == asset.id) ? state.detail : asset;
         if (state.editing && mayEdit(asset)) {
@@ -5376,7 +5401,13 @@
                 ops.appendChild(moreMenu([{ icon: 'trash', label: t('trashMove'), danger: true, onClick: function () { openDelete(full); } }]));
             }
         }
+        if (state.acts.secret) {
+            ops.appendChild(toolButton(full.secret ? t('secretPlaceOff') : t('secretPlace'), full.secret ? 'eye' : 'lock', function () {
+                toggleSecret(full);
+            }));
+        }
         main.appendChild(ops);
+        if (full.secret) main.appendChild(el('p', 'asset-tree-hint', t('secretHint')));
         if (asset.parentId && crumbs(asset)) main.appendChild(el('p', 'asset-tree-crumb', crumbs(asset)));
 
         var placeItems = [detailItem(t('type'), typeBadge(typeFor(full), full.typeLabel || typeOf(full.typeKey).label || ''))];
@@ -8215,6 +8246,31 @@
         node.textContent = message || '';
     }
 
+    function holdOpenCard(id) {
+        state.mediaHold = id;
+        state.mediaHoldAt = Date.now();
+    }
+
+    /* Paints the new picture on the open card and keeps the next tree refresh from rebuilding the screen. */
+    function showMedia(asset, apply) {
+        if (!asset) return;
+        holdOpenCard(asset.id);
+        [state.assets, state.searchHits, state.mineAssets, state.holderAssets].forEach(function (pool) {
+            if (!pool) return;
+            for (var i = 0; i < pool.length; i++) {
+                if (pool[i] && pool[i].id === asset.id) apply(pool[i]);
+            }
+        });
+        if (state.detail && state.detail.id === asset.id) apply(state.detail);
+        if (state.pane !== 'card' || state.selectedId !== asset.id || !state.detail) return;
+        var img = document.querySelector('#asset-tree-detail .asset-tree-photo');
+        if (img && state.detail.photo) {
+            img.src = photoUrl(state.detail);
+            return;
+        }
+        showDetail(state.detail, false);
+    }
+
     function uploadCardImage(asset, file) {
         if (!file) return;
         showCardImageError('');
@@ -8228,7 +8284,10 @@
             if (xhr.readyState !== 4) return;
             if (xhr.status >= 200 && xhr.status < 300) {
                 notify(t('saved'));
-                selectAsset(asset.id, true);
+                showMedia(asset, function (row) {
+                    row.cardImage = true;
+                    row.updated = new Date().toISOString();
+                });
                 return;
             }
             var payload = null;
@@ -8265,7 +8324,9 @@
             if (xhr.readyState !== 4) return;
             if (xhr.status >= 200 && xhr.status < 300) {
                 notify(t('saved'));
-                selectAsset(asset.id, true);
+                showMedia(asset, function (row) {
+                    row.cardImage = false;
+                });
                 return;
             }
             var payload = null;
@@ -8317,7 +8378,10 @@
                     reloadTree(function () { renderFrame(); });
                     return;
                 }
-                selectAsset(asset.id, true);
+                showMedia(asset, function (row) {
+                    row.photo = true;
+                    row.photoRev = Date.now();
+                });
                 return;
             }
             var payload = null;
@@ -8684,7 +8748,10 @@
             if (xhr.readyState !== 4) return;
             if (xhr.status >= 200 && xhr.status < 300) {
                 notify(t('saved'));
-                selectAsset(asset.id, true);
+                showMedia(asset, function (row) {
+                    row.photo = false;
+                    row.photoRev = 0;
+                });
                 return;
             }
             var payload = null;
@@ -12759,6 +12826,7 @@
             state.assets = payload.assets || [];
             state.types = payload.types || [];
             state.statuses = payload.statuses || [];
+            if (state.treeSketch == null) state.treeSketch = treeSketch();
             if (payload.mark != null && payload.mark !== '') state.treeMark = String(payload.mark);
             watchTree();
             invalidate();
@@ -12836,14 +12904,35 @@
             }
             if (status !== 200 || !payload) return;
             var blank = detail && !detail.firstChild;
-            if (!blank && JSON.stringify(payload) === JSON.stringify(state.detail)) return;
+            var same = !blank && JSON.stringify(payload) === JSON.stringify(state.detail);
+            var held = state.mediaHold === payload.id && Date.now() - (state.mediaHoldAt || 0) < 20000;
             stampCardImage(payload);
+            state.detail = payload;
+            if (held) {
+                state.mediaHold = 0;
+                return;
+            }
+            if (same) return;
             if (state.pane === 'card') showDetail(payload, false);
             else {
                 state.detail = payload;
                 replaceDetail();
             }
         });
+    }
+
+    function treeSketch() {
+        var parts = [];
+        var assets = state.assets || [];
+        for (var i = 0; i < assets.length; i++) {
+            var asset = assets[i];
+            if (!asset) continue;
+            parts.push(asset.id + ':' + (asset.parentId || 0) + ':' + (asset.name || '') + ':'
+                + (asset.typeKey || '') + ':' + (asset.status || '') + ':' + (asset.sortOrder || 0) + ':'
+                + (asset.secret ? 1 : 0));
+        }
+        parts.sort();
+        return parts.join('\n');
     }
 
     function pullTreeStamp() {
@@ -12878,6 +12967,18 @@
             var repaint = function () {
                 if (plansMoved && state.view === 'schedules') loadSchedules(true);
                 if (state.view === 'all') {
+                    var sketch = treeSketch();
+                    var treeChanged = sketch !== state.treeSketch;
+                    state.treeSketch = sketch;
+                    var cardOpen = state.pane === 'card' && state.selectedId;
+                    if (cardOpen) {
+                        if (treeChanged) renderNodes();
+                        if (!cardHeld(document.getElementById('asset-tree-detail')) && (cardMoved || treeChanged)) {
+                            refreshOpenCard();
+                        }
+                        if (objectsMoved && state.canRemove) loadTrash();
+                        return;
+                    }
                     if (cardHeld(document.getElementById('asset-tree-detail'))) {
                         renderNodes();
                         return;
