@@ -1778,12 +1778,10 @@
             head.appendChild(panes);
         }
         var search = null;
-        if (!data.total) {
-            root.appendChild(head);
-            var chartsOnly = renderMineCharts(data);
-            if (chartsOnly) root.appendChild(chartsOnly);
-            return root;
-        }
+        root.appendChild(head);
+        var charts = renderMineCharts(data);
+        if (charts) root.appendChild(charts);
+        if (!data.total) return root;
         var bar = el('div', 'asset-tree-portal-mine-bar');
         search = el('input', 'asset-tree-portal-mine-search');
         search.type = 'search';
@@ -1817,13 +1815,10 @@
         ], function (value) { chooseMineOption('asset-tree.portalMineSort', value); }));
         bar.appendChild(search);
         bar.appendChild(quiet);
-        head.appendChild(bar);
-        root.appendChild(head);
+        root.appendChild(bar);
         var empty = el('p', 'asset-tree-portal-mine-empty', 'Ничего не найдено');
         empty.hidden = true;
         root.appendChild(empty);
-        var charts = renderMineCharts(data);
-        if (charts) root.insertBefore(charts, empty);
         (data.projects || []).forEach(function (group) {
             var cards = (group.assets || []).filter(function (card) {
                 return pane === 'clinic' ? !!card.sharedOnly : !card.sharedOnly;
