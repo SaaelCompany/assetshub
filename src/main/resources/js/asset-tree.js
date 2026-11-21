@@ -349,7 +349,30 @@
         { key: 'certificate', g: 'office', d: 'M4,3C2.89,3 2,3.89 2,5V15A2,2 0 0,0 4,17H12V22L15,19L18,22V17H20A2,2 0 0,0 22,15V8L22,6V5A2,2 0 0,0 20,3H16V3H4M12,5L15,7L18,5V8.5L21,10L18,11.5V15L15,13L12,15V11.5L9,10L12,8.5V5M4,5H9V7H4V5M4,9H7V11H4V9M4,13H9V15H4V13Z' },
         { key: 'seal', g: 'office', d: 'M20.39,19.37L16.38,18L15,22L11.92,16L9,22L7.62,18L3.61,19.37L6.53,13.37C5.57,12.17 5,10.65 5,9A7,7 0 0,1 12,2A7,7 0 0,1 19,9C19,10.65 18.43,12.17 17.47,13.37L20.39,19.37M7,9L9.69,10.34L9.5,13.34L12,11.68L14.5,13.33L14.33,10.34L17,9L14.32,7.65L14.5,4.67L12,6.31L9.5,4.65L9.67,7.66L7,9Z' },
         { key: 'bicycle', g: 'office', d: 'M19 10C18.44 10 17.91 10.11 17.41 10.28L14.46 4.5H11V6H13.54L14.42 7.72L12 13.13L10.23 8.95C10.5 8.85 10.74 8.58 10.74 8.25C10.74 7.84 10.41 7.5 10 7.5H8C7.58 7.5 7.24 7.84 7.24 8.25S7.58 9 8 9H8.61L10.86 14.25H9.92C9.56 11.85 7.5 10 5 10C2.24 10 0 12.24 0 15S2.24 20 5 20C7.5 20 9.56 18.15 9.92 15.75H12.5L15.29 9.43L16.08 10.96C14.82 11.87 14 13.34 14 15C14 17.76 16.24 20 19 20S24 17.76 24 15 21.76 10 19 10M5 18.5C3.07 18.5 1.5 16.93 1.5 15S3.07 11.5 5 11.5C6.67 11.5 8.07 12.68 8.41 14.25H4V15.75H8.41C8.07 17.32 6.67 18.5 5 18.5M19 18.5C17.07 18.5 15.5 16.93 15.5 15C15.5 13.92 16 12.97 16.77 12.33L18.57 15.85L19.89 15.13L18.1 11.63C18.39 11.56 18.69 11.5 19 11.5C20.93 11.5 22.5 13.07 22.5 15S20.93 18.5 19 18.5Z' },
-        { key: 'bus', g: 'office', d: 'M18,11H6V6H18M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16Z' }
+        { key: 'bus', g: 'office', d: 'M18,11H6V6H18M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16Z' },
+        { key: 'ultrasound', g: 'medical', d: 'M3 4h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-2 3v-3H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm2 3h8v1.5H5V7zm0 3h5v1.5H5V10zm12 1c2 0 4 2 4 5h-2c0-2-1-3-2-3v-2z' },
+        { key: 'defibrillator', g: 'medical', d: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm2 3v4h3l2-3 2 6 2-4h3V6h-4l-1 2-2-4-2 4H6z' },
+        { key: 'xray', g: 'medical', d: 'M4 3h16v3H4V3zm2 5h12v11H6V8zm3 2v2h6v-2H9zm0 4v2h6v-2H9zm2 4h2v2h-2v-2z' },
+        { key: 'endoscope', g: 'medical', d: 'M8 3h3v6h2a5 5 0 0 1 5 5v2h-2v-2a3 3 0 0 0-3-3H8V3zm1 12a3 3 0 1 1 0 6 3 3 0 0 1 0-6z' },
+        { key: 'autoclave', g: 'medical', d: 'M6 3h12v4H6V3zm-2 6h16v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9zm4 2v6h2v-6H8zm4 0v6h2v-6h-2z' },
+        { key: 'centrifuge', g: 'medical', d: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm-5 6 4 2-4 2v-4zm10 0v4l-4-2 4-2z' },
+        { key: 'infusion', g: 'medical', d: 'M11 2h2v3h4v2h-4v11a3 3 0 1 1-2 0V7H7V5h4V2zm-5 16h4v2H6v-2z' },
+        { key: 'oxygen', g: 'medical', d: 'M9 2h6v3h2v15a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5h2V2zm1 7h4v2h-4V9zm0 4h4v2h-4v-2z' },
+        { key: 'ventilator', g: 'medical', d: 'M3 5h8v6H3V5zm10 0h8v6h-8V5zM7 11v3h4v2H6v3h12v-3h-5v-2h4v-3H7z' },
+        { key: 'ecg', g: 'medical', d: 'M2 13h4l2-6 3 10 2-4h9v-2h-7l-2 4-3-10-2 6H2v2z' },
+        { key: 'otoscope', g: 'medical', d: 'M8 3h6v5l4 3v2h-3v6a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-6H6v-2l2-3V3zm2 2v4h2V5h-2z' },
+        { key: 'scalpel', g: 'medical', d: 'M3 14l8-8 2 2-6 8H3v-2zm10-10 2 2 6 1-7 7-3-3 2-7z' },
+        { key: 'crutch', g: 'medical', d: 'M8 2h3l2 6h2v2h-2l1 12h-2l-1-8H9l-1 8H6l1-12H5V8h2l1-6zm1 2 .6 3h2.2L12 4H9z' },
+        { key: 'mri', g: 'medical', d: 'M2 8a8 8 0 0 1 16 0v8H2V8zm4 0a4 4 0 0 1 8 0v4H6V8zm16-2v12h2V6h-2zM4 18h16v2H4v-2z' },
+        { key: 'sterilizer', g: 'medical', d: 'M5 3h14v4H5V3zM4 9h16v10H4V9zm3 2v2h10v-2H7zm0 4v2h6v-2H7z' },
+        { key: 'stretcher', g: 'medical', d: 'M2 14h20v2H2v-2zm3-6h14l2 6H3l2-6zm2 1.5L6.2 12h11.6L16 9.5H7zM6 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z' },
+        { key: 'incubator', g: 'medical', d: 'M4 6h16a1 1 0 0 1 1 1v8H3V7a1 1 0 0 1 1-1zm-1 11h18v2H3v-2zM8 9h8v2H8V9z' },
+        { key: 'suction', g: 'medical', d: 'M5 14a5 5 0 1 1 8 4H9v2h6v2H7v-4a5 5 0 0 1-2-4zm12-8h3v3h-2V8h-1V6zM15 4h2v4h-2V4z' },
+        { key: 'dentalchair', g: 'medical', d: 'M7 3h4v4H7V3zM6 8h8l3 4v2H5v-2l1-4zm-1 8h14v2H5v-2zm2 3h4v2H7v-2z' },
+        { key: 'generator', g: 'facility', d: 'M3 6h18v12H3V6zm2 2v8h14V8H5zm2 2h4v4H7v-4zm8 1h2v2h-2v-2z' },
+        { key: 'compressor', g: 'facility', d: 'M4 4h8v14H4V4zm2 2v4h4V6H6zm10-1h4v8h-4V5zm1 2v4h2V7h-2zM4 20h16v2H4v-2z' },
+        { key: 'ups', g: 'it', d: 'M7 3h10v14H7V3zm2 2v4h6V5H9zm1 8h4v2h-4v-2zM6 19h12v2H6v-2z' },
+        { key: 'labcentrifuge', g: 'medical', d: 'M4 4h16v12H4V4zm2 2v8h12V6H6zm6 1 3 5H9l3-5zM8 18h8v2H8v-2z' }
     ];
     var STATUSES = ['in_stock', 'in_use', 'repair', 'reserve', 'maintenance', 'written_off'];
     var CATEGORIES = ['todo', 'progress', 'done', 'blue', 'orange', 'red', 'purple', 'teal', 'gray', 'pink', 'lime', 'brown'];
@@ -5056,14 +5079,30 @@
                 colors.set(color);
                 onPick(color);
             });
-            buttons[color] = swatch;
+            buttons[color.toLowerCase()] = swatch;
             colors.appendChild(swatch);
         });
+        var custom = el('input', 'asset-tree-color-custom');
+        custom.type = 'color';
+        custom.setAttribute('aria-label', t('colorCustom'));
+        custom.title = t('colorCustom');
+        custom.addEventListener('input', function () {
+            colors.set(custom.value);
+            onPick(custom.value);
+        });
+        colors.appendChild(custom);
         colors.set = function (color) {
+            var wanted = String(color || '').toLowerCase();
+            var known = false;
             Object.keys(buttons).forEach(function (key) {
-                if (key === color) buttons[key].classList.add('is-selected');
+                var on = key === wanted;
+                if (on) known = true;
+                if (on) buttons[key].classList.add('is-selected');
                 else buttons[key].classList.remove('is-selected');
             });
+            if (/^#[0-9a-f]{6}$/.test(wanted)) custom.value = wanted;
+            if (known) custom.classList.remove('is-selected');
+            else custom.classList.add('is-selected');
         };
         colors.set(initial);
         return colors;
@@ -8170,7 +8209,7 @@
             if (status === 200) state.clinics = payload || [];
             else state.clinics = [];
             if (done) done();
-            else if (state.view === 'settings' && state.schemaTab === 'access') renderFrame();
+            else if (state.view === 'settings' && (state.schemaTab === 'access' || state.schemaTab === 'portal')) renderFrame();
         });
     }
 
@@ -31320,9 +31359,17 @@
 
     function renderPortalSettings(panel) {
         panel.appendChild(el('p', 'asset-tree-hint', t('portalSectionHint')));
-        if (state.canAdmin) panel.appendChild(portalLayoutSettings());
-        panel.appendChild(portalMineSettings());
-        if (moduleOn('reports')) panel.appendChild(portalShowcaseSettings());
+        var bundle = el('section', 'asset-tree-project-card asset-tree-portal-bundle');
+        bundle.appendChild(el('h3', 'asset-tree-settings-title', t('portalBundleTitle')));
+        bundle.appendChild(el('p', 'asset-tree-hint', t('portalBundleHint')));
+        if (state.canAdmin) bundle.appendChild(portalLayoutSettings());
+        bundle.appendChild(portalMineSettings());
+        panel.appendChild(bundle);
+        var portalGroups = el('div', 'asset-tree-project-stack');
+        portalGroups.appendChild(renderClinicAccess());
+        portalGroups.appendChild(renderClinicGrant());
+        portalGroups.appendChild(renderClinicRoster());
+        panel.appendChild(portalGroups);
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
         var fields = el('div', 'asset-tree-portal-fields');
         fields.appendChild(el('h3', 'asset-tree-settings-title', t('portalFieldsTitle')));
@@ -32125,10 +32172,34 @@
         });
     }
 
+    function clinicReportName(id) {
+        var name = id;
+        (state.reportCatalog || []).forEach(function (row) {
+            if (row && String(row.id) === String(id)) name = row.name || id;
+        });
+        return name;
+    }
+
+    function ensureReports(done) {
+        if (state.reportCatalog || !moduleOn('reports')) {
+            if (done) done();
+            return;
+        }
+        if (state.reportsLoading) return;
+        state.reportsLoading = true;
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
+            state.reportsLoading = false;
+            state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            if (done) done();
+            else if (state.view === 'settings' && state.schemaTab === 'portal') renderFrame();
+        });
+    }
+
     function renderClinicAccess() {
-        var block = el('div', 'asset-tree-settings-block');
-        block.appendChild(el('h3', null, t('clinicTitle')));
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessCustomTitle')));
         block.appendChild(el('p', 'asset-tree-hint', t('clinicHint')));
+        if (moduleOn('reports') && state.reportCatalog == null) ensureReports();
         if (!state.clinics) {
             block.appendChild(el('p', 'asset-tree-hint', t('loading')));
             ensureClinics();
@@ -32141,9 +32212,9 @@
             var title = el('div', 'asset-tree-access-person-title');
             title.appendChild(el('strong', null, circle.name || ''));
             row.appendChild(title);
-            var people = (circle.members || []).map(function (person) { return person.displayName || person.userKey || ''; });
             var places = (circle.places || []).map(function (place) { return place.name || ''; });
-            row.appendChild(el('div', 'asset-tree-access-person-summary', people.concat(places).filter(Boolean).join(', ')));
+            var reports = (circle.reports || []).map(clinicReportName);
+            row.appendChild(el('div', 'asset-tree-access-person-summary', places.concat(reports).filter(Boolean).join(', ')));
             var actions = el('div', 'asset-tree-access-person-actions');
             actions.appendChild(button(t('accessEditGroup'), 'asset-tree-btn', function () { openClinicModal(circle); }));
             row.appendChild(actions);
@@ -32159,9 +32230,7 @@
         var draft = {
             id: circle ? circle.id : 0,
             name: circle ? (circle.name || '') : '',
-            members: (circle && circle.members ? circle.members : []).map(function (person) {
-                return { userKey: person.userKey, displayName: person.displayName || person.userKey };
-            }),
+            reports: (circle && circle.reports ? circle.reports : []).map(function (id) { return String(id); }),
             places: (circle && circle.places ? circle.places : []).map(function (place) {
                 return { id: place.id, name: place.name, objectKey: place.objectKey };
             })
@@ -32190,40 +32259,35 @@
                 name.placeholder = t('clinicName');
                 name.addEventListener('input', function () { draft.name = name.value; });
                 host.appendChild(field(t('clinicName'), name, true));
-                host.appendChild(el('div', 'asset-tree-people-label', t('clinicPeople')));
-                host.appendChild(chipRow(draft.members, function (person) { return person.displayName || person.userKey; }, function (index) {
-                    draft.members.splice(index, 1);
-                    paint();
-                }));
-                var personInput = el('input', 'asset-tree-input');
-                personInput.type = 'search';
-                personInput.placeholder = t('clinicSearch');
-                var personResults = el('div', 'asset-tree-user-results');
-                var personTimer = null;
-                var personSeq = 0;
-                personInput.addEventListener('input', function () {
-                    clearTimeout(personTimer);
-                    personTimer = setTimeout(function () {
-                        var query = personInput.value.trim();
-                        var seq = ++personSeq;
-                        personResults.innerHTML = '';
-                        if (query.length < 2 || draft.members.length >= 200) return;
-                        ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                            if (seq !== personSeq) return;
-                            personResults.innerHTML = '';
-                            if (status !== 200) return;
-                            (payload || []).forEach(function (user) {
-                                if (draft.members.some(function (person) { return person.userKey === user.userKey; })) return;
-                                personResults.appendChild(button(user.displayName + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
-                                    draft.members.push({ userKey: user.userKey, displayName: user.displayName });
-                                    paint();
-                                }));
-                            });
+                if (moduleOn('reports')) {
+                    host.appendChild(el('div', 'asset-tree-people-label', t('clinicReports')));
+                    var reportGrid = el('div', 'asset-tree-portal-mine-fields');
+                    (state.reportCatalog || []).forEach(function (row) {
+                        if (!row || row.id == null) return;
+                        var key = String(row.id);
+                        var line = el('label', 'asset-tree-check');
+                        var box = el('input');
+                        box.type = 'checkbox';
+                        box.checked = draft.reports.indexOf(key) >= 0;
+                        box.addEventListener('change', function () {
+                            var at = draft.reports.indexOf(key);
+                            if (box.checked && at < 0) {
+                                if (draft.reports.length >= 8) {
+                                    box.checked = false;
+                                    notify(t('clinicLimit'));
+                                    return;
+                                }
+                                draft.reports.push(key);
+                            }
+                            if (!box.checked && at >= 0) draft.reports.splice(at, 1);
                         });
-                    }, 220);
-                });
-                host.appendChild(personInput);
-                host.appendChild(personResults);
+                        line.appendChild(box);
+                        line.appendChild(el('span', null, row.name || key));
+                        reportGrid.appendChild(line);
+                    });
+                    if (reportGrid.childNodes.length) host.appendChild(reportGrid);
+                    else host.appendChild(el('p', 'asset-tree-hint', t('portalShowcaseEmpty')));
+                }
                 host.appendChild(el('div', 'asset-tree-people-label', t('clinicPlaces')));
                 host.appendChild(chipRow(draft.places, function (place) {
                     return (place.objectKey ? place.objectKey + ' · ' : '') + (place.name || '');
@@ -32265,7 +32329,7 @@
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/circles', {
                         id: draft.id,
                         name: draft.name,
-                        members: draft.members.map(function (person) { return person.userKey; }),
+                        reports: draft.reports,
                         places: draft.places.map(function (place) { return place.id; })
                     }, function (status, payload) {
                         if (status >= 200 && status < 300) {
@@ -32292,11 +32356,123 @@
         });
     }
 
+    function renderClinicGrant() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessGiveTitle')));
+        card.appendChild(el('p', 'asset-tree-hint', t('clinicGrantHint')));
+        if (!state.clinics) {
+            card.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            return card;
+        }
+        if (!state.clinics.length) {
+            card.appendChild(el('p', 'asset-tree-hint', t('clinicEmpty')));
+            return card;
+        }
+        var picked = null;
+        var personInput = el('input', 'asset-tree-input');
+        personInput.type = 'search';
+        personInput.placeholder = t('clinicSearch');
+        var results = el('div', 'asset-tree-user-results');
+        var timer = null;
+        var seq = 0;
+        personInput.addEventListener('input', function () {
+            picked = null;
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var query = personInput.value.trim();
+                var mine = ++seq;
+                results.innerHTML = '';
+                if (query.length < 2) return;
+                ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                    if (mine !== seq) return;
+                    results.innerHTML = '';
+                    if (status !== 200) return;
+                    (payload || []).forEach(function (user) {
+                        if (!user || !user.userKey) return;
+                        results.appendChild(button((user.displayName || user.userKey) + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
+                            picked = user;
+                            personInput.value = user.displayName || user.userKey;
+                            results.innerHTML = '';
+                        }));
+                    });
+                });
+            }, 220);
+        });
+        var pick = el('select', 'asset-tree-input');
+        state.clinics.forEach(function (circle) {
+            if (!circle) return;
+            var option = document.createElement('option');
+            option.value = String(circle.id);
+            option.textContent = circle.name || '';
+            pick.appendChild(option);
+        });
+        card.appendChild(field(t('clinicSearch'), personInput, true));
+        card.appendChild(results);
+        card.appendChild(field(t('accessCustomTitle'), pick, true));
+        card.appendChild(button(t('accessGive'), 'asset-tree-btn primary', function () {
+            if (!picked || !picked.userKey) {
+                notify(t('clinicSearch'));
+                return;
+            }
+            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + encodeURIComponent(pick.value) + '/members?user=' + encodeURIComponent(picked.userKey), null, function (status, payload) {
+                if (status >= 200 && status < 300) {
+                    state.clinics = null;
+                    ensureClinics();
+                } else notify((payload && payload.message) || t('errorTitle'));
+            });
+        }));
+        return card;
+    }
+
+    function renderClinicRoster() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('portalRosterTitle')));
+        var people = {};
+        var order = [];
+        (state.clinics || []).forEach(function (circle) {
+            (circle.members || []).forEach(function (person) {
+                if (!person || !person.userKey) return;
+                if (!people[person.userKey]) {
+                    people[person.userKey] = { name: person.displayName || person.userKey, groups: [] };
+                    order.push(person.userKey);
+                }
+                people[person.userKey].groups.push(circle);
+            });
+        });
+        if (!order.length) {
+            card.appendChild(el('p', 'asset-tree-hint', t('portalRosterEmpty')));
+            return card;
+        }
+        order.forEach(function (key) {
+            var person = people[key];
+            var row = el('div', 'asset-tree-access-person');
+            var title = el('div', 'asset-tree-access-person-title');
+            title.appendChild(el('strong', null, person.name));
+            row.appendChild(title);
+            var summary = el('div', 'asset-tree-access-person-summary');
+            person.groups.forEach(function (circle) {
+                var chip = el('span', null, circle.name || '');
+                summary.appendChild(chip);
+                summary.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
+                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + circle.id + '/members?user=' + encodeURIComponent(key), null, function (status, payload) {
+                        if (status >= 200 && status < 300) {
+                            state.clinics = null;
+                            ensureClinics();
+                        } else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }));
+            });
+            row.appendChild(summary);
+            card.appendChild(row);
+        });
+        return card;
+    }
+
     function renderAccessSettings(panel) {
         var stack = el('div', 'asset-tree-settings-block asset-tree-project-stack asset-tree-access-stack');
         panel.appendChild(stack);
         var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessCustomTitle')));
         block.appendChild(el('p', 'asset-tree-hint', t('roleHint')));
         if (state.grants === null || state.roles === null) {
             var waitGrants = state.grants === null;
@@ -32341,8 +32517,8 @@
             openRoleModal(null);
         }));
         stack.appendChild(block);
-        stack.appendChild(renderClinicAccess());
-        stack.appendChild(renderAccessPeople());
+        stack.appendChild(renderAccessGrant());
+        stack.appendChild(renderAccessRoster());
         var schemas = el('details', 'asset-tree-access-schemas');
         schemas.appendChild(el('summary', null, t('schemaTitle')));
         schemas.appendChild(schemaSettings());
@@ -32485,10 +32661,15 @@
         }, packed.caps, null);
     }
 
-    function renderAccessPeople() {
+    function renderAccessGrant() {
         var card = el('section', 'asset-tree-project-card');
-        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessPeople')));
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessGiveTitle')));
         card.appendChild(el('p', 'asset-tree-hint', t('accessPeopleHint')));
+        card.appendChild(accessGrantForm());
+        return card;
+    }
+
+    function accessGrantForm() {
         var form = el('form', 'asset-tree-access-give');
         var mode = 'group';
         var pickedUser = null;
@@ -32620,7 +32801,12 @@
         }
         paintMode();
         form.addEventListener('submit', function (event) { event.preventDefault(); });
-        card.appendChild(form);
+        return form;
+    }
+
+    function renderAccessRoster() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessRosterTitle')));
         if (!(state.grants || []).length) card.appendChild(el('p', 'asset-tree-hint', t('accessEmpty')));
         var rows = [];
         var list = el('div', 'asset-tree-access-people');

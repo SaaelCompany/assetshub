@@ -12,6 +12,7 @@ public class ClinicCircleDto {
     private String name = "";
     private List<UserProfileDto> members = new ArrayList<UserProfileDto>();
     private List<Place> places = new ArrayList<Place>();
+    private List<String> reports = new ArrayList<String>();
 
     public int getId() {
         return id;
@@ -43,6 +44,14 @@ public class ClinicCircleDto {
 
     public void setPlaces(List<Place> places) {
         this.places = places == null ? new ArrayList<Place>() : places;
+    }
+
+    public List<String> getReports() {
+        return reports;
+    }
+
+    public void setReports(List<String> reports) {
+        this.reports = reports == null ? new ArrayList<String>() : reports;
     }
 
     @XmlAccessorType(XmlAccessType.PROPERTY)

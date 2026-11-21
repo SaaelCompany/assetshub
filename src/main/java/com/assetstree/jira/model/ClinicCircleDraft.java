@@ -12,6 +12,7 @@ public class ClinicCircleDraft {
     private String name;
     private List<String> members = new ArrayList<String>();
     private List<Integer> places = new ArrayList<Integer>();
+    private List<String> reports = new ArrayList<String>();
 
     public int getId() {
         return id;
@@ -43,5 +44,13 @@ public class ClinicCircleDraft {
 
     public void setPlaces(List<Integer> places) {
         this.places = places == null ? new ArrayList<Integer>() : places;
+    }
+
+    public List<String> getReports() {
+        return reports;
+    }
+
+    public void setReports(List<String> reports) {
+        this.reports = reports == null ? new ArrayList<String>() : reports;
     }
 }

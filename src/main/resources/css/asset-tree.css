@@ -470,7 +470,7 @@
 }
 
 .asset-tree-search input,
-.asset-tree-field input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.asset-tree-field input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="color"]),
 .asset-tree-field select,
 .asset-tree-field textarea {
     width: 100%;
@@ -1554,7 +1554,7 @@ a.asset-tree-url {
     color: #6b778c;
 }
 
-.asset-tree-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="range"]),
+.asset-tree-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="range"]):not([type="color"]),
 .asset-tree-dialog select,
 .asset-tree-dialog textarea {
     display: block !important;
@@ -1679,8 +1679,30 @@ a.asset-tree-url {
 
 .asset-tree-swatches {
     display: flex;
+    align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.asset-tree-color-custom,
+#asset-tree-app .asset-tree-field input.asset-tree-color-custom,
+.asset-tree-dialog input.asset-tree-color-custom {
+    display: inline-block !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+    border: 1px solid #dfe1e6 !important;
+    border-radius: 3px;
+    background: #fff;
+    cursor: pointer;
+    flex: 0 0 36px;
+}
+
+.asset-tree-color-custom.is-selected {
+    box-shadow: 0 0 0 2px #0052cc;
 }
 
 .asset-tree-swatch {
@@ -1860,7 +1882,7 @@ a.asset-tree-url {
 
 .asset-tree-icon-grid {
     position: relative;
-    max-height: 280px;
+    max-height: 440px;
     padding: 4px 8px 8px;
     overflow-y: auto;
     border: 1px solid #dfe1e6;
@@ -4400,7 +4422,7 @@ a.asset-tree-url {
 }
 
 .asset-tree-schema-scroll {
-    max-height: min(52vh, 520px);
+    max-height: calc(100vh - 188px);
     overflow: auto;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
@@ -6134,6 +6156,24 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-portal-fields {
     min-height: 0;
+}
+
+#asset-tree-app .asset-tree-portal-bundle {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+#asset-tree-app .asset-tree-portal-bundle .asset-tree-portal-fields {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+#asset-tree-app .asset-tree-portal-bundle .asset-tree-portal-fields + .asset-tree-portal-fields {
+    padding-top: 16px;
+    border-top: 1px solid #dfe1e6;
 }
 
 #asset-tree-app .asset-tree-portal-mine-settings {

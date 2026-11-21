@@ -206,6 +206,10 @@ public interface AssetService {
 
     void deleteCircle(ApplicationUser user, String projectKey, int circleId);
 
+    ClinicCircleDto addCircleMember(ApplicationUser user, String projectKey, int circleId, String userKey);
+
+    void removeCircleMember(ApplicationUser user, String projectKey, int circleId, String userKey);
+
     ClinicCircleDto.Place attachCircle(ApplicationUser user, int assetId, int circleId);
 
     void detachCircle(ApplicationUser user, int assetId, int circleId);

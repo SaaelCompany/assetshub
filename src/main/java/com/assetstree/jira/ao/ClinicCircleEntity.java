@@ -21,6 +21,12 @@ public interface ClinicCircleEntity extends Entity {
 
     void setName(String name);
 
+    /** Comma-separated report ids this group may see on the portal. */
+    @StringLength(400)
+    String getReports();
+
+    void setReports(String reports);
+
     Date getCreated();
 
     void setCreated(Date created);

@@ -1311,6 +1311,33 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("projects/{projectKey}/circles/{circleId}/members")
+    public Response addCircleMember(@PathParam("projectKey") final String projectKey,
+                                    @PathParam("circleId") final int circleId,
+                                    @QueryParam("user") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.addCircleMember(user(), projectKey, circleId, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/circles/{circleId}/members")
+    public Response removeCircleMember(@PathParam("projectKey") final String projectKey,
+                                       @PathParam("circleId") final int circleId,
+                                       @QueryParam("user") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.removeCircleMember(user(), projectKey, circleId, userKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
     @DELETE
     @Path("projects/{projectKey}/circles/{circleId}")
     public Response deleteCircle(@PathParam("projectKey") final String projectKey, @PathParam("circleId") final int circleId) {
