@@ -11948,6 +11948,7 @@ public class AssetServiceImpl implements AssetService {
             log.debug("Directory attributes failed for {}", userKey, ex);
         }
         rememberProperties(user, contact);
+        AdSyncContact.remember(contact, user.getKey(), user.getUsername(), user.getDirectoryId());
         PersonContact.apply(dto, contact);
         if (blank(dto.getDepartment())) {
             dto.setDepartment(organizationalUnit(contactValue(contact, "distinguished")));
