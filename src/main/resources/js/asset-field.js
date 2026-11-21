@@ -1451,7 +1451,7 @@
         desktop: 'M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h4v2H6v-2h4v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z',
         box: 'M12 3l9 4v10l-9 4-9-4V7l9-4zm0 2.2L6.5 7.6 12 10l5.5-2.4L12 5.2zM5 9.1v6.9l6 2.7v-6.9L5 9.1zm14 0l-6 2.7v6.9l6-2.7V9.1z'
     };
-    var mineState = { payload: null, loading: false, query: '', searching: false, caret: 0 };
+    var mineState = { payload: null, loading: false, query: '', searching: false, caret: 0, pane: 'own' };
     var MINE_LAYOUTS = [
         ['tiles', 'Плитка'],
         ['cards', 'Карточки'],
@@ -1586,7 +1586,7 @@
     }
 
     function mineSignature(data) {
-        var parts = [data.title || '', String(data.total || 0), mineGroupMode(), mineSortMode()];
+        var parts = [data.title || '', String(data.total || 0), mineGroupMode(), mineSortMode(), mineState.pane || 'own'];
         (data.projects || []).forEach(function (group) {
             parts.push(group.key, String(group.count || 0));
             (group.charts || []).forEach(function (chart) {
@@ -1596,7 +1596,7 @@
                 });
             });
             (group.assets || []).forEach(function (card) {
-                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.typeName, card.place, card.showKey ? '1' : '0', card.showStatus ? '1' : '0', card.photo ? '1' : '0');
+                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.typeName, card.place, card.showKey ? '1' : '0', card.showStatus ? '1' : '0', card.photo ? '1' : '0', card.sharedOnly ? '1' : '0');
                 (card.lines || []).forEach(function (line) {
                     parts.push(line.label, line.value);
                 });
@@ -1722,15 +1722,51 @@
         if (count) count.textContent = needle ? (shown + ' / ' + (count.getAttribute('data-total') || '0')) : (count.getAttribute('data-label') || '');
     }
 
+    function mineCounts(data) {
+        var own = 0;
+        var clinic = 0;
+        (data.projects || []).forEach(function (group) {
+            (group.assets || []).forEach(function (card) {
+                if (card.sharedOnly) clinic++;
+                else own++;
+            });
+        });
+        return { own: own, clinic: clinic };
+    }
+
     function renderMine(data) {
+        var counts = mineCounts(data);
+        if (mineState.pane === 'clinic' && !counts.clinic && counts.own) mineState.pane = 'own';
+        if (mineState.pane !== 'clinic' && !counts.own && counts.clinic) mineState.pane = 'clinic';
+        var pane = mineState.pane === 'clinic' ? 'clinic' : 'own';
+        var visibleTotal = pane === 'clinic' ? counts.clinic : counts.own;
+        var split = counts.own > 0 && counts.clinic > 0;
         var root = el('div', 'asset-tree-portal-mine-body');
         var head = el('div', 'asset-tree-portal-mine-head');
         var titles = el('div', 'asset-tree-portal-mine-titles');
         titles.appendChild(el('h2', null, data.title || 'My assets'));
-        var count = el('span', 'asset-tree-portal-mine-count', data.totalLabel || '');
-        count.setAttribute('data-label', data.totalLabel || '');
-        count.setAttribute('data-total', String(data.total || 0));
+        var countLabel = split ? String(visibleTotal) : (data.totalLabel || '');
+        var count = el('span', 'asset-tree-portal-mine-count', countLabel);
+        count.setAttribute('data-label', countLabel);
+        count.setAttribute('data-total', String(split ? visibleTotal : (data.total || 0)));
         titles.appendChild(count);
+        if (split) {
+            var panes = el('div', 'asset-tree-portal-mine-layouts');
+            [['own', 'Моё'], ['clinic', 'Клиника']].forEach(function (item) {
+                var pick = el('button', 'asset-tree-portal-mine-layout' + (item[0] === pane ? ' is-active' : ''), item[1]);
+                pick.type = 'button';
+                pick.addEventListener('click', function () {
+                    if (mineState.pane === item[0]) return;
+                    mineState.pane = item[0];
+                    mineState.query = '';
+                    paintPortalMine();
+                });
+                panes.appendChild(pick);
+            });
+            titles.appendChild(panes);
+        } else if (pane === 'clinic') {
+            titles.appendChild(el('p', 'asset-tree-portal-mine-role', 'Оборудование клиники'));
+        }
         head.appendChild(titles);
         var search = null;
         if (!data.total) {
@@ -1790,7 +1826,10 @@
         var charts = renderMineCharts(data);
         if (charts) root.insertBefore(charts, empty);
         (data.projects || []).forEach(function (group) {
-            var cards = (group.assets || []).slice();
+            var cards = (group.assets || []).filter(function (card) {
+                return pane === 'clinic' ? !!card.sharedOnly : !card.sharedOnly;
+            });
+            if (!cards.length) return;
             var sort = mineSortMode();
             cards.sort(function (left, right) { return mineText(left, sort).localeCompare(mineText(right, sort), 'ru'); });
             var mode = mineGroupMode();

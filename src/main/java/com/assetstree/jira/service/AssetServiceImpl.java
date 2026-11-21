@@ -76,6 +76,9 @@ import com.assetstree.jira.ao.FlowRuleEntity;
 import com.assetstree.jira.ao.AssetFileEntity;
 import com.assetstree.jira.ao.DocTemplateEntity;
 import com.assetstree.jira.ao.AssetShareEntity;
+import com.assetstree.jira.ao.ClinicCircleEntity;
+import com.assetstree.jira.ao.ClinicMemberEntity;
+import com.assetstree.jira.ao.ClinicPlaceEntity;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetLinkEntity;
 import com.assetstree.jira.ao.AssetPeerEntity;
@@ -129,6 +132,7 @@ import com.assetstree.jira.dto.AssetTypeDto;
 import com.assetstree.jira.dto.AttributeDto;
 import com.assetstree.jira.dto.BulkIssueDto;
 import com.assetstree.jira.dto.BulkResultDto;
+import com.assetstree.jira.dto.ClinicCircleDto;
 import com.assetstree.jira.dto.CommentDto;
 import com.assetstree.jira.dto.FieldDto;
 import com.assetstree.jira.dto.FlowBookDto;
@@ -216,6 +220,8 @@ import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
 import com.assetstree.jira.model.ChartLayout;
+import com.assetstree.jira.model.ClinicCircleDraft;
+import com.assetstree.jira.model.ClinicCircles;
 import com.assetstree.jira.model.GrantHomes;
 import com.assetstree.jira.model.GrantDraft;
 import com.assetstree.jira.model.OwnReach;
@@ -1467,7 +1473,7 @@ public class AssetServiceImpl implements AssetService {
         Map<Integer, AssetEntity> index = indexAssets(rows);
         List<AssetAttributeEntity> attributes = attributesFor(id);
         AssetTypeDto type = types.get(asset.getTypeKey());
-        boolean shared = TreeLogic.coveredByShare(id, parentMap(rows), shareIds(user.getKey()));
+        boolean shared = TreeLogic.coveredByShare(id, parentMap(rows), portalShareIds(user.getKey()));
         String role = portalRole(asset, attributes, type, user.getKey(), shared);
         ProjectViewEntity view = viewRow(projectKey);
         ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
@@ -2468,7 +2474,7 @@ public class AssetServiceImpl implements AssetService {
         }
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(projectKey, rows));
         AssetTypeDto type = types.get(asset.getTypeKey());
-        boolean shared = TreeLogic.coveredByShare(assetId, parentMap(rows), shareIds(user.getKey()));
+        boolean shared = TreeLogic.coveredByShare(assetId, parentMap(rows), portalShareIds(user.getKey()));
         if (portalRole(asset, attributesFor(assetId), type, user.getKey(), shared) == null) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
@@ -3137,6 +3143,7 @@ public class AssetServiceImpl implements AssetService {
         deleteRows(AssetCommentEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetFileEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetShareEntity.class, "ASSET_ID", toDelete);
+        deleteRows(ClinicPlaceEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetActivityEntity.class, "ASSET_ID", toDelete);
         deleteRows(ServicePlanEntity.class, "ASSET_ID", toDelete);
         deleteRows(LifecycleEntity.class, "ASSET_ID", toDelete);
@@ -6315,7 +6322,7 @@ public class AssetServiceImpl implements AssetService {
                     }
                 });
                 int total = 0;
-                final Set<Integer> sharedIds = shareIds(holder);
+                final Set<Integer> sharedIds = portalShareIds(holder);
                 for (Project project : ordered) {
                     if (!moduleOn(project.getKey(), ProjectModules.PORTAL)) {
                         continue;
@@ -6350,13 +6357,16 @@ public class AssetServiceImpl implements AssetService {
                         if (type != null && type.isLocation()) {
                             continue;
                         }
-                        String role = portalRole(row, attributes.get(row.getID()), type, holder,
-                                TreeLogic.coveredByShare(row.getID(), parents, sharedIds));
-                        if (role == null) {
+                        String personal = holderRole(row, attributes.get(row.getID()), type, holder);
+                        boolean shared = TreeLogic.coveredByShare(row.getID(), parents, sharedIds);
+                        if (personal == null && !shared) {
                             continue;
                         }
-                        cards.add(portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey(),
-                                Boolean.TRUE.equals(setup.getPhoto())));
+                        String role = portalRole(row, attributes.get(row.getID()), type, holder, shared);
+                        PortalMineDto.Card card = portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey(),
+                                Boolean.TRUE.equals(setup.getPhoto()));
+                        card.setSharedOnly(personal == null);
+                        cards.add(card);
                     }
                     Collections.sort(cards, new Comparator<PortalMineDto.Card>() {
                         @Override
@@ -10663,6 +10673,9 @@ public class AssetServiceImpl implements AssetService {
             dto.setComments(commentDtos(entity.getID()));
             dto.setFiles(fileDtos(entity.getID()));
             dto.setShares(shareDtos(entity.getID()));
+            if (type != null && type.isLocation()) {
+                dto.setCircles(circleRefs(entity.getID()));
+            }
             dto.setActivities(activityDtos(entity.getID()));
             dto.setPlans(planDtos(plans, businessToday()));
             dto.setLinks(linksFor(entity.getID()));
@@ -10975,6 +10988,275 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         return result;
+    }
+
+    @Override
+    public List<ClinicCircleDto> listCircles(ApplicationUser user, String projectKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        return ao().executeInTransaction(new TransactionCallback<List<ClinicCircleDto>>() {
+            @Override
+            public List<ClinicCircleDto> doInTransaction() {
+                return circleDtos(project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public List<ClinicCircleDto.Place> searchCirclePlaces(ApplicationUser user, String projectKey, String query) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        final String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        return ao().executeInTransaction(new TransactionCallback<List<ClinicCircleDto.Place>>() {
+            @Override
+            public List<ClinicCircleDto.Place> doInTransaction() {
+                List<ClinicCircleDto.Place> found = new ArrayList<ClinicCircleDto.Place>();
+                if (needle.length() < 2) {
+                    return found;
+                }
+                AssetEntity[] rows = assetsIn(project.getKey());
+                Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
+                for (AssetEntity row : rows) {
+                    AssetTypeDto type = types.get(row.getTypeKey());
+                    if (type == null || !type.isLocation() || row.getName() == null) {
+                        continue;
+                    }
+                    String name = row.getName();
+                    String key = row.getObjectKey() == null ? "" : row.getObjectKey();
+                    if (name.toLowerCase(Locale.ROOT).indexOf(needle) < 0 && key.toLowerCase(Locale.ROOT).indexOf(needle) < 0) {
+                        continue;
+                    }
+                    found.add(circlePlace(row));
+                    if (found.size() >= 20) {
+                        break;
+                    }
+                }
+                return found;
+            }
+        });
+    }
+
+    @Override
+    public ClinicCircleDto saveCircle(ApplicationUser user, String projectKey, final ClinicCircleDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        if (draft == null) {
+            throw new AssetException(400, "asset-tree.error.clinic");
+        }
+        final String title = ClinicCircles.name(draft.getName());
+        if (title.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.clinic");
+        }
+        final List<String> members = new ArrayList<String>();
+        for (String key : ClinicCircles.members(draft.getMembers())) {
+            members.add(normalizeCustodian(key));
+        }
+        final List<Integer> places = ClinicCircles.places(draft.getPlaces());
+        return ao().executeInTransaction(new TransactionCallback<ClinicCircleDto>() {
+            @Override
+            public ClinicCircleDto doInTransaction() {
+                ClinicCircleEntity[] existing = ao().find(ClinicCircleEntity.class, "PROJECT_KEY = ?", project.getKey());
+                ClinicCircleEntity row = null;
+                if (draft.getId() > 0) {
+                    row = ao().get(ClinicCircleEntity.class, draft.getId());
+                    if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                        throw new AssetException(404, "asset-tree.error.notFound");
+                    }
+                } else if (existing != null && existing.length >= ClinicCircles.CIRCLE_LIMIT) {
+                    throw new AssetException(400, "asset-tree.error.clinic.limit");
+                }
+                if (existing != null) {
+                    for (ClinicCircleEntity other : existing) {
+                        if (row != null && other.getID() == row.getID()) {
+                            continue;
+                        }
+                        if (title.equalsIgnoreCase(other.getName() == null ? "" : other.getName())) {
+                            throw new AssetException(400, "asset-tree.error.clinic");
+                        }
+                    }
+                }
+                for (Integer placeId : places) {
+                    AssetEntity place = ao().get(AssetEntity.class, placeId.intValue());
+                    if (place == null || !ProjectKeys.same(place.getProjectKey(), project.getKey()) || !isLocation(place)) {
+                        throw new AssetException(400, "asset-tree.error.clinic.place");
+                    }
+                }
+                if (row == null) {
+                    row = ao().create(ClinicCircleEntity.class,
+                            new DBParam("PROJECT_KEY", project.getKey()),
+                            new DBParam("NAME", title),
+                            new DBParam("CREATED", new Date()));
+                } else {
+                    row.setName(title);
+                    row.save();
+                    ao().deleteWithSQL(ClinicMemberEntity.class, "CIRCLE_ID = ?", Integer.valueOf(row.getID()));
+                    ao().deleteWithSQL(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(row.getID()));
+                }
+                int circleId = row.getID();
+                for (String member : members) {
+                    ao().create(ClinicMemberEntity.class,
+                            new DBParam("CIRCLE_ID", Integer.valueOf(circleId)),
+                            new DBParam("USER_KEY", member));
+                }
+                for (Integer placeId : places) {
+                    ao().create(ClinicPlaceEntity.class,
+                            new DBParam("CIRCLE_ID", Integer.valueOf(circleId)),
+                            new DBParam("ASSET_ID", placeId));
+                }
+                return circleDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void deleteCircle(ApplicationUser user, String projectKey, final int circleId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                ClinicCircleEntity row = ao().get(ClinicCircleEntity.class, circleId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ao().deleteWithSQL(ClinicMemberEntity.class, "CIRCLE_ID = ?", Integer.valueOf(circleId));
+                ao().deleteWithSQL(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(circleId));
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public ClinicCircleDto.Place attachCircle(ApplicationUser user, final int assetId, final int circleId) {
+        final AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.SHARE);
+        if (!isLocation(asset)) {
+            throw new AssetException(400, "asset-tree.error.clinic.place");
+        }
+        return ao().executeInTransaction(new TransactionCallback<ClinicCircleDto.Place>() {
+            @Override
+            public ClinicCircleDto.Place doInTransaction() {
+                ClinicCircleEntity circle = ao().get(ClinicCircleEntity.class, circleId);
+                if (circle == null || !ProjectKeys.same(circle.getProjectKey(), asset.getProjectKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ClinicPlaceEntity[] existing = ao().find(ClinicPlaceEntity.class,
+                        Query.select().where("CIRCLE_ID = ? AND ASSET_ID = ?", Integer.valueOf(circleId), Integer.valueOf(assetId)));
+                if (existing == null || existing.length == 0) {
+                    ClinicPlaceEntity[] taken = ao().find(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(circleId));
+                    if (taken != null && taken.length >= ClinicCircles.PLACE_LIMIT) {
+                        throw new AssetException(400, "asset-tree.error.clinic.limit");
+                    }
+                    ao().create(ClinicPlaceEntity.class,
+                            new DBParam("CIRCLE_ID", Integer.valueOf(circleId)),
+                            new DBParam("ASSET_ID", Integer.valueOf(assetId)));
+                }
+                ClinicCircleDto.Place ref = new ClinicCircleDto.Place();
+                ref.setId(circleId);
+                ref.setName(circle.getName() == null ? "" : circle.getName());
+                return ref;
+            }
+        });
+    }
+
+    @Override
+    public void detachCircle(ApplicationUser user, int assetId, int circleId) {
+        requireAssetCap(user, assetId, GrantCaps.SHARE);
+        ao().deleteWithSQL(ClinicPlaceEntity.class, "CIRCLE_ID = ? AND ASSET_ID = ?",
+                Integer.valueOf(circleId), Integer.valueOf(assetId));
+    }
+
+    private List<ClinicCircleDto> circleDtos(String projectKey) {
+        List<ClinicCircleDto> result = new ArrayList<ClinicCircleDto>();
+        ClinicCircleEntity[] rows = ao().find(ClinicCircleEntity.class, "PROJECT_KEY = ?", projectKey);
+        if (rows == null) {
+            return result;
+        }
+        java.util.Arrays.sort(rows, new Comparator<ClinicCircleEntity>() {
+            @Override
+            public int compare(ClinicCircleEntity left, ClinicCircleEntity right) {
+                String a = left.getName() == null ? "" : left.getName();
+                String b = right.getName() == null ? "" : right.getName();
+                return a.compareToIgnoreCase(b);
+            }
+        });
+        for (ClinicCircleEntity row : rows) {
+            result.add(circleDto(row));
+        }
+        return result;
+    }
+
+    private ClinicCircleDto circleDto(ClinicCircleEntity row) {
+        ClinicCircleDto dto = new ClinicCircleDto();
+        dto.setId(row.getID());
+        dto.setName(row.getName() == null ? "" : row.getName());
+        List<UserProfileDto> members = new ArrayList<UserProfileDto>();
+        ClinicMemberEntity[] people = ao().find(ClinicMemberEntity.class, "CIRCLE_ID = ?", Integer.valueOf(row.getID()));
+        if (people != null) {
+            for (ClinicMemberEntity person : people) {
+                UserProfileDto profile = profile(person.getUserKey());
+                if (profile != null) {
+                    members.add(profile);
+                }
+            }
+        }
+        dto.setMembers(members);
+        List<ClinicCircleDto.Place> places = new ArrayList<ClinicCircleDto.Place>();
+        ClinicPlaceEntity[] links = ao().find(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(row.getID()));
+        if (links != null) {
+            for (ClinicPlaceEntity link : links) {
+                AssetEntity place = ao().get(AssetEntity.class, link.getAssetId());
+                if (place != null) {
+                    places.add(circlePlace(place));
+                }
+            }
+        }
+        dto.setPlaces(places);
+        return dto;
+    }
+
+    private List<ClinicCircleDto.Place> circleRefs(int assetId) {
+        List<ClinicCircleDto.Place> refs = new ArrayList<ClinicCircleDto.Place>();
+        ClinicPlaceEntity[] links = ao().find(ClinicPlaceEntity.class, "ASSET_ID = ?", Integer.valueOf(assetId));
+        if (links == null) {
+            return refs;
+        }
+        for (ClinicPlaceEntity link : links) {
+            ClinicCircleEntity circle = ao().get(ClinicCircleEntity.class, link.getCircleId());
+            if (circle == null) {
+                continue;
+            }
+            ClinicCircleDto.Place ref = new ClinicCircleDto.Place();
+            ref.setId(circle.getID());
+            ref.setName(circle.getName() == null ? "" : circle.getName());
+            refs.add(ref);
+        }
+        return refs;
+    }
+
+    private ClinicCircleDto.Place circlePlace(AssetEntity row) {
+        ClinicCircleDto.Place place = new ClinicCircleDto.Place();
+        place.setId(row.getID());
+        place.setName(row.getName() == null ? "" : row.getName());
+        place.setObjectKey(row.getObjectKey() == null ? "" : row.getObjectKey());
+        return place;
+    }
+
+    private Set<Integer> portalShareIds(String userKey) {
+        Set<Integer> ids = shareIds(userKey);
+        if (userKey == null || userKey.isEmpty()) {
+            return ids;
+        }
+        ClinicMemberEntity[] membership = ao().find(ClinicMemberEntity.class, "USER_KEY = ?", userKey);
+        if (membership == null) {
+            return ids;
+        }
+        for (ClinicMemberEntity member : membership) {
+            ClinicPlaceEntity[] links = ao().find(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(member.getCircleId()));
+            if (links == null) {
+                continue;
+            }
+            for (ClinicPlaceEntity link : links) {
+                ids.add(Integer.valueOf(link.getAssetId()));
+            }
+        }
+        return ids;
     }
 
     private Set<Integer> shareIds(String userKey) {

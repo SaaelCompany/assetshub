@@ -12,6 +12,9 @@ import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetLinkEntity;
 import com.assetstree.jira.ao.AssetPeerEntity;
 import com.assetstree.jira.ao.AssetShareEntity;
+import com.assetstree.jira.ao.ClinicCircleEntity;
+import com.assetstree.jira.ao.ClinicMemberEntity;
+import com.assetstree.jira.ao.ClinicPlaceEntity;
 import com.assetstree.jira.ao.AssetTypeEntity;
 import com.assetstree.jira.ao.CardTemplateEntity;
 import com.assetstree.jira.ao.DocTemplateEntity;
@@ -90,6 +93,9 @@ public final class SchemaReady {
             AssetCommentEntity.class,
             AssetFileEntity.class,
             AssetShareEntity.class,
+            ClinicCircleEntity.class,
+            ClinicMemberEntity.class,
+            ClinicPlaceEntity.class,
             AssetActivityEntity.class,
             ProjectStatusEntity.class,
             ProjectGrantEntity.class,

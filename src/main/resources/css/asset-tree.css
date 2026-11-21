@@ -5757,6 +5757,18 @@ a.asset-tree-preview-icon:focus {
     margin-bottom: 8px;
 }
 
+#asset-tree-app .asset-tree-clinic-on-place {
+    margin-top: 14px;
+}
+
+.asset-tree-dialog .asset-tree-clinic-chips .asset-tree-person {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 6px;
+}
+
 #asset-tree-app .asset-tree-attachment a {
     color: #0052cc;
     font-weight: 600;

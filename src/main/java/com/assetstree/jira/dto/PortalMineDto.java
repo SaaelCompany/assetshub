@@ -188,6 +188,7 @@ public class PortalMineDto {
         private String role = "";
         private String typeName = "";
         private String place = "";
+        private boolean sharedOnly;
         private String color = "";
         private String icon = "";
         private boolean photo;
@@ -280,6 +281,14 @@ public class PortalMineDto {
 
         public void setPlace(String place) {
             this.place = place == null ? "" : place;
+        }
+
+        public boolean isSharedOnly() {
+            return sharedOnly;
+        }
+
+        public void setSharedOnly(boolean sharedOnly) {
+            this.sharedOnly = sharedOnly;
         }
 
         public String getColor() {

@@ -42,6 +42,7 @@ public class AssetDto {
     private List<CommentDto> comments;
     private List<FileDto> files;
     private List<UserProfileDto> shares;
+    private List<ClinicCircleDto.Place> circles = new ArrayList<ClinicCircleDto.Place>();
     private List<ActivityDto> activities;
     private List<ServicePlanDto> plans;
     private String serviceDue;
@@ -318,6 +319,14 @@ public class AssetDto {
 
     public List<UserProfileDto> getShares() {
         return shares;
+    }
+
+    public List<ClinicCircleDto.Place> getCircles() {
+        return circles;
+    }
+
+    public void setCircles(List<ClinicCircleDto.Place> circles) {
+        this.circles = circles == null ? new ArrayList<ClinicCircleDto.Place>() : circles;
     }
 
     public void setShares(List<UserProfileDto> shares) {
