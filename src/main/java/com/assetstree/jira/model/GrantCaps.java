@@ -1,8 +1,5 @@
 package com.assetstree.jira.model;
 
-import java.util.LinkedHashSet;
-import java.util.Set;
-
 /**
  * Access kinds stored on a project group.
  * A place is a branch, department, or room. A type is an object type.
@@ -102,7 +99,7 @@ public final class GrantCaps {
     }
 
     public static String normalize(String raw) {
-        Set<String> chosen = new LinkedHashSet<String>();
+        java.util.Map<String, String> chosen = new java.util.LinkedHashMap<String, String>();
         if (raw != null) {
             String[] parts = raw.split(",");
             for (int i = 0; i < parts.length; i++) {
@@ -112,23 +109,23 @@ public final class GrantCaps {
         if (chosen.isEmpty()) {
             return "";
         }
-        if (chosen.contains(ADMIN) || chosen.contains(PROJECT_ADMIN)) {
-            chosen.add(ASSETS);
+        if (chosen.containsKey(ADMIN) || chosen.containsKey(PROJECT_ADMIN)) {
+            putBare(chosen, ASSETS);
         }
-        if (chosen.contains(ASSETS)) {
-            chosen.add(PLACES);
-            chosen.add(TYPES);
-            chosen.add(OBJECT);
-            chosen.add(SCHEME);
-            chosen.add(SCHEME_EDIT);
+        if (chosen.containsKey(ASSETS)) {
+            putBare(chosen, PLACES);
+            putBare(chosen, TYPES);
+            putBare(chosen, OBJECT);
+            putBare(chosen, SCHEME);
+            putBare(chosen, SCHEME_EDIT);
         }
-        if (chosen.contains(SCHEME_EDIT)) {
-            chosen.add(SCHEME);
+        if (chosen.containsKey(SCHEME_EDIT)) {
+            putBare(chosen, SCHEME);
         }
-        if (chosen.contains(PLACES) || chosen.contains(TYPES) || chosen.contains(OBJECT)
-                || chosen.contains(ASSETS) || chosen.contains(ADMIN) || chosen.contains(PROJECT_ADMIN)
+        if (chosen.containsKey(PLACES) || chosen.containsKey(TYPES) || chosen.containsKey(OBJECT)
+                || chosen.containsKey(ASSETS) || chosen.containsKey(ADMIN) || chosen.containsKey(PROJECT_ADMIN)
                 || opensTree(chosen)) {
-            chosen.add(VIEW);
+            putBare(chosen, VIEW);
         }
         StringBuilder builder = new StringBuilder();
         appendChosen(builder, chosen, ORDER);
@@ -143,9 +140,46 @@ public final class GrantCaps {
     public static String coarse(String caps) {
         String normalized = normalize(caps);
         StringBuilder builder = new StringBuilder();
-        appendChosen(builder, split(normalized), ORDER);
+        for (int i = 0; i < ORDER.length; i++) {
+            if (!contains(normalized, ORDER[i])) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(ORDER[i]);
+        }
         String value = builder.toString();
         return value.length() <= 80 ? value : value.substring(0, 80);
+    }
+
+    /**
+     * Where this one action applies. A stored suffix wins. An older broad kind
+     * uses the grant's single reach. Reading actions stay on the whole project.
+     */
+    public static String actionReach(String caps, String action, String fallback) {
+        if (action == null || action.isEmpty() || !allows(caps, action)) {
+            return "";
+        }
+        String explicit = "";
+        String normalized = normalize(caps);
+        String[] parts = normalized.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            if (!action.equals(tokenBase(parts[i]))) {
+                continue;
+            }
+            String suffix = tokenReach(parts[i]);
+            if ("own".equals(suffix) || "all".equals(suffix)) {
+                explicit = suffix;
+            }
+        }
+        if (!explicit.isEmpty()) {
+            return explicit;
+        }
+        if (!bounded(action)) {
+            return "all";
+        }
+        return "own".equals(fallback) ? "own" : "all";
     }
 
     /**
@@ -264,42 +298,60 @@ public final class GrantCaps {
         return VIEW;
     }
 
-    private static void addToken(Set<String> chosen, String token) {
-        if (VIEW.equals(token) || PLACES.equals(token) || TYPES.equals(token)
-                || OBJECT.equals(token) || ASSETS.equals(token) || PROJECT_ADMIN.equals(token) || ADMIN.equals(token)
-                || REPORTS.equals(token) || MAP.equals(token)
-                || SCHEME.equals(token) || SCHEME_EDIT.equals(token)) {
-            chosen.add(token);
+    private static void addToken(java.util.Map<String, String> chosen, String raw) {
+        if (raw == null || raw.isEmpty()) {
             return;
         }
+        String reach = tokenReach(raw);
+        String token = tokenBase(raw);
         if (CREATE.equals(token) || EDIT.equals(token) || MOVE.equals(token)
                 || REMOVE.equals(token) || COMMENT.equals(token)) {
-            chosen.add(PLACES);
-            chosen.add(OBJECT);
+            putBare(chosen, PLACES);
+            putBare(chosen, OBJECT);
             return;
         }
         if (SCHEMA.equals(token)) {
-            chosen.add(TYPES);
+            putBare(chosen, TYPES);
             return;
         }
         if (ACCESS.equals(token)) {
-            chosen.add(ASSETS);
+            putBare(chosen, ASSETS);
             return;
         }
-        for (int i = 0; i < FINE.length; i++) {
-            if (FINE[i].equals(token)) {
-                chosen.add(token);
-                return;
-            }
+        if (!known(token)) {
+            return;
+        }
+        if (!chosen.containsKey(token) || !reach.isEmpty()) {
+            chosen.put(token, reach);
         }
     }
 
-    private static boolean opensTree(Set<String> chosen) {
-        return chosen.contains(OBJ_CREATE) || chosen.contains(OBJ_EDIT) || chosen.contains(OBJ_MOVE)
-                || chosen.contains(OBJ_REMOVE) || chosen.contains(NOTE) || chosen.contains(SHARE)
-                || chosen.contains(LIFE) || chosen.contains(PLACE_ADD) || chosen.contains(PLACE_EDIT)
-                || chosen.contains(PLACE_DEL) || chosen.contains(STATUS) || chosen.contains(EXCHANGE)
-                || chosen.contains(PLAN_EDIT) || chosen.contains(PORTAL) || chosen.contains(GRANTS);
+    private static void putBare(java.util.Map<String, String> chosen, String token) {
+        if (!chosen.containsKey(token)) {
+            chosen.put(token, "");
+        }
+    }
+
+    private static boolean known(String token) {
+        for (int i = 0; i < ORDER.length; i++) {
+            if (ORDER[i].equals(token)) {
+                return true;
+            }
+        }
+        for (int i = 0; i < FINE.length; i++) {
+            if (FINE[i].equals(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean opensTree(java.util.Map<String, String> chosen) {
+        return chosen.containsKey(OBJ_CREATE) || chosen.containsKey(OBJ_EDIT) || chosen.containsKey(OBJ_MOVE)
+                || chosen.containsKey(OBJ_REMOVE) || chosen.containsKey(NOTE) || chosen.containsKey(SHARE)
+                || chosen.containsKey(LIFE) || chosen.containsKey(PLACE_ADD) || chosen.containsKey(PLACE_EDIT)
+                || chosen.containsKey(PLACE_DEL) || chosen.containsKey(STATUS) || chosen.containsKey(EXCHANGE)
+                || chosen.containsKey(PLAN_EDIT) || chosen.containsKey(PORTAL) || chosen.containsKey(GRANTS);
     }
 
     private static boolean fineEdit(String caps) {
@@ -310,39 +362,52 @@ public final class GrantCaps {
                 || contains(normalized, PLACE_EDIT) || contains(normalized, PLACE_DEL);
     }
 
-    private static Set<String> split(String caps) {
-        Set<String> chosen = new LinkedHashSet<String>();
-        if (caps == null || caps.isEmpty()) {
-            return chosen;
-        }
-        String[] parts = caps.split(",");
-        for (int i = 0; i < parts.length; i++) {
-            if (parts[i] != null && !parts[i].isEmpty()) {
-                chosen.add(parts[i]);
-            }
-        }
-        return chosen;
-    }
-
-    private static void appendChosen(StringBuilder builder, Set<String> chosen, String[] order) {
+    private static void appendChosen(StringBuilder builder, java.util.Map<String, String> chosen, String[] order) {
         for (int i = 0; i < order.length; i++) {
-            if (!chosen.contains(order[i])) {
+            if (!chosen.containsKey(order[i])) {
                 continue;
             }
             if (builder.length() > 0) {
                 builder.append(',');
             }
             builder.append(order[i]);
+            String reach = chosen.get(order[i]);
+            if ("own".equals(reach) || "all".equals(reach)) {
+                builder.append(':').append(reach);
+            }
         }
     }
 
     private static boolean contains(String caps, String cap) {
+        if (caps == null || cap == null) {
+            return false;
+        }
         String[] parts = caps.split(",");
         for (int i = 0; i < parts.length; i++) {
-            if (cap.equals(parts[i])) {
+            if (cap.equals(tokenBase(parts[i]))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static String tokenBase(String token) {
+        if (token == null) {
+            return "";
+        }
+        int colon = token.indexOf(':');
+        return colon > 0 ? token.substring(0, colon) : token;
+    }
+
+    private static String tokenReach(String token) {
+        if (token == null) {
+            return "";
+        }
+        int colon = token.indexOf(':');
+        if (colon <= 0 || colon >= token.length() - 1) {
+            return "";
+        }
+        String suffix = token.substring(colon + 1);
+        return "own".equals(suffix) || "all".equals(suffix) ? suffix : "";
     }
 }

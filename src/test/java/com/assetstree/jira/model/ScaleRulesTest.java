@@ -68,6 +68,19 @@ public class ScaleRulesTest {
     }
 
     @Test
+    public void eachActionKeepsItsOwnReach() {
+        assertEquals("own", GrantCaps.actionReach("objEdit:own,objRemove:all", GrantCaps.OBJ_EDIT, "all"));
+        assertEquals("all", GrantCaps.actionReach("objEdit:own,objRemove:all", GrantCaps.OBJ_REMOVE, "own"));
+        assertEquals("", GrantCaps.actionReach("objEdit:own", GrantCaps.OBJ_CREATE, "own"));
+        assertEquals("own", GrantCaps.actionReach("object", GrantCaps.OBJ_EDIT, "own"));
+        assertEquals("all", GrantCaps.actionReach("object", GrantCaps.OBJ_EDIT, "all"));
+        assertTrue(GrantCaps.normalize("objEdit:own").contains("objEdit:own"));
+        assertTrue(GrantCaps.allows("objEdit:own", GrantCaps.OBJ_EDIT));
+        assertFalse(GrantCaps.allows("objEdit:own", GrantCaps.OBJ_REMOVE));
+        assertEquals("view", GrantCaps.coarse("objEdit:own"));
+    }
+
+    @Test
     public void ownReachCoversThePlaceAndTheCustodian() {
         Map<Integer, Integer> parents = new LinkedHashMap<Integer, Integer>();
         parents.put(Integer.valueOf(1), null);
