@@ -73,6 +73,16 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void sharedGrantStaysOnTheProjectThatOwnsIt() {
+        assertTrue(GrantHomes.stays(false, true, true, false));
+        assertFalse(GrantHomes.stays(true, true, false, true));
+        assertTrue(GrantHomes.stays(true, false, false, true));
+        assertFalse(GrantHomes.stays(true, false, false, false));
+        assertFalse(GrantHomes.stays(false, false, false, true));
+        assertFalse(GrantCaps.has(GrantCaps.normalize("projectAdmin"), GrantCaps.ADMIN));
+    }
+
+    @Test
     public void reportsOnlyGrantDoesNotOpenTheTree() {
         assertFalse(GrantCaps.has(GrantCaps.normalize("reports"), GrantCaps.VIEW));
         assertTrue(GrantCaps.has(GrantCaps.normalize("view"), GrantCaps.MAP));

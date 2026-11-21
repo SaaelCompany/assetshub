@@ -40,11 +40,6 @@ final class GrantSignals {
                     : ao.find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey)))) {
                 return true;
             }
-            if (projectKey != null && !projectKey.isEmpty()
-                    && listed(user, groups, manageOnly, ao.find(ProjectGrantEntity.class,
-                    Query.select().where("PROJECT_KEY = ?", GrantCaps.ALL_PROJECTS)))) {
-                return true;
-            }
         } catch (RuntimeException ex) {
             return false;
         }

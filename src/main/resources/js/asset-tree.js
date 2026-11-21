@@ -31865,9 +31865,13 @@
                 options.forEach(function (pair) {
                     var item = button(t(pair[1]), 'asset-tree-access-opt' + (current === pair[0] ? ' is-on' : ''), function () {
                         map[key] = pair[0];
-                        if ((key === 'projectAdmin' || key === 'admin') && pair[0] === 'all') {
+                        if (key === 'admin' && pair[0] === 'all') {
                             accessKeys().forEach(function (other) {
                                 if (other !== 'secret') map[other] = 'all';
+                            });
+                        } else if (key === 'projectAdmin' && pair[0] === 'all') {
+                            accessKeys().forEach(function (other) {
+                                if (other !== 'secret' && other !== 'admin') map[other] = 'all';
                             });
                         } else if (pair[0] !== 'all' && key !== 'secret') {
                             map.projectAdmin = 'none';
