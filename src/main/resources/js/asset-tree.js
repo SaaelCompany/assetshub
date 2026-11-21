@@ -16817,7 +16817,7 @@
         var current = projectAssetKey(project);
         var allowed = !!state.canArrange;
         panel.appendChild(el('p', 'asset-tree-hint', t('projectSectionHint')));
-        var stack = el('div', 'asset-tree-project-stack is-wide');
+        var stack = el('div', 'asset-tree-project-stack');
 
         var keyCard = el('section', 'asset-tree-project-card');
         keyCard.appendChild(el('h3', 'asset-tree-settings-title', t('assetKeyTitle')));
