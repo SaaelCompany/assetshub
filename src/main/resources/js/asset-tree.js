@@ -10314,6 +10314,15 @@
         return moduleBlock(t('peers'), body);
     }
 
+    function linkChoice(link) {
+        var type = link && link.type;
+        var incoming = !!(link && link.direction === 'in');
+        if (type === 'installed') return incoming ? 'carries' : 'installed';
+        if (type === 'part') return incoming ? 'includes' : 'part';
+        if (type === 'depends') return incoming ? 'needed' : 'depends';
+        return type || '';
+    }
+
     function linkPhrase(link) {
         var type = link && link.type;
         var incoming = !!(link && link.direction === 'in');
@@ -10487,6 +10496,11 @@
                     prev.phrase = prev.phrase ? prev.phrase + ', ' + node.phrase : node.phrase;
                 }
                 if (!prev.linkId && node.linkId) prev.linkId = node.linkId;
+                if (node.linkId) {
+                    if (!prev.linkIds) prev.linkIds = prev.linkId ? [prev.linkId] : [];
+                    if (prev.linkIds.indexOf(node.linkId) < 0) prev.linkIds.push(node.linkId);
+                }
+                if (!prev.choice && node.choice) prev.choice = node.choice;
                 if (!prev.peer && node.peer) prev.peer = node.peer;
                 if (!prev.typeKey && node.typeKey) prev.typeKey = node.typeKey;
                 if (!prev.meta && node.meta) prev.meta = node.meta;
@@ -10518,6 +10532,8 @@
                 kind: 'link',
                 incoming: link.direction === 'in',
                 linkId: link.id,
+                linkIds: link.id ? [link.id] : [],
+                choice: linkChoice(link),
                 typeKey: (id && byId()[id] && byId()[id].typeKey) || (link.card && link.card.typeKey) || '',
                 meta: meta,
                 peer: link.card || peers[id] || null
@@ -10580,31 +10596,17 @@
             copy.appendChild(el('span', 'asset-tree-graph-name', title));
         }
         card.appendChild(copy);
-        if (!self && mayEdit(asset) && node && (node.kind === 'peer' ? node.id : node.linkId)) {
-            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
-                if (event && event.stopPropagation) event.stopPropagation();
-                var path = node.kind === 'peer'
-                    ? '/assets/' + asset.id + '/peers/' + node.id
-                    : '/assets/' + asset.id + '/links/' + node.linkId;
-                ajax('DELETE', path, null, function (status, payload) {
-                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
-                    else setFormError((payload && payload.message) || t('errorTitle'));
-                });
-            });
-            remove.setAttribute('aria-label', t('unlink'));
-            card.appendChild(remove);
-        }
         return card;
     }
 
-    function linkLayoutKey(asset, roomy) {
-        return 'asset-tree-graph' + (roomy ? '-wide' : '') + ':' + String(asset.projectKey || '') + ':' + String(asset.id || '');
+    function linkLayoutKey(asset) {
+        return 'asset-tree-graph:' + String(asset.projectKey || '') + ':' + String(asset.id || '');
     }
 
-    function readLinkLayout(asset, roomy) {
+    function readLinkLayout(asset) {
         try {
             if (!window.localStorage) return null;
-            var raw = localStorage.getItem(linkLayoutKey(asset, roomy));
+            var raw = localStorage.getItem(linkLayoutKey(asset));
             if (!raw) return null;
             var parsed = JSON.parse(raw);
             return parsed && typeof parsed === 'object' ? parsed : null;
@@ -10613,9 +10615,9 @@
         }
     }
 
-    function writeLinkLayout(asset, spots, roomy) {
+    function writeLinkLayout(asset, spots) {
         try {
-            if (window.localStorage) localStorage.setItem(linkLayoutKey(asset, roomy), JSON.stringify(spots));
+            if (window.localStorage) localStorage.setItem(linkLayoutKey(asset), JSON.stringify(spots));
         } catch (error) {}
     }
 
@@ -10627,8 +10629,8 @@
         if (x !== x || y !== y) return fallback;
         if (x < 0) x = 0;
         if (y < 0) y = 0;
-        if (x > 1400) x = 1400;
-        if (y > 1600) y = 1600;
+        if (x > 1800) x = 1800;
+        if (y > 1800) y = 1800;
         return { x: Math.round(x), y: Math.round(y) };
     }
 
@@ -10637,75 +10639,290 @@
         return 'asset:' + (node ? node.id : '');
     }
 
+    var graphMenuNode = null;
+    var graphMenuAway = null;
+
+    function closeGraphMenu() {
+        if (graphMenuAway) {
+            document.removeEventListener('mousedown', graphMenuAway, true);
+            graphMenuAway = null;
+        }
+        if (graphMenuNode && graphMenuNode.parentNode) graphMenuNode.parentNode.removeChild(graphMenuNode);
+        graphMenuNode = null;
+    }
+
+    function openGraphMenu(x, y, items) {
+        closeGraphMenu();
+        var menu = el('div', 'asset-tree-graph-menu');
+        items.forEach(function (item) {
+            menu.appendChild(button(item.label, '', function () {
+                closeGraphMenu();
+                item.run();
+            }));
+        });
+        menu.style.left = Math.round(x) + 'px';
+        menu.style.top = Math.round(y) + 'px';
+        document.body.appendChild(menu);
+        graphMenuNode = menu;
+        graphMenuAway = function (event) {
+            if (!graphMenuNode || graphMenuNode.contains(event.target)) return;
+            closeGraphMenu();
+        };
+        document.addEventListener('mousedown', graphMenuAway, true);
+    }
+
+    function graphObjects(asset) {
+        var rows = [];
+        (state.assets || []).forEach(function (item) {
+            if (!item || item.id === asset.id || isFolder(item)) return;
+            rows.push(item);
+        });
+        rows.sort(function (left, right) {
+            return String(left.name || left.objectKey || '').localeCompare(String(right.name || right.objectKey || ''), 'ru');
+        });
+        return rows;
+    }
+
+    function graphKinds() {
+        return [
+            ['carries', 'linkCarries'],
+            ['installed', 'linkInstalled'],
+            ['includes', 'linkIncludes'],
+            ['part', 'linkPart'],
+            ['needed', 'linkNeeded'],
+            ['depends', 'linkDepends']
+        ];
+    }
+
+    function closeGraphPick() {
+        var pick = document.querySelector('.asset-tree-graph-pick');
+        if (pick && pick.parentNode) pick.parentNode.removeChild(pick);
+    }
+
+    function graphPickError(message) {
+        var hint = document.querySelector('.asset-tree-graph-pick-error');
+        if (hint) hint.textContent = message || '';
+        if (message) setFormError(message);
+    }
+
+    function postGraphLink(asset, otherId, choice, done) {
+        if (choice === 'peer') {
+            ajax('POST', '/assets/' + asset.id + '/peers', { assetId: otherId }, done);
+            return;
+        }
+        ajax('POST', '/assets/' + asset.id + '/links', { assetId: otherId, type: choice, attributes: [] }, done);
+    }
+
+    function graphDropPaths(asset, node) {
+        var paths = [];
+        var ids = node.linkIds && node.linkIds.length ? node.linkIds : (node.linkId ? [node.linkId] : []);
+        var i;
+        for (i = 0; i < ids.length; i++) paths.push('/assets/' + asset.id + '/links/' + ids[i]);
+        var peers = asset.peers || [];
+        for (i = 0; i < peers.length; i++) {
+            if (peers[i] && peers[i].id === node.id) {
+                paths.push('/assets/' + asset.id + '/peers/' + node.id);
+                break;
+            }
+        }
+        if (!paths.length && node.kind === 'peer') paths.push('/assets/' + asset.id + '/peers/' + node.id);
+        return paths;
+    }
+
+    function ajaxDeletes(paths, done) {
+        var index = 0;
+        function next(status, payload) {
+            if (status && (status < 200 || status >= 300)) {
+                done(status, payload);
+                return;
+            }
+            if (index >= paths.length) {
+                done(200, null);
+                return;
+            }
+            ajax('DELETE', paths[index], null, function (st, body) {
+                index += 1;
+                next(st, body);
+            });
+        }
+        next(200, null);
+    }
+
+    function reloadOpenGraph(assetId) {
+        ajax('GET', '/assets/' + assetId, null, function (status, payload) {
+            if (status !== 200 || !payload) return;
+            closeGraphPick();
+            if (state.selectedId === assetId) showDetail(payload, false);
+            var frame = document.querySelector('.asset-tree-graph-dialog .asset-tree-graph-frame');
+            if (!frame) return;
+            frame.innerHTML = '';
+            frame.appendChild(linkGraph(payload, true));
+        });
+    }
+
+    function openGraphPick(asset, title, onChoose) {
+        var dialog = document.querySelector('.asset-tree-graph-dialog');
+        if (!dialog) return;
+        closeGraphPick();
+        var panel = el('div', 'asset-tree-graph-pick');
+        var head = el('div', 'asset-tree-block-head');
+        head.appendChild(el('h3', null, title));
+        head.appendChild(button(t('cancel'), 'asset-tree-btn', closeGraphPick));
+        panel.appendChild(head);
+        panel.appendChild(el('p', 'asset-tree-hint asset-tree-graph-pick-error', ''));
+        var search = el('input');
+        search.type = 'search';
+        search.className = 'asset-tree-text';
+        search.placeholder = t('peerSearch');
+        panel.appendChild(search);
+        var list = el('div', 'asset-tree-graph-pick-list');
+        panel.appendChild(list);
+        var seq = 0;
+        function paint(rows) {
+            list.innerHTML = '';
+            if (!rows.length) {
+                list.appendChild(el('p', 'asset-tree-hint', t('noResults')));
+                return;
+            }
+            rows.forEach(function (item) {
+                var caption = item.name || item.objectKey || '';
+                if (item.objectKey && item.objectKey !== caption) caption += ' \u00b7 ' + item.objectKey;
+                list.appendChild(button(caption, 'asset-tree-user-hit', function () {
+                    onChoose(item);
+                }));
+            });
+        }
+        function localRows(query) {
+            var needle = query.toLowerCase();
+            return graphObjects(asset).filter(function (item) {
+                if (!needle) return true;
+                var blob = ((item.name || '') + ' ' + (item.objectKey || '')).toLowerCase();
+                return blob.indexOf(needle) >= 0;
+            });
+        }
+        function refresh() {
+            var query = search.value.trim();
+            var rows = localRows(query);
+            paint(rows);
+            if (query.length < 2) return;
+            var token = ++seq;
+            ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                if (token !== seq || search.value.trim() !== query || status !== 200 || !payload) return;
+                var seen = {};
+                rows.forEach(function (item) { seen[item.id] = true; });
+                payload.forEach(function (item) {
+                    if (!item || item.id === asset.id || seen[item.id]) return;
+                    seen[item.id] = true;
+                    rows.push(item);
+                });
+                paint(rows);
+            });
+        }
+        search.addEventListener('input', refresh);
+        paint(localRows(''));
+        dialog.appendChild(panel);
+        search.focus();
+    }
+
+    function askGraphKind(asset, other, onDone) {
+        var dialog = document.querySelector('.asset-tree-graph-dialog');
+        if (!dialog) return;
+        closeGraphPick();
+        var panel = el('div', 'asset-tree-graph-pick');
+        var head = el('div', 'asset-tree-block-head');
+        head.appendChild(el('h3', null, t('linkGraphKind')));
+        head.appendChild(button(t('cancel'), 'asset-tree-btn', closeGraphPick));
+        panel.appendChild(head);
+        var caption = other.name || other.objectKey || '';
+        if (other.objectKey && other.objectKey !== caption) caption += ' \u00b7 ' + other.objectKey;
+        panel.appendChild(el('p', 'asset-tree-hint', caption));
+        panel.appendChild(el('p', 'asset-tree-hint asset-tree-graph-pick-error', ''));
+        var kinds = el('div', 'asset-tree-graph-kinds');
+        graphKinds().forEach(function (pair) {
+            kinds.appendChild(button(t(pair[1]), 'asset-tree-btn', function () {
+                onDone(pair[0]);
+            }));
+        });
+        panel.appendChild(kinds);
+        dialog.appendChild(panel);
+    }
+
+    function finishGraphChange(asset, status, payload) {
+        if (status >= 200 && status < 300) {
+            notify(t('linkAdded'));
+            reloadOpenGraph(asset.id);
+            return;
+        }
+        graphPickError((payload && payload.message) || t('errorTitle'));
+    }
+
     function openLinkGraphModal(asset) {
+        closeGraphMenu();
         var root = document.getElementById('asset-tree-app') || document.body;
         openModal(function (dialog) {
             dialog.className += ' asset-tree-graph-dialog';
             var head = el('div', 'asset-tree-block-head');
             head.appendChild(el('h2', null, asset.objectKey || asset.name || t('linkGraph')));
             head.appendChild(button(t('close'), 'asset-tree-btn', function () {
+                closeGraphMenu();
+                closeGraphPick();
                 closeModal(dialog.parentNode);
+                if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
             }));
             dialog.appendChild(head);
             var frame = el('div', 'asset-tree-graph-frame');
-            frame.appendChild(linkGraph(asset, null, true));
+            frame.appendChild(linkGraph(asset, true));
             dialog.appendChild(frame);
         }, root);
     }
 
-    function linkGraph(asset, form, roomy) {
+    function linkGraph(asset, editor) {
         var nodes = relationNodes(asset);
-        var saved = readLinkLayout(asset, roomy);
+        var saved = readLinkLayout(asset);
         var spots = {};
+        var zoom = 1;
+        var panX = 0;
+        var panY = 0;
+        var touched = false;
+        var density = nodes.length >= 14 ? ' is-packed' : (nodes.length >= 8 ? ' is-dense' : '');
         var stage = el('div', 'asset-tree-link-stage');
-        var box = el('div', 'asset-tree-link-graph is-placed' + (nodes.length ? '' : ' is-empty'));
-        box.setAttribute('role', 'group');
-        box.setAttribute('aria-label', t('linkGraph'));
-        if (mayEdit(asset)) {
+        var viewport = el('div', 'asset-tree-link-viewport');
+        var world = el('div', 'asset-tree-link-world asset-tree-link-graph is-placed' + density + (nodes.length ? '' : ' is-empty'));
+        world.setAttribute('role', 'group');
+        world.setAttribute('aria-label', t('linkGraph'));
+        if (!editor && mayEdit(asset)) {
             var tools = el('div', 'asset-tree-graph-tools');
             var pencil = button('', 'asset-tree-btn slim asset-tree-graph-pencil', function () {
-                var on = box.className.indexOf(' is-editing') < 0;
-                box.className = box.className.replace(' is-editing', '');
-                pencil.className = pencil.className.replace(' is-on', '');
-                if (on) {
-                    box.className += ' is-editing';
-                    pencil.className += ' is-on';
-                }
-                pencil.setAttribute('aria-pressed', on ? 'true' : 'false');
-                if (form) form.hidden = !on;
+                openLinkGraphModal(asset);
             });
             pencil.title = t('linkEdit');
             pencil.setAttribute('aria-label', t('linkEdit'));
-            pencil.setAttribute('aria-pressed', 'false');
             pencil.appendChild(toolIcon('edit'));
             tools.appendChild(pencil);
             stage.appendChild(tools);
         }
         var svg = svgEl('svg');
         svg.setAttribute('class', 'asset-tree-link-canvas');
-        svg.setAttribute('preserveAspectRatio', 'none');
         svg.setAttribute('aria-hidden', 'true');
-        box.appendChild(svg);
+        world.appendChild(svg);
         function clearSelected() {
-            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var cards = world.querySelectorAll('.asset-tree-graph-node');
             var n;
-            for (n = 0; n < cards.length; n++) {
-                cards[n].className = cards[n].className.replace(' is-selected', '');
-            }
+            for (n = 0; n < cards.length; n++) cards[n].className = cards[n].className.replace(' is-selected', '');
         }
         var panel = el('div', 'asset-tree-link-detail');
         panel.hidden = true;
-        function showRelation(item, card) {
+        function showRelation(node, card) {
             clearSelected();
             card.className += ' is-selected';
             panel.hidden = false;
             panel.innerHTML = '';
             var bits = [];
-            if (item.node.phrase) bits.push(item.node.phrase);
-            if (item.node.key) bits.push(item.node.key);
-            panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' · ')));
-            if (item.node.peer) panel.appendChild(peerCard(item.node.peer));
-            if (item.node.kind === 'link' && item.node.meta) panel.appendChild(el('p', 'asset-tree-hint', item.node.meta));
+            if (node.phrase) bits.push(node.phrase);
+            if (node.key) bits.push(node.key);
+            panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' \u00b7 ')));
+            if (node.peer) panel.appendChild(peerCard(node.peer));
+            if (node.kind === 'link' && node.meta) panel.appendChild(el('p', 'asset-tree-hint', node.meta));
         }
         var selfCard = linkGraphNode(asset, null, true);
         selfCard.addEventListener('click', function () {
@@ -10713,24 +10930,27 @@
             panel.hidden = true;
             panel.innerHTML = '';
         });
-        box.appendChild(selfCard);
+        world.appendChild(selfCard);
         var placed = [];
-        var firstCard = null;
         nodes.forEach(function (node) {
             var card = linkGraphNode(asset, node, false);
             card.addEventListener('click', function () {
-                showRelation({ node: node }, card);
+                showRelation(node, card);
             });
-            box.appendChild(card);
+            if (editor && mayEdit(asset) && node.kind !== 'mesh' && (node.kind === 'peer' || node.linkId || (node.linkIds && node.linkIds.length))) {
+                card.addEventListener('contextmenu', function (event) {
+                    if (event.preventDefault) event.preventDefault();
+                    if (event.stopPropagation) event.stopPropagation();
+                    openGraphMenu(event.clientX, event.clientY, [
+                        { label: t('linkGraphRemove'), run: function () { removeGraphNode(node); } },
+                        { label: t('linkReplace'), run: function () { replaceGraphNode(node); } }
+                    ]);
+                });
+            }
+            world.appendChild(card);
             placed.push({ node: node, card: card });
-            if (!firstCard) firstCard = card;
         });
-        function placeCard(card, key, index, self, mesh) {
-            var rows = Math.max(nodes.length, 1);
-            var mid = Math.max(16, Math.floor((rows * 76) / 2) - 18);
-            var fallback = roomy
-                ? (self ? { x: 380, y: mid } : { x: mesh ? 720 : 24, y: index * 76 + 8 })
-                : (self ? { x: 8, y: 4 } : { x: mesh ? 36 : 8, y: (index + 1) * 64 });
+        function placeCard(card, key, fallback) {
             var spot = linkSpot(saved, key, fallback);
             card.style.left = spot.x + 'px';
             card.style.top = spot.y + 'px';
@@ -10750,19 +10970,17 @@
                 }
                 function move(ev) {
                     var p = point(ev);
-                    var dx = p.x - clientX;
-                    var dy = p.y - clientY;
-                    if (dx * dx + dy * dy > 16) moved = true;
+                    var dx = (p.x - clientX) / zoom;
+                    var dy = (p.y - clientY) / zoom;
+                    if (dx * dx + dy * dy > 9) moved = true;
                     var x = originLeft + dx;
                     var y = originTop + dy;
                     if (x < 0) x = 0;
                     if (y < 0) y = 0;
-                    var limit = box.clientWidth - 40;
-                    if (limit < 0) limit = 0;
-                    if (x > limit) x = limit;
+                    if (x > 1800) x = 1800;
+                    if (y > 1800) y = 1800;
                     card.style.left = Math.round(x) + 'px';
                     card.style.top = Math.round(y) + 'px';
-                    fitGraph();
                     paintWires();
                     if (ev.preventDefault) ev.preventDefault();
                 }
@@ -10775,7 +10993,7 @@
                     if (!moved) return;
                     card.setAttribute('data-dragged', '1');
                     spots[key] = [card.offsetLeft, card.offsetTop];
-                    writeLinkLayout(asset, spots, roomy);
+                    writeLinkLayout(asset, spots);
                     setTimeout(function () { card.removeAttribute('data-dragged'); }, 0);
                 }
                 document.addEventListener('mousemove', move);
@@ -10798,45 +11016,115 @@
                 if (event.preventDefault) event.preventDefault();
             }, true);
         }
-        placeCard(selfCard, 'self', 0, true);
         var directCount = 0;
+        var meshCount = 0;
         placed.forEach(function (item) {
-            if (!(item.node && item.node.kind === 'mesh')) directCount += 1;
+            if (item.node && item.node.kind === 'mesh') meshCount += 1;
+            else directCount += 1;
         });
+        var inner = Math.max(120, directCount * 26);
+        var outer = meshCount ? inner + 100 : inner;
+        var cx = outer + 80;
+        var cy = outer + 48;
+        function ringPoint(index, count, radius) {
+            var angle = count === 1 ? -Math.PI / 2 : (-Math.PI / 2 + index * 2 * Math.PI / Math.max(count, 1));
+            return {
+                x: Math.round(cx + Math.cos(angle) * radius - 16),
+                y: Math.round(cy + Math.sin(angle) * radius - 14)
+            };
+        }
+        placeCard(selfCard, 'self', { x: cx, y: cy });
         var directRow = 0;
         var meshRow = 0;
         placed.forEach(function (item) {
             var mesh = item.node && item.node.kind === 'mesh';
-            var row = mesh ? (roomy ? meshRow++ : directCount + meshRow++) : directRow++;
-            placeCard(item.card, linkNodeKey(item.node, false), row, false, mesh);
+            var spot = mesh ? ringPoint(meshRow++, meshCount, outer) : ringPoint(directRow++, directCount, inner);
+            placeCard(item.card, linkNodeKey(item.node, false), spot);
         });
-        if (!roomy && nodes.length) {
-            box.addEventListener('dblclick', function (event) {
-                var target = event.target;
-                if (target && target.closest && (target.closest('.asset-tree-peer-remove') || target.closest('.asset-tree-graph-tools'))) return;
-                openLinkGraphModal(asset);
+        function removeGraphNode(node) {
+            ajaxDeletes(graphDropPaths(asset, node), function (status, payload) {
+                if (status >= 200 && status < 300) reloadOpenGraph(asset.id);
+                else setFormError((payload && payload.message) || t('errorTitle'));
             });
         }
-        var laidBottom = 36;
-        for (var spotKey in spots) {
-            if (!Object.prototype.hasOwnProperty.call(spots, spotKey) || !spots[spotKey]) continue;
-            var spotEdge = Number(spots[spotKey][1]) + 42;
-            if (spotEdge > laidBottom) laidBottom = spotEdge;
+        function replaceGraphNode(node) {
+            openGraphPick(asset, t('linkReplace'), function (picked) {
+                ajaxDeletes(graphDropPaths(asset, node), function (status, payload) {
+                    if (status < 200 || status >= 300) {
+                        graphPickError((payload && payload.message) || t('errorTitle'));
+                        return;
+                    }
+                    var choice = node.choice || (node.kind === 'peer' ? 'peer' : '');
+                    if (!choice) {
+                        reloadOpenGraph(asset.id);
+                        return;
+                    }
+                    postGraphLink(asset, picked.id, choice, function (st, body) {
+                        finishGraphChange(asset, st, body);
+                    });
+                });
+            });
         }
-        box.style.height = (laidBottom + 6) + 'px';
-        if (!roomy && nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkGraphOpen')));
-        stage.appendChild(box);
+        if (editor && mayEdit(asset)) {
+            viewport.addEventListener('contextmenu', function (event) {
+                if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node, .asset-tree-graph-zoom')) return;
+                if (event.preventDefault) event.preventDefault();
+                openGraphMenu(event.clientX, event.clientY, [
+                    { label: t('linkGraphAdd'), run: function () {
+                        openGraphPick(asset, t('linkGraphAdd'), function (picked) {
+                            askGraphKind(asset, picked, function (choice) {
+                                postGraphLink(asset, picked.id, choice, function (status, payload) {
+                                    finishGraphChange(asset, status, payload);
+                                });
+                            });
+                        });
+                    } }
+                ]);
+            });
+        }
+        viewport.appendChild(world);
+        var zoomBar = el('div', 'asset-tree-graph-zoom');
+        function zoomAround(factor) {
+            var rect = viewport.getBoundingClientRect();
+            var px = rect.width / 2;
+            var py = rect.height / 2;
+            var next = zoom * factor;
+            if (next < 0.05) next = 0.05;
+            if (next > 2.5) next = 2.5;
+            var wx = (px - panX) / zoom;
+            var wy = (py - panY) / zoom;
+            zoom = next;
+            panX = px - wx * zoom;
+            panY = py - wy * zoom;
+            touched = true;
+            applyZoom();
+        }
+        var zoomOut = button('\u2212', '', function () { zoomAround(1 / 1.15); });
+        zoomOut.title = t('linkGraphZoomOut');
+        zoomOut.setAttribute('aria-label', t('linkGraphZoomOut'));
+        var zoomIn = button('+', '', function () { zoomAround(1.15); });
+        zoomIn.title = t('linkGraphZoomIn');
+        zoomIn.setAttribute('aria-label', t('linkGraphZoomIn'));
+        var fit = button('\u2922', '', function () {
+            touched = false;
+            fitZoom();
+        });
+        fit.title = t('linkGraphFit');
+        fit.setAttribute('aria-label', t('linkGraphFit'));
+        zoomBar.appendChild(zoomOut);
+        zoomBar.appendChild(zoomIn);
+        zoomBar.appendChild(fit);
+        viewport.appendChild(zoomBar);
+        stage.appendChild(viewport);
         if (!nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         stage.appendChild(panel);
-        if (firstCard) showRelation(placed[0], firstCard);
-        function iconCenter(card, origin) {
+        function iconCenter(card) {
             var mark = card.querySelector('.asset-tree-graph-mark') || card;
-            var rect = mark.getBoundingClientRect();
             return {
-                x: rect.left + rect.width / 2 - origin.left,
-                y: rect.top + rect.height / 2 - origin.top,
-                w: rect.width / 2,
-                h: rect.height / 2
+                x: card.offsetLeft + mark.offsetLeft + mark.offsetWidth / 2,
+                y: card.offsetTop + mark.offsetTop + mark.offsetHeight / 2,
+                w: mark.offsetWidth / 2,
+                h: mark.offsetHeight / 2
             };
         }
         function along(x1, y1, x2, y2, half) {
@@ -10851,44 +11139,50 @@
             if (dist > len * 0.46) dist = len * 0.46;
             return { x: x1 + ux * dist, y: y1 + uy * dist };
         }
-        function fitGraph() {
-            var cards = box.querySelectorAll('.asset-tree-graph-node');
-            var bottom = roomy ? 480 : 36;
-            var right = roomy ? 920 : 0;
-            var i;
-            for (i = 0; i < cards.length; i++) {
-                var edge = cards[i].offsetTop + cards[i].offsetHeight;
-                var side = cards[i].offsetLeft + cards[i].offsetWidth;
-                if (edge > bottom) bottom = edge;
-                if (side > right) right = side;
-            }
-            var parent = box.parentNode ? box.parentNode.clientWidth : 0;
-            if (!roomy && right < parent) right = parent;
-            box.style.height = (bottom + 16) + 'px';
-            box.style.width = (right + 16) + 'px';
+        function applyZoom() {
+            world.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+        }
+        function fitZoom() {
+            var viewW = viewport.clientWidth;
+            var viewH = viewport.clientHeight;
+            if (viewW < 40 || viewH < 40) return;
+            var worldW = world.offsetWidth || 1;
+            var worldH = world.offsetHeight || 1;
+            var scale = Math.min(viewW / (worldW + 24), viewH / (worldH + 24), 1);
+            if (scale < 0.05) scale = 0.05;
+            zoom = scale;
+            panX = Math.round((viewW - worldW * zoom) / 2);
+            panY = Math.round((viewH - worldH * zoom) / 2);
+            if (panX < 8) panX = 8;
+            if (panY < 8) panY = 8;
+            applyZoom();
         }
         function paintWires() {
-            if (!box.parentNode) {
-                window.removeEventListener('resize', paintWires);
-                return;
+            if (!world.parentNode) return;
+            var cards = world.querySelectorAll('.asset-tree-graph-node');
+            var right = 240;
+            var bottom = 180;
+            var i;
+            for (i = 0; i < cards.length; i++) {
+                var side = cards[i].offsetLeft + cards[i].offsetWidth + 20;
+                var edge = cards[i].offsetTop + cards[i].offsetHeight + 16;
+                if (side > right) right = side;
+                if (edge > bottom) bottom = edge;
             }
-            fitGraph();
-            var width = box.clientWidth;
-            var height = box.clientHeight;
-            if (width < 40 || height < 20) return;
-            svg.setAttribute('width', String(width));
-            svg.setAttribute('height', String(height));
-            svg.style.width = width + 'px';
-            svg.style.height = height + 'px';
-            var origin = svg.getBoundingClientRect();
-            svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+            world.style.width = right + 'px';
+            world.style.height = bottom + 'px';
+            svg.setAttribute('width', String(right));
+            svg.setAttribute('height', String(bottom));
+            svg.style.width = right + 'px';
+            svg.style.height = bottom + 'px';
+            svg.setAttribute('viewBox', '0 0 ' + right + ' ' + bottom);
             while (svg.firstChild) svg.removeChild(svg.firstChild);
-            var cards = {};
-            cards[String(asset.id)] = selfCard;
-            function stroke(left, right) {
-                if (!left || !right || left === right) return;
-                var fromCenter = iconCenter(left, origin);
-                var toCenter = iconCenter(right, origin);
+            var byCard = {};
+            byCard[String(asset.id)] = selfCard;
+            function stroke(left, rightCard) {
+                if (!left || !rightCard || left === rightCard) return;
+                var fromCenter = iconCenter(left);
+                var toCenter = iconCenter(rightCard);
                 var from = along(fromCenter.x, fromCenter.y, toCenter.x, toCenter.y, fromCenter);
                 var to = along(toCenter.x, toCenter.y, fromCenter.x, fromCenter.y, toCenter);
                 var line = svgEl('line');
@@ -10902,17 +11196,75 @@
                 svg.appendChild(line);
             }
             placed.forEach(function (item) {
-                if (item.node && item.node.id) cards[String(item.node.id)] = item.card;
+                if (item.node && item.node.id) byCard[String(item.node.id)] = item.card;
                 if (item.node && item.node.kind === 'mesh') return;
                 stroke(selfCard, item.card);
             });
             (asset.mesh || []).forEach(function (tie) {
                 if (!tie) return;
-                stroke(cards[String(tie.fromId)], cards[String(tie.toId)]);
+                stroke(byCard[String(tie.fromId)], byCard[String(tie.toId)]);
             });
         }
-        window.addEventListener('resize', paintWires);
-        setTimeout(paintWires, 0);
+        function onWheel(event) {
+            if (event.preventDefault) event.preventDefault();
+            var rect = viewport.getBoundingClientRect();
+            var px = event.clientX - rect.left;
+            var py = event.clientY - rect.top;
+            var factor = event.deltaY < 0 ? 1.12 : (1 / 1.12);
+            var next = zoom * factor;
+            if (next < 0.05) next = 0.05;
+            if (next > 2.5) next = 2.5;
+            var wx = (px - panX) / (zoom || 1);
+            var wy = (py - panY) / (zoom || 1);
+            zoom = next;
+            panX = px - wx * zoom;
+            panY = py - wy * zoom;
+            touched = true;
+            applyZoom();
+        }
+        function onResize() {
+            if (!viewport.parentNode) {
+                window.removeEventListener('resize', onResize);
+                return;
+            }
+            paintWires();
+            if (!touched) fitZoom();
+        }
+        viewport.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node, .asset-tree-graph-zoom, button')) return;
+            var startX = event.clientX;
+            var startY = event.clientY;
+            var originX = panX;
+            var originY = panY;
+            var moved = false;
+            function move(ev) {
+                var dx = ev.clientX - startX;
+                var dy = ev.clientY - startY;
+                if (dx * dx + dy * dy > 4) moved = true;
+                panX = originX + dx;
+                panY = originY + dy;
+                applyZoom();
+                if (ev.preventDefault) ev.preventDefault();
+            }
+            function up() {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', up);
+                if (moved) touched = true;
+            }
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
+        });
+        try {
+            viewport.addEventListener('wheel', onWheel, { passive: false });
+        } catch (error) {
+            viewport.addEventListener('wheel', onWheel, false);
+        }
+        window.addEventListener('resize', onResize);
+        setTimeout(function () {
+            paintWires();
+            fitZoom();
+        }, 30);
         return stage;
     }
 
@@ -10921,13 +11273,7 @@
         if (asset.links == null && asset.peers == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
         } else {
-            var form = null;
-            if (mayEdit(asset)) {
-                form = linkForm(asset);
-                form.hidden = true;
-            }
-            body.appendChild(linkGraph(asset, form));
-            if (form) body.appendChild(form);
+            body.appendChild(linkGraph(asset, false));
         }
         return moduleBlock(t('links'), body, cardCollapsed('links', false), null, 'links');
     }

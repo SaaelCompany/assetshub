@@ -11969,23 +11969,160 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-link-stage {
     position: relative;
     margin: 0 0 12px;
-    overflow-x: auto;
+    overflow: hidden;
     max-width: 100%;
 }
 
 .asset-tree-dialog.asset-tree-graph-dialog {
+    position: relative;
+    display: flex;
+    flex-direction: column;
     width: min(980px, calc(100vw - 32px));
     max-width: none;
     max-height: calc(100vh - 32px);
+    overflow: hidden;
 }
 
 .asset-tree-dialog .asset-tree-graph-frame {
-    overflow: auto;
-    max-height: calc(100vh - 150px);
+    overflow: hidden;
     margin-top: 12px;
     border: 1px solid #dfe1e6;
     border-radius: 3px;
     background: #fafbfc;
+}
+
+#asset-tree-app .asset-tree-link-viewport {
+    position: relative;
+    overflow: hidden;
+    height: 280px;
+    background: #fafbfc;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+}
+
+.asset-tree-dialog .asset-tree-link-viewport {
+    height: min(640px, calc(100vh - 180px));
+    border: 0;
+}
+
+.asset-tree-dialog .asset-tree-link-detail {
+    max-height: 120px;
+    overflow: hidden;
+}
+
+#asset-tree-app .asset-tree-link-world {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: auto;
+    overflow: visible;
+    transform-origin: 0 0;
+}
+
+.asset-tree-graph-zoom {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 3;
+    display: flex;
+    gap: 4px;
+}
+
+.asset-tree-graph-zoom button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font-size: 16px;
+    line-height: 26px;
+    cursor: pointer;
+}
+
+.asset-tree-graph-menu {
+    position: fixed;
+    z-index: 7000;
+    min-width: 148px;
+    padding: 4px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 8px 24px rgba(9, 30, 66, 0.18);
+}
+
+.asset-tree-graph-menu button {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    color: #172b4d;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.asset-tree-graph-menu button:hover {
+    background: #f4f5f7;
+}
+
+.asset-tree-graph-pick {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    top: 56px;
+    bottom: 16px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+}
+
+.asset-tree-graph-pick-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.asset-tree-graph-kinds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#asset-tree-app .asset-tree-link-world.is-dense .asset-tree-graph-mark {
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+}
+
+#asset-tree-app .asset-tree-link-world.is-packed .asset-tree-graph-mark {
+    width: 22px !important;
+    min-width: 22px !important;
+    height: 22px !important;
+    min-height: 22px !important;
+}
+
+#asset-tree-app .asset-tree-link-world.is-dense .asset-tree-graph-copy,
+#asset-tree-app .asset-tree-link-world.is-dense .asset-tree-graph-name,
+#asset-tree-app .asset-tree-link-world.is-dense .asset-tree-graph-copy button.asset-tree-linkish {
+    max-width: 108px;
+    font-size: 11px !important;
+}
+
+#asset-tree-app .asset-tree-link-world.is-packed .asset-tree-graph-copy,
+#asset-tree-app .asset-tree-link-world.is-packed .asset-tree-graph-name,
+#asset-tree-app .asset-tree-link-world.is-packed .asset-tree-graph-copy button.asset-tree-linkish {
+    max-width: 84px;
+    font-size: 10px !important;
 }
 
 #asset-tree-app .asset-tree-graph-tools {
@@ -12130,15 +12267,15 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-link-graph .asset-tree-graph-copy button.asset-tree-linkish {
     display: block !important;
     width: auto !important;
-    max-width: 100%;
-    max-height: 2.6em;
+    max-width: 140px;
     overflow: hidden;
     color: #6b778c !important;
     font-size: 12px !important;
     font-weight: 400 !important;
     line-height: 1.3 !important;
     text-align: left;
-    white-space: normal !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis;
 }
 
 #asset-tree-app .asset-tree-link-graph .asset-tree-graph-node:hover .asset-tree-graph-name,

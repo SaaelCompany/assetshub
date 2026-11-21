@@ -6928,8 +6928,7 @@ public class AssetServiceImpl implements AssetService {
         if (line == null || column < 0 || column >= line.size() || other == null) {
             return;
         }
-        String mark = ((other.getObjectKey() == null ? "" : other.getObjectKey()) + " "
-                + (other.getName() == null ? "" : other.getName())).trim();
+        String mark = other.getObjectKey() == null ? "" : other.getObjectKey().trim();
         if (mark.isEmpty()) {
             return;
         }
