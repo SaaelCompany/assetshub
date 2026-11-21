@@ -14,6 +14,7 @@ public class GrantDraft {
     private String schemaName;
     private String roleName;
     private String reach;
+    private String placeScope;
 
     public String getGroupName() {
         return groupName;
@@ -57,4 +58,6 @@ public class GrantDraft {
     public void setRoleName(String roleName) { this.roleName = roleName; }
     public String getReach() { return reach; }
     public void setReach(String reach) { this.reach = reach; }
+    public String getPlaceScope() { return placeScope; }
+    public void setPlaceScope(String placeScope) { this.placeScope = placeScope; }
 }

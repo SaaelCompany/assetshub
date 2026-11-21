@@ -226,6 +226,7 @@ import com.assetstree.jira.model.ClinicCircles;
 import com.assetstree.jira.model.GrantHomes;
 import com.assetstree.jira.model.GrantDraft;
 import com.assetstree.jira.model.OwnReach;
+import com.assetstree.jira.model.PlaceScope;
 import com.assetstree.jira.model.RoleDraft;
 import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
@@ -9439,6 +9440,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setCanGrant(assets || admin || hasCap(user, project, GrantCaps.GRANTS));
         dto.setActs(actsFor(user, project));
         dto.setReach(writeReach(user, project));
+        dto.setEditPlaces(editPlaces(user, project));
         dto.setCanArrange(canArrangeTypes(user, project));
         boolean open = canOpen(user, project);
         dto.setCanView(open);
@@ -9648,6 +9650,7 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         Set<Integer> assigned = assignedPlaces(asset.getProjectKey(), key);
+        Set<Integer> granted = grantedPlaces(user, asset.getProjectKey());
         if (rows != null) {
             for (int i = 0; i < rows.length; i++) {
                 AssetEntity row = rows[i];
@@ -9657,7 +9660,7 @@ public class AssetServiceImpl implements AssetService {
                 parents.put(Integer.valueOf(row.getID()), TreeLogic.normalizeParent(row.getParentId()));
                 String mol = row.getCustodianKey() == null ? "" : row.getCustodianKey().trim();
                 custodians.put(Integer.valueOf(row.getID()), mol);
-                if (locations.contains(row.getTypeKey()) && (key.equals(mol) || assigned.contains(Integer.valueOf(row.getID())))) {
+                if (locations.contains(row.getTypeKey()) && (key.equals(mol) || assigned.contains(Integer.valueOf(row.getID())) || granted.contains(Integer.valueOf(row.getID())))) {
                     held.add(Integer.valueOf(row.getID()));
                 }
             }
@@ -10365,6 +10368,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setTypeScope(row.getTypeScope() == null ? "" : row.getTypeScope());
         dto.setFieldScope(row.getFieldScope() == null ? "" : row.getFieldScope());
         dto.setSchemaName(row.getSchemaName() == null ? "" : row.getSchemaName());
+        dto.setPlaceScope(row.getPlaceScope() == null ? "" : row.getPlaceScope());
         return dto;
     }
 
@@ -10595,6 +10599,7 @@ public class AssetServiceImpl implements AssetService {
         row.setTypeScope(source.getTypeScope() == null ? "" : source.getTypeScope());
         row.setFieldScope(source.getFieldScope() == null ? "" : source.getFieldScope());
         row.setSchemaName(source.getSchemaName() == null ? "" : source.getSchemaName());
+        row.setPlaceScope(source.getPlaceScope() == null ? "" : source.getPlaceScope());
         row.save();
     }
 
@@ -18262,6 +18267,65 @@ public class AssetServiceImpl implements AssetService {
         row.setTypeScope(cleanList(draft == null ? null : draft.getTypeScope(), 64, 40));
         row.setFieldScope(cleanFieldScope(draft == null ? null : draft.getFieldScope()));
         row.setSchemaName(schema);
+        if (draft != null && draft.getPlaceScope() != null) {
+            row.setPlaceScope(PlaceScope.keep(draft.getPlaceScope(), locationIds(projectKey)));
+        }
+    }
+
+    private Set<Integer> locationIds(String projectKey) {
+        Set<String> locationTypes = new HashSet<String>();
+        AssetTypeEntity[] types = ao().find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (types != null) {
+            for (int i = 0; i < types.length; i++) {
+                if (types[i] != null && types[i].isLocation() && types[i].getTypeKey() != null) {
+                    locationTypes.add(types[i].getTypeKey());
+                }
+            }
+        }
+        Set<Integer> ids = new HashSet<Integer>();
+        AssetEntity[] rows = assetsIn(projectKey);
+        if (rows == null) {
+            return ids;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            AssetEntity row = rows[i];
+            if (row != null && locationTypes.contains(row.getTypeKey())) {
+                ids.add(Integer.valueOf(row.getID()));
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> grantedPlaces(ApplicationUser user, String projectKey) {
+        Set<Integer> ids = new HashSet<Integer>();
+        if (user == null || projectKey == null) {
+            return ids;
+        }
+        ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return ids;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (!grantApplies(user, rows[i])) {
+                continue;
+            }
+            ids.addAll(PlaceScope.read(rows[i].getPlaceScope()));
+        }
+        return ids;
+    }
+
+    private String editPlaces(ApplicationUser user, Project project) {
+        if (user == null || project == null) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (Integer id : grantedPlaces(user, project.getKey())) {
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(id.intValue());
+        }
+        return out.toString();
     }
 
     private String cleanList(String raw, int maxPart, int maxCount) {

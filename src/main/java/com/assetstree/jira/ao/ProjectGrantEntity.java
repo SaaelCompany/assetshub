@@ -73,4 +73,10 @@ public interface ProjectGrantEntity extends Entity {
     String getSchemaName();
 
     void setSchemaName(String schemaName);
+
+    /** Place ids this person or Jira group may edit, besides being the custodian. */
+    @StringLength(StringLength.UNLIMITED)
+    String getPlaceScope();
+
+    void setPlaceScope(String placeScope);
 }

@@ -1007,6 +1007,10 @@
             if (token.reach) state.actReach[token.base] = token.reach;
         });
         state.reach = project && project.reach === 'own' ? 'own' : 'all';
+        state.editPlaces = {};
+        String(project && project.editPlaces || '').split(',').forEach(function (part) {
+            if (part) state.editPlaces[part] = true;
+        });
         if (state.acts.objCreate) state.canCreate = true;
         if (state.acts.objEdit) state.canObjects = true;
         if (state.acts.objMove) state.canMove = true;
@@ -1026,6 +1030,7 @@
             if (isFolder(current)) {
                 if (current.custodian && current.custodian.userKey === state.userKey) return true;
                 if (placeApproverKey(current.id) === state.userKey) return true;
+                if (state.editPlaces && state.editPlaces[String(current.id)]) return true;
             }
             if (!current.parentId) break;
             current = byId()[current.parentId];
@@ -1321,6 +1326,7 @@
         body.schemaName = extra.schemaName || '';
         body.reach = extra.reach || 'all';
         body.roleName = extra.roleName || '';
+        if (extra.placeScope != null) body.placeScope = extra.placeScope;
         ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', body, function (status, payload) {
             if (status >= 200 && status < 300) {
                 rememberGrant(payload);
@@ -22643,7 +22649,7 @@
                     var value = document.createElement('input');
                     value.type = 'text';
                     value.maxLength = 80;
-                    value.placeholder = t('reportFieldValue');
+                    value.placeholder = t('reportFieldOptional');
                     value.setAttribute('aria-label', t('reportFieldValue'));
                     value.value = rule.value || '';
                     value.addEventListener('input', function () { rule.value = value.value; });
@@ -22830,19 +22836,18 @@
                 var statusKeys = Object.keys(pickedStatuses);
                 var holderKeys = Object.keys(pickedHolders);
                 var placeKeys = Object.keys(pickedPlaces);
-                if (group.value === 'field' && !field.value) {
-                    save.disabled = false;
-                    notify(t('reportField'));
-                    field.focus();
-                    return;
-                }
+                var breakdownKey = group.value === 'field' ? (field.value || '') : '';
                 var completeRules = [];
                 var brokenRule = false;
                 fieldRules.forEach(function (rule) {
                     var key = rule.key || '';
                     var text = (rule.value || '').replace(/^\s+|\s+$/g, '');
                     if (!key && !text) return;
-                    if (!key || !text || text.length > 80) brokenRule = true;
+                    if (key && !text) {
+                        if (!breakdownKey) breakdownKey = key;
+                        return;
+                    }
+                    if (!key || text.length > 80) brokenRule = true;
                     else completeRules.push({ key: key, value: text });
                 });
                 if (brokenRule) {
@@ -22851,6 +22856,26 @@
                     return;
                 }
                 var groupValue = plannedGroup();
+                var fieldHost = { type: 1, status: 1, place: 1, branch: 1, holder: 1, issued: 1 };
+                if (breakdownKey && groupValue.indexOf('field') < 0 && source.value !== 'done' && !reportOpsSource(source.value)) {
+                    if (fieldHost[group.value]) {
+                        var withField = groupValue + '+field';
+                        if (withField.length > 16) {
+                            save.disabled = false;
+                            notify(t('reportAlso'));
+                            return;
+                        }
+                        groupValue = withField;
+                    } else if (group.value !== 'field') {
+                        groupValue = 'field';
+                    }
+                }
+                if ((group.value === 'field' || groupValue.indexOf('field') >= 0) && !breakdownKey) {
+                    save.disabled = false;
+                    notify(t('reportField'));
+                    field.focus();
+                    return;
+                }
                 if (groupValue.length > 16) {
                     save.disabled = false;
                     notify(t('reportAlso'));
@@ -22866,7 +22891,7 @@
                     metric: reportOpsSource(source.value) ? source.value : (source.value === 'done' ? 'count' : metric.value),
                     filterField: '',
                     filterValue: '',
-                    fieldKey: group.value === 'field' ? field.value : '',
+                    fieldKey: breakdownKey,
                     attrKey: '',
                     attrValue: ''
                 };
@@ -33091,6 +33116,7 @@
     function issueDraft(packed) {
         var draft = state.accessDraft || {};
         var scope = draft.scope || { typeScope: '', fieldScope: '', schemaName: '' };
+        scope.placeScope = draft.placeScope || '';
         if (draft.mode === 'user') {
             if (!draft.userKey) {
                 notify(t('userSearch'));
@@ -33103,7 +33129,8 @@
                 fieldScope: scope.fieldScope,
                 schemaName: scope.schemaName,
                 reach: packed.reach,
-                roleName: ''
+                roleName: '',
+                placeScope: scope.placeScope
             }, packed.caps, null);
             return;
         }
@@ -33118,8 +33145,88 @@
             fieldScope: scope.fieldScope,
             schemaName: scope.schemaName,
             reach: packed.reach,
-            roleName: ''
+            roleName: '',
+            placeScope: scope.placeScope
         }, packed.caps, null);
+    }
+
+    function placeChoices() {
+        var list = [];
+        (state.assets || []).forEach(function (asset) {
+            if (!asset || !typeOf(asset.typeKey).location) return;
+            list.push(asset);
+        });
+        list.sort(function (left, right) {
+            return (left.name || '').localeCompare(right.name || '', 'ru');
+        });
+        return list;
+    }
+
+    function placeLabel(asset) {
+        if (!asset) return '';
+        var name = asset.name || asset.objectKey || String(asset.id);
+        if (asset.objectKey && asset.name) return name + ' · ' + asset.objectKey;
+        return name;
+    }
+
+    function grantPlaceNames(grant) {
+        var picked = {};
+        String(grant && grant.placeScope || '').split(',').forEach(function (part) {
+            if (part) picked[part] = true;
+        });
+        var names = [];
+        placeChoices().forEach(function (asset) {
+            if (picked[String(asset.id)]) names.push(asset.name || asset.objectKey || String(asset.id));
+        });
+        return names.join(', ');
+    }
+
+    function placeChecklist(picked) {
+        var list = el('div', 'asset-tree-check-list asset-tree-access-places');
+        var places = placeChoices();
+        if (!places.length) {
+            list.appendChild(el('p', 'asset-tree-hint', t('accessPlacesNone')));
+            return list;
+        }
+        places.forEach(function (asset) {
+            var label = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = !!picked[String(asset.id)];
+            box.addEventListener('change', function () {
+                if (box.checked) picked[String(asset.id)] = true;
+                else delete picked[String(asset.id)];
+            });
+            label.appendChild(box);
+            label.appendChild(document.createTextNode(placeLabel(asset)));
+            list.appendChild(label);
+        });
+        return list;
+    }
+
+    function openPlaceModal(grant) {
+        var picked = {};
+        String(grant && grant.placeScope || '').split(',').forEach(function (part) {
+            if (part) picked[part] = true;
+        });
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('accessPlaces')));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('accessPlacesHint')));
+            dialog.appendChild(placeChecklist(picked));
+            var actions = el('div', 'asset-tree-inline-actions');
+            actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+                postGrant(grant, grant.caps || '', null, {
+                    typeScope: grant.typeScope || '',
+                    fieldScope: grant.fieldScope || '',
+                    schemaName: grant.schemaName || '',
+                    reach: grant.reach || 'all',
+                    roleName: grant.roleName || '',
+                    placeScope: Object.keys(picked).join(',')
+                });
+            }));
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn', closeModal));
+            dialog.appendChild(actions);
+        });
     }
 
     function renderAccessGrant() {
@@ -33164,6 +33271,12 @@
         roleField.appendChild(el('span', null, t('roleUse')));
         roleField.appendChild(rolePick);
         form.appendChild(roleField);
+        var pickedPlaces = {};
+        var placeBlock = el('div', 'asset-tree-field asset-tree-access-place-field');
+        placeBlock.appendChild(el('span', null, t('accessPlaces')));
+        placeBlock.appendChild(el('p', 'asset-tree-hint', t('accessPlacesHint')));
+        placeBlock.appendChild(placeChecklist(pickedPlaces));
+        form.appendChild(placeBlock);
         var error = el('div', 'asset-tree-form-error');
         error.hidden = true;
         form.appendChild(error);
@@ -33221,13 +33334,13 @@
                     return;
                 }
                 if (!role) {
-                    state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '' };
+                    state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '', placeScope: Object.keys(pickedPlaces).join(',') };
                     openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
                         issueDraft(packed);
                     });
                     return;
                 }
-                postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
+                postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name, placeScope: Object.keys(pickedPlaces).join(',') }, role.caps || '', error);
                 return;
             }
             var groupName = principalInput.value.trim();
@@ -33237,13 +33350,13 @@
                 return;
             }
             if (!role) {
-                state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '' };
+                state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '', placeScope: Object.keys(pickedPlaces).join(',') };
                 openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
                     issueDraft(packed);
                 });
                 return;
             }
-            postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
+            postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name, placeScope: Object.keys(pickedPlaces).join(',') }, role.caps || '', error);
         }));
         function paintMode() {
             groupMode.className = 'asset-tree-btn' + (mode === 'group' ? ' primary' : '');
@@ -33289,6 +33402,8 @@
             var summary = el('div', 'asset-tree-access-person-summary');
             summary.appendChild(el('span', null, grant.roleName ? grant.roleName : t('roleCustom')));
             summary.appendChild(el('span', null, accessSummary(grant.roleName ? roleByName(grant.roleName) || grant : grant)));
+            var placeNames = grantPlaceNames(grant);
+            if (placeNames) summary.appendChild(el('span', null, placeNames));
             row.appendChild(summary);
             var actions = el('div', 'asset-tree-access-person-actions');
             if (grant.roleName) {
@@ -33313,6 +33428,9 @@
                     openGrantModal(grant);
                 }));
             }
+            actions.appendChild(button(t('accessPlacesEdit'), 'asset-tree-btn', function () {
+                openPlaceModal(grant);
+            }));
             actions.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
                 var suffix = grant.userKey
                     ? '?user=' + encodeURIComponent(grant.userKey)

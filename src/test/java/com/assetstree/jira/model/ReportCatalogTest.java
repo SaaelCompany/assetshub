@@ -12,6 +12,7 @@ public class ReportCatalogTest {
         assertEquals("", ReportCatalog.chart("waffle"));
         assertEquals("field", ReportCatalog.group("field"));
         assertEquals("type+status", ReportCatalog.group("type+status"));
+        assertEquals("type+field", ReportCatalog.group("type+field"));
         assertEquals("bar,pie", ReportCatalog.chart("bar,pie"));
         assertEquals("histogram,scatter", ReportCatalog.chart("histogram,scatter"));
         assertEquals("donut,pie,bar,bars,line,area,histogram,scatter,radar,gantt,venn",
