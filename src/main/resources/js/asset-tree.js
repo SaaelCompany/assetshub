@@ -33246,12 +33246,14 @@
         var userMode = button(t('accessUser'), 'asset-tree-btn', function () { setMode('user'); });
         kind.appendChild(groupMode);
         kind.appendChild(userMode);
-        form.appendChild(kind);
         var principalInput = input('grant-principal', '', false);
         principalInput.placeholder = t('groupSearch');
         var principalField = field(t('accessGroup'), principalInput, true);
         var principalLabel = principalField.querySelector('span');
-        form.appendChild(principalField);
+        var who = el('div', 'asset-tree-access-give-row');
+        who.appendChild(kind);
+        who.appendChild(principalField);
+        form.appendChild(who);
         var suggest = el('div', 'asset-tree-suggest');
         form.appendChild(suggest);
         var rolePick = document.createElement('select');

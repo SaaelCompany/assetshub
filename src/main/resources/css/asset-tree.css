@@ -7609,10 +7609,17 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-access-give {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin: 0 0 8px;
+}
+
+#asset-tree-app .asset-tree-access-give-row {
+    display: flex;
     flex-wrap: wrap;
     gap: 8px 12px;
     align-items: flex-end;
-    margin: 0 0 8px;
 }
 
 #asset-tree-app .asset-tree-access-give .asset-tree-grant-kind {
@@ -7620,29 +7627,34 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-access-give .asset-tree-field {
-    flex: 1 1 200px;
-    max-width: 280px;
+    flex: none;
+    width: min(420px, 100%);
+    max-width: none;
     margin: 0;
 }
 
+#asset-tree-app .asset-tree-access-give-row .asset-tree-field {
+    flex: 1 1 240px;
+    width: auto;
+    max-width: 420px;
+}
+
+#asset-tree-app .asset-tree-access-give > .asset-tree-access-place-field {
+    width: 100%;
+}
+
+#asset-tree-app .asset-tree-access-give > .asset-tree-suggest:empty {
+    display: none;
+}
+
 #asset-tree-app .asset-tree-access-give > button.asset-tree-btn {
-    flex: 0 0 auto;
+    align-self: flex-start;
     width: auto;
     margin: 0;
 }
 
-#asset-tree-app .asset-tree-access-give .asset-tree-suggest,
-#asset-tree-app .asset-tree-access-give .asset-tree-form-error {
-    flex: 1 0 100%;
-}
-
-#asset-tree-app .asset-tree-access-give .asset-tree-access-place-field {
-    flex: 1 0 100%;
-    max-width: none;
-}
-
 #asset-tree-app .asset-tree-access-places {
-    max-height: 220px;
+    max-height: 180px;
     overflow: auto;
 }
 
@@ -7700,8 +7712,10 @@ a.asset-tree-preview-icon:focus {
     grid-template-columns: 1fr;
 }
 
-#asset-tree-app.is-phone .asset-tree-access-give .asset-tree-field {
-    flex-basis: 100%;
+#asset-tree-app.is-phone .asset-tree-access-give .asset-tree-field,
+#asset-tree-app.is-phone .asset-tree-access-give-row .asset-tree-field {
+    flex: none;
+    width: 100%;
     max-width: none;
 }
 
