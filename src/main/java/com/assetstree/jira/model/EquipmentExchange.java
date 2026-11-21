@@ -1547,7 +1547,16 @@ public final class EquipmentExchange {
                 phrase = true;
             }
         }
-        return key && name && phrase && !type && !place && !linkTo;
+        boolean classic = key && name && phrase && !type && !place && !linkTo;
+        return classic || (titled(sheet, labels, "linkSheet") && key && phrase && !linkTo);
+    }
+
+    private static boolean titled(EquipmentSheet.Sheet sheet, Map<String, String> labels, String role) {
+        if (sheet == null || labels == null || sheet.getName() == null || role == null) {
+            return false;
+        }
+        String title = labels.get(role);
+        return title != null && same(sheet.getName(), title);
     }
 
     private static void readWideLinkSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
@@ -1979,7 +1988,7 @@ public final class EquipmentExchange {
                 key = true;
             }
         }
-        return life && key && !name;
+        return (life && key && !name) || (titled(sheet, labels, "lifeTitle") && key && life);
     }
 
     private static void readLifeSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
@@ -2046,7 +2055,7 @@ public final class EquipmentExchange {
                 name = true;
             }
         }
-        return kind && !name;
+        return (kind && !name) || (titled(sheet, labels, "serviceSheet") && kind);
     }
 
     private static void readServiceSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Directory people,

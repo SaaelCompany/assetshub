@@ -60,7 +60,10 @@ public final class DocFields {
         put(out, card.address, "address", "адрес");
         put(out, card.city, "city", "город");
         put(out, card.mol, "mol", "мол");
+        put(out, NameShort.of(card.mol), "мол кратко", "mol short");
         put(out, card.issued, "issued", "issuedto", "кому выдано", "выдано");
+        put(out, NameShort.of(card.issued), "кому выдано кратко", "выдано кратко", "issued short");
+        put(out, NameShort.of(first(card.issued, card.mol)), "фио кратко", "name short");
         put(out, card.role, "должность", "роль", "title");
         put(out, card.phone, "phone", "телефон", "тел");
         put(out, card.email, "email", "почта");
@@ -74,6 +77,7 @@ public final class DocFields {
         put(out, card.issuedEmail, "почта кому выдано", "issued email");
         put(out, card.issuedDepartment, "отдел кому выдано", "issued department");
         put(out, card.custodian, "custodian", "ответственный");
+        put(out, NameShort.of(card.custodian), "ответственный кратко", "custodian short");
         put(out, card.description, "description", "описание");
         put(out, card.project, "project", "организация", "клиника");
         put(out, card.today, "today", "date", "дата");

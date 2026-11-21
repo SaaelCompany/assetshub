@@ -349,7 +349,30 @@
         { key: 'certificate', g: 'office', d: 'M4,3C2.89,3 2,3.89 2,5V15A2,2 0 0,0 4,17H12V22L15,19L18,22V17H20A2,2 0 0,0 22,15V8L22,6V5A2,2 0 0,0 20,3H16V3H4M12,5L15,7L18,5V8.5L21,10L18,11.5V15L15,13L12,15V11.5L9,10L12,8.5V5M4,5H9V7H4V5M4,9H7V11H4V9M4,13H9V15H4V13Z' },
         { key: 'seal', g: 'office', d: 'M20.39,19.37L16.38,18L15,22L11.92,16L9,22L7.62,18L3.61,19.37L6.53,13.37C5.57,12.17 5,10.65 5,9A7,7 0 0,1 12,2A7,7 0 0,1 19,9C19,10.65 18.43,12.17 17.47,13.37L20.39,19.37M7,9L9.69,10.34L9.5,13.34L12,11.68L14.5,13.33L14.33,10.34L17,9L14.32,7.65L14.5,4.67L12,6.31L9.5,4.65L9.67,7.66L7,9Z' },
         { key: 'bicycle', g: 'office', d: 'M19 10C18.44 10 17.91 10.11 17.41 10.28L14.46 4.5H11V6H13.54L14.42 7.72L12 13.13L10.23 8.95C10.5 8.85 10.74 8.58 10.74 8.25C10.74 7.84 10.41 7.5 10 7.5H8C7.58 7.5 7.24 7.84 7.24 8.25S7.58 9 8 9H8.61L10.86 14.25H9.92C9.56 11.85 7.5 10 5 10C2.24 10 0 12.24 0 15S2.24 20 5 20C7.5 20 9.56 18.15 9.92 15.75H12.5L15.29 9.43L16.08 10.96C14.82 11.87 14 13.34 14 15C14 17.76 16.24 20 19 20S24 17.76 24 15 21.76 10 19 10M5 18.5C3.07 18.5 1.5 16.93 1.5 15S3.07 11.5 5 11.5C6.67 11.5 8.07 12.68 8.41 14.25H4V15.75H8.41C8.07 17.32 6.67 18.5 5 18.5M19 18.5C17.07 18.5 15.5 16.93 15.5 15C15.5 13.92 16 12.97 16.77 12.33L18.57 15.85L19.89 15.13L18.1 11.63C18.39 11.56 18.69 11.5 19 11.5C20.93 11.5 22.5 13.07 22.5 15S20.93 18.5 19 18.5Z' },
-        { key: 'bus', g: 'office', d: 'M18,11H6V6H18M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16Z' }
+        { key: 'bus', g: 'office', d: 'M18,11H6V6H18M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16Z' },
+        { key: 'ultrasound', g: 'medical', d: 'M3 4h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-2 3v-3H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm2 3h8v1.5H5V7zm0 3h5v1.5H5V10zm12 1c2 0 4 2 4 5h-2c0-2-1-3-2-3v-2z' },
+        { key: 'defibrillator', g: 'medical', d: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm2 3v4h3l2-3 2 6 2-4h3V6h-4l-1 2-2-4-2 4H6z' },
+        { key: 'xray', g: 'medical', d: 'M4 3h16v3H4V3zm2 5h12v11H6V8zm3 2v2h6v-2H9zm0 4v2h6v-2H9zm2 4h2v2h-2v-2z' },
+        { key: 'endoscope', g: 'medical', d: 'M8 3h3v6h2a5 5 0 0 1 5 5v2h-2v-2a3 3 0 0 0-3-3H8V3zm1 12a3 3 0 1 1 0 6 3 3 0 0 1 0-6z' },
+        { key: 'autoclave', g: 'medical', d: 'M6 3h12v4H6V3zm-2 6h16v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9zm4 2v6h2v-6H8zm4 0v6h2v-6h-2z' },
+        { key: 'centrifuge', g: 'medical', d: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm-5 6 4 2-4 2v-4zm10 0v4l-4-2 4-2z' },
+        { key: 'infusion', g: 'medical', d: 'M11 2h2v3h4v2h-4v11a3 3 0 1 1-2 0V7H7V5h4V2zm-5 16h4v2H6v-2z' },
+        { key: 'oxygen', g: 'medical', d: 'M9 2h6v3h2v15a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5h2V2zm1 7h4v2h-4V9zm0 4h4v2h-4v-2z' },
+        { key: 'ventilator', g: 'medical', d: 'M3 5h8v6H3V5zm10 0h8v6h-8V5zM7 11v3h4v2H6v3h12v-3h-5v-2h4v-3H7z' },
+        { key: 'ecg', g: 'medical', d: 'M2 13h4l2-6 3 10 2-4h9v-2h-7l-2 4-3-10-2 6H2v2z' },
+        { key: 'otoscope', g: 'medical', d: 'M8 3h6v5l4 3v2h-3v6a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-6H6v-2l2-3V3zm2 2v4h2V5h-2z' },
+        { key: 'scalpel', g: 'medical', d: 'M3 14l8-8 2 2-6 8H3v-2zm10-10 2 2 6 1-7 7-3-3 2-7z' },
+        { key: 'crutch', g: 'medical', d: 'M8 2h3l2 6h2v2h-2l1 12h-2l-1-8H9l-1 8H6l1-12H5V8h2l1-6zm1 2 .6 3h2.2L12 4H9z' },
+        { key: 'mri', g: 'medical', d: 'M2 8a8 8 0 0 1 16 0v8H2V8zm4 0a4 4 0 0 1 8 0v4H6V8zm16-2v12h2V6h-2zM4 18h16v2H4v-2z' },
+        { key: 'sterilizer', g: 'medical', d: 'M5 3h14v4H5V3zM4 9h16v10H4V9zm3 2v2h10v-2H7zm0 4v2h6v-2H7z' },
+        { key: 'stretcher', g: 'medical', d: 'M2 14h20v2H2v-2zm3-6h14l2 6H3l2-6zm2 1.5L6.2 12h11.6L16 9.5H7zM6 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z' },
+        { key: 'incubator', g: 'medical', d: 'M4 6h16a1 1 0 0 1 1 1v8H3V7a1 1 0 0 1 1-1zm-1 11h18v2H3v-2zM8 9h8v2H8V9z' },
+        { key: 'suction', g: 'medical', d: 'M5 14a5 5 0 1 1 8 4H9v2h6v2H7v-4a5 5 0 0 1-2-4zm12-8h3v3h-2V8h-1V6zM15 4h2v4h-2V4z' },
+        { key: 'dentalchair', g: 'medical', d: 'M7 3h4v4H7V3zM6 8h8l3 4v2H5v-2l1-4zm-1 8h14v2H5v-2zm2 3h4v2H7v-2z' },
+        { key: 'generator', g: 'facility', d: 'M3 6h18v12H3V6zm2 2v8h14V8H5zm2 2h4v4H7v-4zm8 1h2v2h-2v-2z' },
+        { key: 'compressor', g: 'facility', d: 'M4 4h8v14H4V4zm2 2v4h4V6H6zm10-1h4v8h-4V5zm1 2v4h2V7h-2zM4 20h16v2H4v-2z' },
+        { key: 'ups', g: 'it', d: 'M7 3h10v14H7V3zm2 2v4h6V5H9zm1 8h4v2h-4v-2zM6 19h12v2H6v-2z' },
+        { key: 'labcentrifuge', g: 'medical', d: 'M4 4h16v12H4V4zm2 2v8h12V6H6zm6 1 3 5H9l3-5zM8 18h8v2H8v-2z' }
     ];
     var STATUSES = ['in_stock', 'in_use', 'repair', 'reserve', 'maintenance', 'written_off'];
     var CATEGORIES = ['todo', 'progress', 'done', 'blue', 'orange', 'red', 'purple', 'teal', 'gray', 'pink', 'lime', 'brown'];
@@ -984,6 +1007,10 @@
             if (token.reach) state.actReach[token.base] = token.reach;
         });
         state.reach = project && project.reach === 'own' ? 'own' : 'all';
+        state.editPlaces = {};
+        String(project && project.editPlaces || '').split(',').forEach(function (part) {
+            if (part) state.editPlaces[part] = true;
+        });
         if (state.acts.objCreate) state.canCreate = true;
         if (state.acts.objEdit) state.canObjects = true;
         if (state.acts.objMove) state.canMove = true;
@@ -1003,6 +1030,7 @@
             if (isFolder(current)) {
                 if (current.custodian && current.custodian.userKey === state.userKey) return true;
                 if (placeApproverKey(current.id) === state.userKey) return true;
+                if (state.editPlaces && (state.editPlaces['*'] || state.editPlaces[String(current.id)])) return true;
             }
             if (!current.parentId) break;
             current = byId()[current.parentId];
@@ -1298,6 +1326,7 @@
         body.schemaName = extra.schemaName || '';
         body.reach = extra.reach || 'all';
         body.roleName = extra.roleName || '';
+        if (extra.placeScope != null) body.placeScope = extra.placeScope;
         ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/grants', body, function (status, payload) {
             if (status >= 200 && status < 300) {
                 rememberGrant(payload);
@@ -5056,14 +5085,30 @@
                 colors.set(color);
                 onPick(color);
             });
-            buttons[color] = swatch;
+            buttons[color.toLowerCase()] = swatch;
             colors.appendChild(swatch);
         });
+        var custom = el('input', 'asset-tree-color-custom');
+        custom.type = 'color';
+        custom.setAttribute('aria-label', t('colorCustom'));
+        custom.title = t('colorCustom');
+        custom.addEventListener('input', function () {
+            colors.set(custom.value);
+            onPick(custom.value);
+        });
+        colors.appendChild(custom);
         colors.set = function (color) {
+            var wanted = String(color || '').toLowerCase();
+            var known = false;
             Object.keys(buttons).forEach(function (key) {
-                if (key === color) buttons[key].classList.add('is-selected');
+                var on = key === wanted;
+                if (on) known = true;
+                if (on) buttons[key].classList.add('is-selected');
                 else buttons[key].classList.remove('is-selected');
             });
+            if (/^#[0-9a-f]{6}$/.test(wanted)) custom.value = wanted;
+            if (known) custom.classList.remove('is-selected');
+            else custom.classList.add('is-selected');
         };
         colors.set(initial);
         return colors;
@@ -8154,7 +8199,75 @@
             field.appendChild(links);
             field.appendChild(search);
         }
+        if (isFolder(asset)) field.appendChild(clinicPlaceBox(asset));
         return field;
+    }
+
+    function ensureClinics(done) {
+        if (state.clinics) {
+            if (done) done();
+            return;
+        }
+        if (state.clinicsLoading) return;
+        state.clinicsLoading = true;
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/circles', null, function (status, payload) {
+            state.clinicsLoading = false;
+            if (status === 200) state.clinics = payload || [];
+            else state.clinics = [];
+            if (done) done();
+            else if (state.view === 'settings' && (state.schemaTab === 'access' || state.schemaTab === 'portal')) renderFrame();
+        });
+    }
+
+    function clinicPlaceBox(asset) {
+        var box = el('div', 'asset-tree-clinic-on-place');
+        box.appendChild(el('div', 'asset-tree-people-label', t('clinicOnPlace')));
+        var circles = asset.circles || [];
+        if (!circles.length) box.appendChild(el('p', 'asset-tree-hint', t('clinicEmpty')));
+        circles.forEach(function (circle) {
+            var row = el('div', 'asset-tree-person');
+            row.appendChild(el('strong', null, circle.name || ''));
+            if (state.canGrant && mayEdit(asset)) {
+                row.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
+                    ajax('DELETE', '/assets/' + asset.id + '/circles/' + circle.id, null, function (status, payload) {
+                        if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                        else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }));
+            }
+            box.appendChild(row);
+        });
+        if (state.canGrant && mayEdit(asset)) {
+            if (!state.clinics) {
+                ensureClinics(function () { selectAsset(asset.id, true); });
+            } else {
+                var taken = {};
+                circles.forEach(function (circle) { taken[circle.id] = true; });
+                var free = (state.clinics || []).filter(function (circle) { return circle && !taken[circle.id]; });
+                if (free.length) {
+                    var pick = el('select', 'asset-tree-input');
+                    var blank = document.createElement('option');
+                    blank.value = '';
+                    blank.textContent = t('clinicAdd');
+                    pick.appendChild(blank);
+                    free.forEach(function (circle) {
+                        var option = document.createElement('option');
+                        option.value = String(circle.id);
+                        option.textContent = circle.name || '';
+                        pick.appendChild(option);
+                    });
+                    pick.addEventListener('change', function () {
+                        if (!pick.value) return;
+                        ajax('POST', '/assets/' + asset.id + '/circles/' + encodeURIComponent(pick.value), null, function (status, payload) {
+                            if (status >= 200 && status < 300) selectAsset(asset.id, true);
+                            else notify((payload && payload.message) || t('errorTitle'));
+                        });
+                    });
+                    box.appendChild(pick);
+                }
+            }
+        }
+        return box;
     }
 
     function fileBlock(asset, folded) {
@@ -9639,7 +9752,7 @@
                 extra.push({ icon: 'image', label: t('photoAdd'), onClick: function () { pickPhoto(pictured); } });
             }
         }
-        if (!isFolder(asset)) ops.appendChild(documentButton(asset));
+        if (!isFolder(asset) && moduleOn('docs')) ops.appendChild(documentButton(asset));
         if (!isFolder(asset) && moduleOn('tni') && moduleSetup().tniPing !== false) {
             var ping = toolButton(t('tniPing'), 'ping', function () { pingAsset(asset); });
             var pingState = pingMark(asset);
@@ -10207,6 +10320,15 @@
         return moduleBlock(t('peers'), body);
     }
 
+    function linkChoice(link) {
+        var type = link && link.type;
+        var incoming = !!(link && link.direction === 'in');
+        if (type === 'installed') return incoming ? 'carries' : 'installed';
+        if (type === 'part') return incoming ? 'includes' : 'part';
+        if (type === 'depends') return incoming ? 'needed' : 'depends';
+        return type || '';
+    }
+
     function linkPhrase(link) {
         var type = link && link.type;
         var incoming = !!(link && link.direction === 'in');
@@ -10370,18 +10492,43 @@
 
     function relationNodes(asset) {
         var nodes = [];
-        var linked = {};
+        var byAsset = {};
         var peers = {};
+        function remember(node) {
+            if (!node || !node.id || node.id === asset.id) return;
+            var prev = byAsset[node.id];
+            if (prev) {
+                if (node.phrase && prev.kind === node.kind && prev.phrase.indexOf(node.phrase) < 0) {
+                    prev.phrase = prev.phrase ? prev.phrase + ', ' + node.phrase : node.phrase;
+                }
+                if (!prev.linkId && node.linkId) prev.linkId = node.linkId;
+                if (node.linkId) {
+                    if (!prev.linkIds) prev.linkIds = prev.linkId ? [prev.linkId] : [];
+                    if (prev.linkIds.indexOf(node.linkId) < 0) prev.linkIds.push(node.linkId);
+                }
+                if (!prev.choice && node.choice) prev.choice = node.choice;
+                if (!prev.peer && node.peer) prev.peer = node.peer;
+                if (!prev.typeKey && node.typeKey) prev.typeKey = node.typeKey;
+                if (!prev.meta && node.meta) prev.meta = node.meta;
+                if (prev.kind === 'mesh' && node.kind !== 'mesh') {
+                    prev.kind = node.kind;
+                    prev.phrase = node.phrase || prev.phrase;
+                    prev.linkId = node.linkId || prev.linkId;
+                }
+                return;
+            }
+            byAsset[node.id] = node;
+            nodes.push(node);
+        }
         (asset.peers || []).forEach(function (peer) {
             if (peer && peer.id) peers[peer.id] = peer;
         });
         (asset.links || []).forEach(function (link) {
             var id = linkOtherId(link);
-            if (id) linked[id] = true;
             var meta = (link.attributes || []).map(function (item) {
                 return (item.key || '') + ': ' + (item.value || '');
             }).join(' · ');
-            nodes.push({
+            remember({
                 id: id,
                 name: link.name || link.objectKey || '',
                 key: link.objectKey || '',
@@ -10391,14 +10538,16 @@
                 kind: 'link',
                 incoming: link.direction === 'in',
                 linkId: link.id,
-                typeKey: (id && byId()[id] && byId()[id].typeKey) || '',
+                linkIds: link.id ? [link.id] : [],
+                choice: linkChoice(link),
+                typeKey: (id && byId()[id] && byId()[id].typeKey) || (link.card && link.card.typeKey) || '',
                 meta: meta,
                 peer: link.card || peers[id] || null
             });
         });
         (asset.peers || []).forEach(function (peer) {
-            if (!peer || !peer.id || linked[peer.id]) return;
-            nodes.push({
+            if (!peer || !peer.id) return;
+            remember({
                 id: peer.id,
                 name: peer.name || peer.objectKey || '',
                 key: peer.objectKey || '',
@@ -10406,8 +10555,25 @@
                 open: !!peer.open,
                 projectKey: peer.projectKey,
                 kind: 'peer',
-                typeKey: (peer.id && byId()[peer.id] && byId()[peer.id].typeKey) || '',
+                typeKey: (byId()[peer.id] && byId()[peer.id].typeKey) || peer.typeKey || '',
                 peer: peer
+            });
+        });
+        (asset.mesh || []).forEach(function (tie) {
+            if (!tie) return;
+            [tie.from, tie.to].forEach(function (end) {
+                if (!end || !end.id) return;
+                remember({
+                    id: end.id,
+                    name: end.name || end.objectKey || '',
+                    key: end.objectKey || '',
+                    phrase: tie.type === 'peer' ? t('linkRelated') : linkPhrase({ type: tie.type, direction: tie.direction }),
+                    open: !!end.open,
+                    projectKey: end.projectKey,
+                    kind: 'mesh',
+                    typeKey: end.typeKey || (byId()[end.id] && byId()[end.id].typeKey) || '',
+                    peer: end
+                });
             });
         });
         return nodes;
@@ -10428,6 +10594,7 @@
         card.title = caption;
         if (!self && node && node.open && node.id) {
             copy.appendChild(button(title, 'asset-tree-linkish', function (event) {
+                if (event && event.detail > 1) return;
                 if (event && event.stopPropagation) event.stopPropagation();
                 goToAsset(node.projectKey, node.id);
             }));
@@ -10435,20 +10602,6 @@
             copy.appendChild(el('span', 'asset-tree-graph-name', title));
         }
         card.appendChild(copy);
-        if (!self && mayEdit(asset) && node && (node.kind === 'peer' ? node.id : node.linkId)) {
-            var remove = button('\u00d7', 'asset-tree-peer-remove', function (event) {
-                if (event && event.stopPropagation) event.stopPropagation();
-                var path = node.kind === 'peer'
-                    ? '/assets/' + asset.id + '/peers/' + node.id
-                    : '/assets/' + asset.id + '/links/' + node.linkId;
-                ajax('DELETE', path, null, function (status, payload) {
-                    if (status >= 200 && status < 300) selectAsset(asset.id, true);
-                    else setFormError((payload && payload.message) || t('errorTitle'));
-                });
-            });
-            remove.setAttribute('aria-label', t('unlink'));
-            card.appendChild(remove);
-        }
         return card;
     }
 
@@ -10482,70 +10635,303 @@
         if (x !== x || y !== y) return fallback;
         if (x < 0) x = 0;
         if (y < 0) y = 0;
-        if (x > 480) x = 480;
-        if (y > 720) y = 720;
+        if (x > 1800) x = 1800;
+        if (y > 1800) y = 1800;
         return { x: Math.round(x), y: Math.round(y) };
     }
 
     function linkNodeKey(node, self) {
         if (self) return 'self';
-        if (node && node.kind === 'peer') return 'peer:' + node.id;
-        return 'link:' + (node ? node.linkId : '');
+        return 'asset:' + (node ? node.id : '');
     }
 
-    function linkGraph(asset, form) {
+    var graphMenuNode = null;
+    var graphMenuAway = null;
+
+    function closeGraphMenu() {
+        if (graphMenuAway) {
+            document.removeEventListener('mousedown', graphMenuAway, true);
+            graphMenuAway = null;
+        }
+        if (graphMenuNode && graphMenuNode.parentNode) graphMenuNode.parentNode.removeChild(graphMenuNode);
+        graphMenuNode = null;
+    }
+
+    function openGraphMenu(x, y, items) {
+        closeGraphMenu();
+        var menu = el('div', 'asset-tree-graph-menu');
+        items.forEach(function (item) {
+            menu.appendChild(button(item.label, '', function () {
+                closeGraphMenu();
+                item.run();
+            }));
+        });
+        menu.style.left = Math.round(x) + 'px';
+        menu.style.top = Math.round(y) + 'px';
+        document.body.appendChild(menu);
+        graphMenuNode = menu;
+        graphMenuAway = function (event) {
+            if (!graphMenuNode || graphMenuNode.contains(event.target)) return;
+            closeGraphMenu();
+        };
+        document.addEventListener('mousedown', graphMenuAway, true);
+    }
+
+    function graphObjects(asset) {
+        var rows = [];
+        (state.assets || []).forEach(function (item) {
+            if (!item || item.id === asset.id || isFolder(item)) return;
+            rows.push(item);
+        });
+        rows.sort(function (left, right) {
+            return String(left.name || left.objectKey || '').localeCompare(String(right.name || right.objectKey || ''), 'ru');
+        });
+        return rows;
+    }
+
+    function graphKinds() {
+        return [
+            ['carries', 'linkCarries'],
+            ['installed', 'linkInstalled'],
+            ['includes', 'linkIncludes'],
+            ['part', 'linkPart'],
+            ['needed', 'linkNeeded'],
+            ['depends', 'linkDepends']
+        ];
+    }
+
+    function closeGraphPick() {
+        var picks = document.querySelectorAll('.asset-tree-graph-pick, .asset-tree-graph-kind');
+        var i;
+        for (i = 0; i < picks.length; i++) {
+            if (picks[i].parentNode) picks[i].parentNode.removeChild(picks[i]);
+        }
+    }
+
+    function graphPickError(message) {
+        var hint = document.querySelector('.asset-tree-graph-pick-error');
+        if (hint) hint.textContent = message || '';
+        if (message) setFormError(message);
+    }
+
+    function postGraphLink(asset, otherId, choice, done) {
+        if (choice === 'peer') {
+            ajax('POST', '/assets/' + asset.id + '/peers', { assetId: otherId }, done);
+            return;
+        }
+        ajax('POST', '/assets/' + asset.id + '/links', { assetId: otherId, type: choice, attributes: [] }, done);
+    }
+
+    function graphDropPaths(asset, node) {
+        var paths = [];
+        var ids = node.linkIds && node.linkIds.length ? node.linkIds : (node.linkId ? [node.linkId] : []);
+        var i;
+        for (i = 0; i < ids.length; i++) paths.push('/assets/' + asset.id + '/links/' + ids[i]);
+        var peers = asset.peers || [];
+        for (i = 0; i < peers.length; i++) {
+            if (peers[i] && peers[i].id === node.id) {
+                paths.push('/assets/' + asset.id + '/peers/' + node.id);
+                break;
+            }
+        }
+        if (!paths.length && node.kind === 'peer') paths.push('/assets/' + asset.id + '/peers/' + node.id);
+        return paths;
+    }
+
+    function ajaxDeletes(paths, done) {
+        var index = 0;
+        function next(status, payload) {
+            if (status && (status < 200 || status >= 300)) {
+                done(status, payload);
+                return;
+            }
+            if (index >= paths.length) {
+                done(200, null);
+                return;
+            }
+            ajax('DELETE', paths[index], null, function (st, body) {
+                index += 1;
+                next(st, body);
+            });
+        }
+        next(200, null);
+    }
+
+    function reloadOpenGraph(assetId) {
+        ajax('GET', '/assets/' + assetId, null, function (status, payload) {
+            if (status !== 200 || !payload) return;
+            closeGraphPick();
+            if (state.selectedId === assetId) showDetail(payload, false);
+            var frame = document.querySelector('.asset-tree-graph-dialog .asset-tree-graph-frame');
+            if (!frame) return;
+            frame.innerHTML = '';
+            frame.appendChild(linkGraph(payload, true));
+        });
+    }
+
+    function openGraphPick(asset, title, onChoose) {
+        var dialog = document.querySelector('.asset-tree-graph-dialog');
+        if (!dialog) return;
+        closeGraphPick();
+        var panel = el('div', 'asset-tree-graph-pick');
+        var head = el('div', 'asset-tree-block-head');
+        head.appendChild(el('h3', null, title));
+        head.appendChild(button(t('cancel'), 'asset-tree-btn', closeGraphPick));
+        panel.appendChild(head);
+        panel.appendChild(el('p', 'asset-tree-hint asset-tree-graph-pick-error', ''));
+        var search = el('input');
+        search.type = 'search';
+        search.className = 'asset-tree-text';
+        search.placeholder = t('peerSearch');
+        panel.appendChild(search);
+        var list = el('div', 'asset-tree-graph-pick-list');
+        panel.appendChild(list);
+        var seq = 0;
+        function paint(rows) {
+            list.innerHTML = '';
+            if (!rows.length) {
+                list.appendChild(el('p', 'asset-tree-hint', t('noResults')));
+                return;
+            }
+            rows.forEach(function (item) {
+                var caption = item.name || item.objectKey || '';
+                if (item.objectKey && item.objectKey !== caption) caption += ' \u00b7 ' + item.objectKey;
+                list.appendChild(button(caption, 'asset-tree-user-hit', function () {
+                    onChoose(item);
+                }));
+            });
+        }
+        function localRows(query) {
+            var needle = query.toLowerCase();
+            return graphObjects(asset).filter(function (item) {
+                if (!needle) return true;
+                var blob = ((item.name || '') + ' ' + (item.objectKey || '')).toLowerCase();
+                return blob.indexOf(needle) >= 0;
+            });
+        }
+        function refresh() {
+            var query = search.value.trim();
+            var rows = localRows(query);
+            paint(rows);
+            if (query.length < 2) return;
+            var token = ++seq;
+            ajax('GET', '/assets/' + asset.id + '/peers/search?q=' + encodeURIComponent(query), null, function (status, payload) {
+                if (token !== seq || search.value.trim() !== query || status !== 200 || !payload) return;
+                var seen = {};
+                rows.forEach(function (item) { seen[item.id] = true; });
+                payload.forEach(function (item) {
+                    if (!item || item.id === asset.id || seen[item.id]) return;
+                    seen[item.id] = true;
+                    rows.push(item);
+                });
+                paint(rows);
+            });
+        }
+        search.addEventListener('input', refresh);
+        paint(localRows(''));
+        dialog.appendChild(panel);
+        search.focus();
+    }
+
+    function askGraphKind(asset, other, onDone) {
+        var dialog = document.querySelector('.asset-tree-graph-dialog');
+        if (!dialog) return;
+        closeGraphPick();
+        var panel = el('div', 'asset-tree-graph-kind');
+        var head = el('div', 'asset-tree-block-head');
+        head.appendChild(el('h3', null, t('linkGraphKind')));
+        head.appendChild(button(t('cancel'), 'asset-tree-btn', closeGraphPick));
+        panel.appendChild(head);
+        var caption = other.name || other.objectKey || '';
+        if (other.objectKey && other.objectKey !== caption) caption += ' \u00b7 ' + other.objectKey;
+        panel.appendChild(el('p', 'asset-tree-hint', caption));
+        panel.appendChild(el('p', 'asset-tree-hint asset-tree-graph-pick-error', ''));
+        var kinds = el('div', 'asset-tree-graph-kinds');
+        graphKinds().forEach(function (pair) {
+            kinds.appendChild(button(t(pair[1]), 'asset-tree-btn', function () {
+                onDone(pair[0]);
+            }));
+        });
+        panel.appendChild(kinds);
+        dialog.appendChild(panel);
+    }
+
+    function finishGraphChange(asset, status, payload) {
+        if (status >= 200 && status < 300) {
+            notify(t('linkAdded'));
+            reloadOpenGraph(asset.id);
+            return;
+        }
+        graphPickError((payload && payload.message) || t('errorTitle'));
+    }
+
+    function openLinkGraphModal(asset) {
+        closeGraphMenu();
+        var root = document.getElementById('asset-tree-app') || document.body;
+        openModal(function (dialog) {
+            dialog.className += ' asset-tree-graph-dialog';
+            var head = el('div', 'asset-tree-block-head');
+            head.appendChild(el('h2', null, asset.objectKey || asset.name || t('linkGraph')));
+            head.appendChild(button(t('close'), 'asset-tree-btn', function () {
+                closeGraphMenu();
+                closeGraphPick();
+                closeModal(dialog.parentNode);
+                if (state.detail && state.detail.id === asset.id) showDetail(state.detail, false);
+            }));
+            dialog.appendChild(head);
+            var frame = el('div', 'asset-tree-graph-frame');
+            frame.appendChild(linkGraph(asset, true));
+            dialog.appendChild(frame);
+        }, root);
+    }
+
+    function linkGraph(asset, editor) {
         var nodes = relationNodes(asset);
         var saved = readLinkLayout(asset);
         var spots = {};
+        var zoom = 1;
+        var panX = 0;
+        var panY = 0;
+        var touched = false;
+        var density = nodes.length >= 14 ? ' is-packed' : (nodes.length >= 8 ? ' is-dense' : '');
         var stage = el('div', 'asset-tree-link-stage');
-        var box = el('div', 'asset-tree-link-graph is-placed' + (nodes.length ? '' : ' is-empty'));
-        box.setAttribute('role', 'group');
-        box.setAttribute('aria-label', t('linkGraph'));
-        if (mayEdit(asset)) {
+        var viewport = el('div', 'asset-tree-link-viewport');
+        var world = el('div', 'asset-tree-link-world asset-tree-link-graph is-placed' + density + (nodes.length ? '' : ' is-empty'));
+        world.setAttribute('role', 'group');
+        world.setAttribute('aria-label', t('linkGraph'));
+        if (!editor && mayEdit(asset)) {
             var tools = el('div', 'asset-tree-graph-tools');
             var pencil = button('', 'asset-tree-btn slim asset-tree-graph-pencil', function () {
-                var on = box.className.indexOf(' is-editing') < 0;
-                box.className = box.className.replace(' is-editing', '');
-                pencil.className = pencil.className.replace(' is-on', '');
-                if (on) {
-                    box.className += ' is-editing';
-                    pencil.className += ' is-on';
-                }
-                pencil.setAttribute('aria-pressed', on ? 'true' : 'false');
-                if (form) form.hidden = !on;
+                openLinkGraphModal(asset);
             });
             pencil.title = t('linkEdit');
             pencil.setAttribute('aria-label', t('linkEdit'));
-            pencil.setAttribute('aria-pressed', 'false');
             pencil.appendChild(toolIcon('edit'));
             tools.appendChild(pencil);
             stage.appendChild(tools);
         }
         var svg = svgEl('svg');
         svg.setAttribute('class', 'asset-tree-link-canvas');
-        svg.setAttribute('preserveAspectRatio', 'none');
         svg.setAttribute('aria-hidden', 'true');
-        box.appendChild(svg);
+        world.appendChild(svg);
         function clearSelected() {
-            var cards = box.querySelectorAll('.asset-tree-graph-node');
+            var cards = world.querySelectorAll('.asset-tree-graph-node');
             var n;
-            for (n = 0; n < cards.length; n++) {
-                cards[n].className = cards[n].className.replace(' is-selected', '');
-            }
+            for (n = 0; n < cards.length; n++) cards[n].className = cards[n].className.replace(' is-selected', '');
         }
         var panel = el('div', 'asset-tree-link-detail');
         panel.hidden = true;
-        function showRelation(item, card) {
+        function showRelation(node, card) {
             clearSelected();
             card.className += ' is-selected';
             panel.hidden = false;
             panel.innerHTML = '';
             var bits = [];
-            if (item.node.phrase) bits.push(item.node.phrase);
-            if (item.node.key) bits.push(item.node.key);
-            panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' · ')));
-            if (item.node.peer) panel.appendChild(peerCard(item.node.peer));
-            if (item.node.kind === 'link' && item.node.meta) panel.appendChild(el('p', 'asset-tree-hint', item.node.meta));
+            if (node.phrase) bits.push(node.phrase);
+            if (node.key) bits.push(node.key);
+            panel.appendChild(el('p', 'asset-tree-link-meta', bits.join(' \u00b7 ')));
+            if (node.peer) panel.appendChild(peerCard(node.peer));
+            if (node.kind === 'link' && node.meta) panel.appendChild(el('p', 'asset-tree-hint', node.meta));
         }
         var selfCard = linkGraphNode(asset, null, true);
         selfCard.addEventListener('click', function () {
@@ -10553,20 +10939,27 @@
             panel.hidden = true;
             panel.innerHTML = '';
         });
-        box.appendChild(selfCard);
+        world.appendChild(selfCard);
         var placed = [];
-        var firstCard = null;
         nodes.forEach(function (node) {
             var card = linkGraphNode(asset, node, false);
             card.addEventListener('click', function () {
-                showRelation({ node: node }, card);
+                showRelation(node, card);
             });
-            box.appendChild(card);
+            if (editor && mayEdit(asset) && node.kind !== 'mesh' && (node.kind === 'peer' || node.linkId || (node.linkIds && node.linkIds.length))) {
+                card.addEventListener('contextmenu', function (event) {
+                    if (event.preventDefault) event.preventDefault();
+                    if (event.stopPropagation) event.stopPropagation();
+                    openGraphMenu(event.clientX, event.clientY, [
+                        { label: t('linkGraphRemove'), run: function () { removeGraphNode(node); } },
+                        { label: t('linkReplace'), run: function () { replaceGraphNode(node); } }
+                    ]);
+                });
+            }
+            world.appendChild(card);
             placed.push({ node: node, card: card });
-            if (!firstCard) firstCard = card;
         });
-        function placeCard(card, key, index, self) {
-            var fallback = { x: self && nodes.length ? 28 : 0, y: index * 58 };
+        function placeCard(card, key, fallback) {
             var spot = linkSpot(saved, key, fallback);
             card.style.left = spot.x + 'px';
             card.style.top = spot.y + 'px';
@@ -10586,19 +10979,19 @@
                 }
                 function move(ev) {
                     var p = point(ev);
-                    var dx = p.x - clientX;
-                    var dy = p.y - clientY;
-                    if (dx * dx + dy * dy > 16) moved = true;
+                    var dx = (p.x - clientX) / zoom;
+                    var dy = (p.y - clientY) / zoom;
+                    if (dx * dx + dy * dy > 9) moved = true;
                     var x = originLeft + dx;
                     var y = originTop + dy;
                     if (x < 0) x = 0;
                     if (y < 0) y = 0;
-                    var limit = box.clientWidth - 40;
-                    if (limit < 0) limit = 0;
-                    if (x > limit) x = limit;
+                    var span = editor ? 1800 : ((viewport.clientWidth || 1800) / (zoom || 1) - 40);
+                    if (span < 40) span = 40;
+                    if (x > span) x = span;
+                    if (y > (editor ? 1800 : 900)) y = editor ? 1800 : 900;
                     card.style.left = Math.round(x) + 'px';
                     card.style.top = Math.round(y) + 'px';
-                    fitGraph();
                     paintWires();
                     if (ev.preventDefault) ev.preventDefault();
                 }
@@ -10619,12 +11012,14 @@
                 document.addEventListener('touchmove', move);
                 document.addEventListener('touchend', up);
             }
-            mark.addEventListener('mousedown', function (event) {
+            card.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
+                if (event.target && event.target.closest && event.target.closest('button, a')) return;
                 begin(event.clientX, event.clientY, event);
             });
-            mark.addEventListener('touchstart', function (event) {
+            card.addEventListener('touchstart', function (event) {
                 if (!event.touches || !event.touches.length) return;
+                if (event.target && event.target.closest && event.target.closest('button, a')) return;
                 begin(event.touches[0].clientX, event.touches[0].clientY, event);
             });
             card.addEventListener('click', function (event) {
@@ -10634,29 +11029,94 @@
                 if (event.preventDefault) event.preventDefault();
             }, true);
         }
-        placeCard(selfCard, 'self', 0, true);
-        placed.forEach(function (item, index) {
-            placeCard(item.card, linkNodeKey(item.node, false), index + 1, false);
-        });
-        var laidBottom = 36;
-        for (var spotKey in spots) {
-            if (!Object.prototype.hasOwnProperty.call(spots, spotKey) || !spots[spotKey]) continue;
-            var spotEdge = Number(spots[spotKey][1]) + 42;
-            if (spotEdge > laidBottom) laidBottom = spotEdge;
+        if (editor) {
+            var directCount = 0;
+            var meshCount = 0;
+            placed.forEach(function (item) {
+                if (item.node && item.node.kind === 'mesh') meshCount += 1;
+                else directCount += 1;
+            });
+            var inner = Math.max(120, directCount * 26);
+            var outer = meshCount ? inner + 100 : inner;
+            var cx = outer + 80;
+            var cy = outer + 48;
+            function ringPoint(index, count, radius) {
+                var angle = count === 1 ? -Math.PI / 2 : (-Math.PI / 2 + index * 2 * Math.PI / Math.max(count, 1));
+                return {
+                    x: Math.round(cx + Math.cos(angle) * radius - 16),
+                    y: Math.round(cy + Math.sin(angle) * radius - 14)
+                };
+            }
+            placeCard(selfCard, 'self', { x: cx, y: cy });
+            var directRow = 0;
+            var meshRow = 0;
+            placed.forEach(function (item) {
+                var mesh = item.node && item.node.kind === 'mesh';
+                var spot = mesh ? ringPoint(meshRow++, meshCount, outer) : ringPoint(directRow++, directCount, inner);
+                placeCard(item.card, linkNodeKey(item.node, false), spot);
+            });
+        } else {
+            placeCard(selfCard, 'self', { x: nodes.length ? 28 : 0, y: 0 });
+            placed.forEach(function (item, index) {
+                var mesh = item.node && item.node.kind === 'mesh';
+                placeCard(item.card, linkNodeKey(item.node, false), {
+                    x: mesh ? 48 : 4 + (index % 2) * 22,
+                    y: (index + 1) * 52
+                });
+            });
         }
-        box.style.height = (laidBottom + 6) + 'px';
-        stage.appendChild(box);
+        function removeGraphNode(node) {
+            ajaxDeletes(graphDropPaths(asset, node), function (status, payload) {
+                if (status >= 200 && status < 300) reloadOpenGraph(asset.id);
+                else setFormError((payload && payload.message) || t('errorTitle'));
+            });
+        }
+        function replaceGraphNode(node) {
+            openGraphPick(asset, t('linkReplace'), function (picked) {
+                ajaxDeletes(graphDropPaths(asset, node), function (status, payload) {
+                    if (status < 200 || status >= 300) {
+                        graphPickError((payload && payload.message) || t('errorTitle'));
+                        return;
+                    }
+                    var choice = node.choice || (node.kind === 'peer' ? 'peer' : '');
+                    if (!choice) {
+                        reloadOpenGraph(asset.id);
+                        return;
+                    }
+                    postGraphLink(asset, picked.id, choice, function (st, body) {
+                        finishGraphChange(asset, st, body);
+                    });
+                });
+            });
+        }
+        if (editor && mayEdit(asset)) {
+            viewport.addEventListener('contextmenu', function (event) {
+                if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node')) return;
+                if (event.preventDefault) event.preventDefault();
+                openGraphMenu(event.clientX, event.clientY, [
+                    { label: t('linkGraphAdd'), run: function () {
+                        openGraphPick(asset, t('linkGraphAdd'), function (picked) {
+                            askGraphKind(asset, picked, function (choice) {
+                                postGraphLink(asset, picked.id, choice, function (status, payload) {
+                                    finishGraphChange(asset, status, payload);
+                                });
+                            });
+                        });
+                    } }
+                ]);
+            });
+        }
+        viewport.appendChild(world);
+        stage.appendChild(viewport);
         if (!nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         stage.appendChild(panel);
-        if (firstCard) showRelation(placed[0], firstCard);
-        function iconCenter(card, origin) {
+        function iconCenter(card) {
             var mark = card.querySelector('.asset-tree-graph-mark') || card;
-            var rect = mark.getBoundingClientRect();
             return {
-                x: rect.left + rect.width / 2 - origin.left,
-                y: rect.top + rect.height / 2 - origin.top,
-                w: rect.width / 2,
-                h: rect.height / 2
+                x: card.offsetLeft + mark.offsetLeft + mark.offsetWidth / 2,
+                y: card.offsetTop + mark.offsetTop + mark.offsetHeight / 2,
+                w: mark.offsetWidth / 2,
+                h: mark.offsetHeight / 2
             };
         }
         function along(x1, y1, x2, y2, half) {
@@ -10671,31 +11131,66 @@
             if (dist > len * 0.46) dist = len * 0.46;
             return { x: x1 + ux * dist, y: y1 + uy * dist };
         }
-        function fitGraph() {
-            var cards = box.querySelectorAll('.asset-tree-graph-node');
-            var bottom = 36;
-            var i;
-            for (i = 0; i < cards.length; i++) {
-                var edge = cards[i].offsetTop + cards[i].offsetHeight;
-                if (edge > bottom) bottom = edge;
+        function applyZoom() {
+            world.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+        }
+        function fitZoom() {
+            var viewW = viewport.clientWidth;
+            var maxH = editor ? viewport.clientHeight : 280;
+            if (viewW < 40 || maxH < 40) return;
+            var worldW = world.offsetWidth || 1;
+            var worldH = world.offsetHeight || 1;
+            var scale = Math.min(viewW / (worldW + 24), maxH / (worldH + 24), 1);
+            if (scale < 0.05) scale = 0.05;
+            zoom = scale;
+            panX = Math.round((viewW - worldW * zoom) / 2);
+            if (panX < 8) panX = 8;
+            if (editor) {
+                panY = Math.round((maxH - worldH * zoom) / 2);
+                if (panY < 8) panY = 8;
+            } else {
+                panY = 4;
+                viewport.style.height = Math.max(48, Math.ceil(worldH * zoom + 12)) + 'px';
             }
-            box.style.height = (bottom + 6) + 'px';
+            applyZoom();
         }
         function paintWires() {
-            if (!box.parentNode) {
-                window.removeEventListener('resize', paintWires);
-                return;
+            if (!world.parentNode) return;
+            var cards = world.querySelectorAll('.asset-tree-graph-node');
+            var right = 72;
+            var bottom = 40;
+            var i;
+            for (i = 0; i < cards.length; i++) {
+                var side = cards[i].offsetLeft + cards[i].offsetWidth + 20;
+                var edge = cards[i].offsetTop + cards[i].offsetHeight + 16;
+                if (side > right) right = side;
+                if (edge > bottom) bottom = edge;
             }
-            fitGraph();
-            var origin = svg.getBoundingClientRect();
-            if (origin.width < 40 || origin.height < 20) return;
-            svg.setAttribute('viewBox', '0 0 ' + origin.width + ' ' + origin.height);
+            if (!editor) {
+                var viewW = viewport.clientWidth;
+                if (viewW > right) right = viewW;
+                if (bottom < 52) bottom = 52;
+                world.style.width = '100%';
+                world.style.height = bottom + 'px';
+                viewport.style.height = bottom + 'px';
+            } else {
+                world.style.width = right + 'px';
+                world.style.height = bottom + 'px';
+            }
+            svg.setAttribute('width', String(right));
+            svg.setAttribute('height', String(bottom));
+            svg.style.width = right + 'px';
+            svg.style.height = bottom + 'px';
+            svg.setAttribute('viewBox', '0 0 ' + right + ' ' + bottom);
             while (svg.firstChild) svg.removeChild(svg.firstChild);
-            var hub = iconCenter(selfCard, origin);
-            placed.forEach(function (item) {
-                var other = iconCenter(item.card, origin);
-                var from = along(hub.x, hub.y, other.x, other.y, hub);
-                var to = along(other.x, other.y, hub.x, hub.y, other);
+            var byCard = {};
+            byCard[String(asset.id)] = selfCard;
+            function stroke(left, rightCard) {
+                if (!left || !rightCard || left === rightCard) return;
+                var fromCenter = iconCenter(left);
+                var toCenter = iconCenter(rightCard);
+                var from = along(fromCenter.x, fromCenter.y, toCenter.x, toCenter.y, fromCenter);
+                var to = along(toCenter.x, toCenter.y, fromCenter.x, fromCenter.y, toCenter);
                 var line = svgEl('line');
                 line.setAttribute('x1', String(Math.round(from.x)));
                 line.setAttribute('y1', String(Math.round(from.y)));
@@ -10705,10 +11200,79 @@
                 line.setAttribute('stroke-width', '1.5');
                 line.setAttribute('stroke-linecap', 'round');
                 svg.appendChild(line);
+            }
+            placed.forEach(function (item) {
+                if (item.node && item.node.id) byCard[String(item.node.id)] = item.card;
+                if (item.node && item.node.kind === 'mesh') return;
+                stroke(selfCard, item.card);
+            });
+            (asset.mesh || []).forEach(function (tie) {
+                if (!tie) return;
+                stroke(byCard[String(tie.fromId)], byCard[String(tie.toId)]);
             });
         }
-        window.addEventListener('resize', paintWires);
-        setTimeout(paintWires, 0);
+        function onWheel(event) {
+            if (event.preventDefault) event.preventDefault();
+            var rect = viewport.getBoundingClientRect();
+            var px = event.clientX - rect.left;
+            var py = event.clientY - rect.top;
+            var factor = event.deltaY < 0 ? 1.12 : (1 / 1.12);
+            var next = zoom * factor;
+            if (next < 0.05) next = 0.05;
+            if (next > 2.5) next = 2.5;
+            var wx = (px - panX) / (zoom || 1);
+            var wy = (py - panY) / (zoom || 1);
+            zoom = next;
+            panX = px - wx * zoom;
+            panY = py - wy * zoom;
+            touched = true;
+            applyZoom();
+        }
+        function onResize() {
+            if (!viewport.parentNode) {
+                window.removeEventListener('resize', onResize);
+                return;
+            }
+            paintWires();
+            if (editor && !touched) fitZoom();
+        }
+        viewport.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node, button')) return;
+            var startX = event.clientX;
+            var startY = event.clientY;
+            var originX = panX;
+            var originY = panY;
+            var moved = false;
+            function move(ev) {
+                var dx = ev.clientX - startX;
+                var dy = ev.clientY - startY;
+                if (dx * dx + dy * dy > 4) moved = true;
+                panX = originX + dx;
+                panY = originY + dy;
+                applyZoom();
+                if (ev.preventDefault) ev.preventDefault();
+            }
+            function up() {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', up);
+                if (moved) touched = true;
+            }
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
+        });
+        try {
+            viewport.addEventListener('wheel', onWheel, { passive: false });
+        } catch (error) {
+            viewport.addEventListener('wheel', onWheel, false);
+        }
+        window.addEventListener('resize', onResize);
+        setTimeout(function () {
+            paintWires();
+            if (!editor) return;
+            fitZoom();
+            setTimeout(fitZoom, 80);
+        }, 30);
         return stage;
     }
 
@@ -10717,13 +11281,7 @@
         if (asset.links == null && asset.peers == null) {
             body.appendChild(el('p', 'asset-tree-hint', t('loading')));
         } else {
-            var form = null;
-            if (mayEdit(asset)) {
-                form = linkForm(asset);
-                form.hidden = true;
-            }
-            body.appendChild(linkGraph(asset, form));
-            if (form) body.appendChild(form);
+            body.appendChild(linkGraph(asset, false));
         }
         return moduleBlock(t('links'), body, cardCollapsed('links', false), null, 'links');
     }
@@ -15865,6 +16423,7 @@
         if (moduleKey === 'life') return 'moduleLife';
         if (moduleKey === 'portal') return 'modulePortal';
         if (moduleKey === 'card') return 'moduleCard';
+        if (moduleKey === 'docs') return 'moduleDocs';
         if (moduleKey === 'tni') return 'moduleTni';
         return 'setupTitle';
     }
@@ -15893,10 +16452,10 @@
     }
 
     function openModuleSetup(moduleKey) {
-        if (moduleKey === 'portal' || moduleKey === 'tni') {
+        if (moduleKey === 'portal' || moduleKey === 'tni' || moduleKey === 'docs') {
             closeAllModals();
             state.view = 'settings';
-            state.schemaTab = moduleKey === 'tni' ? (state.canObjects ? 'exchange' : 'project') : 'portal';
+            state.schemaTab = moduleKey === 'tni' ? (state.canObjects ? 'exchange' : 'project') : (moduleKey === 'docs' ? 'documents' : 'portal');
             rememberView('settings');
             renderFrame();
             return;
@@ -16498,7 +17057,7 @@
         var sections = [];
         if (state.canConfigure) {
             sections.push(['project', t('projectSection'), null]);
-            sections.push(['documents', t('docSection'), null]);
+            if (moduleOn('docs')) sections.push(['documents', t('docSection'), null]);
         }
         if (state.canConfigure) {
             sections.push(['types', t('typesSection'), state.types.length]);
@@ -16657,13 +17216,13 @@
         if (english) {
             return [
                 [t('docGroupCard'), ['name', 'key', 'serial', 'inventory', 'type', 'status', 'description', 'maker', 'model', 'group', 'quantity', 'life', 'year', 'date', 'request']],
-                [t('docGroupPerson'), ['mol', 'mol title', 'mol department', 'mol email', 'mol phone', 'issued', 'issued title', 'issued department', 'issued email', 'issued phone', 'custodian']],
+                [t('docGroupPerson'), ['mol', 'mol short', 'mol title', 'mol department', 'mol email', 'mol phone', 'issued', 'issued short', 'issued title', 'issued department', 'issued email', 'issued phone', 'name short', 'custodian', 'custodian short']],
                 [t('docGroupPlace'), ['place', 'address', 'city', 'project']]
             ];
         }
         return [
             [t('docGroupCard'), ['наименование', 'ключ', 'серийный', 'инвентарный', 'тип', 'статус', 'описание', 'производитель', 'модель', 'группа', 'количество', 'срок', 'год', 'дата', 'заявка']],
-            [t('docGroupPerson'), ['мол', 'должность мол', 'отдел мол', 'почта мол', 'телефон мол', 'кому выдано', 'должность кому выдано', 'отдел кому выдано', 'почта кому выдано', 'телефон кому выдано', 'должность', 'отдел', 'почта', 'телефон', 'ответственный']],
+            [t('docGroupPerson'), ['мол', 'мол кратко', 'должность мол', 'отдел мол', 'почта мол', 'телефон мол', 'кому выдано', 'кому выдано кратко', 'должность кому выдано', 'отдел кому выдано', 'почта кому выдано', 'телефон кому выдано', 'должность', 'отдел', 'почта', 'телефон', 'фио кратко', 'ответственный', 'ответственный кратко']],
             [t('docGroupPlace'), ['площадка', 'филиал', 'адрес', 'город', 'организация']]
         ];
     }
@@ -16752,8 +17311,6 @@
             }
             keyCard.appendChild(actions);
         }
-        stack.appendChild(keyCard);
-
         var treeCard = el('section', 'asset-tree-project-card');
         treeCard.appendChild(el('h3', 'asset-tree-settings-title', t('projectTreeTitle')));
         var treeRow = el('label', 'asset-tree-check-row');
@@ -16775,7 +17332,6 @@
         treeText.appendChild(el('span', 'asset-tree-hint', t('treeObjectsHint')));
         treeRow.appendChild(treeText);
         treeCard.appendChild(treeRow);
-        stack.appendChild(treeCard);
 
         var photoCard = el('section', 'asset-tree-project-card');
         photoCard.appendChild(el('h3', 'asset-tree-settings-title', t('photoTitle')));
@@ -16798,7 +17354,6 @@
         photoText.appendChild(el('strong', null, t('photoShow')));
         photoRow.appendChild(photoText);
         photoCard.appendChild(photoRow);
-        stack.appendChild(photoCard);
 
         var cardCard = el('section', 'asset-tree-project-card');
         cardCard.appendChild(el('h3', 'asset-tree-settings-title', t('cardOpenTitle')));
@@ -16818,6 +17373,7 @@
             ['inside', 'placeInside'],
             ['types', 'placeTypes']
         ];
+        var cardGrid = el('div', 'asset-tree-card-open-grid');
         var cardBoxes = [];
         function cardOpenValue() {
             var picked = [];
@@ -16845,9 +17401,9 @@
             var text = el('span');
             text.appendChild(el('strong', null, t(item[1])));
             row.appendChild(text);
-            cardCard.appendChild(row);
+            cardGrid.appendChild(row);
         });
-        stack.appendChild(cardCard);
+        cardCard.appendChild(cardGrid);
 
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
@@ -16861,6 +17417,7 @@
             ['life', 'moduleLife', 'moduleLifeHint', '', 'beta'],
             ['portal', 'modulePortal', 'modulePortalHint', '', 'beta'],
             ['card', 'moduleCard', 'moduleCardHint', '', 'beta'],
+            ['docs', 'moduleDocs', 'moduleDocsHint', '', 'beta'],
             ['tni', 'moduleTni', 'moduleTniHint', '', 'beta']
         ].forEach(function (item) {
             if (item[0] === 'tni' && !state.canAdmin) return;
@@ -16875,7 +17432,7 @@
             box.addEventListener('change', function () {
                 var want = box.checked;
                 var next = [];
-                var order = ['service', 'map', 'reports', 'life', 'portal', 'card', 'tni'];
+                var order = ['service', 'map', 'reports', 'life', 'portal', 'card', 'docs', 'tni'];
                 order.forEach(function (key) {
                     var on = key === item[0] ? want : moduleOn(key);
                     if (on) next.push(key);
@@ -16913,7 +17470,19 @@
             grid.appendChild(option);
         });
         modules.appendChild(grid);
-        stack.appendChild(modules);
+        var board = el('div', 'asset-tree-project-board');
+        var main = el('div', 'asset-tree-project-main');
+        var pair = el('div', 'asset-tree-project-pair');
+        var side = el('div', 'asset-tree-project-side');
+        side.appendChild(treeCard);
+        side.appendChild(photoCard);
+        pair.appendChild(keyCard);
+        pair.appendChild(side);
+        main.appendChild(pair);
+        main.appendChild(modules);
+        board.appendChild(main);
+        board.appendChild(cardCard);
+        stack.appendChild(board);
         if (state.canAdmin && moduleOn('tni')) stack.appendChild(tniRemovalCard(allowed));
         panel.appendChild(stack);
     }
@@ -22082,7 +22651,7 @@
                     var value = document.createElement('input');
                     value.type = 'text';
                     value.maxLength = 80;
-                    value.placeholder = t('reportFieldValue');
+                    value.placeholder = t('reportFieldOptional');
                     value.setAttribute('aria-label', t('reportFieldValue'));
                     value.value = rule.value || '';
                     value.addEventListener('input', function () { rule.value = value.value; });
@@ -22269,19 +22838,18 @@
                 var statusKeys = Object.keys(pickedStatuses);
                 var holderKeys = Object.keys(pickedHolders);
                 var placeKeys = Object.keys(pickedPlaces);
-                if (group.value === 'field' && !field.value) {
-                    save.disabled = false;
-                    notify(t('reportField'));
-                    field.focus();
-                    return;
-                }
+                var breakdownKey = group.value === 'field' ? (field.value || '') : '';
                 var completeRules = [];
                 var brokenRule = false;
                 fieldRules.forEach(function (rule) {
                     var key = rule.key || '';
                     var text = (rule.value || '').replace(/^\s+|\s+$/g, '');
                     if (!key && !text) return;
-                    if (!key || !text || text.length > 80) brokenRule = true;
+                    if (key && !text) {
+                        if (!breakdownKey) breakdownKey = key;
+                        return;
+                    }
+                    if (!key || text.length > 80) brokenRule = true;
                     else completeRules.push({ key: key, value: text });
                 });
                 if (brokenRule) {
@@ -22290,6 +22858,26 @@
                     return;
                 }
                 var groupValue = plannedGroup();
+                var fieldHost = { type: 1, status: 1, place: 1, branch: 1, holder: 1, issued: 1 };
+                if (breakdownKey && groupValue.indexOf('field') < 0 && source.value !== 'done' && !reportOpsSource(source.value)) {
+                    if (fieldHost[group.value]) {
+                        var withField = groupValue + '+field';
+                        if (withField.length > 16) {
+                            save.disabled = false;
+                            notify(t('reportAlso'));
+                            return;
+                        }
+                        groupValue = withField;
+                    } else if (group.value !== 'field') {
+                        groupValue = 'field';
+                    }
+                }
+                if ((group.value === 'field' || groupValue.indexOf('field') >= 0) && !breakdownKey) {
+                    save.disabled = false;
+                    notify(t('reportField'));
+                    field.focus();
+                    return;
+                }
                 if (groupValue.length > 16) {
                     save.disabled = false;
                     notify(t('reportAlso'));
@@ -22305,7 +22893,7 @@
                     metric: reportOpsSource(source.value) ? source.value : (source.value === 'done' ? 'count' : metric.value),
                     filterField: '',
                     filterValue: '',
-                    fieldKey: group.value === 'field' ? field.value : '',
+                    fieldKey: breakdownKey,
                     attrKey: '',
                     attrValue: ''
                 };
@@ -30557,12 +31145,6 @@
                 blank: true
             });
         }));
-        downloads.appendChild(button(t('exchangeLinksExport'), 'asset-tree-btn', function () {
-            startWorkbook('links', {
-                typeKey: typeSelect.value,
-                placeId: parseInt(placeSelect.value, 10) || 0
-            });
-        }));
         block.appendChild(downloads);
         var upload = el('div', 'asset-tree-exchange-upload');
         upload.appendChild(picker);
@@ -30986,18 +31568,20 @@
 
     function portalMineSettings() {
         var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
-        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineTitle')));
-        box.appendChild(el('p', 'asset-tree-hint', t('portalMineHint')));
-        var show = el('label', 'asset-tree-check');
+        var head = el('div', 'asset-tree-portal-head');
+        head.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineTitle')));
+        var show = el('label', 'asset-tree-portal-switch');
         var toggle = el('input');
         toggle.type = 'checkbox';
         toggle.checked = !!moduleSetup().portalMine;
         toggle.setAttribute('aria-label', t('portalMineShow'));
         show.appendChild(toggle);
-        show.appendChild(el('span', null, t('portalMineShow')));
-        box.appendChild(show);
-        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineFields')));
-        box.appendChild(el('p', 'asset-tree-hint', t('portalMineFieldsHint')));
+        head.appendChild(show);
+        box.appendChild(head);
+        box.appendChild(el('p', 'asset-tree-hint', t('portalMineHint')));
+        var fields = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
+        fields.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineFields')));
+        fields.appendChild(el('p', 'asset-tree-hint', t('portalMineFieldsHint')));
         var grid = el('div', 'asset-tree-portal-mine-fields');
         var choices = portalMineChoices();
         var selected = portalMineSelected();
@@ -31033,8 +31617,8 @@
         toggle.addEventListener('change', function () {
             savePortalMine(toggle.checked, selected);
         });
-        box.appendChild(grid);
-        return box;
+        fields.appendChild(grid);
+        return { show: box, fields: fields };
     }
 
     function savePortalMine(show, selected) {
@@ -31213,6 +31797,7 @@
         var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
         box.appendChild(el('h3', 'asset-tree-settings-title', t('portalLayoutTitle')));
         box.appendChild(el('p', 'asset-tree-hint', t('portalLayoutHint')));
+        var choices = el('div', 'asset-tree-portal-layouts');
         var current = knownPortalLayout(state.portalLayout);
         [
             ['tiles', 'portalLayoutTiles'],
@@ -31241,8 +31826,9 @@
             });
             row.appendChild(input);
             row.appendChild(el('span', null, t(item[1])));
-            box.appendChild(row);
+            choices.appendChild(row);
         });
+        box.appendChild(choices);
         return box;
     }
 
@@ -31252,9 +31838,15 @@
 
     function renderPortalSettings(panel) {
         panel.appendChild(el('p', 'asset-tree-hint', t('portalSectionHint')));
-        if (state.canAdmin) panel.appendChild(portalLayoutSettings());
-        panel.appendChild(portalMineSettings());
-        if (moduleOn('reports')) panel.appendChild(portalShowcaseSettings());
+        var bundle = el('section', 'asset-tree-project-card asset-tree-portal-bundle');
+        var mine = portalMineSettings();
+        bundle.appendChild(mine.show);
+        if (state.canAdmin) bundle.appendChild(portalLayoutSettings());
+        bundle.appendChild(mine.fields);
+        panel.appendChild(bundle);
+        var portalGroups = el('div', 'asset-tree-project-stack');
+        portalGroups.appendChild(renderClinicAccess());
+        panel.appendChild(portalGroups);
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
         var fields = el('div', 'asset-tree-portal-fields');
         fields.appendChild(el('h3', 'asset-tree-settings-title', t('portalFieldsTitle')));
@@ -32057,11 +32649,318 @@
         });
     }
 
+    function clinicReportName(id) {
+        var name = id;
+        (state.reportCatalog || []).forEach(function (row) {
+            if (row && String(row.id) === String(id)) name = row.name || id;
+        });
+        return name;
+    }
+
+    function ensureReports(done) {
+        if (state.reportCatalog || !moduleOn('reports')) {
+            if (done) done();
+            return;
+        }
+        if (done) {
+            state.reportWaiters = state.reportWaiters || [];
+            state.reportWaiters.push(done);
+        }
+        if (state.reportsLoading) return;
+        state.reportsLoading = true;
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
+            state.reportsLoading = false;
+            state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            var waiters = state.reportWaiters || [];
+            state.reportWaiters = [];
+            if (waiters.length) waiters.forEach(function (fn) { fn(); });
+            else if (state.view === 'settings' && state.schemaTab === 'portal') renderFrame();
+        });
+    }
+
+    function renderClinicAccess() {
+        var block = el('section', 'asset-tree-project-card');
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessCustomTitle')));
+        block.appendChild(el('p', 'asset-tree-hint', t('clinicHint')));
+        if (moduleOn('reports') && state.reportCatalog == null) ensureReports();
+        if (!state.clinics) {
+            block.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            ensureClinics();
+            return block;
+        }
+        if (!state.clinics.length) block.appendChild(el('p', 'asset-tree-hint', t('clinicEmpty')));
+        state.clinics.forEach(function (circle) {
+            if (!circle) return;
+            var row = el('div', 'asset-tree-access-person');
+            var title = el('div', 'asset-tree-access-person-title');
+            title.appendChild(el('strong', null, circle.name || ''));
+            row.appendChild(title);
+            var places = (circle.places || []).map(function (place) { return place.name || ''; });
+            var reports = (circle.reports || []).map(clinicReportName);
+            row.appendChild(el('div', 'asset-tree-access-person-summary', places.concat(reports).filter(Boolean).join(', ')));
+            var actions = el('div', 'asset-tree-access-person-actions');
+            actions.appendChild(button(t('clinicPeopleCount', (circle.members || []).length), 'asset-tree-btn', function () { openClinicPeople(circle); }));
+            actions.appendChild(button(t('accessEditGroup'), 'asset-tree-btn', function () { openClinicModal(circle); }));
+            row.appendChild(actions);
+            block.appendChild(row);
+        });
+        if (state.clinics.length < 40) {
+            block.appendChild(button(t('clinicNew'), 'asset-tree-btn primary', function () { openClinicModal(null); }));
+        }
+        return block;
+    }
+
+    function openClinicModal(circle) {
+        var draft = {
+            id: circle ? circle.id : 0,
+            name: circle ? (circle.name || '') : '',
+            reports: (circle && circle.reports ? circle.reports : []).map(function (id) { return String(id); }),
+            places: (circle && circle.places ? circle.places : []).map(function (place) {
+                return { id: place.id, name: place.name, objectKey: place.objectKey };
+            })
+        };
+        openModal(function (dialog) {
+            dialog.classList.add('is-wide');
+            var host = el('div');
+            dialog.appendChild(host);
+            function chipRow(items, labelOf, onRemove) {
+                var row = el('div', 'asset-tree-clinic-chips');
+                items.forEach(function (item, index) {
+                    var chip = el('div', 'asset-tree-person');
+                    chip.appendChild(el('strong', null, labelOf(item)));
+                    chip.appendChild(button('×', 'asset-tree-linkish', function () { onRemove(index); }));
+                    row.appendChild(chip);
+                });
+                return row;
+            }
+            function paint() {
+                host.innerHTML = '';
+                host.appendChild(el('h2', null, draft.id ? draft.name : t('clinicNew')));
+                host.appendChild(el('p', 'asset-tree-hint', t('clinicHint')));
+                var name = el('input', 'asset-tree-input');
+                name.value = draft.name;
+                name.maxLength = 80;
+                name.placeholder = t('clinicName');
+                name.addEventListener('input', function () { draft.name = name.value; });
+                host.appendChild(field(t('clinicName'), name, true));
+                if (moduleOn('reports')) {
+                    host.appendChild(el('div', 'asset-tree-clinic-label', t('clinicReports')));
+                    var reportGrid = el('div', 'asset-tree-clinic-reports');
+                    (state.reportCatalog || []).forEach(function (row) {
+                        if (!row || row.id == null) return;
+                        var key = String(row.id);
+                        var line = el('label', 'asset-tree-check');
+                        var box = el('input');
+                        box.type = 'checkbox';
+                        box.checked = draft.reports.indexOf(key) >= 0;
+                        box.addEventListener('change', function () {
+                            var at = draft.reports.indexOf(key);
+                            if (box.checked && at < 0) {
+                                if (draft.reports.length >= 8) {
+                                    box.checked = false;
+                                    notify(t('clinicLimit'));
+                                    return;
+                                }
+                                draft.reports.push(key);
+                            }
+                            if (!box.checked && at >= 0) draft.reports.splice(at, 1);
+                        });
+                        line.appendChild(box);
+                        line.appendChild(el('span', null, row.name || key));
+                        reportGrid.appendChild(line);
+                    });
+                    if (reportGrid.childNodes.length) host.appendChild(reportGrid);
+                    else host.appendChild(el('p', 'asset-tree-hint', t('portalShowcaseEmpty')));
+                }
+                host.appendChild(el('div', 'asset-tree-clinic-label', t('clinicPlaces')));
+                host.appendChild(chipRow(draft.places, function (place) {
+                    return (place.objectKey ? place.objectKey + ' · ' : '') + (place.name || '');
+                }, function (index) {
+                    draft.places.splice(index, 1);
+                    paint();
+                }));
+                var placeInput = el('input', 'asset-tree-input');
+                placeInput.type = 'search';
+                placeInput.placeholder = t('clinicPlaceSearch');
+                var placeResults = el('div', 'asset-tree-user-results');
+                var placeTimer = null;
+                var placeSeq = 0;
+                placeInput.addEventListener('input', function () {
+                    clearTimeout(placeTimer);
+                    placeTimer = setTimeout(function () {
+                        var query = placeInput.value.trim();
+                        var seq = ++placeSeq;
+                        placeResults.innerHTML = '';
+                        if (query.length < 2 || draft.places.length >= 30) return;
+                        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/places?q=' + encodeURIComponent(query), null, function (status, payload) {
+                            if (seq !== placeSeq) return;
+                            placeResults.innerHTML = '';
+                            if (status !== 200) return;
+                            (payload || []).forEach(function (place) {
+                                if (draft.places.some(function (item) { return item.id === place.id; })) return;
+                                placeResults.appendChild(button((place.objectKey ? place.objectKey + ' · ' : '') + place.name, 'asset-tree-user-hit', function () {
+                                    draft.places.push(place);
+                                    paint();
+                                }));
+                            });
+                        });
+                    }, 220);
+                });
+                host.appendChild(placeInput);
+                host.appendChild(placeResults);
+                var actions = el('div', 'asset-tree-dialog-actions');
+                actions.appendChild(button(t('clinicSave'), 'asset-tree-btn primary', function () {
+                    ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/circles', {
+                        id: draft.id,
+                        name: draft.name,
+                        reports: draft.reports,
+                        places: draft.places.map(function (place) { return place.id; })
+                    }, function (status, payload) {
+                        if (status >= 200 && status < 300) {
+                            closeAllModals();
+                            state.clinics = null;
+                            ensureClinics();
+                        } else notify((payload && payload.message) || t('errorTitle'));
+                    });
+                }));
+                if (draft.id) {
+                    actions.appendChild(button(t('clinicRemove'), 'asset-tree-btn', function () {
+                        ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + draft.id, null, function (status, payload) {
+                            if (status >= 200 && status < 300) {
+                                closeAllModals();
+                                state.clinics = null;
+                                ensureClinics();
+                            } else notify((payload && payload.message) || t('errorTitle'));
+                        });
+                    }));
+                }
+                host.appendChild(actions);
+            }
+            paint();
+            if (moduleOn('reports') && state.reportCatalog == null) ensureReports(paint);
+        });
+    }
+
+    function rememberCircle(next) {
+        if (!next) return;
+        var found = false;
+        state.clinics = (state.clinics || []).map(function (item) {
+            if (item && item.id === next.id) {
+                found = true;
+                return next;
+            }
+            return item;
+        });
+        if (!found) state.clinics.push(next);
+    }
+
+    function openClinicPeople(circle) {
+        var members = (circle.members || []).map(function (person) {
+            return { userKey: person.userKey, displayName: person.displayName || person.userKey, department: person.department || '' };
+        });
+        openModal(function (dialog) {
+            dialog.classList.add('is-wide');
+            dialog.appendChild(el('h2', null, circle.name || t('clinicPeople')));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('clinicGrantHint')));
+            var addInput = el('input', 'asset-tree-input');
+            addInput.type = 'search';
+            addInput.placeholder = t('clinicSearch');
+            var addResults = el('div', 'asset-tree-user-results');
+            var addTimer = null;
+            var addSeq = 0;
+            addInput.addEventListener('input', function () {
+                clearTimeout(addTimer);
+                addTimer = setTimeout(function () {
+                    var query = addInput.value.trim();
+                    var mine = ++addSeq;
+                    addResults.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mine !== addSeq) return;
+                        addResults.innerHTML = '';
+                        if (status !== 200) return;
+                        (payload || []).forEach(function (user) {
+                            if (!user || !user.userKey) return;
+                            if (members.some(function (person) { return person.userKey === user.userKey; })) return;
+                            addResults.appendChild(button((user.displayName || user.userKey) + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
+                                if (members.length >= 500) {
+                                    notify(t('clinicLimit'));
+                                    return;
+                                }
+                                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + circle.id + '/members?user=' + encodeURIComponent(user.userKey), null, function (saveStatus, saved) {
+                                    if (saveStatus >= 200 && saveStatus < 300 && saved) {
+                                        members = (saved.members || []).map(function (person) {
+                                            return { userKey: person.userKey, displayName: person.displayName || person.userKey, department: person.department || '' };
+                                        });
+                                        rememberCircle(saved);
+                                        addInput.value = '';
+                                        addResults.innerHTML = '';
+                                        fill();
+                                        renderFrame();
+                                    } else notify((saved && saved.message) || t('errorTitle'));
+                                });
+                            }));
+                        });
+                    });
+                }, 220);
+            });
+            dialog.appendChild(addInput);
+            dialog.appendChild(addResults);
+            var count = el('div', 'asset-tree-clinic-label');
+            dialog.appendChild(count);
+            var find = el('input', 'asset-tree-input');
+            find.type = 'search';
+            find.placeholder = t('clinicPeopleFind');
+            var needle = '';
+            find.addEventListener('input', function () {
+                needle = find.value.trim().toLowerCase();
+                fill();
+            });
+            dialog.appendChild(find);
+            var list = el('div', 'asset-tree-clinic-people');
+            dialog.appendChild(list);
+            function fill() {
+                count.textContent = t('clinicPeopleCount', members.length);
+                list.innerHTML = '';
+                var shown = 0;
+                members.forEach(function (person) {
+                    var label = person.displayName || person.userKey || '';
+                    var hay = (label + ' ' + (person.userKey || '') + ' ' + (person.department || '')).toLowerCase();
+                    if (needle && hay.indexOf(needle) < 0) return;
+                    shown++;
+                    var row = el('div', 'asset-tree-person');
+                    var title = el('strong', null, label);
+                    if (person.department) title.appendChild(el('span', null, ' · ' + person.department));
+                    row.appendChild(title);
+                    row.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
+                        ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + circle.id + '/members?user=' + encodeURIComponent(person.userKey), null, function (status, payload) {
+                            if (status >= 200 && status < 300) {
+                                members = members.filter(function (item) { return item.userKey !== person.userKey; });
+                                rememberCircle({
+                                    id: circle.id,
+                                    name: circle.name,
+                                    places: circle.places,
+                                    reports: circle.reports,
+                                    members: members
+                                });
+                                fill();
+                                renderFrame();
+                            } else notify((payload && payload.message) || t('errorTitle'));
+                        });
+                    }));
+                    list.appendChild(row);
+                });
+                if (!shown) list.appendChild(el('p', 'asset-tree-hint', members.length ? t('schemaNoMatch') : t('clinicPeopleEmpty')));
+            }
+            fill();
+        });
+    }
+
     function renderAccessSettings(panel) {
         var stack = el('div', 'asset-tree-settings-block asset-tree-project-stack asset-tree-access-stack');
         panel.appendChild(stack);
         var block = el('section', 'asset-tree-project-card');
-        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessSection')));
+        block.appendChild(el('h3', 'asset-tree-settings-title', t('accessCustomTitle')));
         block.appendChild(el('p', 'asset-tree-hint', t('roleHint')));
         if (state.grants === null || state.roles === null) {
             var waitGrants = state.grants === null;
@@ -32106,7 +33005,8 @@
             openRoleModal(null);
         }));
         stack.appendChild(block);
-        stack.appendChild(renderAccessPeople());
+        stack.appendChild(renderAccessGrant());
+        stack.appendChild(renderAccessRoster());
         var schemas = el('details', 'asset-tree-access-schemas');
         schemas.appendChild(el('summary', null, t('schemaTitle')));
         schemas.appendChild(schemaSettings());
@@ -32218,6 +33118,7 @@
     function issueDraft(packed) {
         var draft = state.accessDraft || {};
         var scope = draft.scope || { typeScope: '', fieldScope: '', schemaName: '' };
+        scope.placeScope = draft.placeScope || '';
         if (draft.mode === 'user') {
             if (!draft.userKey) {
                 notify(t('userSearch'));
@@ -32230,7 +33131,8 @@
                 fieldScope: scope.fieldScope,
                 schemaName: scope.schemaName,
                 reach: packed.reach,
-                roleName: ''
+                roleName: '',
+                placeScope: scope.placeScope
             }, packed.caps, null);
             return;
         }
@@ -32245,14 +33147,139 @@
             fieldScope: scope.fieldScope,
             schemaName: scope.schemaName,
             reach: packed.reach,
-            roleName: ''
+            roleName: '',
+            placeScope: scope.placeScope
         }, packed.caps, null);
     }
 
-    function renderAccessPeople() {
+    function placeChoices() {
+        var list = [];
+        (state.assets || []).forEach(function (asset) {
+            if (!asset || !typeOf(asset.typeKey).location) return;
+            list.push(asset);
+        });
+        list.sort(function (left, right) {
+            return (left.name || '').localeCompare(right.name || '', 'ru');
+        });
+        return list;
+    }
+
+    function placeLabel(asset) {
+        if (!asset) return '';
+        var name = asset.name || asset.objectKey || String(asset.id);
+        if (asset.objectKey && asset.name) return name + ' · ' + asset.objectKey;
+        return name;
+    }
+
+    function placeScopeValue(picked) {
+        if (picked && picked['*']) return '*';
+        var ids = [];
+        Object.keys(picked || {}).forEach(function (key) {
+            if (key && key !== '*') ids.push(key);
+        });
+        return ids.join(',');
+    }
+
+    function grantPlaceNames(grant) {
+        var picked = {};
+        String(grant && grant.placeScope || '').split(',').forEach(function (part) {
+            if (part) picked[part] = true;
+        });
+        if (picked['*']) return t('accessPlacesEvery');
+        var names = [];
+        placeChoices().forEach(function (asset) {
+            if (picked[String(asset.id)]) names.push(asset.name || asset.objectKey || String(asset.id));
+        });
+        return names.join(', ');
+    }
+
+    function placeChecklist(picked) {
+        var list = el('div', 'asset-tree-check-list asset-tree-access-places');
+        var places = placeChoices();
+        var boxes = [];
+        var allLabel = el('label', 'asset-tree-check asset-tree-access-places-all');
+        var allBox = document.createElement('input');
+        allBox.type = 'checkbox';
+        allBox.checked = !!picked['*'];
+        allBox.addEventListener('change', function () {
+            if (allBox.checked) {
+                picked['*'] = true;
+            } else {
+                delete picked['*'];
+                boxes.forEach(function (box) {
+                    box.checked = false;
+                    delete picked[box.getAttribute('data-place')];
+                });
+            }
+            paintAll();
+        });
+        allLabel.appendChild(allBox);
+        allLabel.appendChild(document.createTextNode(t('accessPlacesAll')));
+        list.appendChild(allLabel);
+        function paintAll() {
+            boxes.forEach(function (box) {
+                box.disabled = !!picked['*'];
+                if (picked['*']) box.checked = true;
+            });
+        }
+        if (!places.length) {
+            list.appendChild(el('p', 'asset-tree-hint', t('accessPlacesNone')));
+            return list;
+        }
+        places.forEach(function (asset) {
+            var label = el('label', 'asset-tree-check');
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.setAttribute('data-place', String(asset.id));
+            box.checked = !!picked['*'] || !!picked[String(asset.id)];
+            box.addEventListener('change', function () {
+                if (picked['*']) return;
+                if (box.checked) picked[String(asset.id)] = true;
+                else delete picked[String(asset.id)];
+            });
+            label.appendChild(box);
+            label.appendChild(document.createTextNode(placeLabel(asset)));
+            list.appendChild(label);
+            boxes.push(box);
+        });
+        paintAll();
+        return list;
+    }
+
+    function openPlaceModal(grant) {
+        var picked = {};
+        String(grant && grant.placeScope || '').split(',').forEach(function (part) {
+            if (part) picked[part] = true;
+        });
+        openModal(function (dialog) {
+            dialog.appendChild(el('h2', null, t('accessPlaces')));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('accessPlacesHint')));
+            dialog.appendChild(placeChecklist(picked));
+            var actions = el('div', 'asset-tree-inline-actions');
+            actions.appendChild(button(t('save'), 'asset-tree-btn primary', function () {
+                postGrant(grant, grant.caps || '', null, {
+                    typeScope: grant.typeScope || '',
+                    fieldScope: grant.fieldScope || '',
+                    schemaName: grant.schemaName || '',
+                    reach: grant.reach || 'all',
+                    roleName: grant.roleName || '',
+                    placeScope: placeScopeValue(picked)
+                });
+            }));
+            actions.appendChild(button(t('cancel'), 'asset-tree-btn', closeModal));
+            dialog.appendChild(actions);
+        });
+    }
+
+    function renderAccessGrant() {
         var card = el('section', 'asset-tree-project-card');
-        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessPeople')));
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessGiveTitle')));
         card.appendChild(el('p', 'asset-tree-hint', t('accessPeopleHint')));
+        card.appendChild(accessGrantForm());
+        return card;
+    }
+
+    function accessGrantForm() {
         var form = el('form', 'asset-tree-access-give');
         var mode = 'group';
         var pickedUser = null;
@@ -32261,12 +33288,14 @@
         var userMode = button(t('accessUser'), 'asset-tree-btn', function () { setMode('user'); });
         kind.appendChild(groupMode);
         kind.appendChild(userMode);
-        form.appendChild(kind);
         var principalInput = input('grant-principal', '', false);
         principalInput.placeholder = t('groupSearch');
         var principalField = field(t('accessGroup'), principalInput, true);
         var principalLabel = principalField.querySelector('span');
-        form.appendChild(principalField);
+        var who = el('div', 'asset-tree-access-give-row');
+        who.appendChild(kind);
+        who.appendChild(principalField);
+        form.appendChild(who);
         var suggest = el('div', 'asset-tree-suggest');
         form.appendChild(suggest);
         var rolePick = document.createElement('select');
@@ -32286,6 +33315,12 @@
         roleField.appendChild(el('span', null, t('roleUse')));
         roleField.appendChild(rolePick);
         form.appendChild(roleField);
+        var pickedPlaces = {};
+        var placeBlock = el('div', 'asset-tree-field asset-tree-access-place-field');
+        placeBlock.appendChild(el('span', null, t('accessPlaces')));
+        placeBlock.appendChild(el('p', 'asset-tree-hint', t('accessPlacesHint')));
+        placeBlock.appendChild(placeChecklist(pickedPlaces));
+        form.appendChild(placeBlock);
         var error = el('div', 'asset-tree-form-error');
         error.hidden = true;
         form.appendChild(error);
@@ -32343,13 +33378,13 @@
                     return;
                 }
                 if (!role) {
-                    state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '' };
+                    state.accessDraft = { mode: 'user', userKey: userKey, display: principalInput.value.trim(), text: '', placeScope: placeScopeValue(pickedPlaces) };
                     openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
                         issueDraft(packed);
                     });
                     return;
                 }
-                postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
+                postGrant({ userKey: userKey, reach: role.reach || 'all', roleName: role.name, placeScope: placeScopeValue(pickedPlaces) }, role.caps || '', error);
                 return;
             }
             var groupName = principalInput.value.trim();
@@ -32359,13 +33394,13 @@
                 return;
             }
             if (!role) {
-                state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '' };
+                state.accessDraft = { mode: 'group', text: groupName, display: groupName, userKey: '', placeScope: placeScopeValue(pickedPlaces) };
                 openGrantModal(null, presetMatrix('engineer'), t('accessGive'), function (packed) {
                     issueDraft(packed);
                 });
                 return;
             }
-            postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name }, role.caps || '', error);
+            postGrant({ groupName: groupName, reach: role.reach || 'all', roleName: role.name, placeScope: placeScopeValue(pickedPlaces) }, role.caps || '', error);
         }));
         function paintMode() {
             groupMode.className = 'asset-tree-btn' + (mode === 'group' ? ' primary' : '');
@@ -32384,7 +33419,12 @@
         }
         paintMode();
         form.addEventListener('submit', function (event) { event.preventDefault(); });
-        card.appendChild(form);
+        return form;
+    }
+
+    function renderAccessRoster() {
+        var card = el('section', 'asset-tree-project-card');
+        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessRosterTitle')));
         if (!(state.grants || []).length) card.appendChild(el('p', 'asset-tree-hint', t('accessEmpty')));
         var rows = [];
         var list = el('div', 'asset-tree-access-people');
@@ -32406,6 +33446,8 @@
             var summary = el('div', 'asset-tree-access-person-summary');
             summary.appendChild(el('span', null, grant.roleName ? grant.roleName : t('roleCustom')));
             summary.appendChild(el('span', null, accessSummary(grant.roleName ? roleByName(grant.roleName) || grant : grant)));
+            var placeNames = grantPlaceNames(grant);
+            if (placeNames) summary.appendChild(el('span', null, placeNames));
             row.appendChild(summary);
             var actions = el('div', 'asset-tree-access-person-actions');
             if (grant.roleName) {
@@ -32430,6 +33472,9 @@
                     openGrantModal(grant);
                 }));
             }
+            actions.appendChild(button(t('accessPlacesEdit'), 'asset-tree-btn', function () {
+                openPlaceModal(grant);
+            }));
             actions.appendChild(button(t('accessRemove'), 'asset-tree-btn', function () {
                 var suffix = grant.userKey
                     ? '?user=' + encodeURIComponent(grant.userKey)

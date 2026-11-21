@@ -13,6 +13,7 @@ import javax.naming.Context;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
 import javax.naming.directory.Attribute;
+import javax.naming.directory.DirContext;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
 import javax.naming.ldap.InitialLdapContext;
@@ -20,9 +21,15 @@ import javax.naming.ldap.LdapContext;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Hashtable;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -34,7 +41,8 @@ public final class DirectoryPeople {
     private static final String LOADER = "com.atlassian.crowd.directory.loader.DirectoryInstanceLoader";
     private static final long REMEMBER = 10L * 60L * 1000L;
     private static final String[] ATTRIBUTES = {
-            "title", "jobTitle", "personalTitle", "telephoneNumber", "telephone", "mobile",
+            "title", "jobTitle", "personalTitle", "employeeType", "description",
+            "telephoneNumber", "telephone", "mobile",
             "mobileTelephone", "otherMobile", "otherTelephone", "ipPhone", "homePhone",
             "department", "division"
     };
@@ -138,10 +146,69 @@ public final class DirectoryPeople {
 
     private static Found search(Directory directory, Map<String, String> stored, String username, String email) {
         String query = filter(stored.get("ldap.user.username"), username, email);
-        String base = searchBase(stored.get("ldap.user.dn"), stored.get("ldap.basedn"));
         if (query.isEmpty()) {
             return null;
         }
+        String[] names = attributeNames(stored);
+        Found live = searchLive(directory, query, names);
+        if (live != null && !live.title.isEmpty()) {
+            return live;
+        }
+        Found bound = searchBound(directory, stored, query, names);
+        if (bound != null && (live == null || !bound.title.isEmpty() || !bound.phone.isEmpty() || !bound.department.isEmpty())) {
+            return bound;
+        }
+        return live != null ? live : bound;
+    }
+
+    /** Attribute names the directory itself maps, plus the usual job, phone and department names. */
+    static String[] attributeNames(Map<String, String> stored) {
+        LinkedHashSet<String> names = new LinkedHashSet<String>();
+        Collections.addAll(names, ATTRIBUTES);
+        if (stored == null) {
+            return names.toArray(new String[names.size()]);
+        }
+        for (Map.Entry<String, String> entry : stored.entrySet()) {
+            String key = entry.getKey() == null ? "" : entry.getKey().toLowerCase(Locale.ROOT);
+            String value = entry.getValue() == null ? "" : entry.getValue().trim();
+            if (!value.matches("[A-Za-z][A-Za-z0-9._-]{0,48}")) {
+                continue;
+            }
+            if (key.contains("title") || key.contains("job") || key.contains("phone") || key.contains("mobile")
+                    || key.contains("department") || key.contains("employee")) {
+                names.add(value);
+            }
+        }
+        return names.toArray(new String[names.size()]);
+    }
+
+    /** Uses the directory connection Jira already holds, so the password does not have to be rebuilt. */
+    private static Found searchLive(Directory directory, String query, String[] names) {
+        Object opened = loader();
+        Object remote = opened == null ? null : remote(opened, directory);
+        DirContext context = liveContext(remote, 0, Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>()));
+        if (context == null) {
+            return null;
+        }
+        try {
+            return query(context, "", query, names);
+        } catch (RuntimeException ex) {
+            log.debug("Directory contact was not read", ex);
+            return null;
+        } catch (NamingException ex) {
+            log.debug("Directory contact was not read", ex);
+            return null;
+        } finally {
+            try {
+                context.close();
+            } catch (NamingException ignored) {
+                // The directory conversation is already finished.
+            }
+        }
+    }
+
+    private static Found searchBound(Directory directory, Map<String, String> stored, String query, String[] names) {
+        String base = searchBase(stored.get("ldap.user.dn"), stored.get("ldap.basedn"));
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         ClassLoader system = ClassLoader.getSystemClassLoader();
         LdapContext context = null;
@@ -164,40 +231,12 @@ public final class DirectoryPeople {
             if (base.isEmpty()) {
                 base = namingContext(context);
             }
-            SearchControls controls = new SearchControls();
-            controls.setSearchScope(SearchControls.SUBTREE_SCOPE);
-            controls.setReturningAttributes(ATTRIBUTES);
-            controls.setCountLimit(5);
-            controls.setTimeLimit(8000);
-            NamingEnumeration<SearchResult> found = context.search(base, query, controls);
-            try {
-                String phone = "";
-                String title = "";
-                String department = "";
-                while (found.hasMore()) {
-                    Found one = fromResult(found.next());
-                    if (phone.isEmpty()) {
-                        phone = one.phone;
-                    }
-                    if (title.isEmpty()) {
-                        title = one.title;
-                    }
-                    if (department.isEmpty()) {
-                        department = one.department;
-                    }
-                    if (!phone.isEmpty() && !title.isEmpty()) {
-                        break;
-                    }
-                }
-                return new Found(phone, title, department);
-            } finally {
-                found.close();
-            }
+            return query(context, base, query, names);
         } catch (RuntimeException ex) {
-            log.debug("Directory contact was not read for {}", username, ex);
+            log.debug("Directory contact was not read", ex);
             return null;
         } catch (NamingException ex) {
-            log.debug("Directory contact was not read for {}", username, ex);
+            log.debug("Directory contact was not read", ex);
             return null;
         } finally {
             Thread.currentThread().setContextClassLoader(previous);
@@ -209,6 +248,98 @@ public final class DirectoryPeople {
                 }
             }
         }
+    }
+
+    private static Found query(DirContext context, String base, String filter, String[] names) throws NamingException {
+        SearchControls controls = new SearchControls();
+        controls.setSearchScope(SearchControls.SUBTREE_SCOPE);
+        controls.setReturningAttributes(names);
+        controls.setCountLimit(5);
+        controls.setTimeLimit(8000);
+        NamingEnumeration<SearchResult> found = context.search(base == null ? "" : base, filter, controls);
+        try {
+            String phone = "";
+            String title = "";
+            String department = "";
+            while (found.hasMore()) {
+                Found one = fromResult(found.next());
+                if (phone.isEmpty()) {
+                    phone = one.phone;
+                }
+                if (title.isEmpty()) {
+                    title = one.title;
+                }
+                if (department.isEmpty()) {
+                    department = one.department;
+                }
+                if (!phone.isEmpty() && !title.isEmpty()) {
+                    break;
+                }
+            }
+            return new Found(phone, title, department);
+        } finally {
+            found.close();
+        }
+    }
+
+    private static DirContext liveContext(Object node, int depth, Set<Object> seen) {
+        if (node == null || depth > 4 || node instanceof String || node instanceof Number || node instanceof Boolean
+                || node instanceof Map || node instanceof Iterable || !seen.add(node)) {
+            return null;
+        }
+        String typeName = node.getClass().getName().toLowerCase(Locale.ROOT);
+        if (typeName.contains("contextsource") || typeName.contains("ldapcontext")) {
+            DirContext opened = readOnly(node);
+            if (opened != null) {
+                return opened;
+            }
+        }
+        Class<?> type = node.getClass();
+        while (type != null && !type.getName().startsWith("java.")) {
+            Field[] fields;
+            try {
+                fields = type.getDeclaredFields();
+            } catch (RuntimeException ex) {
+                return null;
+            }
+            for (int i = 0; i < fields.length; i++) {
+                if (Modifier.isStatic(fields[i].getModifiers())) {
+                    continue;
+                }
+                fields[i].setAccessible(true);
+                Object value;
+                try {
+                    value = fields[i].get(node);
+                } catch (IllegalAccessException ex) {
+                    continue;
+                }
+                DirContext nested = liveContext(value, depth + 1, seen);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+            type = type.getSuperclass();
+        }
+        return null;
+    }
+
+    private static DirContext readOnly(Object source) {
+        try {
+            Method method = source.getClass().getMethod("getReadOnlyContext");
+            Object value = method.invoke(source);
+            if (value instanceof DirContext) {
+                return (DirContext) value;
+            }
+        } catch (RuntimeException ex) {
+            log.debug("Directory connection was not read", ex);
+        } catch (IllegalAccessException ex) {
+            log.debug("Directory connection was not read", ex);
+        } catch (InvocationTargetException ex) {
+            log.debug("Directory connection was not read", ex);
+        } catch (NoSuchMethodException ignored) {
+            // This object keeps the directory another way.
+        }
+        return null;
     }
 
     private static Found fromResult(SearchResult result) throws NamingException {

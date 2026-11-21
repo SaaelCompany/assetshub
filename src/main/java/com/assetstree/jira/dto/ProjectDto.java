@@ -32,6 +32,7 @@ public class ProjectDto {
     private boolean canSchemeEdit;
     private String reach;
     private String acts;
+    private String editPlaces;
     private String assetKey;
     private boolean treeObjects;
     private List<String> columns = new ArrayList<String>();
@@ -181,6 +182,8 @@ public class ProjectDto {
     public void setReach(String reach) { this.reach = reach; }
     public String getActs() { return acts; }
     public void setActs(String acts) { this.acts = acts; }
+    public String getEditPlaces() { return editPlaces; }
+    public void setEditPlaces(String editPlaces) { this.editPlaces = editPlaces; }
 
     public String getAssetKey() {
         return assetKey;

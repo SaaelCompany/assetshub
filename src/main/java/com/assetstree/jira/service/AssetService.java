@@ -16,6 +16,7 @@ import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.BulkResultDto;
 import com.assetstree.jira.dto.AssetListDto;
 import com.assetstree.jira.dto.AssetTypeDto;
+import com.assetstree.jira.dto.ClinicCircleDto;
 import com.assetstree.jira.dto.CommentDto;
 import com.assetstree.jira.dto.FieldDto;
 import com.assetstree.jira.dto.FileDto;
@@ -196,6 +197,22 @@ public interface AssetService {
     void deleteStatus(ApplicationUser user, String projectKey, String statusKey);
 
     List<GrantDto> listGrants(ApplicationUser user, String projectKey);
+
+    List<ClinicCircleDto> listCircles(ApplicationUser user, String projectKey);
+
+    List<ClinicCircleDto.Place> searchCirclePlaces(ApplicationUser user, String projectKey, String query);
+
+    ClinicCircleDto saveCircle(ApplicationUser user, String projectKey, com.assetstree.jira.model.ClinicCircleDraft draft);
+
+    void deleteCircle(ApplicationUser user, String projectKey, int circleId);
+
+    ClinicCircleDto addCircleMember(ApplicationUser user, String projectKey, int circleId, String userKey);
+
+    void removeCircleMember(ApplicationUser user, String projectKey, int circleId, String userKey);
+
+    ClinicCircleDto.Place attachCircle(ApplicationUser user, int assetId, int circleId);
+
+    void detachCircle(ApplicationUser user, int assetId, int circleId);
 
     GrantDto addGrant(ApplicationUser user, String projectKey, GrantDraft draft);
 

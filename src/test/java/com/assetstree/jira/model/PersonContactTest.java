@@ -39,6 +39,21 @@ public class PersonContactTest {
     }
 
     @Test
+    public void employeeTypeAndAShortDescriptionFillTheJobWhenTitleIsAbsent() {
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        attributes.put("employeeType", "Врач-терапевт");
+        attributes.put("description", "Длинное описание, которое не должно победить должность");
+        UserProfileDto dto = new UserProfileDto();
+        PersonContact.apply(dto, attributes);
+        assertEquals("Врач-терапевт", dto.getTitle());
+        attributes.clear();
+        attributes.put("description", "Заведующий отделением");
+        dto = new UserProfileDto();
+        PersonContact.apply(dto, attributes);
+        assertEquals("Заведующий отделением", dto.getTitle());
+    }
+
+    @Test
     public void aFilledValueStays() {
         Map<String, String> attributes = new LinkedHashMap<String, String>();
         attributes.put("title", "Другая");

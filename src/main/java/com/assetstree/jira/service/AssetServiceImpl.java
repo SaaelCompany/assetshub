@@ -76,6 +76,9 @@ import com.assetstree.jira.ao.FlowRuleEntity;
 import com.assetstree.jira.ao.AssetFileEntity;
 import com.assetstree.jira.ao.DocTemplateEntity;
 import com.assetstree.jira.ao.AssetShareEntity;
+import com.assetstree.jira.ao.ClinicCircleEntity;
+import com.assetstree.jira.ao.ClinicMemberEntity;
+import com.assetstree.jira.ao.ClinicPlaceEntity;
 import com.assetstree.jira.ao.AssetIssueLinkEntity;
 import com.assetstree.jira.ao.AssetLinkEntity;
 import com.assetstree.jira.ao.AssetPeerEntity;
@@ -108,6 +111,7 @@ import com.assetstree.jira.ao.AssetTypeEntity;
 import com.assetstree.jira.dto.ActivityDto;
 import com.assetstree.jira.dto.AssetDto;
 import com.assetstree.jira.dto.AssetLinkDto;
+import com.assetstree.jira.dto.GraphTieDto;
 import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.LinkAttrDto;
 import com.assetstree.jira.dto.AssetKeyDto;
@@ -129,6 +133,7 @@ import com.assetstree.jira.dto.AssetTypeDto;
 import com.assetstree.jira.dto.AttributeDto;
 import com.assetstree.jira.dto.BulkIssueDto;
 import com.assetstree.jira.dto.BulkResultDto;
+import com.assetstree.jira.dto.ClinicCircleDto;
 import com.assetstree.jira.dto.CommentDto;
 import com.assetstree.jira.dto.FieldDto;
 import com.assetstree.jira.dto.FlowBookDto;
@@ -216,9 +221,12 @@ import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
 import com.assetstree.jira.model.ChartLayout;
+import com.assetstree.jira.model.ClinicCircleDraft;
+import com.assetstree.jira.model.ClinicCircles;
 import com.assetstree.jira.model.GrantHomes;
 import com.assetstree.jira.model.GrantDraft;
 import com.assetstree.jira.model.OwnReach;
+import com.assetstree.jira.model.PlaceScope;
 import com.assetstree.jira.model.RoleDraft;
 import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
@@ -1467,7 +1475,7 @@ public class AssetServiceImpl implements AssetService {
         Map<Integer, AssetEntity> index = indexAssets(rows);
         List<AssetAttributeEntity> attributes = attributesFor(id);
         AssetTypeDto type = types.get(asset.getTypeKey());
-        boolean shared = TreeLogic.coveredByShare(id, parentMap(rows), shareIds(user.getKey()));
+        boolean shared = TreeLogic.coveredByShare(id, parentMap(rows), portalShareIds(user.getKey()));
         String role = portalRole(asset, attributes, type, user.getKey(), shared);
         ProjectViewEntity view = viewRow(projectKey);
         ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
@@ -2468,7 +2476,7 @@ public class AssetServiceImpl implements AssetService {
         }
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(projectKey, rows));
         AssetTypeDto type = types.get(asset.getTypeKey());
-        boolean shared = TreeLogic.coveredByShare(assetId, parentMap(rows), shareIds(user.getKey()));
+        boolean shared = TreeLogic.coveredByShare(assetId, parentMap(rows), portalShareIds(user.getKey()));
         if (portalRole(asset, attributesFor(assetId), type, user.getKey(), shared) == null) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
@@ -3137,6 +3145,7 @@ public class AssetServiceImpl implements AssetService {
         deleteRows(AssetCommentEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetFileEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetShareEntity.class, "ASSET_ID", toDelete);
+        deleteRows(ClinicPlaceEntity.class, "ASSET_ID", toDelete);
         deleteRows(AssetActivityEntity.class, "ASSET_ID", toDelete);
         deleteRows(ServicePlanEntity.class, "ASSET_ID", toDelete);
         deleteRows(LifecycleEntity.class, "ASSET_ID", toDelete);
@@ -4580,6 +4589,100 @@ public class AssetServiceImpl implements AssetService {
             dto.setOpen(false);
         }
         return dto;
+    }
+
+    private List<GraphTieDto> meshFor(int assetId, List<AssetPeerDto> peers, List<AssetLinkDto> links) {
+        Map<Integer, AssetPeerDto> cards = new LinkedHashMap<Integer, AssetPeerDto>();
+        if (peers != null) {
+            for (int i = 0; i < peers.size(); i++) {
+                AssetPeerDto peer = peers.get(i);
+                if (peer != null && peer.getId() > 0 && peer.getId() != assetId) {
+                    cards.put(Integer.valueOf(peer.getId()), peer);
+                }
+            }
+        }
+        if (links != null) {
+            for (int i = 0; i < links.size(); i++) {
+                AssetLinkDto link = links.get(i);
+                if (link == null) {
+                    continue;
+                }
+                int other = "in".equals(link.getDirection()) ? link.getFromId() : link.getToId();
+                if (other <= 0 || other == assetId || cards.containsKey(Integer.valueOf(other))) {
+                    continue;
+                }
+                AssetPeerDto card = link.getCard();
+                if (card == null) {
+                    card = new AssetPeerDto();
+                    card.setId(other);
+                    card.setObjectKey(link.getObjectKey() == null ? "" : link.getObjectKey());
+                    card.setName(link.getName() == null ? "" : link.getName());
+                    card.setProjectKey(link.getProjectKey() == null ? "" : link.getProjectKey());
+                    card.setOpen(link.isOpen());
+                }
+                cards.put(Integer.valueOf(other), card);
+            }
+        }
+        List<Integer> neighbors = new ArrayList<Integer>(cards.keySet());
+        Set<String> pairs = new HashSet<String>();
+        List<GraphTieDto> ties = new ArrayList<GraphTieDto>();
+        int[] extra = new int[] { 0 };
+        int limit = Math.min(neighbors.size(), 40);
+        for (int n = 0; n < limit; n++) {
+            int neighbor = neighbors.get(n).intValue();
+            AssetPeerDto near = cards.get(Integer.valueOf(neighbor));
+            List<AssetLinkDto> theirs = linksFor(neighbor);
+            for (int i = 0; i < theirs.size(); i++) {
+                AssetLinkDto link = theirs.get(i);
+                if (link == null) {
+                    continue;
+                }
+                int other = "in".equals(link.getDirection()) ? link.getFromId() : link.getToId();
+                addMeshTie(ties, pairs, cards, extra, assetId, neighbor, near, other, link.getCard(),
+                        link.getType(), link.getDirection());
+            }
+            List<AssetPeerDto> theirPeers = peersFor(neighbor);
+            for (int i = 0; i < theirPeers.size(); i++) {
+                AssetPeerDto peer = theirPeers.get(i);
+                if (peer == null) {
+                    continue;
+                }
+                addMeshTie(ties, pairs, cards, extra, assetId, neighbor, near, peer.getId(), peer, "peer", "out");
+            }
+        }
+        return ties;
+    }
+
+    private void addMeshTie(List<GraphTieDto> ties, Set<String> pairs, Map<Integer, AssetPeerDto> cards, int[] extra,
+                            int assetId, int neighbor, AssetPeerDto near, int other, AssetPeerDto far,
+                            String type, String direction) {
+        if (other <= 0 || other == assetId || other == neighbor || near == null) {
+            return;
+        }
+        int low = other < neighbor ? other : neighbor;
+        int high = other < neighbor ? neighbor : other;
+        String pair = low + ":" + high;
+        if (pairs.contains(pair)) {
+            return;
+        }
+        AssetPeerDto known = cards.get(Integer.valueOf(other));
+        if (known == null) {
+            if (extra[0] >= 24 || far == null || far.getId() <= 0) {
+                return;
+            }
+            cards.put(Integer.valueOf(other), far);
+            extra[0]++;
+            known = far;
+        }
+        pairs.add(pair);
+        GraphTieDto tie = new GraphTieDto();
+        tie.setFromId(neighbor);
+        tie.setToId(other);
+        tie.setType(type);
+        tie.setDirection(direction);
+        tie.setFrom(near);
+        tie.setTo(known);
+        ties.add(tie);
     }
 
     @Override
@@ -6315,7 +6418,7 @@ public class AssetServiceImpl implements AssetService {
                     }
                 });
                 int total = 0;
-                final Set<Integer> sharedIds = shareIds(holder);
+                final Set<Integer> sharedIds = portalShareIds(holder);
                 for (Project project : ordered) {
                     if (!moduleOn(project.getKey(), ProjectModules.PORTAL)) {
                         continue;
@@ -6323,11 +6426,11 @@ public class AssetServiceImpl implements AssetService {
                     ProjectViewEntity view = viewRow(project.getKey());
                     ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
                     boolean mineOn = Boolean.TRUE.equals(setup.getPortalMine());
-                    boolean listed = PortalShowcase.sees(setup.getPortalAudience(), holder);
-                    if (!mineOn && !listed) {
+                    List<String> circleReports = circleReportIds(project.getKey(), holder);
+                    List<PortalMineDto.Chart> charts = portalCharts(project, circleReports);
+                    if (!mineOn && charts.isEmpty()) {
                         continue;
                     }
-                    List<PortalMineDto.Chart> charts = listed ? portalCharts(project, setup) : new ArrayList<PortalMineDto.Chart>();
                     if (!mineOn) {
                         if (charts.isEmpty()) {
                             continue;
@@ -6350,13 +6453,16 @@ public class AssetServiceImpl implements AssetService {
                         if (type != null && type.isLocation()) {
                             continue;
                         }
-                        String role = portalRole(row, attributes.get(row.getID()), type, holder,
-                                TreeLogic.coveredByShare(row.getID(), parents, sharedIds));
-                        if (role == null) {
+                        String personal = holderRole(row, attributes.get(row.getID()), type, holder);
+                        boolean shared = TreeLogic.coveredByShare(row.getID(), parents, sharedIds);
+                        if (personal == null && !shared) {
                             continue;
                         }
-                        cards.add(portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey(),
-                                Boolean.TRUE.equals(setup.getPhoto())));
+                        String role = portalRole(row, attributes.get(row.getID()), type, holder, shared);
+                        PortalMineDto.Card card = portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey(),
+                                Boolean.TRUE.equals(setup.getPhoto()));
+                        card.setSharedOnly(personal == null);
+                        cards.add(card);
                     }
                     Collections.sort(cards, new Comparator<PortalMineDto.Card>() {
                         @Override
@@ -6649,14 +6755,6 @@ public class AssetServiceImpl implements AssetService {
                 return leftKey.compareToIgnoreCase(rightKey);
             }
         };
-        boolean serviceOn = moduleOn(projectKey, ProjectModules.SERVICE);
-        boolean lifeOn = moduleOn(projectKey, ProjectModules.LIFE);
-        List<String> serviceHeaders = serviceColumnLabels(labels);
-        List<String> lifeHeaders = lifeColumnLabels(labels);
-        Map<Integer, LifecycleEntity> lives = lifeOn ? livesByAsset(byType) : new HashMap<Integer, LifecycleEntity>();
-        Map<Integer, List<ServicePlanEntity>> plans = serviceOn
-                ? plansByAsset(byType) : new HashMap<Integer, List<ServicePlanEntity>>();
-        Map<String, String> kindLabels = serviceOn ? kindNames(projectKey) : new HashMap<String, String>();
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
         for (AssetTypeDto type : types) {
             if (type.isLocation() || !byType.containsKey(type.getTypeKey())) {
@@ -6676,30 +6774,6 @@ public class AssetServiceImpl implements AssetService {
                     }
                     columns.add(field);
                     headers.add(field.getLabel());
-                }
-            }
-            List<Integer> addedService = new ArrayList<Integer>();
-            if (serviceOn) {
-                for (int slot = 0; slot < serviceHeaders.size(); slot++) {
-                    String header = serviceHeaders.get(slot);
-                    String marker = EquipmentExchange.norm(header);
-                    if (marker.isEmpty() || !taken.add(marker)) {
-                        continue;
-                    }
-                    addedService.add(Integer.valueOf(slot));
-                    headers.add(header);
-                }
-            }
-            List<Integer> addedLife = new ArrayList<Integer>();
-            if (lifeOn) {
-                for (int slot = 0; slot < lifeHeaders.size(); slot++) {
-                    String header = lifeHeaders.get(slot);
-                    String marker = EquipmentExchange.norm(header);
-                    if (marker.isEmpty() || !taken.add(marker)) {
-                        continue;
-                    }
-                    addedLife.add(Integer.valueOf(slot));
-                    headers.add(header);
                 }
             }
             List<AssetEntity> equipment = byType.get(type.getTypeKey());
@@ -6733,19 +6807,6 @@ public class AssetServiceImpl implements AssetService {
                     }
                     line.add(value == null ? "" : value);
                 }
-                if (serviceOn) {
-                    List<ServicePlanEntity> owned = plans.get(Integer.valueOf(row.getID()));
-                    ServicePlanEntity one = owned != null && owned.size() == 1 ? owned.get(0) : null;
-                    for (Integer slot : addedService) {
-                        line.add(one == null ? "" : serviceCell(one, slot.intValue(), kindLabels, labels, dayFirst));
-                    }
-                }
-                if (lifeOn) {
-                    LifecycleEntity life = lives.get(Integer.valueOf(row.getID()));
-                    for (Integer slot : addedLife) {
-                        line.add(lifeCell(life, slot.intValue(), dayFirst));
-                    }
-                }
                 lines.add(line);
             }
             pages.add(new WorkbookSheet.Page(type.getLabel(), headers, lines));
@@ -6753,58 +6814,41 @@ public class AssetServiceImpl implements AssetService {
         if (pages.isEmpty()) {
             pages.add(new WorkbookSheet.Page("Equipment", common, new ArrayList<List<String>>()));
         }
-        if (serviceOn && !blank) {
-            pages.add(servicePage(types, byType, plans, serviceHeaders, kindLabels, labels, dayFirst));
+        pages.add(linksPage(projectKey, typeKey, placeId, blank));
+        if (moduleOn(projectKey, ProjectModules.LIFE)) {
+            pages.add(lifePage(projectKey, typeKey, placeId, blank));
+        }
+        if (moduleOn(projectKey, ProjectModules.SERVICE)) {
+            pages.add(serviceBookPage(projectKey, typeKey, placeId, blank));
         }
         return WorkbookSheet.write(pages);
     }
 
     private byte[] buildLinksBook(String projectKey, String typeKey, int placeId) {
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(linksSheet(projectKey, typeKey, placeId, false));
+        return WorkbookSheet.write(pages);
+    }
+
+    private WorkbookSheet.Page linksPage(String projectKey, String typeKey, int placeId, boolean blank) {
+        return linksSheet(projectKey, typeKey, placeId, blank);
+    }
+
+    private WorkbookSheet.Page linksSheet(String projectKey, String typeKey, int placeId, boolean blank) {
         AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
-        List<AssetTypeDto> types = typeDtos(projectKey, rows);
         Map<Integer, AssetEntity> index = indexAssets(rows);
-        Map<String, Boolean> locations = new HashMap<String, Boolean>();
-        for (AssetTypeDto type : types) {
-            locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
-        }
-        String wantedType = typeKey == null ? "" : typeKey.trim();
-        List<AssetEntity> equipment = new ArrayList<AssetEntity>();
+        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
         List<Integer> ids = new ArrayList<Integer>();
-        if (rows != null) {
-            for (AssetEntity row : rows) {
-                if (row == null || row.getDeletedAt() != null) {
-                    continue;
-                }
-                Boolean location = locations.get(row.getTypeKey());
-                if (location != null && location.booleanValue()) {
-                    continue;
-                }
-                if (!wantedType.isEmpty() && !wantedType.equals(row.getTypeKey())) {
-                    continue;
-                }
-                if (placeId > 0 && !underPlace(row, placeId, index)) {
-                    continue;
-                }
-                equipment.add(row);
-                ids.add(Integer.valueOf(row.getID()));
-            }
+        for (int i = 0; i < equipment.size(); i++) {
+            ids.add(Integer.valueOf(equipment.get(i).getID()));
         }
-        Collections.sort(equipment, new Comparator<AssetEntity>() {
-            @Override
-            public int compare(AssetEntity left, AssetEntity right) {
-                String leftKey = left.getObjectKey() == null ? "" : left.getObjectKey();
-                String rightKey = right.getObjectKey() == null ? "" : right.getObjectKey();
-                return leftKey.compareToIgnoreCase(rightKey);
-            }
-        });
         I18nHelper labels = i18n();
         String[] phrases = { "linkCarries", "linkInstalled", "linkIncludes", "linkPart", "linkNeeded", "linkDepends" };
         String[] stored = { LinkRules.INSTALLED, LinkRules.INSTALLED, LinkRules.PART, LinkRules.PART,
                 LinkRules.DEPENDS, LinkRules.DEPENDS };
         boolean[] inbound = { true, false, true, false, true, false };
-        List<String> headers = new ArrayList<String>();
-        headers.add(labels.getText("asset-tree.ui.keyLabel"));
-        headers.add(labels.getText("asset-tree.ui.name"));
+        Map<String, String> typeLabels = typeLabelMap(projectKey, rows);
+        List<String> headers = identityHeaders(labels);
         for (int i = 0; i < phrases.length; i++) {
             headers.add(labels.getText("asset-tree.ui." + phrases[i]));
         }
@@ -6817,7 +6861,7 @@ public class AssetServiceImpl implements AssetService {
             }
             cells.put(Integer.valueOf(asset.getID()), line);
         }
-        if (!ids.isEmpty()) {
+        if (!blank && !ids.isEmpty()) {
             Set<Integer> seen = new HashSet<Integer>();
             List<AssetLinkEntity> relations = new ArrayList<AssetLinkEntity>();
             relations.addAll(findIn(AssetLinkEntity.class, "FROM_ID", ids, null));
@@ -6840,19 +6884,17 @@ public class AssetServiceImpl implements AssetService {
             headers.add(custom.get(i));
         }
         List<List<String>> lines = new ArrayList<List<String>>();
-        for (AssetEntity asset : equipment) {
-            List<String> line = new ArrayList<String>();
-            line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
-            line.add(asset.getName() == null ? "" : asset.getName());
-            List<String> values = cells.get(Integer.valueOf(asset.getID()));
-            if (values != null) {
-                line.addAll(values);
+        if (!blank) {
+            for (AssetEntity asset : equipment) {
+                List<String> line = identityCells(asset, typeLabels, index);
+                List<String> values = cells.get(Integer.valueOf(asset.getID()));
+                if (values != null) {
+                    line.addAll(values);
+                }
+                lines.add(line);
             }
-            lines.add(line);
         }
-        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
-        pages.add(new WorkbookSheet.Page(labels.getText("asset-tree.ui.linkSheet"), headers, lines));
-        return WorkbookSheet.write(pages);
+        return new WorkbookSheet.Page(labels.getText("asset-tree.ui.linkSheet"), headers, lines);
     }
 
     private void writeLinkCells(Map<Integer, List<String>> cells, List<String> custom, AssetEntity from, AssetEntity to,
@@ -6887,8 +6929,7 @@ public class AssetServiceImpl implements AssetService {
         if (line == null || column < 0 || column >= line.size() || other == null) {
             return;
         }
-        String mark = ((other.getObjectKey() == null ? "" : other.getObjectKey()) + " "
-                + (other.getName() == null ? "" : other.getName())).trim();
+        String mark = other.getObjectKey() == null ? "" : other.getObjectKey().trim();
         if (mark.isEmpty()) {
             return;
         }
@@ -6914,6 +6955,126 @@ public class AssetServiceImpl implements AssetService {
             cursor = parentId == null ? null : index.get(parentId);
         }
         return false;
+    }
+
+    private List<AssetEntity> exchangeRows(String projectKey, String typeKey, int placeId) {
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
+        List<AssetTypeDto> types = typeDtos(projectKey, rows);
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        Map<String, Boolean> locations = new HashMap<String, Boolean>();
+        for (AssetTypeDto type : types) {
+            locations.put(type.getTypeKey(), Boolean.valueOf(type.isLocation()));
+        }
+        String wantedType = typeKey == null ? "" : typeKey.trim();
+        List<AssetEntity> equipment = new ArrayList<AssetEntity>();
+        if (rows != null) {
+            for (AssetEntity row : rows) {
+                if (row == null || row.getDeletedAt() != null) {
+                    continue;
+                }
+                Boolean location = locations.get(row.getTypeKey());
+                if (location != null && location.booleanValue()) {
+                    continue;
+                }
+                if (!wantedType.isEmpty() && !wantedType.equals(row.getTypeKey())) {
+                    continue;
+                }
+                if (placeId > 0 && !underPlace(row, placeId, index)) {
+                    continue;
+                }
+                equipment.add(row);
+            }
+        }
+        Collections.sort(equipment, new Comparator<AssetEntity>() {
+            @Override
+            public int compare(AssetEntity left, AssetEntity right) {
+                String leftKey = left.getObjectKey() == null ? "" : left.getObjectKey();
+                String rightKey = right.getObjectKey() == null ? "" : right.getObjectKey();
+                return leftKey.compareToIgnoreCase(rightKey);
+            }
+        });
+        return equipment;
+    }
+
+    private byte[] buildLifeBook(String projectKey, String typeKey, int placeId) {
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(lifePage(projectKey, typeKey, placeId, false));
+        return WorkbookSheet.write(pages);
+    }
+
+    private WorkbookSheet.Page lifePage(String projectKey, String typeKey, int placeId, boolean blank) {
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
+        Map<String, List<AssetEntity>> byType = new HashMap<String, List<AssetEntity>>();
+        byType.put("all", equipment);
+        Map<Integer, LifecycleEntity> lives = blank ? new HashMap<Integer, LifecycleEntity>() : livesByAsset(byType);
+        I18nHelper labels = i18n();
+        boolean dayFirst = labels.getLocale() != null && "ru".equalsIgnoreCase(labels.getLocale().getLanguage());
+        List<String> lifeHeaders = lifeColumnLabels(labels);
+        List<String> headers = identityHeaders(labels);
+        headers.addAll(lifeHeaders);
+        List<List<String>> lines = new ArrayList<List<String>>();
+        if (!blank) {
+            Map<String, String> typeLabels = typeLabelMap(projectKey, rows);
+            for (int i = 0; i < equipment.size(); i++) {
+                AssetEntity asset = equipment.get(i);
+                LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
+                List<String> line = identityCells(asset, typeLabels, index);
+                for (int slot = 0; slot < lifeHeaders.size(); slot++) {
+                    line.add(lifeCell(life, slot, dayFirst));
+                }
+                lines.add(line);
+            }
+        }
+        return new WorkbookSheet.Page(labels.getText("asset-tree.ui.lifeTitle"), headers, lines);
+    }
+
+    private byte[] buildServiceBook(String projectKey, String typeKey, int placeId) {
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(serviceBookPage(projectKey, typeKey, placeId, false));
+        return WorkbookSheet.write(pages);
+    }
+
+    private WorkbookSheet.Page serviceBookPage(String projectKey, String typeKey, int placeId, boolean blank) {
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
+        Map<String, List<AssetEntity>> byType = new HashMap<String, List<AssetEntity>>();
+        byType.put("all", equipment);
+        Map<Integer, List<ServicePlanEntity>> plans = blank
+                ? new HashMap<Integer, List<ServicePlanEntity>>() : plansByAsset(byType);
+        I18nHelper labels = i18n();
+        boolean dayFirst = labels.getLocale() != null && "ru".equalsIgnoreCase(labels.getLocale().getLanguage());
+        return servicePage(equipment, plans, serviceColumnLabels(labels), kindNames(projectKey), labels, dayFirst,
+                typeLabelMap(projectKey, rows), index, blank);
+    }
+
+    private List<String> identityHeaders(I18nHelper labels) {
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+        headers.add(labels.getText("asset-tree.ui.name"));
+        headers.add(labels.getText("asset-tree.ui.type"));
+        headers.add(labels.getText("asset-tree.ui.exchangePlace"));
+        return headers;
+    }
+
+    private List<String> identityCells(AssetEntity asset, Map<String, String> typeLabels, Map<Integer, AssetEntity> index) {
+        List<String> line = new ArrayList<String>();
+        line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+        line.add(asset.getName() == null ? "" : asset.getName());
+        String type = typeLabels.get(asset.getTypeKey());
+        line.add(type == null ? "" : type);
+        line.add(location(asset, index));
+        return line;
+    }
+
+    private Map<String, String> typeLabelMap(String projectKey, AssetEntity[] rows) {
+        Map<String, String> labels = new HashMap<String, String>();
+        for (AssetTypeDto type : typeDtos(projectKey, rows)) {
+            labels.put(type.getTypeKey(), type.getLabel() == null ? "" : type.getLabel());
+        }
+        return labels;
     }
 
     private List<String> lifeColumnLabels(I18nHelper labels) {
@@ -7085,31 +7246,25 @@ public class AssetServiceImpl implements AssetService {
         return unit == null ? "" : unit;
     }
 
-    private WorkbookSheet.Page servicePage(List<AssetTypeDto> types, Map<String, List<AssetEntity>> byType,
-                                           Map<Integer, List<ServicePlanEntity>> plans, List<String> serviceHeaders,
-                                           Map<String, String> kindLabels, I18nHelper labels, boolean dayFirst) {
-        List<String> headers = new ArrayList<String>();
-        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+    private WorkbookSheet.Page servicePage(List<AssetEntity> equipment, Map<Integer, List<ServicePlanEntity>> plans,
+                                           List<String> serviceHeaders, Map<String, String> kindLabels,
+                                           I18nHelper labels, boolean dayFirst, Map<String, String> typeLabels,
+                                           Map<Integer, AssetEntity> index, boolean blank) {
+        List<String> headers = identityHeaders(labels);
         headers.addAll(serviceHeaders);
         List<List<String>> lines = new ArrayList<List<String>>();
-        for (AssetTypeDto type : types) {
-            if (type.isLocation()) {
-                continue;
-            }
-            List<AssetEntity> equipment = byType.get(type.getTypeKey());
-            if (equipment == null) {
-                continue;
-            }
-            for (AssetEntity asset : equipment) {
+        if (!blank && equipment != null) {
+            for (int i = 0; i < equipment.size(); i++) {
+                AssetEntity asset = equipment.get(i);
                 List<ServicePlanEntity> owned = plans.get(Integer.valueOf(asset.getID()));
-                if (owned == null || owned.size() < 2) {
+                if (owned == null || owned.isEmpty()) {
                     continue;
                 }
-                for (ServicePlanEntity plan : owned) {
-                    List<String> line = new ArrayList<String>();
-                    line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
-                    for (int index = 0; index < serviceHeaders.size(); index++) {
-                        line.add(serviceCell(plan, index, kindLabels, labels, dayFirst));
+                for (int planIndex = 0; planIndex < owned.size(); planIndex++) {
+                    ServicePlanEntity plan = owned.get(planIndex);
+                    List<String> line = identityCells(asset, typeLabels, index);
+                    for (int column = 0; column < serviceHeaders.size(); column++) {
+                        line.add(serviceCell(plan, column, kindLabels, labels, dayFirst));
                     }
                     lines.add(line);
                 }
@@ -7212,6 +7367,9 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("linkIncludes", labels.getText("asset-tree.ui.linkIncludes"));
         headerLabels.put("linkNeeded", labels.getText("asset-tree.ui.linkNeeded"));
         headerLabels.put("linkCarries", labels.getText("asset-tree.ui.linkCarries"));
+        headerLabels.put("linkSheet", labels.getText("asset-tree.ui.linkSheet"));
+        headerLabels.put("lifeTitle", labels.getText("asset-tree.ui.lifeTitle"));
+        headerLabels.put("serviceSheet", labels.getText("asset-tree.ui.serviceSheet"));
         boolean service = moduleOn(projectKey, ProjectModules.SERVICE)
                 && ModuleSetup.calendarOn(moduleSetup(projectKey).getScheduleBoards());
         boolean life = moduleOn(projectKey, ProjectModules.LIFE);
@@ -8710,45 +8868,42 @@ public class AssetServiceImpl implements AssetService {
         return setup;
     }
 
-    private List<PortalMineDto.Chart> portalCharts(Project project, ModuleSetupDto setup) {
+    private List<String> circleReportIds(String projectKey, String userKey) {
+        List<String> ids = new ArrayList<String>();
+        if (userKey == null || userKey.isEmpty()) {
+            return ids;
+        }
+        ClinicMemberEntity[] membership = ao().find(ClinicMemberEntity.class, "USER_KEY = ?", userKey);
+        if (membership == null) {
+            return ids;
+        }
+        for (ClinicMemberEntity member : membership) {
+            ClinicCircleEntity circle = ao().get(ClinicCircleEntity.class, member.getCircleId());
+            if (circle == null || !ProjectKeys.same(circle.getProjectKey(), projectKey)) {
+                continue;
+            }
+            for (String id : PortalShowcase.list(PortalShowcase.reports(circle.getReports()))) {
+                if (ids.size() >= PortalShowcase.CHART_LIMIT) {
+                    return ids;
+                }
+                if (!ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+        }
+        return ids;
+    }
+
+    private List<PortalMineDto.Chart> portalCharts(Project project, List<String> reportIds) {
         List<PortalMineDto.Chart> charts = new ArrayList<PortalMineDto.Chart>();
-        if (project == null || setup == null || !moduleOn(project.getKey(), ProjectModules.REPORTS)) {
+        if (project == null || reportIds == null || reportIds.isEmpty() || !moduleOn(project.getKey(), ProjectModules.REPORTS)) {
             return charts;
         }
-        List<String> wanted = new ArrayList<String>();
-        List<String> kinds = new ArrayList<String>();
-        for (String id : PortalShowcase.list(setup.getPortalReports())) {
-            if (wanted.size() >= PortalShowcase.CHART_LIMIT || wanted.contains(id)) {
-                continue;
+        for (String id : reportIds) {
+            if (charts.size() >= PortalShowcase.CHART_LIMIT) {
+                break;
             }
-            wanted.add(id);
-            kinds.add("");
-        }
-        for (String boardId : PortalShowcase.list(setup.getPortalBoards())) {
-            int id;
-            try {
-                id = Integer.parseInt(boardId);
-            } catch (NumberFormatException ex) {
-                continue;
-            }
-            ReportBoardEntity row = ao().get(ReportBoardEntity.class, id);
-            if (row == null || row.getProjectKey() == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
-                continue;
-            }
-            for (ReportBoards.Panel panel : ReportBoards.read(row.getPanels())) {
-                if (wanted.size() >= PortalShowcase.CHART_LIMIT) {
-                    break;
-                }
-                String report = panel.getReport() == null ? "" : panel.getReport().trim().toLowerCase(Locale.ROOT);
-                if (report.isEmpty() || wanted.contains(report)) {
-                    continue;
-                }
-                wanted.add(report);
-                kinds.add(panel.getChart() == null ? "" : panel.getChart());
-            }
-        }
-        for (int i = 0; i < wanted.size(); i++) {
-            PortalMineDto.Chart chart = portalChart(project, wanted.get(i), kinds.get(i));
+            PortalMineDto.Chart chart = portalChart(project, id, "");
             if (chart != null) {
                 charts.add(chart);
             }
@@ -9285,6 +9440,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setCanGrant(assets || admin || hasCap(user, project, GrantCaps.GRANTS));
         dto.setActs(actsFor(user, project));
         dto.setReach(writeReach(user, project));
+        dto.setEditPlaces(editPlaces(user, project));
         dto.setCanArrange(canArrangeTypes(user, project));
         boolean open = canOpen(user, project);
         dto.setCanView(open);
@@ -9494,6 +9650,8 @@ public class AssetServiceImpl implements AssetService {
             }
         }
         Set<Integer> assigned = assignedPlaces(asset.getProjectKey(), key);
+        Set<Integer> granted = grantedPlaces(user, asset.getProjectKey());
+        boolean everyPlace = grantedAllPlaces(user, asset.getProjectKey());
         if (rows != null) {
             for (int i = 0; i < rows.length; i++) {
                 AssetEntity row = rows[i];
@@ -9503,8 +9661,9 @@ public class AssetServiceImpl implements AssetService {
                 parents.put(Integer.valueOf(row.getID()), TreeLogic.normalizeParent(row.getParentId()));
                 String mol = row.getCustodianKey() == null ? "" : row.getCustodianKey().trim();
                 custodians.put(Integer.valueOf(row.getID()), mol);
-                if (locations.contains(row.getTypeKey()) && (key.equals(mol) || assigned.contains(Integer.valueOf(row.getID())))) {
-                    held.add(Integer.valueOf(row.getID()));
+                Integer id = Integer.valueOf(row.getID());
+                if (locations.contains(row.getTypeKey()) && (key.equals(mol) || assigned.contains(id) || everyPlace || granted.contains(id))) {
+                    held.add(id);
                 }
             }
         }
@@ -10211,6 +10370,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setTypeScope(row.getTypeScope() == null ? "" : row.getTypeScope());
         dto.setFieldScope(row.getFieldScope() == null ? "" : row.getFieldScope());
         dto.setSchemaName(row.getSchemaName() == null ? "" : row.getSchemaName());
+        dto.setPlaceScope(row.getPlaceScope() == null ? "" : row.getPlaceScope());
         return dto;
     }
 
@@ -10441,6 +10601,7 @@ public class AssetServiceImpl implements AssetService {
         row.setTypeScope(source.getTypeScope() == null ? "" : source.getTypeScope());
         row.setFieldScope(source.getFieldScope() == null ? "" : source.getFieldScope());
         row.setSchemaName(source.getSchemaName() == null ? "" : source.getSchemaName());
+        row.setPlaceScope(source.getPlaceScope() == null ? "" : source.getPlaceScope());
         row.save();
     }
 
@@ -10663,9 +10824,13 @@ public class AssetServiceImpl implements AssetService {
             dto.setComments(commentDtos(entity.getID()));
             dto.setFiles(fileDtos(entity.getID()));
             dto.setShares(shareDtos(entity.getID()));
+            if (type != null && type.isLocation()) {
+                dto.setCircles(circleRefs(entity.getID()));
+            }
             dto.setActivities(activityDtos(entity.getID()));
             dto.setPlans(planDtos(plans, businessToday()));
             dto.setLinks(linksFor(entity.getID()));
+            dto.setMesh(meshFor(entity.getID(), dto.getPeers(), dto.getLinks()));
             TniWatchEntity watch = tniWatchRow(entity.getID());
             dto.setPingUp(watch == null ? 0 : watch.getUp());
             dto.setPingExempt(watch != null && watch.getExempt() != 0);
@@ -10977,6 +11142,342 @@ public class AssetServiceImpl implements AssetService {
         return result;
     }
 
+    @Override
+    public List<ClinicCircleDto> listCircles(ApplicationUser user, String projectKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        return ao().executeInTransaction(new TransactionCallback<List<ClinicCircleDto>>() {
+            @Override
+            public List<ClinicCircleDto> doInTransaction() {
+                return circleDtos(project.getKey());
+            }
+        });
+    }
+
+    @Override
+    public List<ClinicCircleDto.Place> searchCirclePlaces(ApplicationUser user, String projectKey, String query) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        final String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        return ao().executeInTransaction(new TransactionCallback<List<ClinicCircleDto.Place>>() {
+            @Override
+            public List<ClinicCircleDto.Place> doInTransaction() {
+                List<ClinicCircleDto.Place> found = new ArrayList<ClinicCircleDto.Place>();
+                if (needle.length() < 2) {
+                    return found;
+                }
+                AssetEntity[] rows = assetsIn(project.getKey());
+                Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
+                for (AssetEntity row : rows) {
+                    AssetTypeDto type = types.get(row.getTypeKey());
+                    if (type == null || !type.isLocation() || row.getName() == null) {
+                        continue;
+                    }
+                    String name = row.getName();
+                    String key = row.getObjectKey() == null ? "" : row.getObjectKey();
+                    if (name.toLowerCase(Locale.ROOT).indexOf(needle) < 0 && key.toLowerCase(Locale.ROOT).indexOf(needle) < 0) {
+                        continue;
+                    }
+                    found.add(circlePlace(row));
+                    if (found.size() >= 20) {
+                        break;
+                    }
+                }
+                return found;
+            }
+        });
+    }
+
+    @Override
+    public ClinicCircleDto saveCircle(ApplicationUser user, String projectKey, final ClinicCircleDraft draft) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        if (draft == null) {
+            throw new AssetException(400, "asset-tree.error.clinic");
+        }
+        final String title = ClinicCircles.name(draft.getName());
+        if (title.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.clinic");
+        }
+        final List<String> members = new ArrayList<String>();
+        for (String key : ClinicCircles.members(draft.getMembers())) {
+            members.add(normalizeCustodian(key));
+        }
+        final List<Integer> places = ClinicCircles.places(draft.getPlaces());
+        final String reports = PortalShowcase.reports(joinComma(draft.getReports()));
+        return ao().executeInTransaction(new TransactionCallback<ClinicCircleDto>() {
+            @Override
+            public ClinicCircleDto doInTransaction() {
+                ClinicCircleEntity[] existing = ao().find(ClinicCircleEntity.class, "PROJECT_KEY = ?", project.getKey());
+                ClinicCircleEntity row = null;
+                if (draft.getId() > 0) {
+                    row = ao().get(ClinicCircleEntity.class, draft.getId());
+                    if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                        throw new AssetException(404, "asset-tree.error.notFound");
+                    }
+                } else if (existing != null && existing.length >= ClinicCircles.CIRCLE_LIMIT) {
+                    throw new AssetException(400, "asset-tree.error.clinic.limit");
+                }
+                if (existing != null) {
+                    for (ClinicCircleEntity other : existing) {
+                        if (row != null && other.getID() == row.getID()) {
+                            continue;
+                        }
+                        if (title.equalsIgnoreCase(other.getName() == null ? "" : other.getName())) {
+                            throw new AssetException(400, "asset-tree.error.clinic");
+                        }
+                    }
+                }
+                for (Integer placeId : places) {
+                    AssetEntity place = ao().get(AssetEntity.class, placeId.intValue());
+                    if (place == null || !ProjectKeys.same(place.getProjectKey(), project.getKey()) || !isLocation(place)) {
+                        throw new AssetException(400, "asset-tree.error.clinic.place");
+                    }
+                }
+                if (row == null) {
+                    row = ao().create(ClinicCircleEntity.class,
+                            new DBParam("PROJECT_KEY", project.getKey()),
+                            new DBParam("NAME", title),
+                            new DBParam("REPORTS", reports),
+                            new DBParam("CREATED", new Date()));
+                    int circleId = row.getID();
+                    for (String member : members) {
+                        ao().create(ClinicMemberEntity.class,
+                                new DBParam("CIRCLE_ID", Integer.valueOf(circleId)),
+                                new DBParam("USER_KEY", member));
+                    }
+                } else {
+                    row.setName(title);
+                    row.setReports(reports);
+                    row.save();
+                    ao().deleteWithSQL(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(row.getID()));
+                }
+                int circleId = row.getID();
+                for (Integer placeId : places) {
+                    ao().create(ClinicPlaceEntity.class,
+                            new DBParam("CIRCLE_ID", Integer.valueOf(circleId)),
+                            new DBParam("ASSET_ID", placeId));
+                }
+                return circleDto(row);
+            }
+        });
+    }
+
+    @Override
+    public ClinicCircleDto addCircleMember(ApplicationUser user, String projectKey, final int circleId, String userKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        final String member = normalizeCustodian(userKey);
+        return ao().executeInTransaction(new TransactionCallback<ClinicCircleDto>() {
+            @Override
+            public ClinicCircleDto doInTransaction() {
+                ClinicCircleEntity row = ao().get(ClinicCircleEntity.class, circleId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ClinicMemberEntity[] people = ao().find(ClinicMemberEntity.class, "CIRCLE_ID = ?", Integer.valueOf(circleId));
+                int count = 0;
+                if (people != null) {
+                    for (ClinicMemberEntity person : people) {
+                        if (member.equals(person.getUserKey())) {
+                            return circleDto(row);
+                        }
+                        count++;
+                    }
+                }
+                if (count >= ClinicCircles.MEMBER_LIMIT) {
+                    throw new AssetException(400, "asset-tree.error.clinic.limit");
+                }
+                ao().create(ClinicMemberEntity.class,
+                        new DBParam("CIRCLE_ID", Integer.valueOf(circleId)),
+                        new DBParam("USER_KEY", member));
+                return circleDto(row);
+            }
+        });
+    }
+
+    @Override
+    public void removeCircleMember(ApplicationUser user, String projectKey, int circleId, String userKey) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        ClinicCircleEntity row = ao().get(ClinicCircleEntity.class, circleId);
+        if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
+        String member = userKey == null ? "" : userKey.trim();
+        if (member.isEmpty()) {
+            throw new AssetException(400, "asset-tree.error.user");
+        }
+        ao().deleteWithSQL(ClinicMemberEntity.class, "CIRCLE_ID = ? AND USER_KEY = ?", Integer.valueOf(circleId), member);
+    }
+
+    @Override
+    public void deleteCircle(ApplicationUser user, String projectKey, final int circleId) {
+        final Project project = requireProjectCap(user, projectKey, GrantCaps.ACCESS);
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                ClinicCircleEntity row = ao().get(ClinicCircleEntity.class, circleId);
+                if (row == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ao().deleteWithSQL(ClinicMemberEntity.class, "CIRCLE_ID = ?", Integer.valueOf(circleId));
+                ao().deleteWithSQL(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(circleId));
+                ao().delete(row);
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public ClinicCircleDto.Place attachCircle(ApplicationUser user, final int assetId, final int circleId) {
+        final AssetEntity asset = requireAssetCap(user, assetId, GrantCaps.SHARE);
+        if (!isLocation(asset)) {
+            throw new AssetException(400, "asset-tree.error.clinic.place");
+        }
+        return ao().executeInTransaction(new TransactionCallback<ClinicCircleDto.Place>() {
+            @Override
+            public ClinicCircleDto.Place doInTransaction() {
+                ClinicCircleEntity circle = ao().get(ClinicCircleEntity.class, circleId);
+                if (circle == null || !ProjectKeys.same(circle.getProjectKey(), asset.getProjectKey())) {
+                    throw new AssetException(404, "asset-tree.error.notFound");
+                }
+                ClinicPlaceEntity[] existing = ao().find(ClinicPlaceEntity.class,
+                        Query.select().where("CIRCLE_ID = ? AND ASSET_ID = ?", Integer.valueOf(circleId), Integer.valueOf(assetId)));
+                if (existing == null || existing.length == 0) {
+                    ClinicPlaceEntity[] taken = ao().find(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(circleId));
+                    if (taken != null && taken.length >= ClinicCircles.PLACE_LIMIT) {
+                        throw new AssetException(400, "asset-tree.error.clinic.limit");
+                    }
+                    ao().create(ClinicPlaceEntity.class,
+                            new DBParam("CIRCLE_ID", Integer.valueOf(circleId)),
+                            new DBParam("ASSET_ID", Integer.valueOf(assetId)));
+                }
+                ClinicCircleDto.Place ref = new ClinicCircleDto.Place();
+                ref.setId(circleId);
+                ref.setName(circle.getName() == null ? "" : circle.getName());
+                return ref;
+            }
+        });
+    }
+
+    @Override
+    public void detachCircle(ApplicationUser user, int assetId, int circleId) {
+        requireAssetCap(user, assetId, GrantCaps.SHARE);
+        ao().deleteWithSQL(ClinicPlaceEntity.class, "CIRCLE_ID = ? AND ASSET_ID = ?",
+                Integer.valueOf(circleId), Integer.valueOf(assetId));
+    }
+
+    private List<ClinicCircleDto> circleDtos(String projectKey) {
+        List<ClinicCircleDto> result = new ArrayList<ClinicCircleDto>();
+        ClinicCircleEntity[] rows = ao().find(ClinicCircleEntity.class, "PROJECT_KEY = ?", projectKey);
+        if (rows == null) {
+            return result;
+        }
+        java.util.Arrays.sort(rows, new Comparator<ClinicCircleEntity>() {
+            @Override
+            public int compare(ClinicCircleEntity left, ClinicCircleEntity right) {
+                String a = left.getName() == null ? "" : left.getName();
+                String b = right.getName() == null ? "" : right.getName();
+                return a.compareToIgnoreCase(b);
+            }
+        });
+        for (ClinicCircleEntity row : rows) {
+            result.add(circleDto(row));
+        }
+        return result;
+    }
+
+    private ClinicCircleDto circleDto(ClinicCircleEntity row) {
+        ClinicCircleDto dto = new ClinicCircleDto();
+        dto.setId(row.getID());
+        dto.setName(row.getName() == null ? "" : row.getName());
+        List<UserProfileDto> members = new ArrayList<UserProfileDto>();
+        ClinicMemberEntity[] people = ao().find(ClinicMemberEntity.class, "CIRCLE_ID = ?", Integer.valueOf(row.getID()));
+        if (people != null) {
+            for (ClinicMemberEntity person : people) {
+                UserProfileDto profile = profile(person.getUserKey());
+                if (profile != null) {
+                    members.add(profile);
+                }
+            }
+        }
+        dto.setMembers(members);
+        List<ClinicCircleDto.Place> places = new ArrayList<ClinicCircleDto.Place>();
+        ClinicPlaceEntity[] links = ao().find(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(row.getID()));
+        if (links != null) {
+            for (ClinicPlaceEntity link : links) {
+                AssetEntity place = ao().get(AssetEntity.class, link.getAssetId());
+                if (place != null) {
+                    places.add(circlePlace(place));
+                }
+            }
+        }
+        dto.setPlaces(places);
+        dto.setReports(PortalShowcase.list(row.getReports()));
+        return dto;
+    }
+
+    private static String joinComma(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        StringBuilder joined = new StringBuilder();
+        for (String value : values) {
+            if (value == null || value.trim().isEmpty()) {
+                continue;
+            }
+            if (joined.length() > 0) {
+                joined.append(',');
+            }
+            joined.append(value.trim());
+        }
+        return joined.toString();
+    }
+
+    private List<ClinicCircleDto.Place> circleRefs(int assetId) {
+        List<ClinicCircleDto.Place> refs = new ArrayList<ClinicCircleDto.Place>();
+        ClinicPlaceEntity[] links = ao().find(ClinicPlaceEntity.class, "ASSET_ID = ?", Integer.valueOf(assetId));
+        if (links == null) {
+            return refs;
+        }
+        for (ClinicPlaceEntity link : links) {
+            ClinicCircleEntity circle = ao().get(ClinicCircleEntity.class, link.getCircleId());
+            if (circle == null) {
+                continue;
+            }
+            ClinicCircleDto.Place ref = new ClinicCircleDto.Place();
+            ref.setId(circle.getID());
+            ref.setName(circle.getName() == null ? "" : circle.getName());
+            refs.add(ref);
+        }
+        return refs;
+    }
+
+    private ClinicCircleDto.Place circlePlace(AssetEntity row) {
+        ClinicCircleDto.Place place = new ClinicCircleDto.Place();
+        place.setId(row.getID());
+        place.setName(row.getName() == null ? "" : row.getName());
+        place.setObjectKey(row.getObjectKey() == null ? "" : row.getObjectKey());
+        return place;
+    }
+
+    private Set<Integer> portalShareIds(String userKey) {
+        Set<Integer> ids = shareIds(userKey);
+        if (userKey == null || userKey.isEmpty()) {
+            return ids;
+        }
+        ClinicMemberEntity[] membership = ao().find(ClinicMemberEntity.class, "USER_KEY = ?", userKey);
+        if (membership == null) {
+            return ids;
+        }
+        for (ClinicMemberEntity member : membership) {
+            ClinicPlaceEntity[] links = ao().find(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(member.getCircleId()));
+            if (links == null) {
+                continue;
+            }
+            for (ClinicPlaceEntity link : links) {
+                ids.add(Integer.valueOf(link.getAssetId()));
+            }
+        }
+        return ids;
+    }
+
     private Set<Integer> shareIds(String userKey) {
         Set<Integer> ids = new HashSet<Integer>();
         if (userKey == null || userKey.isEmpty()) {
@@ -11151,6 +11652,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setProjectName(owner == null || owner.getName() == null ? dto.getProjectKey() : owner.getName());
         AssetTypeEntity type = findType(entity.getTypeKey());
         dto.setTypeLabel(typeLabel(type));
+        dto.setTypeKey(entity.getTypeKey() == null ? "" : entity.getTypeKey());
         dto.setLocation(locationChain(entity));
         dto.setOpen(canOpen(user, owner));
         if (type == null) {
@@ -17767,6 +18269,86 @@ public class AssetServiceImpl implements AssetService {
         row.setTypeScope(cleanList(draft == null ? null : draft.getTypeScope(), 64, 40));
         row.setFieldScope(cleanFieldScope(draft == null ? null : draft.getFieldScope()));
         row.setSchemaName(schema);
+        if (draft != null && draft.getPlaceScope() != null) {
+            row.setPlaceScope(PlaceScope.keep(draft.getPlaceScope(), locationIds(projectKey)));
+        }
+    }
+
+    private Set<Integer> locationIds(String projectKey) {
+        Set<String> locationTypes = new HashSet<String>();
+        AssetTypeEntity[] types = ao().find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (types != null) {
+            for (int i = 0; i < types.length; i++) {
+                if (types[i] != null && types[i].isLocation() && types[i].getTypeKey() != null) {
+                    locationTypes.add(types[i].getTypeKey());
+                }
+            }
+        }
+        Set<Integer> ids = new HashSet<Integer>();
+        AssetEntity[] rows = assetsIn(projectKey);
+        if (rows == null) {
+            return ids;
+        }
+        for (int i = 0; i < rows.length; i++) {
+            AssetEntity row = rows[i];
+            if (row != null && locationTypes.contains(row.getTypeKey())) {
+                ids.add(Integer.valueOf(row.getID()));
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> grantedPlaces(ApplicationUser user, String projectKey) {
+        Set<Integer> ids = new HashSet<Integer>();
+        ProjectGrantEntity[] rows = grantsFor(user, projectKey);
+        for (int i = 0; i < rows.length; i++) {
+            ids.addAll(PlaceScope.read(rows[i].getPlaceScope()));
+        }
+        return ids;
+    }
+
+    private boolean grantedAllPlaces(ApplicationUser user, String projectKey) {
+        ProjectGrantEntity[] rows = grantsFor(user, projectKey);
+        for (int i = 0; i < rows.length; i++) {
+            if (PlaceScope.all(rows[i].getPlaceScope())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ProjectGrantEntity[] grantsFor(ApplicationUser user, String projectKey) {
+        if (user == null || projectKey == null) {
+            return new ProjectGrantEntity[0];
+        }
+        ProjectGrantEntity[] rows = ao().find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
+        if (rows == null) {
+            return new ProjectGrantEntity[0];
+        }
+        List<ProjectGrantEntity> mine = new ArrayList<ProjectGrantEntity>();
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != null && grantApplies(user, rows[i])) {
+                mine.add(rows[i]);
+            }
+        }
+        return mine.toArray(new ProjectGrantEntity[mine.size()]);
+    }
+
+    private String editPlaces(ApplicationUser user, Project project) {
+        if (user == null || project == null) {
+            return "";
+        }
+        if (grantedAllPlaces(user, project.getKey())) {
+            return PlaceScope.ALL;
+        }
+        StringBuilder out = new StringBuilder();
+        for (Integer id : grantedPlaces(user, project.getKey())) {
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(id.intValue());
+        }
+        return out.toString();
     }
 
     private String cleanList(String raw, int maxPart, int maxCount) {
@@ -19107,20 +19689,29 @@ public class AssetServiceImpl implements AssetService {
         String kind = draft == null || draft.getKind() == null ? "" : draft.getKind().trim();
         final Project project;
         final boolean reports;
+        final boolean links = "links".equals(kind);
+        final boolean lifeBook = "life".equals(kind);
+        final boolean serviceBook = "service".equals(kind);
         if ("reports".equals(kind)) {
             project = requireOpenOrCap(user, projectKey, GrantCaps.REPORTS);
             requireModule(project.getKey(), ProjectModules.REPORTS);
             reports = true;
-        } else if ("equipment".equals(kind) || "links".equals(kind)) {
+        } else if ("equipment".equals(kind) || links || lifeBook || serviceBook) {
             project = requireProjectCap(user, projectKey, GrantCaps.OBJECT);
+            if (lifeBook) {
+                requireModule(project.getKey(), ProjectModules.LIFE);
+            }
+            if (serviceBook) {
+                requireModule(project.getKey(), ProjectModules.SERVICE);
+            }
             reports = false;
         } else {
             throw new AssetException(400, "asset-tree.error.export");
         }
         final String storedKey = project.getKey();
         final ApplicationUser actor = user;
-        final boolean links = "links".equals(kind);
-        final String fileName = (reports ? "reports-" : links ? "links-" : "equipment-") + storedKey + ".xlsx";
+        final String fileName = (reports ? "reports-" : links ? "links-" : lifeBook ? "life-" : serviceBook ? "service-" : "equipment-")
+                + storedKey + ".xlsx";
         final String exportType = draft == null || draft.getTypeKey() == null ? "" : draft.getTypeKey().trim();
         final int exportPlace = draft == null || draft.getPlaceId() == null ? 0 : Math.max(0, draft.getPlaceId().intValue());
         final boolean exportBlank = draft != null && Boolean.TRUE.equals(draft.getBlank());
@@ -19139,6 +19730,12 @@ public class AssetServiceImpl implements AssetService {
                             }
                             if (links) {
                                 return buildLinksBook(storedKey, exportType, exportPlace);
+                            }
+                            if (lifeBook) {
+                                return buildLifeBook(storedKey, exportType, exportPlace);
+                            }
+                            if (serviceBook) {
+                                return buildServiceBook(storedKey, exportType, exportPlace);
                             }
                             return buildEquipmentBook(storedKey, exportType, exportPlace, exportBlank);
                         }
@@ -20583,6 +21180,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public List<DocTemplateDto> documents(ApplicationUser user, String projectKey) {
         Project project = requireReadableProject(user, projectKey);
+        requireModule(project.getKey(), ProjectModules.DOCS);
         List<DocTemplateDto> list = new ArrayList<DocTemplateDto>();
         DocTemplateEntity[] rows = ao().find(DocTemplateEntity.class,
                 Query.select().where("PROJECT_KEY = ?", project.getKey()).order("ID ASC"));
@@ -20597,6 +21195,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public DocTemplateDto saveDocument(ApplicationUser user, String projectKey, String name, String fileName, byte[] data) {
         Project project = requireReadableProject(user, projectKey);
+        requireModule(project.getKey(), ProjectModules.DOCS);
         if (!canConfigure(user, project)) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
@@ -20631,6 +21230,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public void deleteDocument(ApplicationUser user, String projectKey, String templateId) {
         Project project = requireReadableProject(user, projectKey);
+        requireModule(project.getKey(), ProjectModules.DOCS);
         if (!canConfigure(user, project)) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
@@ -20649,6 +21249,7 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public StoredFile openDocument(ApplicationUser user, int assetId, String templateId) {
         AssetEntity asset = requireVisible(user, assetId);
+        requireModule(asset.getProjectKey(), ProjectModules.DOCS);
         String title = documentTitle(asset.getProjectKey(), templateId);
         byte[] template = documentBytes(asset.getProjectKey(), templateId);
         try {

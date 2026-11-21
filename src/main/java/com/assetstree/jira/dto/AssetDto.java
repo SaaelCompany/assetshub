@@ -39,9 +39,11 @@ public class AssetDto {
     private List<IssueRefDto> issues;
     private List<AssetPeerDto> peers;
     private List<AssetLinkDto> links;
+    private List<GraphTieDto> mesh;
     private List<CommentDto> comments;
     private List<FileDto> files;
     private List<UserProfileDto> shares;
+    private List<ClinicCircleDto.Place> circles = new ArrayList<ClinicCircleDto.Place>();
     private List<ActivityDto> activities;
     private List<ServicePlanDto> plans;
     private String serviceDue;
@@ -300,6 +302,14 @@ public class AssetDto {
         this.links = links;
     }
 
+    public List<GraphTieDto> getMesh() {
+        return mesh;
+    }
+
+    public void setMesh(List<GraphTieDto> mesh) {
+        this.mesh = mesh;
+    }
+
     public List<CommentDto> getComments() {
         return comments;
     }
@@ -318,6 +328,14 @@ public class AssetDto {
 
     public List<UserProfileDto> getShares() {
         return shares;
+    }
+
+    public List<ClinicCircleDto.Place> getCircles() {
+        return circles;
+    }
+
+    public void setCircles(List<ClinicCircleDto.Place> circles) {
+        this.circles = circles == null ? new ArrayList<ClinicCircleDto.Place>() : circles;
     }
 
     public void setShares(List<UserProfileDto> shares) {

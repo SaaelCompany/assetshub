@@ -18,6 +18,7 @@ import com.assetstree.jira.model.CommentDraft;
 import com.assetstree.jira.model.ShareDraft;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.FieldDraft;
+import com.assetstree.jira.model.ClinicCircleDraft;
 import com.assetstree.jira.model.GrantDraft;
 import com.assetstree.jira.model.RoleDraft;
 import com.assetstree.jira.dto.FloorDto;
@@ -1272,6 +1273,101 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.deleteStatus(user(), projectKey, statusKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/circles")
+    public Response circles(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listCircles(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/circles/places")
+    public Response circlePlaces(@PathParam("projectKey") final String projectKey, @QueryParam("q") final String query) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.searchCirclePlaces(user(), projectKey, query)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/circles")
+    public Response saveCircle(@PathParam("projectKey") final String projectKey, final ClinicCircleDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveCircle(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/circles/{circleId}/members")
+    public Response addCircleMember(@PathParam("projectKey") final String projectKey,
+                                    @PathParam("circleId") final int circleId,
+                                    @QueryParam("user") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.addCircleMember(user(), projectKey, circleId, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/circles/{circleId}/members")
+    public Response removeCircleMember(@PathParam("projectKey") final String projectKey,
+                                       @PathParam("circleId") final int circleId,
+                                       @QueryParam("user") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.removeCircleMember(user(), projectKey, circleId, userKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/circles/{circleId}")
+    public Response deleteCircle(@PathParam("projectKey") final String projectKey, @PathParam("circleId") final int circleId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteCircle(user(), projectKey, circleId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/circles/{circleId}")
+    public Response attachCircle(@PathParam("id") final int id, @PathParam("circleId") final int circleId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.attachCircle(user(), id, circleId)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/circles/{circleId}")
+    public Response detachCircle(@PathParam("id") final int id, @PathParam("circleId") final int circleId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.detachCircle(user(), id, circleId);
                 return Response.noContent().build();
             }
         });

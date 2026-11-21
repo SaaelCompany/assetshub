@@ -1451,7 +1451,7 @@
         desktop: 'M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h4v2H6v-2h4v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z',
         box: 'M12 3l9 4v10l-9 4-9-4V7l9-4zm0 2.2L6.5 7.6 12 10l5.5-2.4L12 5.2zM5 9.1v6.9l6 2.7v-6.9L5 9.1zm14 0l-6 2.7v6.9l6-2.7V9.1z'
     };
-    var mineState = { payload: null, loading: false, query: '', searching: false, caret: 0 };
+    var mineState = { payload: null, loading: false, query: '', searching: false, caret: 0, pane: 'own' };
     var MINE_LAYOUTS = [
         ['tiles', 'Плитка'],
         ['cards', 'Карточки'],
@@ -1492,7 +1492,7 @@
     }
 
     function mineSortMode() {
-        return mineStored('asset-tree.portalMineSort', ['name', 'place', 'type'], 'name');
+        return mineStored('asset-tree.portalMineSort', ['name', 'place', 'type', 'status'], 'name');
     }
 
     function chooseMineOption(key, value) {
@@ -1505,6 +1505,7 @@
     function mineText(card, kind) {
         if (kind === 'place') return card.place || 'Без площадки';
         if (kind === 'type') return card.typeName || 'Без типа';
+        if (kind === 'status') return card.statusLabel || 'Без статуса';
         return card.name || '';
     }
 
@@ -1533,10 +1534,10 @@
         try { localStorage.setItem('asset-tree.portalMineFold', JSON.stringify(map)); } catch (error) {}
     }
 
-    function mineSelect(label, value, options, onChange) {
-        var wrap = el('label', 'asset-tree-portal-mine-pick');
-        wrap.appendChild(el('span', null, label));
+    function mineQuietSelect(label, value, options, onChange) {
         var select = document.createElement('select');
+        select.className = 'asset-tree-portal-mine-quiet';
+        select.setAttribute('aria-label', label);
         options.forEach(function (item) {
             var option = document.createElement('option');
             option.value = item[0];
@@ -1545,8 +1546,7 @@
             select.appendChild(option);
         });
         select.addEventListener('change', function () { onChange(select.value); });
-        wrap.appendChild(select);
-        return wrap;
+        return select;
     }
 
     function profilePage() {
@@ -1586,7 +1586,7 @@
     }
 
     function mineSignature(data) {
-        var parts = [data.title || '', String(data.total || 0), mineGroupMode(), mineSortMode()];
+        var parts = [data.title || '', String(data.total || 0), mineGroupMode(), mineSortMode(), mineState.pane || 'own'];
         (data.projects || []).forEach(function (group) {
             parts.push(group.key, String(group.count || 0));
             (group.charts || []).forEach(function (chart) {
@@ -1596,7 +1596,7 @@
                 });
             });
             (group.assets || []).forEach(function (card) {
-                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.typeName, card.place, card.showKey ? '1' : '0', card.showStatus ? '1' : '0', card.photo ? '1' : '0');
+                parts.push(card.name, card.objectKey, card.role, card.statusLabel, card.typeName, card.place, card.showKey ? '1' : '0', card.showStatus ? '1' : '0', card.photo ? '1' : '0', card.sharedOnly ? '1' : '0');
                 (card.lines || []).forEach(function (line) {
                     parts.push(line.label, line.value);
                 });
@@ -1722,49 +1722,68 @@
         if (count) count.textContent = needle ? (shown + ' / ' + (count.getAttribute('data-total') || '0')) : (count.getAttribute('data-label') || '');
     }
 
+    function mineCounts(data) {
+        var own = 0;
+        var clinic = 0;
+        (data.projects || []).forEach(function (group) {
+            (group.assets || []).forEach(function (card) {
+                if (card.sharedOnly) clinic++;
+                else own++;
+            });
+        });
+        return { own: own, clinic: clinic };
+    }
+
     function renderMine(data) {
+        var counts = mineCounts(data);
+        if (mineState.pane === 'clinic' && !counts.clinic && counts.own) mineState.pane = 'own';
+        if (mineState.pane !== 'clinic' && !counts.own && counts.clinic) mineState.pane = 'clinic';
+        var pane = mineState.pane === 'clinic' ? 'clinic' : 'own';
+        var visibleTotal = pane === 'clinic' ? counts.clinic : counts.own;
+        var split = counts.own > 0 && counts.clinic > 0;
         var root = el('div', 'asset-tree-portal-mine-body');
         var head = el('div', 'asset-tree-portal-mine-head');
         var titles = el('div', 'asset-tree-portal-mine-titles');
         titles.appendChild(el('h2', null, data.title || 'My assets'));
-        var count = el('span', 'asset-tree-portal-mine-count', data.totalLabel || '');
-        count.setAttribute('data-label', data.totalLabel || '');
-        count.setAttribute('data-total', String(data.total || 0));
-        titles.appendChild(count);
+        var countLabel = split ? String(visibleTotal) : (data.totalLabel || '');
+        var count = el('span', 'asset-tree-portal-mine-count', countLabel);
+        count.setAttribute('data-label', countLabel);
+        count.setAttribute('data-total', String(split ? visibleTotal : (data.total || 0)));
+        if (!split) titles.appendChild(count);
+        if (pane === 'clinic' && !split) titles.appendChild(el('span', 'asset-tree-portal-mine-note', 'Оборудование площадки'));
         head.appendChild(titles);
         var search = null;
-        if (!data.total) {
-            root.appendChild(head);
-            var chartsOnly = renderMineCharts(data);
-            if (chartsOnly) root.appendChild(chartsOnly);
-            return root;
-        }
-        var layouts = el('div', 'asset-tree-portal-mine-layouts');
-        layouts.setAttribute('role', 'tablist');
-        layouts.setAttribute('aria-label', 'Вид списка');
-        var chosen = mineLayout();
-        MINE_LAYOUTS.forEach(function (item) {
-            var pick = el('button', 'asset-tree-portal-mine-layout' + (item[0] === chosen ? ' is-active' : ''), item[1]);
-            pick.type = 'button';
-            pick.setAttribute('role', 'tab');
-            pick.setAttribute('aria-selected', item[0] === chosen ? 'true' : 'false');
-            pick.addEventListener('click', function () { chooseMineLayout(item[0]); });
-            layouts.appendChild(pick);
-        });
-        head.appendChild(layouts);
-        var tools = el('div', 'asset-tree-portal-mine-tools');
-        tools.appendChild(mineSelect('Группировка', mineGroupMode(), [
-            ['place', 'Площадка'],
-            ['type', 'Тип'],
-            ['none', 'Списком']
-        ], function (value) { chooseMineOption('asset-tree.portalMineGroup', value); }));
-        tools.appendChild(mineSelect('Сортировка', mineSortMode(), [
-            ['name', 'Имя'],
-            ['place', 'Площадка'],
-            ['type', 'Тип']
-        ], function (value) { chooseMineOption('asset-tree.portalMineSort', value); }));
-        head.appendChild(tools);
         root.appendChild(head);
+        var charts = renderMineCharts(data);
+        if (charts) root.appendChild(charts);
+        if (split) {
+            var panes = el('div', 'asset-tree-portal-mine-panes');
+            panes.setAttribute('role', 'tablist');
+            [['own', 'Моё', counts.own], ['clinic', 'Площадка', counts.clinic]].forEach(function (item) {
+                var active = item[0] === pane;
+                var pick = el('button', 'asset-tree-portal-mine-pane' + (active ? ' is-active' : ''));
+                pick.type = 'button';
+                pick.setAttribute('role', 'tab');
+                pick.setAttribute('aria-selected', active ? 'true' : 'false');
+                pick.appendChild(document.createTextNode(item[1]));
+                var num = el('span', active ? 'asset-tree-portal-mine-count' : 'asset-tree-portal-mine-pane-count', String(item[2]));
+                if (active) {
+                    num.setAttribute('data-label', String(item[2]));
+                    num.setAttribute('data-total', String(item[2]));
+                }
+                pick.appendChild(num);
+                pick.addEventListener('click', function () {
+                    if (mineState.pane === item[0]) return;
+                    mineState.pane = item[0];
+                    mineState.query = '';
+                    paintPortalMine();
+                });
+                panes.appendChild(pick);
+            });
+            root.appendChild(panes);
+        }
+        if (!data.total) return root;
+        var bar = el('div', 'asset-tree-portal-mine-bar');
         search = el('input', 'asset-tree-portal-mine-search');
         search.type = 'search';
         search.placeholder = 'Поиск по имени, ключу или полю';
@@ -1783,16 +1802,36 @@
             applyMineFilter(root);
         });
         search.addEventListener('blur', function () { mineState.searching = false; });
-        root.appendChild(search);
+        var quiet = el('div', 'asset-tree-portal-mine-quiet-row');
+        quiet.appendChild(mineQuietSelect('Вид', mineLayout(), MINE_LAYOUTS, chooseMineLayout));
+        quiet.appendChild(mineQuietSelect('Группировка', mineGroupMode(), [
+            ['place', 'Площадка'],
+            ['type', 'Тип'],
+            ['none', 'Списком']
+        ], function (value) { chooseMineOption('asset-tree.portalMineGroup', value); }));
+        quiet.appendChild(mineQuietSelect('Сортировка', mineSortMode(), [
+            ['name', 'Имя'],
+            ['place', 'Площадка'],
+            ['type', 'Тип'],
+            ['status', 'Статус']
+        ], function (value) { chooseMineOption('asset-tree.portalMineSort', value); }));
+        bar.appendChild(search);
+        bar.appendChild(quiet);
+        root.appendChild(bar);
         var empty = el('p', 'asset-tree-portal-mine-empty', 'Ничего не найдено');
         empty.hidden = true;
         root.appendChild(empty);
-        var charts = renderMineCharts(data);
-        if (charts) root.insertBefore(charts, empty);
         (data.projects || []).forEach(function (group) {
-            var cards = (group.assets || []).slice();
+            var cards = (group.assets || []).filter(function (card) {
+                return pane === 'clinic' ? !!card.sharedOnly : !card.sharedOnly;
+            });
+            if (!cards.length) return;
             var sort = mineSortMode();
-            cards.sort(function (left, right) { return mineText(left, sort).localeCompare(mineText(right, sort), 'ru'); });
+            cards.sort(function (left, right) {
+                var compared = mineText(left, sort).localeCompare(mineText(right, sort), 'ru');
+                if (compared) return compared;
+                return (left.name || '').localeCompare(right.name || '', 'ru');
+            });
             var mode = mineGroupMode();
             var buckets = [];
             var bucketIndex = {};

@@ -44,4 +44,23 @@ public class DirectoryPeopleTest {
         assertEquals("Инженер", found.title);
         assertEquals("Аптека", found.department);
     }
+
+    @Test
+    public void aMappedDirectoryAttributeIsRequestedWithTheUsualOnes() {
+        Map<String, String> stored = new LinkedHashMap<String, String>();
+        stored.put("ldap.user.title", "extensionAttribute12");
+        String[] names = DirectoryPeople.attributeNames(stored);
+        boolean title = false;
+        boolean extra = false;
+        for (int i = 0; i < names.length; i++) {
+            if ("title".equals(names[i])) {
+                title = true;
+            }
+            if ("extensionAttribute12".equals(names[i])) {
+                extra = true;
+            }
+        }
+        assertTrue(title);
+        assertTrue(extra);
+    }
 }
