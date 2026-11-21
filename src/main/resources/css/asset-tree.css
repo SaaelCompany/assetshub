@@ -596,12 +596,14 @@
 }
 
 .asset-tree-context-item.is-arrow {
-    width: 36px;
+    width: 48px;
     height: 32px;
     padding: 0;
-    font-size: 18px;
+    font-size: 16px;
     line-height: 32px;
+    letter-spacing: 1px;
     text-align: center;
+    white-space: nowrap;
 }
 
 .asset-tree-row.is-match .asset-tree-name {

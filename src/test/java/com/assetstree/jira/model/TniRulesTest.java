@@ -227,6 +227,29 @@ public class TniRulesTest {
     }
 
     @Test
+    public void typeTargetBeatsThePlaceAndLosesToTheObject() {
+        PortalConditionDraft condition = new PortalConditionDraft();
+        condition.setField("Филиал");
+        condition.setOption("Усть-Лабинск");
+        PortalRuleDto place = new PortalRuleDto();
+        place.setAssetId(1);
+        place.setConditions(Collections.singletonList(condition));
+        PortalRuleDto type = new PortalRuleDto();
+        type.setAssetId(1);
+        type.setTypeKey("stomatology");
+        type.setConditions(Collections.singletonList(condition));
+        PortalRuleDto object = new PortalRuleDto();
+        object.setAssetId(4);
+        object.setConditions(Collections.singletonList(condition));
+        Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+        parents.put(Integer.valueOf(1), null);
+        parents.put(Integer.valueOf(4), Integer.valueOf(1));
+        java.util.List<PortalRules.Answer> answers = Arrays.asList(answer("Филиал", "Усть-Лабинск"));
+        assertEquals("stomatology", PortalRules.choose(Arrays.asList(place, type), answers, parents).getTypeKey());
+        assertEquals(4, PortalRules.choose(Arrays.asList(place, type, object), answers, parents).getAssetId());
+    }
+
+    @Test
     public void createPageCanCarryTheDeviceScriptBesideTheField() {
         byte[] page = "<html><body><p>portal</p></body></html>".getBytes(StandardCharsets.UTF_8);
         byte[] withField = PortalPageMarkup.insertBoot(page, PortalPageMarkup.snippet("/jira", 4, "STP", "customfield_1", true, true));

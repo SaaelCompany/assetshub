@@ -10,6 +10,7 @@ public class PickerNodeDto {
     private String name;
     private String objectKey;
     private String typeLabel;
+    private String typeKey;
     private String status;
     private String search;
     private boolean group;
@@ -52,6 +53,14 @@ public class PickerNodeDto {
 
     public void setTypeLabel(String typeLabel) {
         this.typeLabel = typeLabel;
+    }
+
+    public String getTypeKey() {
+        return typeKey == null ? "" : typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey == null ? "" : typeKey;
     }
 
     public String getStatus() {

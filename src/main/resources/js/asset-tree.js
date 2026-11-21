@@ -3565,6 +3565,24 @@
         return nest;
     }
 
+    function labeledWay(names) {
+        var rows = [];
+        for (var i = 0; i < names.length; i++) rows.push({ name: names[i] || '', id: i });
+        return nameSortWay(rows);
+    }
+
+    function placeSortNames(placeId) {
+        var names = [];
+        treeChildren(placeId).forEach(function (asset) { names.push(asset.name || ''); });
+        function walk(type) {
+            names.push(type.label || '');
+            if (!localParent(placeId, type.typeKey)) subtypesAt(placeId, type.typeKey).forEach(walk);
+            equipmentIn(placeId, type.typeKey).forEach(function (asset) { names.push(asset.name || ''); });
+        }
+        typeGroupsFor(placeId).forEach(walk);
+        return names;
+    }
+
     function listContext() {
         var group = state.typeGroup;
         var base = group
@@ -3668,6 +3686,20 @@
                 state.treePicked = {};
                 state.pane = 'list';
                 selectAsset(asset.id);
+            });
+            row.addEventListener('contextmenu', function (event) {
+                if (!isFolder(asset) || !(state.canPlaces || state.canObjects || state.canArrange)) return;
+                var names = placeSortNames(asset.id);
+                if (names.length < 2) return;
+                event.preventDefault();
+                event.stopPropagation();
+                var way = labeledWay(names);
+                openTreeMenu(event.clientX, event.clientY, [{
+                    arrow: true,
+                    label: '\u2191\u2193',
+                    title: t(way < 0 ? 'sortNameDown' : 'sortNameUp'),
+                    onClick: function () { sortPlaceByName(asset.id, way); }
+                }]);
             });
             branch.appendChild(row);
             if (expandable && isExpanded(asset.id)) {
@@ -3895,6 +3927,22 @@
         return objects.length > 1 ? -1 : 1;
     }
 
+    function sortPlaceByName(placeId, direction) {
+        ajax('POST', '/assets/' + placeId + '/sort', { direction: direction < 0 ? -1 : 1 }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            reloadTree(function () {
+                state.expanded[placeId] = true;
+                rememberExpanded();
+                renderNodes();
+                replaceDetail();
+                notify(t('saved'));
+            });
+        });
+    }
+
     function sortTypeByName(placeId, typeKey, direction) {
         var objects = equipmentIn(placeId, typeKey).slice();
         var way = direction < 0 ? -1 : 1;
@@ -3982,7 +4030,7 @@
             var way = nameSortWay(objects);
             openTreeMenu(event.clientX, event.clientY, [{
                 arrow: true,
-                label: way < 0 ? '\u2193' : '\u2191',
+                label: '\u2191\u2193',
                 title: t(way < 0 ? 'sortNameDown' : 'sortNameUp'),
                 onClick: function () { sortTypeByName(placeId, type.typeKey, way); }
             }]);
@@ -8205,16 +8253,19 @@
     }
 
     function ensureClinics(done) {
-        if (state.clinics) {
+        if (state.clinics && state.clinicsFor === state.projectKey) {
             if (done) done();
             return;
         }
-        if (state.clinicsLoading) return;
-        state.clinicsLoading = true;
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/circles', null, function (status, payload) {
-            state.clinicsLoading = false;
+        var projectKey = state.projectKey;
+        if (state.clinicsLoading === projectKey) return;
+        state.clinicsLoading = projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/circles', null, function (status, payload) {
+            if (state.clinicsLoading === projectKey) state.clinicsLoading = false;
+            if (state.projectKey !== projectKey) return;
             if (status === 200) state.clinics = payload || [];
             else state.clinics = [];
+            state.clinicsFor = projectKey;
             if (done) done();
             else if (state.view === 'settings' && (state.schemaTab === 'access' || state.schemaTab === 'portal')) renderFrame();
         });
@@ -13809,6 +13860,9 @@
         state.grants = null;
         state.roles = null;
         state.portalRules = null;
+        state.clinics = null;
+        state.clinicsFor = '';
+        state.clinicsLoading = false;
         state.portalDraft = null;
         state.flowRules = null;
         state.flowBook = null;
@@ -13878,6 +13932,11 @@
         state.mapAnchor = null;
         state.mapClickAt = 0;
         state.reportCatalog = null;
+        state.reportCatalogFor = '';
+        state.clinics = null;
+        state.clinicsFor = '';
+        state.clinicsLoading = false;
+        state.reportsLoading = false;
         state.reportKey = 'status';
         state.reportView = null;
         state.reportBoard = false;
@@ -13912,6 +13971,9 @@
         state.grants = null;
         state.roles = null;
         state.portalRules = null;
+        state.clinics = null;
+        state.clinicsFor = '';
+        state.clinicsLoading = false;
         state.portalDraft = null;
         state.flowRules = null;
         state.flowBook = null;
@@ -31547,6 +31609,49 @@
         return names.join(' / ');
     }
 
+    function portalTargetValue(assetId, typeKey) {
+        return typeKey ? String(assetId) + '|' + typeKey : String(assetId || '');
+    }
+
+    function parsePortalTarget(value) {
+        var raw = String(value || '');
+        var mark = raw.indexOf('|');
+        if (mark < 0) return { assetId: parseInt(raw, 10) || 0, typeKey: '' };
+        return { assetId: parseInt(raw.slice(0, mark), 10) || 0, typeKey: raw.slice(mark + 1) };
+    }
+
+    /** Place, then its types and objects, then the places inside it. */
+    function portalTargets() {
+        var rows = [];
+        var seen = {};
+        function add(value, label) {
+            if (!value || seen[value]) return;
+            seen[value] = true;
+            rows.push({ value: value, label: label });
+        }
+        function walk(place) {
+            add(String(place.id), assetPath(place));
+            var typePath = {};
+            placeSlots(place.id).forEach(function (slot) {
+                var type = typeByKey(slot.typeKey);
+                if (!type) return;
+                var above = slot.parentKey ? typePath[slot.parentKey] : assetPath(place);
+                var label = (above || assetPath(place)) + ' / ' + (type.label || type.typeKey);
+                typePath[slot.typeKey] = label;
+                add(portalTargetValue(place.id, slot.typeKey), label);
+                equipmentIn(place.id, slot.typeKey).forEach(function (asset) {
+                    add(String(asset.id), label + ' / ' + (asset.name || ''));
+                });
+            });
+            treeChildren(place.id).forEach(walk);
+        }
+        treeChildren(null).forEach(walk);
+        childrenOf(null).forEach(function (asset) {
+            if (!isFolder(asset)) add(String(asset.id), assetPath(asset));
+        });
+        return rows;
+    }
+
     function renderFlowSettings(host) {
         var block = el('section', 'asset-tree-project-card');
         block.appendChild(el('h3', 'asset-tree-settings-title', t('flowSection')));
@@ -31673,6 +31778,7 @@
         next.portalMine = !!show;
         next.portalColumns = columns.length ? columns.join(',') : '-';
         var project = currentProject();
+        if (project && project.setup && project.setup.portalLayout) next.portalLayout = project.setup.portalLayout;
         if (project) project.setup = next;
         saveProjectView({ setup: next }, null, true);
     }
@@ -31833,7 +31939,7 @@
         box.appendChild(el('h3', 'asset-tree-settings-title', t('portalLayoutTitle')));
         box.appendChild(el('p', 'asset-tree-hint', t('portalLayoutHint')));
         var choices = el('div', 'asset-tree-portal-layouts');
-        var current = knownPortalLayout(state.portalLayout);
+        var current = projectPortalLayout();
         [
             ['tiles', 'portalLayoutTiles'],
             ['cards', 'portalLayoutCards'],
@@ -31851,11 +31957,15 @@
                 var want = item[0];
                 ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/portal-layout', { layout: want }, function (status, payload) {
                     if (status >= 200 && status < 300 && payload && knownPortalLayout(payload.layout) === payload.layout) {
-                        state.portalLayout = payload.layout;
+                        var project = currentProject();
+                        if (project) {
+                            project.setup = project.setup || {};
+                            project.setup.portalLayout = payload.layout;
+                        }
                         return;
                     }
                     var radios = box.querySelectorAll('input');
-                    for (var i = 0; i < radios.length; i++) radios[i].checked = radios[i].value === knownPortalLayout(state.portalLayout);
+                    for (var i = 0; i < radios.length; i++) radios[i].checked = radios[i].value === projectPortalLayout();
                     notify((payload && payload.message) || t('errorTitle'));
                 });
             });
@@ -31869,6 +31979,13 @@
 
     function knownPortalLayout(value) {
         return value === 'tiles' || value === 'cards' || value === 'list' ? value : 'tiles';
+    }
+
+    function projectPortalLayout() {
+        var project = currentProject();
+        var own = project && project.setup && project.setup.portalLayout;
+        if (own === 'tiles' || own === 'cards' || own === 'list') return own;
+        return knownPortalLayout(state.portalLayout);
     }
 
     function renderPortalSettings(panel) {
@@ -31923,7 +32040,7 @@
             actions.appendChild(button(t('portalEditRule'), 'asset-tree-btn', function () {
                 state.portalDraft = {
                     id: rule.id,
-                    assetId: String(rule.assetId || ''),
+                    assetId: portalTargetValue(rule.assetId, rule.typeKey),
                     conditions: (rule.conditions || []).map(function (condition) {
                         return { field: condition.field || '', option: condition.option || '' };
                     })
@@ -31987,11 +32104,9 @@
         var emptyOption = el('option', null, '—');
         emptyOption.value = '';
         target.appendChild(emptyOption);
-        state.assets.slice().sort(function (left, right) {
-            return assetPath(left).localeCompare(assetPath(right));
-        }).forEach(function (asset) {
-            var option = el('option', null, assetPath(asset));
-            option.value = String(asset.id);
+        portalTargets().forEach(function (row) {
+            var option = el('option', null, row.label);
+            option.value = row.value;
             target.appendChild(option);
         });
         target.value = draft.assetId || '';
@@ -32021,7 +32136,8 @@
                 error.textContent = t('portalConditionRequired');
                 return;
             }
-            var body = { assetId: parseInt(target.value, 10), conditions: cleaned };
+            var picked = parsePortalTarget(target.value);
+            var body = { assetId: picked.assetId, typeKey: picked.typeKey, conditions: cleaned };
             var editingId = draft.id;
             var method = editingId ? 'PUT' : 'POST';
             var path = '/projects/' + encodeURIComponent(state.projectKey) + '/portal-rules' + (editingId ? '/' + editingId : '');
@@ -32693,19 +32809,22 @@
     }
 
     function ensureReports(done) {
-        if (state.reportCatalog || !moduleOn('reports')) {
+        if ((state.reportCatalog && state.reportCatalogFor === state.projectKey) || !moduleOn('reports')) {
             if (done) done();
             return;
         }
+        var projectKey = state.projectKey;
         if (done) {
             state.reportWaiters = state.reportWaiters || [];
             state.reportWaiters.push(done);
         }
-        if (state.reportsLoading) return;
-        state.reportsLoading = true;
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
-            state.reportsLoading = false;
+        if (state.reportsLoading === projectKey) return;
+        state.reportsLoading = projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/reports', null, function (status, payload) {
+            if (state.reportsLoading === projectKey) state.reportsLoading = false;
+            if (state.projectKey !== projectKey) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            state.reportCatalogFor = projectKey;
             var waiters = state.reportWaiters || [];
             state.reportWaiters = [];
             if (waiters.length) waiters.forEach(function (fn) { fn(); });

@@ -561,7 +561,7 @@ button.asset-tree-portal-mine-fold:hover {
     cursor: pointer;
 }
 
-.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card {
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card, .asset-tree-portal-mine-group.is-list .asset-tree-portal-mine-card {
     display: grid;
     grid-template-columns: 36px minmax(0, 1fr);
     gap: 12px;
@@ -570,11 +570,11 @@ button.asset-tree-portal-mine-fold:hover {
     padding: 12px;
 }
 
-.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.has-photo {
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.has-photo, .asset-tree-portal-mine-group.is-list .asset-tree-portal-mine-card.has-photo {
     grid-template-columns: 36px minmax(0, 1fr) 120px;
 }
 
-.asset-tree-portal-mine.is-list .asset-tree-portal-mine-photo {
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-photo, .asset-tree-portal-mine-group.is-list .asset-tree-portal-mine-photo {
     width: 120px;
     height: 80px;
     object-fit: contain;
@@ -583,21 +583,21 @@ button.asset-tree-portal-mine-fold:hover {
     background: #f4f5f7;
 }
 
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-grid {
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-grid, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 12px;
 }
 
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card {
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-card {
     display: flex;
     flex-direction: column;
     min-height: 196px;
     overflow: hidden;
 }
 
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-photo,
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-icon {
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-photo, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-photo,
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-icon, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-icon {
     width: 100%;
     height: auto;
     aspect-ratio: 3 / 2;
@@ -607,35 +607,35 @@ button.asset-tree-portal-mine-fold:hover {
     background: #f4f5f7;
 }
 
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-icon svg {
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-icon svg, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-icon svg {
     width: 36px;
     height: 36px;
 }
 
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon {
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon {
     display: none;
 }
 
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-copy {
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-copy, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-copy {
     order: 1;
     padding: 12px 14px 14px;
 }
 
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-grid {
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-grid, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-grid {
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card {
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-card {
     display: grid;
     grid-template-columns: 168px minmax(0, 1fr);
     min-height: 128px;
     overflow: hidden;
 }
 
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-photo,
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon {
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-photo, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-photo,
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-icon {
     grid-column: 1;
     grid-row: 1;
     width: 168px;
@@ -647,22 +647,22 @@ button.asset-tree-portal-mine-fold:hover {
     background: #f4f5f7;
 }
 
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-copy {
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-copy, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-copy {
     grid-column: 2;
     grid-row: 1;
     padding: 14px 16px;
 }
 
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon svg {
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon svg, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-icon svg {
     width: 36px;
     height: 36px;
 }
 
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon {
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-card.has-photo .asset-tree-portal-mine-icon {
     display: none;
 }
 
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-lines {
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-lines, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-lines {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px 16px;
@@ -673,9 +673,9 @@ button.asset-tree-portal-mine-fold:hover {
     border-color: #4c9aff;
 }
 
-.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.is-hidden,
-.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card.is-hidden,
-.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.is-hidden, .asset-tree-portal-mine-group.is-list .asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-card.is-hidden, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-card.is-hidden,
+.asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card.is-hidden, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-card.is-hidden,
 .asset-tree-portal-mine-group.is-hidden {
     display: none !important;
 }
@@ -921,31 +921,31 @@ button.asset-tree-portal-close:hover {
         margin-left: 0;
     }
 
-    .asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-grid {
+    .asset-tree-portal-mine.is-tiles .asset-tree-portal-mine-grid, .asset-tree-portal-mine-group.is-tiles .asset-tree-portal-mine-grid {
         grid-template-columns: 1fr;
     }
 
-    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card {
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-card, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-card {
         grid-template-columns: 96px minmax(0, 1fr);
     }
 
-    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-photo,
-    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon {
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-photo, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-photo,
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-icon, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-icon {
         width: 96px;
         height: 64px;
         min-height: 64px;
     }
 
-    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-lines,
+    .asset-tree-portal-mine.is-cards .asset-tree-portal-mine-lines, .asset-tree-portal-mine-group.is-cards .asset-tree-portal-mine-lines,
     .asset-tree-portal-detail-row {
         grid-template-columns: 1fr;
     }
 
-    .asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.has-photo {
+    .asset-tree-portal-mine.is-list .asset-tree-portal-mine-card.has-photo, .asset-tree-portal-mine-group.is-list .asset-tree-portal-mine-card.has-photo {
         grid-template-columns: 36px minmax(0, 1fr) 84px;
     }
 
-    .asset-tree-portal-mine.is-list .asset-tree-portal-mine-photo {
+    .asset-tree-portal-mine.is-list .asset-tree-portal-mine-photo, .asset-tree-portal-mine-group.is-list .asset-tree-portal-mine-photo {
         width: 84px;
         height: 56px;
     }

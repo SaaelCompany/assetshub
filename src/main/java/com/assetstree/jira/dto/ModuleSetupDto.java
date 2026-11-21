@@ -46,6 +46,8 @@ public class ModuleSetupDto {
     private String glyphs;
     private Boolean portalMine;
     private String portalColumns;
+    /** tiles, cards or list. Empty keeps the layout that was saved before projects had their own. */
+    private String portalLayout;
     private String portalReports;
     private String portalBoards;
     private String portalAudience;
@@ -146,6 +148,8 @@ public class ModuleSetupDto {
     public void setPortalMine(Boolean portalMine) { this.portalMine = portalMine; }
     public String getPortalColumns() { return portalColumns; }
     public void setPortalColumns(String portalColumns) { this.portalColumns = portalColumns; }
+    public String getPortalLayout() { return portalLayout; }
+    public void setPortalLayout(String portalLayout) { this.portalLayout = portalLayout; }
     public String getPortalReports() { return portalReports; }
     public void setPortalReports(String portalReports) { this.portalReports = portalReports; }
     public String getPortalBoards() { return portalBoards; }

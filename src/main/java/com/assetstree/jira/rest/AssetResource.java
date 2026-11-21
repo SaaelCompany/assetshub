@@ -39,6 +39,7 @@ import com.assetstree.jira.dto.FlowBookDto;
 import com.assetstree.jira.model.FlowRuleDraft;
 import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
+import com.assetstree.jira.model.NameSortDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
 import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
@@ -176,6 +177,19 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.setSecret(user(), id, on)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/sort")
+    public Response sortPlace(@PathParam("id") final int id, final NameSortDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                int direction = draft == null || draft.getDirection() == null ? 1 : draft.getDirection().intValue();
+                assetService.sortPlaceByName(user(), id, direction);
+                return Response.noContent().build();
             }
         });
     }

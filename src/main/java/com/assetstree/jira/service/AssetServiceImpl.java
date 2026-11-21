@@ -209,6 +209,7 @@ import com.assetstree.jira.model.FieldDraft;
 import com.assetstree.jira.model.FlowBook;
 import com.assetstree.jira.model.FlowGraph;
 import com.assetstree.jira.model.PickerLayout;
+import com.assetstree.jira.model.NameOrder;
 import com.assetstree.jira.model.PlaceArrangeDraft;
 import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceLayout;
@@ -544,21 +545,29 @@ public class AssetServiceImpl implements AssetService {
         return ao().executeInTransaction(new TransactionCallback<String>() {
             @Override
             public String doInTransaction() {
-                PortalLayoutEntity[] rows = ao().find(PortalLayoutEntity.class);
-                PortalLayoutEntity row;
-                if (rows == null || rows.length == 0) {
-                    row = ao().create(PortalLayoutEntity.class, new DBParam("LAYOUT", clean));
-                } else {
-                    row = rows[0];
-                    for (int i = 1; i < rows.length; i++) {
-                        ao().delete(rows[i]);
-                    }
+                ProjectViewEntity row = viewRow(project.getKey());
+                if (row == null) {
+                    row = ao().create(ProjectViewEntity.class,
+                            new DBParam("PROJECT_KEY", project.getKey()),
+                            new DBParam("TREE_MODE", Integer.valueOf(0)));
                 }
-                row.setLayout(clean);
+                ModuleSetupDto setup = ModuleSetup.read(row.getOptionList());
+                setup.setPortalLayout(clean);
+                row.setOptionList(ModuleSetup.write(setup));
                 row.save();
                 return clean;
             }
         });
+    }
+
+    /** The layout saved for this project, or the older shared layout when the project has none yet. */
+    private String portalLayoutFor(String projectKey) {
+        ProjectViewEntity view = viewRow(projectKey);
+        ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+        if (setup.getPortalLayout() != null && !setup.getPortalLayout().isEmpty()) {
+            return PortalLayouts.canonical(setup.getPortalLayout());
+        }
+        return readPortalLayout();
     }
 
     private String readPortalLayoutOutside() {
@@ -3428,6 +3437,140 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public void sortPlaceByName(ApplicationUser user, final int assetId, final int direction) {
+        final int way = direction < 0 ? -1 : 1;
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetEntity place = requireAsset(assetId);
+                if (!isLocation(place)) {
+                    throw new AssetException(400, "asset-tree.error.type.place");
+                }
+                Project project = project(place.getProjectKey());
+                boolean places = hasCap(user, project, GrantCaps.PLACES);
+                boolean objects = hasCap(user, project, GrantCaps.OBJECT);
+                boolean arrange = canArrangeTypes(user, project);
+                if (!places && !objects && !arrange) {
+                    if (!canOpen(user, project)) {
+                        throw new AssetException(404, "asset-tree.error.notFound");
+                    }
+                    throw new AssetException(403, "asset-tree.error.forbidden");
+                }
+                AssetEntity[] all = assetsIn(place.getProjectKey());
+                List<AssetEntity> siblings = new ArrayList<AssetEntity>();
+                List<AssetEntity> childPlaces = new ArrayList<AssetEntity>();
+                for (AssetEntity candidate : all) {
+                    if (!TreeLogic.sameParent(candidate.getParentId(), Integer.valueOf(place.getID()))) {
+                        continue;
+                    }
+                    siblings.add(candidate);
+                    if (isLocation(candidate)) {
+                        childPlaces.add(candidate);
+                    }
+                }
+                if (places && childPlaces.size() > 1) {
+                    List<AssetEntity> ordered = new ArrayList<AssetEntity>(childPlaces);
+                    Collections.sort(ordered, named(way));
+                    rewriteSlots(siblings, indexById(childPlaces), ordered);
+                }
+                if (objects) {
+                    Map<String, List<AssetEntity>> byType = new LinkedHashMap<String, List<AssetEntity>>();
+                    for (AssetEntity sibling : siblings) {
+                        if (isLocation(sibling) || sibling.getTypeKey() == null || sibling.getTypeKey().trim().isEmpty()) {
+                            continue;
+                        }
+                        List<AssetEntity> bucket = byType.get(sibling.getTypeKey());
+                        if (bucket == null) {
+                            bucket = new ArrayList<AssetEntity>();
+                            byType.put(sibling.getTypeKey(), bucket);
+                        }
+                        bucket.add(sibling);
+                    }
+                    for (List<AssetEntity> bucket : byType.values()) {
+                        if (bucket.size() < 2) {
+                            continue;
+                        }
+                        List<AssetEntity> ordered = new ArrayList<AssetEntity>(bucket);
+                        Collections.sort(ordered, named(way));
+                        rewriteSlots(siblings, indexById(bucket), ordered);
+                    }
+                }
+                if (arrange) {
+                    List<String> pinned = offeredKeys(place.getOfferedTypes());
+                    for (AssetEntity asset : all) {
+                        Integer parent = TreeLogic.normalizeParent(asset.getParentId());
+                        if (parent != null && parent.intValue() == place.getID() && !isLocation(asset)
+                                && asset.getTypeKey() != null && !pinned.contains(asset.getTypeKey())) {
+                            pinned.add(asset.getTypeKey());
+                        }
+                    }
+                    Map<String, String> labels = new LinkedHashMap<String, String>();
+                    for (AssetTypeEntity type : ao().find(AssetTypeEntity.class, Query.select().where("PROJECT_KEY = ?", place.getProjectKey()))) {
+                        if (type != null && type.getTypeKey() != null && !type.isLocation()) {
+                            labels.put(type.getTypeKey(), type.getLabel() == null ? type.getTypeKey() : type.getLabel());
+                        }
+                    }
+                    List<String> next = PlaceLayout.orderByName(offeredLines(place.getOfferedTypes()), pinned,
+                            placeFacts(place.getProjectKey()), labels, way < 0);
+                    String stored = joinOffered(next);
+                    if (!stored.equals(place.getOfferedTypes() == null ? "" : place.getOfferedTypes())) {
+                        place.setOfferedTypes(stored);
+                        place.setUpdated(new Date());
+                        place.setUpdatedBy(user.getKey());
+                        place.save();
+                    }
+                }
+                return null;
+            }
+        });
+    }
+
+    private Map<Integer, AssetEntity> indexById(List<AssetEntity> rows) {
+        Map<Integer, AssetEntity> index = new LinkedHashMap<Integer, AssetEntity>();
+        for (AssetEntity row : rows) {
+            index.put(Integer.valueOf(row.getID()), row);
+        }
+        return index;
+    }
+
+    private Comparator<AssetEntity> named(final int way) {
+        return new Comparator<AssetEntity>() {
+            @Override
+            public int compare(AssetEntity left, AssetEntity right) {
+                int cmp = NameOrder.compare(left.getName(), right.getName());
+                if (cmp == 0) {
+                    cmp = Integer.compare(left.getID(), right.getID());
+                }
+                return cmp * way;
+            }
+        };
+    }
+
+    /** Puts {@code ordered} back into the slots those rows already occupy, then rewrites sort order. */
+    private void rewriteSlots(List<AssetEntity> siblings, Map<Integer, AssetEntity> matching, List<AssetEntity> ordered) {
+        Collections.sort(siblings, SIBLING_ORDER);
+        List<Integer> slots = new ArrayList<Integer>();
+        for (int i = 0; i < siblings.size(); i++) {
+            if (matching.containsKey(Integer.valueOf(siblings.get(i).getID()))) {
+                slots.add(Integer.valueOf(i));
+            }
+        }
+        if (slots.size() != ordered.size()) {
+            return;
+        }
+        for (int i = 0; i < slots.size(); i++) {
+            siblings.set(slots.get(i).intValue(), ordered.get(i));
+        }
+        for (int i = 0; i < siblings.size(); i++) {
+            AssetEntity sibling = siblings.get(i);
+            if (sibling.getSortOrder() != i) {
+                sibling.setSortOrder(i);
+                sibling.save();
+            }
+        }
+    }
+
+    @Override
     public AssetTypeDto createType(ApplicationUser user, TypeDraft draft) {
         if (draft == null) {
             throw new AssetException(400, "asset-tree.error.type.label");
@@ -5270,6 +5413,7 @@ public class AssetServiceImpl implements AssetService {
                     node.setObjectKey(laid.getObjectKey());
                     node.setStatus(laid.getStatus());
                     node.setTypeLabel(laid.getTypeLabel());
+                    node.setTypeKey(laid.getTypeKey());
                     node.setGroup(laid.isGroup());
                     if (!laid.isGroup()) {
                         String extra = searchText.get(Integer.valueOf(laid.getId()));
@@ -5318,6 +5462,7 @@ public class AssetServiceImpl implements AssetService {
                 PortalRuleEntity rule = ao().create(PortalRuleEntity.class,
                         new DBParam("PROJECT_KEY", project.getKey()),
                         new DBParam("ASSET_ID", draft.getAssetId()),
+                        new DBParam("TYPE_KEY", portalTypeKey(asset, draft.getTypeKey())),
                         new DBParam("POSITION", position));
                 for (int i = 0; i < conditions.size(); i++) {
                     PortalConditionDraft condition = conditions.get(i);
@@ -5370,6 +5515,7 @@ public class AssetServiceImpl implements AssetService {
                     throw new AssetException(400, "asset-tree.error.portal.target");
                 }
                 rule.setAssetId(draft.getAssetId());
+                rule.setTypeKey(portalTypeKey(asset, draft.getTypeKey()));
                 rule.save();
                 ao().deleteWithSQL(PortalRuleConditionEntity.class, "RULE_ID = ?", ruleId);
                 for (int i = 0; i < conditions.size(); i++) {
@@ -6041,11 +6187,12 @@ public class AssetServiceImpl implements AssetService {
         PortalRuleDto dto = new PortalRuleDto();
         dto.setId(rule.getID());
         dto.setAssetId(rule.getAssetId());
+        dto.setTypeKey(rule.getTypeKey() == null ? "" : rule.getTypeKey().trim());
         dto.setPosition(rule.getPosition());
         AssetEntity asset = ao().get(AssetEntity.class, rule.getAssetId());
         if (asset != null) {
             dto.setAssetName(asset.getName());
-            dto.setAssetPath(portalPath(asset));
+            dto.setAssetPath(portalTargetPath(asset, dto.getTypeKey()));
         }
         PortalRuleConditionEntity[] conditions = ao().find(PortalRuleConditionEntity.class,
                 Query.select().where("RULE_ID = ?", rule.getID()));
@@ -6350,6 +6497,31 @@ public class AssetServiceImpl implements AssetService {
                 when == null ? new Date() : when);
     }
 
+    /** A type target is stored only on a place. An object keeps its own type in the path. */
+    private String portalTypeKey(AssetEntity asset, String raw) {
+        String key = raw == null ? "" : raw.trim();
+        if (key.isEmpty() || asset == null || !isLocation(asset)) {
+            return "";
+        }
+        AssetTypeEntity type = findType(key);
+        if (type == null || type.isLocation() || !ProjectKeys.same(type.getProjectKey(), asset.getProjectKey())) {
+            throw new AssetException(400, "asset-tree.error.portal.target");
+        }
+        return type.getTypeKey();
+    }
+
+    private String portalTargetPath(AssetEntity asset, String typeKey) {
+        String path = portalPath(asset);
+        if (typeKey == null || typeKey.trim().isEmpty() || asset == null || !isLocation(asset)) {
+            return path;
+        }
+        String extra = joinNames(typeChain(typeKey));
+        if (extra.isEmpty()) {
+            return path;
+        }
+        return path.isEmpty() ? extra : path + " / " + extra;
+    }
+
     private String portalPath(AssetEntity entity) {
         List<String> names = new ArrayList<String>();
         AssetEntity cursor = entity;
@@ -6360,9 +6532,48 @@ public class AssetServiceImpl implements AssetService {
             cursor = parentId == null ? null : ao().get(AssetEntity.class, parentId.intValue());
             guard++;
         }
+        if (entity != null && !isLocation(entity) && !names.isEmpty()) {
+            names.addAll(names.size() - 1, typeChain(entity.getTypeKey()));
+        }
+        return joinNames(names);
+    }
+
+    private List<String> typeChain(String typeKey) {
+        List<String> labels = new ArrayList<String>();
+        if (typeKey == null || typeKey.trim().isEmpty()) {
+            return labels;
+        }
+        AssetTypeEntity type = findType(typeKey.trim());
+        if (type == null || type.isLocation()) {
+            return labels;
+        }
+        String parentKey = type.getParentTypeKey() == null ? "" : type.getParentTypeKey().trim();
+        if (!parentKey.isEmpty() && !parentKey.equals(type.getTypeKey())) {
+            AssetTypeEntity parent = findType(parentKey);
+            if (parent != null && !parent.isLocation()) {
+                String parentLabel = typeLabel(parent);
+                if (!parentLabel.isEmpty()) {
+                    labels.add(parentLabel);
+                }
+            }
+        }
+        String label = typeLabel(type);
+        if (!label.isEmpty()) {
+            labels.add(label);
+        }
+        return labels;
+    }
+
+    private String joinNames(List<String> names) {
         StringBuilder builder = new StringBuilder();
+        if (names == null) {
+            return "";
+        }
         for (int i = 0; i < names.size(); i++) {
-            if (i > 0) {
+            if (names.get(i) == null || names.get(i).isEmpty()) {
+                continue;
+            }
+            if (builder.length() > 0) {
                 builder.append(" / ");
             }
             builder.append(names.get(i));
@@ -6514,6 +6725,7 @@ public class AssetServiceImpl implements AssetService {
                         }
                         PortalMineDto.Group chartsOnly = new PortalMineDto.Group();
                         chartsOnly.setKey(project.getKey());
+                        chartsOnly.setLayout(portalLayoutFor(project.getKey()));
                         chartsOnly.setCharts(charts);
                         groups.add(chartsOnly);
                         continue;
@@ -6554,6 +6766,7 @@ public class AssetServiceImpl implements AssetService {
                     group.setKey(project.getKey());
                     group.setCount(cards.size());
                     group.setCountLabel(portalCount(cards.size()));
+                    group.setLayout(portalLayoutFor(project.getKey()));
                     group.setAssets(cards);
                     group.setCharts(charts);
                     groups.add(group);
@@ -6562,7 +6775,7 @@ public class AssetServiceImpl implements AssetService {
                 page.setProjects(groups);
                 page.setTotal(total);
                 page.setTotalLabel(portalCount(total));
-                page.setLayout(readPortalLayout());
+                page.setLayout(groups.isEmpty() ? readPortalLayout() : groups.get(0).getLayout());
                 return page;
             }
         });

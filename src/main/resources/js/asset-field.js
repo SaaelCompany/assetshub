@@ -625,7 +625,7 @@
             });
             if (!ok) return;
             var score = rule.conditions.length;
-            var depth = depthOf(rule.assetId, byId);
+            var depth = depthOf(rule.assetId, byId) + (rule.typeKey ? 1 : 0);
             if (score > bestScore || (score === bestScore && depth > bestDepth)) {
                 best = rule;
                 bestScore = score;
@@ -633,6 +633,17 @@
             }
         });
         return best;
+    }
+
+    function typeGroupId(nodes, placeId, typeKey) {
+        if (!placeId || !typeKey) return null;
+        var byId = indexOf(nodes);
+        var found = null;
+        (nodes || []).forEach(function (node) {
+            if (found || !node || !node.group || node.typeKey !== typeKey) return;
+            if (contains(byId, placeId, node.id)) found = node.id;
+        });
+        return found;
     }
 
     function depthOf(id, byId) {
@@ -743,6 +754,10 @@
             var locked = rules.length > 0;
             var rule = locked ? chooseRule(rules, readAnswers(picker), byId) : null;
             var rootId = rule ? rule.assetId : null;
+            if (rule && rule.typeKey) {
+                var typed = typeGroupId(nodes, rule.assetId, rule.typeKey);
+                if (typed) rootId = typed;
+            }
             if (!force && rootId === appliedRoot && locked === appliedLock) return;
             appliedRoot = rootId;
             appliedLock = locked;
@@ -1468,10 +1483,24 @@
     function mineLayout() {
         var stored = '';
         try { stored = localStorage.getItem('asset-tree.portalMineLayout') || ''; } catch (error) { stored = ''; }
-        var chosen = knownMineLayout(stored);
+        return knownMineLayout(stored);
+    }
+
+    function groupMineLayout(group, data) {
+        var chosen = mineLayout();
         if (chosen) return chosen;
-        var fallback = mineState.payload && mineState.payload.layout;
-        return knownMineLayout(fallback) || 'tiles';
+        return knownMineLayout(group && group.layout) || knownMineLayout(data && data.layout) || 'tiles';
+    }
+
+    function shownMineLayout(data) {
+        var chosen = mineLayout();
+        if (chosen) return chosen;
+        var seen = [];
+        (data && data.projects || []).forEach(function (group) {
+            var layout = groupMineLayout(group, data);
+            if (seen.indexOf(layout) < 0) seen.push(layout);
+        });
+        return seen.length === 1 ? seen[0] : (knownMineLayout(data && data.layout) || seen[0] || 'tiles');
     }
 
     function chooseMineLayout(layout) {
@@ -1803,7 +1832,7 @@
         });
         search.addEventListener('blur', function () { mineState.searching = false; });
         var quiet = el('div', 'asset-tree-portal-mine-quiet-row');
-        quiet.appendChild(mineQuietSelect('Вид', mineLayout(), MINE_LAYOUTS, chooseMineLayout));
+        quiet.appendChild(mineQuietSelect('Вид', shownMineLayout(data), MINE_LAYOUTS, chooseMineLayout));
         quiet.appendChild(mineQuietSelect('Группировка', mineGroupMode(), [
             ['place', 'Площадка'],
             ['type', 'Тип'],
@@ -1847,6 +1876,7 @@
                 buckets.sort(function (left, right) { return left.name.localeCompare(right.name, 'ru'); });
             }
             var block = el('section', 'asset-tree-portal-mine-group');
+            if (!mineLayout()) block.classList.add('is-' + groupMineLayout(group, data));
             if (group.key) {
                 var title = el('h3', null);
                 title.appendChild(el('strong', null, group.key || ''));
@@ -2820,9 +2850,10 @@
             existing.id = 'asset-tree-portal-mine';
         }
         if (existing.parentNode !== host) host.appendChild(existing);
-        var signature = mineSignature(data) + '\u0001' + mineLayout() + '\u0001' + mineGroupMode() + '\u0001' + mineSortMode();
+        var layouts = (data.projects || []).map(function (group) { return groupMineLayout(group, data); }).join(',');
+        var signature = mineSignature(data) + '\u0001' + mineLayout() + '\u0001' + layouts + '\u0001' + mineGroupMode() + '\u0001' + mineSortMode();
         if (existing.getAttribute('data-sig') === signature) return;
-        existing.className = 'asset-tree-portal-mine is-' + mineLayout();
+        existing.className = 'asset-tree-portal-mine' + (mineLayout() ? ' is-' + mineLayout() : '');
         existing.setAttribute('data-sig', signature);
         while (existing.firstChild) existing.removeChild(existing.firstChild);
         existing.appendChild(renderMine(data));
