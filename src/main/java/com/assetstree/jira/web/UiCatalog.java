@@ -395,6 +395,7 @@ public final class UiCatalog {
             "shareAdd",
             "shareEmpty",
             "shareHint",
+            "sharePlaceHint",
             "shareRemove",
             "actShare",
             "actShareRemove",

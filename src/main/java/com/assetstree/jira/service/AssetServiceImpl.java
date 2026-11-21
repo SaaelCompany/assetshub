@@ -1415,9 +1415,6 @@ public class AssetServiceImpl implements AssetService {
     private UserProfileDto grantShare(ApplicationUser user, AssetEntity asset, String userKey) {
         final String holder = normalizeCustodian(userKey);
         final int assetId = asset.getID();
-        if (isLocation(asset)) {
-            throw new AssetException(400, "asset-tree.error.share.place");
-        }
         AssetShareEntity[] existing = ao().find(AssetShareEntity.class,
                 Query.select().where("ASSET_ID = ? AND USER_KEY = ?", Integer.valueOf(assetId), holder));
         if (existing != null && existing.length > 0) {
@@ -1465,7 +1462,7 @@ public class AssetServiceImpl implements AssetService {
         Map<Integer, AssetEntity> index = indexAssets(rows);
         List<AssetAttributeEntity> attributes = attributesFor(id);
         AssetTypeDto type = types.get(asset.getTypeKey());
-        boolean shared = shareIds(user.getKey()).contains(Integer.valueOf(id));
+        boolean shared = TreeLogic.coveredByShare(id, parentMap(rows), shareIds(user.getKey()));
         String role = portalRole(asset, attributes, type, user.getKey(), shared);
         ProjectViewEntity view = viewRow(projectKey);
         ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
@@ -2466,7 +2463,7 @@ public class AssetServiceImpl implements AssetService {
         }
         Map<String, AssetTypeDto> types = indexTypes(typeDtos(projectKey, rows));
         AssetTypeDto type = types.get(asset.getTypeKey());
-        boolean shared = shareIds(user.getKey()).contains(Integer.valueOf(assetId));
+        boolean shared = TreeLogic.coveredByShare(assetId, parentMap(rows), shareIds(user.getKey()));
         if (portalRole(asset, attributesFor(assetId), type, user.getKey(), shared) == null) {
             throw new AssetException(403, "asset-tree.error.forbidden");
         }
@@ -6269,13 +6266,14 @@ public class AssetServiceImpl implements AssetService {
                         Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
                         Map<Integer, List<ServicePlanEntity>> planIndex = plansFor(idsOf(rows));
                         Set<Integer> sharedIds = shareIds(holder);
+                        Map<Integer, Integer> parents = parentMap(rows);
                         for (AssetEntity row : rows) {
                             AssetTypeDto type = types.get(row.getTypeKey());
                             if (type != null && type.isLocation()) {
                                 continue;
                             }
                             String role = holderRole(row, attributes.get(row.getID()), type, holder);
-                            if (role == null && sharedIds.contains(Integer.valueOf(row.getID()))) {
+                            if (role == null && TreeLogic.coveredByShare(row.getID(), parents, sharedIds)) {
                                 role = i18n().getText("asset-tree.ui.shareTitle");
                             }
                             if (role == null) {
@@ -6353,6 +6351,7 @@ public class AssetServiceImpl implements AssetService {
                     Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
                     Map<Integer, AssetEntity> index = indexAssets(rows);
                     Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
+                    Map<Integer, Integer> parents = parentMap(rows);
                     List<PortalMineDto.Card> cards = new ArrayList<PortalMineDto.Card>();
                     for (AssetEntity row : rows) {
                         AssetTypeDto type = types.get(row.getTypeKey());
@@ -6360,7 +6359,7 @@ public class AssetServiceImpl implements AssetService {
                             continue;
                         }
                         String role = portalRole(row, attributes.get(row.getID()), type, holder,
-                                sharedIds.contains(Integer.valueOf(row.getID())));
+                                TreeLogic.coveredByShare(row.getID(), parents, sharedIds));
                         if (role == null) {
                             continue;
                         }

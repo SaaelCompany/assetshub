@@ -50,6 +50,29 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void shareOnAPlaceCoversTheEquipmentInside() {
+        Map<Integer, Integer> parents = new HashMap<Integer, Integer>();
+        parents.put(Integer.valueOf(11), Integer.valueOf(10));
+        parents.put(Integer.valueOf(20), Integer.valueOf(11));
+        parents.put(Integer.valueOf(21), Integer.valueOf(10));
+        parents.put(Integer.valueOf(30), Integer.valueOf(40));
+        Set<Integer> shared = new HashSet<Integer>();
+        shared.add(Integer.valueOf(10));
+        assertTrue(TreeLogic.coveredByShare(20, parents, shared));
+        assertTrue(TreeLogic.coveredByShare(21, parents, shared));
+        assertTrue(TreeLogic.coveredByShare(11, parents, shared));
+        assertFalse(TreeLogic.coveredByShare(30, parents, shared));
+        assertFalse(TreeLogic.coveredByShare(20, parents, Collections.<Integer>emptySet()));
+        Set<Integer> oneCard = new HashSet<Integer>();
+        oneCard.add(Integer.valueOf(20));
+        assertTrue(TreeLogic.coveredByShare(20, parents, oneCard));
+        assertFalse(TreeLogic.coveredByShare(21, parents, oneCard));
+        parents.put(Integer.valueOf(50), Integer.valueOf(51));
+        parents.put(Integer.valueOf(51), Integer.valueOf(50));
+        assertFalse(TreeLogic.coveredByShare(50, parents, shared));
+    }
+
+    @Test
     public void reportsOnlyGrantDoesNotOpenTheTree() {
         assertFalse(GrantCaps.has(GrantCaps.normalize("reports"), GrantCaps.VIEW));
         assertTrue(GrantCaps.has(GrantCaps.normalize("view"), GrantCaps.MAP));
