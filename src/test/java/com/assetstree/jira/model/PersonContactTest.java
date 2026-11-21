@@ -54,6 +54,22 @@ public class PersonContactTest {
     }
 
     @Test
+    public void aPanelOfLabeledLinesFillsTheJobTheDepartmentAndThePhone() {
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        attributes.put("AD Атрибуты автора",
+                "Должность: Заместитель руководителя Единого информационного центра ОП\n"
+                        + "Почта: e.burakova@bzklinika.ru\n"
+                        + "Отдел: КРС Информационный центр\n"
+                        + "Мобильный: 79233040561");
+        UserProfileDto dto = new UserProfileDto();
+        PersonContact.apply(dto, attributes);
+        assertEquals("Заместитель руководителя Единого информационного центра ОП", dto.getTitle());
+        assertEquals("КРС Информационный центр", dto.getDepartment());
+        assertEquals("79233040561", dto.getPhone());
+        assertEquals("e.burakova@bzklinika.ru", dto.getEmail());
+    }
+
+    @Test
     public void aFilledValueStays() {
         Map<String, String> attributes = new LinkedHashMap<String, String>();
         attributes.put("title", "Другая");

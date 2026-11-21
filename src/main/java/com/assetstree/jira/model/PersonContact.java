@@ -1,5 +1,6 @@
 package com.assetstree.jira.model;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Picks a person's phone, job title and department out of directory attributes and user properties. */
@@ -11,6 +12,7 @@ public final class PersonContact {
         if (dto == null || attributes == null) {
             return;
         }
+        attributes = labeled(attributes);
         if (blank(dto.getPhone())) {
             dto.setPhone(phone(attributes));
         }
@@ -26,6 +28,49 @@ public final class PersonContact {
                 dto.setEmail(mail);
             }
         }
+    }
+
+    /**
+     * A block such as the author panel keeps every attribute on its own line:
+     * "Должность: …". Those lines become their own attributes.
+     */
+    static Map<String, String> labeled(Map<String, String> attributes) {
+        if (attributes == null || attributes.isEmpty()) {
+            return attributes;
+        }
+        Map<String, String> out = null;
+        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+            String value = entry.getValue();
+            if (value == null || value.indexOf(':') < 0) {
+                continue;
+            }
+            String[] lines = value.split("\\r?\\n");
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i] == null ? "" : lines[i].trim();
+                int colon = line.indexOf(':');
+                if (colon < 2 || colon > 48) {
+                    continue;
+                }
+                String label = line.substring(0, colon).trim();
+                String rest = line.substring(colon + 1).trim();
+                if (label.isEmpty() || rest.isEmpty() || !contactLabel(label)) {
+                    continue;
+                }
+                if (out == null) {
+                    out = new LinkedHashMap<String, String>(attributes);
+                }
+                if (!out.containsKey(label)) {
+                    out.put(label, rest);
+                }
+            }
+        }
+        return out == null ? attributes : out;
+    }
+
+    private static boolean contactLabel(String label) {
+        String norm = DocxFill.normalize(label);
+        return titleScore(label, "роль") > 0 || phoneScore(label, "1") > 0 || departmentScore(label) > 0
+                || norm.contains("mail") || norm.contains("почт") || norm.contains("email");
     }
 
     public static String phone(Map<String, String> attributes) {
