@@ -1533,10 +1533,10 @@
         try { localStorage.setItem('asset-tree.portalMineFold', JSON.stringify(map)); } catch (error) {}
     }
 
-    function mineSelect(label, value, options, onChange) {
-        var wrap = el('label', 'asset-tree-portal-mine-pick');
-        wrap.appendChild(el('span', null, label));
+    function mineQuietSelect(label, value, options, onChange) {
         var select = document.createElement('select');
+        select.className = 'asset-tree-portal-mine-quiet';
+        select.setAttribute('aria-label', label);
         options.forEach(function (item) {
             var option = document.createElement('option');
             option.value = item[0];
@@ -1545,8 +1545,7 @@
             select.appendChild(option);
         });
         select.addEventListener('change', function () { onChange(select.value); });
-        wrap.appendChild(select);
-        return wrap;
+        return select;
     }
 
     function profilePage() {
@@ -1749,12 +1748,25 @@
         var count = el('span', 'asset-tree-portal-mine-count', countLabel);
         count.setAttribute('data-label', countLabel);
         count.setAttribute('data-total', String(split ? visibleTotal : (data.total || 0)));
-        titles.appendChild(count);
+        if (!split) titles.appendChild(count);
+        if (pane === 'clinic' && !split) titles.appendChild(el('span', 'asset-tree-portal-mine-note', 'Оборудование клиники'));
+        head.appendChild(titles);
         if (split) {
-            var panes = el('div', 'asset-tree-portal-mine-layouts');
-            [['own', 'Моё'], ['clinic', 'Клиника']].forEach(function (item) {
-                var pick = el('button', 'asset-tree-portal-mine-layout' + (item[0] === pane ? ' is-active' : ''), item[1]);
+            var panes = el('div', 'asset-tree-portal-mine-panes');
+            panes.setAttribute('role', 'tablist');
+            [['own', 'Моё', counts.own], ['clinic', 'Клиника', counts.clinic]].forEach(function (item) {
+                var active = item[0] === pane;
+                var pick = el('button', 'asset-tree-portal-mine-pane' + (active ? ' is-active' : ''));
                 pick.type = 'button';
+                pick.setAttribute('role', 'tab');
+                pick.setAttribute('aria-selected', active ? 'true' : 'false');
+                pick.appendChild(document.createTextNode(item[1]));
+                var num = el('span', active ? 'asset-tree-portal-mine-count' : 'asset-tree-portal-mine-pane-count', String(item[2]));
+                if (active) {
+                    num.setAttribute('data-label', String(item[2]));
+                    num.setAttribute('data-total', String(item[2]));
+                }
+                pick.appendChild(num);
                 pick.addEventListener('click', function () {
                     if (mineState.pane === item[0]) return;
                     mineState.pane = item[0];
@@ -1763,11 +1775,8 @@
                 });
                 panes.appendChild(pick);
             });
-            titles.appendChild(panes);
-        } else if (pane === 'clinic') {
-            titles.appendChild(el('p', 'asset-tree-portal-mine-role', 'Оборудование клиники'));
+            head.appendChild(panes);
         }
-        head.appendChild(titles);
         var search = null;
         if (!data.total) {
             root.appendChild(head);
@@ -1775,32 +1784,7 @@
             if (chartsOnly) root.appendChild(chartsOnly);
             return root;
         }
-        var layouts = el('div', 'asset-tree-portal-mine-layouts');
-        layouts.setAttribute('role', 'tablist');
-        layouts.setAttribute('aria-label', 'Вид списка');
-        var chosen = mineLayout();
-        MINE_LAYOUTS.forEach(function (item) {
-            var pick = el('button', 'asset-tree-portal-mine-layout' + (item[0] === chosen ? ' is-active' : ''), item[1]);
-            pick.type = 'button';
-            pick.setAttribute('role', 'tab');
-            pick.setAttribute('aria-selected', item[0] === chosen ? 'true' : 'false');
-            pick.addEventListener('click', function () { chooseMineLayout(item[0]); });
-            layouts.appendChild(pick);
-        });
-        head.appendChild(layouts);
-        var tools = el('div', 'asset-tree-portal-mine-tools');
-        tools.appendChild(mineSelect('Группировка', mineGroupMode(), [
-            ['place', 'Площадка'],
-            ['type', 'Тип'],
-            ['none', 'Списком']
-        ], function (value) { chooseMineOption('asset-tree.portalMineGroup', value); }));
-        tools.appendChild(mineSelect('Сортировка', mineSortMode(), [
-            ['name', 'Имя'],
-            ['place', 'Площадка'],
-            ['type', 'Тип']
-        ], function (value) { chooseMineOption('asset-tree.portalMineSort', value); }));
-        head.appendChild(tools);
-        root.appendChild(head);
+        var bar = el('div', 'asset-tree-portal-mine-bar');
         search = el('input', 'asset-tree-portal-mine-search');
         search.type = 'search';
         search.placeholder = 'Поиск по имени, ключу или полю';
@@ -1819,7 +1803,22 @@
             applyMineFilter(root);
         });
         search.addEventListener('blur', function () { mineState.searching = false; });
-        root.appendChild(search);
+        var quiet = el('div', 'asset-tree-portal-mine-quiet-row');
+        quiet.appendChild(mineQuietSelect('Вид', mineLayout(), MINE_LAYOUTS, chooseMineLayout));
+        quiet.appendChild(mineQuietSelect('Группировка', mineGroupMode(), [
+            ['place', 'Площадка'],
+            ['type', 'Тип'],
+            ['none', 'Списком']
+        ], function (value) { chooseMineOption('asset-tree.portalMineGroup', value); }));
+        quiet.appendChild(mineQuietSelect('Сортировка', mineSortMode(), [
+            ['name', 'Имя'],
+            ['place', 'Площадка'],
+            ['type', 'Тип']
+        ], function (value) { chooseMineOption('asset-tree.portalMineSort', value); }));
+        bar.appendChild(search);
+        bar.appendChild(quiet);
+        head.appendChild(bar);
+        root.appendChild(head);
         var empty = el('p', 'asset-tree-portal-mine-empty', 'Ничего не найдено');
         empty.hidden = true;
         root.appendChild(empty);
