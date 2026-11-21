@@ -1752,6 +1752,10 @@
         if (!split) titles.appendChild(count);
         if (pane === 'clinic' && !split) titles.appendChild(el('span', 'asset-tree-portal-mine-note', 'Оборудование площадки'));
         head.appendChild(titles);
+        var search = null;
+        root.appendChild(head);
+        var charts = renderMineCharts(data);
+        if (charts) root.appendChild(charts);
         if (split) {
             var panes = el('div', 'asset-tree-portal-mine-panes');
             panes.setAttribute('role', 'tablist');
@@ -1776,12 +1780,8 @@
                 });
                 panes.appendChild(pick);
             });
-            head.appendChild(panes);
+            root.appendChild(panes);
         }
-        var search = null;
-        root.appendChild(head);
-        var charts = renderMineCharts(data);
-        if (charts) root.appendChild(charts);
         if (!data.total) return root;
         var bar = el('div', 'asset-tree-portal-mine-bar');
         search = el('input', 'asset-tree-portal-mine-search');

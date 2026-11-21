@@ -219,6 +219,7 @@ textarea.asset-tree-picker-native {
 .asset-tree-portal-mine-panes {
     display: flex;
     gap: 20px;
+    margin: 0 0 12px;
     border-bottom: 1px solid #dfe1e6;
 }
 
