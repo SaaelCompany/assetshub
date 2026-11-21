@@ -746,6 +746,7 @@ public final class TniBook {
             }
             asset.save();
         } else if (claimed) {
+            String before = face(asset);
             String chosen = TniText.preferred(asset.getName(), row.getLabel(), kindLabel, person, facts.address, facts.host);
             if (!chosen.equals(asset.getName() == null ? "" : asset.getName())) {
                 asset.setName(chosen);
@@ -768,10 +769,13 @@ public final class TniBook {
                     host.note(asset.getID(), userKey, "move", "", site);
                 }
             }
-            asset.setUpdated(new Date(now));
-            asset.setUpdatedBy(clip(userKey, 255));
-            asset.save();
+            if (!before.equals(face(asset))) {
+                asset.setUpdated(new Date(now));
+                asset.setUpdatedBy(clip(userKey, 255));
+                asset.save();
+            }
         } else {
+            String before = face(asset);
             name = asset.getName() == null ? "" : asset.getName();
             if (place != null && (asset.getParentId() == null || asset.getParentId().intValue() <= 0)) {
                 asset.setParentId(place);
@@ -781,9 +785,11 @@ public final class TniBook {
                     host.note(asset.getID(), userKey, "move", "", site);
                 }
             }
-            asset.setUpdated(new Date(now));
-            asset.setUpdatedBy(clip(userKey, 255));
-            asset.save();
+            if (!before.equals(face(asset))) {
+                asset.setUpdated(new Date(now));
+                asset.setUpdatedBy(clip(userKey, 255));
+                asset.save();
+            }
         }
         link(ao, asset, issueId);
         row.setAssetId(asset.getID());
@@ -974,6 +980,13 @@ public final class TniBook {
 
     private static boolean blank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    // A browser reports every few minutes; touching UPDATED on an unchanged
+    // row would make every open tree reload for nothing.
+    private static String face(AssetEntity asset) {
+        return asset.getName() + '\u0001' + asset.getDescription() + '\u0001' + asset.getExternalKey()
+                + '\u0001' + asset.getStatus() + '\u0001' + asset.getParentId();
     }
 
     private static String clip(String value, int max) {

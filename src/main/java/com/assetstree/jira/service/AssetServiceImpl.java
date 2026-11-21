@@ -658,41 +658,12 @@ public class AssetServiceImpl implements AssetService {
             @Override
             public AssetListDto doInTransaction() {
                 notices.clear();
-                String mark = freshTreeMark(key);
-                AssetEntity[] rows = assetsIn(key);
-                applyDueFor(key, rows, notices);
-                Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
-                Map<String, String[]> holders = new HashMap<String, String[]>();
-                List<AssetEntity> matched = new ArrayList<AssetEntity>();
-                for (AssetEntity row : rows) {
-                    if (!needle.isEmpty() && !matches(row, attributes.get(row.getID()), needle, holders)) {
-                        continue;
-                    }
-                    matched.add(row);
-                    if (!needle.isEmpty() && matched.size() >= SEARCH_LIMIT) {
-                        break;
-                    }
+                startListMemo();
+                try {
+                    return listInside(key, needle, notices);
+                } finally {
+                    endListMemo();
                 }
-                Collections.sort(matched, SIBLING_ORDER);
-                List<AssetTypeDto> types = typeDtos(key, rows);
-                Map<String, AssetTypeDto> typeIndex = indexTypes(types);
-                Map<Integer, AssetEntity> index = indexAssets(rows);
-                Map<Integer, List<ServicePlanEntity>> planIndex = plansFor(idsOf(rows));
-                AssetListDto list = new AssetListDto();
-                List<AssetDto> assets = new ArrayList<AssetDto>();
-                for (AssetEntity row : matched) {
-                    AssetTypeDto type = typeIndex.get(row.getTypeKey());
-                    boolean location = type != null && type.isLocation();
-                    if (!currentScope().allowsType(row.getTypeKey(), location)) {
-                        continue;
-                    }
-                    assets.add(toDto(row, attributes.get(row.getID()), typeIndex, index, false, planIndex));
-                }
-                list.setAssets(assets);
-                list.setTypes(visibleTypes(types));
-                list.setStatuses(statusDtos(key, rows));
-                list.setMark(mark);
-                return list;
             }
         };
         AssetListDto list;
@@ -707,6 +678,72 @@ public class AssetServiceImpl implements AssetService {
         } finally {
             clearScope();
         }
+    }
+
+    private AssetListDto listInside(String key, String needle, List<ServiceNotice> notices) {
+        String mark = freshTreeMark(key);
+        AssetEntity[] rows = assetsIn(key);
+        applyDueFor(key, rows, notices);
+        Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
+        Map<String, String[]> holders = new HashMap<String, String[]>();
+        List<AssetEntity> matched = new ArrayList<AssetEntity>();
+        for (AssetEntity row : rows) {
+            if (!needle.isEmpty() && !matches(row, attributes.get(row.getID()), needle, holders)) {
+                continue;
+            }
+            matched.add(row);
+            if (!needle.isEmpty() && matched.size() >= SEARCH_LIMIT) {
+                break;
+            }
+        }
+        Collections.sort(matched, SIBLING_ORDER);
+        List<AssetTypeDto> types = typeDtos(key, rows);
+        Map<String, AssetTypeDto> typeIndex = indexTypes(types);
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        Map<Integer, List<ServicePlanEntity>> planIndex = plansFor(idsOf(rows));
+        AssetListDto list = new AssetListDto();
+        List<AssetDto> assets = new ArrayList<AssetDto>();
+        for (AssetEntity row : matched) {
+            AssetTypeDto type = typeIndex.get(row.getTypeKey());
+            boolean location = type != null && type.isLocation();
+            if (!currentScope().allowsType(row.getTypeKey(), location)) {
+                continue;
+            }
+            assets.add(toDto(row, attributes.get(row.getID()), typeIndex, index, false, planIndex));
+        }
+        list.setAssets(assets);
+        list.setTypes(visibleTypes(types));
+        list.setStatuses(statusDtos(key, rows));
+        list.setMark(mark);
+        return list;
+    }
+
+    /* A list names the same few people on every row, and each profile asks the
+       user directory for contacts. One list request builds each person once. */
+    private static final ThreadLocal<Map<String, UserProfileDto>> PROFILE_MEMO = new ThreadLocal<Map<String, UserProfileDto>>();
+    private static final ThreadLocal<Map<String, Boolean>> EDIT_MEMO = new ThreadLocal<Map<String, Boolean>>();
+
+    private static void startListMemo() {
+        PROFILE_MEMO.set(new HashMap<String, UserProfileDto>());
+        EDIT_MEMO.set(new HashMap<String, Boolean>());
+    }
+
+    private static void endListMemo() {
+        PROFILE_MEMO.remove();
+        EDIT_MEMO.remove();
+    }
+
+    private boolean editableIn(Project project) {
+        Map<String, Boolean> memo = EDIT_MEMO.get();
+        String key = project == null ? "" : project.getKey();
+        if (memo != null && memo.containsKey(key)) {
+            return memo.get(key).booleanValue();
+        }
+        boolean editable = canWrite(authenticationContext().getLoggedInUser(), project);
+        if (memo != null) {
+            memo.put(key, Boolean.valueOf(editable));
+        }
+        return editable;
     }
 
     @Override
@@ -6093,31 +6130,36 @@ public class AssetServiceImpl implements AssetService {
             public List<AssetDto> doInTransaction() {
                 notices.clear();
                 List<AssetDto> found = new ArrayList<AssetDto>();
-                for (ProjectDto project : visibleProjects(user)) {
-                    AssetEntity[] rows = assetsIn(project.getKey());
-                    applyDueFor(project.getKey(), rows, notices);
-                    Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
-                    Map<Integer, AssetEntity> index = indexAssets(rows);
-                    Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
-                    Map<Integer, List<ServicePlanEntity>> planIndex = plansFor(idsOf(rows));
-                    Set<Integer> sharedIds = shareIds(holder);
-                    for (AssetEntity row : rows) {
-                        AssetTypeDto type = types.get(row.getTypeKey());
-                        if (type != null && type.isLocation()) {
-                            continue;
+                startListMemo();
+                try {
+                    for (ProjectDto project : visibleProjects(user)) {
+                        AssetEntity[] rows = assetsIn(project.getKey());
+                        applyDueFor(project.getKey(), rows, notices);
+                        Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
+                        Map<Integer, AssetEntity> index = indexAssets(rows);
+                        Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
+                        Map<Integer, List<ServicePlanEntity>> planIndex = plansFor(idsOf(rows));
+                        Set<Integer> sharedIds = shareIds(holder);
+                        for (AssetEntity row : rows) {
+                            AssetTypeDto type = types.get(row.getTypeKey());
+                            if (type != null && type.isLocation()) {
+                                continue;
+                            }
+                            String role = holderRole(row, attributes.get(row.getID()), type, holder);
+                            if (role == null && sharedIds.contains(Integer.valueOf(row.getID()))) {
+                                role = i18n().getText("asset-tree.ui.shareTitle");
+                            }
+                            if (role == null) {
+                                continue;
+                            }
+                            AssetDto dto = toDto(row, attributes.get(row.getID()), types, index, false, planIndex);
+                            dto.setHolderRole(role);
+                            dto.setProjectName(project.getName());
+                            found.add(dto);
                         }
-                        String role = holderRole(row, attributes.get(row.getID()), type, holder);
-                        if (role == null && sharedIds.contains(Integer.valueOf(row.getID()))) {
-                            role = i18n().getText("asset-tree.ui.shareTitle");
-                        }
-                        if (role == null) {
-                            continue;
-                        }
-                        AssetDto dto = toDto(row, attributes.get(row.getID()), types, index, false, planIndex);
-                        dto.setHolderRole(role);
-                        dto.setProjectName(project.getName());
-                        found.add(dto);
                     }
+                } finally {
+                    endListMemo();
                 }
                 Collections.sort(found, new Comparator<AssetDto>() {
                     @Override
@@ -9947,7 +9989,7 @@ public class AssetServiceImpl implements AssetService {
         dto.setProjectKey(entity.getProjectKey());
         Project project = project(entity.getProjectKey());
         dto.setProjectName(project == null ? entity.getProjectKey() : project.getName());
-        dto.setEditable(canWrite(authenticationContext().getLoggedInUser(), project));
+        dto.setEditable(editableIn(project));
         String cardImage = entity.getCardImage();
         dto.setCardImage(cardImage != null && !cardImage.isEmpty());
         String photo = entity.getPhoto();
@@ -10719,6 +10761,19 @@ public class AssetServiceImpl implements AssetService {
         if (userKey == null || userKey.isEmpty()) {
             return null;
         }
+        Map<String, UserProfileDto> memo = PROFILE_MEMO.get();
+        if (memo == null) {
+            return buildProfile(userKey);
+        }
+        UserProfileDto known = memo.get(userKey);
+        if (known == null) {
+            known = buildProfile(userKey);
+            memo.put(userKey, known);
+        }
+        return known;
+    }
+
+    private UserProfileDto buildProfile(String userKey) {
         ApplicationUser user = lookupUser(userKey);
         UserProfileDto dto = new UserProfileDto();
         dto.setUserKey(userKey);

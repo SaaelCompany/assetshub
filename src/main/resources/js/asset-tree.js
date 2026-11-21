@@ -2767,10 +2767,31 @@
         return node;
     }
 
+    /* The frame is cleared before it is rebuilt, so a failure halfway would leave
+       a blank screen until the next render. The old nodes keep their listeners
+       after being detached and go back in place instead. */
+    function keepChildren(node) {
+        var kept = [];
+        if (!node) return kept;
+        for (var i = 0; i < node.childNodes.length; i++) kept.push(node.childNodes[i]);
+        return kept;
+    }
+
+    function putBack(node, kept, error) {
+        if (window.console && window.console.error) window.console.error('AssetHub render failed', error);
+        if (!node || !kept.length) return;
+        node.innerHTML = '';
+        for (var i = 0; i < kept.length; i++) node.appendChild(kept[i]);
+    }
+
     function renderFrame() {
         var keptScroll = captureViewScroll();
+        var frame = document.getElementById('asset-tree-frame');
+        var kept = keepChildren(frame);
         try {
             renderFrameContents();
+        } catch (error) {
+            putBack(frame, kept, error);
         } finally {
             restoreViewScroll(keptScroll);
             fitSplit();
@@ -3151,7 +3172,12 @@
             return;
         }
         var top = scroll ? scroll.scrollTop : 0;
-        renderNodesInto(nodes);
+        var kept = keepChildren(nodes);
+        try {
+            renderNodesInto(nodes);
+        } catch (error) {
+            putBack(nodes, kept, error);
+        }
         if (scroll) {
             scroll.scrollTop = top;
         }
@@ -12682,11 +12708,14 @@
         panel.appendChild(el('p', 'asset-tree-banner', state.treeError));
     }
 
-    function reloadTree(done) {
+    function reloadTree(done, quiet) {
         var key = state.projectKey;
         var token = ++treeToken;
         ajax('GET', '/assets?projectKey=' + encodeURIComponent(key), null, function (status, payload) {
             if (token !== treeToken || key !== state.projectKey) {
+                return;
+            }
+            if (status !== 200 && quiet && state.treeReady) {
                 return;
             }
             if (status !== 200) {
@@ -12766,20 +12795,21 @@
                     else renderFrame();
                 }
             };
-            if (objectsMoved) reloadTree(repaint);
-            else reloadCatalog(repaint);
+            if (objectsMoved) reloadTree(repaint, true);
+            else reloadCatalog(repaint, true);
         });
     }
 
     /** Types, fields and statuses only. Falls back to the whole tree when objects changed too. */
-    function reloadCatalog(done) {
+    function reloadCatalog(done, quiet) {
         var key = state.projectKey;
         var token = treeToken;
         ajax('GET', '/projects/' + encodeURIComponent(key) + '/catalog', null, function (status, payload) {
             if (key !== state.projectKey || token !== treeToken) return;
+            if (status !== 200 && quiet && state.treeReady) return;
             var mark = payload && payload.mark != null ? String(payload.mark) : '';
             if (status !== 200 || !payload || !state.treeReady || !mark || markPart(mark, 0) !== markPart(state.treeMark, 0)) {
-                reloadTree(done);
+                reloadTree(done, quiet);
                 return;
             }
             state.types = payload.types || [];
