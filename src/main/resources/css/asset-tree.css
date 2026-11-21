@@ -11968,6 +11968,7 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-link-stage {
     position: relative;
+    width: 100%;
     margin: 0 0 12px;
     overflow: visible;
     max-width: 100%;
@@ -12005,9 +12006,10 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-link-viewport {
     position: relative;
+    width: 100%;
     overflow: hidden;
     height: auto;
-    min-height: 48px;
+    min-height: 52px;
     background: transparent;
     border: 0;
 }
@@ -12083,6 +12085,24 @@ a.asset-tree-preview-icon:focus {
     flex: 1 1 auto;
     min-height: 220px;
     overflow: auto;
+}
+
+.asset-tree-graph-kind {
+    position: absolute;
+    z-index: 5;
+    left: 50%;
+    top: 64px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: max-content;
+    max-width: calc(100% - 32px);
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    box-shadow: 0 8px 24px rgba(9, 30, 66, 0.18);
 }
 
 .asset-tree-graph-kinds {

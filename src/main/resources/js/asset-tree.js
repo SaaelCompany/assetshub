@@ -10695,8 +10695,11 @@
     }
 
     function closeGraphPick() {
-        var pick = document.querySelector('.asset-tree-graph-pick');
-        if (pick && pick.parentNode) pick.parentNode.removeChild(pick);
+        var picks = document.querySelectorAll('.asset-tree-graph-pick, .asset-tree-graph-kind');
+        var i;
+        for (i = 0; i < picks.length; i++) {
+            if (picks[i].parentNode) picks[i].parentNode.removeChild(picks[i]);
+        }
     }
 
     function graphPickError(message) {
@@ -10828,7 +10831,7 @@
         var dialog = document.querySelector('.asset-tree-graph-dialog');
         if (!dialog) return;
         closeGraphPick();
-        var panel = el('div', 'asset-tree-graph-pick');
+        var panel = el('div', 'asset-tree-graph-kind');
         var head = el('div', 'asset-tree-block-head');
         head.appendChild(el('h3', null, t('linkGraphKind')));
         head.appendChild(button(t('cancel'), 'asset-tree-btn', closeGraphPick));
@@ -10977,8 +10980,10 @@
                     var y = originTop + dy;
                     if (x < 0) x = 0;
                     if (y < 0) y = 0;
-                    if (x > 1800) x = 1800;
-                    if (y > 1800) y = 1800;
+                    var span = editor ? 1800 : ((viewport.clientWidth || 1800) / (zoom || 1) - 40);
+                    if (span < 40) span = 40;
+                    if (x > span) x = span;
+                    if (y > (editor ? 1800 : 900)) y = editor ? 1800 : 900;
                     card.style.left = Math.round(x) + 'px';
                     card.style.top = Math.round(y) + 'px';
                     paintWires();
@@ -11001,12 +11006,14 @@
                 document.addEventListener('touchmove', move);
                 document.addEventListener('touchend', up);
             }
-            mark.addEventListener('mousedown', function (event) {
+            card.addEventListener('mousedown', function (event) {
                 if (event.button !== 0) return;
+                if (event.target && event.target.closest && event.target.closest('button, a')) return;
                 begin(event.clientX, event.clientY, event);
             });
-            mark.addEventListener('touchstart', function (event) {
+            card.addEventListener('touchstart', function (event) {
                 if (!event.touches || !event.touches.length) return;
+                if (event.target && event.target.closest && event.target.closest('button, a')) return;
                 begin(event.touches[0].clientX, event.touches[0].clientY, event);
             });
             card.addEventListener('click', function (event) {
@@ -11016,31 +11023,42 @@
                 if (event.preventDefault) event.preventDefault();
             }, true);
         }
-        var directCount = 0;
-        var meshCount = 0;
-        placed.forEach(function (item) {
-            if (item.node && item.node.kind === 'mesh') meshCount += 1;
-            else directCount += 1;
-        });
-        var inner = Math.max(120, directCount * 26);
-        var outer = meshCount ? inner + 100 : inner;
-        var cx = outer + 80;
-        var cy = outer + 48;
-        function ringPoint(index, count, radius) {
-            var angle = count === 1 ? -Math.PI / 2 : (-Math.PI / 2 + index * 2 * Math.PI / Math.max(count, 1));
-            return {
-                x: Math.round(cx + Math.cos(angle) * radius - 16),
-                y: Math.round(cy + Math.sin(angle) * radius - 14)
-            };
+        if (editor) {
+            var directCount = 0;
+            var meshCount = 0;
+            placed.forEach(function (item) {
+                if (item.node && item.node.kind === 'mesh') meshCount += 1;
+                else directCount += 1;
+            });
+            var inner = Math.max(120, directCount * 26);
+            var outer = meshCount ? inner + 100 : inner;
+            var cx = outer + 80;
+            var cy = outer + 48;
+            function ringPoint(index, count, radius) {
+                var angle = count === 1 ? -Math.PI / 2 : (-Math.PI / 2 + index * 2 * Math.PI / Math.max(count, 1));
+                return {
+                    x: Math.round(cx + Math.cos(angle) * radius - 16),
+                    y: Math.round(cy + Math.sin(angle) * radius - 14)
+                };
+            }
+            placeCard(selfCard, 'self', { x: cx, y: cy });
+            var directRow = 0;
+            var meshRow = 0;
+            placed.forEach(function (item) {
+                var mesh = item.node && item.node.kind === 'mesh';
+                var spot = mesh ? ringPoint(meshRow++, meshCount, outer) : ringPoint(directRow++, directCount, inner);
+                placeCard(item.card, linkNodeKey(item.node, false), spot);
+            });
+        } else {
+            placeCard(selfCard, 'self', { x: nodes.length ? 28 : 0, y: 0 });
+            placed.forEach(function (item, index) {
+                var mesh = item.node && item.node.kind === 'mesh';
+                placeCard(item.card, linkNodeKey(item.node, false), {
+                    x: mesh ? 48 : 4 + (index % 2) * 22,
+                    y: (index + 1) * 52
+                });
+            });
         }
-        placeCard(selfCard, 'self', { x: cx, y: cy });
-        var directRow = 0;
-        var meshRow = 0;
-        placed.forEach(function (item) {
-            var mesh = item.node && item.node.kind === 'mesh';
-            var spot = mesh ? ringPoint(meshRow++, meshCount, outer) : ringPoint(directRow++, directCount, inner);
-            placeCard(item.card, linkNodeKey(item.node, false), spot);
-        });
         function removeGraphNode(node) {
             ajaxDeletes(graphDropPaths(asset, node), function (status, payload) {
                 if (status >= 200 && status < 300) reloadOpenGraph(asset.id);
@@ -11142,8 +11160,17 @@
                 if (side > right) right = side;
                 if (edge > bottom) bottom = edge;
             }
-            world.style.width = right + 'px';
-            world.style.height = bottom + 'px';
+            if (!editor) {
+                var viewW = viewport.clientWidth;
+                if (viewW > right) right = viewW;
+                if (bottom < 52) bottom = 52;
+                world.style.width = '100%';
+                world.style.height = bottom + 'px';
+                viewport.style.height = bottom + 'px';
+            } else {
+                world.style.width = right + 'px';
+                world.style.height = bottom + 'px';
+            }
             svg.setAttribute('width', String(right));
             svg.setAttribute('height', String(bottom));
             svg.style.width = right + 'px';
@@ -11201,7 +11228,7 @@
                 return;
             }
             paintWires();
-            if (!touched) fitZoom();
+            if (editor && !touched) fitZoom();
         }
         viewport.addEventListener('mousedown', function (event) {
             if (event.button !== 0) return;
@@ -11236,8 +11263,9 @@
         window.addEventListener('resize', onResize);
         setTimeout(function () {
             paintWires();
+            if (!editor) return;
             fitZoom();
-            if (editor) setTimeout(fitZoom, 80);
+            setTimeout(fitZoom, 80);
         }, 30);
         return stage;
     }
