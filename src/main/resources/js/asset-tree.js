@@ -594,10 +594,13 @@
         rememberPlace();
     }
 
-    function t(key, arg) {
+    function t(key) {
         var value = (state.i18n && state.i18n[key]) || key;
-        if (arg !== undefined && arg !== null) {
-            value = String(value).split('{0}').join(String(arg));
+        var index;
+        for (index = 1; index < arguments.length; index++) {
+            var arg = arguments[index];
+            if (arg === undefined || arg === null) continue;
+            value = String(value).split('{' + (index - 1) + '}').join(String(arg));
         }
         return value;
     }
@@ -30086,6 +30089,22 @@
         });
     }
 
+    function addImportLines(lines, incoming) {
+        (incoming || []).forEach(function (line) {
+            if (!line || !line.label) return;
+            var found = null;
+            lines.forEach(function (item) {
+                if (item.label === line.label) found = item;
+            });
+            if (!found) {
+                found = { label: line.label, created: 0, updated: 0 };
+                lines.push(found);
+            }
+            found.created += line.created || 0;
+            found.updated += line.updated || 0;
+        });
+    }
+
     function renderExchangeSettings(panel) {
         var stack = el('div', 'asset-tree-project-stack');
         var block = el('section', 'asset-tree-project-card');
@@ -30195,7 +30214,7 @@
                     : { name: name, csv: decodeSheet(reader.result), chunked: true, idempotencyKey: token + ':0' };
                 if (scopeType) body.typeKey = scopeType;
                 if (scopePlace) body.placeId = scopePlace;
-                var totals = { created: 0, updated: 0, errors: [] };
+                var totals = { created: 0, updated: 0, errors: [], lines: [] };
                 setBusy(true);
                 function sendChunk(part) {
                     ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/equipment', part, function (status, payload) {
@@ -30207,6 +30226,7 @@
                         }
                         totals.created += payload.created || 0;
                         totals.updated += payload.updated || 0;
+                        addImportLines(totals.lines, payload.lines);
                         (payload.errors || []).forEach(function (error) { totals.errors.push(error); });
                         if (payload.done === false && payload.uploadId) {
                             notify(t('exchangeChunk', (payload.nextOffset || 0) + ' / ' + (payload.totalRows || 0)));
@@ -30219,14 +30239,13 @@
                             return;
                         }
                         setBusy(false);
-                        state.importResult = { created: totals.created, updated: totals.updated, errors: totals.errors, done: true };
+                        state.importResult = { created: totals.created, updated: totals.updated, lines: totals.lines, errors: totals.errors, done: true };
                         state.report = null;
                         state.mineAssets = null;
                         reportToken++;
-                        reloadTree(function () {
-                            renderFrame();
-                            notify(t('exchangeCreated', totals.created) + ' ' + t('exchangeUpdated', totals.updated));
-                        });
+                        renderFrame();
+                        notify(t('exchangeCreated', totals.created) + ' ' + t('exchangeUpdated', totals.updated));
+                        reloadTree();
                     });
                 }
                 sendChunk(body);
@@ -30237,8 +30256,12 @@
         block.appendChild(el('p', 'asset-tree-hint', t('exchangeScope')));
         var result = state.importResult;
         if (result) {
-            var summary = el('p', 'asset-tree-hint');
-            summary.appendChild(document.createTextNode(t('exchangeCreated', result.created || 0) + ' ' + t('exchangeUpdated', result.updated || 0)));
+            var summary = el('div', 'asset-tree-import-summary');
+            summary.appendChild(el('p', null, t('exchangeCreated', result.created || 0) + ' ' + t('exchangeUpdated', result.updated || 0)));
+            (result.lines || []).forEach(function (line) {
+                if (!line || !line.label || (!line.created && !line.updated)) return;
+                summary.appendChild(el('p', null, t('exchangeLine', line.label, line.created || 0, line.updated || 0)));
+            });
             block.appendChild(summary);
             var errors = result.errors || [];
             if (errors.length) {

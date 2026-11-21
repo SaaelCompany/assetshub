@@ -4324,6 +4324,23 @@ a.asset-tree-url {
     text-align: left;
 }
 
+.asset-tree-import-summary {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    background: #e3fcef;
+    border: 1px solid #36b37e;
+    border-radius: 3px;
+    color: #006644;
+}
+
+.asset-tree-import-summary p {
+    margin: 0;
+}
+
+.asset-tree-import-summary p + p {
+    margin-top: 4px;
+}
+
 .asset-tree-import-errors {
     margin: 8px 0 0;
     padding-left: 18px;
