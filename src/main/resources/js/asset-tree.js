@@ -6707,6 +6707,21 @@
                 var note = action === 'delete' ? t('bulkDeleted', combined.done) : (action === 'move' ? t('bulkMoved', combined.done) : (action === 'copy' ? t('bulkCopied', combined.done) : t('bulkChanged', combined.done)));
                 if (combined.errors.length) note += ' ' + t('bulkFailed', combined.errors.length);
                 notify(note);
+                if (action === 'delete' && combined.done > 0) {
+                    var trashed = [];
+                    projects.forEach(function (key) {
+                        groups[key].forEach(function (item) {
+                            if (item.kind !== 'type') trashed.push(parseInt(item.key, 10));
+                        });
+                    });
+                    paintTrashed(trashed);
+                    hideWork();
+                    assetsChanged();
+                    reloadTree(function () {
+                        if (document.getElementById('asset-tree-nodes')) renderNodes(true);
+                    }, true);
+                    return;
+                }
                 assetsChanged();
                 showWork(t('bulkLoading'));
                 if (state.view === 'mine') {
@@ -6717,8 +6732,8 @@
                 reloadTree(function () {
                     renderFrame();
                     hideWork();
-                });
-                setTimeout(hideWork, 60000);
+                }, true);
+                setTimeout(hideWork, 8000);
             } else {
                 var project = projects[index];
                 index += 1;
@@ -12044,20 +12059,20 @@
             var actions = el('div', 'asset-tree-dialog-actions');
             actions.appendChild(button(t('cancel'), 'asset-tree-btn subtle', closeModal));
             actions.appendChild(button(t('trashMove'), 'asset-tree-btn danger', function () {
+                var move = this;
+                if (move.getAttribute('data-busy') === '1') return;
+                move.setAttribute('data-busy', '1');
                 ajax('DELETE', '/assets/' + asset.id + '?cascade=' + (nested ? 'true' : 'false'), null, function (status, payload) {
+                    move.removeAttribute('data-busy');
                     if (status >= 200 && status < 300) {
-                        closeModal();
                         var next = asset.parentId || null;
-                        state.selectedId = next;
-                        state.dirty = false;
+                        closeModal();
+                        paintTrashed([asset.id], next);
+                        notify(t('trashMoved'));
                         assetsChanged();
                         reloadTree(function () {
-                            if (next && byId()[next]) {
-                                selectAsset(next, true);
-                            } else {
-                                renderFrame();
-                            }
-                        });
+                            if (document.getElementById('asset-tree-nodes')) renderNodes(true);
+                        }, true);
                     } else {
                         dialog.appendChild(el('div', 'asset-tree-form-error', (payload && payload.message) || t('errorTitle')));
                     }
@@ -12822,14 +12837,76 @@
         panel.appendChild(el('p', 'asset-tree-banner', state.treeError));
     }
 
+    var treeWaiters = [];
+
+    function finishTreeWaiters() {
+        var waiters = treeWaiters;
+        treeWaiters = [];
+        for (var i = 0; i < waiters.length; i++) {
+            try {
+                waiters[i]();
+            } catch (error) {
+                if (window.console && window.console.error) window.console.error('AssetHub refresh failed', error);
+            }
+        }
+    }
+
+    /** Drop the branch from the open tree the moment the server accepts the move. */
+    function paintTrashed(ids, nextId) {
+        var gone = {};
+        function mark(id) {
+            if (id == null || gone[id]) return;
+            gone[id] = true;
+            descendantsOf(id).forEach(mark);
+        }
+        (ids || []).forEach(mark);
+        if (!state.droppedIds) state.droppedIds = {};
+        Object.keys(gone).forEach(function (id) { state.droppedIds[id] = true; });
+        state.droppedMark = state.treeMark == null ? '' : String(state.treeMark);
+        var openGone = state.selectedId != null && gone[state.selectedId];
+        var fallback = null;
+        if (openGone && nextId === undefined) {
+            var current = byId()[state.selectedId];
+            fallback = current && current.parentId && !gone[current.parentId] ? current.parentId : null;
+        }
+        function keep(pool) {
+            if (!pool) return pool;
+            return pool.filter(function (row) { return row && !gone[row.id]; });
+        }
+        state.assets = keep(state.assets);
+        if (state.searchHits) state.searchHits = keep(state.searchHits);
+        if (state.mineAssets) state.mineAssets = keep(state.mineAssets);
+        if (state.holderAssets) state.holderAssets = keep(state.holderAssets);
+        invalidate();
+        if (openGone || nextId !== undefined) {
+            var next = nextId !== undefined ? nextId : fallback;
+            if (next != null && (gone[next] || !byId()[next])) next = null;
+            state.selectedId = next;
+            state.detail = next ? byId()[next] : null;
+            state.pane = state.detail && !isFolder(state.detail) && !childrenOf(state.detail.id).length ? 'card' : 'list';
+            state.editing = false;
+            state.dirty = false;
+        }
+        state.treeSketch = treeSketch();
+        if (document.getElementById('asset-tree-nodes')) {
+            renderNodes(true);
+            replaceDetail();
+        } else if (state.view === 'all') {
+            renderFrame();
+        }
+    }
+
     function reloadTree(done, quiet) {
+        if (done) treeWaiters.push(done);
         var key = state.projectKey;
         var token = ++treeToken;
         ajax('GET', '/assets?projectKey=' + encodeURIComponent(key), null, function (status, payload) {
             if (token !== treeToken || key !== state.projectKey) {
                 return;
             }
+            var waiting = treeWaiters.length > 0;
             if (status !== 200 && quiet && state.treeReady) {
+                finishTreeWaiters();
                 return;
             }
             if (status !== 200) {
@@ -12839,19 +12916,35 @@
                 if (state.view === 'settings' || state.view === 'reports' || state.view === 'map' || state.view === 'schedules') {
                     state.treeError = message;
                     state.error = null;
-                    if (done) done();
+                    if (waiting) finishTreeWaiters();
                     else renderFrame();
                     return;
                 }
                 state.treeError = null;
                 state.error = message;
                 renderFrame();
+                finishTreeWaiters();
                 return;
             }
             state.treeError = null;
             state.error = null;
             state.treeReady = true;
-            state.assets = payload.assets || [];
+            var rows = payload.assets || [];
+            if (state.droppedIds) {
+                var fresh = payload.mark != null && String(payload.mark) !== (state.droppedMark == null ? '' : String(state.droppedMark));
+                if (!fresh) {
+                    var kept = [];
+                    for (var i = 0; i < rows.length; i++) {
+                        if (rows[i] && state.droppedIds[rows[i].id]) continue;
+                        kept.push(rows[i]);
+                    }
+                    rows = kept;
+                } else {
+                    state.droppedIds = null;
+                    state.droppedMark = null;
+                }
+            }
+            state.assets = rows;
             state.types = payload.types || [];
             state.statuses = payload.statuses || [];
             if (state.treeSketch == null) state.treeSketch = treeSketch();
@@ -12859,11 +12952,8 @@
             watchTree();
             invalidate();
             ensureExpandedDefaults();
-            if (done) {
-                done();
-            } else {
-                renderFrame();
-            }
+            if (waiting) finishTreeWaiters();
+            else renderFrame();
         });
     }
 

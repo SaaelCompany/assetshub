@@ -82,6 +82,7 @@ public final class UiCatalog {
             "trashNested",
             "trashPlace",
             "trashMove",
+            "trashMoved",
             "root",
             "created",
             "updated",
