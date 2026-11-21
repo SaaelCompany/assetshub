@@ -7632,9 +7632,13 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-access-give .asset-tree-suggest,
-#asset-tree-app .asset-tree-access-give .asset-tree-form-error,
-#asset-tree-app .asset-tree-access-place-field {
+#asset-tree-app .asset-tree-access-give .asset-tree-form-error {
     flex: 1 0 100%;
+}
+
+#asset-tree-app .asset-tree-access-give .asset-tree-access-place-field {
+    flex: 1 0 100%;
+    max-width: none;
 }
 
 #asset-tree-app .asset-tree-access-places {
