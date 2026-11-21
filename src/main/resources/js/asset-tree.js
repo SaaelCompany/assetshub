@@ -5008,6 +5008,7 @@
             ping: 'M12 18.5a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5zM7.4 14.1a6.5 6.5 0 0 1 9.2 0l-1.5 1.5a4.4 4.4 0 0 0-6.2 0l-1.5-1.5zm-2.6-2.6a10.2 10.2 0 0 1 14.4 0l-1.5 1.5a8 8 0 0 0-11.4 0L4.8 11.5z',
             link: 'M3.9 12a5 5 0 0 1 5-5h4v2h-4a3 3 0 0 0 0 6h4v2h-4a5 5 0 0 1-5-5zm6.1-1h4v2h-4v-2zm5.1-4h4a5 5 0 0 1 0 10h-4v-2h4a3 3 0 0 0 0-6h-4V7z',
             lock: 'M17 10h-1V8a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm-7-2a2 2 0 0 1 4 0v2h-4V8zm7 11H7v-7h10v7z',
+            unlock: 'M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z',
             plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
             trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 7h12l-1 14H7L6 7z',
             image: 'M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5L19 18H5l3.5-4.5z',
@@ -12747,11 +12748,12 @@
         });
     }
 
-    function refreshSchema(full) {
+    function refreshSchema(full, after) {
         (full ? reloadTree : reloadCatalog)(function () {
             if (state.view === 'settings') {
                 closeAllModals();
                 renderFrame();
+                if (after) after();
                 return;
             }
             // The tree and the open card list types too, so repaint them behind the dialog.
@@ -12761,6 +12763,7 @@
                 renderFrame();
             }
             openTypes();
+            if (after) after();
         });
     }
 
@@ -13129,12 +13132,30 @@
             }
             return false;
         }
+        var parentOwn = {};
+        var parentType = typeByKey(parentKeyOf(type));
+        var parentLabel = parentType ? (parentType.label || parentType.typeKey || '') : '';
+        if (parentType) {
+            (parentType.fields || []).forEach(function (item) {
+                if (item && item.fieldKey && !item.inherited) parentOwn[item.fieldKey] = true;
+            });
+        }
+        function openOwnedField(fieldKey) {
+            var fresh = typeByKey(type.typeKey);
+            if (!fresh) return;
+            var found = null;
+            (fresh.fields || []).forEach(function (item) {
+                if (item && item.fieldKey === fieldKey) found = item;
+            });
+            if (found && !found.inherited) openFieldModal(fresh, null, found);
+        }
         (type.fields || []).forEach(function (fieldDef) {
             var inherited = !!fieldDef.inherited;
-            var fieldRow = el('div', 'asset-tree-type-field' + (!inherited && state.canConfigure ? ' is-editable' : '') + (inherited ? ' is-inherited' : ''));
+            var released = !inherited && !!parentOwn[fieldDef.fieldKey];
+            var fieldRow = el('div', 'asset-tree-type-field' + (!inherited && state.canConfigure ? ' is-editable' : '') + (inherited ? ' is-inherited' : '') + (released ? ' is-released' : ''));
             fieldRow.setAttribute('data-name', fieldDef.label || '');
             fieldRow.setAttribute('data-field', fieldDef.fieldKey);
-            if (state.canConfigure && !inherited) {
+            if (state.canConfigure && !inherited && !released) {
                 fieldRow.draggable = true;
                 var grip = el('span', 'asset-tree-field-grip', '\u2807');
                 grip.title = t('fieldDragHint');
@@ -13189,10 +13210,24 @@
                     reorderFields(moving, fieldDef.fieldKey, after);
                 });
             }
-            if (inherited) {
-                var lock = el('span', 'asset-tree-field-grip is-locked');
-                lock.title = t('fieldInherited', fieldDef.inheritedFrom || '');
-                lock.appendChild(toolIcon('lock'));
+            if (inherited || released) {
+                var lockTitle = inherited
+                    ? t('fieldUnlockHint', fieldDef.inheritedFrom || parentLabel)
+                    : t('fieldRelockHint', parentLabel);
+                var lock = el(state.canConfigure ? 'button' : 'span', 'asset-tree-field-grip is-locked' + (released ? ' is-open' : ''));
+                if (state.canConfigure) lock.type = 'button';
+                lock.title = lockTitle;
+                lock.appendChild(toolIcon(released ? 'unlock' : 'lock'));
+                if (state.canConfigure) {
+                    lock.addEventListener('click', function () {
+                        var path = '/types/' + encodeURIComponent(type.typeKey) + '/fields/' + encodeURIComponent(fieldDef.fieldKey) + '/own';
+                        ajax(released ? 'DELETE' : 'POST', path, released ? null : {}, function (status, payload) {
+                            if (status >= 200 && status < 300) {
+                                refreshSchema(true, released ? null : function () { openOwnedField(fieldDef.fieldKey); });
+                            } else notify((payload && payload.message) || t('errorTitle'));
+                        });
+                    });
+                }
                 fieldRow.appendChild(lock);
             }
             fieldRow.appendChild(el('span', 'asset-tree-field-label', fieldDef.label));
@@ -13206,7 +13241,7 @@
                 });
                 editField.title = t('editFieldTitle');
                 actions.appendChild(editField);
-                actions.appendChild(button(t('deleteField'), 'asset-tree-btn', function () {
+                if (!released) actions.appendChild(button(t('deleteField'), 'asset-tree-btn', function () {
                     ajax('DELETE', '/types/' + encodeURIComponent(type.typeKey) + '/fields/' + encodeURIComponent(fieldDef.fieldKey), null, function (status, payload) {
                         if (status >= 200 && status < 300) refreshSchema(true);
                         else notify((payload && payload.message) || t('errorTitle'));

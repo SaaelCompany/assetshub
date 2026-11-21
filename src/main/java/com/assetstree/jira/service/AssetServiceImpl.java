@@ -3699,6 +3699,83 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public FieldDto ownField(ApplicationUser user, final String typeKey, final String fieldKey) {
+        if (fieldKey == null || fieldKey.trim().isEmpty()) {
+            throw new AssetException(404, "asset-tree.error.field.notFound");
+        }
+        return ao().executeInTransaction(new TransactionCallback<FieldDto>() {
+            @Override
+            public FieldDto doInTransaction() {
+                AssetTypeEntity type = findType(typeKey);
+                if (type == null) {
+                    throw new AssetException(404, "asset-tree.error.type.notFound");
+                }
+                requireConfigurableProject(user, type.getProjectKey());
+                AssetFieldEntity existing = findField(type.getTypeKey(), fieldKey);
+                if (existing != null) {
+                    return toFieldDto(existing, i18n());
+                }
+                AssetFieldEntity parentField = parentField(type, fieldKey);
+                if (parentField == null) {
+                    throw new AssetException(404, "asset-tree.error.field.notFound");
+                }
+                int max = -1;
+                AssetFieldEntity[] own = fields(type.getTypeKey());
+                if (own != null) {
+                    for (AssetFieldEntity field : own) {
+                        if (field.getPosition() > max) {
+                            max = field.getPosition();
+                        }
+                    }
+                }
+                String options = parentField.getOptions() == null ? "" : parentField.getOptions();
+                AssetFieldEntity created = ao().create(AssetFieldEntity.class,
+                        new DBParam("TYPE_KEY", type.getTypeKey()),
+                        new DBParam("FIELD_KEY", parentField.getFieldKey()),
+                        new DBParam("SCOPE_KEY", type.getTypeKey() + ":" + parentField.getFieldKey()),
+                        new DBParam("LABEL", parentField.getLabel() == null ? "" : parentField.getLabel()),
+                        new DBParam("KIND", parentField.getKind()),
+                        new DBParam("REQUIRED", Boolean.valueOf(parentField.isRequired())),
+                        new DBParam("ISSUE_HIDDEN", Boolean.valueOf(parentField.isIssueHidden())),
+                        new DBParam("POSITION", Integer.valueOf(max + 1)),
+                        new DBParam("OPTIONS", options));
+                return toFieldDto(created, i18n());
+            }
+        });
+    }
+
+    @Override
+    public void inheritField(ApplicationUser user, final String typeKey, final String fieldKey) {
+        ao().executeInTransaction(new TransactionCallback<Void>() {
+            @Override
+            public Void doInTransaction() {
+                AssetTypeEntity type = findType(typeKey);
+                if (type == null) {
+                    throw new AssetException(404, "asset-tree.error.type.notFound");
+                }
+                requireConfigurableProject(user, type.getProjectKey());
+                AssetFieldEntity field = findField(type.getTypeKey(), fieldKey);
+                if (field == null) {
+                    throw new AssetException(404, "asset-tree.error.field.notFound");
+                }
+                if (parentField(type, fieldKey) == null) {
+                    throw new AssetException(400, "asset-tree.error.field.notFound");
+                }
+                ao().delete(field);
+                return null;
+            }
+        });
+    }
+
+    private AssetFieldEntity parentField(AssetTypeEntity type, String fieldKey) {
+        String parentKey = type.getParentTypeKey();
+        if (parentKey == null || parentKey.trim().isEmpty() || fieldKey == null) {
+            return null;
+        }
+        return findField(parentKey.trim(), fieldKey);
+    }
+
+    @Override
     public List<FieldDto> reorderFields(ApplicationUser user, final String typeKey, final FieldOrderDto order) {
         if (order == null) {
             throw new AssetException(400, "asset-tree.error.field.notFound");
