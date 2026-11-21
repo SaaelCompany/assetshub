@@ -6245,11 +6245,23 @@ a.asset-tree-preview-icon:focus {
     margin-bottom: 0;
 }
 
-#asset-tree-app .asset-tree-portal-mine-fields {
+#asset-tree-app .asset-tree-portal-layouts {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 18px;
-    margin-top: 8px;
+    gap: 8px 22px;
+}
+
+#asset-tree-app .asset-tree-portal-layouts .asset-tree-check {
+    display: inline-flex !important;
+    align-items: center;
+    margin: 0;
+}
+
+#asset-tree-app .asset-tree-portal-mine-fields {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px 16px;
+    margin-top: 4px;
 }
 
 #asset-tree-app .asset-tree-portal-people {
@@ -6273,7 +6285,15 @@ a.asset-tree-preview-icon:focus {
 }
 
 #asset-tree-app .asset-tree-portal-mine-fields .asset-tree-check {
+    display: flex !important;
+    align-items: flex-start;
+    min-width: 0;
     margin: 0;
+}
+
+#asset-tree-app .asset-tree-portal-mine-fields .asset-tree-check span {
+    min-width: 0;
+    line-height: 1.35;
 }
 
 #asset-tree-app .asset-tree-jira-field {
@@ -7432,6 +7452,35 @@ a.asset-tree-preview-icon:focus {
     margin-top: 16px;
 }
 
+#asset-tree-app .asset-tree-project-stack.is-wide {
+    max-width: none;
+}
+
+#asset-tree-app .asset-tree-project-top {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.9fr) minmax(240px, 0.85fr) minmax(340px, 1.35fr);
+    gap: 16px;
+    align-items: start;
+}
+
+#asset-tree-app .asset-tree-project-side {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+#asset-tree-app .asset-tree-card-open-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 18px;
+}
+
+#asset-tree-app .asset-tree-card-open-grid .asset-tree-check-row {
+    align-items: center;
+    margin: 0;
+}
+
 #asset-tree-app .asset-tree-access-stack {
     max-width: 980px;
 }
@@ -7861,8 +7910,25 @@ a.asset-tree-preview-icon:focus {
     text-align: left;
 }
 
+@media (max-width: 1100px) {
+    #asset-tree-app .asset-tree-project-top {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    #asset-tree-app .asset-tree-project-top > .asset-tree-project-card:last-child {
+        grid-column: 1 / -1;
+    }
+
+    #asset-tree-app .asset-tree-portal-mine-fields {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 @media (max-width: 860px) {
-    #asset-tree-app .asset-tree-module-grid {
+    #asset-tree-app .asset-tree-module-grid,
+    #asset-tree-app .asset-tree-project-top,
+    #asset-tree-app .asset-tree-card-open-grid,
+    #asset-tree-app .asset-tree-portal-mine-fields {
         grid-template-columns: 1fr;
     }
 }

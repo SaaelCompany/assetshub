@@ -16817,7 +16817,7 @@
         var current = projectAssetKey(project);
         var allowed = !!state.canArrange;
         panel.appendChild(el('p', 'asset-tree-hint', t('projectSectionHint')));
-        var stack = el('div', 'asset-tree-project-stack');
+        var stack = el('div', 'asset-tree-project-stack is-wide');
 
         var keyCard = el('section', 'asset-tree-project-card');
         keyCard.appendChild(el('h3', 'asset-tree-settings-title', t('assetKeyTitle')));
@@ -16859,8 +16859,6 @@
             }
             keyCard.appendChild(actions);
         }
-        stack.appendChild(keyCard);
-
         var treeCard = el('section', 'asset-tree-project-card');
         treeCard.appendChild(el('h3', 'asset-tree-settings-title', t('projectTreeTitle')));
         var treeRow = el('label', 'asset-tree-check-row');
@@ -16882,7 +16880,6 @@
         treeText.appendChild(el('span', 'asset-tree-hint', t('treeObjectsHint')));
         treeRow.appendChild(treeText);
         treeCard.appendChild(treeRow);
-        stack.appendChild(treeCard);
 
         var photoCard = el('section', 'asset-tree-project-card');
         photoCard.appendChild(el('h3', 'asset-tree-settings-title', t('photoTitle')));
@@ -16905,7 +16902,6 @@
         photoText.appendChild(el('strong', null, t('photoShow')));
         photoRow.appendChild(photoText);
         photoCard.appendChild(photoRow);
-        stack.appendChild(photoCard);
 
         var cardCard = el('section', 'asset-tree-project-card');
         cardCard.appendChild(el('h3', 'asset-tree-settings-title', t('cardOpenTitle')));
@@ -16925,6 +16921,7 @@
             ['inside', 'placeInside'],
             ['types', 'placeTypes']
         ];
+        var cardGrid = el('div', 'asset-tree-card-open-grid');
         var cardBoxes = [];
         function cardOpenValue() {
             var picked = [];
@@ -16952,9 +16949,17 @@
             var text = el('span');
             text.appendChild(el('strong', null, t(item[1])));
             row.appendChild(text);
-            cardCard.appendChild(row);
+            cardGrid.appendChild(row);
         });
-        stack.appendChild(cardCard);
+        cardCard.appendChild(cardGrid);
+        var top = el('div', 'asset-tree-project-top');
+        var side = el('div', 'asset-tree-project-side');
+        top.appendChild(keyCard);
+        side.appendChild(treeCard);
+        side.appendChild(photoCard);
+        top.appendChild(side);
+        top.appendChild(cardCard);
+        stack.appendChild(top);
 
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
@@ -31095,16 +31100,19 @@
         var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
         box.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineTitle')));
         box.appendChild(el('p', 'asset-tree-hint', t('portalMineHint')));
-        var show = el('label', 'asset-tree-check');
+        var show = el('label', 'asset-tree-check-row');
         var toggle = el('input');
         toggle.type = 'checkbox';
         toggle.checked = !!moduleSetup().portalMine;
         toggle.setAttribute('aria-label', t('portalMineShow'));
         show.appendChild(toggle);
-        show.appendChild(el('span', null, t('portalMineShow')));
+        var showText = el('span');
+        showText.appendChild(el('strong', null, t('portalMineShow')));
+        show.appendChild(showText);
         box.appendChild(show);
-        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineFields')));
-        box.appendChild(el('p', 'asset-tree-hint', t('portalMineFieldsHint')));
+        var fields = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
+        fields.appendChild(el('h3', 'asset-tree-settings-title', t('portalMineFields')));
+        fields.appendChild(el('p', 'asset-tree-hint', t('portalMineFieldsHint')));
         var grid = el('div', 'asset-tree-portal-mine-fields');
         var choices = portalMineChoices();
         var selected = portalMineSelected();
@@ -31140,8 +31148,8 @@
         toggle.addEventListener('change', function () {
             savePortalMine(toggle.checked, selected);
         });
-        box.appendChild(grid);
-        return box;
+        fields.appendChild(grid);
+        return { show: box, fields: fields };
     }
 
     function savePortalMine(show, selected) {
@@ -31320,6 +31328,7 @@
         var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
         box.appendChild(el('h3', 'asset-tree-settings-title', t('portalLayoutTitle')));
         box.appendChild(el('p', 'asset-tree-hint', t('portalLayoutHint')));
+        var choices = el('div', 'asset-tree-portal-layouts');
         var current = knownPortalLayout(state.portalLayout);
         [
             ['tiles', 'portalLayoutTiles'],
@@ -31348,8 +31357,9 @@
             });
             row.appendChild(input);
             row.appendChild(el('span', null, t(item[1])));
-            box.appendChild(row);
+            choices.appendChild(row);
         });
+        box.appendChild(choices);
         return box;
     }
 
@@ -31362,10 +31372,12 @@
         var bundle = el('section', 'asset-tree-project-card asset-tree-portal-bundle');
         bundle.appendChild(el('h3', 'asset-tree-settings-title', t('portalBundleTitle')));
         bundle.appendChild(el('p', 'asset-tree-hint', t('portalBundleHint')));
+        var mine = portalMineSettings();
+        bundle.appendChild(mine.show);
         if (state.canAdmin) bundle.appendChild(portalLayoutSettings());
-        bundle.appendChild(portalMineSettings());
+        bundle.appendChild(mine.fields);
         panel.appendChild(bundle);
-        var portalGroups = el('div', 'asset-tree-project-stack');
+        var portalGroups = el('div', 'asset-tree-project-stack is-wide');
         portalGroups.appendChild(renderClinicAccess());
         panel.appendChild(portalGroups);
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
