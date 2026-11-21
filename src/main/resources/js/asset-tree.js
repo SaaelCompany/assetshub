@@ -10477,18 +10477,38 @@
 
     function relationNodes(asset) {
         var nodes = [];
-        var linked = {};
+        var byAsset = {};
         var peers = {};
+        function remember(node) {
+            if (!node || !node.id || node.id === asset.id) return;
+            var prev = byAsset[node.id];
+            if (prev) {
+                if (node.phrase && prev.kind === node.kind && prev.phrase.indexOf(node.phrase) < 0) {
+                    prev.phrase = prev.phrase ? prev.phrase + ', ' + node.phrase : node.phrase;
+                }
+                if (!prev.linkId && node.linkId) prev.linkId = node.linkId;
+                if (!prev.peer && node.peer) prev.peer = node.peer;
+                if (!prev.typeKey && node.typeKey) prev.typeKey = node.typeKey;
+                if (!prev.meta && node.meta) prev.meta = node.meta;
+                if (prev.kind === 'mesh' && node.kind !== 'mesh') {
+                    prev.kind = node.kind;
+                    prev.phrase = node.phrase || prev.phrase;
+                    prev.linkId = node.linkId || prev.linkId;
+                }
+                return;
+            }
+            byAsset[node.id] = node;
+            nodes.push(node);
+        }
         (asset.peers || []).forEach(function (peer) {
             if (peer && peer.id) peers[peer.id] = peer;
         });
         (asset.links || []).forEach(function (link) {
             var id = linkOtherId(link);
-            if (id) linked[id] = true;
             var meta = (link.attributes || []).map(function (item) {
                 return (item.key || '') + ': ' + (item.value || '');
             }).join(' · ');
-            nodes.push({
+            remember({
                 id: id,
                 name: link.name || link.objectKey || '',
                 key: link.objectKey || '',
@@ -10498,14 +10518,14 @@
                 kind: 'link',
                 incoming: link.direction === 'in',
                 linkId: link.id,
-                typeKey: (id && byId()[id] && byId()[id].typeKey) || '',
+                typeKey: (id && byId()[id] && byId()[id].typeKey) || (link.card && link.card.typeKey) || '',
                 meta: meta,
                 peer: link.card || peers[id] || null
             });
         });
         (asset.peers || []).forEach(function (peer) {
-            if (!peer || !peer.id || linked[peer.id]) return;
-            nodes.push({
+            if (!peer || !peer.id) return;
+            remember({
                 id: peer.id,
                 name: peer.name || peer.objectKey || '',
                 key: peer.objectKey || '',
@@ -10513,21 +10533,15 @@
                 open: !!peer.open,
                 projectKey: peer.projectKey,
                 kind: 'peer',
-                typeKey: (peer.id && byId()[peer.id] && byId()[peer.id].typeKey) || peer.typeKey || '',
+                typeKey: (byId()[peer.id] && byId()[peer.id].typeKey) || peer.typeKey || '',
                 peer: peer
             });
-        });
-        var seen = {};
-        seen[asset.id] = true;
-        nodes.forEach(function (node) {
-            if (node && node.id) seen[node.id] = true;
         });
         (asset.mesh || []).forEach(function (tie) {
             if (!tie) return;
             [tie.from, tie.to].forEach(function (end) {
-                if (!end || !end.id || seen[end.id]) return;
-                seen[end.id] = true;
-                nodes.push({
+                if (!end || !end.id) return;
+                remember({
                     id: end.id,
                     name: end.name || end.objectKey || '',
                     key: end.objectKey || '',
@@ -10558,6 +10572,7 @@
         card.title = caption;
         if (!self && node && node.open && node.id) {
             copy.appendChild(button(title, 'asset-tree-linkish', function (event) {
+                if (event && event.detail > 1) return;
                 if (event && event.stopPropagation) event.stopPropagation();
                 goToAsset(node.projectKey, node.id);
             }));
@@ -10582,14 +10597,14 @@
         return card;
     }
 
-    function linkLayoutKey(asset) {
-        return 'asset-tree-graph:' + String(asset.projectKey || '') + ':' + String(asset.id || '');
+    function linkLayoutKey(asset, roomy) {
+        return 'asset-tree-graph' + (roomy ? '-wide' : '') + ':' + String(asset.projectKey || '') + ':' + String(asset.id || '');
     }
 
-    function readLinkLayout(asset) {
+    function readLinkLayout(asset, roomy) {
         try {
             if (!window.localStorage) return null;
-            var raw = localStorage.getItem(linkLayoutKey(asset));
+            var raw = localStorage.getItem(linkLayoutKey(asset, roomy));
             if (!raw) return null;
             var parsed = JSON.parse(raw);
             return parsed && typeof parsed === 'object' ? parsed : null;
@@ -10598,9 +10613,9 @@
         }
     }
 
-    function writeLinkLayout(asset, spots) {
+    function writeLinkLayout(asset, spots, roomy) {
         try {
-            if (window.localStorage) localStorage.setItem(linkLayoutKey(asset), JSON.stringify(spots));
+            if (window.localStorage) localStorage.setItem(linkLayoutKey(asset, roomy), JSON.stringify(spots));
         } catch (error) {}
     }
 
@@ -10612,20 +10627,35 @@
         if (x !== x || y !== y) return fallback;
         if (x < 0) x = 0;
         if (y < 0) y = 0;
-        if (x > 480) x = 480;
-        if (y > 720) y = 720;
+        if (x > 1400) x = 1400;
+        if (y > 1600) y = 1600;
         return { x: Math.round(x), y: Math.round(y) };
     }
 
     function linkNodeKey(node, self) {
         if (self) return 'self';
-        if (node && (node.kind === 'peer' || node.kind === 'mesh')) return node.kind + ':' + node.id;
-        return 'link:' + (node ? node.linkId : '');
+        return 'asset:' + (node ? node.id : '');
     }
 
-    function linkGraph(asset, form) {
+    function openLinkGraphModal(asset) {
+        var root = document.getElementById('asset-tree-app') || document.body;
+        openModal(function (dialog) {
+            dialog.className += ' asset-tree-graph-dialog';
+            var head = el('div', 'asset-tree-block-head');
+            head.appendChild(el('h2', null, asset.objectKey || asset.name || t('linkGraph')));
+            head.appendChild(button(t('close'), 'asset-tree-btn', function () {
+                closeModal(dialog.parentNode);
+            }));
+            dialog.appendChild(head);
+            var frame = el('div', 'asset-tree-graph-frame');
+            frame.appendChild(linkGraph(asset, null, true));
+            dialog.appendChild(frame);
+        }, root);
+    }
+
+    function linkGraph(asset, form, roomy) {
         var nodes = relationNodes(asset);
-        var saved = readLinkLayout(asset);
+        var saved = readLinkLayout(asset, roomy);
         var spots = {};
         var stage = el('div', 'asset-tree-link-stage');
         var box = el('div', 'asset-tree-link-graph is-placed' + (nodes.length ? '' : ' is-empty'));
@@ -10696,9 +10726,11 @@
             if (!firstCard) firstCard = card;
         });
         function placeCard(card, key, index, self, mesh) {
-            var fallback = self
-                ? { x: nodes.length ? 28 : 0, y: 0 }
-                : { x: mesh ? 48 : 4 + (index % 2) * 22, y: index * 52 };
+            var rows = Math.max(nodes.length, 1);
+            var mid = Math.max(16, Math.floor((rows * 76) / 2) - 18);
+            var fallback = roomy
+                ? (self ? { x: 380, y: mid } : { x: mesh ? 720 : 24, y: index * 76 + 8 })
+                : (self ? { x: 8, y: 4 } : { x: mesh ? 36 : 8, y: (index + 1) * 64 });
             var spot = linkSpot(saved, key, fallback);
             card.style.left = spot.x + 'px';
             card.style.top = spot.y + 'px';
@@ -10743,7 +10775,7 @@
                     if (!moved) return;
                     card.setAttribute('data-dragged', '1');
                     spots[key] = [card.offsetLeft, card.offsetTop];
-                    writeLinkLayout(asset, spots);
+                    writeLinkLayout(asset, spots, roomy);
                     setTimeout(function () { card.removeAttribute('data-dragged'); }, 0);
                 }
                 document.addEventListener('mousemove', move);
@@ -10767,9 +10799,24 @@
             }, true);
         }
         placeCard(selfCard, 'self', 0, true);
-        placed.forEach(function (item, index) {
-            placeCard(item.card, linkNodeKey(item.node, false), index + 1, false, item.node && item.node.kind === 'mesh');
+        var directCount = 0;
+        placed.forEach(function (item) {
+            if (!(item.node && item.node.kind === 'mesh')) directCount += 1;
         });
+        var directRow = 0;
+        var meshRow = 0;
+        placed.forEach(function (item) {
+            var mesh = item.node && item.node.kind === 'mesh';
+            var row = mesh ? (roomy ? meshRow++ : directCount + meshRow++) : directRow++;
+            placeCard(item.card, linkNodeKey(item.node, false), row, false, mesh);
+        });
+        if (!roomy && nodes.length) {
+            box.addEventListener('dblclick', function (event) {
+                var target = event.target;
+                if (target && target.closest && (target.closest('.asset-tree-peer-remove') || target.closest('.asset-tree-graph-tools'))) return;
+                openLinkGraphModal(asset);
+            });
+        }
         var laidBottom = 36;
         for (var spotKey in spots) {
             if (!Object.prototype.hasOwnProperty.call(spots, spotKey) || !spots[spotKey]) continue;
@@ -10777,6 +10824,7 @@
             if (spotEdge > laidBottom) laidBottom = spotEdge;
         }
         box.style.height = (laidBottom + 6) + 'px';
+        if (!roomy && nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkGraphOpen')));
         stage.appendChild(box);
         if (!nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         stage.appendChild(panel);
@@ -10805,13 +10853,19 @@
         }
         function fitGraph() {
             var cards = box.querySelectorAll('.asset-tree-graph-node');
-            var bottom = 36;
+            var bottom = roomy ? 480 : 36;
+            var right = roomy ? 920 : 0;
             var i;
             for (i = 0; i < cards.length; i++) {
                 var edge = cards[i].offsetTop + cards[i].offsetHeight;
+                var side = cards[i].offsetLeft + cards[i].offsetWidth;
                 if (edge > bottom) bottom = edge;
+                if (side > right) right = side;
             }
-            box.style.height = (bottom + 6) + 'px';
+            var parent = box.parentNode ? box.parentNode.clientWidth : 0;
+            if (!roomy && right < parent) right = parent;
+            box.style.height = (bottom + 16) + 'px';
+            box.style.width = (right + 16) + 'px';
         }
         function paintWires() {
             if (!box.parentNode) {
@@ -10819,9 +10873,15 @@
                 return;
             }
             fitGraph();
+            var width = box.clientWidth;
+            var height = box.clientHeight;
+            if (width < 40 || height < 20) return;
+            svg.setAttribute('width', String(width));
+            svg.setAttribute('height', String(height));
+            svg.style.width = width + 'px';
+            svg.style.height = height + 'px';
             var origin = svg.getBoundingClientRect();
-            if (origin.width < 40 || origin.height < 20) return;
-            svg.setAttribute('viewBox', '0 0 ' + origin.width + ' ' + origin.height);
+            svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
             while (svg.firstChild) svg.removeChild(svg.firstChild);
             var cards = {};
             cards[String(asset.id)] = selfCard;
@@ -30710,28 +30770,6 @@
                 blank: true
             });
         }));
-        downloads.appendChild(button(t('exchangeLinksExport'), 'asset-tree-btn', function () {
-            startWorkbook('links', {
-                typeKey: typeSelect.value,
-                placeId: parseInt(placeSelect.value, 10) || 0
-            });
-        }));
-        if (moduleOn('life')) {
-            downloads.appendChild(button(t('exchangeLifeExport'), 'asset-tree-btn', function () {
-                startWorkbook('life', {
-                    typeKey: typeSelect.value,
-                    placeId: parseInt(placeSelect.value, 10) || 0
-                });
-            }));
-        }
-        if (moduleOn('service')) {
-            downloads.appendChild(button(t('exchangeServiceExport'), 'asset-tree-btn', function () {
-                startWorkbook('service', {
-                    typeKey: typeSelect.value,
-                    placeId: parseInt(placeSelect.value, 10) || 0
-                });
-            }));
-        }
         block.appendChild(downloads);
         var upload = el('div', 'asset-tree-exchange-upload');
         upload.appendChild(picker);

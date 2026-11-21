@@ -6813,10 +6813,27 @@ public class AssetServiceImpl implements AssetService {
         if (pages.isEmpty()) {
             pages.add(new WorkbookSheet.Page("Equipment", common, new ArrayList<List<String>>()));
         }
+        pages.add(linksPage(projectKey, typeKey, placeId, blank));
+        if (moduleOn(projectKey, ProjectModules.LIFE)) {
+            pages.add(lifePage(projectKey, typeKey, placeId, blank));
+        }
+        if (moduleOn(projectKey, ProjectModules.SERVICE)) {
+            pages.add(serviceBookPage(projectKey, typeKey, placeId, blank));
+        }
         return WorkbookSheet.write(pages);
     }
 
     private byte[] buildLinksBook(String projectKey, String typeKey, int placeId) {
+        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
+        pages.add(linksSheet(projectKey, typeKey, placeId, false));
+        return WorkbookSheet.write(pages);
+    }
+
+    private WorkbookSheet.Page linksPage(String projectKey, String typeKey, int placeId, boolean blank) {
+        return linksSheet(projectKey, typeKey, placeId, blank);
+    }
+
+    private WorkbookSheet.Page linksSheet(String projectKey, String typeKey, int placeId, boolean blank) {
         AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
         Map<Integer, AssetEntity> index = indexAssets(rows);
         List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
@@ -6829,9 +6846,8 @@ public class AssetServiceImpl implements AssetService {
         String[] stored = { LinkRules.INSTALLED, LinkRules.INSTALLED, LinkRules.PART, LinkRules.PART,
                 LinkRules.DEPENDS, LinkRules.DEPENDS };
         boolean[] inbound = { true, false, true, false, true, false };
-        List<String> headers = new ArrayList<String>();
-        headers.add(labels.getText("asset-tree.ui.keyLabel"));
-        headers.add(labels.getText("asset-tree.ui.name"));
+        Map<String, String> typeLabels = typeLabelMap(projectKey, rows);
+        List<String> headers = identityHeaders(labels);
         for (int i = 0; i < phrases.length; i++) {
             headers.add(labels.getText("asset-tree.ui." + phrases[i]));
         }
@@ -6844,7 +6860,7 @@ public class AssetServiceImpl implements AssetService {
             }
             cells.put(Integer.valueOf(asset.getID()), line);
         }
-        if (!ids.isEmpty()) {
+        if (!blank && !ids.isEmpty()) {
             Set<Integer> seen = new HashSet<Integer>();
             List<AssetLinkEntity> relations = new ArrayList<AssetLinkEntity>();
             relations.addAll(findIn(AssetLinkEntity.class, "FROM_ID", ids, null));
@@ -6867,19 +6883,17 @@ public class AssetServiceImpl implements AssetService {
             headers.add(custom.get(i));
         }
         List<List<String>> lines = new ArrayList<List<String>>();
-        for (AssetEntity asset : equipment) {
-            List<String> line = new ArrayList<String>();
-            line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
-            line.add(asset.getName() == null ? "" : asset.getName());
-            List<String> values = cells.get(Integer.valueOf(asset.getID()));
-            if (values != null) {
-                line.addAll(values);
+        if (!blank) {
+            for (AssetEntity asset : equipment) {
+                List<String> line = identityCells(asset, typeLabels, index);
+                List<String> values = cells.get(Integer.valueOf(asset.getID()));
+                if (values != null) {
+                    line.addAll(values);
+                }
+                lines.add(line);
             }
-            lines.add(line);
         }
-        List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
-        pages.add(new WorkbookSheet.Page(labels.getText("asset-tree.ui.linkSheet"), headers, lines));
-        return WorkbookSheet.write(pages);
+        return new WorkbookSheet.Page(labels.getText("asset-tree.ui.linkSheet"), headers, lines);
     }
 
     private void writeLinkCells(Map<Integer, List<String>> cells, List<String> custom, AssetEntity from, AssetEntity to,
@@ -6983,43 +6997,84 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private byte[] buildLifeBook(String projectKey, String typeKey, int placeId) {
-        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
-        Map<String, List<AssetEntity>> byType = new HashMap<String, List<AssetEntity>>();
-        byType.put("all", equipment);
-        Map<Integer, LifecycleEntity> lives = livesByAsset(byType);
-        I18nHelper labels = i18n();
-        boolean dayFirst = labels.getLocale() != null && "ru".equalsIgnoreCase(labels.getLocale().getLanguage());
-        List<String> lifeHeaders = lifeColumnLabels(labels);
-        List<String> headers = new ArrayList<String>();
-        headers.add(labels.getText("asset-tree.ui.keyLabel"));
-        headers.addAll(lifeHeaders);
-        List<List<String>> lines = new ArrayList<List<String>>();
-        for (int i = 0; i < equipment.size(); i++) {
-            AssetEntity asset = equipment.get(i);
-            LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
-            List<String> line = new ArrayList<String>();
-            line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
-            for (int slot = 0; slot < lifeHeaders.size(); slot++) {
-                line.add(lifeCell(life, slot, dayFirst));
-            }
-            lines.add(line);
-        }
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
-        pages.add(new WorkbookSheet.Page(labels.getText("asset-tree.ui.lifeTitle"), headers, lines));
+        pages.add(lifePage(projectKey, typeKey, placeId, false));
         return WorkbookSheet.write(pages);
     }
 
-    private byte[] buildServiceBook(String projectKey, String typeKey, int placeId) {
+    private WorkbookSheet.Page lifePage(String projectKey, String typeKey, int placeId, boolean blank) {
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
+        Map<Integer, AssetEntity> index = indexAssets(rows);
         List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
         Map<String, List<AssetEntity>> byType = new HashMap<String, List<AssetEntity>>();
         byType.put("all", equipment);
-        Map<Integer, List<ServicePlanEntity>> plans = plansByAsset(byType);
+        Map<Integer, LifecycleEntity> lives = blank ? new HashMap<Integer, LifecycleEntity>() : livesByAsset(byType);
         I18nHelper labels = i18n();
         boolean dayFirst = labels.getLocale() != null && "ru".equalsIgnoreCase(labels.getLocale().getLanguage());
-        List<String> serviceHeaders = serviceColumnLabels(labels);
+        List<String> lifeHeaders = lifeColumnLabels(labels);
+        List<String> headers = identityHeaders(labels);
+        headers.addAll(lifeHeaders);
+        List<List<String>> lines = new ArrayList<List<String>>();
+        if (!blank) {
+            Map<String, String> typeLabels = typeLabelMap(projectKey, rows);
+            for (int i = 0; i < equipment.size(); i++) {
+                AssetEntity asset = equipment.get(i);
+                LifecycleEntity life = lives.get(Integer.valueOf(asset.getID()));
+                List<String> line = identityCells(asset, typeLabels, index);
+                for (int slot = 0; slot < lifeHeaders.size(); slot++) {
+                    line.add(lifeCell(life, slot, dayFirst));
+                }
+                lines.add(line);
+            }
+        }
+        return new WorkbookSheet.Page(labels.getText("asset-tree.ui.lifeTitle"), headers, lines);
+    }
+
+    private byte[] buildServiceBook(String projectKey, String typeKey, int placeId) {
         List<WorkbookSheet.Page> pages = new ArrayList<WorkbookSheet.Page>();
-        pages.add(servicePage(equipment, plans, serviceHeaders, kindNames(projectKey), labels, dayFirst));
+        pages.add(serviceBookPage(projectKey, typeKey, placeId, false));
         return WorkbookSheet.write(pages);
+    }
+
+    private WorkbookSheet.Page serviceBookPage(String projectKey, String typeKey, int placeId, boolean blank) {
+        AssetEntity[] rows = forViewer(authenticationContext().getLoggedInUser(), project(projectKey), assetsIn(projectKey));
+        Map<Integer, AssetEntity> index = indexAssets(rows);
+        List<AssetEntity> equipment = exchangeRows(projectKey, typeKey, placeId);
+        Map<String, List<AssetEntity>> byType = new HashMap<String, List<AssetEntity>>();
+        byType.put("all", equipment);
+        Map<Integer, List<ServicePlanEntity>> plans = blank
+                ? new HashMap<Integer, List<ServicePlanEntity>>() : plansByAsset(byType);
+        I18nHelper labels = i18n();
+        boolean dayFirst = labels.getLocale() != null && "ru".equalsIgnoreCase(labels.getLocale().getLanguage());
+        return servicePage(equipment, plans, serviceColumnLabels(labels), kindNames(projectKey), labels, dayFirst,
+                typeLabelMap(projectKey, rows), index, blank);
+    }
+
+    private List<String> identityHeaders(I18nHelper labels) {
+        List<String> headers = new ArrayList<String>();
+        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+        headers.add(labels.getText("asset-tree.ui.name"));
+        headers.add(labels.getText("asset-tree.ui.type"));
+        headers.add(labels.getText("asset-tree.ui.exchangePlace"));
+        return headers;
+    }
+
+    private List<String> identityCells(AssetEntity asset, Map<String, String> typeLabels, Map<Integer, AssetEntity> index) {
+        List<String> line = new ArrayList<String>();
+        line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
+        line.add(asset.getName() == null ? "" : asset.getName());
+        String type = typeLabels.get(asset.getTypeKey());
+        line.add(type == null ? "" : type);
+        line.add(location(asset, index));
+        return line;
+    }
+
+    private Map<String, String> typeLabelMap(String projectKey, AssetEntity[] rows) {
+        Map<String, String> labels = new HashMap<String, String>();
+        for (AssetTypeDto type : typeDtos(projectKey, rows)) {
+            labels.put(type.getTypeKey(), type.getLabel() == null ? "" : type.getLabel());
+        }
+        return labels;
     }
 
     private List<String> lifeColumnLabels(I18nHelper labels) {
@@ -7193,12 +7248,12 @@ public class AssetServiceImpl implements AssetService {
 
     private WorkbookSheet.Page servicePage(List<AssetEntity> equipment, Map<Integer, List<ServicePlanEntity>> plans,
                                            List<String> serviceHeaders, Map<String, String> kindLabels,
-                                           I18nHelper labels, boolean dayFirst) {
-        List<String> headers = new ArrayList<String>();
-        headers.add(labels.getText("asset-tree.ui.keyLabel"));
+                                           I18nHelper labels, boolean dayFirst, Map<String, String> typeLabels,
+                                           Map<Integer, AssetEntity> index, boolean blank) {
+        List<String> headers = identityHeaders(labels);
         headers.addAll(serviceHeaders);
         List<List<String>> lines = new ArrayList<List<String>>();
-        if (equipment != null) {
+        if (!blank && equipment != null) {
             for (int i = 0; i < equipment.size(); i++) {
                 AssetEntity asset = equipment.get(i);
                 List<ServicePlanEntity> owned = plans.get(Integer.valueOf(asset.getID()));
@@ -7207,10 +7262,9 @@ public class AssetServiceImpl implements AssetService {
                 }
                 for (int planIndex = 0; planIndex < owned.size(); planIndex++) {
                     ServicePlanEntity plan = owned.get(planIndex);
-                    List<String> line = new ArrayList<String>();
-                    line.add(asset.getObjectKey() == null ? "" : asset.getObjectKey());
-                    for (int index = 0; index < serviceHeaders.size(); index++) {
-                        line.add(serviceCell(plan, index, kindLabels, labels, dayFirst));
+                    List<String> line = identityCells(asset, typeLabels, index);
+                    for (int column = 0; column < serviceHeaders.size(); column++) {
+                        line.add(serviceCell(plan, column, kindLabels, labels, dayFirst));
                     }
                     lines.add(line);
                 }
@@ -7313,6 +7367,9 @@ public class AssetServiceImpl implements AssetService {
         headerLabels.put("linkIncludes", labels.getText("asset-tree.ui.linkIncludes"));
         headerLabels.put("linkNeeded", labels.getText("asset-tree.ui.linkNeeded"));
         headerLabels.put("linkCarries", labels.getText("asset-tree.ui.linkCarries"));
+        headerLabels.put("linkSheet", labels.getText("asset-tree.ui.linkSheet"));
+        headerLabels.put("lifeTitle", labels.getText("asset-tree.ui.lifeTitle"));
+        headerLabels.put("serviceSheet", labels.getText("asset-tree.ui.serviceSheet"));
         boolean service = moduleOn(projectKey, ProjectModules.SERVICE)
                 && ModuleSetup.calendarOn(moduleSetup(projectKey).getScheduleBoards());
         boolean life = moduleOn(projectKey, ProjectModules.LIFE);
