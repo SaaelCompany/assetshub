@@ -2798,8 +2798,18 @@
         var keptScroll = captureViewScroll();
         var frame = document.getElementById('asset-tree-frame');
         var kept = keepChildren(frame);
+        var keptDetail = null;
+        for (var i = 0; i < kept.length; i++) {
+            if (kept[i].id === 'asset-tree-detail' && kept[i].firstChild) keptDetail = kept[i];
+        }
         try {
             renderFrameContents();
+            /* A card pane starts empty and is filled afterwards. If that fill does not
+               happen, put the previous card back instead of leaving a white screen. */
+            var painted = document.getElementById('asset-tree-detail');
+            if (painted && !painted.firstChild && keptDetail && painted.parentNode) {
+                painted.parentNode.replaceChild(keptDetail, painted);
+            }
         } catch (error) {
             putBack(frame, kept, error);
         } finally {
@@ -3028,12 +3038,14 @@
     }
 
     /* A card pane is an empty section until showDetail fills it. A tree reload
-       while a card is open used to leave that section blank. */
+       while a card is open used to leave that section blank. The list row is
+       enough when the open copy has not arrived yet. */
     function paintOpenCard(detail) {
         if (!detail || detail.id !== 'asset-tree-detail' || detail.firstChild) return;
-        if (state.pane !== 'card' || !state.detail || state.detail.id !== state.selectedId) return;
-        if (isFolder(state.detail)) return;
-        showDetail(state.detail, state.detail.issues == null, detail);
+        if (state.pane !== 'card' || !state.selectedId) return;
+        var asset = state.detail && state.detail.id === state.selectedId ? state.detail : byId()[state.selectedId];
+        if (!asset || isFolder(asset)) return;
+        showDetail(asset, asset.issues == null, detail);
     }
 
     function panelStore() {
@@ -3185,11 +3197,11 @@
         return Object.keys(visible.__matches).length;
     }
 
-    function renderNodes() {
+    function renderNodes(quiet) {
         var nodes = document.getElementById('asset-tree-nodes');
         var scroll = document.getElementById('asset-tree-scroll');
         if (!nodes) {
-            renderFrame();
+            if (!quiet) renderFrame();
             return;
         }
         var top = scroll ? scroll.scrollTop : 0;
@@ -3564,6 +3576,8 @@
         }
         noteListPosition();
         var next = renderDetail();
+        if (next && !next.firstChild) paintOpenCard(next);
+        if (next && !next.firstChild && existing.firstChild) return;
         frame.replaceChild(next, existing);
         restoreListedScroll(next);
         syncPhone();
@@ -5323,7 +5337,7 @@
                 }));
             });
         });
-        return moduleBlock(t('menuMap'), box);
+        return moduleBlock(t('menuMap'), box, cardCollapsed('schemes', false));
     }
 
     function toggleSecret(asset) {
@@ -5417,8 +5431,8 @@
         (full.attributes || []).forEach(function (attribute) {
             placeItems.push(detailItem(attribute.name || attribute.fieldKey, attributeView(attribute)));
         });
-        main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems)));
-        main.appendChild(descriptionModule(full, true, true));
+        main.appendChild(moduleBlock(t('detailsTitle'), detailGrid(placeItems), cardCollapsed('details', false)));
+        main.appendChild(descriptionModule(full, true, cardCollapsed('description', true)));
         main.appendChild(placeSchemesBlock(asset));
 
         if (departments.length) {
@@ -5429,7 +5443,7 @@
                     selectAsset(place.id);
                 }, typeOf(place.typeKey).color, typeOf(place.typeKey)));
             });
-            main.appendChild(moduleBlock(t('placeInside'), places));
+            main.appendChild(moduleBlock(t('placeInside'), places, cardCollapsed('inside', false)));
         }
 
         var typeBlock = el('div');
@@ -5470,9 +5484,9 @@
                 });
             });
         }
-        main.appendChild(moduleBlock(t('placeTypes'), typeBlock));
-        main.appendChild(fileBlock(full, true));
-        main.appendChild(activityBlock(full, true));
+        main.appendChild(moduleBlock(t('placeTypes'), typeBlock, cardCollapsed('types', false)));
+        main.appendChild(fileBlock(full, cardCollapsed('files', true)));
+        main.appendChild(activityBlock(full, cardCollapsed('activity', true)));
 
         var issues = el('div');
         if (mayEdit(full)) issues.appendChild(issueLinker(full.id));
@@ -5485,10 +5499,10 @@
                 issues.appendChild(issueRow(full.id, issue));
             });
         }
-        main.appendChild(moduleBlock(t('issues'), issues, !(full.issues && full.issues.length), full.issues ? full.issues.length : 0));
+        main.appendChild(moduleBlock(t('issues'), issues, cardCollapsed('issues', !(full.issues && full.issues.length)), full.issues ? full.issues.length : 0));
 
-        aside.appendChild(moduleBlock(t('people'), staticPeople(full)));
-        aside.appendChild(moduleBlock(t('dates'), datesBody(full)));
+        aside.appendChild(moduleBlock(t('people'), staticPeople(full), cardCollapsed('people', false)));
+        aside.appendChild(moduleBlock(t('dates'), datesBody(full), cardCollapsed('dates', false)));
 
         form.appendChild(main);
         attachAside(form, aside);
@@ -6262,7 +6276,7 @@
                 openPlansOnSchedule(asset);
             }));
             body.appendChild(tools);
-            return moduleBlock(t('serviceTitle'), body, true, asset.plans.length);
+            return moduleBlock(t('serviceTitle'), body, cardCollapsed('service', true), asset.plans.length);
         }
         body.appendChild(el('p', 'asset-tree-hint', t('serviceHint')));
         var creating = offered && mayEdit(asset) && state.serviceOpen === asset.id;
@@ -9545,9 +9559,12 @@
         var painted = section.getAttribute('data-asset-id');
         var kept = painted === String(asset.id) ? readPaneScroll(section) : null;
         if (section.className.indexOf('is-queue') >= 0) noteListPosition();
+        var held = keepChildren(section);
+        var heldClass = section.className;
         section.className = 'asset-tree-detail is-issue is-view';
         section.innerHTML = '';
         section.setAttribute('data-asset-id', String(asset.id));
+        try {
         var form = el('div', 'asset-tree-request is-view');
         var main = el('div', 'asset-tree-request-main');
         var aside = el('aside', 'asset-tree-request-aside');
@@ -9646,13 +9663,13 @@
         });
         var showPhoto = !isFolder(asset) && photoEnabled() && asset.photo;
         var story = showPhoto ? el('div', 'asset-tree-photo-stack') : main;
-        story.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items)));
+        story.appendChild(moduleBlock(t('detailsTitle'), detailGrid(items), cardCollapsed('details', false)));
         var service = serviceBlock(asset, false);
         if (service) story.appendChild(service);
         if (moduleOn('life') && !isFolder(asset)) {
             story.appendChild(lifeBlock(asset));
         }
-        story.appendChild(descriptionModule(asset, true, true));
+        story.appendChild(descriptionModule(asset, true, cardCollapsed('description', true)));
         if (showPhoto) {
             var band = el('div', 'asset-tree-photo-band');
             band.appendChild(story);
@@ -9671,9 +9688,9 @@
                 issues.appendChild(issueRow(asset.id, issue));
             });
         }
-        main.appendChild(moduleBlock(t('issues'), issues, !(asset.issues && asset.issues.length), asset.issues ? asset.issues.length : 0));
-        main.appendChild(fileBlock(asset, true));
-        main.appendChild(activityBlock(asset, true));
+        main.appendChild(moduleBlock(t('issues'), issues, cardCollapsed('issues', !(asset.issues && asset.issues.length)), asset.issues ? asset.issues.length : 0));
+        main.appendChild(fileBlock(asset, cardCollapsed('files', true)));
+        main.appendChild(activityBlock(asset, cardCollapsed('activity', true)));
 
         var error = el('div', 'asset-tree-form-error');
         error.id = 'asset-tree-form-error';
@@ -9685,14 +9702,18 @@
         people.appendChild(issuedPicker(asset));
         people.appendChild(shareField(asset));
         people.appendChild(personField(t('author'), asset.author || (asset.createdBy ? { displayName: asset.createdBy } : null)));
-        aside.appendChild(moduleBlock(t('people'), people));
+        aside.appendChild(moduleBlock(t('people'), people, cardCollapsed('people', false)));
         aside.appendChild(linkBlock(asset));
-        aside.appendChild(moduleBlock(t('dates'), datesBody(asset)));
+        aside.appendChild(moduleBlock(t('dates'), datesBody(asset), cardCollapsed('dates', false)));
 
         form.appendChild(main);
         attachAside(form, aside);
         section.appendChild(form);
         writePaneScroll(section, kept);
+        } catch (error) {
+            section.className = heldClass;
+            putBack(section, held, error);
+        }
     }
 
     function showDetail(asset, issuesLoading, section) {
@@ -9723,9 +9744,12 @@
         var painted = section.getAttribute('data-asset-id');
         var kept = painted === String(asset.id) ? readPaneScroll(section) : null;
         if (section.className.indexOf('is-queue') >= 0) noteListPosition();
+        var held = keepChildren(section);
+        var heldClass = section.className;
         section.className = 'asset-tree-detail is-issue';
         section.innerHTML = '';
         section.setAttribute('data-asset-id', String(asset.id));
+        try {
         var form = el('form', 'asset-tree-request');
         form.id = 'asset-detail-form';
         var main = el('div', 'asset-tree-request-main');
@@ -9921,6 +9945,10 @@
             typeSelect.addEventListener('change', function () {
                 paintAssetFields(attrList, typeSelect.value, collectAttributes());
             });
+        }
+        } catch (error) {
+            section.className = heldClass;
+            putBack(section, held, error);
         }
     }
 
@@ -10663,7 +10691,7 @@
             body.appendChild(linkGraph(asset, form));
             if (form) body.appendChild(form);
         }
-        return moduleBlock(t('links'), body);
+        return moduleBlock(t('links'), body, cardCollapsed('links', false));
     }
 
     function issueRow(assetId, issue) {
@@ -12908,10 +12936,7 @@
             var held = state.mediaHold === payload.id && Date.now() - (state.mediaHoldAt || 0) < 20000;
             stampCardImage(payload);
             state.detail = payload;
-            if (held) {
-                state.mediaHold = 0;
-                return;
-            }
+            if (held && !blank) return;
             if (same) return;
             if (state.pane === 'card') showDetail(payload, false);
             else {
@@ -12970,23 +12995,21 @@
                     var sketch = treeSketch();
                     var treeChanged = sketch !== state.treeSketch;
                     state.treeSketch = sketch;
+                    var detail = document.getElementById('asset-tree-detail');
+                    var nodes = document.getElementById('asset-tree-nodes');
+                    var catalogOnly = !objectsMoved;
+                    if (nodes && (treeChanged || catalogOnly)) renderNodes(true);
                     var cardOpen = state.pane === 'card' && state.selectedId;
-                    if (cardOpen) {
-                        if (treeChanged) renderNodes();
-                        if (!cardHeld(document.getElementById('asset-tree-detail')) && (cardMoved || treeChanged)) {
-                            refreshOpenCard();
-                        }
-                        if (objectsMoved && state.canRemove) loadTrash();
-                        return;
+                    var blank = detail && !detail.firstChild;
+                    if (!cardHeld(detail)) {
+                        if ((cardOpen || openCardId()) && (cardMoved || treeChanged || blank)) refreshOpenCard();
+                        else if (detail && state.pane !== 'card' && (treeChanged || catalogOnly)) replaceDetail();
                     }
-                    if (cardHeld(document.getElementById('asset-tree-detail'))) {
-                        renderNodes();
-                        return;
-                    }
-                    renderFrame();
+                    if (!nodes && !detail) renderFrame();
                     if (objectsMoved && state.canRemove) loadTrash();
-                    refreshOpenCard();
-                } else if (state.view === 'mine') {
+                    return;
+                }
+                if (state.view === 'mine') {
                     if (objectsMoved) loadMine();
                     else renderFrame();
                 }
@@ -16656,6 +16679,55 @@
         photoRow.appendChild(photoText);
         photoCard.appendChild(photoRow);
         stack.appendChild(photoCard);
+
+        var cardCard = el('section', 'asset-tree-project-card');
+        cardCard.appendChild(el('h3', 'asset-tree-settings-title', t('cardOpenTitle')));
+        cardCard.appendChild(el('p', 'asset-tree-hint', t('cardOpenHint')));
+        var cardChoices = [
+            ['details', 'detailsTitle'],
+            ['description', 'description'],
+            ['service', 'serviceTitle'],
+            ['life', 'lifeTitle'],
+            ['issues', 'issues'],
+            ['files', 'attachments'],
+            ['activity', 'activityTitle'],
+            ['people', 'people'],
+            ['links', 'links'],
+            ['dates', 'dates'],
+            ['schemes', 'menuMap'],
+            ['inside', 'placeInside'],
+            ['types', 'placeTypes']
+        ];
+        var cardBoxes = [];
+        function cardOpenValue() {
+            var picked = [];
+            cardBoxes.forEach(function (item) {
+                if (item.box.checked) picked.push(item.key);
+            });
+            return picked.length ? picked.join(',') : '-';
+        }
+        cardChoices.forEach(function (item) {
+            var row = el('label', 'asset-tree-check-row');
+            var box = el('input');
+            box.type = 'checkbox';
+            box.checked = cardOpenChecked(item[0]);
+            box.disabled = !allowed;
+            if (!allowed) box.setAttribute('data-disabled', '1');
+            box.setAttribute('aria-label', t(item[1]));
+            cardBoxes.push({ key: item[0], box: box });
+            box.addEventListener('change', function () {
+                var want = box.checked;
+                saveProjectView({ setup: { cardOpen: cardOpenValue() } }, function (ok) {
+                    if (ok === false) box.checked = !want;
+                });
+            });
+            row.appendChild(box);
+            var text = el('span');
+            text.appendChild(el('strong', null, t(item[1])));
+            row.appendChild(text);
+            cardCard.appendChild(row);
+        });
+        stack.appendChild(cardCard);
 
         var modules = el('section', 'asset-tree-project-card');
         var head = el('h3', 'asset-tree-settings-title', t('modulesTitle'));
@@ -22175,6 +22247,25 @@
         return number;
     }
 
+    /* Empty means the card keeps its usual blocks open. A saved list opens only those blocks. */
+    function cardCollapsed(key, whenUnset) {
+        var raw = moduleSetup().cardOpen;
+        if (!raw || raw === '*') return !!whenUnset;
+        if (raw === '-') return true;
+        return String(raw).split(',').indexOf(key) < 0;
+    }
+
+    function cardOpenChecked(key) {
+        var raw = moduleSetup().cardOpen;
+        if (!raw || raw === '*') {
+            if (key === 'life') return !moduleSetup().lifeFold;
+            if (key === 'description' || key === 'service' || key === 'files' || key === 'activity') return false;
+            return true;
+        }
+        if (raw === '-') return false;
+        return String(raw).split(',').indexOf(key) >= 0;
+    }
+
     function moduleSetup() {
         var project = currentProject();
         var setup = project && project.setup ? project.setup : {};
@@ -22213,6 +22304,7 @@
             lifeCurrency: setup.lifeCurrency || 'RUB',
             lifeMonths: setup.lifeMonths == null || setup.lifeMonths === '' ? 60 : clampNum(setup.lifeMonths, 0, 600),
             lifeFold: !!setup.lifeFold,
+            cardOpen: setup.cardOpen == null || setup.cardOpen === '' || setup.cardOpen === '*' ? '' : String(setup.cardOpen),
             scheduleBoards: 'calendar',
             scheduleOpen: 'calendar',
             furniture: setup.furniture || '',
@@ -29808,7 +29900,7 @@
 
     function lifeModule(asset, inner) {
         var remembered = Object.prototype.hasOwnProperty.call(state.lifeFolded, asset.id);
-        var collapsed = remembered ? !!state.lifeFolded[asset.id] : !!moduleSetup().lifeFold;
+        var collapsed = remembered ? !!state.lifeFolded[asset.id] : cardCollapsed('life', !!moduleSetup().lifeFold);
         var block = moduleBlock(t('lifeTitle'), inner, collapsed);
         var head = block.querySelector('.asset-tree-module-head');
         if (head) {

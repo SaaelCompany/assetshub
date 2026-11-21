@@ -48,6 +48,11 @@ public class ModuleSetupDto {
     private String portalColumns;
     /** True when an equipment card can show one photo. */
     private Boolean photo;
+    /**
+     * Card blocks that start expanded. Empty keeps the usual layout.
+     * "-" starts every block collapsed. Otherwise a comma list of block keys.
+     */
+    private String cardOpen;
     /** Kept so an older saved project still reads. Requests no longer receive these comments. */
     private Boolean issueNotes;
     private Integer tniKeep;
@@ -138,6 +143,8 @@ public class ModuleSetupDto {
     public void setPortalColumns(String portalColumns) { this.portalColumns = portalColumns; }
     public Boolean getPhoto() { return photo; }
     public void setPhoto(Boolean photo) { this.photo = photo; }
+    public String getCardOpen() { return cardOpen; }
+    public void setCardOpen(String cardOpen) { this.cardOpen = cardOpen; }
     public Boolean getIssueNotes() { return issueNotes; }
     public void setIssueNotes(Boolean issueNotes) { this.issueNotes = issueNotes; }
     public Integer getTniKeep() { return tniKeep; }
