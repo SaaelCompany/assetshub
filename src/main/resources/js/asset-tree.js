@@ -11237,6 +11237,7 @@
         setTimeout(function () {
             paintWires();
             fitZoom();
+            if (editor) setTimeout(fitZoom, 80);
         }, 30);
         return stage;
     }
