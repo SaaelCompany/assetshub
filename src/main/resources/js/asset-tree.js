@@ -11067,7 +11067,7 @@
         }
         if (editor && mayEdit(asset)) {
             viewport.addEventListener('contextmenu', function (event) {
-                if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node, .asset-tree-graph-zoom')) return;
+                if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node')) return;
                 if (event.preventDefault) event.preventDefault();
                 openGraphMenu(event.clientX, event.clientY, [
                     { label: t('linkGraphAdd'), run: function () {
@@ -11083,38 +11083,6 @@
             });
         }
         viewport.appendChild(world);
-        var zoomBar = el('div', 'asset-tree-graph-zoom');
-        function zoomAround(factor) {
-            var rect = viewport.getBoundingClientRect();
-            var px = rect.width / 2;
-            var py = rect.height / 2;
-            var next = zoom * factor;
-            if (next < 0.05) next = 0.05;
-            if (next > 2.5) next = 2.5;
-            var wx = (px - panX) / zoom;
-            var wy = (py - panY) / zoom;
-            zoom = next;
-            panX = px - wx * zoom;
-            panY = py - wy * zoom;
-            touched = true;
-            applyZoom();
-        }
-        var zoomOut = button('\u2212', '', function () { zoomAround(1 / 1.15); });
-        zoomOut.title = t('linkGraphZoomOut');
-        zoomOut.setAttribute('aria-label', t('linkGraphZoomOut'));
-        var zoomIn = button('+', '', function () { zoomAround(1.15); });
-        zoomIn.title = t('linkGraphZoomIn');
-        zoomIn.setAttribute('aria-label', t('linkGraphZoomIn'));
-        var fit = button('\u2922', '', function () {
-            touched = false;
-            fitZoom();
-        });
-        fit.title = t('linkGraphFit');
-        fit.setAttribute('aria-label', t('linkGraphFit'));
-        zoomBar.appendChild(zoomOut);
-        zoomBar.appendChild(zoomIn);
-        zoomBar.appendChild(fit);
-        viewport.appendChild(zoomBar);
         stage.appendChild(viewport);
         if (!nodes.length) stage.appendChild(el('p', 'asset-tree-hint', t('linkEmpty')));
         stage.appendChild(panel);
@@ -11144,24 +11112,29 @@
         }
         function fitZoom() {
             var viewW = viewport.clientWidth;
-            var viewH = viewport.clientHeight;
-            if (viewW < 40 || viewH < 40) return;
+            var maxH = editor ? viewport.clientHeight : 280;
+            if (viewW < 40 || maxH < 40) return;
             var worldW = world.offsetWidth || 1;
             var worldH = world.offsetHeight || 1;
-            var scale = Math.min(viewW / (worldW + 24), viewH / (worldH + 24), 1);
+            var scale = Math.min(viewW / (worldW + 24), maxH / (worldH + 24), 1);
             if (scale < 0.05) scale = 0.05;
             zoom = scale;
             panX = Math.round((viewW - worldW * zoom) / 2);
-            panY = Math.round((viewH - worldH * zoom) / 2);
             if (panX < 8) panX = 8;
-            if (panY < 8) panY = 8;
+            if (editor) {
+                panY = Math.round((maxH - worldH * zoom) / 2);
+                if (panY < 8) panY = 8;
+            } else {
+                panY = 4;
+                viewport.style.height = Math.max(48, Math.ceil(worldH * zoom + 12)) + 'px';
+            }
             applyZoom();
         }
         function paintWires() {
             if (!world.parentNode) return;
             var cards = world.querySelectorAll('.asset-tree-graph-node');
-            var right = 240;
-            var bottom = 180;
+            var right = 72;
+            var bottom = 40;
             var i;
             for (i = 0; i < cards.length; i++) {
                 var side = cards[i].offsetLeft + cards[i].offsetWidth + 20;
@@ -11232,7 +11205,7 @@
         }
         viewport.addEventListener('mousedown', function (event) {
             if (event.button !== 0) return;
-            if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node, .asset-tree-graph-zoom, button')) return;
+            if (event.target && event.target.closest && event.target.closest('.asset-tree-graph-node, button')) return;
             var startX = event.clientX;
             var startY = event.clientY;
             var originX = panX;

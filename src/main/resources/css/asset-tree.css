@@ -11969,7 +11969,7 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-link-stage {
     position: relative;
     margin: 0 0 12px;
-    overflow: hidden;
+    overflow: visible;
     max-width: 100%;
 }
 
@@ -11986,18 +11986,16 @@ a.asset-tree-preview-icon:focus {
 .asset-tree-dialog .asset-tree-graph-frame {
     overflow: hidden;
     margin-top: 12px;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fafbfc;
+    background: transparent;
 }
 
 #asset-tree-app .asset-tree-link-viewport {
     position: relative;
     overflow: hidden;
-    height: 280px;
-    background: #fafbfc;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
+    height: auto;
+    min-height: 48px;
+    background: transparent;
+    border: 0;
 }
 
 .asset-tree-dialog .asset-tree-link-viewport {
@@ -12017,28 +12015,6 @@ a.asset-tree-preview-icon:focus {
     width: auto;
     overflow: visible;
     transform-origin: 0 0;
-}
-
-.asset-tree-graph-zoom {
-    position: absolute;
-    right: 8px;
-    bottom: 8px;
-    z-index: 3;
-    display: flex;
-    gap: 4px;
-}
-
-.asset-tree-graph-zoom button {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid #dfe1e6;
-    border-radius: 3px;
-    background: #fff;
-    color: #172b4d;
-    font-size: 16px;
-    line-height: 26px;
-    cursor: pointer;
 }
 
 .asset-tree-graph-menu {
