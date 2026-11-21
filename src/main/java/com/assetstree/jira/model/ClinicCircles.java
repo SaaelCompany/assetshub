@@ -6,7 +6,7 @@ import java.util.List;
 /** Names, people and places of a clinic access group. */
 public final class ClinicCircles {
     public static final int CIRCLE_LIMIT = 40;
-    public static final int MEMBER_LIMIT = 200;
+    public static final int MEMBER_LIMIT = 500;
     public static final int PLACE_LIMIT = 30;
 
     private ClinicCircles() {

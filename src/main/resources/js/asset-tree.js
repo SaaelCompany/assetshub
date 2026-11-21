@@ -31367,8 +31367,6 @@
         panel.appendChild(bundle);
         var portalGroups = el('div', 'asset-tree-project-stack');
         portalGroups.appendChild(renderClinicAccess());
-        portalGroups.appendChild(renderClinicGrant());
-        portalGroups.appendChild(renderClinicRoster());
         panel.appendChild(portalGroups);
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
         var fields = el('div', 'asset-tree-portal-fields');
@@ -32185,12 +32183,18 @@
             if (done) done();
             return;
         }
+        if (done) {
+            state.reportWaiters = state.reportWaiters || [];
+            state.reportWaiters.push(done);
+        }
         if (state.reportsLoading) return;
         state.reportsLoading = true;
         ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
             state.reportsLoading = false;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
-            if (done) done();
+            var waiters = state.reportWaiters || [];
+            state.reportWaiters = [];
+            if (waiters.length) waiters.forEach(function (fn) { fn(); });
             else if (state.view === 'settings' && state.schemaTab === 'portal') renderFrame();
         });
     }
@@ -32216,6 +32220,7 @@
             var reports = (circle.reports || []).map(clinicReportName);
             row.appendChild(el('div', 'asset-tree-access-person-summary', places.concat(reports).filter(Boolean).join(', ')));
             var actions = el('div', 'asset-tree-access-person-actions');
+            actions.appendChild(button(t('clinicPeopleCount', (circle.members || []).length), 'asset-tree-btn', function () { openClinicPeople(circle); }));
             actions.appendChild(button(t('accessEditGroup'), 'asset-tree-btn', function () { openClinicModal(circle); }));
             row.appendChild(actions);
             block.appendChild(row);
@@ -32260,8 +32265,8 @@
                 name.addEventListener('input', function () { draft.name = name.value; });
                 host.appendChild(field(t('clinicName'), name, true));
                 if (moduleOn('reports')) {
-                    host.appendChild(el('div', 'asset-tree-people-label', t('clinicReports')));
-                    var reportGrid = el('div', 'asset-tree-portal-mine-fields');
+                    host.appendChild(el('div', 'asset-tree-clinic-label', t('clinicReports')));
+                    var reportGrid = el('div', 'asset-tree-clinic-reports');
                     (state.reportCatalog || []).forEach(function (row) {
                         if (!row || row.id == null) return;
                         var key = String(row.id);
@@ -32288,7 +32293,7 @@
                     if (reportGrid.childNodes.length) host.appendChild(reportGrid);
                     else host.appendChild(el('p', 'asset-tree-hint', t('portalShowcaseEmpty')));
                 }
-                host.appendChild(el('div', 'asset-tree-people-label', t('clinicPlaces')));
+                host.appendChild(el('div', 'asset-tree-clinic-label', t('clinicPlaces')));
                 host.appendChild(chipRow(draft.places, function (place) {
                     return (place.objectKey ? place.objectKey + ' · ' : '') + (place.name || '');
                 }, function (index) {
@@ -32353,119 +32358,123 @@
                 host.appendChild(actions);
             }
             paint();
+            if (moduleOn('reports') && state.reportCatalog == null) ensureReports(paint);
         });
     }
 
-    function renderClinicGrant() {
-        var card = el('section', 'asset-tree-project-card');
-        card.appendChild(el('h3', 'asset-tree-settings-title', t('accessGiveTitle')));
-        card.appendChild(el('p', 'asset-tree-hint', t('clinicGrantHint')));
-        if (!state.clinics) {
-            card.appendChild(el('p', 'asset-tree-hint', t('loading')));
-            return card;
-        }
-        if (!state.clinics.length) {
-            card.appendChild(el('p', 'asset-tree-hint', t('clinicEmpty')));
-            return card;
-        }
-        var picked = null;
-        var personInput = el('input', 'asset-tree-input');
-        personInput.type = 'search';
-        personInput.placeholder = t('clinicSearch');
-        var results = el('div', 'asset-tree-user-results');
-        var timer = null;
-        var seq = 0;
-        personInput.addEventListener('input', function () {
-            picked = null;
-            clearTimeout(timer);
-            timer = setTimeout(function () {
-                var query = personInput.value.trim();
-                var mine = ++seq;
-                results.innerHTML = '';
-                if (query.length < 2) return;
-                ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
-                    if (mine !== seq) return;
-                    results.innerHTML = '';
-                    if (status !== 200) return;
-                    (payload || []).forEach(function (user) {
-                        if (!user || !user.userKey) return;
-                        results.appendChild(button((user.displayName || user.userKey) + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
-                            picked = user;
-                            personInput.value = user.displayName || user.userKey;
-                            results.innerHTML = '';
-                        }));
-                    });
-                });
-            }, 220);
-        });
-        var pick = el('select', 'asset-tree-input');
-        state.clinics.forEach(function (circle) {
-            if (!circle) return;
-            var option = document.createElement('option');
-            option.value = String(circle.id);
-            option.textContent = circle.name || '';
-            pick.appendChild(option);
-        });
-        card.appendChild(field(t('clinicSearch'), personInput, true));
-        card.appendChild(results);
-        card.appendChild(field(t('accessCustomTitle'), pick, true));
-        card.appendChild(button(t('accessGive'), 'asset-tree-btn primary', function () {
-            if (!picked || !picked.userKey) {
-                notify(t('clinicSearch'));
-                return;
+    function rememberCircle(next) {
+        if (!next) return;
+        var found = false;
+        state.clinics = (state.clinics || []).map(function (item) {
+            if (item && item.id === next.id) {
+                found = true;
+                return next;
             }
-            ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + encodeURIComponent(pick.value) + '/members?user=' + encodeURIComponent(picked.userKey), null, function (status, payload) {
-                if (status >= 200 && status < 300) {
-                    state.clinics = null;
-                    ensureClinics();
-                } else notify((payload && payload.message) || t('errorTitle'));
-            });
-        }));
-        return card;
+            return item;
+        });
+        if (!found) state.clinics.push(next);
     }
 
-    function renderClinicRoster() {
-        var card = el('section', 'asset-tree-project-card');
-        card.appendChild(el('h3', 'asset-tree-settings-title', t('portalRosterTitle')));
-        var people = {};
-        var order = [];
-        (state.clinics || []).forEach(function (circle) {
-            (circle.members || []).forEach(function (person) {
-                if (!person || !person.userKey) return;
-                if (!people[person.userKey]) {
-                    people[person.userKey] = { name: person.displayName || person.userKey, groups: [] };
-                    order.push(person.userKey);
-                }
-                people[person.userKey].groups.push(circle);
-            });
+    function openClinicPeople(circle) {
+        var members = (circle.members || []).map(function (person) {
+            return { userKey: person.userKey, displayName: person.displayName || person.userKey, department: person.department || '' };
         });
-        if (!order.length) {
-            card.appendChild(el('p', 'asset-tree-hint', t('portalRosterEmpty')));
-            return card;
-        }
-        order.forEach(function (key) {
-            var person = people[key];
-            var row = el('div', 'asset-tree-access-person');
-            var title = el('div', 'asset-tree-access-person-title');
-            title.appendChild(el('strong', null, person.name));
-            row.appendChild(title);
-            var summary = el('div', 'asset-tree-access-person-summary');
-            person.groups.forEach(function (circle) {
-                var chip = el('span', null, circle.name || '');
-                summary.appendChild(chip);
-                summary.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
-                    ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + circle.id + '/members?user=' + encodeURIComponent(key), null, function (status, payload) {
-                        if (status >= 200 && status < 300) {
-                            state.clinics = null;
-                            ensureClinics();
-                        } else notify((payload && payload.message) || t('errorTitle'));
+        openModal(function (dialog) {
+            dialog.classList.add('is-wide');
+            dialog.appendChild(el('h2', null, circle.name || t('clinicPeople')));
+            dialog.appendChild(el('p', 'asset-tree-hint', t('clinicGrantHint')));
+            var addInput = el('input', 'asset-tree-input');
+            addInput.type = 'search';
+            addInput.placeholder = t('clinicSearch');
+            var addResults = el('div', 'asset-tree-user-results');
+            var addTimer = null;
+            var addSeq = 0;
+            addInput.addEventListener('input', function () {
+                clearTimeout(addTimer);
+                addTimer = setTimeout(function () {
+                    var query = addInput.value.trim();
+                    var mine = ++addSeq;
+                    addResults.innerHTML = '';
+                    if (query.length < 2) return;
+                    ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                        if (mine !== addSeq) return;
+                        addResults.innerHTML = '';
+                        if (status !== 200) return;
+                        (payload || []).forEach(function (user) {
+                            if (!user || !user.userKey) return;
+                            if (members.some(function (person) { return person.userKey === user.userKey; })) return;
+                            addResults.appendChild(button((user.displayName || user.userKey) + (user.department ? ' · ' + user.department : ''), 'asset-tree-user-hit', function () {
+                                if (members.length >= 500) {
+                                    notify(t('clinicLimit'));
+                                    return;
+                                }
+                                ajax('POST', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + circle.id + '/members?user=' + encodeURIComponent(user.userKey), null, function (saveStatus, saved) {
+                                    if (saveStatus >= 200 && saveStatus < 300 && saved) {
+                                        members = (saved.members || []).map(function (person) {
+                                            return { userKey: person.userKey, displayName: person.displayName || person.userKey, department: person.department || '' };
+                                        });
+                                        rememberCircle(saved);
+                                        addInput.value = '';
+                                        addResults.innerHTML = '';
+                                        fill();
+                                        renderFrame();
+                                    } else notify((saved && saved.message) || t('errorTitle'));
+                                });
+                            }));
+                        });
                     });
-                }));
+                }, 220);
             });
-            row.appendChild(summary);
-            card.appendChild(row);
+            dialog.appendChild(addInput);
+            dialog.appendChild(addResults);
+            var count = el('div', 'asset-tree-clinic-label');
+            dialog.appendChild(count);
+            var find = el('input', 'asset-tree-input');
+            find.type = 'search';
+            find.placeholder = t('clinicPeopleFind');
+            var needle = '';
+            find.addEventListener('input', function () {
+                needle = find.value.trim().toLowerCase();
+                fill();
+            });
+            dialog.appendChild(find);
+            var list = el('div', 'asset-tree-clinic-people');
+            dialog.appendChild(list);
+            function fill() {
+                count.textContent = t('clinicPeopleCount', members.length);
+                list.innerHTML = '';
+                var shown = 0;
+                members.forEach(function (person) {
+                    var label = person.displayName || person.userKey || '';
+                    var hay = (label + ' ' + (person.userKey || '') + ' ' + (person.department || '')).toLowerCase();
+                    if (needle && hay.indexOf(needle) < 0) return;
+                    shown++;
+                    var row = el('div', 'asset-tree-person');
+                    var title = el('strong', null, label);
+                    if (person.department) title.appendChild(el('span', null, ' · ' + person.department));
+                    row.appendChild(title);
+                    row.appendChild(button(t('shareRemove'), 'asset-tree-linkish', function () {
+                        ajax('DELETE', '/projects/' + encodeURIComponent(state.projectKey) + '/circles/' + circle.id + '/members?user=' + encodeURIComponent(person.userKey), null, function (status, payload) {
+                            if (status >= 200 && status < 300) {
+                                members = members.filter(function (item) { return item.userKey !== person.userKey; });
+                                rememberCircle({
+                                    id: circle.id,
+                                    name: circle.name,
+                                    places: circle.places,
+                                    reports: circle.reports,
+                                    members: members
+                                });
+                                fill();
+                                renderFrame();
+                            } else notify((payload && payload.message) || t('errorTitle'));
+                        });
+                    }));
+                    list.appendChild(row);
+                });
+                if (!shown) list.appendChild(el('p', 'asset-tree-hint', members.length ? t('schemaNoMatch') : t('clinicPeopleEmpty')));
+            }
+            fill();
         });
-        return card;
     }
 
     function renderAccessSettings(panel) {
