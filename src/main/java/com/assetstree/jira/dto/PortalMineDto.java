@@ -60,6 +60,7 @@ public class PortalMineDto {
         private String key = "";
         private int count;
         private String countLabel = "";
+        private String layout = "";
         private List<Card> assets = new ArrayList<Card>();
         private List<Chart> charts = new ArrayList<Chart>();
 
@@ -85,6 +86,14 @@ public class PortalMineDto {
 
         public void setCountLabel(String countLabel) {
             this.countLabel = countLabel == null ? "" : countLabel;
+        }
+
+        public String getLayout() {
+            return layout;
+        }
+
+        public void setLayout(String layout) {
+            this.layout = layout == null ? "" : layout;
         }
 
         public List<Card> getAssets() {

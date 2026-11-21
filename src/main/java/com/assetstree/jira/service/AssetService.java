@@ -379,6 +379,9 @@ public interface AssetService {
     /** Puts one type's equipment on a place into the given order. */
     void sortTypeObjects(ApplicationUser user, int assetId, PlaceSortDraft draft);
 
+    /** Sorts the child places, type folders and equipment of one place by name. */
+    void sortPlaceByName(ApplicationUser user, int assetId, int direction);
+
     ServicePlanDto updatePlan(ApplicationUser user, int assetId, int planId, ServicePlanDraft draft);
 
     void deletePlan(ApplicationUser user, int assetId, int planId);

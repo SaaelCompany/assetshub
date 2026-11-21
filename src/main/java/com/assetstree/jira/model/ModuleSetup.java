@@ -60,6 +60,9 @@ public final class ModuleSetup {
         setup.setGlyphs(glyphs(values.get("syms")));
         setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
         setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
+        if (values.containsKey("playout")) {
+            setup.setPortalLayout(PortalLayouts.canonical(values.get("playout")));
+        }
         setup.setPortalReports(PortalShowcase.reports(values.get("preps")));
         setup.setPortalBoards(PortalShowcase.boards(values.get("pbrd")));
         setup.setPortalAudience(PortalShowcase.people(values.get("pwho")));
@@ -126,6 +129,9 @@ public final class ModuleSetup {
         append(stored, "syms", glyphs(value.getGlyphs()));
         append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
         append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
+        if (value.getPortalLayout() != null) {
+            append(stored, "playout", PortalLayouts.canonical(value.getPortalLayout()));
+        }
         append(stored, "preps", PortalShowcase.reports(value.getPortalReports()));
         append(stored, "pbrd", PortalShowcase.boards(value.getPortalBoards()));
         append(stored, "pwho", PortalShowcase.people(value.getPortalAudience()));
@@ -427,6 +433,7 @@ public final class ModuleSetup {
         merged.setGlyphs(incoming.getGlyphs() != null ? incoming.getGlyphs() : base.getGlyphs());
         merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
         merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
+        merged.setPortalLayout(incoming.getPortalLayout() != null ? PortalLayouts.canonical(incoming.getPortalLayout()) : base.getPortalLayout());
         merged.setPortalReports(incoming.getPortalReports() != null ? PortalShowcase.reports(incoming.getPortalReports()) : base.getPortalReports());
         merged.setPortalBoards(incoming.getPortalBoards() != null ? PortalShowcase.boards(incoming.getPortalBoards()) : base.getPortalBoards());
         merged.setPortalAudience(incoming.getPortalAudience() != null ? PortalShowcase.people(incoming.getPortalAudience()) : base.getPortalAudience());

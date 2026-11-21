@@ -3565,6 +3565,55 @@
         return nest;
     }
 
+    function sortGlyph() {
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('aria-hidden', 'true');
+        ['M8 2.2v5.1M5.3 4.7 8 2.2l2.7 2.5', 'M8 13.8V8.7M5.3 11.3 8 13.8l2.7-2.5'].forEach(function (shape) {
+            var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', shape);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'currentColor');
+            path.setAttribute('stroke-width', '1.6');
+            path.setAttribute('stroke-linecap', 'round');
+            path.setAttribute('stroke-linejoin', 'round');
+            svg.appendChild(path);
+        });
+        return svg;
+    }
+
+    function sortButton(title, onClick) {
+        var button = el('button', 'asset-tree-sort');
+        button.type = 'button';
+        button.title = title;
+        button.setAttribute('aria-label', title);
+        button.appendChild(sortGlyph());
+        button.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            onClick();
+        });
+        return button;
+    }
+
+    function labeledWay(names) {
+        var rows = [];
+        for (var i = 0; i < names.length; i++) rows.push({ name: names[i] || '', id: i });
+        return nameSortWay(rows);
+    }
+
+    function placeSortNames(placeId) {
+        var names = [];
+        treeChildren(placeId).forEach(function (asset) { names.push(asset.name || ''); });
+        function walk(type) {
+            names.push(type.label || '');
+            if (!localParent(placeId, type.typeKey)) subtypesAt(placeId, type.typeKey).forEach(walk);
+            equipmentIn(placeId, type.typeKey).forEach(function (asset) { names.push(asset.name || ''); });
+        }
+        typeGroupsFor(placeId).forEach(walk);
+        return names;
+    }
+
     function listContext() {
         var group = state.typeGroup;
         var base = group
@@ -3661,6 +3710,15 @@
             row.appendChild(chevron);
             row.appendChild(name);
             if (asset.secret) row.appendChild(el('span', 'asset-tree-secret', t('secretBadge')));
+            if ((state.canPlaces || state.canObjects || state.canArrange) && isFolder(asset)) {
+                var sortNames = placeSortNames(asset.id);
+                if (sortNames.length > 1) {
+                    var sortWay = labeledWay(sortNames);
+                    row.appendChild(sortButton(t(sortWay < 0 ? 'sortNameDown' : 'sortNameUp'), function () {
+                        sortPlaceByName(asset.id, sortWay);
+                    }));
+                }
+            }
             var queued = equipmentCount(asset.id);
             if (queued) row.appendChild(el('span', 'asset-tree-qcount', '(' + queued + ')'));
             row.appendChild(nestButton(asset.id));
@@ -3895,6 +3953,22 @@
         return objects.length > 1 ? -1 : 1;
     }
 
+    function sortPlaceByName(placeId, direction) {
+        ajax('POST', '/assets/' + placeId + '/sort', { direction: direction < 0 ? -1 : 1 }, function (status, payload) {
+            if (status < 200 || status >= 300) {
+                notify((payload && payload.message) || t('errorTitle'));
+                return;
+            }
+            reloadTree(function () {
+                state.expanded[placeId] = true;
+                rememberExpanded();
+                renderNodes();
+                replaceDetail();
+                notify(t('saved'));
+            });
+        });
+    }
+
     function sortTypeByName(placeId, typeKey, direction) {
         var objects = equipmentIn(placeId, typeKey).slice();
         var way = direction < 0 ? -1 : 1;
@@ -3954,6 +4028,13 @@
         var name = el('span', 'asset-tree-name', type.label);
         name.insertBefore(typeTile(type, 'sm'), name.firstChild);
         row.appendChild(name);
+        var sortable = equipmentIn(placeId, type.typeKey);
+        if (state.canObjects && sortable.length > 1) {
+            var sortWay = nameSortWay(sortable);
+            row.appendChild(sortButton(t(sortWay < 0 ? 'sortNameDown' : 'sortNameUp'), function () {
+                sortTypeByName(placeId, type.typeKey, sortWay);
+            }));
+        }
         var count = typeFolderCount(placeId, type);
         if (count) row.appendChild(el('span', 'asset-tree-qcount', '(' + count + ')'));
         if (state.canArrange) {
@@ -8205,16 +8286,19 @@
     }
 
     function ensureClinics(done) {
-        if (state.clinics) {
+        if (state.clinics && state.clinicsFor === state.projectKey) {
             if (done) done();
             return;
         }
-        if (state.clinicsLoading) return;
-        state.clinicsLoading = true;
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/circles', null, function (status, payload) {
-            state.clinicsLoading = false;
+        var projectKey = state.projectKey;
+        if (state.clinicsLoading === projectKey) return;
+        state.clinicsLoading = projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/circles', null, function (status, payload) {
+            if (state.clinicsLoading === projectKey) state.clinicsLoading = false;
+            if (state.projectKey !== projectKey) return;
             if (status === 200) state.clinics = payload || [];
             else state.clinics = [];
+            state.clinicsFor = projectKey;
             if (done) done();
             else if (state.view === 'settings' && (state.schemaTab === 'access' || state.schemaTab === 'portal')) renderFrame();
         });
@@ -13809,6 +13893,9 @@
         state.grants = null;
         state.roles = null;
         state.portalRules = null;
+        state.clinics = null;
+        state.clinicsFor = '';
+        state.clinicsLoading = false;
         state.portalDraft = null;
         state.flowRules = null;
         state.flowBook = null;
@@ -13878,6 +13965,11 @@
         state.mapAnchor = null;
         state.mapClickAt = 0;
         state.reportCatalog = null;
+        state.reportCatalogFor = '';
+        state.clinics = null;
+        state.clinicsFor = '';
+        state.clinicsLoading = false;
+        state.reportsLoading = false;
         state.reportKey = 'status';
         state.reportView = null;
         state.reportBoard = false;
@@ -13912,6 +14004,9 @@
         state.grants = null;
         state.roles = null;
         state.portalRules = null;
+        state.clinics = null;
+        state.clinicsFor = '';
+        state.clinicsLoading = false;
         state.portalDraft = null;
         state.flowRules = null;
         state.flowBook = null;
@@ -31673,6 +31768,7 @@
         next.portalMine = !!show;
         next.portalColumns = columns.length ? columns.join(',') : '-';
         var project = currentProject();
+        if (project && project.setup && project.setup.portalLayout) next.portalLayout = project.setup.portalLayout;
         if (project) project.setup = next;
         saveProjectView({ setup: next }, null, true);
     }
@@ -31833,7 +31929,7 @@
         box.appendChild(el('h3', 'asset-tree-settings-title', t('portalLayoutTitle')));
         box.appendChild(el('p', 'asset-tree-hint', t('portalLayoutHint')));
         var choices = el('div', 'asset-tree-portal-layouts');
-        var current = knownPortalLayout(state.portalLayout);
+        var current = projectPortalLayout();
         [
             ['tiles', 'portalLayoutTiles'],
             ['cards', 'portalLayoutCards'],
@@ -31851,11 +31947,15 @@
                 var want = item[0];
                 ajax('PUT', '/projects/' + encodeURIComponent(state.projectKey) + '/portal-layout', { layout: want }, function (status, payload) {
                     if (status >= 200 && status < 300 && payload && knownPortalLayout(payload.layout) === payload.layout) {
-                        state.portalLayout = payload.layout;
+                        var project = currentProject();
+                        if (project) {
+                            project.setup = project.setup || {};
+                            project.setup.portalLayout = payload.layout;
+                        }
                         return;
                     }
                     var radios = box.querySelectorAll('input');
-                    for (var i = 0; i < radios.length; i++) radios[i].checked = radios[i].value === knownPortalLayout(state.portalLayout);
+                    for (var i = 0; i < radios.length; i++) radios[i].checked = radios[i].value === projectPortalLayout();
                     notify((payload && payload.message) || t('errorTitle'));
                 });
             });
@@ -31869,6 +31969,13 @@
 
     function knownPortalLayout(value) {
         return value === 'tiles' || value === 'cards' || value === 'list' ? value : 'tiles';
+    }
+
+    function projectPortalLayout() {
+        var project = currentProject();
+        var own = project && project.setup && project.setup.portalLayout;
+        if (own === 'tiles' || own === 'cards' || own === 'list') return own;
+        return knownPortalLayout(state.portalLayout);
     }
 
     function renderPortalSettings(panel) {
@@ -32693,19 +32800,22 @@
     }
 
     function ensureReports(done) {
-        if (state.reportCatalog || !moduleOn('reports')) {
+        if ((state.reportCatalog && state.reportCatalogFor === state.projectKey) || !moduleOn('reports')) {
             if (done) done();
             return;
         }
+        var projectKey = state.projectKey;
         if (done) {
             state.reportWaiters = state.reportWaiters || [];
             state.reportWaiters.push(done);
         }
-        if (state.reportsLoading) return;
-        state.reportsLoading = true;
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/reports', null, function (status, payload) {
-            state.reportsLoading = false;
+        if (state.reportsLoading === projectKey) return;
+        state.reportsLoading = projectKey;
+        ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/reports', null, function (status, payload) {
+            if (state.reportsLoading === projectKey) state.reportsLoading = false;
+            if (state.projectKey !== projectKey) return;
             state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+            state.reportCatalogFor = projectKey;
             var waiters = state.reportWaiters || [];
             state.reportWaiters = [];
             if (waiters.length) waiters.forEach(function (fn) { fn(); });

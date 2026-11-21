@@ -783,6 +783,49 @@ public class ProductRulesTest {
     }
 
     @Test
+    public void nameOrderPutsTenAfterTwo() {
+        assertTrue(NameOrder.compare("\u041a\u0430\u0431\u0438\u043d\u0435\u0442 2", "\u041a\u0430\u0431\u0438\u043d\u0435\u0442 10") < 0);
+        assertTrue(NameOrder.compare("\u0411", "\u0430") > 0);
+        assertEquals(0, NameOrder.compare("Canon", "canon"));
+    }
+
+    @Test
+    public void placeTypesSortByLabelAndKeepNesting() {
+        List<PlaceLayout.Fact> facts = Arrays.asList(
+                new PlaceLayout.Fact("printer", ""),
+                new PlaceLayout.Fact("scan", ""),
+                new PlaceLayout.Fact("needle", "printer"));
+        Map<String, String> labels = new LinkedHashMap<String, String>();
+        labels.put("printer", "\u041f\u0440\u0438\u043d\u0442\u0435\u0440");
+        labels.put("scan", "\u0421\u043a\u0430\u043d\u0435\u0440");
+        labels.put("needle", "\u0418\u0433\u043b\u0430");
+        List<String> lines = Arrays.asList("scan@", "printer@", "needle@printer");
+        List<String> pinned = Arrays.asList("printer", "scan", "needle");
+        assertEquals(Arrays.asList("printer@", "needle@printer", "scan@"),
+                PlaceLayout.orderByName(lines, pinned, facts, labels, false));
+        assertEquals(Arrays.asList("scan@", "printer@", "needle@printer"),
+                PlaceLayout.orderByName(lines, pinned, facts, labels, true));
+    }
+
+    @Test
+    public void portalLayoutStaysWithItsProject() {
+        ModuleSetupDto medical = new ModuleSetupDto();
+        medical.setPortalLayout("cards");
+        medical.setPortalMine(Boolean.TRUE);
+        ModuleSetupDto read = ModuleSetup.read(ModuleSetup.write(medical));
+        assertEquals("cards", read.getPortalLayout());
+        assertEquals(Boolean.TRUE, read.getPortalMine());
+        ModuleSetupDto patch = new ModuleSetupDto();
+        patch.setPortalMine(Boolean.FALSE);
+        ModuleSetupDto merged = ModuleSetup.merge(read, patch);
+        assertEquals("cards", merged.getPortalLayout());
+        assertEquals(Boolean.FALSE, merged.getPortalMine());
+        assertNull(ModuleSetup.read("").getPortalLayout());
+        patch.setPortalLayout("list");
+        assertEquals("list", ModuleSetup.merge(merged, patch).getPortalLayout());
+    }
+
+    @Test
     public void exportKeepsFiftyThousandRows() {
         assertFalse(ReportLines.cutsExport(50000));
         assertTrue(ReportLines.cutsExport(50001));
