@@ -215,6 +215,7 @@ import com.assetstree.jira.model.DuplicateMarks;
 import com.assetstree.jira.model.DocxFill;
 import com.assetstree.jira.model.FieldKinds;
 import com.assetstree.jira.model.GrantCaps;
+import com.assetstree.jira.model.ChartLayout;
 import com.assetstree.jira.model.GrantHomes;
 import com.assetstree.jira.model.GrantDraft;
 import com.assetstree.jira.model.OwnReach;
@@ -243,6 +244,7 @@ import com.assetstree.jira.model.LinkRules;
 import com.assetstree.jira.model.ReportLines;
 import com.assetstree.jira.model.LifeApprovers;
 import com.assetstree.jira.model.ModuleSetup;
+import com.assetstree.jira.model.PortalShowcase;
 import com.assetstree.jira.model.PlanUnderlay;
 import com.assetstree.jira.model.CalendarIssues;
 import com.assetstree.jira.model.CalendarRaise;
@@ -5632,7 +5634,7 @@ public class AssetServiceImpl implements AssetService {
         saved.setTreeObjects(Boolean.valueOf(row != null && row.getTreeMode() == 1));
         saved.setColumns(row == null ? new ArrayList<String>() : ViewColumns.split(row.getColumnList()));
         saved.setModules(row == null ? new ArrayList<String>() : ProjectModules.split(row.getModuleList()));
-        saved.setSetup(ModuleSetup.read(row == null ? "" : row.getOptionList()));
+        saved.setSetup(namedAudience(ModuleSetup.read(row == null ? "" : row.getOptionList())));
         return saved;
     }
 
@@ -5716,7 +5718,7 @@ public class AssetServiceImpl implements AssetService {
             project.setTreeObjects(row != null && row.getTreeMode() == 1);
             project.setColumns(row == null ? new ArrayList<String>() : ViewColumns.split(row.getColumnList()));
             project.setModules(row == null ? new ArrayList<String>() : ProjectModules.split(row.getModuleList()));
-            project.setSetup(ModuleSetup.read(row == null ? "" : row.getOptionList()));
+            project.setSetup(namedAudience(ModuleSetup.read(row == null ? "" : row.getOptionList())));
         }
     }
 
@@ -6320,7 +6322,20 @@ public class AssetServiceImpl implements AssetService {
                     }
                     ProjectViewEntity view = viewRow(project.getKey());
                     ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
-                    if (!Boolean.TRUE.equals(setup.getPortalMine())) {
+                    boolean mineOn = Boolean.TRUE.equals(setup.getPortalMine());
+                    boolean listed = PortalShowcase.sees(setup.getPortalAudience(), holder);
+                    if (!mineOn && !listed) {
+                        continue;
+                    }
+                    List<PortalMineDto.Chart> charts = listed ? portalCharts(project, setup) : new ArrayList<PortalMineDto.Chart>();
+                    if (!mineOn) {
+                        if (charts.isEmpty()) {
+                            continue;
+                        }
+                        PortalMineDto.Group chartsOnly = new PortalMineDto.Group();
+                        chartsOnly.setKey(project.getKey());
+                        chartsOnly.setCharts(charts);
+                        groups.add(chartsOnly);
                         continue;
                     }
                     List<String> columns = ModuleSetup.portalColumnList(setup.getPortalColumns());
@@ -6349,7 +6364,7 @@ public class AssetServiceImpl implements AssetService {
                             return left.getName().compareToIgnoreCase(right.getName());
                         }
                     });
-                    if (cards.isEmpty()) {
+                    if (cards.isEmpty() && charts.isEmpty()) {
                         continue;
                     }
                     PortalMineDto.Group group = new PortalMineDto.Group();
@@ -6357,6 +6372,7 @@ public class AssetServiceImpl implements AssetService {
                     group.setCount(cards.size());
                     group.setCountLabel(portalCount(cards.size()));
                     group.setAssets(cards);
+                    group.setCharts(charts);
                     groups.add(group);
                     total += cards.size();
                 }
@@ -8670,6 +8686,137 @@ public class AssetServiceImpl implements AssetService {
         return text.toString();
     }
 
+    private static final String[] PORTAL_CHART_COLORS = new String[] {
+            "#0052CC", "#00875A", "#6554C0", "#FF8B00", "#00B8D9", "#DE350B", "#36B37E", "#8777D9"
+    };
+
+    private ModuleSetupDto namedAudience(ModuleSetupDto setup) {
+        if (setup == null) {
+            return null;
+        }
+        StringBuilder names = new StringBuilder();
+        for (String key : PortalShowcase.list(setup.getPortalAudience())) {
+            ApplicationUser person = findDirectoryUser(key);
+            String name = key;
+            if (person != null && person.getDisplayName() != null && !person.getDisplayName().trim().isEmpty()) {
+                name = person.getDisplayName().trim().replace('\n', ' ');
+            }
+            if (names.length() > 0) {
+                names.append('\n');
+            }
+            names.append(name);
+        }
+        setup.setPortalAudienceNames(names.toString());
+        return setup;
+    }
+
+    private List<PortalMineDto.Chart> portalCharts(Project project, ModuleSetupDto setup) {
+        List<PortalMineDto.Chart> charts = new ArrayList<PortalMineDto.Chart>();
+        if (project == null || setup == null || !moduleOn(project.getKey(), ProjectModules.REPORTS)) {
+            return charts;
+        }
+        List<String> wanted = new ArrayList<String>();
+        List<String> kinds = new ArrayList<String>();
+        for (String id : PortalShowcase.list(setup.getPortalReports())) {
+            if (wanted.size() >= PortalShowcase.CHART_LIMIT || wanted.contains(id)) {
+                continue;
+            }
+            wanted.add(id);
+            kinds.add("");
+        }
+        for (String boardId : PortalShowcase.list(setup.getPortalBoards())) {
+            int id;
+            try {
+                id = Integer.parseInt(boardId);
+            } catch (NumberFormatException ex) {
+                continue;
+            }
+            ReportBoardEntity row = ao().get(ReportBoardEntity.class, id);
+            if (row == null || row.getProjectKey() == null || !ProjectKeys.same(row.getProjectKey(), project.getKey())) {
+                continue;
+            }
+            for (ReportBoards.Panel panel : ReportBoards.read(row.getPanels())) {
+                if (wanted.size() >= PortalShowcase.CHART_LIMIT) {
+                    break;
+                }
+                String report = panel.getReport() == null ? "" : panel.getReport().trim().toLowerCase(Locale.ROOT);
+                if (report.isEmpty() || wanted.contains(report)) {
+                    continue;
+                }
+                wanted.add(report);
+                kinds.add(panel.getChart() == null ? "" : panel.getChart());
+            }
+        }
+        for (int i = 0; i < wanted.size(); i++) {
+            PortalMineDto.Chart chart = portalChart(project, wanted.get(i), kinds.get(i));
+            if (chart != null) {
+                charts.add(chart);
+            }
+        }
+        return charts;
+    }
+
+    private PortalMineDto.Chart portalChart(Project project, String reportKey, String preferred) {
+        try {
+            ReportViewDto view = reportViewInside(project, reportKey, 0, false, "", "", "");
+            if (view == null || view.getRows() == null) {
+                return null;
+            }
+            String chartKind = preferred == null || preferred.trim().isEmpty() ? view.getChart() : preferred;
+            List<PortalMineDto.Slice> slices = new ArrayList<PortalMineDto.Slice>();
+            int total = 0;
+            int other = 0;
+            int index = 0;
+            for (ReportBucketDto row : view.getRows()) {
+                if (row == null) {
+                    continue;
+                }
+                int count = row.getCount();
+                if (count <= 0 && row.getAmount() > 0L) {
+                    count = row.getAmount() > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) row.getAmount();
+                }
+                if (count <= 0) {
+                    continue;
+                }
+                total += count;
+                if (slices.size() >= PortalShowcase.SLICE_LIMIT) {
+                    other += count;
+                    continue;
+                }
+                PortalMineDto.Slice slice = new PortalMineDto.Slice();
+                String label = row.getLabel() == null ? "" : row.getLabel().trim();
+                slice.setLabel(label.isEmpty() ? String.valueOf(count) : label);
+                slice.setCount(count);
+                String color = row.getColor();
+                if (color == null || !color.matches("#[0-9A-Fa-f]{6}")) {
+                    color = PORTAL_CHART_COLORS[index % PORTAL_CHART_COLORS.length];
+                }
+                slice.setColor(color);
+                slices.add(slice);
+                index++;
+            }
+            if (other > 0) {
+                PortalMineDto.Slice rest = new PortalMineDto.Slice();
+                rest.setLabel(i18n().getText("asset-tree.ui.portalShowcaseMore"));
+                rest.setCount(other);
+                rest.setColor("#6B778C");
+                slices.add(rest);
+            }
+            if (slices.isEmpty()) {
+                return null;
+            }
+            PortalMineDto.Chart chart = new PortalMineDto.Chart();
+            chart.setTitle(view.getTitle() == null ? "" : view.getTitle());
+            chart.setKind(ChartLayout.ring(chartKind, slices.size()) ? "donut" : "bars");
+            chart.setTotal(total);
+            chart.setRows(slices);
+            return chart;
+        } catch (RuntimeException ex) {
+            log.debug("Portal chart {} was skipped", reportKey, ex);
+            return null;
+        }
+    }
+
     private PortalMineDto.Card portalCard(AssetEntity row, List<AssetAttributeEntity> attributes, AssetTypeDto type,
                                           Map<Integer, AssetEntity> index, List<String> columns, String role,
                                           String projectKey, boolean photos) {
@@ -8693,11 +8840,13 @@ public class AssetServiceImpl implements AssetService {
         if (type != null) {
             card.setColor(type.getColor() == null ? "#5D6B82" : type.getColor());
             card.setIcon(type.getIcon() == null ? "box" : type.getIcon());
+            card.setTypeName(type.getLabel() == null ? "" : type.getLabel());
         } else {
             card.setColor("#5D6B82");
             card.setIcon("box");
         }
         Map<String, String> values = portalValues(row, attributes, type, index);
+        card.setPlace(values.get("location") == null ? "" : values.get("location"));
         List<PortalMineDto.Line> lines = new ArrayList<PortalMineDto.Line>();
         Set<String> seen = new HashSet<String>();
         for (String column : columns) {

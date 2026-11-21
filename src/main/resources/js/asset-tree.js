@@ -20174,8 +20174,9 @@
         measured.forEach(function (row) { if (row.count) drawn.push(row); });
         if (kind === 'columns' || kind === 'histogram') {
             var columns = el('div', 'asset-tree-report-chart');
-            var plot = reportColumnsChart(measured, max, money);
-            if (kind === 'histogram') plot.className += ' is-histogram';
+            var crowded = kind === 'histogram' && measured.length > 8;
+            var plot = crowded ? reportBarsChart(measured, max, money) : reportColumnsChart(measured, max, money);
+            if (kind === 'histogram' && !crowded) plot.className += ' is-histogram';
             columns.appendChild(plot);
             return columns;
         }
@@ -22488,6 +22489,10 @@
             furniture: setup.furniture || '',
             glyphs: setup.glyphs || '',
             portalMine: !!setup.portalMine,
+            portalReports: setup.portalReports || '',
+            portalBoards: setup.portalBoards || '',
+            portalAudience: setup.portalAudience || '',
+            portalAudienceNames: setup.portalAudienceNames || '',
             photo: !!setup.photo,
             tniKeep: clampNum(setup.tniKeep || 90, 1, 3650),
             tniProbeDays: clampNum(setup.tniProbeDays || 3, 1, 30),
@@ -31053,6 +31058,157 @@
         saveProjectView({ setup: next }, null, true);
     }
 
+    function portalShowcaseSettings() {
+        var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
+        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalShowcaseTitle')));
+        box.appendChild(el('p', 'asset-tree-hint', t('portalShowcaseHint')));
+        var projectKey = state.projectKey;
+        if (state.reportCatalog == null || state.boards == null) {
+            box.appendChild(el('p', 'asset-tree-hint', t('loading')));
+            if (!state.portalListsLoading) {
+                state.portalListsLoading = true;
+                var pending = 0;
+                function done() {
+                    pending--;
+                    if (pending > 0) return;
+                    state.portalListsLoading = false;
+                    refreshPortalSettings();
+                }
+                if (state.reportCatalog == null) {
+                    pending++;
+                    ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/reports', null, function (status, payload) {
+                        if (state.projectKey === projectKey) {
+                            state.reportCatalog = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+                        }
+                        done();
+                    });
+                }
+                if (state.boards == null) {
+                    pending++;
+                    ajax('GET', '/projects/' + encodeURIComponent(projectKey) + '/boards', null, function (status, payload) {
+                        if (state.projectKey === projectKey) {
+                            state.boards = status === 200 && Object.prototype.toString.call(payload) === '[object Array]' ? payload : [];
+                        }
+                        done();
+                    });
+                }
+                if (!pending) state.portalListsLoading = false;
+            }
+            return box;
+        }
+        var setup = moduleSetup();
+        var reports = String(setup.portalReports || '').split(',').filter(function (id) { return id; });
+        var boards = String(setup.portalBoards || '').split(',').filter(function (id) { return id; });
+        var people = String(setup.portalAudience || '').split(',').filter(function (id) { return id; });
+        var names = String(setup.portalAudienceNames || '').split('\n');
+        function remember() {
+            var project = currentProject();
+            if (!project) return;
+            if (!project.setup) project.setup = {};
+            project.setup.portalReports = reports.join(',');
+            project.setup.portalBoards = boards.join(',');
+            project.setup.portalAudience = people.join(',');
+            project.setup.portalAudienceNames = names.join('\n');
+            var next = moduleSetup();
+            saveProjectView({ setup: next }, null, true);
+        }
+        function checks(title, rows, selected, limit, read) {
+            box.appendChild(el('h3', 'asset-tree-settings-title', title));
+            if (!rows.length) {
+                box.appendChild(el('p', 'asset-tree-hint', t('portalShowcaseEmpty')));
+                return;
+            }
+            var grid = el('div', 'asset-tree-portal-mine-fields');
+            rows.forEach(function (row) {
+                var id = read(row);
+                if (!id) return;
+                var line = el('label', 'asset-tree-check');
+                var input = el('input');
+                input.type = 'checkbox';
+                input.checked = selected.indexOf(id) >= 0;
+                input.setAttribute('aria-label', row.name || id);
+                input.addEventListener('change', function () {
+                    var at = selected.indexOf(id);
+                    if (input.checked && at < 0) {
+                        if (selected.length >= limit) {
+                            input.checked = false;
+                            notify(t('portalShowcaseLimit'));
+                            return;
+                        }
+                        selected.push(id);
+                    }
+                    if (!input.checked && at >= 0) selected.splice(at, 1);
+                    remember();
+                });
+                line.appendChild(input);
+                line.appendChild(el('span', null, row.name || id));
+                grid.appendChild(line);
+            });
+            box.appendChild(grid);
+        }
+        checks(t('portalShowcaseReports'), state.reportCatalog || [], reports, 8, function (row) {
+            return row && row.id ? String(row.id) : '';
+        });
+        checks(t('portalShowcaseBoards'), state.boards || [], boards, 6, function (row) {
+            return row && row.id != null ? String(row.id) : '';
+        });
+        box.appendChild(el('h3', 'asset-tree-settings-title', t('portalShowcasePeople')));
+        var chips = el('div', 'asset-tree-portal-people');
+        people.forEach(function (key, index) {
+            var chip = el('span', 'asset-tree-portal-person');
+            chip.appendChild(document.createTextNode(names[index] || key));
+            chip.appendChild(button('\u00d7', 'asset-tree-btn', function () {
+                people.splice(index, 1);
+                names.splice(index, 1);
+                remember();
+                refreshPortalSettings();
+            }));
+            chips.appendChild(chip);
+        });
+        box.appendChild(chips);
+        var search = input('portal-audience', '', false);
+        search.placeholder = t('portalShowcaseSearch');
+        box.appendChild(search);
+        var suggest = el('div', 'asset-tree-suggest');
+        box.appendChild(suggest);
+        var timer = null;
+        search.addEventListener('input', function () {
+            var query = search.value.trim();
+            suggest.innerHTML = '';
+            if (query.length < 2) return;
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                if (search.value.trim() !== query) return;
+                ajax('GET', '/users?q=' + encodeURIComponent(query), null, function (status, payload) {
+                    if (search.value.trim() !== query || status !== 200) return;
+                    suggest.innerHTML = '';
+                    (payload || []).forEach(function (user) {
+                        if (!user || !user.userKey) return;
+                        var text = user.displayName || user.username || user.userKey;
+                        suggest.appendChild(button(text, 'asset-tree-btn', function () {
+                            if (people.indexOf(user.userKey) >= 0) {
+                                suggest.innerHTML = '';
+                                search.value = '';
+                                return;
+                            }
+                            if (people.length >= 40) {
+                                notify(t('portalShowcaseLimit'));
+                                return;
+                            }
+                            people.push(user.userKey);
+                            names.push(text);
+                            search.value = '';
+                            suggest.innerHTML = '';
+                            remember();
+                            refreshPortalSettings();
+                        }));
+                    });
+                });
+            }, 220);
+        });
+        return box;
+    }
+
     function portalLayoutSettings() {
         var box = el('section', 'asset-tree-portal-fields asset-tree-portal-mine-settings');
         box.appendChild(el('h3', 'asset-tree-settings-title', t('portalLayoutTitle')));
@@ -31098,6 +31254,7 @@
         panel.appendChild(el('p', 'asset-tree-hint', t('portalSectionHint')));
         if (state.canAdmin) panel.appendChild(portalLayoutSettings());
         panel.appendChild(portalMineSettings());
+        if (moduleOn('reports')) panel.appendChild(portalShowcaseSettings());
         var layout = el('div', 'asset-tree-settings-block asset-tree-portal-layout');
         var fields = el('div', 'asset-tree-portal-fields');
         fields.appendChild(el('h3', 'asset-tree-settings-title', t('portalFieldsTitle')));

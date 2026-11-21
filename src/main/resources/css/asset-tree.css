@@ -3259,9 +3259,11 @@ a.asset-tree-url {
 
 #asset-tree-app button.asset-tree-legend-btn {
     display: inline-flex !important;
+    flex-wrap: nowrap !important;
     width: auto !important;
     max-width: 100% !important;
     align-self: flex-start;
+    white-space: nowrap !important;
 }
 
 #asset-tree-app .asset-tree-legend-label {
@@ -6133,6 +6135,26 @@ a.asset-tree-preview-icon:focus {
     margin-top: 8px;
 }
 
+#asset-tree-app .asset-tree-portal-people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+}
+
+#asset-tree-app .asset-tree-portal-person {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 2px 4px 2px 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #f4f5f7;
+    color: #172b4d;
+    font-size: 13px;
+}
+
 #asset-tree-app .asset-tree-portal-mine-fields .asset-tree-check {
     margin: 0;
 }
@@ -8568,12 +8590,15 @@ a.asset-tree-preview-icon:focus {
 
 #asset-tree-app .asset-tree-report-legend li {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 10px;
+    max-width: 100%;
     min-height: 28px;
     color: #172b4d;
     font-size: 15px;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 #asset-tree-app .asset-tree-report-legend i {
@@ -8810,7 +8835,7 @@ a.asset-tree-preview-icon:focus {
 #asset-tree-app .asset-tree-report-column-label {
     display: block;
     width: 100%;
-    max-height: 2.6em;
+    max-height: 1.3em;
     margin-top: 8px;
     overflow: hidden;
     color: #42526e;
@@ -8818,7 +8843,10 @@ a.asset-tree-preview-icon:focus {
     font-weight: 600;
     line-height: 1.3;
     text-align: center;
-    white-space: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: keep-all;
+    overflow-wrap: normal;
 }
 
 #asset-tree-app .asset-tree-report-bars {
