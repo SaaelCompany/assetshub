@@ -46,6 +46,11 @@ public class ModuleSetupDto {
     private String glyphs;
     private Boolean portalMine;
     private String portalColumns;
+    private String portalReports;
+    private String portalBoards;
+    private String portalAudience;
+    /** Display names in the same order as portalAudience. Not stored. */
+    private String portalAudienceNames;
     /** True when an equipment card can show one photo. */
     private Boolean photo;
     /**
@@ -141,6 +146,14 @@ public class ModuleSetupDto {
     public void setPortalMine(Boolean portalMine) { this.portalMine = portalMine; }
     public String getPortalColumns() { return portalColumns; }
     public void setPortalColumns(String portalColumns) { this.portalColumns = portalColumns; }
+    public String getPortalReports() { return portalReports; }
+    public void setPortalReports(String portalReports) { this.portalReports = portalReports; }
+    public String getPortalBoards() { return portalBoards; }
+    public void setPortalBoards(String portalBoards) { this.portalBoards = portalBoards; }
+    public String getPortalAudience() { return portalAudience; }
+    public void setPortalAudience(String portalAudience) { this.portalAudience = portalAudience; }
+    public String getPortalAudienceNames() { return portalAudienceNames; }
+    public void setPortalAudienceNames(String portalAudienceNames) { this.portalAudienceNames = portalAudienceNames; }
     public Boolean getPhoto() { return photo; }
     public void setPhoto(Boolean photo) { this.photo = photo; }
     public String getCardOpen() { return cardOpen; }

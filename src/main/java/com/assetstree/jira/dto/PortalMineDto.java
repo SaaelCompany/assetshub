@@ -61,6 +61,7 @@ public class PortalMineDto {
         private int count;
         private String countLabel = "";
         private List<Card> assets = new ArrayList<Card>();
+        private List<Chart> charts = new ArrayList<Chart>();
 
         public String getKey() {
             return key;
@@ -93,6 +94,85 @@ public class PortalMineDto {
         public void setAssets(List<Card> assets) {
             this.assets = assets == null ? new ArrayList<Card>() : assets;
         }
+
+        public List<Chart> getCharts() {
+            return charts;
+        }
+
+        public void setCharts(List<Chart> charts) {
+            this.charts = charts == null ? new ArrayList<Chart>() : charts;
+        }
+    }
+
+    @XmlAccessorType(XmlAccessType.PROPERTY)
+    public static class Chart {
+        private String title = "";
+        private String kind = "bars";
+        private int total;
+        private List<Slice> rows = new ArrayList<Slice>();
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title == null ? "" : title;
+        }
+
+        public String getKind() {
+            return kind;
+        }
+
+        public void setKind(String kind) {
+            this.kind = "donut".equals(kind) ? "donut" : "bars";
+        }
+
+        public int getTotal() {
+            return total;
+        }
+
+        public void setTotal(int total) {
+            this.total = total;
+        }
+
+        public List<Slice> getRows() {
+            return rows;
+        }
+
+        public void setRows(List<Slice> rows) {
+            this.rows = rows == null ? new ArrayList<Slice>() : rows;
+        }
+    }
+
+    @XmlAccessorType(XmlAccessType.PROPERTY)
+    public static class Slice {
+        private String label = "";
+        private int count;
+        private String color = "";
+
+        public String getLabel() {
+            return label;
+        }
+
+        public void setLabel(String label) {
+            this.label = label == null ? "" : label;
+        }
+
+        public int getCount() {
+            return count;
+        }
+
+        public void setCount(int count) {
+            this.count = count;
+        }
+
+        public String getColor() {
+            return color;
+        }
+
+        public void setColor(String color) {
+            this.color = color == null ? "" : color;
+        }
     }
 
     @XmlAccessorType(XmlAccessType.PROPERTY)
@@ -106,6 +186,8 @@ public class PortalMineDto {
         private String statusLabel = "";
         private String statusCategory = "";
         private String role = "";
+        private String typeName = "";
+        private String place = "";
         private String color = "";
         private String icon = "";
         private boolean photo;
@@ -182,6 +264,22 @@ public class PortalMineDto {
 
         public void setRole(String role) {
             this.role = role == null ? "" : role;
+        }
+
+        public String getTypeName() {
+            return typeName;
+        }
+
+        public void setTypeName(String typeName) {
+            this.typeName = typeName == null ? "" : typeName;
+        }
+
+        public String getPlace() {
+            return place;
+        }
+
+        public void setPlace(String place) {
+            this.place = place == null ? "" : place;
         }
 
         public String getColor() {

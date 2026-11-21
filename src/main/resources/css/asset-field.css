@@ -309,6 +309,172 @@ input.asset-tree-portal-mine-search:focus {
     font-size: 14px;
 }
 
+.asset-tree-portal-mine-tools {
+    display: flex;
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+}
+
+.asset-tree-portal-mine-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: #6b778c;
+    font-size: 12px;
+}
+
+.asset-tree-portal-mine-pick select {
+    height: 28px;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+    color: #172b4d;
+    font: inherit;
+    font-size: 13px;
+}
+
+.asset-tree-portal-mine-bucket {
+    margin: 0 0 16px;
+}
+
+.asset-tree-portal-mine-bucket h4 {
+    margin: 0 0 8px;
+}
+
+button.asset-tree-portal-mine-fold {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 4px 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #172b4d !important;
+    font: inherit !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    line-height: 1.3 !important;
+    text-align: left;
+    cursor: pointer;
+}
+
+button.asset-tree-portal-mine-fold:hover {
+    color: #0052cc !important;
+}
+
+.asset-tree-portal-mine-chevron {
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 4px 0 4px 5px;
+    border-color: transparent transparent transparent #6b778c;
+    transform: rotate(90deg);
+}
+
+.asset-tree-portal-mine-bucket.is-collapsed .asset-tree-portal-mine-chevron {
+    transform: none;
+}
+
+.asset-tree-portal-mine-fold-count {
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+.asset-tree-portal-mine-body:not(.is-searching) .asset-tree-portal-mine-bucket.is-collapsed .asset-tree-portal-mine-grid {
+    display: none;
+}
+
+.asset-tree-portal-mine-charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    margin: 0 0 16px;
+}
+
+.asset-tree-portal-mine-charts > h3 {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: #6b778c;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.asset-tree-portal-mine-chart {
+    padding: 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: 3px;
+    background: #fff;
+}
+
+.asset-tree-portal-mine-chart-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 8px;
+}
+
+.asset-tree-portal-mine-chart-head strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #172b4d;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset-tree-portal-donut {
+    display: block;
+    width: 72px;
+    height: 72px;
+    margin: 0 0 8px;
+}
+
+.asset-tree-portal-bar {
+    display: grid;
+    grid-template-columns: minmax(72px, 1fr) minmax(64px, 88px) auto;
+    gap: 8px;
+    align-items: center;
+    margin: 0 0 6px;
+    font-size: 12px;
+}
+
+.asset-tree-portal-bar > span:first-child {
+    overflow: hidden;
+    color: #172b4d;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset-tree-portal-bar-track {
+    display: block;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: #f4f5f7;
+}
+
+.asset-tree-portal-bar-track > span {
+    display: block;
+    height: 100%;
+}
+
+.asset-tree-portal-bar strong {
+    color: #172b4d;
+    font-variant-numeric: tabular-nums;
+}
+
 .asset-tree-portal-mine-card {
     border: 1px solid #dfe1e6;
     border-radius: 3px;

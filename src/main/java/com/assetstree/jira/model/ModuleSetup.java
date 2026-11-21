@@ -60,6 +60,9 @@ public final class ModuleSetup {
         setup.setGlyphs(glyphs(values.get("syms")));
         setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
         setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
+        setup.setPortalReports(PortalShowcase.reports(values.get("preps")));
+        setup.setPortalBoards(PortalShowcase.boards(values.get("pbrd")));
+        setup.setPortalAudience(PortalShowcase.people(values.get("pwho")));
         setup.setPhoto(Boolean.valueOf("1".equals(values.get("photo"))));
         if (values.containsKey("copen")) {
             setup.setCardOpen(cardOpen(values.get("copen")));
@@ -123,6 +126,9 @@ public final class ModuleSetup {
         append(stored, "syms", glyphs(value.getGlyphs()));
         append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
         append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
+        append(stored, "preps", PortalShowcase.reports(value.getPortalReports()));
+        append(stored, "pbrd", PortalShowcase.boards(value.getPortalBoards()));
+        append(stored, "pwho", PortalShowcase.people(value.getPortalAudience()));
         append(stored, "photo", Boolean.TRUE.equals(value.getPhoto()) ? "1" : "0");
         String blocks = cardOpen(value.getCardOpen());
         if (blocks != null) {
@@ -421,6 +427,9 @@ public final class ModuleSetup {
         merged.setGlyphs(incoming.getGlyphs() != null ? incoming.getGlyphs() : base.getGlyphs());
         merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
         merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
+        merged.setPortalReports(incoming.getPortalReports() != null ? PortalShowcase.reports(incoming.getPortalReports()) : base.getPortalReports());
+        merged.setPortalBoards(incoming.getPortalBoards() != null ? PortalShowcase.boards(incoming.getPortalBoards()) : base.getPortalBoards());
+        merged.setPortalAudience(incoming.getPortalAudience() != null ? PortalShowcase.people(incoming.getPortalAudience()) : base.getPortalAudience());
         merged.setPhoto(incoming.getPhoto() != null ? incoming.getPhoto() : base.getPhoto());
         merged.setCardOpen(incoming.getCardOpen() != null ? cardOpen(incoming.getCardOpen()) : base.getCardOpen());
         merged.setIssueNotes(incoming.getIssueNotes() != null ? incoming.getIssueNotes() : base.getIssueNotes());
