@@ -47,6 +47,7 @@ public class ScaleRulesTest {
         assertTrue(GrantCaps.has(caps, GrantCaps.SCHEME_EDIT));
         assertTrue(GrantCaps.has(caps, GrantCaps.TYPES));
         assertFalse(GrantCaps.has(caps, GrantCaps.ADMIN));
+        assertFalse(GrantCaps.allows(caps, GrantCaps.SECRET));
         assertEquals(GrantCaps.PROJECT_ADMIN, GrantCaps.levelOf(caps));
         assertEquals(GrantCaps.ADMIN, GrantCaps.levelOf("admin"));
     }
