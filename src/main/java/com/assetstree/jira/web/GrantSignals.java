@@ -6,11 +6,12 @@ import com.atlassian.jira.security.groups.GroupManager;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.ao.ProjectGrantEntity;
 import com.assetstree.jira.model.GrantCaps;
+import com.assetstree.jira.service.JiraServices;
 import net.java.ao.Query;
 
 /**
- * Menu visibility for group grants stored on a project.
- * A failure here hides the extra item and leaves the Jira permission checks in place.
+ * Menu visibility for grants stored on a project.
+ * A row names a group or one user. A failure here hides the extra item and leaves the Jira permission checks in place.
  */
 final class GrantSignals {
     private GrantSignals() {
@@ -29,35 +30,65 @@ final class GrantSignals {
             return false;
         }
         try {
-            ActiveObjects ao = ComponentAccessor.getOSGiComponentInstanceOfType(ActiveObjects.class);
+            ActiveObjects ao = JiraServices.activeObjects();
             GroupManager groups = ComponentAccessor.getGroupManager();
             if (ao == null || groups == null) {
                 return false;
             }
-            ProjectGrantEntity[] rows = projectKey == null || projectKey.isEmpty()
+            if (listed(user, groups, manageOnly, projectKey == null || projectKey.isEmpty()
                     ? ao.find(ProjectGrantEntity.class)
-                    : ao.find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey));
-            for (ProjectGrantEntity row : rows) {
-                if (row == null || row.getGroupName() == null) {
-                    continue;
-                }
-                String caps = row.getCaps();
-                if (caps == null || caps.trim().isEmpty()) {
-                    caps = GrantCaps.fromLevel(row.getLevel());
-                }
-                if (manageOnly && !GrantCaps.has(caps, GrantCaps.TYPES) && !GrantCaps.has(caps, GrantCaps.ASSETS)) {
-                    continue;
-                }
-                if (caps.isEmpty()) {
-                    continue;
-                }
-                if (groups.isUserInGroup(user, row.getGroupName())) {
-                    return true;
-                }
+                    : ao.find(ProjectGrantEntity.class, Query.select().where("PROJECT_KEY = ?", projectKey)))) {
+                return true;
+            }
+            if (projectKey != null && !projectKey.isEmpty()
+                    && listed(user, groups, manageOnly, ao.find(ProjectGrantEntity.class,
+                    Query.select().where("PROJECT_KEY = ?", GrantCaps.ALL_PROJECTS)))) {
+                return true;
             }
         } catch (RuntimeException ex) {
             return false;
         }
         return false;
+    }
+
+    private static boolean listed(ApplicationUser user, GroupManager groups, boolean manageOnly, ProjectGrantEntity[] rows) {
+        if (rows == null) {
+            return false;
+        }
+        for (ProjectGrantEntity row : rows) {
+            if (row == null) {
+                continue;
+            }
+            String caps = row.getCaps();
+            if (caps == null || caps.trim().isEmpty()) {
+                caps = GrantCaps.fromLevel(row.getLevel());
+            }
+            if (manageOnly && !GrantCaps.has(caps, GrantCaps.TYPES) && !GrantCaps.has(caps, GrantCaps.ASSETS)) {
+                continue;
+            }
+            if (caps == null || caps.isEmpty()) {
+                continue;
+            }
+            if (grantApplies(user, row, groups)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean grantApplies(ApplicationUser user, ProjectGrantEntity row, GroupManager groups) {
+        String userKey = row.getUserKey();
+        if (userKey != null && !userKey.trim().isEmpty()) {
+            return user.getKey() != null && user.getKey().equals(userKey.trim());
+        }
+        String groupName = row.getGroupName();
+        if (groupName == null || groupName.trim().isEmpty() || groups == null) {
+            return false;
+        }
+        try {
+            return groups.isUserInGroup(user, groupName.trim());
+        } catch (RuntimeException ex) {
+            return false;
+        }
     }
 }

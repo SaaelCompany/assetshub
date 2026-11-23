@@ -6,7 +6,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
-/** Hourly check that moves due equipment and writes the notice. */
+/** Check every 15 minutes that moves due equipment and queues the report letter. */
 public class ServiceDueJob implements PluginJob {
     private static final Logger log = LoggerFactory.getLogger(ServiceDueJob.class);
 
@@ -16,6 +16,11 @@ public class ServiceDueJob implements PluginJob {
             AssetBridge.service().applyDuePlans();
         } catch (RuntimeException ex) {
             log.warn("Service dates were not applied", ex);
+        }
+        try {
+            AssetBridge.service().sendScheduledReports();
+        } catch (RuntimeException ex) {
+            log.warn("Report mail was not sent", ex);
         }
     }
 }

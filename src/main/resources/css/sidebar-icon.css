@@ -1,20 +1,21 @@
-/* Project sidebar glyph for "Активы". Same slot as the JSM nav icons:
-   a 16px mark inside .aui-icon-large, painted with the link color so the
-   selected and hover states follow the rest of the menu. The graphic is
-   images/sidebar-assets.svg. */
-.asset-tree-sidebar-icon {
-    background-color: currentColor;
-    background-image: none;
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Ccircle cx='12' cy='5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='5.75' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='18.25' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Cpath d='M12 7.2v3.3M12 10.5H7.1M12 10.5h4.9M7.1 10.5v5.7M16.9 10.5v5.7' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Ccircle cx='12' cy='5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='5.75' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Ccircle cx='18.25' cy='18.5' r='2.15' stroke='%23fff' stroke-width='1.7'/%3E%3Cpath d='M12 7.2v3.3M12 10.5H7.1M12 10.5h4.9M7.1 10.5v5.7M16.9 10.5v5.7' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-    mask-position: center;
-    -webkit-mask-size: contain;
-    mask-size: contain;
+/* Project sidebar glyph for Активы. The picture is inlined so the
+   resource minifier cannot split the address, and the mark is dark so it
+   stays visible on the light Jira Service Management menu. */
+.aui-sidebar .aui-nav-item .asset-tree-sidebar-icon,
+#asset-tree-project-link .asset-tree-sidebar-icon,
+span.asset-tree-sidebar-icon {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    background-color: transparent !important;
+    background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%3E%3Cpath%20d%3D%27M12%208.15V11.1M6.35%2011.1h11.3M6.35%2011.1v4.35M17.65%2011.1v4.35%27%20fill%3D%27none%27%20stroke%3D%27%2344546F%27%20stroke-width%3D%272.8%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%275.05%27%20r%3D%273.05%27%20fill%3D%27%2344546F%27%2F%3E%3Ccircle%20cx%3D%276.35%27%20cy%3D%2718.55%27%20r%3D%273.05%27%20fill%3D%27%2344546F%27%2F%3E%3Ccircle%20cx%3D%2717.65%27%20cy%3D%2718.55%27%20r%3D%273.05%27%20fill%3D%27%2344546F%27%2F%3E%3C%2Fsvg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: center !important;
+    background-size: 20px 20px !important;
 }
 
-.asset-tree-sidebar-icon:before {
-    content: none;
+.aui-sidebar .aui-nav-item .asset-tree-sidebar-icon:before,
+#asset-tree-project-link .asset-tree-sidebar-icon:before,
+span.asset-tree-sidebar-icon:before {
+    content: none !important;
 }

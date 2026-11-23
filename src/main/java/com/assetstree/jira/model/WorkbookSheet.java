@@ -252,7 +252,8 @@ public final class WorkbookSheet {
                 + "<fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills>"
                 + "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
                 + "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
-                + "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>"
+                + "<cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>"
+                + "<xf numFmtId=\"2\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyNumberFormat=\"1\"/></cellXfs>"
                 + "</styleSheet>";
     }
 
@@ -276,12 +277,50 @@ public final class WorkbookSheet {
         xml.append("<row r=\"").append(number).append("\">");
         if (cells != null) {
             for (int i = 0; i < cells.size() && i < MAX_COLUMNS; i++) {
+                String raw = cells.get(i);
+                if (raw != null && raw.length() > 3 && raw.charAt(0) == '\u0001' && raw.charAt(2) == ':') {
+                    String numberText = raw.substring(3);
+                    if (plainNumeric(numberText)) {
+                        char kind = raw.charAt(1);
+                        xml.append("<c r=\"").append(columnName(i)).append(number).append("\"");
+                        if (kind == 'd') {
+                            xml.append(" s=\"1\"");
+                        }
+                        xml.append("><v>").append(numberText).append("</v></c>");
+                        continue;
+                    }
+                }
                 xml.append("<c r=\"").append(columnName(i)).append(number).append("\" t=\"inlineStr\"><is><t xml:space=\"preserve\">");
-                xml.append(escape(cells.get(i)));
+                xml.append(escape(raw));
                 xml.append("</t></is></c>");
             }
         }
         xml.append("</row>");
+    }
+
+    private static boolean plainNumeric(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return false;
+        }
+        int start = raw.charAt(0) == '-' ? 1 : 0;
+        if (start >= raw.length()) {
+            return false;
+        }
+        boolean dot = false;
+        for (int i = start; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (ch == '.') {
+                if (dot) {
+                    return false;
+                }
+                dot = true;
+                continue;
+            }
+            if (ch < '0' || ch > '9') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String columnName(int index) {

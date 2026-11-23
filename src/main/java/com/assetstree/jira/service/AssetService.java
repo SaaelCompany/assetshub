@@ -3,6 +3,7 @@ package com.assetstree.jira.service;
 import com.atlassian.jira.issue.Issue;
 import com.atlassian.jira.user.ApplicationUser;
 import com.assetstree.jira.dto.AssetDto;
+import com.assetstree.jira.dto.AssetPeerDto;
 import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ProjectViewDto;
@@ -119,11 +120,19 @@ public interface AssetService {
 
     void deleteGrant(ApplicationUser user, String projectKey, String groupName);
 
+    void deleteUserGrant(ApplicationUser user, String projectKey, String userKey);
+
     List<GrantDto> searchGroups(ApplicationUser user, String query);
 
     IssueRefDto linkIssue(ApplicationUser user, int assetId, String issueKey);
 
     void unlinkIssue(ApplicationUser user, int assetId, long issueId);
+
+    AssetPeerDto linkPeer(ApplicationUser user, int assetId, int otherId);
+
+    void unlinkPeer(ApplicationUser user, int assetId, int otherId);
+
+    List<AssetPeerDto> searchPeers(ApplicationUser user, int assetId, String query);
 
     List<AssetDto> assetsForIssue(ApplicationUser user, long issueId);
 
@@ -180,6 +189,8 @@ public interface AssetService {
 
     List<UserProfileDto> searchUsers(ApplicationUser user, String query);
 
+    UserProfileDto userProfile(ApplicationUser user, String userKey);
+
     List<AssetDto> assetsForUser(ApplicationUser user, String userKey);
 
     void syncRequestAsset(ApplicationUser user, Issue issue, String previousAssetId, String nextAssetId);
@@ -228,9 +239,19 @@ public interface AssetService {
 
     SavedReportDto createReport(ApplicationUser user, String projectKey, SavedReportDraft draft);
 
+    SavedReportDto updateReportChart(ApplicationUser user, String projectKey, String reportKey, String chart);
+
+    SavedReportDto updateSavedReport(ApplicationUser user, String projectKey, String reportKey, SavedReportDraft draft);
+
     void deleteReport(ApplicationUser user, String projectKey, String reportKey);
 
-    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey);
+    ReportViewDto reportView(ApplicationUser user, String projectKey, String reportKey, int lineFrom, boolean allLines, String bucket);
+
+    byte[] exportReports(ApplicationUser user, String projectKey);
+
+    void sendReportMail(ApplicationUser user, String projectKey);
+
+    void sendScheduledReports();
 
     LifecycleDto lifecycle(ApplicationUser user, int assetId);
 

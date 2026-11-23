@@ -12,6 +12,13 @@ public interface ServicePlanEntity extends Entity {
 
     void setAssetId(int assetId);
 
+    /** Project of a calendar event that is not tied to an object. Empty on older rows. */
+    @Indexed
+    @StringLength(80)
+    String getProjectKey();
+
+    void setProjectKey(String projectKey);
+
     @StringLength(80)
     String getName();
 
@@ -47,7 +54,7 @@ public interface ServicePlanEntity extends Entity {
 
     void setAppliedFor(String appliedFor);
 
-    /** to, kts, or verify. Empty on rows created before kinds existed. */
+    /** Work-kind id, at most 16 characters. Empty on rows created before kinds existed. */
     @StringLength(16)
     String getKind();
 
@@ -78,4 +85,13 @@ public interface ServicePlanEntity extends Entity {
     String getCompletedOn();
 
     void setCompletedOn(String completedOn);
+
+    /**
+     * One occurrence moved or skipped without shifting the series.
+     * Pairs are {@code yyyy-mm-dd>yyyy-mm-dd} or {@code yyyy-mm-dd>-}, separated by commas.
+     */
+    @StringLength(StringLength.UNLIMITED)
+    String getMoves();
+
+    void setMoves(String moves);
 }

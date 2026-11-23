@@ -22,6 +22,7 @@ public class ServicePlanDto {
     private String endTime;
     private String completedOn;
     private boolean completed;
+    private String moves;
 
     public int getId() {
         return id;
@@ -129,4 +130,6 @@ public class ServicePlanDto {
     public void setCompletedOn(String completedOn) { this.completedOn = completedOn; }
     public boolean isCompleted() { return completed; }
     public void setCompleted(boolean completed) { this.completed = completed; }
+    public String getMoves() { return moves; }
+    public void setMoves(String moves) { this.moves = moves; }
 }

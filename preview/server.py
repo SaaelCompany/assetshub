@@ -498,6 +498,7 @@ STATE = {
     "lives": {},
     "cards": {}, "card_images": {},
     "assetKeys": {}, "ready": False, "views": {},
+    "peers": [],
 }
 
 
@@ -940,12 +941,18 @@ def ensure_portal_demo():
     ensure_type("test-place", "Площадка", True, "building", 10)
     ensure_type("test-dept", "Отделение", True, "department", 11)
     ensure_type("test-device", "Оборудование", False, "device", 12)
+    STATE["types"]["test-device"]["fields"] = [
+        {"fieldKey": "serial", "label": "Серийный номер", "kind": "text", "required": False, "position": 0},
+        {"fieldKey": "inventory", "label": "Инвентарный номер", "kind": "text", "required": False, "position": 1},
+    ]
     place_a = add_asset("TEST", "test-place", "Площадка А", None, "in_use", None, {}, "TEST-1")
     place_b = add_asset("TEST", "test-place", "Площадка Б", None, "in_use", None, {}, "TEST-2")
     department = add_asset("TEST", "test-dept", "Отделение А", place_a, "in_use", None, {}, "TEST-3")
-    add_asset("TEST", "test-device", "Аппарат", department, "in_use", None, {}, "TEST-4")
-    add_asset("TEST", "test-device", "Управляющая компания", department, "in_use", None, {}, "TEST-5")
-    add_asset("TEST", "test-device", "Принтер Б", place_b, "in_use", None, {}, "TEST-6")
+    apparat = add_asset("TEST", "test-device", "Аппарат", department, "in_use", "smirnov", {"serial": "SN-APPARAT-77", "inventory": "INV-100"}, "TEST-4")
+    office = add_asset("TEST", "test-device", "Управляющая компания", department, "in_use", None, {"serial": "SN-OFFICE-88", "inventory": "INV-200"}, "TEST-5")
+    add_asset("TEST", "test-device", "Принтер Б", place_b, "in_use", None, {"serial": "SN-PRINTER-99", "inventory": "INV-300"}, "TEST-6")
+    STATE["assets"][apparat]["description"] = "Кабинет бухгалтерии"
+    STATE["assets"][office]["description"] = "Серверная стойка"
     STATE["portal_rules"] = [
         {"id": 1, "assetId": place_a, "position": 1, "conditions": [{"field": "Площадка", "option": "Пункт А"}]},
         {"id": 2, "assetId": place_b, "position": 2, "conditions": [{"field": "Площадка", "option": "Пункт Б"}]},
@@ -1048,13 +1055,100 @@ def reject_module(project_key, module, text):
     return None
 
 
-def module_setup(stored):
+KIND_SLUG = re.compile(r"[a-z][a-z0-9]{0,15}")
+BUILTIN_KIND_LABELS = {
+    "to": "ТО",
+    "kts": "КТС",
+    "verify": "Поверка",
+    "staff": "Работа",
+    "event": "Мероприятие",
+    "update": "Обновление",
+}
+DEFAULT_KINDS = "to,kts,verify,staff,event,update"
+
+
+def parse_kinds(raw):
+    rows = []
+    seen = set()
+    for part in str(raw or "").split(","):
+        piece = part.strip()
+        if not piece:
+            continue
+        ident, _, label = piece.partition("|")
+        ident = ident.strip().lower()
+        label = re.sub(r"[,;|=]", " ", label)
+        label = re.sub(r"\s+", " ", label).strip()[:40]
+        if not KIND_SLUG.fullmatch(ident) or ident in seen:
+            continue
+        seen.add(ident)
+        rows.append((ident, label))
+        if len(rows) >= 24:
+            break
+    if not rows:
+        rows = [(key, "") for key in DEFAULT_KINDS.split(",")]
+    return rows
+
+
+def pack_kinds(rows):
+    parts = []
+    for ident, label in rows:
+        label = re.sub(r"\s+", " ", re.sub(r"[,;|=]", " ", label or "")).strip()[:40]
+        parts.append(ident if not label else ident + "|" + label)
+    return ",".join(parts) or DEFAULT_KINDS
+
+
+def kind_label(project_key, kind):
+    stored = ((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}
+    for ident, label in parse_kinds(stored.get("scheduleKinds")):
+        if ident == kind and label:
+            return label
+    return BUILTIN_KIND_LABELS.get(kind, kind)
+
+
+def module_setup(stored, migrate=True):
     stored = stored or {}
-    kinds = [key for key in ("to", "kts", "verify") if key in str(stored.get("scheduleKinds") or "to,kts,verify").split(",")]
+    raw = stored.get("scheduleKinds")
+    version = stored.get("scheduleKindVersion")
+    if migrate and version != 2 and (raw in (None, "") or str(raw).strip() == "to,kts,verify"):
+        raw = ""
+    kinds = parse_kinds(raw)
+    layer = str(stored.get("scheduleLayer") or "").strip().lower()
+    if layer in ("roster", "staff"):
+        layer = "roster"
+    elif layer not in {ident for ident, _label in kinds}:
+        layer = ""
     unit = stored.get("scheduleUnit") or "month"
     if unit not in ("once", "day", "week", "month", "year"):
         unit = "month"
     hidden = [key for key in str(stored.get("reportHidden") or "").split(",") if key in REPORT_STANDARD]
+    charts = []
+    seen_charts = set()
+    for part in str(stored.get("reportCharts") or "").split(","):
+        if ":" not in part:
+            continue
+        chart_key, chart_kind = part.split(":", 1)
+        chart_key = chart_key.strip().lower()
+        chart_kind = chart_kind.strip().lower()
+        if chart_key in REPORT_STANDARD and chart_kind in ("donut", "pie", "bar", "bars") and chart_key not in seen_charts:
+            seen_charts.add(chart_key)
+            charts.append("%s:%s" % (chart_key, chart_kind))
+    every = "month" if str(stored.get("reportMailEvery") or "").strip().lower() == "month" else "week"
+    try:
+        mail_day = int(stored.get("reportMailDay") or 1)
+    except (TypeError, ValueError):
+        mail_day = 1
+    mail_day = min(31, max(1, mail_day)) if every == "month" else (mail_day if 1 <= mail_day <= 7 else 1)
+    mail_to = []
+    for key in str(stored.get("reportMailTo") or "").split(","):
+        key = key.strip()
+        if re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", key) and key not in mail_to and len(mail_to) < 20:
+            mail_to.append(key)
+    mail_sent = str(stored.get("reportMailSent") or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", mail_sent):
+        mail_sent = ""
+    mail_part = str(stored.get("reportMailPart") or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}:[A-Za-z0-9._@,-]+", mail_part):
+        mail_part = ""
     grid = int(stored.get("mapGrid") or 24)
     if grid not in (8, 12, 16, 24, 32):
         grid = 24
@@ -1065,7 +1159,8 @@ def module_setup(stored):
     if not re.fullmatch(r"[A-Za-z0-9._@-]{0,80}", approver):
         approver = ""
     return {
-        "scheduleKinds": ",".join(kinds or ["to", "kts", "verify"]),
+        "scheduleKinds": pack_kinds(kinds),
+        "scheduleLayer": layer,
         "scheduleUnit": unit,
         "scheduleNotify": bool(stored.get("scheduleNotify")),
         "mapWidth": plan_limit(stored.get("mapWidth"), 1200, 640, 2400),
@@ -1073,11 +1168,209 @@ def module_setup(stored):
         "mapGrid": grid,
         "mapSnap": stored.get("mapSnap") is not False,
         "reportHidden": ",".join(hidden),
+        "reportCharts": ",".join(charts),
+        "reportMail": bool(stored.get("reportMail")),
+        "reportMailEvery": every,
+        "reportMailDay": mail_day,
+        "reportMailTo": ",".join(mail_to),
+        "reportMailSent": mail_sent,
+        "reportMailPart": mail_part,
         "lifeApproval": stored.get("lifeApproval") is not False,
         "lifeApprover": approver,
         "lifeCurrency": currency,
-        "lifeMonths": max(0, min(600, int(stored.get("lifeMonths") or 0))),
+        "lifeMonths": 60 if stored.get("lifeMonths") in (None, "") else max(0, min(600, int(stored.get("lifeMonths") or 0))),
+        "staffMarks": pack_staff_marks(stored.get("staffMarks")),
+        "staffOrder": pack_staff_order(stored.get("staffOrder")),
+        "staffPlaceOrder": pack_staff_places(stored.get("staffPlaceOrder")),
+        "scheduleBoards": pack_boards(stored.get("scheduleBoards")),
+        "scheduleOpen": pack_open(stored.get("scheduleOpen"), layer),
+        "furniture": pack_furniture(stored.get("furniture")),
+        "scheduleKindVersion": 2,
     }
+
+
+def pack_furniture(raw):
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    kept = []
+    for template in text.split("|"):
+        if len(kept) >= 24:
+            break
+        head = template.split("^", 2)
+        if len(head) < 3:
+            continue
+        ident = head[0].strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9]{0,7}", ident):
+            continue
+        name = re.sub(r"\s+", " ", re.sub(r"[,;|^!=]", " ", head[1])).strip()[:40]
+        shapes = []
+        for part in head[2].split("!"):
+            if len(shapes) >= 16:
+                break
+            bits = part.split(",")
+            if len(bits) < 5:
+                continue
+            kind = bits[0].strip().lower()
+            if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text", "power", "scs", "comm", "vent", "water"):
+                kind = "room"
+            def coord(value, limit):
+                try:
+                    number = int(value)
+                except (TypeError, ValueError):
+                    number = 0
+                return max(0, min(limit, number))
+            minimum = 16 if kind in ("room", "stair") else 8 if kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug") else 4
+            color = (bits[5] if len(bits) > 5 else "").strip().lower().lstrip("#")
+            if not re.fullmatch(r"[0-9a-f]{6}", color):
+                color = ""
+            label = re.sub(r"\s+", " ", re.sub(r"[,;|^!=]", " ", bits[6] if len(bits) > 6 else "")).strip()[:40]
+            shapes.append("%s,%s,%s,%s,%s,%s,%s,%s" % (
+                kind, coord(bits[1], 2000), coord(bits[2], 2000),
+                max(minimum, coord(bits[3], 800)), max(minimum, coord(bits[4], 800)), color, label,
+                room_angle(bits[7] if len(bits) > 7 else 0),
+            ))
+        if name and shapes and ident not in {item.split("^", 1)[0] for item in kept}:
+            kept.append(ident + "^" + name + "^" + "!".join(shapes))
+    return "|".join(kept)
+
+
+DEFAULT_STAFF_MARKS = (
+    ("work", "", "172b4d", 8, 1),
+    ("night", "", "4338ca", 8, 2),
+    ("trip", "", "0f766e", 8, 1),
+    ("leave", "", "d97706", 0, 0),
+    ("sick", "", "e11d48", 0, 0),
+)
+
+
+def pack_boards(raw):
+    parts = [part.strip().lower() for part in str(raw or "").split(",") if part.strip()]
+    calendar = "calendar" in parts
+    roster = "roster" in parts
+    if calendar and roster or not calendar and not roster:
+        return "calendar,roster"
+    return "calendar" if calendar else "roster"
+
+
+def pack_open(raw, layer):
+    value = str(raw or "").strip().lower()
+    if value in ("calendar", "roster"):
+        return value
+    if str(layer or "").strip().lower() in ("roster", "staff"):
+        return "roster"
+    return "calendar"
+
+
+def format_mark_hours(value):
+    rounded = round(float(value) * 100) / 100
+    if abs(rounded - round(rounded)) < 0.001:
+        return str(int(round(rounded)))
+    text = ("%s" % rounded).rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def mark_factor(piece, hours, ident):
+    if len(piece) > 4 and str(piece[4]).strip() != "":
+        try:
+            value = int(piece[4])
+        except (TypeError, ValueError):
+            value = -1
+        if value in (0, 1, 2):
+            return value
+    if hours <= 0:
+        return 0
+    if ident == "night":
+        return 2
+    return 1
+
+
+def pack_staff_order(raw):
+    keys = []
+    for part in str(raw or "").split(","):
+        key = part.strip()
+        if re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", key) and key not in keys:
+            keys.append(key)
+        if len(keys) >= 60:
+            break
+    return ",".join(keys)
+
+
+def pack_staff_places(raw):
+    ids = []
+    for part in str(raw or "").split(","):
+        key = part.strip()
+        if not re.fullmatch(r"\d{1,9}", key):
+            continue
+        key = str(int(key))
+        if key not in ids:
+            ids.append(key)
+        if len(ids) >= 80:
+            break
+    return ",".join(ids)
+
+
+def pack_staff_marks(raw):
+    source = str(raw or "").strip() or ",".join(
+        f"{item[0]}|{item[1]}|{item[2]}|{item[3]}|{item[4]}" for item in DEFAULT_STAFF_MARKS
+    )
+    rows = []
+    seen = set()
+    for part in source.split(","):
+        if len(rows) >= 12:
+            break
+        piece = part.split("|")
+        ident = (piece[0] if piece else "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9]{0,15}", ident) or ident in ("off", "hours") or ident in seen:
+            continue
+        seen.add(ident)
+        label = re.sub(r"\s+", " ", re.sub(r"[,;|=#]", " ", piece[1] if len(piece) > 1 else "")).strip()[:40]
+        color = (piece[2] if len(piece) > 2 else "").strip().lower()
+        if color.startswith("#"):
+            color = color[1:]
+        if not re.fullmatch(r"[0-9a-f]{6}", color):
+            color = "64748b"
+        try:
+            hours = int(piece[3] if len(piece) > 3 and piece[3] != "" else 8)
+        except (TypeError, ValueError):
+            hours = 8
+        hours = max(0, min(24, hours))
+        factor = mark_factor(piece, hours, ident)
+        rows.append((ident, label, color, hours, factor))
+    if not any(item[0] == "work" for item in rows):
+        rows.insert(0, ("work", "", "172b4d", 8, 1))
+        rows = rows[:12]
+    if not rows:
+        rows = list(DEFAULT_STAFF_MARKS)
+    return ",".join(f"{ident}|{label}|{color}|{hours}|{factor}" for ident, label, color, hours, factor in rows)
+
+
+def clean_day_marks(raw):
+    marks = {}
+    text = str(raw or "").strip()[:12000]
+    for part in text.split(","):
+        if ":" not in part or len(marks) >= 400:
+            continue
+        day, token = part.split(":", 1)
+        day = day.strip()
+        token = token.strip().lower()
+        ident = token
+        suffix = ""
+        if "@" in token:
+            ident, rest = token.split("@", 1)
+            rest = rest.strip()
+            if rest.startswith("="):
+                suffix = ""
+            elif re.fullmatch(r"\d{1,2}(\.\d{1,2})?", rest):
+                value = float(rest)
+                if 0 <= value <= 24:
+                    suffix = "@" + format_mark_hours(value)
+        if parse_staff_day(day) is None:
+            continue
+        if ident != "off" and not re.fullmatch(r"[a-z][a-z0-9]{0,15}", ident):
+            continue
+        marks[day] = ident if ident == "off" else ident + suffix
+    return ",".join(f"{day}:{marks[day]}" for day in sorted(marks))
 
 
 def plan_limit(raw, default, low, high):
@@ -1128,7 +1421,7 @@ def save_project_view(project_key, body, text):
                 present.add(key)
         view["modules"] = [key for key in KNOWN_MODULES if key in present]
     if isinstance(body.get("setup"), dict):
-        view["setup"] = module_setup(body.get("setup"))
+        view["setup"] = module_setup(body.get("setup"), migrate=False)
     return 200, project_view(project_key)
 
 
@@ -1165,7 +1458,7 @@ def add_asset(project, type_key, name, parent, status, custodian, values, object
     STATE["assets"][asset_id] = {
         "id": asset_id, "objectKey": key, "projectKey": project, "name": name,
         "description": "", "typeKey": type_key, "status": status, "parentId": parent,
-        "sortOrder": asset_id, "custodianKey": custodian, "created": "2026-09-26T09:00:00Z",
+        "sortOrder": asset_id, "custodianKey": custodian, "issuedKey": None, "created": "2026-09-26T09:00:00Z",
         "updated": "2026-09-26T09:00:00Z", "values": values, "offeredTypes": [],
     }
     return asset_id
@@ -1181,6 +1474,7 @@ def seed():
         "showInTree": True, "service": False, "sortOrder": 1, "fields": [],
     }
     add_asset("STP", "stp-place", "Усть-Лабинск", None, "in_use", None, {}, "STP-1")
+    add_asset("STP", "stp-place", "Краснодар", None, "in_use", None, {}, "STP-2")
 
 
 def normalize_parent(parent_id):
@@ -1356,6 +1650,7 @@ def picker_nodes(rows, text):
             "parentTypeLabel": parent_label,
             "location": location,
             "offeredLines": list(row.get("offeredTypes") or []) if location else [],
+            "search": asset_search_text(row, text),
         })
     return arrange_picker(sources)
 
@@ -1452,6 +1747,30 @@ def picker_root_label(root_key, items):
     return items[0]["typeLabel"] or root_key
 
 
+def asset_search_text(row, text):
+    parts = []
+
+    def add(value):
+        item = str(value or "").strip()
+        if item and item not in parts:
+            parts.append(item)
+
+    add(row.get("objectKey"))
+    add(row.get("description"))
+    for key_name in ("custodianKey", "issuedKey"):
+        user_key = row.get(key_name) or ""
+        add(user_key)
+        person = USERS.get(user_key) or {}
+        add(person.get("displayName"))
+        add(person.get("email"))
+    typed = type_row(row.get("typeKey")) or {}
+    values = row.get("values") or {}
+    for field in typed.get("fields") or []:
+        add(label_of(field.get("label"), text) if text else field.get("label"))
+        add(values.get(field.get("fieldKey")))
+    return " ".join(parts)
+
+
 def picker_asset(source, parent_id):
     return {
         "id": source["id"],
@@ -1461,6 +1780,7 @@ def picker_asset(source, parent_id):
         "status": source["status"],
         "typeLabel": source["typeLabel"],
         "group": False,
+        "search": source.get("search") or "",
     }
 
 
@@ -1510,6 +1830,7 @@ def asset_dto(asset, text, with_issues):
             if field["kind"] == "user" else asset["values"].get(field["fieldKey"], ""),
         })
     holder = USERS.get(asset.get("custodianKey") or "")
+    issued = USERS.get(asset.get("issuedKey") or "")
     dto = {
         "id": asset["id"], "objectKey": asset["objectKey"], "name": asset["name"], "description": asset["description"],
         "typeKey": asset["typeKey"], "typeLabel": typed["label"], "color": typed["color"], "icon": typed["icon"],
@@ -1519,7 +1840,7 @@ def asset_dto(asset, text, with_issues):
         "projectName": next(item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]),
         "location": location_of(asset), "editable": True,
         "cardImage": asset["id"] in STATE["card_images"],
-        "custodian": holder, "attributes": attributes,
+        "custodian": holder, "issued": issued, "attributes": attributes,
         "serviceDue": service_due_names(asset["id"]),
         "offeredTypes": list(asset.get("offeredTypes") or []) if is_location_id(asset["id"]) else [],
     }
@@ -1529,6 +1850,7 @@ def asset_dto(asset, text, with_issues):
         dto["comments"] = [comment_dto(row) for row in comments_of(asset["id"])]
         dto["files"] = [file_dto(row) for row in files_of(asset["id"])]
         dto["activities"] = [activity_dto(row) for row in activities_of(asset["id"])]
+        dto["peers"] = peers_for(asset["id"], text)
     return dto
 
 
@@ -1594,6 +1916,172 @@ def log_activity(asset_id, kind, field, old_value, new_value, author="ivanov"):
     record_activity(asset_id, kind, field, left, right, author)
 
 
+def peer_rows():
+    return STATE.setdefault("peers", [])
+
+
+def linked_peer_ids(asset_id):
+    found = set()
+    for pair in peer_rows():
+        if pair["low"] == asset_id:
+            found.add(pair["high"])
+        elif pair["high"] == asset_id:
+            found.add(pair["low"])
+    return found
+
+
+def peer_history(asset):
+    if not asset:
+        return ""
+    name = (asset.get("name") or "").strip()
+    project = next((item["name"] for item in PROJECTS if item["key"] == asset.get("projectKey")), asset.get("projectKey") or "")
+    if name and project:
+        return "%s · %s" % (name, project)
+    return name or project or ""
+
+
+def peer_field_label(field, text):
+    label = (field or {}).get("label") or (field or {}).get("fieldKey") or ""
+    if text and label in text:
+        return text[label]
+    return label
+
+
+def peer_dto(asset, text=None):
+    text = text or {}
+    row = type_row(asset["typeKey"]) or {}
+    project_name = next((item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]), asset.get("projectKey") or "")
+    attributes = []
+    values = asset.get("values") or {}
+    for field in row.get("fields") or []:
+        raw = values.get(field["fieldKey"], "")
+        display = raw
+        if field.get("kind") == "user":
+            display = (USERS.get(raw) or {}).get("displayName") or raw
+        attributes.append({
+            "fieldKey": field["fieldKey"],
+            "name": peer_field_label(field, text),
+            "kind": field.get("kind") or "text",
+            "showOnIssue": field["showOnIssue"] if "showOnIssue" in field else True,
+            "value": raw,
+            "displayValue": display,
+        })
+    return {
+        "id": asset["id"],
+        "objectKey": asset.get("objectKey") or "",
+        "name": asset.get("name") or "",
+        "projectKey": asset.get("projectKey") or "",
+        "projectName": project_name,
+        "typeLabel": row.get("label") or asset.get("typeKey") or "",
+        "location": location_of(asset),
+        "open": True,
+        "custodian": USERS.get(asset.get("custodianKey") or ""),
+        "issued": USERS.get(asset.get("issuedKey") or ""),
+        "attributes": attributes,
+    }
+
+
+def peers_for(asset_id, text=None):
+    rows = []
+    for other_id in linked_peer_ids(asset_id):
+        other = STATE["assets"].get(other_id)
+        if other:
+            rows.append(peer_dto(other, text))
+    rows.sort(key=lambda item: ((item.get("name") or "").lower(), item["id"]))
+    return rows
+
+
+def peer_matches(asset, needle):
+    project_name = next((item["name"] for item in PROJECTS if item["key"] == asset["projectKey"]), "")
+    hay = " ".join([
+        asset.get("name") or "",
+        asset.get("objectKey") or "",
+        asset.get("projectKey") or "",
+        project_name,
+    ]).lower()
+    return needle in hay
+
+
+def search_peers(asset_id, query, text):
+    asset = STATE["assets"].get(asset_id)
+    if not asset:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(asset_id):
+        return 200, []
+    needle = (query or "").strip().lower()
+    if len(needle) < 2:
+        return 200, []
+    linked = linked_peer_ids(asset_id)
+    found = []
+    for other in STATE["assets"].values():
+        if other["id"] == asset_id or other["id"] in linked or is_location_id(other["id"]):
+            continue
+        if not peer_matches(other, needle):
+            continue
+        found.append(peer_dto(other, text))
+        if len(found) >= 80:
+            break
+    found.sort(key=lambda item: ((item.get("name") or "").lower(), item["id"]))
+    return 200, found[:15]
+
+
+def link_peers(asset_id, other_id, text):
+    source = STATE["assets"].get(asset_id)
+    if not source:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(asset_id):
+        return 400, {"message": text["asset-tree.error.peer.place"]}
+    if not other_id:
+        return 400, {"message": text["asset-tree.error.peer.notFound"]}
+    if asset_id == other_id:
+        return 400, {"message": text["asset-tree.error.peer.self"]}
+    target = STATE["assets"].get(other_id)
+    if not target:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    if is_location_id(other_id):
+        return 400, {"message": text["asset-tree.error.peer.place"]}
+    low, high = (asset_id, other_id) if asset_id < other_id else (other_id, asset_id)
+    if any(pair["low"] == low and pair["high"] == high for pair in peer_rows()):
+        return 409, {"message": text["asset-tree.error.peer.exists"]}
+    peer_rows().append({"low": low, "high": high})
+    record_activity(asset_id, "peer_add", target.get("objectKey") or "", "", peer_history(target))
+    record_activity(other_id, "peer_add", source.get("objectKey") or "", "", peer_history(source))
+    return 201, peer_dto(target, text)
+
+
+def unlink_peers(asset_id, other_id, text):
+    source = STATE["assets"].get(asset_id)
+    if not source:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    low, high = (asset_id, other_id) if asset_id < other_id else (other_id, asset_id)
+    before = list(peer_rows())
+    STATE["peers"] = [pair for pair in before if not (pair["low"] == low and pair["high"] == high)]
+    if len(STATE["peers"]) == len(before):
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    target = STATE["assets"].get(other_id)
+    record_activity(asset_id, "peer_remove", (target or {}).get("objectKey") or "", peer_history(target), "")
+    if target:
+        record_activity(other_id, "peer_remove", source.get("objectKey") or "", peer_history(source), "")
+    return 204, None
+
+
+def drop_peers(doomed):
+    kept = []
+    for pair in peer_rows():
+        low, high = pair["low"], pair["high"]
+        low_gone = low in doomed
+        high_gone = high in doomed
+        if not low_gone and not high_gone:
+            kept.append(pair)
+            continue
+        if low_gone != high_gone:
+            other = high if low_gone else low
+            gone = STATE["assets"].get(low if low_gone else high)
+            if other in STATE["assets"]:
+                record_activity(other, "peer_remove", (gone or {}).get("objectKey") or "", peer_history(gone), "")
+    STATE["peers"] = kept
+
+
 def plan_rows(asset_id):
     rows = [row for row in STATE["plans"].values() if row["assetId"] == asset_id]
     rows.sort(key=lambda item: item["id"])
@@ -1637,6 +2125,195 @@ def plan_next(row):
     return None
 
 
+def day_of(target):
+    if target is None:
+        return ""
+    text = str(target)
+    at = text.find("@")
+    return text if at < 0 else text[:at].strip()
+
+
+def clock_of(target, series_start, series_end):
+    start = (series_start or "").strip()
+    end = (series_end or "").strip()
+    if target is None:
+        return start, end
+    at = str(target).find("@")
+    if at < 0:
+        return start, end
+    span = str(target)[at + 1:].strip()
+    if not span or span == "-":
+        return "", ""
+    dash = span.find("-")
+    if dash < 0:
+        return span, ""
+    return span[:dash].strip(), span[dash + 1:].strip()
+
+
+def move_targets(moves):
+    found = {}
+    for part in str(moves or "").split(","):
+        at = part.find(">")
+        if at < 1:
+            continue
+        source = part[:at].strip()
+        if len(source) != 10 or source[4] != "-" or source[7] != "-":
+            continue
+        raw = part[at + 1:].strip()
+        day = day_of(raw)
+        if day == "-" or (len(day) == 10 and day[4] == "-" and day[7] == "-"):
+            found[source] = raw
+    return found
+
+
+def jump_to(first, count, unit, start):
+    if first >= start:
+        return first
+    if unit in ("day", "week"):
+        span = count * (7 if unit == "week" else 1)
+        steps = (start - first).days // span
+        jumped = first + datetime.timedelta(days=steps * span)
+        if jumped < start:
+            jumped += datetime.timedelta(days=span)
+        return jumped
+    months = 12 if unit == "year" else 1
+    step = count * months
+    between = (start.year - first.year) * 12 + (start.month - first.month)
+    jumped = add_months(first, (between // step) * step if step else 0)
+    guard = 0
+    while jumped < start and guard < 24:
+        jumped = add_months(jumped, step)
+        guard += 1
+    return jumped
+
+
+def display_of(series_day, moved):
+    if not series_day:
+        return None
+    key = series_day.isoformat()
+    if key not in moved:
+        return series_day
+    day = day_of(moved.get(key))
+    if day == "-":
+        return None
+    return parse_plan_date(day)
+
+
+def shown_clock(day, target, plan):
+    start, end = clock_of(target, plan.get("startTime"), plan.get("endTime"))
+    return {"day": day, "start": start, "end": end}
+
+
+def add_shown(open_days, seen, day, target, plan):
+    if not day:
+        return
+    key = day.isoformat()
+    if key in seen:
+        return
+    seen.add(key)
+    open_days.append(shown_clock(day, target, plan))
+
+
+def soonest_later(upcoming, count, unit, moved, last_done, today, plan):
+    best = None
+    best_target = None
+    from_move = False
+    anchor = (last_done or "").strip()
+    for source, target in moved.items():
+        if target is None or day_of(target) == "-":
+            continue
+        if anchor and source <= anchor:
+            continue
+        shown = parse_plan_date(day_of(target))
+        if shown and shown >= today and (best is None or shown < best):
+            best = shown
+            best_target = target
+            from_move = True
+    cursor = upcoming
+    guard = 0
+    while cursor and guard < 500:
+        if cursor.isoformat() not in moved:
+            if best is None or cursor < best:
+                best = cursor
+                best_target = None
+                from_move = False
+            break
+        cursor = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        guard += 1
+    if best is None:
+        return None
+    return shown_clock(best, best_target if from_move else None, plan)
+
+
+def report_days(plan, today=None):
+    today = today or datetime.date.today()
+    first = plan_next(plan)
+    if not first:
+        return []
+    moved = move_targets(plan.get("moves"))
+    unit = plan.get("everyUnit") or ""
+    count = int(plan.get("everyCount") or 0)
+    applied = plan.get("appliedFor") or ""
+    completed = applied == "done" or (unit == "once" and applied == first.isoformat())
+    if unit == "once":
+        if completed:
+            return []
+        target = moved.get(first.isoformat())
+        if target is not None and day_of(target) == "-":
+            return []
+        day = first if target is None else parse_plan_date(day_of(target))
+        if not day:
+            return []
+        return [shown_clock(day, target, plan)]
+    open_days = []
+    seen = set()
+    cursor = first
+    guard = 0
+    anchor_day = plan.get("lastDone") or ""
+    while cursor and guard < 20000:
+        if after_anchor(cursor, anchor_day):
+            target = moved.get(cursor.isoformat())
+            shown = display_of(cursor, moved)
+            if shown and shown <= today:
+                add_shown(open_days, seen, shown, target, plan)
+        if cursor >= today:
+            break
+        nxt = plan_next({"lastDone": cursor.isoformat(), "everyCount": count, "everyUnit": unit})
+        if not nxt or nxt <= cursor:
+            break
+        cursor = nxt
+        guard += 1
+    anchor = (plan.get("lastDone") or "").strip()[:10]
+    for source, target in moved.items():
+        if target is None or day_of(target) == "-":
+            continue
+        if anchor and source <= anchor:
+            continue
+        shown = parse_plan_date(day_of(target))
+        if shown and shown <= today:
+            add_shown(open_days, seen, shown, target, plan)
+    if open_days:
+        open_days.sort(key=lambda item: item["day"])
+        return open_days
+    upcoming = jump_to(first, count, unit, today) if first < today else first
+    later = soonest_later(upcoming, count, unit, moved, plan.get("lastDone") or "", today, plan)
+    return [later] if later else []
+
+
+def after_anchor(day, last_done):
+    anchor = parse_plan_date((last_done or "").strip()[:10])
+    if not anchor:
+        return True
+    return day > anchor
+
+
+def next_shown(plan, today=None):
+    days = report_days(plan, today)
+    if not days:
+        return None
+    return days[-1]["day"]
+
+
 def plan_completed(row, nxt):
     applied = row.get("appliedFor") or ""
     if applied == "done":
@@ -1648,7 +2325,47 @@ def plan_due(row, today=None):
     nxt = plan_next(row)
     if not nxt or plan_completed(row, nxt):
         return False
-    return nxt <= (today or datetime.date.today())
+    today = today or datetime.date.today()
+    source = nxt.isoformat()
+    display = source
+    start = (row.get("startTime") or "").strip()
+    for part in str(row.get("moves") or "").split(","):
+        at = part.find(">")
+        if at < 1 or part[:at].strip() != source:
+            continue
+        target = part[at + 1:].strip()
+        timed = target.find("@")
+        day = target if timed < 0 else target[:timed].strip()
+        if day == "-":
+            return nxt <= today
+        if day:
+            display = day
+        if timed >= 0:
+            span = target[timed + 1:].strip()
+            if span == "-":
+                start = ""
+            else:
+                start = span.split("-", 1)[0].strip()
+        break
+    try:
+        shown = datetime.date.fromisoformat(display)
+    except ValueError:
+        return nxt <= today
+    if shown > today:
+        return False
+    if shown < today:
+        return True
+    if len(start) != 5 or start[2] != ":":
+        return True
+    try:
+        hour = int(start[:2])
+        minute = int(start[3:])
+    except ValueError:
+        return True
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return True
+    now = datetime.datetime.now()
+    return (hour, minute) <= (now.hour, now.minute)
 
 
 def schedule_anchor(first, count, unit):
@@ -1687,6 +2404,7 @@ def plan_dto(row):
         "endTime": row.get("endTime") or "",
         "completedOn": row.get("completedOn") or "",
         "completed": completed,
+        "moves": row.get("moves") or "",
     }
 
 
@@ -1697,9 +2415,9 @@ def plan_dtos(asset_id):
 def schedule_item(plan, asset):
     item = plan_dto(plan)
     item.update({
-        "assetId": asset["id"],
-        "assetName": asset.get("name") or "",
-        "objectKey": asset.get("objectKey") or "",
+        "assetId": asset["id"] if asset else 0,
+        "assetName": (asset or {}).get("name") or "",
+        "objectKey": (asset or {}).get("objectKey") or "",
     })
     return item
 
@@ -1707,6 +2425,10 @@ def schedule_item(plan, asset):
 def schedule_rows(project_key):
     rows = []
     for plan in STATE["plans"].values():
+        if not plan.get("assetId"):
+            if plan.get("projectKey") == project_key:
+                rows.append(schedule_item(plan, None))
+            continue
         asset = STATE["assets"].get(plan["assetId"])
         if not asset or asset.get("projectKey") != project_key or is_location_id(asset["id"]):
             continue
@@ -1720,11 +2442,16 @@ def staff_dto(row):
         "id": row["id"],
         "userKey": row.get("userKey") or "",
         "userName": user.get("displayName") or row.get("userKey") or "",
+        "department": user.get("department") or "",
+        "phone": user.get("phone") or "",
         "kind": row.get("kind") or "",
         "weekdays": int(row.get("weekdays") or 0),
         "hours": int(row.get("hours") or 0),
         "startOn": row.get("startOn") or "",
         "endOn": row.get("endOn") or "",
+        "marks": row.get("marks") or "",
+        "placeId": int(row.get("placeId") or 0),
+        "note": row.get("note") or "",
     }
 
 
@@ -1732,6 +2459,19 @@ def staff_list(project_key):
     rows = [staff_dto(row) for row in STATE["duties"].values() if row.get("projectKey") == project_key]
     rows.sort(key=lambda item: ((item.get("userName") or "").lower(), 0 if item.get("kind") == "hours" else 1, item.get("startOn") or "", item["id"]))
     return rows
+
+
+def staff_shift_pattern(weekdays):
+    if weekdays < 128 or weekdays > 383:
+        return False
+    packed = weekdays - 128
+    work = packed // 16
+    rest = packed % 16
+    return 1 <= work <= 15 and 1 <= rest <= 15
+
+
+def staff_weekdays_allowed(weekdays):
+    return (1 <= weekdays <= 127) or staff_shift_pattern(weekdays)
 
 
 def parse_staff_day(raw):
@@ -1754,7 +2494,7 @@ def save_staff(project_key, body, text):
         hours = int(body.get("hours") or 0)
     except (TypeError, ValueError):
         return 400, {"message": text["asset-tree.error.staff"]}
-    if weekdays < 1 or weekdays > 127 or hours < 1 or hours > 24:
+    if not staff_weekdays_allowed(weekdays) or hours < 1 or hours > 24:
         return 400, {"message": text["asset-tree.error.staff"]}
     existing = None
     owned = [row for row in STATE["duties"].values() if row.get("projectKey") == project_key]
@@ -1771,9 +2511,42 @@ def save_staff(project_key, body, text):
         STATE["duties"][duty_id] = existing
     existing["weekdays"] = weekdays
     existing["hours"] = hours
-    existing["startOn"] = ""
+    anchor = existing.get("startOn") or ""
+    explicit_start = "startOn" in body
+    if explicit_start:
+        parsed = parse_staff_day(body.get("startOn"))
+        anchor = parsed.isoformat() if parsed else ""
+    if (staff_shift_pattern(weekdays) or hours >= 12) and not anchor and not explicit_start:
+        anchor = "2024-01-01"
+    existing["startOn"] = anchor
     existing["endOn"] = ""
+    if "marks" in body:
+        existing["marks"] = clean_day_marks(body.get("marks"))
+    elif "marks" not in existing:
+        existing["marks"] = ""
+    if "placeId" in body:
+        try:
+            place_id = int(body.get("placeId") or 0)
+        except (TypeError, ValueError):
+            return 400, {"message": text["asset-tree.error.staff"]}
+        if place_id:
+            place = STATE["assets"].get(place_id)
+            if not place or place.get("projectKey") != project_key or not is_location_id(place_id):
+                return 400, {"message": text["asset-tree.error.staff"]}
+        existing["placeId"] = place_id
+    elif "placeId" not in existing:
+        existing["placeId"] = 0
+    if "note" in body:
+        existing["note"] = clean_staff_note(body.get("note"))
+    elif "note" not in existing:
+        existing["note"] = ""
     return 200, staff_dto(existing)
+
+
+def clean_staff_note(raw):
+    text = (raw or "").replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    text = "".join(ch for ch in text if ord(ch) >= 32).strip()
+    return text[:240].strip()
 
 
 def add_staff_leave(project_key, body, text):
@@ -1826,13 +2599,29 @@ def create_schedule(project_key, body, text):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     body = body or {}
     ids = body.get("assetIds") or []
-    if not ids or len(ids) > 40:
+    if len(ids) > 40:
         return 400, {"message": text.get("asset-tree.error.service", "Schedule")}
     kind = (body.get("kind") or "to").strip().lower()
-    labels = {"to": "ТО", "kts": "КТС", "verify": "Поверка"}
-    if kind not in labels:
+    if not KIND_SLUG.fullmatch(kind):
         return 400, {"message": text.get("asset-tree.error.service", "Schedule")}
-    name = (body.get("name") or "").strip() or labels[kind]
+    name = (body.get("name") or "").strip() or kind_label(project_key, kind)
+    if not ids:
+        loose = [row for row in STATE["plans"].values() if not row.get("assetId") and row.get("projectKey") == project_key]
+        if len(loose) >= 40:
+            return 400, {"message": text.get("asset-tree.error.service.limit", "Limit")}
+        row = {"assetId": 0, "projectKey": project_key, "appliedFor": "", "notify": False}
+        payload = dict(body)
+        payload["name"] = name
+        payload["kind"] = kind
+        payload["lastDone"] = schedule_anchor(body.get("lastDone"), int(body.get("everyCount") or 0), (body.get("everyUnit") or "").strip().lower())
+        error = fill_plan(row, payload, True, project_key, text)
+        if error:
+            return 400, {"message": error}
+        plan_id = STATE["plan_seq"]
+        STATE["plan_seq"] += 1
+        row["id"] = plan_id
+        STATE["plans"][plan_id] = row
+        return 201, [schedule_item(row, None)]
     staged = []
     for raw in ids:
         asset = STATE["assets"].get(int(raw))
@@ -1859,12 +2648,56 @@ def create_schedule(project_key, body, text):
     return 201, created
 
 
+def room_points(value):
+    text = "" if value is None else str(value)
+    cleaned = "".join(ch for ch in text if ch.isdigit() or ch in ",;-")
+    return cleaned[:4000]
+
+
+def room_angle(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = 0
+    number %= 360
+    if number < 0:
+        number += 360
+    return number
+
+
+def room_asset(asset_id):
+    try:
+        asset_id = int(asset_id or 0)
+    except (TypeError, ValueError):
+        return 0
+    asset = STATE["assets"].get(asset_id)
+    if asset and not is_location_id(asset_id):
+        return asset_id
+    return 0
+
+
+def room_place(place_id):
+    try:
+        place_id = int(place_id or 0)
+    except (TypeError, ValueError):
+        return 0
+    if place_id and place_id in STATE["assets"] and is_location_id(place_id):
+        return place_id
+    return 0
+
+
 def floor_dto(row):
     rooms = []
     for room in row.get("rooms") or []:
         rooms.append({
             "id": room["id"], "name": room.get("name") or "", "kind": room.get("kind") or "room",
             "color": room_color(room.get("color")), "x": room["x"], "y": room["y"], "w": room["w"], "h": room["h"],
+            "angle": room_angle(room.get("angle")),
+            "points": room_points(room.get("points")),
+            "placeId": room_place(room.get("placeId")),
+            "assetId": room_asset(room.get("assetId")),
+            "swing": 1 if int(room.get("swing") or 0) == 1 else 0,
+            "groupId": max(0, min(1000000, int(room.get("groupId") or 0))),
         })
     pins = []
     for pin in row.get("pins") or []:
@@ -1931,7 +2764,7 @@ def save_floor(project_key, floor_id, body, text):
     plan_h = plan_limit(body.get("planH"), 760, 480, 1600)
     rooms = body.get("rooms") or []
     pins = body.get("pins") or []
-    if len(rooms) > 80 or len(pins) > 200:
+    if len(rooms) > 400 or len(pins) > 200:
         return 400, {"message": text.get("asset-tree.error.floor", "Floor")}
     place_id = int(body.get("placeId") or 0)
     if place_id and (place_id not in STATE["assets"] or not is_location_id(place_id)):
@@ -1940,23 +2773,40 @@ def save_floor(project_key, floor_id, body, text):
     seq = 1
     for room in rooms:
         kind = (room.get("kind") or "room").strip().lower()
-        if kind not in ("room", "wall", "door", "window"):
+        if kind not in ("room", "wall", "door", "window", "column", "stair", "desk", "partition", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "arc", "dim", "text", "power", "scs", "comm", "vent", "water"):
             kind = "room"
         label = (room.get("name") or "").strip()
-        if not label and kind == "room":
+        if not label and kind == "room" and not room_points(room.get("points")):
             label = "Комната"
-        minimum = 36 if kind == "room" else 6
-        x = max(0, min(plan_w - minimum, int(room.get("x") or 0)))
-        y = max(0, min(plan_h - minimum, int(room.get("y") or 0)))
+        if kind in ("room", "stair"):
+            minimum = 16
+        elif kind in ("column", "desk", "table", "chair", "cabinet", "sofa", "seat", "pedestal", "bed", "plant", "bath", "toilet", "sink", "stove", "rug", "text"):
+            minimum = 8
+        else:
+            minimum = 4
+        angle = room_angle(room.get("angle"))
         w = max(minimum, int(room.get("w") or minimum))
         h = max(minimum, int(room.get("h") or minimum))
-        if x + w > plan_w:
-            w = plan_w - x
-        if y + h > plan_h:
-            h = plan_h - y
+        if angle % 180 == 0:
+            x = max(0, min(plan_w - minimum, int(room.get("x") or 0)))
+            y = max(0, min(plan_h - minimum, int(room.get("y") or 0)))
+            if x + w > plan_w:
+                w = max(minimum, plan_w - x)
+            if y + h > plan_h:
+                h = max(minimum, plan_h - y)
+        else:
+            x = max(-2400, min(4800, int(room.get("x") or 0)))
+            y = max(-2400, min(4800, int(room.get("y") or 0)))
+            w = min(w, 4800)
+            h = min(h, 4800)
         stored_rooms.append({
             "id": seq, "name": label[:80], "kind": kind, "color": room_color(room.get("color")),
-            "x": x, "y": y, "w": w, "h": h,
+            "x": x, "y": y, "w": w, "h": h, "angle": room_angle(room.get("angle")),
+            "points": room_points(room.get("points")),
+            "placeId": room_place(room.get("placeId")),
+            "assetId": room_asset(room.get("assetId")),
+            "swing": 1 if int(room.get("swing") or 0) == 1 else 0,
+            "groupId": max(0, min(1000000, int(room.get("groupId") or 0))),
         })
         seq += 1
     stored_pins = []
@@ -2148,6 +2998,16 @@ def decide_writeoff(asset_id, body, text):
     return 200, life_dto(asset_id)
 
 
+def stored_report_chart(project_key, report_key, fallback):
+    setup = module_setup(((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}, migrate=False)
+    for part in str(setup.get("reportCharts") or "").split(","):
+        if part.startswith(report_key + ":"):
+            chart = part.split(":", 1)[1]
+            if chart in ("donut", "pie", "bar", "bars"):
+                return chart
+    return fallback
+
+
 def report_group(key):
     if key in ("status", "type", "place", "holder"):
         return key
@@ -2167,7 +3027,7 @@ def report_catalog(project_key, text):
         "writeoff": text.get("asset-tree.ui.reportWriteoffs", "Write-offs"),
         "work": text.get("asset-tree.ui.reportWork", "Work"),
     }
-    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": "donut" if key == "status" else "bar", "metric": "count", "standard": True, "filterField": "", "filterValue": ""} for key in REPORT_STANDARD]
+    items = [{"id": key, "name": titles[key], "groupBy": report_group(key), "chart": stored_report_chart(project_key, key, "donut" if key == "status" else "bar"), "metric": "cost" if key == "cost" else "count", "standard": True, "filterField": "", "filterValue": ""} for key in REPORT_STANDARD]
     own = [row for row in STATE.setdefault("saved_reports", {}).values() if row.get("projectKey") == project_key]
     own.sort(key=lambda item: item["id"])
     for row in own:
@@ -2183,14 +3043,20 @@ def create_saved_report(project_key, body, text):
     group = (body.get("groupBy") or "").strip().lower()
     filt = (body.get("filterField") or "").strip().lower()
     value = (body.get("filterValue") or "").strip()
-    if group not in ("status", "type", "place", "holder") or not name or len(name) > 80:
+    if group not in ("status", "type", "place", "holder", "month", "age", "warranty", "writeoff", "kind") or not name or len(name) > 80:
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
     if filt and filt not in ("status", "type", "holder", "mix"):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
-    if bool(filt) != bool(value) or len(value) > 255:
+    if bool(filt) != bool(value):
         return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if len(value) > 4000:
+        return 400, {"message": text.get("asset-tree.error.report.filter", "The filter is longer than 4000 characters. Remove some conditions.")}
+    if filt == "mix":
+        for part in value.split(";"):
+            if not part.startswith(("t=", "s=", "h=", "p=")):
+                return 400, {"message": text.get("asset-tree.error.report", "Report")}
     chart = (body.get("chart") or "bar").strip().lower()
-    if chart not in ("bar", "donut"):
+    if chart not in ("bar", "bars", "donut", "pie"):
         chart = "bar"
     metric = (body.get("metric") or "count").strip().lower()
     if metric not in ("count", "cost"):
@@ -2220,7 +3086,286 @@ def delete_saved_report(project_key, report_key, text):
     return 204, None
 
 
-def report_view(project_key, report_key, text):
+def update_report_chart(project_key, report_key, body, text):
+    if not module_on(project_key, "reports"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    body = body or {}
+    if (body.get("name") or "").strip() or (body.get("groupBy") or "").strip():
+        if not str(report_key).startswith("s"):
+            return 400, {"message": text.get("asset-tree.error.report", "Report")}
+        try:
+            report_id = int(str(report_key)[1:])
+        except ValueError:
+            return 400, {"message": text.get("asset-tree.error.report", "Report")}
+        row = STATE.setdefault("saved_reports", {}).get(report_id)
+        if not row or row.get("projectKey") != project_key:
+            return 404, {"message": text["asset-tree.error.notFound"]}
+        status, saved = create_saved_report(project_key, body, text)
+        if status != 201:
+            return status, saved
+        STATE["saved_reports"].pop(saved and int(str(saved["id"])[1:]), None)
+        STATE["report_seq"] -= 1
+        row.update({
+            "name": saved["name"], "groupBy": saved["groupBy"], "filterField": saved["filterField"],
+            "filterValue": saved["filterValue"], "chart": saved["chart"], "metric": "count" if saved["groupBy"] == "kind" else saved["metric"],
+        })
+        return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "filterField": row["filterField"], "filterValue": row["filterValue"], "chart": row["chart"], "metric": row["metric"], "standard": False}
+    chart = (body.get("chart") or "").strip().lower()
+    if chart not in ("donut", "pie", "bar", "bars"):
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    if report_key in REPORT_STANDARD:
+        view = STATE.setdefault("views", {}).setdefault(project_key, {})
+        setup = module_setup(view.get("setup") or {}, migrate=False)
+        kept = [part for part in (setup.get("reportCharts") or "").split(",") if part and not part.startswith(report_key + ":")]
+        kept.append(report_key + ":" + chart)
+        setup["reportCharts"] = ",".join(kept)
+        view["setup"] = module_setup(setup, migrate=False)
+        return 200, {"id": report_key, "chart": chart, "standard": True}
+    if not str(report_key).startswith("s"):
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    try:
+        report_id = int(str(report_key)[1:])
+    except ValueError:
+        return 400, {"message": text.get("asset-tree.error.report", "Report")}
+    row = STATE.setdefault("saved_reports", {}).get(report_id)
+    if not row or row.get("projectKey") != project_key:
+        return 404, {"message": text["asset-tree.error.notFound"]}
+    row["chart"] = chart
+    return 200, {"id": report_key, "name": row["name"], "groupBy": row["groupBy"], "chart": chart, "metric": row.get("metric") or "count", "standard": False}
+
+
+REPORT_PALETTE = (
+    "#0052CC", "#00875A", "#FF8B00", "#6554C0", "#00A3BF",
+    "#DE350B", "#36B37E", "#FF5630", "#8777D9", "#FFAB00",
+)
+RU_MONTHS = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+EN_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+
+def book_minor(life, today=None):
+    row = life or {}
+    price = int(row.get("priceMinor") or 0)
+    residual = int(row.get("residualMinor") or 0)
+    months = int(row.get("lifeMonths") or 0)
+    if price <= 0:
+        return 0
+    monthly = 0 if months <= 0 or price <= residual else (price - residual) // months
+    book = price
+    purchased = row.get("purchased") or ""
+    if purchased and monthly:
+        try:
+            start = datetime.date.fromisoformat(purchased)
+            today = today or datetime.date.today()
+            elapsed = (today.year - start.year) * 12 + today.month - start.month
+            if today.day < start.day:
+                elapsed -= 1
+            elapsed = max(0, elapsed)
+            floor = max(0, residual)
+            book = price - monthly * elapsed
+            if book < floor:
+                book = floor
+        except ValueError:
+            book = price
+    return book
+
+
+def soonest_plan(asset_id):
+    chosen = None
+    chosen_next = None
+    for plan in plan_rows(asset_id):
+        nxt = plan_next(plan)
+        if chosen is None:
+            chosen = plan
+            chosen_next = nxt
+            continue
+        if nxt is None:
+            continue
+        if chosen_next is None or nxt < chosen_next:
+            chosen = plan
+            chosen_next = nxt
+    return chosen
+
+
+def month_label(year_month, text):
+    raw = str(year_month or "")
+    if len(raw) < 7 or raw[4] != "-":
+        return text.get("asset-tree.ui.reportNoDate", "No date")
+    try:
+        month = int(raw[5:7])
+        year = raw[:4]
+    except ValueError:
+        return raw[:7]
+    if month < 1 or month > 12:
+        return raw[:7]
+    russian = (text.get("asset-tree.ui.reportTotalRow") or "").startswith("И")
+    names = RU_MONTHS if russian else EN_MONTHS
+    return "%s %s" % (names[month - 1], year)
+
+
+def warranty_band(raw, today):
+    try:
+        until = datetime.date.fromisoformat(raw or "")
+    except ValueError:
+        return "expired"
+    if until < today:
+        return "expired"
+    if until <= today + datetime.timedelta(days=90):
+        return "soon"
+    return "active"
+
+
+def age_band(raw, today):
+    try:
+        start = datetime.date.fromisoformat(raw or "")
+    except ValueError:
+        return "y0"
+    months = (today.year - start.year) * 12 + today.month - start.month
+    if today.day < start.day:
+        months -= 1
+    if months >= 60:
+        return "y5"
+    if months >= 36:
+        return "y3"
+    if months >= 12:
+        return "y1"
+    return "y0"
+
+
+def kind_color(bucket):
+    fixed = {
+        "to": "#0052CC",
+        "kts": "#FF8B00",
+        "verify": "#6554C0",
+        "staff": "#00875A",
+        "event": "#00B8D9",
+        "update": "#FF5630",
+    }
+    if bucket in fixed:
+        return fixed[bucket]
+    palette = ("#006644", "#403294", "#FF7452", "#2684FF", "#57D9A3", "#8777D9")
+    cursor = 0
+    for ch in bucket or "":
+        cursor = (cursor + ord(ch)) % len(palette)
+    return palette[cursor]
+
+
+def distinct_report_colors(rows):
+    used = set()
+    cursor = 0
+    for row in rows:
+        color = (row.get("color") or "").lower()
+        if not color or color in used:
+            guard = 0
+            while guard < len(REPORT_PALETTE) and REPORT_PALETTE[cursor % len(REPORT_PALETTE)].lower() in used:
+                cursor += 1
+                guard += 1
+            color = REPORT_PALETTE[cursor % len(REPORT_PALETTE)]
+            cursor += 1
+            row["color"] = color
+            color = color.lower()
+        used.add(color)
+
+
+def lines_for_bucket(lines, keys, query):
+    query = query or {}
+    if "bucket" not in query:
+        return lines, False
+    wanted = (query.get("bucket") or [""])[0]
+    kept = [line for line, key in zip(lines, keys) if key == wanted]
+    return kept, True
+
+
+def report_line_page(lines, query, truncated):
+    query = query or {}
+    line_total = len(lines)
+    all_lines = str((query.get("lines") or [""])[0]).lower() == "all"
+    try:
+        start = int((query.get("from") or ["0"])[0] or 0)
+    except (TypeError, ValueError):
+        start = 0
+    if start < 0:
+        start = 0
+    if all_lines:
+        return lines, line_total, bool(truncated)
+    if start > line_total:
+        start = line_total
+    page = lines[start:start + 300]
+    return page, line_total, bool(truncated) or start + len(page) < line_total
+
+
+def empty_reason(report_key, group, money, text, any_purchase=False):
+    if report_key == "warranty" or group == "warranty":
+        return text.get("asset-tree.ui.reportEmptyWarranty", "")
+    if report_key == "age" or group == "age":
+        return text.get("asset-tree.ui.reportEmptyAge", "")
+    if report_key == "writeoff" or group == "writeoff":
+        return text.get("asset-tree.ui.reportEmptyWriteoff", "")
+    if (report_key == "receipts" or group == "month") and (not any_purchase or not money):
+        return text.get("asset-tree.ui.reportEmptyMonth", "")
+    if money:
+        return text.get("asset-tree.ui.reportEmptyCost", "")
+    return ""
+
+
+def work_report_view(project_key, report_key, spec, assets, filt, text, query):
+    plans = []
+    for asset in assets:
+        plans.extend(plan_rows(asset["id"]))
+    if not filt:
+        loose = [row for row in STATE["plans"].values() if row.get("assetId") == 0 and row.get("projectKey") == project_key]
+        loose.sort(key=lambda item: item["id"])
+        plans.extend(loose)
+    buckets = {}
+    lines = []
+    line_keys = []
+    truncated = False
+    for plan in plans:
+        asset = STATE["assets"].get(plan.get("assetId")) if plan.get("assetId") else None
+        if plan.get("assetId") and not asset:
+            continue
+        days = report_days(plan)
+        if not days:
+            continue
+        bucket = plan.get("kind") or "to"
+        label = kind_label(project_key, bucket)
+        color = kind_color(bucket)
+        slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
+        who = text.get("asset-tree.ui.reportNoAsset", "No object") if asset is None else (asset.get("name") or "")
+        name = (plan.get("name") or "").strip() or label
+        for shown in days:
+            slot["count"] += 1
+            detail = "%s · %s · %s" % (label, who, shown["day"].isoformat())
+            if shown.get("start"):
+                detail += " " + shown["start"]
+                if shown.get("end"):
+                    detail += "–" + shown["end"]
+            if len(lines) < 5000:
+                lines.append({"assetId": asset["id"] if asset else 0, "objectKey": (asset.get("objectKey") if asset else "") or "", "name": name, "detail": detail})
+                line_keys.append(bucket)
+            else:
+                truncated = True
+    rows = list(buckets.values())
+    rank = {row["key"]: index for index, row in enumerate(rows)}
+    paired = list(zip(lines, line_keys))
+    paired.sort(key=lambda item: (rank.get(item[1], len(rows)), (item[0].get("name") or "").lower(), (item[0].get("objectKey") or "").lower()))
+    lines = [item[0] for item in paired]
+    keys = [item[1] for item in paired]
+    lines, filtered = lines_for_bucket(lines, keys, query)
+    if filtered:
+        truncated = False
+    page, line_total, capped = report_line_page(lines, query, truncated)
+    chart = spec.get("chart") or "bar"
+    if spec.get("standard"):
+        chart = stored_report_chart(project_key, report_key, "bar")
+    return 200, {
+        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCountedWorks", ""),
+        "total": sum(row["count"] for row in rows),
+        "sum": "", "standard": bool(spec.get("standard")), "groupBy": "kind", "chart": chart,
+        "capped": capped, "lineTotal": line_total, "reason": "", "rows": rows, "lines": page,
+    }
+
+
+def report_view(project_key, report_key, text, query=None):
     if not module_on(project_key, "reports"):
         return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
     catalog = {item["id"]: item for item in report_catalog(project_key, text)}
@@ -2236,7 +3381,7 @@ def report_view(project_key, report_key, text):
         return (token or "") in [part for part in (raw or "").split(",") if part]
 
     if filt == "status":
-        assets = [asset for asset in assets if token_hit(value, asset.get("status") or "")]
+        assets = [asset for asset in assets if token_hit(value, canonical(asset.get("status")))]
     elif filt == "type":
         assets = [asset for asset in assets if token_hit(value, asset.get("typeKey") or "")]
     elif filt == "holder":
@@ -2244,102 +3389,161 @@ def report_view(project_key, report_key, text):
     elif filt == "mix":
         types = ""
         statuses = ""
+        holders = ""
+        places = ""
         for part in value.split(";"):
             if part.startswith("t="):
                 types = part[2:]
             elif part.startswith("s="):
                 statuses = part[2:]
-        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, asset.get("status") or ""))]
+            elif part.startswith("h="):
+                holders = part[2:]
+            elif part.startswith("p="):
+                places = part[2:]
+
+        def place_hit(asset):
+            if not places:
+                return True
+            wanted = [part for part in places.split(",") if part]
+            return any(part in wanted for part in place_chain(asset["id"]))
+
+        assets = [asset for asset in assets if (not types or token_hit(types, asset.get("typeKey") or "")) and (not statuses or token_hit(statuses, canonical(asset.get("status")))) and (not holders or token_hit(holders, asset.get("custodianKey") or "")) and place_hit(asset)]
+    metric = spec.get("metric") or ("cost" if report_key == "cost" else "count")
+    if group == "kind":
+        metric = "count"
+    money = report_key == "cost" or metric == "cost"
+    if report_key in ("service", "work") or group == "kind":
+        return work_report_view(project_key, report_key, spec, assets, filt, text, query or {})
+    status_names = {row["statusKey"]: row.get("label") or row["statusKey"] for row in ensure_statuses(project_key, text)}
     buckets = {}
     lines = []
+    line_keys = []
     total_book = 0
+    capped = False
+    today = datetime.date.today()
+    chosen = 0
+    any_purchase = False
+    place_sort = {}
+    needs_life = money or report_key in ("warranty", "receipts", "age", "writeoff") or group in ("warranty", "month", "age", "writeoff")
     for asset in assets:
-        if report_key in ("service", "work") and not plan_rows(asset["id"]):
+        life = (life_row(asset["id"]) or {}) if needs_life else {}
+        if life.get("purchased"):
+            any_purchase = True
+        if (report_key == "warranty" or group == "warranty") and not life.get("warrantyUntil"):
             continue
-        life = life_row(asset["id"]) or {}
-        if report_key == "warranty" and not life.get("warrantyUntil"):
+        if money and not life.get("priceMinor"):
             continue
-        if report_key == "cost" and not life.get("priceMinor"):
+        if (report_key in ("receipts", "age") or group in ("month", "age")) and not life.get("purchased"):
             continue
-        if report_key in ("receipts", "age") and not life.get("purchased"):
+        if (report_key == "writeoff" or group == "writeoff") and canonical(asset.get("status")) != "written_off" and life.get("writeoffState") != "approved":
             continue
-        if report_key == "writeoff" and asset.get("status") != "written_off" and life.get("writeoffState") != "approved":
-            continue
+        chosen += 1
+        detail = ""
+        color = "#0052CC"
+        book = 0
         if report_key in ("service", "work"):
-            plan = plan_rows(asset["id"])[0]
+            plan = soonest_plan(asset["id"]) or {}
             bucket = plan.get("kind") or "to"
-            label = {"to": "ТО", "kts": "КТС", "verify": "Поверка"}.get(bucket, bucket)
-            detail = label
-        elif report_key == "receipts":
+            label = kind_label(asset.get("projectKey") or "", bucket)
+            nxt = plan_next(plan) if plan else None
+            detail = label + (" · " + nxt.isoformat() if nxt else "")
+            if bucket == "kts":
+                color = "#FF8B00"
+            elif bucket == "verify":
+                color = "#6554C0"
+        elif report_key == "receipts" or group == "month":
             bucket = (life.get("purchased") or "")[:7]
-            label = bucket
-            detail = bucket
-        elif report_key == "age":
-            bucket = "y0"
-            try:
-                start = datetime.date.fromisoformat(life.get("purchased") or "")
-                today = datetime.date.today()
-                months = (today.year - start.year) * 12 + today.month - start.month
-                if months >= 60:
-                    bucket = "y5"
-                elif months >= 36:
-                    bucket = "y3"
-                elif months >= 12:
-                    bucket = "y1"
-            except ValueError:
-                bucket = "y0"
+            label = month_label(bucket, text)
+            detail = life.get("purchased") or ""
+        elif report_key == "age" or group == "age":
+            bucket = age_band(life.get("purchased") or "", today)
             label = text.get("asset-tree.ui.reportAge" + bucket[1:], bucket)
             detail = life.get("purchased") or ""
-        elif report_key == "writeoff":
+        elif report_key == "writeoff" or group == "writeoff":
             bucket = (life.get("decidedAt") or "")[:7] or "none"
-            label = bucket
-            detail = life.get("writeoffReason") or ""
-        elif report_key == "warranty":
-            bucket = "active"
-            label = life.get("warrantyUntil") or ""
-            detail = label
-        elif report_key == "cost":
+            label = month_label(bucket, text)
+            detail = (life.get("writeoffReason") or "").strip() or (life.get("decidedAt") or "")
+        elif report_key == "warranty" or group == "warranty":
+            bucket = warranty_band(life.get("warrantyUntil") or "", today)
+            if bucket == "expired":
+                label = text.get("asset-tree.ui.lifeWarrantyOff", bucket)
+                color = "#DE350B"
+            elif bucket == "soon":
+                label = text.get("asset-tree.ui.lifeWarrantySoon", bucket)
+                color = "#FF8B00"
+            else:
+                label = text.get("asset-tree.ui.lifeWarrantyOn", bucket)
+            detail = life.get("warrantyUntil") or ""
+        elif report_key == "cost" or group == "type":
             bucket = asset.get("typeKey") or ""
             label = (STATE["types"].get(bucket) or {}).get("label") or bucket
-            detail = format_money(life.get("priceMinor") or 0)
-            total_book += int(life.get("priceMinor") or 0)
-        elif group == "type":
-            bucket = asset.get("typeKey") or ""
-            label = (STATE["types"].get(bucket) or {}).get("label") or bucket
-            detail = ""
+            color = (STATE["types"].get(bucket) or {}).get("color") or "#0052CC"
         elif group == "holder":
             bucket = asset.get("custodianKey") or ""
-            label = (USERS.get(bucket) or {}).get("displayName") or text.get("asset-tree.ui.reportUnassigned", "None")
-            detail = ""
+            person = USERS.get(bucket) or {}
+            label = text.get("asset-tree.ui.reportUnassigned", "None") if not bucket else (person.get("displayName") or bucket)
         elif group == "place":
-            parent = STATE["assets"].get(asset.get("parentId"))
-            bucket = str(parent["id"]) if parent else ""
-            label = parent.get("name") if parent else text.get("asset-tree.ui.root", "Root")
-            detail = ""
+            place_id = place_root(asset["id"])
+            place = STATE["assets"].get(place_id) if place_id else None
+            bucket = str(place["id"]) if place else ""
+            label = (place.get("name") if place else "") or text.get("asset-tree.ui.root", "Root")
+            place_sort[bucket] = place_sort_key(bucket)
+            if not money:
+                detail = place_path(asset["id"]) or label
         else:
-            bucket = asset.get("status") or ""
-            label = bucket
-            for status_row in ensure_statuses(project_key, text):
-                if status_row["statusKey"] == bucket:
-                    label = status_row["label"]
-                    break
-            detail = ""
-        color = "#0052CC"
-        if report_key == "status" or group == "status":
-            color = {"in_use": "#00875A", "active": "#00875A", "repair": "#FF8B00", "maintenance": "#FF8B00", "written_off": "#DE350B", "reserve": "#6554C0", "in_stock": "#6B778C"}.get(bucket, "#0052CC")
-        slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0})
+            bucket = canonical(asset.get("status"))
+            label = status_names.get(bucket) or bucket
+            color = {"in_use": "#00875A", "repair": "#FF8B00", "maintenance": "#FF8B00", "written_off": "#DE350B", "reserve": "#6554C0", "in_stock": "#6B778C"}.get(bucket, "#0052CC")
+        if money:
+            book = book_minor(life, today)
+            total_book += book
+            detail = format_money(book)
+        if not detail:
+            detail = label
+        slot = buckets.setdefault(bucket, {"key": bucket, "label": label, "color": color, "count": 0, "amount": 0, "amountText": ""})
         slot["count"] += 1
-        if len(lines) < 300:
+        if money:
+            slot["amount"] += book
+        if len(lines) < 5000:
             lines.append({"assetId": asset["id"], "objectKey": asset.get("objectKey") or "", "name": asset.get("name") or "", "detail": detail})
+            line_keys.append(bucket)
+        else:
+            capped = True
+    rows = list(buckets.values())
+    if money:
+        for row in rows:
+            row["amountText"] = format_money(row["amount"])
+    sort_report_rows(report_key, group, rows, place_sort)
+    if group != "kind":
+        distinct_report_colors(rows)
+    rank = {row["key"]: index for index, row in enumerate(rows)}
+    paired = list(zip(lines, line_keys))
+    paired.sort(key=lambda item: (
+        rank.get(item[1], len(rows)),
+        (item[0].get("name") or "").lower(),
+        (item[0].get("objectKey") or "").lower(),
+    ))
+    lines = [item[0] for item in paired]
+    keys = [item[1] for item in paired]
+    lines, filtered = lines_for_bucket(lines, keys, query)
+    if filtered:
+        capped = False
+    page, line_total, page_capped = report_line_page(lines, query, capped)
+    chart = spec.get("chart") or ("donut" if report_key == "status" else "bar")
+    if spec.get("standard"):
+        chart = stored_report_chart(project_key, report_key, chart)
     return 200, {
-        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportHint", ""),
-        "total": sum(item["count"] for item in buckets.values()),
-        "sum": format_money(total_book) if report_key == "cost" else "",
+        "id": report_key, "title": spec["name"], "hint": text.get("asset-tree.ui.reportCounted", ""),
+        "total": chosen,
+        "sum": format_money(total_book) if money else "",
         "standard": bool(spec.get("standard")),
         "groupBy": group,
-        "chart": spec.get("chart") or ("donut" if report_key == "status" else "bar"),
-        "rows": list(buckets.values()),
-        "lines": lines,
+        "chart": chart,
+        "capped": page_capped,
+        "lineTotal": line_total,
+        "reason": empty_reason(report_key, group, money, text, any_purchase) if not rows else "",
+        "rows": rows,
+        "lines": page,
     }
 
 
@@ -2387,6 +3591,59 @@ def apply_due(project_key=None):
                 STATE["mails"].append({"to": email, "subject": subject, "body": body, "assetId": asset["id"]})
 
 
+def clock_span(raw):
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if value == "-":
+        return "@-"
+    bits = value.split("-", 1)
+    start = bits[0].strip()
+    end = bits[1].strip() if len(bits) > 1 else ""
+    if not re.fullmatch(r"\d{2}:\d{2}", start):
+        return ""
+    hour, minute = int(start[:2]), int(start[3:])
+    if hour > 23 or minute > 59:
+        return ""
+    if end:
+        if not re.fullmatch(r"\d{2}:\d{2}", end):
+            return ""
+        end_hour, end_minute = int(end[:2]), int(end[3:])
+        if end_hour > 23 or end_minute > 59:
+            return ""
+        return "@" + start + "-" + end
+    return "@" + start
+
+
+def clean_moves(raw):
+    parts = []
+    for part in str(raw or "").split(","):
+        if len(parts) >= 80:
+            break
+        if ">" not in part:
+            continue
+        source_raw, target_raw = part.split(">", 1)
+        source = parse_plan_date(source_raw.strip())
+        target_text = target_raw.strip()
+        timed = target_text.find("@")
+        day_text = target_text if timed < 0 else target_text[:timed].strip()
+        time_text = "" if timed < 0 else target_text[timed + 1 :].strip()
+        if day_text == "-":
+            target = "-"
+        else:
+            parsed = parse_plan_date(day_text)
+            target = parsed.isoformat() if parsed else ""
+        span = clock_span(time_text)
+        if time_text and not span:
+            continue
+        if not source or not target or (source.isoformat() == target and not span):
+            continue
+        if target == "-":
+            span = ""
+        parts.append(source.isoformat() + ">" + target + span)
+    return ",".join(parts)
+
+
 def fill_plan(row, body, creating, project_key, text):
     body = body or {}
     if body.get("done") is True:
@@ -2394,7 +3651,8 @@ def fill_plan(row, body, creating, project_key, text):
         if row.get("everyUnit") == "once":
             row["appliedFor"] = "done"
         else:
-            row["lastDone"] = datetime.date.today().isoformat()
+            done_on = parse_plan_date(body.get("doneOn"))
+            row["lastDone"] = done_on.isoformat() if done_on else datetime.date.today().isoformat()
             row["appliedFor"] = ""
     elif body.get("lastDone") is not None or creating:
         parsed = parse_plan_date(body.get("lastDone"))
@@ -2442,7 +3700,7 @@ def fill_plan(row, body, creating, project_key, text):
         row["notify"] = True if body.get("notify") is None else bool(body.get("notify"))
     if body.get("kind") is not None or creating:
         kind = (body.get("kind") or "to").strip().lower()
-        if kind not in ("to", "kts", "verify"):
+        if not KIND_SLUG.fullmatch(kind):
             return text.get("asset-tree.error.service", "Schedule")
         row["kind"] = kind
     if body.get("assigneeKey") is not None or creating:
@@ -2459,6 +3717,8 @@ def fill_plan(row, body, creating, project_key, text):
         row["startTime"] = (body.get("startTime") or "").strip()
     if body.get("endTime") is not None or creating:
         row["endTime"] = (body.get("endTime") or "").strip()
+    if body.get("moves") is not None or creating:
+        row["moves"] = clean_moves(body.get("moves"))
     if not row.get("name") or not row.get("lastDone") or not row.get("everyUnit"):
         return text.get("asset-tree.error.service", "Schedule")
     return None
@@ -2469,6 +3729,80 @@ def is_location_id(asset_id):
     if not asset:
         return False
     return bool((STATE["types"].get(asset["typeKey"]) or {}).get("location"))
+
+
+def place_chain(asset_id):
+    asset = STATE["assets"].get(asset_id) or {}
+    current = normalize_parent(asset.get("parentId"))
+    found = []
+    seen = set()
+    while current and current not in seen:
+        seen.add(current)
+        node = STATE["assets"].get(current)
+        if not node:
+            break
+        if is_location_id(current):
+            found.append(str(current))
+        current = normalize_parent(node.get("parentId"))
+    return found
+
+
+def place_root(asset_id):
+    chain = place_chain(asset_id)
+    return int(chain[0]) if chain else None
+
+
+def sort_report_rows(report_key, group, rows, place_sort):
+    if report_key == "age" or group == "age":
+        order = {"y0": 0, "y1": 1, "y3": 2, "y5": 3}
+        rows.sort(key=lambda row: order.get(row["key"], 9))
+        return
+    if report_key == "warranty" or group == "warranty":
+        order = {"expired": 0, "soon": 1, "active": 2}
+        rows.sort(key=lambda row: order.get(row["key"], 9))
+        return
+    if group == "month" or report_key == "writeoff" or group == "writeoff":
+        rows.sort(key=lambda row: row["key"] if len(row["key"]) >= 7 and row["key"][4] == "-" else "9999-99")
+        return
+    if group == "status" or report_key == "status":
+        order = ("in_stock", "in_use", "repair", "reserve", "maintenance", "written_off")
+
+        def status_key(row):
+            key = row.get("key") or ""
+            rank = order.index(key) if key in order else len(order)
+            return (rank, (row.get("label") or "").lower())
+
+        rows.sort(key=status_key)
+        return
+    if group in ("type", "holder") or report_key == "cost":
+        rows.sort(key=lambda row: ((row.get("label") or "").lower(), (row.get("key") or "").lower()))
+        return
+    if group == "place":
+        rows.sort(key=lambda row: (((place_sort or {}).get(row.get("key") or "") or "").lower(), (row.get("label") or "").lower()))
+
+
+def place_sort_key(place_key):
+    if not place_key:
+        return ""
+    try:
+        place_id = int(place_key)
+    except (TypeError, ValueError):
+        return str(place_key)
+    names = []
+    for ancestor in reversed(place_chain(place_id)):
+        node = STATE["assets"].get(int(ancestor)) or {}
+        names.append(node.get("name") or ancestor)
+    node = STATE["assets"].get(place_id) or {}
+    names.append(node.get("name") or str(place_id))
+    return " / ".join(names).lower()
+
+
+def place_path(asset_id):
+    names = []
+    for place_id in reversed(place_chain(asset_id)):
+        node = STATE["assets"].get(int(place_id)) or {}
+        names.append(node.get("name") or place_id)
+    return " / ".join(names)
 
 
 def place_container(start_id, skip=None):
@@ -2781,6 +4115,24 @@ def sheet_title(raw, used=None):
     return candidate
 
 
+def plain_numeric(raw):
+    if not raw:
+        return False
+    start = 1 if raw[0] == "-" else 0
+    if start >= len(raw):
+        return False
+    dot = False
+    for ch in raw[start:]:
+        if ch == ".":
+            if dot:
+                return False
+            dot = True
+            continue
+        if ch < "0" or ch > "9":
+            return False
+    return True
+
+
 def sheet_xml(headers, rows):
     sheet = ["<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
              "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>"]
@@ -2788,8 +4140,13 @@ def sheet_xml(headers, rows):
     for number, cells in enumerate(table, start=1):
         sheet.append("<row r=\"%d\">" % number)
         for index, cell in enumerate(cells):
-            sheet.append("<c r=\"%s%d\" t=\"inlineStr\"><is><t xml:space=\"preserve\">%s</t></is></c>"
-                         % (column_name(index), number, xml_text(cell)))
+            raw = "" if cell is None else str(cell)
+            if len(raw) > 3 and raw[0] == "\u0001" and raw[2] == ":" and plain_numeric(raw[3:]):
+                style = " s=\"1\"" if raw[1] == "d" else ""
+                sheet.append("<c r=\"%s%d\"%s><v>%s</v></c>" % (column_name(index), number, style, raw[3:]))
+            else:
+                sheet.append("<c r=\"%s%d\" t=\"inlineStr\"><is><t xml:space=\"preserve\">%s</t></is></c>"
+                             % (column_name(index), number, xml_text(raw)))
         sheet.append("</row>")
     sheet.append("</sheetData></worksheet>")
     return "".join(sheet)
@@ -2886,7 +4243,8 @@ def workbook_bytes(pages):
 <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
 <borders count="1"><border/></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>
 </styleSheet>"""
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as book:
@@ -2897,6 +4255,275 @@ def workbook_bytes(pages):
 
 def equipment_xlsx(project_key, text, day_first):
     return workbook_bytes(equipment_pages(project_key, text, day_first))
+
+
+def book_count(count):
+    return "\u0001i:%d" % int(count or 0)
+
+
+def book_decimal(minor):
+    value = int(minor or 0)
+    sign = "-" if value < 0 else ""
+    units, cents = divmod(abs(value), 100)
+    return "\u0001d:%s%d.%02d" % (sign, units, cents)
+
+
+def money_minor(raw):
+    text = str(raw or "").strip().replace(" ", "").replace(",", ".")
+    if not text:
+        return None
+    sign = -1 if text.startswith("-") else 1
+    text = text[1:] if text[:1] in "+-" else text
+    try:
+        if "." in text:
+            units, cents = text.split(".", 1)
+            cents = (cents + "00")[:2]
+            if not units:
+                units = "0"
+            return sign * (int(units) * 100 + int(cents))
+        return sign * int(text) * 100
+    except ValueError:
+        return None
+
+
+def share_labels(values, total):
+    if total <= 0:
+        return ["0 %"] * len(values)
+    floors = []
+    remainders = []
+    assigned = 0
+    for value in values:
+        exact = float(value) * 1000.0 / float(total)
+        floor = int(exact + 1e-9)
+        floors.append(floor)
+        remainders.append(exact - floor)
+        assigned += floor
+    left = 1000 - assigned
+    while left > 0 and remainders:
+        best = 0
+        for index in range(1, len(remainders)):
+            if remainders[index] > remainders[best]:
+                best = index
+        floors[best] += 1
+        remainders[best] = -1
+        left -= 1
+    labels = []
+    for tenths in floors:
+        if tenths % 10 == 0:
+            labels.append("%d %%" % (tenths // 10))
+        else:
+            labels.append("%d.%d %%" % (tenths // 10, tenths % 10))
+    return labels
+
+
+def report_sheet(view, text, used):
+    money = bool(view.get("sum"))
+    headers = [view.get("title") or "", text.get("asset-tree.ui.reportCount", "Count")]
+    if money:
+        headers.append(text.get("asset-tree.ui.lifeBook", "Book value"))
+    headers.append(text.get("asset-tree.ui.reportShare", "Share"))
+    rows = view.get("rows") or []
+    share_total = sum((row.get("amount") or 0) if money else (row.get("count") or 0) for row in rows)
+    if not money:
+        share_total = view.get("total") or 0
+    values = [((row.get("amount") or 0) if money else (row.get("count") or 0)) for row in rows]
+    shares = share_labels(values, share_total)
+    lines = []
+    for index, row in enumerate(rows):
+        cells = [row.get("label") or "", book_count(row.get("count") or 0)]
+        if money:
+            cells.append(book_decimal(row.get("amount") or 0))
+        cells.append(shares[index].replace("%%", "%"))
+        lines.append(cells)
+    total = [text.get("asset-tree.ui.reportTotalRow", "Total"), book_count(view.get("total") or 0)]
+    if money:
+        total.append(book_decimal(share_total))
+    total.append("100 %" if share_total else "0 %")
+    lines.append(total)
+    if not rows:
+        reason = view.get("reason") or text.get("asset-tree.ui.reportEmptyLines", "This report has no rows.")
+        lines.append([reason])
+    lines.append([])
+    lines.append([
+        text.get("asset-tree.ui.keyLabel", "Key"),
+        text.get("asset-tree.ui.name", "Name"),
+        text.get("asset-tree.ui.lifeBook", "Book value") if money else detail_word(view.get("groupBy"), text),
+    ])
+    for line in view.get("lines") or []:
+        detail = line.get("detail") or ""
+        if money:
+            minor = money_minor(detail)
+            detail = book_decimal(minor) if minor is not None else detail
+        lines.append([line.get("objectKey") or "", line.get("name") or "", detail])
+    if view.get("capped"):
+        lines.append([text.get("asset-tree.ui.reportLinesCut", "The list stops at 5000 rows.")])
+    return (sheet_title(view.get("title") or "Report", used), headers, lines)
+
+
+def reports_xlsx(project_key, text):
+    setup = module_setup(((STATE.get("views") or {}).get(project_key) or {}).get("setup") or {}, migrate=False)
+    hidden = set(part for part in (setup.get("reportHidden") or "").split(",") if part)
+    pages = []
+    used = set()
+    for item in report_catalog(project_key, text):
+        if item.get("standard") and item["id"] in hidden:
+            continue
+        status, view = report_view(project_key, item["id"], text, {"lines": ["all"]})
+        if status != 200:
+            continue
+        pages.append(report_sheet(view, text, used))
+    if not pages:
+        title = text.get("asset-tree.ui.menuReports", "Reports")
+        note = text.get("asset-tree.ui.reportNone", "All reports are hidden in the module settings.")
+        pages.append((sheet_title(title, used), [title], [[note]]))
+    return workbook_bytes(pages)
+
+
+def this_mail_date(setup, today):
+    day = int(setup.get("reportMailDay") or 1)
+    if setup.get("reportMailEvery") == "month":
+        want = 1 if day < 1 else min(day, 31)
+        last = calendar.monthrange(today.year, today.month)[1]
+        return today.replace(day=min(want, last))
+    want = day if 1 <= day <= 7 else 1
+    return today + datetime.timedelta(days=want - today.isoweekday())
+
+
+def previous_mail_date(current, setup):
+    if setup.get("reportMailEvery") == "month":
+        month = current.replace(day=1) - datetime.timedelta(days=1)
+        day = int(setup.get("reportMailDay") or 1)
+        want = 1 if day < 1 else min(day, 31)
+        last = calendar.monthrange(month.year, month.month)[1]
+        return month.replace(day=min(want, last))
+    return current - datetime.timedelta(weeks=1)
+
+
+def mail_due_date(setup, today):
+    if not setup or not setup.get("reportMail") or today is None:
+        return None
+    current = this_mail_date(setup, today)
+    sent = setup.get("reportMailSent") or ""
+    if current <= today:
+        return None if sent >= current.isoformat() else current
+    if not sent:
+        return None
+    previous = previous_mail_date(current, setup)
+    if previous is None or sent >= previous.isoformat():
+        return None
+    return previous
+
+
+def mail_part_keys(part, due):
+    keys = set()
+    if not part or due is None:
+        return keys
+    colon = part.find(":")
+    if colon != 10 or part[:colon] != due.isoformat():
+        return keys
+    for bit in part[colon + 1:].split(","):
+        if bit:
+            keys.add(bit)
+    return keys
+
+
+def queue_report_mail(project_key, text, force):
+    if not module_on(project_key, "reports"):
+        return 400, {"message": text.get("asset-tree.error.module.off", "Module")}
+    view = STATE.setdefault("views", {}).setdefault(project_key, {})
+    setup = module_setup(view.get("setup") or {}, migrate=False)
+    today = datetime.date.today()
+    due = None if force else mail_due_date(setup, today)
+    if not force and due is None:
+        return 204, None
+    recipients = []
+    for key in (setup.get("reportMailTo") or "").split(","):
+        key = key.strip()
+        if key and key not in recipients:
+            recipients.append(key)
+    if not recipients:
+        if force:
+            return 400, {"message": text.get("asset-tree.error.report.mail", "The report letter was not queued.")}
+        return 204, None
+    already = set() if force or due is None else mail_part_keys(setup.get("reportMailPart") or "", due)
+    pending = [key for key in recipients if key not in already]
+    if not pending:
+        if not force and due is not None:
+            setup["reportMailSent"] = today.isoformat()
+            setup["reportMailPart"] = ""
+            view["setup"] = module_setup(setup, migrate=False)
+        return 204, None
+    refused = set(STATE.get("mail_fail") or [])
+    emails = []
+    queued = []
+    for key in pending:
+        user = USERS.get(key) or {}
+        email = (user.get("email") or "").strip()
+        if not email:
+            if force:
+                return 400, {"message": text.get("asset-tree.error.report.mail.recipient", "A recipient has no email address.")}
+            return 204, None
+        if key in refused and not force:
+            continue
+        emails.append((key, email))
+        queued.append(key)
+    if emails:
+        book = reports_xlsx(project_key, text)
+        subject = text.get("asset-tree.mail.reports.subject", "Reports for {0}").replace("{0}", project_key)
+        body = text.get("asset-tree.mail.reports.body", "The report workbook is attached.")
+        for _key, email in emails:
+            STATE["mails"].append({
+                "to": email, "subject": subject, "body": body,
+                "attachment": "reports-%s.xlsx" % project_key, "bytes": len(book),
+            })
+    if force:
+        return 204, None
+    done = set(already)
+    done.update(queued)
+    if not done:
+        return 204, None
+    complete = all(key in done for key in recipients)
+    if complete:
+        setup["reportMailSent"] = today.isoformat()
+        setup["reportMailPart"] = ""
+    else:
+        kept = [key for key in recipients if key in done]
+        setup["reportMailPart"] = due.isoformat() + ":" + ",".join(kept)
+    view["setup"] = module_setup(setup, migrate=False)
+    return 204, None
+
+
+def detail_word(group, text):
+    if group == "kind":
+        return text.get("asset-tree.ui.reportWorkDetail", "Kind, object, date and time")
+    if group in ("age", "month"):
+        return text.get("asset-tree.ui.lifePurchase", "Purchase date")
+    if group == "warranty":
+        return text.get("asset-tree.ui.lifeWarranty", "Warranty until")
+    if group == "writeoff":
+        return text.get("asset-tree.ui.reportWriteoffDetail", "Reason or decision date")
+    return group_word(group, text)
+
+
+def group_word(group, text):
+    keys = {
+        "type": "asset-tree.ui.groupWordType",
+        "place": "asset-tree.ui.groupWordPlace",
+        "holder": "asset-tree.ui.groupWordHolder",
+        "month": "asset-tree.ui.groupWordMonth",
+        "age": "asset-tree.ui.groupWordAge",
+        "warranty": "asset-tree.ui.groupWordWarranty",
+        "writeoff": "asset-tree.ui.groupWordWriteoff",
+        "kind": "asset-tree.ui.groupWordKind",
+    }
+    return text.get(keys.get(group or "", "asset-tree.ui.groupWordStatus"), group or "")
+
+
+def dispatch_due_report_mail(text):
+    for project in PROJECTS:
+        if module_on(project["key"], "reports"):
+            queue_report_mail(project["key"], text, False)
+    return 204, None
 
 
 def xml_local(tag):
@@ -3099,20 +4726,27 @@ def find_preview_user(raw):
     return ""
 
 
-def find_preview_place(project_key, path):
+def preview_place_index(project_key):
+    types = {row["typeKey"]: row for row in STATE["types"].values()}
+    index = {}
+    for asset in project_assets(project_key):
+        kind = types.get(asset["typeKey"]) or {}
+        if not kind.get("location"):
+            continue
+        parent = normalize_parent(asset.get("parentId"))
+        name = (asset.get("name") or "").lower()
+        index.setdefault((parent, name), []).append(asset)
+    return index
+
+
+def find_preview_place(project_key, path, index=None):
     parts = [part.strip() for part in (path or "").split("/") if part.strip()]
     if not parts:
         return None
+    places = preview_place_index(project_key) if index is None else index
     parent = None
-    types = {row["typeKey"]: row for row in STATE["types"].values()}
     for part in parts:
-        matches = []
-        for asset in project_assets(project_key):
-            kind = types.get(asset["typeKey"]) or {}
-            if not kind.get("location") or asset["name"].lower() != part.lower():
-                continue
-            if normalize_parent(asset["parentId"]) == parent:
-                matches.append(asset)
+        matches = places.get((parent, part.lower()), [])
         if len(matches) != 1:
             return None
         parent = matches[0]["id"]
@@ -3252,9 +4886,14 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": text.get("asset-tree.error.import.header", "Header")}]})
     if not records:
         return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": text.get("asset-tree.error.import.empty", "Empty")}]})
+    if len(records) > 2000:
+        message = text.get("asset-tree.error.import.limit", "Limit").replace("{0}", "2000")
+        return finish({"created": 0, "updated": 0, "errors": [{"row": 1, "message": message}]})
     types = [row for row in STATE["types"].values() if row["projectKey"] == project_key]
     statuses = status_dtos(project_key, text)
     by_key = {asset["objectKey"].lower(): asset for asset in project_assets(project_key)}
+    places = preview_place_index(project_key)
+    known_users = {}
     created = 0
     updated = 0
     errors = []
@@ -3310,14 +4949,16 @@ def import_rows(project_key, headers, records, text, seen=None, sheet=""):
         if not status_key:
             errors.append({"row": row_number, "message": text.get("asset-tree.error.import.status", "Status").replace("{0}", status_name)})
             continue
-        parent = find_preview_place(project_key, place)
+        parent = find_preview_place(project_key, place, places)
         if not parent:
             message = text.get("asset-tree.error.import.place.required" if not place else "asset-tree.error.import.place", "Place")
             errors.append({"row": row_number, "message": message.replace("{0}", place)})
             continue
         custodian = None
         if custodian_name:
-            custodian = find_preview_user(custodian_name)
+            if custodian_name not in known_users:
+                known_users[custodian_name] = find_preview_user(custodian_name)
+            custodian = known_users[custodian_name]
             if not custodian:
                 errors.append({"row": row_number, "message": text.get("asset-tree.error.import.user", "User").replace("{0}", custodian_name)})
                 continue
@@ -3974,6 +5615,9 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         if path == "/preview/mails" and method == "GET":
             return self.respond(200, json.dumps(STATE["mails"]).encode("utf-8"), "application/json; charset=utf-8")
+        if path == "/preview/report-mail" and method == "POST":
+            dispatch_due_report_mail(self.text())
+            return self.respond(204, b"", "application/json; charset=utf-8")
         if path in ("/", "/plugins/servlet/asset-tree"):
             return self.serve_page(query)
         if path == "/issue":
@@ -3989,6 +5633,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_static(path.rsplit("/", 1)[-1])
         if path.startswith("/rest/asset-tree/1.0/"):
             rest = path[len("/rest/asset-tree/1.0"):]
+            if method == "GET" and re.fullmatch(r"/projects/[A-Za-z0-9]+/reports\.xlsx", rest):
+                project_key = rest.split("/")[2]
+                body = reports_xlsx(project_key, self.text())
+                return self.respond(200, body, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", {
+                    "Content-Disposition": 'attachment; filename="reports-%s.xlsx"' % project_key,
+                })
             if method == "GET" and re.fullmatch(r"/projects/[A-Za-z0-9]+/equipment\.xlsx", rest):
                 project_key = rest.split("/")[2]
                 body = equipment_xlsx(project_key, self.text(), self.lang() != "en")
@@ -4029,6 +5679,7 @@ class Handler(BaseHTTPRequestHandler):
                 .replace("@@TITLE@@", text.get("asset-tree.ui.title", "Asset tree"))
                 .replace("@@CSS@@", "/download/resources/asset-tree/asset-tree.css")
                 .replace("@@QR@@", "/download/resources/asset-tree/qr-code.js")
+                .replace("@@PLAN@@", "/download/resources/asset-tree/plan-exchange.js")
                 .replace("@@JS@@", "/download/resources/asset-tree/asset-tree.js")
                 .replace("@@REST@@", "/rest/asset-tree/1.0")
                 .replace("@@PROJECT@@", project)
@@ -4278,7 +5929,12 @@ form.vp-request-form .select2-container .select2-chosen { position: relative; z-
             search.hidden = !showSearch;
             for (var i = 0; i < el.options.length; i++) {
                 var text = el.options[i].text || '';
-                if (needle && text.toLowerCase().indexOf(needle) === -1) continue;
+                var matched = true;
+                if (needle) {
+                    if (typeof options.matcher === 'function') matched = !!options.matcher(input.value, text, el.options[i]);
+                    else matched = text.toLowerCase().indexOf(needle) !== -1;
+                }
+                if (!matched) continue;
                 var item = document.createElement('li');
                 item.className = 'select2-result';
                 item.textContent = text;
@@ -4465,8 +6121,14 @@ setTimeout(function () {
             return self.create_asset(self.read_json(), text)
         if path == "/users" and method == "GET":
             needle = (query.get("q") or [""])[0].strip().lower()
-            found = [user for user in USERS.values() if needle and needle in (user["displayName"] + user["email"] + user["department"]).lower()]
+            found = [user for user in USERS.values() if needle and needle in (user["displayName"] + user["email"] + user["department"] + user["username"] + user["userKey"]).lower()]
             return 200, found[:8]
+        match = re.fullmatch(r"/users/([A-Za-z0-9._@-]+)", path)
+        if match and method == "GET":
+            user = USERS.get(match.group(1))
+            if not user:
+                return 404, {"message": text["asset-tree.error.user"]}
+            return 200, user
         match = re.fullmatch(r"/users/([a-z0-9_-]+)/assets", path)
         if match and method == "GET":
             user_key = match.group(1)
@@ -4476,7 +6138,12 @@ setTimeout(function () {
             for asset in STATE["assets"].values():
                 if is_location_id(asset["id"]):
                     continue
-                role = text["asset-tree.ui.custodian"] if asset.get("custodianKey") == user_key else None
+                if asset.get("custodianKey") == user_key:
+                    role = text["asset-tree.ui.custodian"]
+                elif asset.get("issuedKey") == user_key:
+                    role = text.get("asset-tree.ui.issuedTo", "Issued to")
+                else:
+                    role = None
                 if role:
                     dto = asset_dto(asset, text, False)
                     dto["holderRole"] = role
@@ -4570,6 +6237,12 @@ setTimeout(function () {
                 return 200, report_catalog(project_key, text)
             if method == "POST":
                 return create_saved_report(project_key, self.read_json(), text)
+        match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports/mail", path)
+        if match and method == "POST":
+            project_key = match.group(1)
+            if project_key not in {item["key"] for item in PROJECTS}:
+                return 400, {"message": text["asset-tree.error.project.required"]}
+            return queue_report_mail(project_key, text, True)
         match = re.fullmatch(r"/projects/([A-Za-z0-9]+)/reports/([A-Za-z0-9]+)", path)
         if match:
             project_key = match.group(1)
@@ -4577,7 +6250,9 @@ setTimeout(function () {
             if project_key not in {item["key"] for item in PROJECTS}:
                 return 400, {"message": text["asset-tree.error.project.required"]}
             if method == "GET":
-                return report_view(project_key, report_key, text)
+                return report_view(project_key, report_key, text, query)
+            if method == "PUT":
+                return update_report_chart(project_key, report_key, self.read_json(), text)
             if method == "DELETE":
                 return delete_saved_report(project_key, report_key, text)
         match = re.fullmatch(r"/assets/(\d+)/lifecycle", path)
@@ -4872,6 +6547,20 @@ setTimeout(function () {
         match = re.fullmatch(r"/assets/(\d+)/move", path)
         if match and method == "POST":
             return self.move_asset(int(match.group(1)), self.read_json(), text)
+        match = re.fullmatch(r"/assets/(\d+)/peers/search", path)
+        if match and method == "GET":
+            return search_peers(int(match.group(1)), (query.get("q") or [""])[0], text)
+        match = re.fullmatch(r"/assets/(\d+)/peers/(\d+)", path)
+        if match and method == "DELETE":
+            return unlink_peers(int(match.group(1)), int(match.group(2)), text)
+        match = re.fullmatch(r"/assets/(\d+)/peers", path)
+        if match and method == "POST":
+            body = self.read_json() or {}
+            try:
+                other_id = int(body.get("assetId") or 0)
+            except (TypeError, ValueError):
+                other_id = 0
+            return link_peers(int(match.group(1)), other_id, text)
         match = re.fullmatch(r"/assets/(\d+)/issues", path)
         if match and method == "POST":
             return self.link_issue(int(match.group(1)), (self.read_json() or {}).get("issueKey"), text)
@@ -5023,7 +6712,7 @@ setTimeout(function () {
         if match and method == "POST":
             return self.add_grant(match.group(1), self.read_json(), text)
         if match and method == "DELETE":
-            return self.delete_grant(match.group(1), (query.get("group") or [""])[0], text)
+            return self.delete_grant(match.group(1), query, text)
         if path == "/groups" and method == "GET":
             needle = (query.get("q") or [""])[0].strip().lower()
             found = [{"groupName": name} for name in GROUPS if needle and needle in name.lower()]
@@ -5103,27 +6792,65 @@ setTimeout(function () {
     def add_grant(self, project_key, body, text):
         if project_key not in {item["key"] for item in PROJECTS}:
             return 404, {"message": text["asset-tree.error.project.notFound"]}
+        user_key = ((body or {}).get("userKey") or "").strip()
         group_name = ((body or {}).get("groupName") or "").strip()
         raw_caps = (body or {}).get("caps")
         level = ((body or {}).get("level") or "").strip()
         caps = normalize_caps(raw_caps) if raw_caps else caps_from_level(level)
+        rows = STATE["grants"].setdefault(project_key, [])
+        if user_key:
+            person = USERS.get(user_key)
+            if person is None:
+                needle = user_key.lower()
+                person = next((
+                    user for user in USERS.values()
+                    if user["username"].lower() == needle or user["displayName"].lower() == needle
+                ), None)
+            if person is None or not caps:
+                return 400, {"message": text["asset-tree.error.user"]}
+            row = {
+                "userKey": person["userKey"],
+                "username": person["username"],
+                "displayName": person["displayName"],
+                "level": level_of(caps),
+                "caps": caps,
+            }
+            current = next((item for item in rows if item.get("userKey") == person["userKey"]), None)
+            if current:
+                current.clear()
+                current.update(row)
+                saved = current
+            else:
+                rows.append(row)
+                saved = row
+            rows.sort(key=lambda item: (item.get("displayName") or item.get("groupName") or "").lower())
+            return 201, saved
         if group_name not in GROUPS or not caps:
             return 400, {"message": text["asset-tree.error.group"]}
         row = {"groupName": group_name, "level": level_of(caps), "caps": caps}
-        rows = STATE["grants"].setdefault(project_key, [])
-        current = next((item for item in rows if item["groupName"] == group_name), None)
+        current = next((item for item in rows if not item.get("userKey") and item.get("groupName") == group_name), None)
         if current:
+            current.clear()
             current.update(row)
-            return 201, current
-        rows.append(row)
-        rows.sort(key=lambda item: item["groupName"].lower())
-        return 201, row
+            saved = current
+        else:
+            rows.append(row)
+            saved = row
+        rows.sort(key=lambda item: (item.get("displayName") or item.get("groupName") or "").lower())
+        return 201, saved
 
-    def delete_grant(self, project_key, group_name, text):
+    def delete_grant(self, project_key, query, text):
+        user_key = ((query or {}).get("user") or [""])[0].strip()
+        group_name = ((query or {}).get("group") or [""])[0].strip()
         rows = STATE["grants"].get(project_key, [])
-        match = next((item for item in rows if item["groupName"] == (group_name or "").strip()), None)
-        if not match:
-            return 404, {"message": text["asset-tree.error.group"]}
+        if user_key:
+            match = next((item for item in rows if item.get("userKey") == user_key), None)
+            if not match:
+                return 404, {"message": text["asset-tree.error.user"]}
+        else:
+            match = next((item for item in rows if not item.get("userKey") and item.get("groupName") == group_name), None)
+            if not match:
+                return 404, {"message": text["asset-tree.error.group"]}
         STATE["grants"][project_key] = [item for item in rows if item is not match]
         return 204, None
 
@@ -5256,18 +6983,33 @@ setTimeout(function () {
         return 201, plan_dto(STATE["plans"][plan_id])
 
     def update_plan(self, asset_id, plan_id, body, text):
-        asset = STATE["assets"].get(asset_id)
         row = STATE["plans"].get(plan_id)
+        if asset_id == 0:
+            if not row or row.get("assetId"):
+                return 404, {"message": text["asset-tree.error.notFound"]}
+            error = fill_plan(row, body, False, row.get("projectKey") or "", text)
+            if error:
+                return 400, {"message": error}
+            return 200, plan_dto(row)
+        asset = STATE["assets"].get(asset_id)
         if not asset or not row or row["assetId"] != asset_id:
             return 404, {"message": text["asset-tree.error.notFound"]}
+        marking = (body or {}).get("done") is True
         error = fill_plan(row, body, False, asset["projectKey"], text)
         if error:
             return 400, {"message": error}
+        if marking:
+            record_activity(asset_id, "service_done", row.get("name") or "", "", row.get("completedOn") or "")
         apply_due(asset["projectKey"])
         return 200, plan_dto(row)
 
     def delete_plan(self, asset_id, plan_id, text):
         row = STATE["plans"].get(plan_id)
+        if asset_id == 0:
+            if not row or row.get("assetId"):
+                return 404, {"message": text["asset-tree.error.notFound"]}
+            STATE["plans"].pop(plan_id, None)
+            return 204, None
         if not STATE["assets"].get(asset_id) or not row or row["assetId"] != asset_id:
             return 404, {"message": text["asset-tree.error.notFound"]}
         STATE["plans"].pop(plan_id, None)
@@ -5292,6 +7034,11 @@ setTimeout(function () {
         custodian = (body.get("custodianKey") or "").strip() or None
         if custodian and custodian not in USERS:
             return 400, {"message": text["asset-tree.error.user"]}
+        issued = (body.get("issuedKey") or "").strip() or None
+        if row.get("location"):
+            issued = None
+        elif issued and issued not in USERS:
+            return 400, {"message": text["asset-tree.error.user"]}
         error, values = self.values_from(body, type_key, text)
         if error:
             return 400, {"message": error}
@@ -5301,6 +7048,7 @@ setTimeout(function () {
         asset_id = add_asset(project_key, type_key, body["name"].strip(), parent_id, status, custodian, values)
         if not asset_id:
             return 400, {"message": text.get("asset-tree.error.assetKey.required", "Key")}
+        STATE["assets"][asset_id]["issuedKey"] = issued
         STATE["assets"][asset_id]["description"] = body.get("description") or ""
         log_activity(asset_id, "created", "", "", body["name"].strip())
         log_place(place_container(parent_id), "place_add", STATE["assets"][asset_id])
@@ -5325,6 +7073,7 @@ setTimeout(function () {
         )
         if not new_id:
             return 400, {"message": text.get("asset-tree.error.assetKey.required", "Key")}
+        STATE["assets"][new_id]["issuedKey"] = asset.get("issuedKey")
         STATE["assets"][new_id]["description"] = asset.get("description") or ""
         log_activity(new_id, "created", "", "", name)
         log_place(place_container(parent_id), "place_add", STATE["assets"][new_id])
@@ -5346,6 +7095,11 @@ setTimeout(function () {
         custodian = (body.get("custodianKey") or "").strip() or None
         if custodian and custodian not in USERS:
             return 400, {"message": text["asset-tree.error.user"]}
+        issued = (body.get("issuedKey") or "").strip() or None
+        if row.get("location"):
+            issued = None
+        elif issued and issued not in USERS:
+            return 400, {"message": text["asset-tree.error.user"]}
         error, values = self.values_from(body, type_key, text)
         if error:
             return 400, {"message": error}
@@ -5354,12 +7108,14 @@ setTimeout(function () {
         old_type = asset["typeKey"]
         old_status = canonical(asset["status"])
         old_custodian = asset.get("custodianKey") or ""
+        old_issued = asset.get("issuedKey") or ""
         old_values = dict(asset.get("values") or {})
         new_name = body["name"].strip()
         new_description = body.get("description") or ""
         new_status = canonical(status)
         new_custodian = custodian or ""
-        asset.update({"name": new_name, "description": new_description, "typeKey": type_key, "status": new_status, "custodianKey": custodian, "values": values, "updated": now_stamp()})
+        new_issued = issued or ""
+        asset.update({"name": new_name, "description": new_description, "typeKey": type_key, "status": new_status, "custodianKey": custodian, "issuedKey": issued, "values": values, "updated": now_stamp()})
         log_activity(asset_id, "name", "", old_name, new_name)
         log_activity(asset_id, "description", "", old_description, new_description)
         old_type_row = type_row(old_type)
@@ -5369,6 +7125,9 @@ setTimeout(function () {
         old_person = USERS.get(old_custodian)
         new_person = USERS.get(new_custodian)
         log_activity(asset_id, "custodian", "", old_person["displayName"] if old_person else "", new_person["displayName"] if new_person else "")
+        old_holder = USERS.get(old_issued)
+        new_holder = USERS.get(new_issued)
+        log_activity(asset_id, "issued", "", old_holder["displayName"] if old_holder else "", new_holder["displayName"] if new_holder else "")
         labels = {}
         for field in (new_type_row or {}).get("fields") or []:
             labels[field["fieldKey"]] = label_of(field["label"], text)
@@ -5388,6 +7147,7 @@ setTimeout(function () {
         if nested and not cascade:
             return 409, {"message": text["asset-tree.error.hasChildren"].replace("{0}", str(len(nested)))}
         doomed = set(nested + [asset_id])
+        drop_peers(doomed)
         for current in nested + [asset_id]:
             gone = STATE["assets"].get(current)
             if gone:

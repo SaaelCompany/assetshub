@@ -21,6 +21,12 @@ public interface ProjectGrantEntity extends Entity {
 
     void setGroupName(String groupName);
 
+    @Indexed
+    @StringLength(255)
+    String getUserKey();
+
+    void setUserKey(String userKey);
+
     @NotNull
     @StringLength(16)
     String getLevel();
