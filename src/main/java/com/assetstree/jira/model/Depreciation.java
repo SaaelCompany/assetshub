@@ -39,4 +39,20 @@ public final class Depreciation {
     public static boolean warrantyActive(LocalDate until, LocalDate today) {
         return until != null && today != null && !today.isAfter(until);
     }
+
+    /** The month the straight-line life ends. Null when the life was not set. */
+    public static LocalDate replaceOn(LocalDate purchased, int lifeMonths) {
+        if (purchased == null || lifeMonths <= 0) {
+            return null;
+        }
+        return purchased.plusMonths(lifeMonths);
+    }
+
+    public static int monthsLeft(int lifeMonths, int elapsed) {
+        if (lifeMonths <= 0) {
+            return 0;
+        }
+        int left = lifeMonths - Math.max(0, elapsed);
+        return left < 0 ? 0 : left;
+    }
 }

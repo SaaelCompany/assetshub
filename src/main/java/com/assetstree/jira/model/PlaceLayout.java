@@ -462,6 +462,49 @@ public final class PlaceLayout {
         return 1000000 + schemaAt;
     }
 
+    /**
+     * Explicit lines with each sibling list ordered by the type label.
+     * Nesting stays as it is. An empty layout comes back unchanged.
+     */
+    public static List<String> orderByName(List<String> lines, List<String> pinned, List<Fact> schema,
+                                            final Map<String, String> labels, final boolean descending) {
+        List<Slot> slots = layout(lines, pinned, schema);
+        if (slots.isEmpty()) {
+            return lines == null ? new ArrayList<String>() : new ArrayList<String>(lines);
+        }
+        List<String> roots = new ArrayList<String>();
+        Map<String, List<String>> children = new LinkedHashMap<String, List<String>>();
+        for (Slot slot : slots) {
+            if (slot.parentKey.isEmpty()) {
+                roots.add(slot.typeKey);
+                continue;
+            }
+            List<String> bucket = children.get(slot.parentKey);
+            if (bucket == null) {
+                bucket = new ArrayList<String>();
+                children.put(slot.parentKey, bucket);
+            }
+            bucket.add(slot.typeKey);
+        }
+        Comparator<String> byLabel = new Comparator<String>() {
+            @Override
+            public int compare(String left, String right) {
+                String leftLabel = labels == null || labels.get(left) == null ? left : labels.get(left);
+                String rightLabel = labels == null || labels.get(right) == null ? right : labels.get(right);
+                int cmp = NameOrder.compare(leftLabel, rightLabel);
+                if (cmp == 0) {
+                    cmp = left.compareTo(right);
+                }
+                return descending ? -cmp : cmp;
+            }
+        };
+        Collections.sort(roots, byLabel);
+        for (List<String> bucket : children.values()) {
+            Collections.sort(bucket, byLabel);
+        }
+        return write(roots, children);
+    }
+
     private static List<String> write(List<String> roots, Map<String, List<String>> children) {
         List<String> lines = new ArrayList<String>();
         for (String root : roots) {

@@ -2,22 +2,52 @@ package com.assetstree.jira.model;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
  * Turns a spreadsheet of equipment into creates and updates.
  * A blank key creates an object. A key already in the project updates it.
+ * A host name such as KRUL-IT updates the computer that already has that name.
  * Places and types must already exist: the file does not invent the tree.
  */
 public final class EquipmentExchange {
-    public static final int MAX_ROWS = 2000;
+    /** One workbook, across every sheet. A larger book is refused. */
+    public static final int MAX_ROWS = 20000;
+    /** Rows written by one request when the client asks for chunks. */
+    public static final int CHUNK_ROWS = 400;
 
     private static final Pattern NUMBER = Pattern.compile("^-?\\d{1,12}(\\.\\d{1,4})?$");
-    private static final String[] ROLES = {"key", "name", "type", "status", "place", "custodian", "description"};
+    private static final String[] ROLES = {
+            "key", "name", "type", "status", "place", "custodian", "issued", "description",
+            "serviceKind", "serviceName", "serviceDate", "serviceEvery", "serviceUnit", "serviceWho",
+            "lifePurchased", "lifeSupplier", "lifeDocument", "lifePrice", "lifeCurrency", "lifeCommissioned",
+            "lifeWarranty", "lifeWarrantyService", "lifeContractor", "lifeContractNo", "lifeContractFrom",
+            "lifeContractUntil", "lifeMonths", "lifeResidual",
+            "linkTo", "linkType", "linkInbound", "linkAttrs"
+    };
+    private static final String[] LIFE_FIELDS = {
+            "purchased", "supplier", "document", "price", "currency", "commissioned",
+            "warrantyUntil", "warrantyService", "contractor", "contractNo", "contractFrom",
+            "contractUntil", "lifeMonths", "residual"
+    };
+    private static final int LIFE_FIRST = 14;
+    private static final int ROLE_KEY = 0;
+    private static final int ROLE_SERVICE_KIND = 8;
+    private static final int ROLE_SERVICE_NAME = 9;
+    private static final int ROLE_SERVICE_DATE = 10;
+    private static final int ROLE_SERVICE_EVERY = 11;
+    private static final int ROLE_SERVICE_UNIT = 12;
+    private static final int ROLE_SERVICE_WHO = 13;
+    private static final int ROLE_LINK_TO = 28;
+    private static final int ROLE_LINK_TYPE = 29;
+    private static final int ROLE_LINK_IN = 30;
+    private static final int ROLE_LINK_ATTRS = 31;
 
     private EquipmentExchange() {
     }
@@ -163,12 +193,28 @@ public final class EquipmentExchange {
         private final String objectKey;
         private final boolean location;
 
+        private final String typeKey;
+        private final String serial;
+        private final String inventory;
+
         public Node(int id, Integer parentId, String name, String objectKey, boolean location) {
+            this(id, parentId, name, objectKey, location, "");
+        }
+
+        public Node(int id, Integer parentId, String name, String objectKey, boolean location, String typeKey) {
+            this(id, parentId, name, objectKey, location, typeKey, "", "");
+        }
+
+        public Node(int id, Integer parentId, String name, String objectKey, boolean location, String typeKey,
+                    String serial, String inventory) {
             this.id = id;
             this.parentId = parentId;
             this.name = name;
             this.objectKey = objectKey;
             this.location = location;
+            this.typeKey = typeKey == null ? "" : typeKey;
+            this.serial = serial == null ? "" : serial;
+            this.inventory = inventory == null ? "" : inventory;
         }
 
         public int getId() {
@@ -189,6 +235,18 @@ public final class EquipmentExchange {
 
         public boolean isLocation() {
             return location;
+        }
+
+        public String getTypeKey() {
+            return typeKey;
+        }
+
+        public String getSerial() {
+            return serial;
+        }
+
+        public String getInventory() {
+            return inventory;
         }
     }
 
@@ -220,10 +278,29 @@ public final class EquipmentExchange {
         private final int parentId;
         private final boolean custodianPresent;
         private final String custodianKey;
+        private final boolean issuedPresent;
+        private final String issuedKey;
         private final List<Value> attributes;
+        private final Service service;
+        private final LifeBook.Change lifecycle;
 
         Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
-               int parentId, boolean custodianPresent, String custodianKey, List<Value> attributes) {
+               int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
+               List<Value> attributes) {
+            this(row, existingId, name, description, typeKey, statusKey, parentId, custodianPresent, custodianKey,
+                    issuedPresent, issuedKey, attributes, null, null);
+        }
+
+        Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
+               int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
+               List<Value> attributes, Service service) {
+            this(row, existingId, name, description, typeKey, statusKey, parentId, custodianPresent, custodianKey,
+                    issuedPresent, issuedKey, attributes, service, null);
+        }
+
+        Change(int row, Integer existingId, String name, String description, String typeKey, String statusKey,
+               int parentId, boolean custodianPresent, String custodianKey, boolean issuedPresent, String issuedKey,
+               List<Value> attributes, Service service, LifeBook.Change lifecycle) {
             this.row = row;
             this.existingId = existingId;
             this.name = name;
@@ -233,7 +310,11 @@ public final class EquipmentExchange {
             this.parentId = parentId;
             this.custodianPresent = custodianPresent;
             this.custodianKey = custodianKey;
+            this.issuedPresent = issuedPresent;
+            this.issuedKey = issuedKey;
             this.attributes = attributes;
+            this.service = service;
+            this.lifecycle = lifecycle;
         }
 
         public int getRow() {
@@ -272,8 +353,142 @@ public final class EquipmentExchange {
             return custodianKey;
         }
 
+        public boolean isIssuedPresent() {
+            return issuedPresent;
+        }
+
+        public String getIssuedKey() {
+            return issuedKey;
+        }
+
         public List<Value> getAttributes() {
             return attributes;
+        }
+
+        public Service getService() {
+            return service;
+        }
+
+        public LifeBook.Change getLifecycle() {
+            return lifecycle;
+        }
+    }
+
+    /** One maintenance row from the object line or from the service sheet. */
+    public static final class Service {
+        private final int row;
+        private final String sheet;
+        private final String objectKey;
+        private final String kind;
+        private final String name;
+        private final String lastDone;
+        private final int everyCount;
+        private final String everyUnit;
+        private final String assigneeKey;
+
+        public Service(int row, String sheet, String objectKey, String kind, String name, String lastDone,
+                       int everyCount, String everyUnit, String assigneeKey) {
+            this.row = row;
+            this.sheet = sheet == null ? "" : sheet;
+            this.objectKey = objectKey == null ? "" : objectKey;
+            this.kind = kind == null ? "" : kind;
+            this.name = name == null ? "" : name;
+            this.lastDone = lastDone == null ? "" : lastDone;
+            this.everyCount = everyCount;
+            this.everyUnit = everyUnit == null ? "" : everyUnit;
+            this.assigneeKey = assigneeKey == null ? "" : assigneeKey;
+        }
+
+        public int getRow() {
+            return row;
+        }
+
+        public String getSheet() {
+            return sheet;
+        }
+
+        public String getObjectKey() {
+            return objectKey;
+        }
+
+        public String getKind() {
+            return kind;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getLastDone() {
+            return lastDone;
+        }
+
+        public int getEveryCount() {
+            return everyCount;
+        }
+
+        public String getEveryUnit() {
+            return everyUnit;
+        }
+
+        public String getAssigneeKey() {
+            return assigneeKey;
+        }
+    }
+
+    /** One directed relation. {@code reverse} stores the sentence on the other card. */
+    public static final class Link {
+        private final int row;
+        private final String sheet;
+        private final String fromKey;
+        private final String toKey;
+        private final String type;
+        private final boolean reverse;
+        private final String inbound;
+        private final String attrs;
+
+        public Link(int row, String sheet, String fromKey, String toKey, String type, boolean reverse,
+                    String inbound, String attrs) {
+            this.row = row;
+            this.sheet = sheet == null ? "" : sheet;
+            this.fromKey = fromKey == null ? "" : fromKey;
+            this.toKey = toKey == null ? "" : toKey;
+            this.type = type == null ? "" : type;
+            this.reverse = reverse;
+            this.inbound = inbound == null ? "" : inbound;
+            this.attrs = attrs == null ? "" : attrs;
+        }
+
+        public int getRow() {
+            return row;
+        }
+
+        public String getSheet() {
+            return sheet;
+        }
+
+        public String getFromKey() {
+            return fromKey;
+        }
+
+        public String getToKey() {
+            return toKey;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public boolean isReverse() {
+            return reverse;
+        }
+
+        public String getInbound() {
+            return inbound;
+        }
+
+        public String getAttrs() {
+            return attrs;
         }
     }
 
@@ -314,10 +529,29 @@ public final class EquipmentExchange {
     public static final class Plan {
         private final List<Change> changes;
         private final List<Issue> issues;
+        private final List<Service> services;
+        private final List<LifeBook.Change> lifecycles;
+        private final List<Link> links;
 
         Plan(List<Change> changes, List<Issue> issues) {
+            this(changes, issues, new ArrayList<Service>());
+        }
+
+        Plan(List<Change> changes, List<Issue> issues, List<Service> services) {
+            this(changes, issues, services, new ArrayList<LifeBook.Change>());
+        }
+
+        Plan(List<Change> changes, List<Issue> issues, List<Service> services, List<LifeBook.Change> lifecycles) {
+            this(changes, issues, services, lifecycles, new ArrayList<Link>());
+        }
+
+        Plan(List<Change> changes, List<Issue> issues, List<Service> services, List<LifeBook.Change> lifecycles,
+             List<Link> links) {
             this.changes = changes;
             this.issues = issues;
+            this.services = services == null ? new ArrayList<Service>() : services;
+            this.lifecycles = lifecycles == null ? new ArrayList<LifeBook.Change>() : lifecycles;
+            this.links = links == null ? new ArrayList<Link>() : links;
         }
 
         public List<Change> getChanges() {
@@ -326,6 +560,18 @@ public final class EquipmentExchange {
 
         public List<Issue> getIssues() {
             return issues;
+        }
+
+        public List<Service> getServices() {
+            return services;
+        }
+
+        public List<LifeBook.Change> getLifecycles() {
+            return lifecycles;
+        }
+
+        public List<Link> getLinks() {
+            return links;
         }
     }
 
@@ -343,11 +589,34 @@ public final class EquipmentExchange {
      */
     public static Plan planBook(List<EquipmentSheet.Sheet> sheets, List<TypeRef> types, List<Named> statuses,
                                 List<Node> nodes, String defaultStatus, Map<String, String> labels, Directory people) {
+        return planBook(sheets, types, statuses, nodes, defaultStatus, labels, people, false, null);
+    }
+
+    /**
+     * Same as {@link #planBook(List, List, List, List, String, Map, Directory)}.
+     * When {@code service} is true, maintenance columns on an object row and a
+     * sheet that has a work-kind column and no name column become plans.
+     * When it is false those columns are ignored and that sheet is skipped,
+     * so a book saved while maintenance was on still loads.
+     * Lifecycle columns follow the same rule when {@code life} is true.
+     */
+    public static Plan planBook(List<EquipmentSheet.Sheet> sheets, List<TypeRef> types, List<Named> statuses,
+                                List<Node> nodes, String defaultStatus, Map<String, String> labels, Directory people,
+                                boolean service, List<Named> kinds) {
+        return planBook(sheets, types, statuses, nodes, defaultStatus, labels, people, service, kinds, false);
+    }
+
+    public static Plan planBook(List<EquipmentSheet.Sheet> sheets, List<TypeRef> types, List<Named> statuses,
+                                List<Node> nodes, String defaultStatus, Map<String, String> labels, Directory people,
+                                boolean service, List<Named> kinds, boolean life) {
         List<Change> changes = new ArrayList<Change>();
         List<Issue> issues = new ArrayList<Issue>();
+        List<Service> services = new ArrayList<Service>();
+        List<LifeBook.Change> lifecycles = new ArrayList<LifeBook.Change>();
+        List<Link> links = new ArrayList<Link>();
         if (sheets == null || sheets.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
-            return new Plan(changes, issues);
+            return new Plan(changes, issues, services);
         }
         int rows = 0;
         for (EquipmentSheet.Sheet sheet : sheets) {
@@ -357,12 +626,57 @@ public final class EquipmentExchange {
         }
         if (rows > MAX_ROWS) {
             issues.add(new Issue(1, "asset-tree.error.import.limit", String.valueOf(MAX_ROWS)));
-            return new Plan(changes, issues);
+            return new Plan(changes, issues, services);
         }
         Map<String, Integer> seenKeys = new LinkedHashMap<String, Integer>();
+        List<Node> known = new ArrayList<Node>();
+        if (nodes != null) {
+            known.addAll(nodes);
+        }
+        int[] made = new int[] { -1 };
         boolean anyData = false;
         for (EquipmentSheet.Sheet sheet : sheets) {
             if (sheet == null || (sheet.getHeaders().isEmpty() && sheet.getRecords().isEmpty())) {
+                continue;
+            }
+            if (wideLinkSheet(sheet, labels)) {
+                if (sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readWideLinkSheet(sheet, known, labels, links, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
+                continue;
+            }
+            if (linkSheet(sheet, labels)) {
+                if (sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readLinkSheet(sheet, known, labels, links, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
+                continue;
+            }
+            if (serviceSheet(sheet, labels)) {
+                if (!service || sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readServiceSheet(sheet, known, people, kinds, labels, services, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
+                continue;
+            }
+            if (lifeSheet(sheet, labels)) {
+                if (!life || sheet.getRecords().isEmpty()) {
+                    continue;
+                }
+                anyData = true;
+                List<Issue> partIssues = new ArrayList<Issue>();
+                readLifeSheet(sheet, known, labels, lifecycles, partIssues);
+                issues.addAll(stamp(sheet.getName(), partIssues));
                 continue;
             }
             TypeRef bound = uniqueSheetType(sheet.getName(), types);
@@ -371,19 +685,43 @@ public final class EquipmentExchange {
                 continue;
             }
             anyData = true;
-            Plan part = plan(prepared, types, statuses, nodes, defaultStatus, labels, people, seenKeys);
+            Plan part = plan(prepared, types, statuses, known, defaultStatus, labels, people, seenKeys, service, kinds, life);
             issues.addAll(stamp(sheet.getName(), part.getIssues()));
             changes.addAll(part.getChanges());
+            lifecycles.addAll(part.getLifecycles());
+            for (int i = 0; i < part.getChanges().size(); i++) {
+                Change change = part.getChanges().get(i);
+                if (change.getExistingId() == null) {
+                    String serial = markOf(change, types, true);
+                    String inventory = markOf(change, types, false);
+                    if (!TniText.shortHost(change.getName()).isEmpty() || !serial.isEmpty() || !inventory.isEmpty()) {
+                        known.add(new Node(made[0]--, change.getParentId(), change.getName(), "", false, change.getTypeKey(),
+                                serial, inventory));
+                    }
+                }
+            }
         }
         if (!anyData && issues.isEmpty()) {
             issues.add(new Issue(1, "asset-tree.error.import.empty", ""));
         }
-        return new Plan(changes, issues);
+        return new Plan(changes, issues, services, lifecycles, links);
     }
 
     public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
                             String defaultStatus, Map<String, String> labels, Directory people,
                             Map<String, Integer> seenKeys) {
+        return plan(sheet, types, statuses, nodes, defaultStatus, labels, people, seenKeys, false, null);
+    }
+
+    public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
+                            String defaultStatus, Map<String, String> labels, Directory people,
+                            Map<String, Integer> seenKeys, boolean service, List<Named> kinds) {
+        return plan(sheet, types, statuses, nodes, defaultStatus, labels, people, seenKeys, service, kinds, false);
+    }
+
+    public static Plan plan(EquipmentSheet.Sheet sheet, List<TypeRef> types, List<Named> statuses, List<Node> nodes,
+                            String defaultStatus, Map<String, String> labels, Directory people,
+                            Map<String, Integer> seenKeys, boolean service, List<Named> kinds, boolean life) {
         List<Change> changes = new ArrayList<Change>();
         List<Issue> issues = new ArrayList<Issue>();
         if (sheet == null || sheet.getHeaders().isEmpty()) {
@@ -439,9 +777,33 @@ public final class EquipmentExchange {
         Map<String, List<Node>> places = indexPlaces(nodes);
         Map<Integer, Integer> parentById = parents(nodes);
         Map<String, Integer> keys = seenKeys == null ? new LinkedHashMap<String, Integer>() : seenKeys;
+        List<TniSame.Card> hosts = new ArrayList<TniSame.Card>();
+        Map<Integer, Node> byId = new HashMap<Integer, Node>();
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node == null) {
+                    continue;
+                }
+                byId.put(Integer.valueOf(node.getId()), node);
+                hosts.add(new TniSame.Card(node.getId(), node.getName(), node.isLocation(), "", "",
+                        node.getSerial(), node.getInventory(), node.getTypeKey()));
+            }
+        }
+        Set<Integer> taken = new HashSet<Integer>();
+        int low = 0;
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node != null && node.getId() < low) {
+                    low = node.getId();
+                }
+            }
+        }
+        int[] synthetic = new int[] { low - 1 };
         for (EquipmentSheet.Record record : sheet.getRecords()) {
             Change change = readRow(record, roleColumn, fieldColumns, headers, types, statuses, places, parentById, byKey,
-                    keys, defaultStatus, people, issues);
+                    keys, defaultStatus, people, issues, service, kinds, hosts, byId, taken, synthetic, life);
             if (change != null) {
                 changes.add(change);
             }
@@ -453,7 +815,9 @@ public final class EquipmentExchange {
                                   List<String> headers, List<TypeRef> types, List<Named> statuses,
                                   Map<String, List<Node>> places, Map<Integer, Integer> parentById,
                                   Map<String, Node> byKey, Map<String, Integer> seenKeys, String defaultStatus,
-                                  Directory people, List<Issue> issues) {
+                                  Directory people, List<Issue> issues, boolean service, List<Named> kinds,
+                                  List<TniSame.Card> hosts, Map<Integer, Node> byId, Set<Integer> taken, int[] synthetic,
+                                  boolean life) {
         int row = record.getRow();
         String key = text(record, roleColumn[0]);
         String name = text(record, roleColumn[1]);
@@ -462,8 +826,11 @@ public final class EquipmentExchange {
         String place = text(record, roleColumn[4]);
         boolean custodianPresent = roleColumn[5] >= 0;
         String custodian = text(record, roleColumn[5]);
-        String description = roleColumn[6] < 0 ? null : record.cell(roleColumn[6]);
-        if (name.isEmpty() && key.isEmpty() && typeName.isEmpty() && place.isEmpty()) {
+        boolean issuedPresent = roleColumn[6] >= 0;
+        String issued = text(record, roleColumn[6]);
+        String description = roleColumn[7] < 0 ? null : record.cell(roleColumn[7]);
+        if (name.isEmpty() && key.isEmpty() && typeName.isEmpty() && place.isEmpty()
+                && !(service && serviceTouched(record, roleColumn))) {
             return null;
         }
         if (name.isEmpty()) {
@@ -479,6 +846,7 @@ public final class EquipmentExchange {
             return null;
         }
         Node existing = null;
+        boolean keepType = false;
         if (!key.isEmpty()) {
             String marker = norm(key);
             if (seenKeys.containsKey(marker)) {
@@ -496,6 +864,38 @@ public final class EquipmentExchange {
                 return null;
             }
         }
+        String serial = columnMark(record, fieldColumns, headers, true);
+        String inventory = columnMark(record, fieldColumns, headers, false);
+        if (hosts != null && key.isEmpty()) {
+            TypeRef hinted = matchType(typeName, types);
+            boolean computer = hinted != null && computerType(hinted.getLabel(), hinted.getKey());
+            int same = 0;
+            if (computer) {
+                same = TniSame.pick(hosts, 0, name, "", serial, inventory, taken);
+            } else if (hinted != null) {
+                same = TniSame.byName(hosts, hinted.getKey(), name, serial, inventory, taken);
+            }
+            if (same < 0 || (same > 0 && taken != null && taken.contains(Integer.valueOf(same)))) {
+                issues.add(new Issue(row, "asset-tree.error.import.host", name));
+                return null;
+            }
+            if (same > 0 && byId != null) {
+                existing = byId.get(Integer.valueOf(same));
+                rememberMark(hosts, same, serial, inventory);
+                keepType = existing != null && !existing.getTypeKey().isEmpty();
+                if (existing != null && !existing.getObjectKey().isEmpty()) {
+                    String marker = norm(existing.getObjectKey());
+                    if (seenKeys.containsKey(marker)) {
+                        issues.add(new Issue(row, "asset-tree.error.import.host", name));
+                        return null;
+                    }
+                    seenKeys.put(marker, Integer.valueOf(row));
+                }
+            }
+        }
+        if (existing != null && taken != null) {
+            taken.add(Integer.valueOf(existing.getId()));
+        }
         TypeRef type = matchType(typeName, types);
         if (type == null) {
             issues.add(new Issue(row, typeName.isEmpty() ? "asset-tree.error.import.type" : "asset-tree.error.import.type", typeName));
@@ -508,6 +908,12 @@ public final class EquipmentExchange {
         if (countTypes(typeName, types) > 1) {
             issues.add(new Issue(row, "asset-tree.error.import.type.ambiguous", typeName));
             return null;
+        }
+        if (keepType) {
+            TypeRef kept = typeByKey(existing.getTypeKey(), types);
+            if (kept != null && !kept.isLocation()) {
+                type = kept;
+            }
         }
         String statusKey = matchStatus(statusName, statuses, defaultStatus);
         if (statusKey == null) {
@@ -526,18 +932,13 @@ public final class EquipmentExchange {
             issues.add(new Issue(row, "asset-tree.error.import.depth", place));
             return null;
         }
-        String custodianKey = null;
-        if (!custodian.isEmpty()) {
-            Person person = people == null ? Person.missing() : people.find(custodian);
-            if (person == null || person.isMissing() || person.isBlank()) {
-                issues.add(new Issue(row, "asset-tree.error.import.user", custodian));
-                return null;
-            }
-            if (person.isAmbiguous()) {
-                issues.add(new Issue(row, "asset-tree.error.import.user.ambiguous", custodian));
-                return null;
-            }
-            custodianKey = person.getKey();
+        String custodianKey = resolvePerson(custodian, people, row, issues);
+        if (!custodian.isEmpty() && custodianKey == null) {
+            return null;
+        }
+        String issuedKey = resolvePerson(issued, people, row, issues);
+        if (!issued.isEmpty() && issuedKey == null) {
+            return null;
         }
         List<Value> attributes = new ArrayList<Value>();
         Map<String, String> filled = new LinkedHashMap<String, String>();
@@ -546,7 +947,7 @@ public final class EquipmentExchange {
             String raw = record.cell(column.intValue());
             FieldRef field = matchField(header, type);
             if (field == null) {
-                if (!raw.trim().isEmpty()) {
+                if (!raw.trim().isEmpty() && !keepType) {
                     issues.add(new Issue(row, "asset-tree.error.import.field", header));
                     return null;
                 }
@@ -609,8 +1010,83 @@ public final class EquipmentExchange {
             }
             attributes.add(new Value(field.getKey(), value));
         }
+        Service wish = null;
+        if (service && serviceTouched(record, roleColumn)) {
+            wish = readService(record, roleColumn, headers, byKey, people, kinds, false, issues);
+            if (wish == null) {
+                return null;
+            }
+        }
+        LifeBook.Change lifecycle = life ? readLifecycle(record, roleColumn, key) : null;
+        if (existing == null && hosts != null && synthetic != null && type != null
+                && (!TniText.shortHost(name).isEmpty() || !serial.isEmpty() || !inventory.isEmpty() || !computerType(type.getLabel(), type.getKey()))) {
+            hosts.add(new TniSame.Card(synthetic[0]--, name.trim(), false, "", "", serial, inventory, type.getKey()));
+        }
         return new Change(row, existing == null ? null : Integer.valueOf(existing.getId()), name.trim(),
-                description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey, attributes);
+                description, type.getKey(), statusKey, parentId.intValue(), custodianPresent, custodianKey,
+                issuedPresent, issuedKey, attributes, wish, lifecycle);
+    }
+
+    private static void rememberMark(List<TniSame.Card> hosts, int id, String serial, String inventory) {
+        if (hosts == null) {
+            return;
+        }
+        for (int i = 0; i < hosts.size(); i++) {
+            TniSame.Card card = hosts.get(i);
+            if (card != null && card.id == id) {
+                card.remember(serial, inventory);
+                return;
+            }
+        }
+    }
+
+    private static String columnMark(EquipmentSheet.Record record, List<Integer> columns, List<String> headers, boolean serial) {
+        if (record == null || columns == null || headers == null) {
+            return "";
+        }
+        String found = "";
+        for (int i = 0; i < columns.size(); i++) {
+            Integer column = columns.get(i);
+            if (column == null || column.intValue() < 0 || column.intValue() >= headers.size()) {
+                continue;
+            }
+            String header = headers.get(column.intValue());
+            String value = text(record, column.intValue());
+            if (value.isEmpty()) {
+                continue;
+            }
+            if (serial ? DuplicateMarks.isSerial(header, header) : DuplicateMarks.isInventory(header, header)) {
+                found = value;
+            }
+        }
+        return found;
+    }
+
+    private static String markOf(Change change, List<TypeRef> types, boolean serial) {
+        if (change == null || change.getAttributes() == null) {
+            return "";
+        }
+        TypeRef type = typeByKey(change.getTypeKey(), types);
+        String found = "";
+        for (int i = 0; i < change.getAttributes().size(); i++) {
+            Value value = change.getAttributes().get(i);
+            if (value == null || value.getValue() == null || value.getValue().trim().isEmpty()) {
+                continue;
+            }
+            String label = value.getFieldKey();
+            if (type != null && type.getFields() != null) {
+                for (int f = 0; f < type.getFields().size(); f++) {
+                    FieldRef field = type.getFields().get(f);
+                    if (field != null && field.getKey().equals(value.getFieldKey())) {
+                        label = field.getLabel();
+                    }
+                }
+            }
+            if (serial ? DuplicateMarks.isSerial(value.getFieldKey(), label) : DuplicateMarks.isInventory(value.getFieldKey(), label)) {
+                found = value.getValue().trim();
+            }
+        }
+        return found;
     }
 
     private static Map<String, List<Node>> indexPlaces(List<Node> nodes) {
@@ -753,6 +1229,19 @@ public final class EquipmentExchange {
         return stamped;
     }
 
+    private static TypeRef typeByKey(String key, List<TypeRef> types) {
+        if (key == null || key.isEmpty() || types == null) {
+            return null;
+        }
+        for (int i = 0; i < types.size(); i++) {
+            TypeRef type = types.get(i);
+            if (type != null && key.equals(type.getKey())) {
+                return type;
+            }
+        }
+        return null;
+    }
+
     private static TypeRef matchType(String typeName, List<TypeRef> types) {
         TypeRef found = null;
         for (TypeRef type : types) {
@@ -820,6 +1309,22 @@ public final class EquipmentExchange {
         return map;
     }
 
+    private static String resolvePerson(String raw, Directory people, int row, List<Issue> issues) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        Person person = people == null ? Person.missing() : people.find(raw);
+        if (person == null || person.isMissing() || person.isBlank()) {
+            issues.add(new Issue(row, "asset-tree.error.import.user", raw));
+            return null;
+        }
+        if (person.isAmbiguous()) {
+            issues.add(new Issue(row, "asset-tree.error.import.user.ambiguous", raw));
+            return null;
+        }
+        return person.getKey();
+    }
+
     private static String text(EquipmentSheet.Record record, int column) {
         if (column < 0) {
             return "";
@@ -845,7 +1350,32 @@ public final class EquipmentExchange {
         alias(roles, "status", "status", "статус");
         alias(roles, "place", "place", "площадка", "место", "расположение");
         alias(roles, "custodian", "custodian", "ответственный", "мол");
+        alias(roles, "issued", "issued", "issued to", "кому выдано", "выдано");
         alias(roles, "description", "description", "описание");
+        alias(roles, "serviceKind", "service: kind", "обслуживание: вид");
+        alias(roles, "serviceName", "service: work", "обслуживание: работа");
+        alias(roles, "serviceDate", "service: date", "обслуживание: дата");
+        alias(roles, "serviceEvery", "service: interval", "обслуживание: интервал");
+        alias(roles, "serviceUnit", "service: period", "обслуживание: период");
+        alias(roles, "serviceWho", "service: assignee", "обслуживание: исполнитель");
+        alias(roles, "lifePurchased", "lifecycle: purchase date", "жизненный цикл: дата покупки");
+        alias(roles, "lifeSupplier", "lifecycle: supplier", "жизненный цикл: поставщик");
+        alias(roles, "lifeDocument", "lifecycle: document", "жизненный цикл: документ");
+        alias(roles, "lifePrice", "lifecycle: cost", "жизненный цикл: цена");
+        alias(roles, "lifeCurrency", "lifecycle: currency", "жизненный цикл: валюта");
+        alias(roles, "lifeCommissioned", "lifecycle: commissioning", "жизненный цикл: дата ввода");
+        alias(roles, "lifeWarranty", "lifecycle: warranty until", "жизненный цикл: гарантия до");
+        alias(roles, "lifeWarrantyService", "lifecycle: warranty service", "жизненный цикл: гарантийный сервис");
+        alias(roles, "lifeContractor", "lifecycle: contractor", "жизненный цикл: подрядчик");
+        alias(roles, "lifeContractNo", "lifecycle: contract number", "жизненный цикл: номер договора");
+        alias(roles, "lifeContractFrom", "lifecycle: contract starts", "жизненный цикл: начало договора");
+        alias(roles, "lifeContractUntil", "lifecycle: contract ends", "жизненный цикл: окончание договора");
+        alias(roles, "lifeMonths", "lifecycle: useful life", "жизненный цикл: срок службы");
+        alias(roles, "lifeResidual", "lifecycle: residual value", "жизненный цикл: остаточная стоимость");
+        alias(roles, "linkTo", "linked to", "связан с");
+        alias(roles, "linkType", "relation", "связь");
+        alias(roles, "linkInbound", "reverse phrase", "обратная подпись");
+        alias(roles, "linkAttrs", "attributes", "атрибуты");
         if (labels != null) {
             for (Map.Entry<String, String> entry : labels.entrySet()) {
                 if (entry.getKey() != null && entry.getValue() != null && !entry.getValue().trim().isEmpty()) {
@@ -860,6 +1390,28 @@ public final class EquipmentExchange {
         for (String name : names) {
             roles.put(norm(name), role);
         }
+    }
+
+    /** A computer, laptop, monoblock, server or terminal. A printer or a UPS is not one of these. */
+    public static boolean computerType(String label, String key) {
+        return computerWord(label) || computerWord(key);
+    }
+
+    private static boolean computerWord(String raw) {
+        String text = norm(raw);
+        if (text.isEmpty()) {
+            return false;
+        }
+        String[] words = {
+                "computer", "laptop", "notebook", "server", "desktop", "monoblock", "terminal",
+                "компьютер", "ноутбук", "моноблок", "сервер", "терминал"
+        };
+        for (int i = 0; i < words.length; i++) {
+            if (text.contains(words[i])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static String norm(String value) {
@@ -886,5 +1438,960 @@ public final class EquipmentExchange {
 
     private static boolean same(String left, String right) {
         return norm(left).equals(norm(right));
+    }
+
+    private static boolean linkSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean to = false;
+        boolean type = false;
+        boolean name = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String role = known.get(norm(headers.get(i)));
+            if ("linkTo".equals(role)) {
+                to = true;
+            }
+            if ("linkType".equals(role)) {
+                type = true;
+            }
+            if ("name".equals(role)) {
+                name = true;
+            }
+        }
+        return to && type && !name;
+    }
+
+    private static void readLinkSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
+                                      List<Link> links, List<Issue> issues) {
+        int[] roleColumn = roleColumns(sheet.getHeaders(), labels, issues);
+        if (roleColumn == null) {
+            return;
+        }
+        if (roleColumn[ROLE_KEY] < 0 || roleColumn[ROLE_LINK_TO] < 0 || roleColumn[ROLE_LINK_TYPE] < 0) {
+            issues.add(new Issue(1, "asset-tree.error.import.header", ""));
+            return;
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String from = text(record, roleColumn[ROLE_KEY]);
+            String to = text(record, roleColumn[ROLE_LINK_TO]);
+            String kind = text(record, roleColumn[ROLE_LINK_TYPE]);
+            if (from.isEmpty() && to.isEmpty() && kind.isEmpty()) {
+                continue;
+            }
+            int row = record.getRow();
+            if (from.isEmpty() || to.isEmpty()) {
+                issues.add(new Issue(row, "asset-tree.error.import.key", from.isEmpty() ? to : from));
+                continue;
+            }
+            if (norm(from).equals(norm(to))) {
+                issues.add(new Issue(row, "asset-tree.error.peer.self", ""));
+                continue;
+            }
+            LinkRules.Sense sense = linkSense(kind, labels);
+            if (sense == null) {
+                issues.add(new Issue(row, "asset-tree.error.link.type", kind));
+                continue;
+            }
+            String inbound = text(record, roleColumn[ROLE_LINK_IN]);
+            String attrs = LinkRules.attrsFromCell(text(record, roleColumn[ROLE_LINK_ATTRS]));
+            links.add(new Link(row, sheet.getName(), from, to, sense.getType(), sense.isReverse(), inbound, attrs));
+        }
+    }
+
+    private static LinkRules.Sense linkSense(String raw, Map<String, String> labels) {
+        LinkRules.Sense sense = LinkRules.phrase(raw);
+        if (sense != null && LinkRules.typeKey(raw).isEmpty()) {
+            return sense;
+        }
+        if (sense != null && (LinkRules.builtIn(sense.getType()) || sense.isReverse())) {
+            return sense;
+        }
+        if (labels != null) {
+            String folded = norm(raw);
+            String[] keys = { "linkPart", "linkDepends", "linkInstalled", "linkIncludes", "linkNeeded", "linkCarries" };
+            String[] types = { "part", "depends", "installed", "includes", "needed", "carries" };
+            for (int i = 0; i < keys.length; i++) {
+                String label = labels.get(keys[i]);
+                if (label != null && folded.equals(norm(label))) {
+                    return LinkRules.sense(types[i]);
+                }
+            }
+        }
+        return sense;
+    }
+
+    /** One row per object. Each relation is its own column, and a cell lists the other objects. */
+    private static boolean wideLinkSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean key = false;
+        boolean name = false;
+        boolean type = false;
+        boolean place = false;
+        boolean linkTo = false;
+        boolean phrase = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String header = headers.get(i);
+            String role = known.get(norm(header));
+            if ("key".equals(role)) {
+                key = true;
+            } else if ("name".equals(role)) {
+                name = true;
+            } else if ("type".equals(role)) {
+                type = true;
+            } else if ("place".equals(role)) {
+                place = true;
+            } else if ("linkTo".equals(role)) {
+                linkTo = true;
+            } else if (linkSense(header, labels) != null) {
+                phrase = true;
+            }
+        }
+        boolean classic = key && name && phrase && !type && !place && !linkTo;
+        return classic || (titled(sheet, labels, "linkSheet") && key && phrase && !linkTo);
+    }
+
+    private static boolean titled(EquipmentSheet.Sheet sheet, Map<String, String> labels, String role) {
+        if (sheet == null || labels == null || sheet.getName() == null || role == null) {
+            return false;
+        }
+        String title = labels.get(role);
+        return title != null && same(sheet.getName(), title);
+    }
+
+    private static void readWideLinkSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
+                                          List<Link> links, List<Issue> issues) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int nameColumn = columnFor(sheet.getHeaders(), labels, "name");
+        List<Integer> columns = new ArrayList<Integer>();
+        List<LinkRules.Sense> senses = new ArrayList<LinkRules.Sense>();
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            if (i == keyColumn || i == nameColumn) {
+                continue;
+            }
+            LinkRules.Sense sense = linkSense(headers.get(i), labels);
+            if (sense == null) {
+                continue;
+            }
+            columns.add(Integer.valueOf(i));
+            senses.add(sense);
+        }
+        Map<String, Node> byKey = new HashMap<String, Node>();
+        Map<String, List<Node>> byName = new HashMap<String, List<Node>>();
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node == null || node.isLocation()) {
+                    continue;
+                }
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+                String name = norm(node.getName());
+                if (!name.isEmpty()) {
+                    List<Node> bucket = byName.get(name);
+                    if (bucket == null) {
+                        bucket = new ArrayList<Node>();
+                        byName.put(name, bucket);
+                    }
+                    bucket.add(node);
+                }
+            }
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            boolean touched = false;
+            for (int i = 0; i < columns.size(); i++) {
+                if (!text(record, columns.get(i).intValue()).isEmpty()) {
+                    touched = true;
+                    break;
+                }
+            }
+            if (!touched) {
+                continue;
+            }
+            int row = record.getRow();
+            String fromKey = resolveRef(text(record, keyColumn), text(record, nameColumn), byKey, byName, row, issues);
+            if (fromKey.isEmpty()) {
+                continue;
+            }
+            for (int i = 0; i < columns.size(); i++) {
+                String cell = text(record, columns.get(i).intValue());
+                if (cell.isEmpty()) {
+                    continue;
+                }
+                String[] pieces = cell.split("[;\\n]");
+                LinkRules.Sense sense = senses.get(i);
+                for (int p = 0; p < pieces.length; p++) {
+                    String piece = pieces[p] == null ? "" : pieces[p].trim();
+                    if (piece.isEmpty()) {
+                        continue;
+                    }
+                    String toKey = resolveRef(piece, "", byKey, byName, row, issues);
+                    if (toKey.isEmpty()) {
+                        continue;
+                    }
+                    if (norm(fromKey).equals(norm(toKey))) {
+                        issues.add(new Issue(row, "asset-tree.error.peer.self", ""));
+                        continue;
+                    }
+                    links.add(new Link(row, sheet.getName(), fromKey, toKey, sense.getType(), sense.isReverse(), "", ""));
+                }
+            }
+        }
+    }
+
+    private static String resolveRef(String written, String name, Map<String, Node> byKey, Map<String, List<Node>> byName,
+                                     int row, List<Issue> issues) {
+        String raw = written == null ? "" : written.trim();
+        if (!raw.isEmpty()) {
+            Node direct = byKey.get(norm(raw));
+            if (direct != null) {
+                return direct.getObjectKey();
+            }
+            int space = raw.indexOf(' ');
+            if (space > 0) {
+                Node head = byKey.get(norm(raw.substring(0, space)));
+                if (head != null) {
+                    return head.getObjectKey();
+                }
+            }
+        }
+        String label = raw.isEmpty() ? (name == null ? "" : name.trim()) : raw;
+        if (label.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.key", ""));
+            return "";
+        }
+        List<Node> hits = byName.get(norm(label));
+        if ((hits == null || hits.isEmpty()) && raw.indexOf(' ') > 0) {
+            hits = byName.get(norm(raw.substring(raw.indexOf(' ') + 1).trim()));
+        }
+        if (hits == null || hits.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.key", label));
+            return "";
+        }
+        if (hits.size() > 1) {
+            issues.add(new Issue(row, "asset-tree.error.import.link.who", label));
+            return "";
+        }
+        return hits.get(0).getObjectKey();
+    }
+
+    private static EquipmentSheet.Sheet filterWide(EquipmentSheet.Sheet sheet, Map<String, String> labels, String typeKey,
+                                                   Set<Integer> places, Map<Integer, Node> byId, Map<String, Node> byKey) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int nameColumn = columnFor(sheet.getHeaders(), labels, "name");
+        Map<String, List<Node>> byName = new HashMap<String, List<Node>>();
+        for (Node node : byId.values()) {
+            if (node == null || node.isLocation()) {
+                continue;
+            }
+            String name = norm(node.getName());
+            if (name.isEmpty()) {
+                continue;
+            }
+            List<Node> bucket = byName.get(name);
+            if (bucket == null) {
+                bucket = new ArrayList<Node>();
+                byName.put(name, bucket);
+            }
+            bucket.add(node);
+        }
+        List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, keyColumn);
+            String name = text(record, nameColumn);
+            if (key.isEmpty() && name.isEmpty()) {
+                continue;
+            }
+            Node node = key.isEmpty() ? null : byKey.get(norm(key));
+            if (node == null && key.indexOf(' ') > 0) {
+                node = byKey.get(norm(key.substring(0, key.indexOf(' '))));
+            }
+            if (node == null && !name.isEmpty()) {
+                List<Node> hits = byName.get(norm(name));
+                node = hits != null && hits.size() == 1 ? hits.get(0) : null;
+            }
+            if (node == null || nodeInScope(node, typeKey, places, byId)) {
+                records.add(record);
+            }
+        }
+        return new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records);
+    }
+
+    /**
+     * Keeps rows of one type and one place. An empty place cell on a new row
+     * is filled with that place, so the row is created there. Cards that are
+     * outside the selection are left out of the book and are not updated.
+     */
+    public static List<EquipmentSheet.Sheet> limit(List<EquipmentSheet.Sheet> sheets, String typeKey, int placeId,
+                                                   List<TypeRef> types, List<Node> nodes, Map<String, String> labels) {
+        String wanted = typeKey == null ? "" : typeKey.trim();
+        if (wanted.isEmpty() && placeId <= 0) {
+            return sheets == null ? new ArrayList<EquipmentSheet.Sheet>() : sheets;
+        }
+        String typeLabel = "";
+        if (!wanted.isEmpty() && types != null) {
+            for (int i = 0; i < types.size(); i++) {
+                TypeRef type = types.get(i);
+                if (type != null && wanted.equals(type.getKey())) {
+                    typeLabel = type.getLabel() == null ? "" : type.getLabel();
+                    break;
+                }
+            }
+            if (typeLabel.isEmpty()) {
+                wanted = "";
+            }
+        }
+        Map<Integer, Node> byId = new HashMap<Integer, Node>();
+        Map<String, Node> byKey = new HashMap<String, Node>();
+        if (nodes != null) {
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node == null) {
+                    continue;
+                }
+                byId.put(Integer.valueOf(node.getId()), node);
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+            }
+        }
+        Set<Integer> places = placeId <= 0 || byId.get(Integer.valueOf(placeId)) == null
+                ? null : placeTree(placeId, byId);
+        if (wanted.isEmpty() && places == null) {
+            return sheets == null ? new ArrayList<EquipmentSheet.Sheet>() : sheets;
+        }
+        List<EquipmentSheet.Sheet> out = new ArrayList<EquipmentSheet.Sheet>();
+        if (sheets == null) {
+            return out;
+        }
+        for (int i = 0; i < sheets.size(); i++) {
+            EquipmentSheet.Sheet sheet = sheets.get(i);
+            if (sheet == null) {
+                continue;
+            }
+            if (wideLinkSheet(sheet, labels)) {
+                out.add(filterWide(sheet, labels, wanted, places, byId, byKey));
+                continue;
+            }
+            if (linkSheet(sheet, labels) || serviceSheet(sheet, labels) || lifeSheet(sheet, labels)) {
+                out.add(filterKeyed(sheet, labels, wanted, places, byId, byKey));
+                continue;
+            }
+            TypeRef bound = uniqueSheetType(sheet.getName(), types);
+            if (!wanted.isEmpty() && bound != null && !wanted.equals(bound.getKey())) {
+                continue;
+            }
+            out.add(filterEquipment(sheet, labels, wanted, typeLabel, bound != null, places, byId, byKey));
+        }
+        return out;
+    }
+
+    private static EquipmentSheet.Sheet filterKeyed(EquipmentSheet.Sheet sheet, Map<String, String> labels,
+                                                    String typeKey, Set<Integer> places, Map<Integer, Node> byId,
+                                                    Map<String, Node> byKey) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int toColumn = columnFor(sheet.getHeaders(), labels, "linkTo");
+        List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, keyColumn);
+            String other = text(record, toColumn);
+            if (key.isEmpty() && other.isEmpty()) {
+                continue;
+            }
+            if (keyedInScope(key, typeKey, places, byId, byKey) || keyedInScope(other, typeKey, places, byId, byKey)) {
+                records.add(record);
+            }
+        }
+        return new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records);
+    }
+
+    private static boolean keyedInScope(String key, String typeKey, Set<Integer> places, Map<Integer, Node> byId,
+                                        Map<String, Node> byKey) {
+        if (key == null || key.trim().isEmpty()) {
+            return false;
+        }
+        Node node = byKey.get(norm(key));
+        if (node == null) {
+            return true;
+        }
+        return nodeInScope(node, typeKey, places, byId);
+    }
+
+    private static EquipmentSheet.Sheet filterEquipment(EquipmentSheet.Sheet sheet, Map<String, String> labels,
+                                                        String typeKey, String typeLabel, boolean bound,
+                                                        Set<Integer> places, Map<Integer, Node> byId,
+                                                        Map<String, Node> byKey) {
+        int keyColumn = columnFor(sheet.getHeaders(), labels, "key");
+        int typeColumn = columnFor(sheet.getHeaders(), labels, "type");
+        int placeColumn = columnFor(sheet.getHeaders(), labels, "place");
+        String placeText = places == null ? "" : placePath(byId.get(firstPlace(places, byId)), byId);
+        List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, keyColumn);
+            Node node = key.isEmpty() ? null : byKey.get(norm(key));
+            if (node != null) {
+                if (!nodeInScope(node, typeKey, places, byId)) {
+                    continue;
+                }
+                records.add(record);
+                continue;
+            }
+            if (!typeKey.isEmpty() && !bound) {
+                String written = text(record, typeColumn);
+                if (!written.isEmpty() && !same(written, typeLabel) && !same(written, typeKey)) {
+                    continue;
+                }
+            }
+            if (places != null) {
+                String written = text(record, placeColumn);
+                if (written.isEmpty()) {
+                    if (placeColumn >= 0 && !placeText.isEmpty()) {
+                        records.add(typed(record, placeColumn, placeText));
+                    } else {
+                        records.add(record);
+                    }
+                    continue;
+                }
+                if (!placeTextMatches(written, places, byId)) {
+                    continue;
+                }
+            }
+            records.add(record);
+        }
+        return new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records);
+    }
+
+    private static boolean nodeInScope(Node node, String typeKey, Set<Integer> places, Map<Integer, Node> byId) {
+        if (node == null || node.isLocation()) {
+            return false;
+        }
+        if (typeKey != null && !typeKey.isEmpty() && !typeKey.equals(node.getTypeKey())) {
+            return false;
+        }
+        if (places == null) {
+            return true;
+        }
+        Node cursor = node;
+        int guard = 0;
+        while (cursor != null && guard++ < 80) {
+            if (places.contains(Integer.valueOf(cursor.getId()))) {
+                return true;
+            }
+            Integer parent = cursor.getParentId();
+            cursor = parent == null ? null : byId.get(parent);
+        }
+        return false;
+    }
+
+    private static boolean placeTextMatches(String written, Set<Integer> places, Map<Integer, Node> byId) {
+        String folded = norm(written);
+        if (folded.isEmpty()) {
+            return false;
+        }
+        for (Integer id : places) {
+            Node place = byId.get(id);
+            if (place == null || !place.isLocation()) {
+                continue;
+            }
+            String path = norm(placePath(place, byId));
+            if (path.isEmpty()) {
+                continue;
+            }
+            if (folded.equals(path) || folded.startsWith(path + " / ")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<Integer> placeTree(int placeId, Map<Integer, Node> byId) {
+        Set<Integer> ids = new HashSet<Integer>();
+        ids.add(Integer.valueOf(placeId));
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (Node node : byId.values()) {
+                if (node == null || !node.isLocation() || node.getParentId() == null) {
+                    continue;
+                }
+                if (ids.contains(node.getParentId()) && ids.add(Integer.valueOf(node.getId()))) {
+                    grew = true;
+                }
+            }
+        }
+        return ids;
+    }
+
+    private static int firstPlace(Set<Integer> places, Map<Integer, Node> byId) {
+        int root = 0;
+        int depth = Integer.MAX_VALUE;
+        for (Integer id : places) {
+            Node node = byId.get(id);
+            if (node == null || !node.isLocation()) {
+                continue;
+            }
+            int steps = 0;
+            Node cursor = node;
+            while (cursor != null && cursor.getParentId() != null && steps < 80) {
+                if (!places.contains(cursor.getParentId())) {
+                    break;
+                }
+                cursor = byId.get(cursor.getParentId());
+                steps++;
+            }
+            if (steps < depth) {
+                depth = steps;
+                root = id.intValue();
+            }
+        }
+        return root;
+    }
+
+    private static String placePath(Node node, Map<Integer, Node> byId) {
+        List<String> names = new ArrayList<String>();
+        Node cursor = node;
+        int guard = 0;
+        while (cursor != null && guard++ < 80) {
+            if (cursor.getName() != null && !cursor.getName().trim().isEmpty()) {
+                names.add(0, cursor.getName().trim());
+            }
+            Integer parent = cursor.getParentId();
+            cursor = parent == null ? null : byId.get(parent);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) {
+                builder.append(" / ");
+            }
+            builder.append(names.get(i));
+        }
+        return builder.toString();
+    }
+
+    private static boolean lifeSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean life = false;
+        boolean name = false;
+        boolean key = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String role = known.get(norm(headers.get(i)));
+            if (role != null && role.startsWith("life")) {
+                life = true;
+            }
+            if ("name".equals(role)) {
+                name = true;
+            }
+            if ("key".equals(role)) {
+                key = true;
+            }
+        }
+        return (life && key && !name) || (titled(sheet, labels, "lifeTitle") && key && life);
+    }
+
+    private static void readLifeSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Map<String, String> labels,
+                                      List<LifeBook.Change> lifecycles, List<Issue> issues) {
+        int[] roleColumn = roleColumns(sheet.getHeaders(), labels, issues);
+        if (roleColumn == null) {
+            return;
+        }
+        if (roleColumn[ROLE_KEY] < 0) {
+            issues.add(new Issue(1, "asset-tree.error.import.header", ""));
+            return;
+        }
+        Map<String, Node> byKey = new LinkedHashMap<String, Node>();
+        if (nodes != null) {
+            for (Node node : nodes) {
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+            }
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            String key = text(record, roleColumn[ROLE_KEY]);
+            LifeBook.Change change = readLifecycle(record, roleColumn, key);
+            if (change == null) {
+                continue;
+            }
+            if (key.isEmpty() || byKey.get(norm(key)) == null || byKey.get(norm(key)).isLocation()) {
+                issues.add(new Issue(record.getRow(), "asset-tree.error.import.key", key));
+                continue;
+            }
+            lifecycles.add(change);
+        }
+    }
+
+    private static LifeBook.Change readLifecycle(EquipmentSheet.Record record, int[] roleColumn, String key) {
+        Map<String, String> fields = new LinkedHashMap<String, String>();
+        for (int i = 0; i < LIFE_FIELDS.length; i++) {
+            int column = LIFE_FIRST + i;
+            if (column >= roleColumn.length) {
+                break;
+            }
+            String value = text(record, roleColumn[column]);
+            if (!value.isEmpty()) {
+                fields.put(LIFE_FIELDS[i], value);
+            }
+        }
+        if (fields.isEmpty()) {
+            return null;
+        }
+        return new LifeBook.Change(record.getRow(), key == null ? "" : key, fields);
+    }
+
+    private static boolean serviceSheet(EquipmentSheet.Sheet sheet, Map<String, String> labels) {
+        Map<String, String> known = roles(labels);
+        boolean kind = false;
+        boolean name = false;
+        List<String> headers = sheet.getHeaders();
+        for (int i = 0; i < headers.size(); i++) {
+            String role = known.get(norm(headers.get(i)));
+            if ("serviceKind".equals(role)) {
+                kind = true;
+            }
+            if ("name".equals(role)) {
+                name = true;
+            }
+        }
+        return (kind && !name) || (titled(sheet, labels, "serviceSheet") && kind);
+    }
+
+    private static void readServiceSheet(EquipmentSheet.Sheet sheet, List<Node> nodes, Directory people,
+                                         List<Named> kinds, Map<String, String> labels, List<Service> services,
+                                         List<Issue> issues) {
+        int[] roleColumn = roleColumns(sheet.getHeaders(), labels, issues);
+        if (roleColumn == null) {
+            return;
+        }
+        if (roleColumn[ROLE_KEY] < 0 || roleColumn[ROLE_SERVICE_KIND] < 0) {
+            issues.add(new Issue(1, "asset-tree.error.import.header", ""));
+            return;
+        }
+        Map<String, Node> byKey = new LinkedHashMap<String, Node>();
+        if (nodes != null) {
+            for (Node node : nodes) {
+                if (node.getObjectKey() != null && !node.getObjectKey().isEmpty()) {
+                    byKey.put(norm(node.getObjectKey()), node);
+                }
+            }
+        }
+        for (EquipmentSheet.Record record : sheet.getRecords()) {
+            if (!serviceTouched(record, roleColumn)) {
+                continue;
+            }
+            Service wish = readService(record, roleColumn, sheet.getHeaders(), byKey, people, kinds, true, issues);
+            if (wish != null) {
+                services.add(new Service(wish.getRow(), sheet.getName(), wish.getObjectKey(), wish.getKind(),
+                        wish.getName(), wish.getLastDone(), wish.getEveryCount(), wish.getEveryUnit(), wish.getAssigneeKey()));
+            }
+        }
+    }
+
+    private static int[] roleColumns(List<String> headers, Map<String, String> labels, List<Issue> issues) {
+        int[] roleColumn = new int[ROLES.length];
+        for (int i = 0; i < roleColumn.length; i++) {
+            roleColumn[i] = -1;
+        }
+        Map<String, String> known = roles(labels);
+        boolean broken = false;
+        for (int column = 0; column < headers.size(); column++) {
+            String header = headers.get(column);
+            String role = known.get(norm(header));
+            int slot = role == null ? -1 : roleSlot(role);
+            if (slot < 0) {
+                continue;
+            }
+            if (roleColumn[slot] >= 0) {
+                issues.add(new Issue(1, "asset-tree.error.import.column", header));
+                broken = true;
+            } else {
+                roleColumn[slot] = column;
+            }
+        }
+        return broken ? null : roleColumn;
+    }
+
+    private static boolean serviceTouched(EquipmentSheet.Record record, int[] roleColumn) {
+        return !text(record, roleColumn[ROLE_SERVICE_KIND]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_NAME]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_DATE]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_EVERY]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_UNIT]).isEmpty()
+                || !text(record, roleColumn[ROLE_SERVICE_WHO]).isEmpty();
+    }
+
+    /**
+     * Reads one maintenance wish. Returns null when the row is incomplete;
+     * the reason is already in {@code issues}. A sheet row also needs an
+     * existing object key. An object row leaves the key empty.
+     */
+    private static Service readService(EquipmentSheet.Record record, int[] roleColumn, List<String> headers,
+                                       Map<String, Node> byKey, Directory people, List<Named> kinds,
+                                       boolean requireKey, List<Issue> issues) {
+        int row = record.getRow();
+        String kindRaw = text(record, roleColumn[ROLE_SERVICE_KIND]);
+        String nameRaw = text(record, roleColumn[ROLE_SERVICE_NAME]);
+        String dateRaw = text(record, roleColumn[ROLE_SERVICE_DATE]);
+        String everyRaw = text(record, roleColumn[ROLE_SERVICE_EVERY]);
+        String unitRaw = text(record, roleColumn[ROLE_SERVICE_UNIT]);
+        String whoRaw = text(record, roleColumn[ROLE_SERVICE_WHO]);
+        String objectKey = "";
+        if (requireKey) {
+            String key = text(record, roleColumn[ROLE_KEY]);
+            if (key.isEmpty()) {
+                issues.add(new Issue(row, "asset-tree.error.import.service.key", key));
+                return null;
+            }
+            Node node = byKey.get(norm(key));
+            if (node == null) {
+                issues.add(new Issue(row, "asset-tree.error.import.service.key", key));
+                return null;
+            }
+            if (node.isLocation()) {
+                issues.add(new Issue(row, "asset-tree.error.import.key.place", key));
+                return null;
+            }
+            objectKey = node.getObjectKey();
+        }
+        if (kindRaw.isEmpty() || dateRaw.isEmpty() || unitRaw.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String kind = serviceKind(kindRaw, kinds);
+        if (kind.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service.kind", kindRaw));
+            return null;
+        }
+        String unit = serviceUnit(unitRaw);
+        if (unit.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service.unit", unitRaw));
+            return null;
+        }
+        if (everyRaw.isEmpty() && !"once".equals(unit)) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        int count;
+        if (everyRaw.isEmpty()) {
+            count = 1;
+        } else {
+            try {
+                count = Integer.parseInt(everyRaw);
+            } catch (NumberFormatException ex) {
+                issues.add(new Issue(row, "asset-tree.error.import.number", headerAt(headers, roleColumn[ROLE_SERVICE_EVERY])));
+                return null;
+            }
+        }
+        if (!ServiceDue.countAllowed(count, unit)) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String lastDone = FieldDates.canonical(dateRaw);
+        if (lastDone == null) {
+            issues.add(new Issue(row, "asset-tree.error.import.date", headerAt(headers, roleColumn[ROLE_SERVICE_DATE])));
+            return null;
+        }
+        if (lastDone.isEmpty()) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String work = nameRaw.isEmpty() ? kindRaw : nameRaw;
+        if (work.isEmpty() || work.length() > 80) {
+            issues.add(new Issue(row, "asset-tree.error.import.service", ""));
+            return null;
+        }
+        String assignee = "";
+        if (!whoRaw.isEmpty()) {
+            assignee = resolvePerson(whoRaw, people, row, issues);
+            if (assignee == null) {
+                return null;
+            }
+        }
+        return new Service(row, "", objectKey, kind, work, lastDone, count, unit, assignee);
+    }
+
+    private static String headerAt(List<String> headers, int column) {
+        if (headers == null || column < 0 || column >= headers.size() || headers.get(column) == null) {
+            return "";
+        }
+        return headers.get(column);
+    }
+
+    static String serviceKind(String raw, List<Named> kinds) {
+        String marker = norm(raw);
+        if (marker.isEmpty()) {
+            return "";
+        }
+        if (kinds != null) {
+            for (Named kind : kinds) {
+                if (kind == null) {
+                    continue;
+                }
+                if (marker.equals(norm(kind.getKey())) || marker.equals(norm(kind.getLabel()))) {
+                    return kind.getKey();
+                }
+            }
+        }
+        String alias = kindAlias(marker);
+        if (alias.isEmpty()) {
+            return "";
+        }
+        if (kinds == null || kinds.isEmpty()) {
+            return alias;
+        }
+        for (Named kind : kinds) {
+            if (kind != null && alias.equals(kind.getKey())) {
+                return alias;
+            }
+        }
+        return "";
+    }
+
+    private static String kindAlias(String marker) {
+        if (marker.equals("to") || marker.equals("то") || marker.equals("maintenance")) {
+            return "to";
+        }
+        if (marker.equals("kts") || marker.equals("ктс") || marker.equals("inspection")) {
+            return "kts";
+        }
+        if (marker.equals("verify") || marker.equals("поверка") || marker.equals("verification")) {
+            return "verify";
+        }
+        if (marker.equals("staff") || marker.equals("work") || marker.equals("работа")) {
+            return "staff";
+        }
+        if (marker.equals("event") || marker.equals("мероприятие")) {
+            return "event";
+        }
+        if (marker.equals("update") || marker.equals("обновление")) {
+            return "update";
+        }
+        return "";
+    }
+
+    static String serviceUnit(String raw) {
+        String marker = norm(raw);
+        while (marker.endsWith(".")) {
+            marker = marker.substring(0, marker.length() - 1).trim();
+        }
+        if (marker.isEmpty()) {
+            return "";
+        }
+        if (oneOf(marker, "once", "разово", "разовая", "разовое", "без повтора", "does not repeat", "one time")) {
+            return "once";
+        }
+        if (oneOf(marker, "day", "days", "дн", "день", "дня", "дней", "сут", "сутки")) {
+            return "day";
+        }
+        if (oneOf(marker, "week", "weeks", "wk", "wks", "нед", "неделя", "недели", "недель")) {
+            return "week";
+        }
+        if (oneOf(marker, "month", "months", "мес", "месяц", "месяца", "месяцев")) {
+            return "month";
+        }
+        if (oneOf(marker, "year", "years", "yr", "yrs", "г", "год", "года", "лет")) {
+            return "year";
+        }
+        return "";
+    }
+
+    private static boolean oneOf(String marker, String... words) {
+        for (String word : words) {
+            if (marker.equals(word)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static int countRows(List<EquipmentSheet.Sheet> sheets) {
+        int rows = 0;
+        if (sheets == null) {
+            return 0;
+        }
+        for (EquipmentSheet.Sheet sheet : sheets) {
+            if (sheet != null && sheet.getRecords() != null) {
+                rows += sheet.getRecords().size();
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * A slice of data rows, headers kept on every sheet that still has rows.
+     * {@code next} is the offset of the following slice. {@code done} is true
+     * when this slice reaches the end.
+     */
+    public static Window window(List<EquipmentSheet.Sheet> sheets, int offset, int limit) {
+        int from = offset < 0 ? 0 : offset;
+        int size = limit <= 0 ? CHUNK_ROWS : limit;
+        List<EquipmentSheet.Sheet> source = sheets == null ? new ArrayList<EquipmentSheet.Sheet>() : sheets;
+        int total = countRows(source);
+        List<EquipmentSheet.Sheet> sliced = new ArrayList<EquipmentSheet.Sheet>();
+        int seen = 0;
+        int taken = 0;
+        for (EquipmentSheet.Sheet sheet : source) {
+            if (sheet == null || sheet.getRecords() == null) {
+                continue;
+            }
+            List<EquipmentSheet.Record> records = new ArrayList<EquipmentSheet.Record>();
+            for (EquipmentSheet.Record record : sheet.getRecords()) {
+                if (seen >= from && taken < size) {
+                    records.add(copyRecord(record));
+                    taken++;
+                }
+                seen++;
+            }
+            if (!records.isEmpty()) {
+                sliced.add(new EquipmentSheet.Sheet(sheet.getName(), new ArrayList<String>(sheet.getHeaders()), records));
+            }
+        }
+        int next = from + taken;
+        return new Window(sliced, total, next, next >= total);
+    }
+
+    public static Integer findPlace(String place, List<Node> nodes, int row, List<Issue> issues) {
+        return matchPlace(place, indexPlaces(nodes), row, issues);
+    }
+
+    private static EquipmentSheet.Record copyRecord(EquipmentSheet.Record record) {
+        List<String> cells = new ArrayList<String>();
+        int width = record == null ? 0 : record.width();
+        for (int i = 0; i < width; i++) {
+            cells.add(record.cell(i));
+        }
+        return new EquipmentSheet.Record(record == null ? 0 : record.getRow(), cells);
+    }
+
+    public static final class Window {
+        private final List<EquipmentSheet.Sheet> sheets;
+        private final int total;
+        private final int next;
+        private final boolean done;
+
+        Window(List<EquipmentSheet.Sheet> sheets, int total, int next, boolean done) {
+            this.sheets = sheets;
+            this.total = total;
+            this.next = next;
+            this.done = done;
+        }
+
+        public List<EquipmentSheet.Sheet> getSheets() {
+            return sheets;
+        }
+
+        public int getTotal() {
+            return total;
+        }
+
+        public int getNext() {
+            return next;
+        }
+
+        public boolean isDone() {
+            return done;
+        }
     }
 }

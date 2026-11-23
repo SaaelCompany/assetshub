@@ -4,10 +4,12 @@ import com.atlassian.jira.component.ComponentAccessor;
 import com.atlassian.jira.security.JiraAuthenticationContext;
 import com.atlassian.jira.user.ApplicationUser;
 import com.atlassian.jira.util.I18nHelper;
+import com.assetstree.jira.dto.DocTemplateDto;
 import com.assetstree.jira.dto.FileDto;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetFileStore;
+import com.assetstree.jira.service.FilePreview;
 import com.assetstree.jira.service.AssetService;
 import com.assetstree.jira.service.StoredFile;
 
@@ -19,6 +21,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 public class AssetFileServlet extends HttpServlet {
@@ -29,6 +33,27 @@ public class AssetFileServlet extends HttpServlet {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
+        String documentId = request.getParameter("document");
+        if (documentId != null && !documentId.trim().isEmpty()) {
+            int assetId = parseId(request.getParameter("assetId"));
+            if (assetId <= 0) {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST);
+                return;
+            }
+            try {
+                StoredFile stored = service().openDocument(user, assetId, documentId.trim());
+                String name = stored.getFileName() == null ? "document.docx" : stored.getFileName().replace("\"", "").replace("\r", "").replace("\n", "");
+                response.setStatus(HttpServletResponse.SC_OK);
+                response.setContentType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                response.setHeader("Content-Disposition", disposition("attachment", name));
+                response.setContentLength(stored.getData().length);
+                response.getOutputStream().write(stored.getData());
+            } catch (AssetException ex) {
+                response.sendError(ex.getStatus());
+            }
+            return;
+        }
         int id = parseId(request.getParameter("id"));
         if (id <= 0) {
             response.sendError(HttpServletResponse.SC_BAD_REQUEST);
@@ -37,10 +62,26 @@ public class AssetFileServlet extends HttpServlet {
         try {
             StoredFile stored = service().openFile(user, id);
             String name = stored.getFileName() == null ? "file" : stored.getFileName().replace("\"", "").replace("\r", "").replace("\n", "");
+            if ("text".equals(request.getParameter("preview"))) {
+                byte[] text = FilePreview.textOf(stored.getFileName(), stored.getData()).getBytes(StandardCharsets.UTF_8);
+                response.setStatus(HttpServletResponse.SC_OK);
+                response.setContentType("text/plain; charset=UTF-8");
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                response.setHeader("Content-Disposition", "inline");
+                response.setContentLength(text.length);
+                response.getOutputStream().write(text);
+                return;
+            }
+            String inline = "1".equals(request.getParameter("inline")) ? FilePreview.inlineType(stored.getData()) : null;
             response.setStatus(HttpServletResponse.SC_OK);
-            response.setContentType(stored.getContentType() == null ? "application/octet-stream" : stored.getContentType());
             response.setHeader("X-Content-Type-Options", "nosniff");
-            response.setHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+            if (inline != null) {
+                response.setContentType(inline);
+                response.setHeader("Content-Disposition", disposition("inline", name));
+            } else {
+                response.setContentType(stored.getContentType() == null ? "application/octet-stream" : stored.getContentType());
+                response.setHeader("Content-Disposition", disposition("attachment", name));
+            }
             response.setContentLength(stored.getData().length);
             response.getOutputStream().write(stored.getData());
         } catch (AssetException ex) {
@@ -53,6 +94,29 @@ public class AssetFileServlet extends HttpServlet {
         ApplicationUser user = user();
         if (user == null) {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
+        if ("1".equals(request.getParameter("documents"))) {
+            String projectKey = request.getParameter("projectKey");
+            String name = request.getParameter("name");
+            try {
+                String type = request.getContentType() == null ? "" : request.getContentType();
+                if (type.toLowerCase(Locale.ROOT).indexOf("multipart/") != 0) {
+                    throw new AssetException(400, "asset-tree.error.file.required");
+                }
+                byte[] body = readAll(request.getInputStream(), request.getContentLength());
+                MultipartBody.FilePart upload = MultipartBody.firstFile(body, type);
+                if (upload == null || upload.getData().length == 0) {
+                    throw new AssetException(400, "asset-tree.error.file.required");
+                }
+                DocTemplateDto saved = service().saveDocument(user, projectKey, name, upload.getFileName(), upload.getData());
+                response.setStatus(HttpServletResponse.SC_CREATED);
+                response.setContentType("application/json; charset=UTF-8");
+                response.setCharacterEncoding("UTF-8");
+                response.getWriter().write("{\"id\":\"" + jsonString(saved.getId()) + "\",\"name\":\"" + jsonString(saved.getName()) + "\"}");
+            } catch (AssetException ex) {
+                writeError(response, ex);
+            }
             return;
         }
         int assetId = parseId(queryValue(request.getQueryString(), "assetId"));
@@ -73,14 +137,42 @@ public class AssetFileServlet extends HttpServlet {
             if (upload.getData().length > AssetFileStore.MAX_BYTES) {
                 throw new AssetException(400, "asset-tree.error.file.size");
             }
-            FileDto saved = service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData());
+            boolean internal = "1".equals(request.getParameter("internal"));
+            String slot = request.getParameter("slot");
+            FileDto saved = "1".equals(request.getParameter("portal"))
+                    ? service().portalStoreFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), false)
+                    : service().storeFile(user, assetId, upload.getFileName(), upload.getContentType(), upload.getData(), internal, slot);
             response.setStatus(HttpServletResponse.SC_CREATED);
             response.setContentType("application/json; charset=UTF-8");
             response.setCharacterEncoding("UTF-8");
-            response.getWriter().write("{\"id\":" + saved.getId() + "}");
+            response.getWriter().write("{\"id\":" + saved.getId()
+                    + ",\"fileName\":\"" + jsonString(saved.getFileName())
+                    + "\",\"size\":" + saved.getSize()
+                    + ",\"slot\":\"" + jsonString(saved.getSlot())
+                    + "\",\"contentType\":\"" + jsonString(saved.getContentType())
+                    + "\",\"authorName\":\"" + jsonString(saved.getAuthorName())
+                    + "\",\"internal\":" + saved.isInternal() + "}");
         } catch (AssetException ex) {
             writeError(response, ex);
         }
+    }
+
+    private static String disposition(String mode, String name) {
+        StringBuilder ascii = new StringBuilder();
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            ascii.append(c >= 32 && c < 127 && c != '"' && c != '\\' ? c : '_');
+        }
+        if (ascii.length() == 0) {
+            ascii.append("file");
+        }
+        String encoded;
+        try {
+            encoded = URLEncoder.encode(name, "UTF-8").replace("+", "%20");
+        } catch (UnsupportedEncodingException ex) {
+            encoded = ascii.toString();
+        }
+        return mode + "; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
     }
 
     private static String queryValue(String query, String name) {

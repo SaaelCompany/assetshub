@@ -12,6 +12,7 @@ public class AttributeDto {
     private boolean showOnIssue;
     private String value;
     private String displayValue;
+    private boolean writable = true;
 
     public AttributeDto() {
     }
@@ -77,4 +78,7 @@ public class AttributeDto {
     public void setDisplayValue(String displayValue) {
         this.displayValue = displayValue;
     }
+
+    public boolean isWritable() { return writable; }
+    public void setWritable(boolean writable) { this.writable = writable; }
 }

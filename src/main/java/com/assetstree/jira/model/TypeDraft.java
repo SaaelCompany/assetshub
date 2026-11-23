@@ -12,6 +12,7 @@ public class TypeDraft {
     private boolean location;
     private Boolean showInTree;
     private Boolean service;
+    private Boolean reach;
     private String placeCaption;
     private String parentTypeKey;
 
@@ -71,6 +72,14 @@ public class TypeDraft {
 
     public void setService(Boolean service) {
         this.service = service;
+    }
+
+    public Boolean getReach() {
+        return reach;
+    }
+
+    public void setReach(Boolean reach) {
+        this.reach = reach;
     }
 
     /** Null when the request did not mention the caption, so a partial update leaves it alone. */

@@ -25,6 +25,14 @@ public class ProjectDto {
     private boolean canAssets;
     private boolean canAdmin;
     private boolean canArrange;
+    private boolean canView = true;
+    private boolean canReports = true;
+    private boolean canMap = true;
+    private boolean canScheme = true;
+    private boolean canSchemeEdit;
+    private String reach;
+    private String acts;
+    private String editPlaces;
     private String assetKey;
     private boolean treeObjects;
     private List<String> columns = new ArrayList<String>();
@@ -159,6 +167,23 @@ public class ProjectDto {
     public void setCanArrange(boolean canArrange) {
         this.canArrange = canArrange;
     }
+
+    public boolean isCanView() { return canView; }
+    public void setCanView(boolean canView) { this.canView = canView; }
+    public boolean isCanReports() { return canReports; }
+    public void setCanReports(boolean canReports) { this.canReports = canReports; }
+    public boolean isCanMap() { return canMap; }
+    public void setCanMap(boolean canMap) { this.canMap = canMap; }
+    public boolean isCanScheme() { return canScheme; }
+    public void setCanScheme(boolean canScheme) { this.canScheme = canScheme; }
+    public boolean isCanSchemeEdit() { return canSchemeEdit; }
+    public void setCanSchemeEdit(boolean canSchemeEdit) { this.canSchemeEdit = canSchemeEdit; }
+    public String getReach() { return reach; }
+    public void setReach(String reach) { this.reach = reach; }
+    public String getActs() { return acts; }
+    public void setActs(String acts) { this.acts = acts; }
+    public String getEditPlaces() { return editPlaces; }
+    public void setEditPlaces(String editPlaces) { this.editPlaces = editPlaces; }
 
     public String getAssetKey() {
         return assetKey;

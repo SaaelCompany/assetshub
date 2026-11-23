@@ -10,6 +10,8 @@ public class ReportBucketDto {
     private String color;
     private String icon;
     private int count;
+    /** A written figure, such as a downtime length. Empty leaves the count as the figure. */
+    private String text;
     private long amount;
     private String amountText;
 
@@ -61,6 +63,14 @@ public class ReportBucketDto {
 
     public void setCount(int count) {
         this.count = count;
+    }
+
+    public String getText() {
+        return text;
+    }
+
+    public void setText(String text) {
+        this.text = text;
     }
 
     public long getAmount() {

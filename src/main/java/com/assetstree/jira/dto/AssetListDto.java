@@ -11,6 +11,7 @@ public class AssetListDto {
     private List<AssetDto> assets = new ArrayList<AssetDto>();
     private List<AssetTypeDto> types = new ArrayList<AssetTypeDto>();
     private List<StatusDto> statuses = new ArrayList<StatusDto>();
+    private String mark = "";
 
     public List<AssetDto> getAssets() {
         return assets;
@@ -34,5 +35,13 @@ public class AssetListDto {
 
     public void setStatuses(List<StatusDto> statuses) {
         this.statuses = statuses;
+    }
+
+    public String getMark() {
+        return mark;
+    }
+
+    public void setMark(String mark) {
+        this.mark = mark == null ? "" : mark;
     }
 }

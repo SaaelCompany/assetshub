@@ -13,10 +13,16 @@ public class ReportViewDto {
     private String hint;
     private int total;
     private String sum;
+    /** A written total, such as downtime in days, hours and minutes. */
+    private String figure;
     private boolean standard;
     private String groupBy;
+    private String fieldKey;
+    private String fieldLabel;
     private String chart;
+    private ReportVennDto venn;
     private boolean capped;
+    private boolean exportLimited;
     private int lineTotal;
     private String reason;
     private List<ReportBucketDto> rows = new ArrayList<ReportBucketDto>();
@@ -32,14 +38,24 @@ public class ReportViewDto {
     public void setTotal(int total) { this.total = total; }
     public String getSum() { return sum; }
     public void setSum(String sum) { this.sum = sum; }
+    public String getFigure() { return figure; }
+    public void setFigure(String figure) { this.figure = figure; }
     public boolean isStandard() { return standard; }
     public void setStandard(boolean standard) { this.standard = standard; }
     public String getGroupBy() { return groupBy; }
     public void setGroupBy(String groupBy) { this.groupBy = groupBy; }
+    public String getFieldKey() { return fieldKey; }
+    public void setFieldKey(String fieldKey) { this.fieldKey = fieldKey; }
+    public String getFieldLabel() { return fieldLabel; }
+    public void setFieldLabel(String fieldLabel) { this.fieldLabel = fieldLabel; }
+    public ReportVennDto getVenn() { return venn; }
+    public void setVenn(ReportVennDto venn) { this.venn = venn; }
     public String getChart() { return chart; }
     public void setChart(String chart) { this.chart = chart; }
     public boolean isCapped() { return capped; }
     public void setCapped(boolean capped) { this.capped = capped; }
+    public boolean isExportLimited() { return exportLimited; }
+    public void setExportLimited(boolean exportLimited) { this.exportLimited = exportLimited; }
     public int getLineTotal() { return lineTotal; }
     public void setLineTotal(int lineTotal) { this.lineTotal = lineTotal; }
     public String getReason() { return reason; }

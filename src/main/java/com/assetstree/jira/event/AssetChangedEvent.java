@@ -1,0 +1,112 @@
+package com.assetstree.jira.event;
+
+/** Published when equipment is created, changed, written off, or its calendar changes. */
+public final class AssetChangedEvent {
+    private final String projectKey;
+    private final String kind;
+    private final int assetId;
+    private final String objectKey;
+    private final String name;
+    private final String status;
+    private final String typeKey;
+    private final String previousStatus;
+    private final String plan;
+    private final String due;
+    private final String detail;
+    private final String note;
+
+    public AssetChangedEvent(String projectKey, String kind, int assetId, String objectKey, String name,
+                              String status, String typeKey, String previousStatus, String plan, String due) {
+        this(projectKey, kind, assetId, objectKey, name, status, typeKey, previousStatus, plan, due, "", "");
+    }
+
+    public AssetChangedEvent(String projectKey, String kind, int assetId, String objectKey, String name,
+                              String status, String typeKey, String previousStatus, String plan, String due,
+                              String detail, String note) {
+        this.projectKey = projectKey == null ? "" : projectKey;
+        this.kind = kind == null ? "" : kind;
+        this.assetId = assetId;
+        this.objectKey = objectKey == null ? "" : objectKey;
+        this.name = name == null ? "" : name;
+        this.status = status == null ? "" : status;
+        this.typeKey = typeKey == null ? "" : typeKey;
+        this.previousStatus = previousStatus == null ? "" : previousStatus;
+        this.plan = plan == null ? "" : plan;
+        this.due = due == null ? "" : due;
+        this.detail = detail == null ? "" : detail;
+        this.note = note == null ? "" : note;
+    }
+
+    public String getProjectKey() {
+        return projectKey;
+    }
+
+    public String getKind() {
+        return kind;
+    }
+
+    public int getAssetId() {
+        return assetId;
+    }
+
+    public String getObjectKey() {
+        return objectKey;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public String getTypeKey() {
+        return typeKey;
+    }
+
+    public String getPreviousStatus() {
+        return previousStatus;
+    }
+
+    public String getPlan() {
+        return plan;
+    }
+
+    public String getDue() {
+        return due;
+    }
+
+    public String getDetail() {
+        return detail;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
+    public String toJson() {
+        return "{\"event\":\"" + escape(kind) + "\",\"id\":" + assetId
+                + ",\"key\":\"" + escape(objectKey) + "\",\"name\":\"" + escape(name)
+                + "\",\"project\":\"" + escape(projectKey) + "\",\"status\":\"" + escape(status)
+                + "\",\"type\":\"" + escape(typeKey) + "\",\"previous\":\"" + escape(previousStatus)
+                + "\",\"plan\":\"" + escape(plan) + "\",\"due\":\"" + escape(due)
+                + "\",\"detail\":\"" + escape(detail) + "\",\"note\":\"" + escape(note) + "\"}";
+    }
+
+    private static String escape(String value) {
+        StringBuilder builder = new StringBuilder();
+        String raw = value == null ? "" : value;
+        for (int i = 0; i < raw.length(); i++) {
+            char current = raw.charAt(i);
+            if (current == '\\' || current == '"') {
+                builder.append('\\').append(current);
+            } else if (current == '\n') {
+                builder.append("\\n");
+            } else if (current >= 32) {
+                builder.append(current);
+            }
+        }
+        return builder.toString();
+    }
+}

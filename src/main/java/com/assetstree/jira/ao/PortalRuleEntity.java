@@ -20,6 +20,12 @@ public interface PortalRuleEntity extends Entity {
 
     void setAssetId(int assetId);
 
+    /** Set when the rule opens a type on the place, empty when it opens the place or one object. */
+    @StringLength(64)
+    String getTypeKey();
+
+    void setTypeKey(String typeKey);
+
     int getPosition();
 
     void setPosition(int position);

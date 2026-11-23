@@ -1,5 +1,7 @@
 package com.assetstree.jira.servlet;
 
+import com.assetstree.jira.service.FileNames;
+
 import java.io.ByteArrayOutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
@@ -144,7 +146,7 @@ public final class MultipartBody {
                 plain = token(line.substring(named + "filename=".length()).trim());
             }
         }
-        String chosen = encoded != null ? decodeStar(encoded) : unquote(plain);
+        String chosen = encoded != null ? decodeStar(encoded) : FileNames.repair(unquote(plain));
         if (chosen == null) {
             return null;
         }

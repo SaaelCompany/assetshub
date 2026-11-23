@@ -111,6 +111,10 @@ public final class PortalLookup {
         }
     }
 
+    static Object service(String className) {
+        return osgiService(className);
+    }
+
     private static Object portalService() {
         Object cached = cachedService;
         if (cached != null) {

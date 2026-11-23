@@ -60,7 +60,11 @@ public final class TypeIcons {
             "coffee", "umbrella", "hanger", "tablefurniture", "filecabinet", "archive", "packagevariant",
             "briefcase", "folder", "book", "calculator", "safe", "clipboardtext", "paperclip", "pen",
             "desklamp", "calendar", "flower", "cart", "bookshelf", "wardrobe", "shredder", "scissorscutting",
-            "stamper", "certificate", "seal", "bicycle", "bus"
+            "stamper", "certificate", "seal", "bicycle", "bus",
+            "ultrasound", "defibrillator", "xray", "endoscope", "autoclave", "centrifuge", "infusion",
+            "oxygen", "ventilator", "ecg", "otoscope", "scalpel", "crutch", "mri", "sterilizer",
+            "stretcher", "incubator", "suction", "dentalchair", "generator", "compressor", "ups",
+            "labcentrifuge"
     ));
 
     private TypeIcons() {

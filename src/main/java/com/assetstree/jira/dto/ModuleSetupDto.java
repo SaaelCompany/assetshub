@@ -22,16 +22,61 @@ public class ModuleSetupDto {
     private String reportMailTo;
     private String reportMailSent;
     private String reportMailPart;
+    /** When true, each top place's custodian also receives a book of that place only. */
+    private Boolean reportMailBranch;
+    /** Comma-separated status keys that count as downtime. Empty means repair. "-" means none. */
+    private String reportIdleStatuses;
+    /** Request statuses for the period report. Empty means all, open means not Done, "-" means none. */
+    private String reportRequestStatuses;
+    /** Board id shown in the asset summary. Empty keeps the built-in summary cards. */
+    private String reportSummary;
     private Boolean lifeApproval;
     private String lifeApprover;
+    private String lifePlaces;
     private String lifeCurrency;
     private Integer lifeMonths;
+    /** True when the lifecycle block starts collapsed on the asset card. */
+    private Boolean lifeFold;
     private String staffMarks;
     private String staffOrder;
     private String staffPlaceOrder;
     private String scheduleBoards;
     private String scheduleOpen;
     private String furniture;
+    private String glyphs;
+    private Boolean portalMine;
+    private String portalColumns;
+    /** tiles, cards or list. Empty keeps the layout that was saved before projects had their own. */
+    private String portalLayout;
+    private String portalReports;
+    private String portalBoards;
+    private String portalAudience;
+    /** Display names in the same order as portalAudience. Not stored. */
+    private String portalAudienceNames;
+    /** True when an equipment card can show one photo. */
+    private Boolean photo;
+    /**
+     * Card blocks that start expanded. Empty keeps the usual layout.
+     * "-" starts every block collapsed. Otherwise a comma list of block keys.
+     */
+    private String cardOpen;
+    /** Kept so an older saved project still reads. Requests no longer receive these comments. */
+    private Boolean issueNotes;
+    private Integer tniKeep;
+    private Integer tniProbeDays;
+    private Integer tniProbeTries;
+    private String tniAction;
+    private String tniComputer;
+    private String tniLaptop;
+    private String tniPhone;
+    private String tniTablet;
+    private Boolean tniBrowser;
+    private Boolean tniScan;
+    private Boolean tniAd;
+    private Boolean tniSccm;
+    private Boolean tniPing;
+    /** Lines {@code KRUL = Крулево}: a host starting with that code is placed on that site. */
+    private String tniSites;
 
     public String getScheduleKinds() { return scheduleKinds; }
     public void setScheduleKinds(String scheduleKinds) { this.scheduleKinds = scheduleKinds; }
@@ -65,14 +110,26 @@ public class ModuleSetupDto {
     public void setReportMailSent(String reportMailSent) { this.reportMailSent = reportMailSent; }
     public String getReportMailPart() { return reportMailPart; }
     public void setReportMailPart(String reportMailPart) { this.reportMailPart = reportMailPart; }
+    public Boolean getReportMailBranch() { return reportMailBranch; }
+    public void setReportMailBranch(Boolean reportMailBranch) { this.reportMailBranch = reportMailBranch; }
+    public String getReportIdleStatuses() { return reportIdleStatuses; }
+    public void setReportIdleStatuses(String reportIdleStatuses) { this.reportIdleStatuses = reportIdleStatuses; }
+    public String getReportRequestStatuses() { return reportRequestStatuses; }
+    public void setReportRequestStatuses(String reportRequestStatuses) { this.reportRequestStatuses = reportRequestStatuses; }
+    public String getReportSummary() { return reportSummary; }
+    public void setReportSummary(String reportSummary) { this.reportSummary = reportSummary; }
     public Boolean getLifeApproval() { return lifeApproval; }
     public void setLifeApproval(Boolean lifeApproval) { this.lifeApproval = lifeApproval; }
     public String getLifeApprover() { return lifeApprover; }
     public void setLifeApprover(String lifeApprover) { this.lifeApprover = lifeApprover; }
+    public String getLifePlaces() { return lifePlaces; }
+    public void setLifePlaces(String lifePlaces) { this.lifePlaces = lifePlaces; }
     public String getLifeCurrency() { return lifeCurrency; }
     public void setLifeCurrency(String lifeCurrency) { this.lifeCurrency = lifeCurrency; }
     public Integer getLifeMonths() { return lifeMonths; }
     public void setLifeMonths(Integer lifeMonths) { this.lifeMonths = lifeMonths; }
+    public Boolean getLifeFold() { return lifeFold; }
+    public void setLifeFold(Boolean lifeFold) { this.lifeFold = lifeFold; }
     public String getStaffMarks() { return staffMarks; }
     public void setStaffMarks(String staffMarks) { this.staffMarks = staffMarks; }
     public String getStaffOrder() { return staffOrder; }
@@ -85,4 +142,54 @@ public class ModuleSetupDto {
     public void setScheduleOpen(String scheduleOpen) { this.scheduleOpen = scheduleOpen; }
     public String getFurniture() { return furniture; }
     public void setFurniture(String furniture) { this.furniture = furniture; }
+    public String getGlyphs() { return glyphs; }
+    public void setGlyphs(String glyphs) { this.glyphs = glyphs; }
+    public Boolean getPortalMine() { return portalMine; }
+    public void setPortalMine(Boolean portalMine) { this.portalMine = portalMine; }
+    public String getPortalColumns() { return portalColumns; }
+    public void setPortalColumns(String portalColumns) { this.portalColumns = portalColumns; }
+    public String getPortalLayout() { return portalLayout; }
+    public void setPortalLayout(String portalLayout) { this.portalLayout = portalLayout; }
+    public String getPortalReports() { return portalReports; }
+    public void setPortalReports(String portalReports) { this.portalReports = portalReports; }
+    public String getPortalBoards() { return portalBoards; }
+    public void setPortalBoards(String portalBoards) { this.portalBoards = portalBoards; }
+    public String getPortalAudience() { return portalAudience; }
+    public void setPortalAudience(String portalAudience) { this.portalAudience = portalAudience; }
+    public String getPortalAudienceNames() { return portalAudienceNames; }
+    public void setPortalAudienceNames(String portalAudienceNames) { this.portalAudienceNames = portalAudienceNames; }
+    public Boolean getPhoto() { return photo; }
+    public void setPhoto(Boolean photo) { this.photo = photo; }
+    public String getCardOpen() { return cardOpen; }
+    public void setCardOpen(String cardOpen) { this.cardOpen = cardOpen; }
+    public Boolean getIssueNotes() { return issueNotes; }
+    public void setIssueNotes(Boolean issueNotes) { this.issueNotes = issueNotes; }
+    public Integer getTniKeep() { return tniKeep; }
+    public void setTniKeep(Integer tniKeep) { this.tniKeep = tniKeep; }
+    public Integer getTniProbeDays() { return tniProbeDays; }
+    public void setTniProbeDays(Integer tniProbeDays) { this.tniProbeDays = tniProbeDays; }
+    public Integer getTniProbeTries() { return tniProbeTries; }
+    public void setTniProbeTries(Integer tniProbeTries) { this.tniProbeTries = tniProbeTries; }
+    public String getTniAction() { return tniAction; }
+    public void setTniAction(String tniAction) { this.tniAction = tniAction; }
+    public String getTniComputer() { return tniComputer; }
+    public void setTniComputer(String tniComputer) { this.tniComputer = tniComputer; }
+    public String getTniLaptop() { return tniLaptop; }
+    public void setTniLaptop(String tniLaptop) { this.tniLaptop = tniLaptop; }
+    public String getTniPhone() { return tniPhone; }
+    public void setTniPhone(String tniPhone) { this.tniPhone = tniPhone; }
+    public String getTniTablet() { return tniTablet; }
+    public void setTniTablet(String tniTablet) { this.tniTablet = tniTablet; }
+    public Boolean getTniBrowser() { return tniBrowser; }
+    public void setTniBrowser(Boolean tniBrowser) { this.tniBrowser = tniBrowser; }
+    public Boolean getTniScan() { return tniScan; }
+    public void setTniScan(Boolean tniScan) { this.tniScan = tniScan; }
+    public Boolean getTniAd() { return tniAd; }
+    public void setTniAd(Boolean tniAd) { this.tniAd = tniAd; }
+    public Boolean getTniSccm() { return tniSccm; }
+    public void setTniSccm(Boolean tniSccm) { this.tniSccm = tniSccm; }
+    public Boolean getTniPing() { return tniPing; }
+    public void setTniPing(Boolean tniPing) { this.tniPing = tniPing; }
+    public String getTniSites() { return tniSites; }
+    public void setTniSites(String tniSites) { this.tniSites = tniSites; }
 }

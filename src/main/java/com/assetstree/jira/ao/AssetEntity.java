@@ -100,4 +100,42 @@ public interface AssetEntity extends Entity {
     String getCardImage();
 
     void setCardImage(String cardImage);
+
+    /** png, jpeg, or empty when this equipment has no photo on the card. */
+    @StringLength(16)
+    String getPhoto();
+
+    void setPhoto(String photo);
+
+    /** 1 when this place and everything inside it is hidden from people without the secret right. */
+    int getSecret();
+
+    void setSecret(int secret);
+
+    /** Id from an external CMDB. Empty until a discovery import sets it. */
+    @Indexed
+    @StringLength(120)
+    String getExternalKey();
+
+    void setExternalKey(String externalKey);
+
+    /** When the object was moved to the trash. Empty while it is in the tree. */
+    @Indexed
+    Date getDeletedAt();
+
+    void setDeletedAt(Date deletedAt);
+
+    /** Account that moved the object to the trash. */
+    @StringLength(255)
+    String getDeletedBy();
+
+    void setDeletedBy(String deletedBy);
+
+    /**
+     * The object whose delete put this row in the trash.
+     * Restoring that object brings this row back with it.
+     */
+    Integer getTrashRootId();
+
+    void setTrashRootId(Integer trashRootId);
 }

@@ -37,11 +37,31 @@ public final class WorkbookSheet {
         private final String name;
         private final List<String> headers;
         private final List<List<String>> rows;
+        private final Chart chart;
+        private final List<Chart> charts;
 
         public Page(String name, List<String> headers, List<List<String>> rows) {
+            this(name, headers, rows, (Chart) null);
+        }
+
+        public Page(String name, List<String> headers, List<List<String>> rows, Chart chart) {
+            this(name, headers, rows, chart == null ? null : java.util.Collections.singletonList(chart));
+        }
+
+        public Page(String name, List<String> headers, List<List<String>> rows, List<Chart> charts) {
             this.name = name;
             this.headers = headers;
             this.rows = rows;
+            List<Chart> kept = new ArrayList<Chart>();
+            if (charts != null) {
+                for (Chart picture : charts) {
+                    if (picture != null && picture.usable()) {
+                        kept.add(picture);
+                    }
+                }
+            }
+            this.charts = kept;
+            this.chart = kept.isEmpty() ? null : kept.get(0);
         }
 
         public String getName() {
@@ -54,6 +74,143 @@ public final class WorkbookSheet {
 
         public List<List<String>> getRows() {
             return rows;
+        }
+
+        public Chart getChart() {
+            return chart;
+        }
+
+        public List<Chart> getCharts() {
+            return charts;
+        }
+    }
+
+    /** The pictures drawn on one worksheet, with the chart part numbers. */
+    private static final class SheetPicture {
+        private final List<Chart> charts = new ArrayList<Chart>();
+        private final List<Integer> files = new ArrayList<Integer>();
+    }
+
+    /**
+     * A drawing on the sheet. Categories and values are either a cell range
+     * on this sheet or a list of literals when the picture is not the summary
+     * columns, as with a Gantt bar or a Venn overlap.
+     */
+    public static final class Chart {
+        private final String plot;
+        private final String title;
+        private final String series;
+        private final String baseSeries;
+        private final int catColumn;
+        private final int valueColumn;
+        private final int xColumn;
+        private final int firstRow;
+        private final int lastRow;
+        private final boolean histogram;
+        private final boolean indexX;
+        private final boolean stacked;
+        private final List<String> labels;
+        private final List<String> values;
+        private final List<String> bases;
+
+        private Chart(String plot, String title, String series, String baseSeries, int catColumn, int valueColumn,
+                int xColumn, int firstRow, int lastRow, boolean histogram, boolean indexX, boolean stacked,
+                List<String> labels, List<String> values, List<String> bases) {
+            this.plot = plot == null ? "col" : plot;
+            this.title = title == null ? "" : title;
+            this.series = series == null ? "" : series;
+            this.baseSeries = baseSeries == null ? "" : baseSeries;
+            this.catColumn = catColumn;
+            this.valueColumn = valueColumn;
+            this.xColumn = xColumn;
+            this.firstRow = firstRow;
+            this.lastRow = lastRow;
+            this.histogram = histogram;
+            this.indexX = indexX;
+            this.stacked = stacked;
+            this.labels = labels;
+            this.values = values;
+            this.bases = bases;
+        }
+
+        public static Chart categories(String plot, String title, String series, int catColumn, int valueColumn,
+                int firstRow, int lastRow, boolean histogram) {
+            return new Chart(plot, title, series, "", catColumn, valueColumn, -1, firstRow, lastRow, histogram, false, false, null, null, null);
+        }
+
+        public static Chart scatter(String title, String series, int xColumn, int valueColumn, int firstRow, int lastRow) {
+            return new Chart("scatter", title, series, "", 0, valueColumn, xColumn, firstRow, lastRow, false, false, false, null, null, null);
+        }
+
+        public static Chart scatterIndex(String title, String series, int valueColumn, int firstRow, int lastRow) {
+            return new Chart("scatter", title, series, "", 0, valueColumn, -1, firstRow, lastRow, false, true, false, null, null, null);
+        }
+
+        public static Chart columnsOf(String title, String series, List<String> labels, List<String> values) {
+            return new Chart("col", title, series, "", 0, 1, -1, 0, 0, false, false, false, labels, values, null);
+        }
+
+        public static Chart gantt(String title, String startName, String spanName, List<String> labels, List<String> offsets, List<String> spans) {
+            return new Chart("bar", title, spanName, startName, 0, 1, -1, 0, 0, false, false, true, labels, spans, offsets);
+        }
+
+        public boolean usable() {
+            if (labels != null) {
+                return !labels.isEmpty() && values != null && values.size() == labels.size()
+                        && (bases == null || bases.size() == labels.size());
+            }
+            return firstRow >= 2 && lastRow >= firstRow && catColumn >= 0 && valueColumn >= 0;
+        }
+
+        public String getPlot() {
+            return plot;
+        }
+
+        public int getValueColumn() {
+            return valueColumn;
+        }
+
+        public int getXColumn() {
+            return xColumn;
+        }
+
+        public int getFirstRow() {
+            return firstRow;
+        }
+
+        public int getLastRow() {
+            return lastRow;
+        }
+
+        public boolean isHistogram() {
+            return histogram;
+        }
+
+        public boolean isIndexX() {
+            return indexX;
+        }
+
+        public boolean isStacked() {
+            return stacked;
+        }
+
+        public List<String> getLabels() {
+            return labels;
+        }
+
+        public List<String> getValues() {
+            return values;
+        }
+
+        public List<String> getBases() {
+            return bases;
+        }
+
+        private int pointCount() {
+            if (labels != null) {
+                return labels.size();
+            }
+            return lastRow - firstRow + 1;
         }
     }
 
@@ -76,7 +233,20 @@ public final class WorkbookSheet {
             for (Page page : book) {
                 names.add(uniqueTitle(page == null ? "" : page.getName(), used));
             }
-            put(zip, "[Content_Types].xml", contentTypes(book.size()));
+            List<SheetPicture> pictures = new ArrayList<SheetPicture>();
+            int chartFile = 1;
+            for (Page page : book) {
+                SheetPicture picture = new SheetPicture();
+                if (page != null && page.getCharts() != null) {
+                    for (Chart chart : page.getCharts()) {
+                        picture.charts.add(chart);
+                        picture.files.add(Integer.valueOf(chartFile));
+                        chartFile++;
+                    }
+                }
+                pictures.add(picture.charts.isEmpty() ? null : picture);
+            }
+            put(zip, "[Content_Types].xml", contentTypes(book.size(), pictures));
             put(zip, "_rels/.rels", rootRels());
             put(zip, "xl/workbook.xml", workbook(names));
             put(zip, "xl/_rels/workbook.xml.rels", workbookRels(book.size()));
@@ -85,7 +255,18 @@ public final class WorkbookSheet {
                 Page page = book.get(i);
                 List<String> headers = page == null ? null : page.getHeaders();
                 List<List<String>> rows = page == null ? null : page.getRows();
-                put(zip, "xl/worksheets/sheet" + (i + 1) + ".xml", sheet(headers, rows));
+                SheetPicture picture = pictures.get(i);
+                int number = i + 1;
+                put(zip, "xl/worksheets/sheet" + number + ".xml", sheet(headers, rows, picture != null));
+                if (picture == null) {
+                    continue;
+                }
+                put(zip, "xl/worksheets/_rels/sheet" + number + ".xml.rels", sheetRels(number));
+                put(zip, "xl/drawings/drawing" + number + ".xml", drawing(picture.charts));
+                put(zip, "xl/drawings/_rels/drawing" + number + ".xml.rels", drawingRels(picture.files));
+                for (int c = 0; c < picture.charts.size(); c++) {
+                    put(zip, "xl/charts/chart" + picture.files.get(c) + ".xml", chartXml(picture.charts.get(c), names.get(i), rows));
+                }
             }
             zip.close();
             return bytes.toByteArray();
@@ -190,16 +371,29 @@ public final class WorkbookSheet {
         zip.closeEntry();
     }
 
-    private static String contentTypes(int count) {
+    private static String contentTypes(int sheets, List<SheetPicture> pictures) {
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
         xml.append("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
         xml.append("<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>");
         xml.append("<Default Extension=\"xml\" ContentType=\"application/xml\"/>");
         xml.append("<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>");
-        for (int i = 1; i <= count; i++) {
+        for (int i = 1; i <= sheets; i++) {
             xml.append("<Override PartName=\"/xl/worksheets/sheet").append(i);
             xml.append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>");
+        }
+        for (int i = 0; i < pictures.size(); i++) {
+            SheetPicture picture = pictures.get(i);
+            if (picture == null) {
+                continue;
+            }
+            int number = i + 1;
+            xml.append("<Override PartName=\"/xl/drawings/drawing").append(number);
+            xml.append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>");
+            for (Integer file : picture.files) {
+                xml.append("<Override PartName=\"/xl/charts/chart").append(file);
+                xml.append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>");
+            }
         }
         xml.append("<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>");
         xml.append("</Types>");
@@ -257,10 +451,14 @@ public final class WorkbookSheet {
                 + "</styleSheet>";
     }
 
-    private static String sheet(List<String> headers, List<List<String>> rows) {
+    private static String sheet(List<String> headers, List<List<String>> rows, boolean drawing) {
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
-        xml.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+        xml.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"");
+        if (drawing) {
+            xml.append(" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"");
+        }
+        xml.append("><sheetData>");
         writeRow(xml, 1, headers);
         if (rows != null) {
             int number = 2;
@@ -269,7 +467,11 @@ public final class WorkbookSheet {
                 number++;
             }
         }
-        xml.append("</sheetData></worksheet>");
+        xml.append("</sheetData>");
+        if (drawing) {
+            xml.append("<drawing r:id=\"rId1\"/>");
+        }
+        xml.append("</worksheet>");
         return xml.toString();
     }
 
@@ -350,6 +552,277 @@ public final class WorkbookSheet {
             }
         }
         return out.toString();
+    }
+
+    private static String sheetRels(int number) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing"
+                + number + ".xml\"/>"
+                + "</Relationships>";
+    }
+
+    private static String drawingRels(List<Integer> files) {
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        xml.append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+        for (int i = 0; i < files.size(); i++) {
+            xml.append("<Relationship Id=\"rId").append(i + 1);
+            xml.append("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart");
+            xml.append(files.get(i)).append(".xml\"/>");
+        }
+        xml.append("</Relationships>");
+        return xml.toString();
+    }
+
+    private static String drawing(List<Chart> charts) {
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        xml.append("<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
+        int row = 0;
+        for (int i = 0; i < charts.size(); i++) {
+            int height = Math.max(16, Math.min(36, charts.get(i).pointCount() + 4));
+            xml.append("<xdr:twoCellAnchor>");
+            xml.append("<xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>").append(row);
+            xml.append("</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>");
+            xml.append("<xdr:to><xdr:col>15</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>").append(row + height);
+            xml.append("</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>");
+            xml.append("<xdr:graphicFrame macro=\"\">");
+            xml.append("<xdr:nvGraphicFramePr><xdr:cNvPr id=\"").append(i + 2);
+            xml.append("\" name=\"Chart ").append(i + 1).append("\"/>");
+            xml.append("<xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr>");
+            xml.append("<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>");
+            xml.append("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">");
+            xml.append("<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId");
+            xml.append(i + 1).append("\"/>");
+            xml.append("</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/>");
+            xml.append("</xdr:twoCellAnchor>");
+            row += height + 1;
+        }
+        xml.append("</xdr:wsDr>");
+        return xml.toString();
+    }
+
+    private static String chartXml(Chart chart, String sheetName, List<List<String>> rows) {
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        xml.append("<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">");
+        xml.append("<c:chart>");
+        String title = chart.title.isEmpty() ? chart.series : chart.title;
+        xml.append("<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:rPr lang=\"ru-RU\" sz=\"1200\"/><a:t>");
+        xml.append(escape(title));
+        xml.append("</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title>");
+        xml.append("<c:plotArea><c:layout/>");
+        plot(xml, chart, sheetName, rows);
+        xml.append("</c:plotArea><c:legend><c:legendPos val=\"b\"/><c:overlay val=\"0\"/></c:legend><c:plotVisOnly val=\"1\"/></c:chart>");
+        xml.append("<c:printSettings><c:headerFooter/><c:pageMargins b=\"0.75\" l=\"0.7\" r=\"0.7\" t=\"0.75\" header=\"0.3\" footer=\"0.3\"/><c:pageSetup/></c:printSettings>");
+        xml.append("</c:chartSpace>");
+        return xml.toString();
+    }
+
+    private static void plot(StringBuilder xml, Chart chart, String sheetName, List<List<String>> rows) {
+        String plot = chart.plot;
+        if ("pie".equals(plot)) {
+            xml.append("<c:pieChart><c:varyColors val=\"1\"/>");
+            sheetSeries(xml, chart, sheetName, rows, false);
+            percentLabels(xml);
+            xml.append("</c:pieChart>");
+            return;
+        }
+        if ("doughnut".equals(plot)) {
+            xml.append("<c:doughnutChart><c:varyColors val=\"1\"/>");
+            sheetSeries(xml, chart, sheetName, rows, false);
+            percentLabels(xml);
+            xml.append("<c:holeSize val=\"60\"/></c:doughnutChart>");
+            return;
+        }
+        if ("line".equals(plot)) {
+            xml.append("<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>");
+            sheetSeries(xml, chart, sheetName, rows, true);
+            xml.append("<c:marker val=\"1\"/><c:smooth val=\"0\"/><c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>");
+            categoryAxes(xml, false);
+            return;
+        }
+        if ("area".equals(plot)) {
+            xml.append("<c:areaChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>");
+            sheetSeries(xml, chart, sheetName, rows, false);
+            xml.append("<c:axId val=\"1\"/><c:axId val=\"2\"/></c:areaChart>");
+            categoryAxes(xml, false);
+            return;
+        }
+        if ("radar".equals(plot)) {
+            xml.append("<c:radarChart><c:radarStyle val=\"marker\"/><c:varyColors val=\"0\"/>");
+            sheetSeries(xml, chart, sheetName, rows, true);
+            xml.append("<c:axId val=\"1\"/><c:axId val=\"2\"/></c:radarChart>");
+            categoryAxes(xml, false);
+            return;
+        }
+        if ("scatter".equals(plot)) {
+            xml.append("<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>");
+            scatterSeries(xml, chart, sheetName, rows);
+            xml.append("<c:axId val=\"1\"/><c:axId val=\"2\"/></c:scatterChart>");
+            valueAxes(xml);
+            return;
+        }
+        boolean horizontal = "bar".equals(plot);
+        xml.append("<c:barChart><c:barDir val=\"").append(horizontal ? "bar" : "col").append("\"/>");
+        xml.append("<c:grouping val=\"").append(chart.stacked ? "stacked" : "clustered").append("\"/><c:varyColors val=\"1\"/>");
+        sheetSeries(xml, chart, sheetName, rows, false);
+        xml.append("<c:gapWidth val=\"").append(chart.histogram ? "0" : "80").append("\"/>");
+        if (chart.stacked) {
+            xml.append("<c:overlap val=\"100\"/>");
+        }
+        xml.append("<c:axId val=\"1\"/><c:axId val=\"2\"/></c:barChart>");
+        categoryAxes(xml, horizontal);
+    }
+
+    private static void sheetSeries(StringBuilder xml, Chart chart, String sheetName, List<List<String>> rows, boolean marker) {
+        if (chart.labels != null) {
+            if (chart.stacked && chart.bases != null) {
+                oneSeries(xml, 0, chart.baseSeries, null, chart.labels, null, chart.bases, false, true);
+                oneSeries(xml, 1, chart.series, null, chart.labels, null, chart.values, marker, false);
+                return;
+            }
+            oneSeries(xml, 0, chart.series, null, chart.labels, null, chart.values, marker, false);
+            return;
+        }
+        List<String> cats = new ArrayList<String>();
+        List<String> vals = new ArrayList<String>();
+        for (int row = chart.firstRow; row <= chart.lastRow; row++) {
+            cats.add(cellText(rows, chart.catColumn, row));
+            vals.add(numericText(cellText(rows, chart.valueColumn, row)));
+        }
+        String catFormula = range(sheetName, chart.catColumn, chart.firstRow, chart.lastRow);
+        String valFormula = range(sheetName, chart.valueColumn, chart.firstRow, chart.lastRow);
+        oneSeries(xml, 0, chart.series, catFormula, cats, valFormula, vals, marker, false);
+    }
+
+    private static void scatterSeries(StringBuilder xml, Chart chart, String sheetName, List<List<String>> rows) {
+        int count = chart.pointCount();
+        List<String> xs = new ArrayList<String>();
+        List<String> ys = new ArrayList<String>();
+        String xFormula = null;
+        for (int i = 0; i < count; i++) {
+            int row = chart.firstRow + i;
+            if (chart.indexX) {
+                xs.add(Integer.toString(i + 1));
+            } else {
+                xs.add(numericText(cellText(rows, chart.xColumn, row)));
+            }
+            ys.add(numericText(cellText(rows, chart.valueColumn, row)));
+        }
+        if (!chart.indexX) {
+            xFormula = range(sheetName, chart.xColumn, chart.firstRow, chart.lastRow);
+        }
+        String yFormula = range(sheetName, chart.valueColumn, chart.firstRow, chart.lastRow);
+        xml.append("<c:ser><c:idx val=\"0\"/><c:order val=\"0\"/><c:tx><c:v>");
+        xml.append(escape(chart.series));
+        xml.append("</c:v></c:tx><c:marker><c:symbol val=\"circle\"/><c:size val=\"7\"/></c:marker>");
+        xml.append("<c:xVal>");
+        numberPoints(xml, xFormula, xs);
+        xml.append("</c:xVal><c:yVal>");
+        numberPoints(xml, yFormula, ys);
+        xml.append("</c:yVal></c:ser>");
+    }
+
+    private static void oneSeries(StringBuilder xml, int index, String name, String catFormula, List<String> cats,
+            String valFormula, List<String> vals, boolean marker, boolean hidden) {
+        xml.append("<c:ser><c:idx val=\"").append(index).append("\"/><c:order val=\"").append(index).append("\"/>");
+        xml.append("<c:tx><c:v>").append(escape(name)).append("</c:v></c:tx>");
+        if (marker) {
+            xml.append("<c:marker><c:symbol val=\"circle\"/><c:size val=\"6\"/></c:marker>");
+        }
+        if (hidden) {
+            xml.append("<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>");
+        }
+        xml.append("<c:cat>");
+        textPoints(xml, catFormula, cats);
+        xml.append("</c:cat><c:val>");
+        numberPoints(xml, valFormula, vals);
+        xml.append("</c:val></c:ser>");
+    }
+
+    private static void textPoints(StringBuilder xml, String formula, List<String> points) {
+        if (formula == null) {
+            xml.append("<c:strLit>");
+            pointList(xml, points);
+            xml.append("</c:strLit>");
+            return;
+        }
+        xml.append("<c:strRef><c:f>").append(escape(formula)).append("</c:f><c:strCache>");
+        pointList(xml, points);
+        xml.append("</c:strCache></c:strRef>");
+    }
+
+    private static void numberPoints(StringBuilder xml, String formula, List<String> points) {
+        if (formula == null) {
+            xml.append("<c:numLit><c:formatCode>General</c:formatCode>");
+            pointList(xml, points);
+            xml.append("</c:numLit>");
+            return;
+        }
+        xml.append("<c:numRef><c:f>").append(escape(formula)).append("</c:f><c:numCache><c:formatCode>General</c:formatCode>");
+        pointList(xml, points);
+        xml.append("</c:numCache></c:numRef>");
+    }
+
+    private static void pointList(StringBuilder xml, List<String> points) {
+        xml.append("<c:ptCount val=\"").append(points.size()).append("\"/>");
+        for (int i = 0; i < points.size(); i++) {
+            xml.append("<c:pt idx=\"").append(i).append("\"><c:v>");
+            xml.append(escape(points.get(i)));
+            xml.append("</c:v></c:pt>");
+        }
+    }
+
+    private static void percentLabels(StringBuilder xml) {
+        xml.append("<c:dLbls><c:showLegendKey val=\"0\"/><c:showVal val=\"0\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"1\"/><c:showLeaderLines val=\"1\"/></c:dLbls>");
+    }
+
+    private static void categoryAxes(StringBuilder xml, boolean horizontal) {
+        String catPos = horizontal ? "l" : "b";
+        String valPos = horizontal ? "b" : "l";
+        xml.append("<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"");
+        xml.append(catPos);
+        xml.append("\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/><c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/></c:catAx>");
+        xml.append("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"");
+        xml.append(valPos);
+        xml.append("\"/><c:majorGridlines/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"1\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"between\"/></c:valAx>");
+    }
+
+    private static void valueAxes(StringBuilder xml) {
+        xml.append("<c:valAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"midCat\"/></c:valAx>");
+        xml.append("<c:valAx><c:axId val=\"2\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"1\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"midCat\"/></c:valAx>");
+    }
+
+    private static String range(String sheetName, int column, int from, int to) {
+        String col = columnName(column);
+        return formulaSheet(sheetName) + "!$" + col + "$" + from + ":$" + col + "$" + to;
+    }
+
+    private static String formulaSheet(String sheetName) {
+        String name = sheetName == null ? "Sheet" : sheetName;
+        return "'" + name.replace("'", "''") + "'";
+    }
+
+    private static String cellText(List<List<String>> rows, int column, int excelRow) {
+        int index = excelRow - 2;
+        if (rows == null || index < 0 || index >= rows.size() || column < 0) {
+            return "";
+        }
+        List<String> row = rows.get(index);
+        if (row == null || column >= row.size() || row.get(column) == null) {
+            return "";
+        }
+        String raw = row.get(column);
+        if (raw.length() > 3 && raw.charAt(0) == '\u0001' && raw.charAt(2) == ':') {
+            return raw.substring(3);
+        }
+        return raw;
+    }
+
+    private static String numericText(String raw) {
+        return plainNumeric(raw) ? raw : "0";
     }
 
     private static Map<String, byte[]> unzip(byte[] bytes) {

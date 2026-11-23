@@ -41,16 +41,50 @@ public final class ModuleSetup {
         setup.setReportMailTo(mailTo(values.get("rto")));
         setup.setReportMailSent(mailSent(values.get("rsent")));
         setup.setReportMailPart(mailPart(values.get("rpart")));
+        setup.setReportMailBranch(Boolean.valueOf("1".equals(values.get("rbranch"))));
+        setup.setReportIdleStatuses(Downtime.store(values.get("ridle")));
+        setup.setReportRequestStatuses(RequestStatuses.store(values.get("rreq")));
+        setup.setReportSummary(summaryBoard(values.get("rsum")));
         setup.setLifeApproval(Boolean.valueOf(!"0".equals(values.get("approve"))));
         setup.setLifeApprover(who(values.get("who")));
+        setup.setLifePlaces(LifeApprovers.normalize(values.get("lwho")));
         setup.setLifeCurrency(currency(values.get("cur")));
         setup.setLifeMonths(Integer.valueOf(months(values.get("months"))));
+        setup.setLifeFold(Boolean.valueOf("1".equals(values.get("fold"))));
         setup.setStaffMarks(staffMarks(values.get("marks")));
         setup.setStaffOrder(staffOrder(values.get("order")));
         setup.setStaffPlaceOrder(staffPlaces(values.get("places")));
         setup.setScheduleBoards(boards(values.get("boards")));
         setup.setScheduleOpen(openBoard(values.get("open"), values.get("layer")));
         setup.setFurniture(furniture(values.get("furn")));
+        setup.setGlyphs(glyphs(values.get("syms")));
+        setup.setPortalMine(Boolean.valueOf("1".equals(values.get("pmine"))));
+        setup.setPortalColumns(normalizePortalColumns(values.get("pcols")));
+        if (values.containsKey("playout")) {
+            setup.setPortalLayout(PortalLayouts.canonical(values.get("playout")));
+        }
+        setup.setPortalReports(PortalShowcase.reports(values.get("preps")));
+        setup.setPortalBoards(PortalShowcase.boards(values.get("pbrd")));
+        setup.setPortalAudience(PortalShowcase.people(values.get("pwho")));
+        setup.setPhoto(Boolean.valueOf("1".equals(values.get("photo"))));
+        if (values.containsKey("copen")) {
+            setup.setCardOpen(cardOpen(values.get("copen")));
+        }
+        setup.setIssueNotes(Boolean.valueOf(!"0".equals(values.get("inote"))));
+        setup.setTniKeep(Integer.valueOf(TniPolicy.keepDays(number(values.get("tkeep")))));
+        setup.setTniProbeDays(Integer.valueOf(TniPolicy.probeDays(number(values.get("tdays")))));
+        setup.setTniProbeTries(Integer.valueOf(TniPolicy.probeTries(number(values.get("ttry")))));
+        setup.setTniAction(TniPolicy.action(values.get("tact")));
+        setup.setTniComputer(TniPolicy.typeKey(values.get("tpc")));
+        setup.setTniLaptop(TniPolicy.typeKey(values.get("tnb")));
+        setup.setTniPhone(TniPolicy.typeKey(values.get("tph")));
+        setup.setTniTablet(TniPolicy.typeKey(values.get("ttb")));
+        setup.setTniBrowser(Boolean.valueOf(flag(values.get("tbrow"))));
+        setup.setTniScan(Boolean.valueOf(flag(values.get("tscan"))));
+        setup.setTniAd(Boolean.valueOf(flag(values.get("tad"))));
+        setup.setTniSccm(Boolean.valueOf(flag(values.get("tscc"))));
+        setup.setTniPing(Boolean.valueOf(flag(values.get("tping"))));
+        setup.setTniSites(TniSites.text(values.get("tsite")));
         return setup;
     }
 
@@ -76,17 +110,166 @@ public final class ModuleSetup {
         append(stored, "rto", mailTo(value.getReportMailTo()));
         append(stored, "rsent", mailSent(value.getReportMailSent()));
         append(stored, "rpart", mailPart(value.getReportMailPart()));
+        append(stored, "rbranch", Boolean.TRUE.equals(value.getReportMailBranch()) ? "1" : "0");
+        append(stored, "ridle", Downtime.store(value.getReportIdleStatuses()));
+        append(stored, "rreq", RequestStatuses.store(value.getReportRequestStatuses()));
+        append(stored, "rsum", summaryBoard(value.getReportSummary()));
         append(stored, "approve", Boolean.FALSE.equals(value.getLifeApproval()) ? "0" : "1");
         append(stored, "who", who(value.getLifeApprover()));
+        append(stored, "lwho", LifeApprovers.normalize(value.getLifePlaces()));
         append(stored, "cur", currency(value.getLifeCurrency()));
         append(stored, "months", String.valueOf(months(value.getLifeMonths() == null ? "" : String.valueOf(value.getLifeMonths()))));
+        append(stored, "fold", Boolean.TRUE.equals(value.getLifeFold()) ? "1" : "0");
         append(stored, "marks", staffMarks(value.getStaffMarks()));
         append(stored, "order", staffOrder(value.getStaffOrder()));
         append(stored, "places", staffPlaces(value.getStaffPlaceOrder()));
         append(stored, "boards", boards(value.getScheduleBoards()));
         append(stored, "open", openBoard(value.getScheduleOpen(), value.getScheduleLayer()));
         append(stored, "furn", furniture(value.getFurniture()));
+        append(stored, "syms", glyphs(value.getGlyphs()));
+        append(stored, "pmine", Boolean.TRUE.equals(value.getPortalMine()) ? "1" : "0");
+        append(stored, "pcols", normalizePortalColumns(value.getPortalColumns()));
+        if (value.getPortalLayout() != null) {
+            append(stored, "playout", PortalLayouts.canonical(value.getPortalLayout()));
+        }
+        append(stored, "preps", PortalShowcase.reports(value.getPortalReports()));
+        append(stored, "pbrd", PortalShowcase.boards(value.getPortalBoards()));
+        append(stored, "pwho", PortalShowcase.people(value.getPortalAudience()));
+        append(stored, "photo", Boolean.TRUE.equals(value.getPhoto()) ? "1" : "0");
+        String blocks = cardOpen(value.getCardOpen());
+        if (blocks != null) {
+            append(stored, "copen", blocks);
+        }
+        append(stored, "inote", Boolean.FALSE.equals(value.getIssueNotes()) ? "0" : "1");
+        append(stored, "tkeep", String.valueOf(TniPolicy.keepDays(value.getTniKeep() == null ? 0 : value.getTniKeep().intValue())));
+        append(stored, "tdays", String.valueOf(TniPolicy.probeDays(value.getTniProbeDays() == null ? 0 : value.getTniProbeDays().intValue())));
+        append(stored, "ttry", String.valueOf(TniPolicy.probeTries(value.getTniProbeTries() == null ? 0 : value.getTniProbeTries().intValue())));
+        append(stored, "tact", TniPolicy.action(value.getTniAction()));
+        append(stored, "tpc", TniPolicy.typeKey(value.getTniComputer()));
+        append(stored, "tnb", TniPolicy.typeKey(value.getTniLaptop()));
+        append(stored, "tph", TniPolicy.typeKey(value.getTniPhone()));
+        append(stored, "ttb", TniPolicy.typeKey(value.getTniTablet()));
+        append(stored, "tbrow", on(value.getTniBrowser()));
+        append(stored, "tscan", on(value.getTniScan()));
+        append(stored, "tad", on(value.getTniAd()));
+        append(stored, "tscc", on(value.getTniSccm()));
+        append(stored, "tping", on(value.getTniPing()));
+        append(stored, "tsite", TniSites.store(value.getTniSites()));
         return stored.toString();
+    }
+
+    private static final List<String> CARD_BLOCKS = Arrays.asList(
+            "details", "description", "service", "life", "issues", "files", "activity",
+            "people", "links", "dates", "schemes", "inside", "types");
+
+    /** Empty keeps the usual card. "-" collapses every block. Other values are a comma list. */
+    static String cardOpen(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = raw.trim().toLowerCase(Locale.ROOT);
+        if (text.isEmpty() || "*".equals(text)) {
+            return null;
+        }
+        if ("-".equals(text)) {
+            return "-";
+        }
+        StringBuilder kept = new StringBuilder();
+        for (String part : text.split(",")) {
+            String token = part == null ? "" : part.trim();
+            if (!CARD_BLOCKS.contains(token) || containsToken(kept, token)) {
+                continue;
+            }
+            if (kept.length() > 0) {
+                kept.append(',');
+            }
+            kept.append(token);
+        }
+        return kept.length() == 0 ? "-" : kept.toString();
+    }
+
+    private static final List<String> PORTAL_FIELDS = Arrays.asList(
+            "key", "type", "status", "location", "description", "created", "updated");
+    private static final List<String> PORTAL_DEFAULT = Arrays.asList("key", "type", "status", "location");
+
+    /** Stored form: {@code *} keeps the default columns, {@code -} keeps none. */
+    public static String normalizePortalColumns(String raw) {
+        if (raw == null) {
+            return "*";
+        }
+        String text = raw.trim();
+        if (text.isEmpty() || "*".equals(text)) {
+            return "*";
+        }
+        if ("-".equals(text)) {
+            return "-";
+        }
+        StringBuilder kept = new StringBuilder();
+        int count = 0;
+        for (String part : text.split(",")) {
+            String token = part == null ? "" : part.trim().toLowerCase(Locale.ROOT);
+            if (!portalToken(token) || containsToken(kept, token)) {
+                continue;
+            }
+            if (kept.length() > 0) {
+                kept.append(',');
+            }
+            kept.append(token);
+            count++;
+            if (count >= 40) {
+                break;
+            }
+        }
+        return kept.length() == 0 ? "-" : kept.toString();
+    }
+
+    public static List<String> portalColumnList(String raw) {
+        String stored = normalizePortalColumns(raw);
+        if ("*".equals(stored)) {
+            return new ArrayList<String>(PORTAL_DEFAULT);
+        }
+        if ("-".equals(stored)) {
+            return new ArrayList<String>();
+        }
+        return new ArrayList<String>(Arrays.asList(stored.split(",")));
+    }
+
+    private static boolean portalToken(String token) {
+        if (PORTAL_FIELDS.contains(token)) {
+            return true;
+        }
+        return token.length() > 2 && token.startsWith("f:") && token.substring(2).matches("[a-z][a-z0-9-]{0,39}");
+    }
+
+    private static boolean containsToken(StringBuilder kept, String token) {
+        String text = kept.toString();
+        if (text.isEmpty()) {
+            return false;
+        }
+        for (String part : text.split(",")) {
+            if (part.equals(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A stored board id, or empty when the summary keeps its own cards. */
+    static String summaryBoard(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String text = raw.trim();
+        if (text.isEmpty() || text.length() > 9) {
+            return "";
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch < '0' || ch > '9') {
+                return "";
+            }
+        }
+        return text.charAt(0) == '0' ? "" : text;
     }
 
     private static void append(StringBuilder stored, String key, String value) {
@@ -168,7 +351,7 @@ public final class ModuleSetup {
             String label = markLabel(piece.length > 1 ? piece[1] : "");
             String color = markColor(piece.length > 2 ? piece[2] : "");
             int hours = markHours(piece.length > 3 ? piece[3] : "8");
-            int factor = markFactor(piece, hours, id);
+            int factor = TimesheetMath.factor(id, hours, explicitFactor(piece));
             rows.put(id, new String[] { label, color, String.valueOf(hours), String.valueOf(factor) });
         }
         if (!rows.containsKey("work")) {
@@ -197,51 +380,93 @@ public final class ModuleSetup {
     }
 
     /** 0 leaves the day out of the totals, 1 uses the person's hours, 2 doubles them. A missing field keeps the old meaning. */
-    private static int markFactor(String[] piece, int hours, String id) {
+    private static Integer explicitFactor(String[] piece) {
         if (piece.length > 4 && piece[4] != null && !piece[4].trim().isEmpty()) {
             int value = number(piece[4]);
             if (value == 0 || value == 1 || value == 2) {
-                return value;
+                return Integer.valueOf(value);
             }
         }
-        if (hours <= 0) {
-            return 0;
-        }
-        if ("night".equals(id)) {
-            return 2;
-        }
-        return 1;
+        return null;
+    }
+
+    /**
+     * Starts from the stored setup and copies only the fields the caller sent.
+     * A null field is omitted, so one key does not wipe kinds, the timesheet, furniture, or the sheet size.
+     */
+    public static ModuleSetupDto merge(ModuleSetupDto stored, ModuleSetupDto patch) {
+        ModuleSetupDto base = stored == null ? new ModuleSetupDto() : stored;
+        ModuleSetupDto incoming = patch == null ? new ModuleSetupDto() : patch;
+        ModuleSetupDto merged = new ModuleSetupDto();
+        merged.setScheduleKinds(incoming.getScheduleKinds() != null ? incoming.getScheduleKinds() : base.getScheduleKinds());
+        merged.setScheduleUnit(incoming.getScheduleUnit() != null ? incoming.getScheduleUnit() : base.getScheduleUnit());
+        merged.setScheduleLayer(incoming.getScheduleLayer() != null ? incoming.getScheduleLayer() : base.getScheduleLayer());
+        merged.setScheduleNotify(incoming.getScheduleNotify() != null ? incoming.getScheduleNotify() : base.getScheduleNotify());
+        merged.setMapWidth(incoming.getMapWidth() != null ? incoming.getMapWidth() : base.getMapWidth());
+        merged.setMapHeight(incoming.getMapHeight() != null ? incoming.getMapHeight() : base.getMapHeight());
+        merged.setMapGrid(incoming.getMapGrid() != null ? incoming.getMapGrid() : base.getMapGrid());
+        merged.setMapSnap(incoming.getMapSnap() != null ? incoming.getMapSnap() : base.getMapSnap());
+        merged.setReportHidden(incoming.getReportHidden() != null ? incoming.getReportHidden() : base.getReportHidden());
+        merged.setReportCharts(incoming.getReportCharts() != null ? incoming.getReportCharts() : base.getReportCharts());
+        merged.setReportMail(incoming.getReportMail() != null ? incoming.getReportMail() : base.getReportMail());
+        merged.setReportMailEvery(incoming.getReportMailEvery() != null ? incoming.getReportMailEvery() : base.getReportMailEvery());
+        merged.setReportMailDay(incoming.getReportMailDay() != null ? incoming.getReportMailDay() : base.getReportMailDay());
+        merged.setReportMailTo(incoming.getReportMailTo() != null ? incoming.getReportMailTo() : base.getReportMailTo());
+        merged.setReportMailSent(incoming.getReportMailSent() != null ? incoming.getReportMailSent() : base.getReportMailSent());
+        merged.setReportMailPart(incoming.getReportMailPart() != null ? incoming.getReportMailPart() : base.getReportMailPart());
+        merged.setReportMailBranch(incoming.getReportMailBranch() != null ? incoming.getReportMailBranch() : base.getReportMailBranch());
+        merged.setReportIdleStatuses(incoming.getReportIdleStatuses() != null ? Downtime.store(incoming.getReportIdleStatuses()) : base.getReportIdleStatuses());
+        merged.setReportRequestStatuses(incoming.getReportRequestStatuses() != null ? RequestStatuses.store(incoming.getReportRequestStatuses()) : base.getReportRequestStatuses());
+        merged.setReportSummary(incoming.getReportSummary() != null ? summaryBoard(incoming.getReportSummary()) : base.getReportSummary());
+        merged.setLifeApproval(incoming.getLifeApproval() != null ? incoming.getLifeApproval() : base.getLifeApproval());
+        merged.setLifeApprover(incoming.getLifeApprover() != null ? incoming.getLifeApprover() : base.getLifeApprover());
+        merged.setLifePlaces(incoming.getLifePlaces() != null ? incoming.getLifePlaces() : base.getLifePlaces());
+        merged.setLifeCurrency(incoming.getLifeCurrency() != null ? incoming.getLifeCurrency() : base.getLifeCurrency());
+        merged.setLifeMonths(incoming.getLifeMonths() != null ? incoming.getLifeMonths() : base.getLifeMonths());
+        merged.setLifeFold(incoming.getLifeFold() != null ? incoming.getLifeFold() : base.getLifeFold());
+        merged.setStaffMarks(incoming.getStaffMarks() != null ? incoming.getStaffMarks() : base.getStaffMarks());
+        merged.setStaffOrder(incoming.getStaffOrder() != null ? incoming.getStaffOrder() : base.getStaffOrder());
+        merged.setStaffPlaceOrder(incoming.getStaffPlaceOrder() != null ? incoming.getStaffPlaceOrder() : base.getStaffPlaceOrder());
+        merged.setScheduleBoards(incoming.getScheduleBoards() != null ? incoming.getScheduleBoards() : base.getScheduleBoards());
+        merged.setScheduleOpen(incoming.getScheduleOpen() != null ? incoming.getScheduleOpen() : base.getScheduleOpen());
+        merged.setFurniture(incoming.getFurniture() != null ? incoming.getFurniture() : base.getFurniture());
+        merged.setGlyphs(incoming.getGlyphs() != null ? incoming.getGlyphs() : base.getGlyphs());
+        merged.setPortalMine(incoming.getPortalMine() != null ? incoming.getPortalMine() : base.getPortalMine());
+        merged.setPortalColumns(incoming.getPortalColumns() != null ? incoming.getPortalColumns() : base.getPortalColumns());
+        merged.setPortalLayout(incoming.getPortalLayout() != null ? PortalLayouts.canonical(incoming.getPortalLayout()) : base.getPortalLayout());
+        merged.setPortalReports(incoming.getPortalReports() != null ? PortalShowcase.reports(incoming.getPortalReports()) : base.getPortalReports());
+        merged.setPortalBoards(incoming.getPortalBoards() != null ? PortalShowcase.boards(incoming.getPortalBoards()) : base.getPortalBoards());
+        merged.setPortalAudience(incoming.getPortalAudience() != null ? PortalShowcase.people(incoming.getPortalAudience()) : base.getPortalAudience());
+        merged.setPhoto(incoming.getPhoto() != null ? incoming.getPhoto() : base.getPhoto());
+        merged.setCardOpen(incoming.getCardOpen() != null ? cardOpen(incoming.getCardOpen()) : base.getCardOpen());
+        merged.setIssueNotes(incoming.getIssueNotes() != null ? incoming.getIssueNotes() : base.getIssueNotes());
+        merged.setTniKeep(incoming.getTniKeep() != null ? incoming.getTniKeep() : base.getTniKeep());
+        merged.setTniProbeDays(incoming.getTniProbeDays() != null ? incoming.getTniProbeDays() : base.getTniProbeDays());
+        merged.setTniProbeTries(incoming.getTniProbeTries() != null ? incoming.getTniProbeTries() : base.getTniProbeTries());
+        merged.setTniAction(incoming.getTniAction() != null ? incoming.getTniAction() : base.getTniAction());
+        merged.setTniComputer(incoming.getTniComputer() != null ? incoming.getTniComputer() : base.getTniComputer());
+        merged.setTniLaptop(incoming.getTniLaptop() != null ? incoming.getTniLaptop() : base.getTniLaptop());
+        merged.setTniPhone(incoming.getTniPhone() != null ? incoming.getTniPhone() : base.getTniPhone());
+        merged.setTniTablet(incoming.getTniTablet() != null ? incoming.getTniTablet() : base.getTniTablet());
+        merged.setTniBrowser(incoming.getTniBrowser() != null ? incoming.getTniBrowser() : base.getTniBrowser());
+        merged.setTniScan(incoming.getTniScan() != null ? incoming.getTniScan() : base.getTniScan());
+        merged.setTniAd(incoming.getTniAd() != null ? incoming.getTniAd() : base.getTniAd());
+        merged.setTniSccm(incoming.getTniSccm() != null ? incoming.getTniSccm() : base.getTniSccm());
+        merged.setTniPing(incoming.getTniPing() != null ? incoming.getTniPing() : base.getTniPing());
+        merged.setTniSites(incoming.getTniSites() != null ? incoming.getTniSites() : base.getTniSites());
+        return merged;
     }
 
     private static String boards(String raw) {
-        boolean calendar = false;
-        boolean roster = false;
-        if (raw != null) {
-            String[] parts = raw.split(",");
-            for (String part : parts) {
-                String id = part == null ? "" : part.trim().toLowerCase(Locale.ROOT);
-                if ("calendar".equals(id)) {
-                    calendar = true;
-                } else if ("roster".equals(id)) {
-                    roster = true;
-                }
-            }
-        }
-        if (calendar && roster || !calendar && !roster) {
-            return "calendar,roster";
-        }
-        return calendar ? "calendar" : "roster";
+        return "calendar";
+    }
+
+    /** The work calendar stays on. A stored timesheet board list no longer turns it off. */
+    public static boolean calendarOn(String boards) {
+        return true;
     }
 
     private static String openBoard(String raw, String layer) {
-        String id = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
-        if ("calendar".equals(id) || "roster".equals(id)) {
-            return id;
-        }
-        String storedLayer = layer == null ? "" : layer.trim().toLowerCase(Locale.ROOT);
-        if ("roster".equals(storedLayer) || "staff".equals(storedLayer)) {
-            return "roster";
-        }
         return "calendar";
     }
 
@@ -329,11 +554,8 @@ public final class ModuleSetup {
 
     private static String layer(String raw, String kinds) {
         String id = WorkKind.id(raw);
-        if (id.isEmpty()) {
+        if (id.isEmpty() || "roster".equals(id)) {
             return "";
-        }
-        if ("roster".equals(id) || "staff".equals(id)) {
-            return "roster";
         }
         return parseKinds(kinds, false).containsKey(id) ? id : "";
     }
@@ -436,7 +658,16 @@ public final class ModuleSetup {
         return value;
     }
 
+    /** Tokens already queued, including a branch book such as {@code b.12.JIRAUSER10000}. */
+    private static String mailTrack(String raw) {
+        return mailList(raw, 80, 120);
+    }
+
     private static String mailTo(String raw) {
+        return mailList(raw, 20, 80);
+    }
+
+    private static String mailList(String raw, int limit, int keyLimit) {
         StringBuilder stored = new StringBuilder();
         if (raw == null) {
             return "";
@@ -445,10 +676,10 @@ public final class ModuleSetup {
         String[] parts = raw.split(",");
         for (String part : parts) {
             String key = part == null ? "" : part.trim();
-            if (key.isEmpty() || key.length() > 80 || !key.matches("[A-Za-z0-9._@-]+") || seen.contains(key)) {
+            if (key.isEmpty() || key.length() > keyLimit || !key.matches("[A-Za-z0-9._@-]+") || seen.contains(key)) {
                 continue;
             }
-            if (seen.size() >= 20) {
+            if (seen.size() >= limit) {
                 break;
             }
             seen.add(key);
@@ -476,11 +707,19 @@ public final class ModuleSetup {
         if (day.isEmpty()) {
             return "";
         }
-        String keys = mailTo(value.substring(11));
+        String keys = mailTrack(value.substring(11));
         if (keys.isEmpty()) {
             return "";
         }
         return day + ":" + keys;
+    }
+
+    private static boolean flag(String raw) {
+        return raw == null || !"0".equals(raw.trim());
+    }
+
+    private static String on(Boolean value) {
+        return Boolean.FALSE.equals(value) ? "0" : "1";
     }
 
     private static String who(String raw) {
@@ -507,6 +746,18 @@ public final class ModuleSetup {
         return value > 600 ? 600 : value;
     }
 
+    /** Symbol library. Delimiters that would break the option row are removed. */
+    private static String glyphs(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        String value = raw.replace(";", "").replace("=", "").replace("\n", "").replace("\r", "").trim();
+        if (value.length() > 24000) {
+            value = value.substring(0, 24000);
+        }
+        return value;
+    }
+
     /** id^name^kind,x,y,w,h,color,label,angle!shape|next . Colors are stored without a hash. Angle is optional. */
     private static String furniture(String raw) {
         if (raw == null || raw.trim().isEmpty()) {
@@ -515,6 +766,7 @@ public final class ModuleSetup {
         StringBuilder stored = new StringBuilder();
         String[] templates = raw.split("\\|");
         int count = 0;
+        int pictures = 0;
         for (String template : templates) {
             if (count >= 24) {
                 break;
@@ -523,11 +775,18 @@ public final class ModuleSetup {
             if (head.length < 3) {
                 continue;
             }
+            boolean picture = head[2].startsWith("png:");
+            if (picture && pictures >= 8) {
+                continue;
+            }
             String id = furnId(head[0]);
             String name = furnLabel(head[1]);
-            String shapes = furnShapes(head[2]);
+            String shapes = picture ? furnPng(head[2]) : furnShapes(head[2]);
             if (id.isEmpty() || name.isEmpty() || shapes.isEmpty()) {
                 continue;
+            }
+            if (picture) {
+                pictures++;
             }
             if (stored.length() > 0) {
                 stored.append('|');
@@ -545,6 +804,30 @@ public final class ModuleSetup {
 
     private static String furnLabel(String raw) {
         return clipLabel(raw).replace('^', ' ').replace('!', ' ').trim();
+    }
+
+    /** png:width:height:base64 . The picture has no semicolon, so it survives the setup row. */
+    private static String furnPng(String raw) {
+        String[] bits = raw.split(":", 4);
+        if (bits.length < 4) {
+            return "";
+        }
+        int width = furnCoord(bits[1], 400);
+        int height = furnCoord(bits[2], 400);
+        if (width < 8) {
+            width = 8;
+        }
+        if (height < 8) {
+            height = 8;
+        }
+        String data = bits[3] == null ? "" : bits[3].trim();
+        if (data.length() < 20 || data.length() > 60000 || !data.matches("[A-Za-z0-9+/=]+")) {
+            return "";
+        }
+        if (!data.startsWith("iVBORw0KGgo") && !data.startsWith("/9j/")) {
+            return "";
+        }
+        return "png:" + width + ":" + height + ":" + data;
     }
 
     private static String furnShapes(String raw) {

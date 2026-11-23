@@ -8,6 +8,12 @@ public class ImportDraft {
     private String csv;
     private String content;
     private String name;
+    private Integer offset;
+    private String uploadId;
+    private String idempotencyKey;
+    private Boolean chunked;
+    private String typeKey;
+    private Integer placeId;
 
     public String getCsv() {
         return csv;
@@ -32,5 +38,56 @@ public class ImportDraft {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public Integer getOffset() {
+        return offset;
+    }
+
+    public void setOffset(Integer offset) {
+        this.offset = offset;
+    }
+
+    public String getUploadId() {
+        return uploadId;
+    }
+
+    public void setUploadId(String uploadId) {
+        this.uploadId = uploadId;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
+    }
+
+    /** When true, one request writes only a slice and returns an upload id. */
+    public Boolean getChunked() {
+        return chunked;
+    }
+
+    public void setChunked(Boolean chunked) {
+        this.chunked = chunked;
+    }
+
+    /** When set, only this equipment type is read. Other sheets stay untouched. */
+    public String getTypeKey() {
+        return typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey;
+    }
+
+    /** When set, only equipment in this place, and new rows without a place land here. */
+    public Integer getPlaceId() {
+        return placeId;
+    }
+
+    public void setPlaceId(Integer placeId) {
+        this.placeId = placeId;
     }
 }

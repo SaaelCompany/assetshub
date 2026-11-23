@@ -28,18 +28,31 @@ public class AssetDto {
     private String location;
     private boolean editable;
     private boolean cardImage;
+    private boolean photo;
+    private long photoRev;
+    private boolean secret;
     private UserProfileDto custodian;
     private UserProfileDto issued;
+    private UserProfileDto author;
     private String holderRole;
     private List<AttributeDto> attributes = new ArrayList<AttributeDto>();
     private List<IssueRefDto> issues;
     private List<AssetPeerDto> peers;
+    private List<AssetLinkDto> links;
+    private List<GraphTieDto> mesh;
     private List<CommentDto> comments;
     private List<FileDto> files;
+    private List<UserProfileDto> shares;
+    private List<ClinicCircleDto.Place> circles = new ArrayList<ClinicCircleDto.Place>();
     private List<ActivityDto> activities;
     private List<ServicePlanDto> plans;
     private String serviceDue;
     private List<String> offeredTypes = new ArrayList<String>();
+    private int pingUp;
+    private boolean pingExempt;
+    private String deleted;
+    private String deletedBy;
+    private int nested;
 
     public int getId() {
         return id;
@@ -201,6 +214,30 @@ public class AssetDto {
         this.cardImage = cardImage;
     }
 
+    public boolean isPhoto() {
+        return photo;
+    }
+
+    public void setPhoto(boolean photo) {
+        this.photo = photo;
+    }
+
+    public long getPhotoRev() {
+        return photoRev;
+    }
+
+    public void setPhotoRev(long photoRev) {
+        this.photoRev = photoRev;
+    }
+
+    public boolean isSecret() {
+        return secret;
+    }
+
+    public void setSecret(boolean secret) {
+        this.secret = secret;
+    }
+
     public UserProfileDto getCustodian() {
         return custodian;
     }
@@ -215,6 +252,14 @@ public class AssetDto {
 
     public void setIssued(UserProfileDto issued) {
         this.issued = issued;
+    }
+
+    public UserProfileDto getAuthor() {
+        return author;
+    }
+
+    public void setAuthor(UserProfileDto author) {
+        this.author = author;
     }
 
     public String getHolderRole() {
@@ -249,6 +294,22 @@ public class AssetDto {
         this.peers = peers;
     }
 
+    public List<AssetLinkDto> getLinks() {
+        return links;
+    }
+
+    public void setLinks(List<AssetLinkDto> links) {
+        this.links = links;
+    }
+
+    public List<GraphTieDto> getMesh() {
+        return mesh;
+    }
+
+    public void setMesh(List<GraphTieDto> mesh) {
+        this.mesh = mesh;
+    }
+
     public List<CommentDto> getComments() {
         return comments;
     }
@@ -263,6 +324,22 @@ public class AssetDto {
 
     public void setFiles(List<FileDto> files) {
         this.files = files;
+    }
+
+    public List<UserProfileDto> getShares() {
+        return shares;
+    }
+
+    public List<ClinicCircleDto.Place> getCircles() {
+        return circles;
+    }
+
+    public void setCircles(List<ClinicCircleDto.Place> circles) {
+        this.circles = circles == null ? new ArrayList<ClinicCircleDto.Place>() : circles;
+    }
+
+    public void setShares(List<UserProfileDto> shares) {
+        this.shares = shares;
     }
 
     public List<ActivityDto> getActivities() {
@@ -295,5 +372,45 @@ public class AssetDto {
 
     public void setOfferedTypes(List<String> offeredTypes) {
         this.offeredTypes = offeredTypes == null ? new ArrayList<String>() : offeredTypes;
+    }
+
+    public int getPingUp() {
+        return pingUp;
+    }
+
+    public void setPingUp(int pingUp) {
+        this.pingUp = pingUp;
+    }
+
+    public boolean isPingExempt() {
+        return pingExempt;
+    }
+
+    public void setPingExempt(boolean pingExempt) {
+        this.pingExempt = pingExempt;
+    }
+
+    public String getDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(String deleted) {
+        this.deleted = deleted;
+    }
+
+    public String getDeletedBy() {
+        return deletedBy;
+    }
+
+    public void setDeletedBy(String deletedBy) {
+        this.deletedBy = deletedBy;
+    }
+
+    public int getNested() {
+        return nested;
+    }
+
+    public void setNested(int nested) {
+        this.nested = nested;
     }
 }

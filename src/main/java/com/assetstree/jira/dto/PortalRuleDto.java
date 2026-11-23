@@ -12,6 +12,7 @@ import java.util.List;
 public class PortalRuleDto {
     private int id;
     private int assetId;
+    private String typeKey;
     private String assetName;
     private String assetPath;
     private int position;
@@ -31,6 +32,14 @@ public class PortalRuleDto {
 
     public void setAssetId(int assetId) {
         this.assetId = assetId;
+    }
+
+    public String getTypeKey() {
+        return typeKey == null ? "" : typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey == null ? "" : typeKey;
     }
 
     public String getAssetName() {

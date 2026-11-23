@@ -30,6 +30,14 @@ public final class PortalRules {
             this.text = text;
             this.value = value;
         }
+
+        public String getText() {
+            return text;
+        }
+
+        public String getValue() {
+            return value;
+        }
     }
 
     public static PortalRuleDto choose(List<PortalRuleDto> rules, List<Answer> answers, Map<Integer, Integer> parents) {
@@ -44,7 +52,7 @@ public final class PortalRules {
                 continue;
             }
             int score = rule.getConditions() == null ? 0 : rule.getConditions().size();
-            int depth = depth(rule.getAssetId(), parents);
+            int depth = rank(depth(rule.getAssetId(), parents), rule.getTypeKey());
             if (score > bestScore || (score == bestScore && depth > bestDepth)) {
                 best = rule;
                 bestScore = score;
@@ -87,6 +95,12 @@ public final class PortalRules {
             }
         }
         return false;
+    }
+
+    /** A type sits between its place and an object on that place. */
+    static int rank(int assetDepth, String typeKey) {
+        boolean typeTarget = typeKey != null && !typeKey.trim().isEmpty();
+        return assetDepth * 2 + (typeTarget ? 2 : 1);
     }
 
     static int depth(int assetId, Map<Integer, Integer> parents) {

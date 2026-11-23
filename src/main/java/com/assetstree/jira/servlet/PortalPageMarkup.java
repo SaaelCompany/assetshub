@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 public final class PortalPageMarkup {
     private static final byte[] BODY_END = "</body>".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] MARKER = "asset-tree-portal-boot".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] TNI_MARK = "tni-portal.js".getBytes(StandardCharsets.US_ASCII);
 
     private PortalPageMarkup() {
     }
@@ -33,20 +34,59 @@ public final class PortalPageMarkup {
         return out;
     }
 
-    public static byte[] snippet(String contextPath, int portalId, String projectKey, String fieldIds) {
+    public static byte[] snippet(String contextPath, int portalId, String projectKey, String fieldIds,
+                                 boolean portal, boolean tni) {
+        if (!portal && !tni) {
+            return new byte[0];
+        }
         String base = contextPath == null ? "" : contextPath;
-        String html = "<div id=\"asset-tree-portal-boot\" hidden data-portal=\""
-                + escape(portalId > 0 ? String.valueOf(portalId) : "")
-                + "\" data-project=\"" + escape(projectKey)
-                + "\" data-fields=\"" + escape(fieldIds)
-                + "\"></div><link rel=\"stylesheet\" href=\"" + escape(base)
-                + "/download/resources/" + PluginInfo.KEY
-                + ":asset-tree-field/asset-field.css?v=" + PluginInfo.VERSION
-                + "\"><script src=\"" + escape(base)
-                + "/download/resources/" + PluginInfo.KEY
-                + ":asset-tree-field/asset-field.js?v=" + PluginInfo.VERSION
-                + "\"></script>";
+        StringBuilder html = new StringBuilder();
+        html.append("<div id=\"asset-tree-portal-boot\" hidden data-portal=\"")
+                .append(escape(portalId > 0 ? String.valueOf(portalId) : ""))
+                .append("\" data-project=\"").append(escape(projectKey))
+                .append("\" data-fields=\"").append(escape(portal ? fieldIds : ""))
+                .append("\" data-base=\"").append(escape(base))
+                .append("\" data-tni=\"").append(tni ? "1" : "")
+                .append("\"></div>");
+        if (portal) {
+            html.append("<link rel=\"stylesheet\" href=\"").append(escape(base))
+                    .append("/download/resources/").append(PluginInfo.KEY)
+                    .append(":asset-tree-field/asset-field.css?v=").append(PluginInfo.VERSION)
+                    .append("\"><script src=\"").append(escape(base))
+                    .append("/download/resources/").append(PluginInfo.KEY)
+                    .append(":asset-tree-field/asset-field.js?v=").append(PluginInfo.VERSION)
+                    .append("\"></script>");
+        }
+        if (tni) {
+            html.append("<script src=\"").append(escape(base))
+                    .append("/download/resources/").append(PluginInfo.KEY)
+                    .append(":asset-tree-field/tni-portal.js?v=").append(PluginInfo.VERSION)
+                    .append("\"></script>");
+        }
+        return html.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    public static byte[] tniScript(String contextPath) {
+        String base = contextPath == null ? "" : contextPath;
+        String html = "<script src=\"" + escape(base) + "/download/resources/" + PluginInfo.KEY
+                + ":asset-tree-field/tni-portal.js?v=" + PluginInfo.VERSION + "\"></script>";
         return html.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** Adds the device script even when the portal field bootstrap is already on the page. */
+    public static byte[] insertTni(byte[] body, byte[] script) {
+        if (body == null || script == null || script.length == 0 || indexOf(body, TNI_MARK) >= 0) {
+            return body;
+        }
+        int at = lastIndexOf(body, BODY_END);
+        if (at < 0) {
+            return body;
+        }
+        byte[] out = new byte[body.length + script.length];
+        System.arraycopy(body, 0, out, 0, at);
+        System.arraycopy(script, 0, out, at, script.length);
+        System.arraycopy(body, at, out, at + script.length, body.length - at);
+        return out;
     }
 
     static String escape(String value) {

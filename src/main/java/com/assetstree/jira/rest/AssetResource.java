@@ -8,34 +8,54 @@ import com.assetstree.jira.dto.AssetKeyDto;
 import com.assetstree.jira.dto.FieldOrderDto;
 import com.assetstree.jira.dto.ProjectViewDto;
 import com.assetstree.jira.dto.MessageDto;
+import com.assetstree.jira.dto.CardFoldDto;
+import com.assetstree.jira.dto.MineViewDto;
+import com.assetstree.jira.model.ActivityWhenDraft;
 import com.assetstree.jira.model.AssetDraft;
 import com.assetstree.jira.model.CardLayout;
 import com.assetstree.jira.model.BulkDraft;
 import com.assetstree.jira.model.CommentDraft;
+import com.assetstree.jira.model.ShareDraft;
 import com.assetstree.jira.model.AssetException;
 import com.assetstree.jira.model.FieldDraft;
+import com.assetstree.jira.model.ClinicCircleDraft;
 import com.assetstree.jira.model.GrantDraft;
+import com.assetstree.jira.model.RoleDraft;
+import com.assetstree.jira.dto.FloorDto;
+import com.assetstree.jira.dto.SchemeDocumentDto;
+import com.assetstree.jira.dto.SchemaDto;
+import com.assetstree.jira.dto.WebhookDto;
+import com.assetstree.jira.model.ExportDraft;
 import com.assetstree.jira.model.ImportDraft;
-import com.assetstree.jira.model.InventoryDraft;
+import com.assetstree.jira.model.JsonImportDraft;
 import com.assetstree.jira.model.IssueLinkDraft;
+import com.assetstree.jira.model.LinkDraft;
+import com.assetstree.jira.model.GroupMoveDraft;
 import com.assetstree.jira.model.MoveDraft;
 import com.assetstree.jira.dto.PortalFieldsDto;
+import com.assetstree.jira.dto.PortalLayoutDto;
 import com.assetstree.jira.dto.PortalProjectDto;
 import com.assetstree.jira.dto.FlowBookDto;
 import com.assetstree.jira.model.FlowRuleDraft;
+import com.assetstree.jira.model.PortalRequestDraft;
 import com.assetstree.jira.model.PortalRuleDraft;
+import com.assetstree.jira.model.NameSortDraft;
 import com.assetstree.jira.model.PlaceArrangeDraft;
+import com.assetstree.jira.model.PlaceSortDraft;
 import com.assetstree.jira.model.PlaceTypeDraft;
-import com.assetstree.jira.dto.FloorDto;
 import com.assetstree.jira.model.LifecycleDraft;
+import com.assetstree.jira.model.ReportBoardDraft;
 import com.assetstree.jira.model.SavedReportDraft;
 import com.assetstree.jira.model.ScheduleDraft;
-import com.assetstree.jira.model.StaffDutyDraft;
 import com.assetstree.jira.model.ServicePlanDraft;
 import com.assetstree.jira.model.WriteoffDraft;
 import com.assetstree.jira.model.StatusDraft;
 import com.assetstree.jira.web.PortalLookup;
 import com.assetstree.jira.model.TypeDraft;
+import com.assetstree.jira.model.TniSightDraft;
+import com.assetstree.jira.model.TniSourceDraft;
+import com.assetstree.jira.dto.TniWatchDraft;
+import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
 import org.slf4j.Logger;
@@ -44,12 +64,16 @@ import org.slf4j.LoggerFactory;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
+import javax.ws.rs.HeaderParam;
 import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.servlet.http.HttpServletRequest;
+import javax.ws.rs.core.CacheControl;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.concurrent.Callable;
@@ -61,6 +85,9 @@ public class AssetResource {
     private static final Logger log = LoggerFactory.getLogger(AssetResource.class);
 
     private final AssetService assetService;
+
+    @Context
+    private HttpServletRequest request;
 
     public AssetResource() {
         this.assetService = AssetBridge.service();
@@ -77,13 +104,35 @@ public class AssetResource {
         });
     }
 
+    @PUT
+    @Path("me/card-folds")
+    public Response saveCardFolds(final CardFoldDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveCardFolds(user(), draft)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("me/columns")
+    public Response saveMine(final MineViewDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveMineView(user(), draft)).build();
+            }
+        });
+    }
+
     @GET
     @Path("assets")
     public Response list(@QueryParam("projectKey") final String projectKey, @QueryParam("q") final String query) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.listAssets(user(), projectKey, query)).build();
+                return fresh(Response.ok(assetService.listAssets(user(), projectKey, query)));
             }
         });
     }
@@ -105,7 +154,7 @@ public class AssetResource {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.getAsset(user(), id)).build();
+                return fresh(Response.ok(assetService.getAsset(user(), id)));
             }
         });
     }
@@ -117,6 +166,42 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.updateAsset(user(), id, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/secret")
+    public Response secret(@PathParam("id") final int id, @QueryParam("on") final boolean on) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.setSecret(user(), id, on)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/sort")
+    public Response sortPlace(@PathParam("id") final int id, final NameSortDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                int direction = draft == null || draft.getDirection() == null ? 1 : draft.getDirection().intValue();
+                assetService.sortPlaceByName(user(), id, direction);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/types/sort")
+    public Response sortType(@PathParam("id") final int id, final PlaceSortDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.sortTypeObjects(user(), id, draft);
+                return Response.noContent().build();
             }
         });
     }
@@ -198,7 +283,8 @@ public class AssetResource {
             @Override
             public Response call() {
                 String body = draft == null ? null : draft.getBody();
-                return Response.status(Response.Status.CREATED).entity(assetService.addComment(user(), id, body)).build();
+                boolean internal = draft != null && draft.isInternal();
+                return Response.status(Response.Status.CREATED).entity(assetService.addComment(user(), id, body, internal)).build();
             }
         });
     }
@@ -215,6 +301,19 @@ public class AssetResource {
         });
     }
 
+    @PUT
+    @Path("assets/{id}/activities/{activityId}")
+    public Response moveActivity(@PathParam("id") final int id, @PathParam("activityId") final int activityId,
+                                 final ActivityWhenDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.moveStatusActivity(user(), id, activityId, draft == null ? null : draft.getCreated());
+                return Response.noContent().build();
+            }
+        });
+    }
+
     @DELETE
     @Path("assets/{id}/activities/{activityId}")
     public Response deleteActivity(@PathParam("id") final int id, @PathParam("activityId") final int activityId) {
@@ -222,6 +321,30 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.deleteActivity(user(), id, activityId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/shares")
+    public Response share(@PathParam("id") final int id, final ShareDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String userKey = draft == null ? null : draft.getUserKey();
+                return Response.status(Response.Status.CREATED).entity(assetService.shareAsset(user(), id, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/shares/{userKey}")
+    public Response unshare(@PathParam("id") final int id, @PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.unshareAsset(user(), id, userKey);
                 return Response.noContent().build();
             }
         });
@@ -241,35 +364,84 @@ public class AssetResource {
 
     @DELETE
     @Path("assets/{id}")
-    public Response delete(@PathParam("id") final int id, @QueryParam("cascade") final boolean cascade) {
+    public Response delete(@PathParam("id") final int id, @QueryParam("cascade") final boolean cascade,
+                           @QueryParam("purge") final boolean purge) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                assetService.deleteAsset(user(), id, cascade);
+                if (purge) {
+                    assetService.purgeAsset(user(), id);
+                } else {
+                    assetService.deleteAsset(user(), id, cascade);
+                }
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/trash")
+    public Response trash(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listTrash(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/trash")
+    public Response emptyTrash(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.emptyTrash(user(), projectKey);
                 return Response.noContent().build();
             }
         });
     }
 
     @POST
-    @Path("assets/{id}/inventory")
-    public Response inventoryMark(@PathParam("id") final int id, final InventoryDraft draft) {
+    @Path("assets/{id}/restore")
+    public Response restore(@PathParam("id") final int id) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                boolean checked = draft != null && draft.isChecked();
-                return Response.ok(assetService.markInventory(user(), id, checked)).build();
+                return Response.ok(assetService.restoreAsset(user(), id)).build();
             }
         });
     }
 
     @GET
-    @Path("projects/{projectKey}/inventory")
-    public Response inventory(@PathParam("projectKey") final String projectKey) {
+    @Path("projects/{projectKey}/tree-stamp")
+    public Response treeStamp(@PathParam("projectKey") final String projectKey, @QueryParam("open") final Integer open) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.inventory(user(), projectKey)).build();
+                String mark = assetService.treeMark(user(), projectKey);
+                if (open != null && open.intValue() > 0) {
+                    mark = mark + "~" + assetService.cardMark(user(), projectKey, open.intValue());
+                }
+                return fresh(Response.ok(new MessageDto(mark)));
+            }
+        });
+    }
+
+    private static Response fresh(Response.ResponseBuilder builder) {
+        CacheControl never = new CacheControl();
+        never.setNoCache(true);
+        never.setNoStore(true);
+        return builder.cacheControl(never).header("Pragma", "no-cache").build();
+    }
+
+    @GET
+    @Path("projects/{projectKey}/catalog")
+    public Response catalog(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return fresh(Response.ok(assetService.catalog(user(), projectKey)));
             }
         });
     }
@@ -304,6 +476,17 @@ public class AssetResource {
             public Response call() {
                 String issueKey = draft == null ? null : draft.getIssueKey();
                 return Response.status(Response.Status.CREATED).entity(assetService.linkIssue(user(), id, issueKey)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("issues/search")
+    public Response searchIssues(@QueryParam("q") final String query) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.searchIssues(user(), query)).build();
             }
         });
     }
@@ -344,6 +527,40 @@ public class AssetResource {
             @Override
             public Response call() {
                 assetService.unlinkPeer(user(), id, otherId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/links")
+    public Response addLink(@PathParam("id") final int id, final LinkDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.addLink(user(), id, draft)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("assets/{id}/links/{linkId}")
+    public Response updateLink(@PathParam("id") final int id, @PathParam("linkId") final int linkId, final LinkDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.updateLink(user(), id, linkId, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/links/{linkId}")
+    public Response deleteLink(@PathParam("id") final int id, @PathParam("linkId") final int linkId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteLink(user(), id, linkId);
                 return Response.noContent().build();
             }
         });
@@ -406,6 +623,30 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.status(Response.Status.CREATED).entity(assetService.addField(user(), typeKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("types/{typeKey}/fields/{fieldKey}/own")
+    public Response ownField(@PathParam("typeKey") final String typeKey, @PathParam("fieldKey") final String fieldKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED)
+                        .entity(assetService.ownField(user(), typeKey, fieldKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("types/{typeKey}/fields/{fieldKey}/own")
+    public Response inheritField(@PathParam("typeKey") final String typeKey, @PathParam("fieldKey") final String fieldKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.inheritField(user(), typeKey, fieldKey);
+                return Response.noContent().build();
             }
         });
     }
@@ -479,51 +720,6 @@ public class AssetResource {
     }
 
     @GET
-    @Path("projects/{projectKey}/staff")
-    public Response staff(@PathParam("projectKey") final String projectKey) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.ok(assetService.staff(user(), projectKey)).build();
-            }
-        });
-    }
-
-    @PUT
-    @Path("projects/{projectKey}/staff")
-    public Response saveStaff(@PathParam("projectKey") final String projectKey, final StaffDutyDraft draft) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.ok(assetService.saveStaff(user(), projectKey, draft)).build();
-            }
-        });
-    }
-
-    @POST
-    @Path("projects/{projectKey}/staff/leave")
-    public Response addStaffLeave(@PathParam("projectKey") final String projectKey, final StaffDutyDraft draft) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                return Response.status(Response.Status.CREATED).entity(assetService.addStaffLeave(user(), projectKey, draft)).build();
-            }
-        });
-    }
-
-    @DELETE
-    @Path("projects/{projectKey}/staff/{dutyId}")
-    public Response deleteStaff(@PathParam("projectKey") final String projectKey, @PathParam("dutyId") final int dutyId) {
-        return invoke(new Callable<Response>() {
-            @Override
-            public Response call() {
-                assetService.deleteStaff(user(), projectKey, dutyId);
-                return Response.noContent().build();
-            }
-        });
-    }
-
-    @GET
     @Path("projects/{projectKey}/floors")
     public Response floors(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
@@ -569,6 +765,143 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/schemes")
+    public Response schemes(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.schemes(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/schemes")
+    public Response createScheme(@PathParam("projectKey") final String projectKey, final SchemeDocumentDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createScheme(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/schemes/{schemeId}")
+    public Response scheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.scheme(user(), projectKey, schemeId)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/schemes/{schemeId}")
+    public Response saveScheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId, final SchemeDocumentDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveScheme(user(), projectKey, schemeId, draft)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/schemes/{schemeId}/shares")
+    public Response shareScheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId, final SchemeDocumentDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.shareScheme(user(), projectKey, schemeId, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/schemes/{schemeId}")
+    public Response deleteScheme(@PathParam("projectKey") final String projectKey, @PathParam("schemeId") final int schemeId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteScheme(user(), projectKey, schemeId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/boards")
+    public Response reportBoards(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.reportBoards(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/boards")
+    public Response createReportBoard(@PathParam("projectKey") final String projectKey, final ReportBoardDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createReportBoard(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/boards/{boardId}")
+    public Response updateReportBoard(@PathParam("projectKey") final String projectKey, @PathParam("boardId") final int boardId,
+                                      final ReportBoardDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.updateReportBoard(user(), projectKey, boardId, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/documents")
+    public Response documents(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.documents(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/documents/{templateId}")
+    public Response deleteDocument(@PathParam("projectKey") final String projectKey,
+                                   @PathParam("templateId") final String templateId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteDocument(user(), projectKey, templateId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/boards/{boardId}")
+    public Response deleteReportBoard(@PathParam("projectKey") final String projectKey, @PathParam("boardId") final int boardId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteReportBoard(user(), projectKey, boardId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/reports")
     public Response reports(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
@@ -586,6 +919,23 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.status(Response.Status.CREATED).entity(assetService.createReport(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/reports/{reportKey}/book.xlsx")
+    @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public Response exportReport(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
+            @QueryParam("chart") final String chart, @QueryParam("start") final String start, @QueryParam("end") final String end) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                byte[] book = assetService.exportReport(user(), projectKey, reportKey, chart, start, end);
+                String file = "report-" + reportKey + ".xlsx";
+                return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
+                        .build();
             }
         });
     }
@@ -638,13 +988,14 @@ public class AssetResource {
     @GET
     @Path("projects/{projectKey}/reports/{reportKey}")
     public Response reportView(@PathParam("projectKey") final String projectKey, @PathParam("reportKey") final String reportKey,
-            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines, @QueryParam("bucket") final String bucket) {
+            @QueryParam("from") final Integer from, @QueryParam("lines") final String lines, @QueryParam("bucket") final String bucket,
+            @QueryParam("start") final String start, @QueryParam("end") final String end) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
                 int lineFrom = from == null ? 0 : from.intValue();
                 boolean allLines = lines != null && "all".equalsIgnoreCase(lines.trim());
-                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines, bucket)).build();
+                return Response.ok(assetService.reportView(user(), projectKey, reportKey, lineFrom, allLines, bucket, start, end)).build();
             }
         });
     }
@@ -722,6 +1073,18 @@ public class AssetResource {
     }
 
     @POST
+    @Path("projects/{projectKey}/move-objects")
+    public Response moveObjects(@PathParam("projectKey") final String projectKey, final GroupMoveDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.moveObjects(user(), projectKey, draft);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
     @Path("projects/{projectKey}/bulk")
     public Response bulk(@PathParam("projectKey") final String projectKey, final BulkDraft draft) {
         return invoke(new Callable<Response>() {
@@ -734,11 +1097,171 @@ public class AssetResource {
 
     @POST
     @Path("projects/{projectKey}/equipment")
-    public Response importEquipment(@PathParam("projectKey") final String projectKey, final ImportDraft draft) {
+    public Response importEquipment(@PathParam("projectKey") final String projectKey, final ImportDraft draft,
+                                    @HeaderParam("X-Idempotency-Key") final String idempotencyKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
+                applyIdempotency(draft, idempotencyKey);
                 return Response.ok(assetService.importEquipment(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/import")
+    public Response importJson(@PathParam("projectKey") final String projectKey, final JsonImportDraft draft,
+                               @HeaderParam("X-Idempotency-Key") final String idempotencyKey) {
+        return receiveJson(projectKey, draft, idempotencyKey);
+    }
+
+    @POST
+    @Path("projects/{projectKey}/discovery")
+    public Response discovery(@PathParam("projectKey") final String projectKey, final JsonImportDraft draft,
+                              @HeaderParam("X-Idempotency-Key") final String idempotencyKey) {
+        return receiveJson(projectKey, draft, idempotencyKey);
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/objects/{objectKey}")
+    public Response patchObject(@PathParam("projectKey") final String projectKey,
+                                @PathParam("objectKey") final String objectKey,
+                                final AssetDraft draft,
+                                @QueryParam("skipBlank") final Boolean skipBlank) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                boolean skip = skipBlank == null || skipBlank.booleanValue();
+                return Response.ok(assetService.patchByKey(user(), projectKey, objectKey, draft, skip)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/schemas")
+    public Response schemas(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listSchemas(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/schemas")
+    public Response saveSchema(@PathParam("projectKey") final String projectKey, final SchemaDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveSchema(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/schemas/{schemaId}")
+    public Response deleteSchema(@PathParam("projectKey") final String projectKey, @PathParam("schemaId") final int schemaId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteSchema(user(), projectKey, schemaId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/webhooks")
+    public Response webhooks(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listWebhooks(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/webhooks")
+    public Response saveWebhook(@PathParam("projectKey") final String projectKey, final WebhookDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveWebhook(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/webhooks/test")
+    public Response probeWebhook(@PathParam("projectKey") final String projectKey, final WebhookDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.probeWebhook(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/webhooks/{webhookId}")
+    public Response deleteWebhook(@PathParam("projectKey") final String projectKey, @PathParam("webhookId") final int webhookId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteWebhook(user(), projectKey, webhookId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/exports")
+    public Response startExport(@PathParam("projectKey") final String projectKey, final ExportDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.startExport(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/exports/{jobId}")
+    public Response exportStatus(@PathParam("projectKey") final String projectKey, @PathParam("jobId") final String jobId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.exportStatus(user(), projectKey, jobId)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/exports/{jobId}/file")
+    @Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public Response exportFile(@PathParam("projectKey") final String projectKey, @PathParam("jobId") final String jobId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                byte[] book = assetService.exportFile(user(), projectKey, jobId);
+                String file = assetService.exportFileName(user(), projectKey, jobId);
+                return Response.ok(book, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .header("Content-Disposition", "attachment; filename=\"" + file + "\"")
+                        .build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/lifecycle/forecast")
+    public Response forecast(@PathParam("projectKey") final String projectKey, @QueryParam("within") final Integer within) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                int window = within == null ? 12 : within.intValue();
+                return Response.ok(assetService.forecast(user(), projectKey, window)).build();
             }
         });
     }
@@ -794,6 +1317,101 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/circles")
+    public Response circles(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listCircles(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/circles/places")
+    public Response circlePlaces(@PathParam("projectKey") final String projectKey, @QueryParam("q") final String query) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.searchCirclePlaces(user(), projectKey, query)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/circles")
+    public Response saveCircle(@PathParam("projectKey") final String projectKey, final ClinicCircleDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveCircle(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/circles/{circleId}/members")
+    public Response addCircleMember(@PathParam("projectKey") final String projectKey,
+                                    @PathParam("circleId") final int circleId,
+                                    @QueryParam("user") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.addCircleMember(user(), projectKey, circleId, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/circles/{circleId}/members")
+    public Response removeCircleMember(@PathParam("projectKey") final String projectKey,
+                                       @PathParam("circleId") final int circleId,
+                                       @QueryParam("user") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.removeCircleMember(user(), projectKey, circleId, userKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/circles/{circleId}")
+    public Response deleteCircle(@PathParam("projectKey") final String projectKey, @PathParam("circleId") final int circleId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteCircle(user(), projectKey, circleId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/circles/{circleId}")
+    public Response attachCircle(@PathParam("id") final int id, @PathParam("circleId") final int circleId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.attachCircle(user(), id, circleId)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("assets/{id}/circles/{circleId}")
+    public Response detachCircle(@PathParam("id") final int id, @PathParam("circleId") final int circleId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.detachCircle(user(), id, circleId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/grants")
     public Response grants(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
@@ -830,6 +1448,40 @@ public class AssetResource {
                 } else {
                     assetService.deleteGrant(user(), projectKey, group);
                 }
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/roles")
+    public Response roles(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listRoles(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/roles")
+    public Response saveRole(@PathParam("projectKey") final String projectKey, final RoleDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveRole(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/roles")
+    public Response deleteRole(@PathParam("projectKey") final String projectKey, @QueryParam("name") final String name) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteRole(user(), projectKey, name);
                 return Response.noContent().build();
             }
         });
@@ -915,6 +1567,17 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("projects/{projectKey}/asset-key/restart")
+    public Response restartAssetKeys(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.restartAssetKeys(user(), projectKey)).build();
+            }
+        });
+    }
+
     @PUT
     @Path("projects/{projectKey}/view")
     public Response saveProjectView(@PathParam("projectKey") final String projectKey, final ProjectViewDto draft) {
@@ -933,6 +1596,135 @@ public class AssetResource {
             @Override
             public Response call() {
                 return Response.ok(assetService.picker(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("portal/assets/{id}")
+    public Response portalAsset(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.portalAsset(user(), id)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("portal/assets/{id}/requests")
+    public Response portalRequestForm(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.portalRequestForm(user(), id)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/intent")
+    public Response rememberPortalAsset(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.rememberPortalAsset(user(), id);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/requests/{issueKey}")
+    public Response portalLinkRequest(@PathParam("id") final int id, @PathParam("issueKey") final String issueKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalLinkRequest(user(), id, issueKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/requests")
+    public Response createPortalRequest(@PathParam("id") final int id, final PortalRequestDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createPortalRequest(user(), id, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/comments")
+    public Response portalComment(@PathParam("id") final int id, final CommentDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String body = draft == null ? null : draft.getBody();
+                return Response.status(Response.Status.CREATED).entity(assetService.portalComment(user(), id, body, false)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("portal/assets/{id}/files/{fileId}")
+    public Response portalDeleteFile(@PathParam("id") final int id, @PathParam("fileId") final int fileId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalDeleteFile(user(), id, fileId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("portal/assets/{id}/shares")
+    public Response portalShare(@PathParam("id") final int id, final ShareDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                String userKey = draft == null ? null : draft.getUserKey();
+                return Response.status(Response.Status.CREATED).entity(assetService.portalShare(user(), id, userKey)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("portal/assets/{id}/shares/{userKey}")
+    public Response portalUnshare(@PathParam("id") final int id, @PathParam("userKey") final String userKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.portalUnshare(user(), id, userKey);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("portal/mine")
+    public Response portalMine() {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.portalMine(user())).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("projects/{projectKey}/portal-layout")
+    public Response savePortalLayout(@PathParam("projectKey") final String projectKey, final PortalLayoutDto draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                PortalLayoutDto saved = new PortalLayoutDto();
+                saved.setLayout(assetService.savePortalLayout(user(), projectKey, draft == null ? "" : draft.getLayout()));
+                return Response.ok(saved).build();
             }
         });
     }
@@ -986,12 +1778,46 @@ public class AssetResource {
     }
 
     @GET
+    @Path("projects/{projectKey}/workflow-statuses")
+    public Response workflowStatuses(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listWorkflowStatuses(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
     @Path("projects/{projectKey}/issue-statuses")
     public Response issueStatuses(@PathParam("projectKey") final String projectKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
                 return Response.ok(assetService.listIssueStatuses(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/request-types")
+    public Response requestTypes(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listRequestTypes(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/request-types/{typeId}/fields")
+    public Response requestFields(@PathParam("projectKey") final String projectKey,
+                                  @PathParam("typeId") final String typeId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.listRequestFields(user(), projectKey, typeId)).build();
             }
         });
     }
@@ -1143,6 +1969,185 @@ public class AssetResource {
         });
     }
 
+    @POST
+    @Path("tni/sight")
+    public Response tniSight(final TniSightDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.rememberTni(user(), draft);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/subnets")
+    public Response tniSubnets(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniSubnets(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/subnets")
+    public Response createTniSubnet(@PathParam("projectKey") final String projectKey, final TniSubnetDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.CREATED).entity(assetService.createTniSubnet(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @DELETE
+    @Path("projects/{projectKey}/subnets/{subnetId}")
+    public Response deleteTniSubnet(@PathParam("projectKey") final String projectKey, @PathParam("subnetId") final int subnetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                assetService.deleteTniSubnet(user(), projectKey, subnetId);
+                return Response.noContent().build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/subnets/{subnetId}/scan")
+    public Response scanTniSubnet(@PathParam("projectKey") final String projectKey, @PathParam("subnetId") final int subnetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.status(Response.Status.ACCEPTED).entity(assetService.scanTniSubnet(user(), projectKey, subnetId)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("assets/{id}/watch")
+    public Response tniWatch(@PathParam("id") final int assetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniWatch(user(), assetId)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("assets/{id}/ping")
+    public Response pingTni(@PathParam("id") final int assetId) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.pingTni(user(), assetId)).build();
+            }
+        });
+    }
+
+    @PUT
+    @Path("assets/{id}/watch")
+    public Response saveTniWatch(@PathParam("id") final int assetId, final TniWatchDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniWatch(user(), assetId, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/directory")
+    public Response tniDirectory(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniDirectory(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/directory")
+    public Response saveTniDirectory(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniDirectory(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/directory/load")
+    public Response loadTniDirectory(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.loadTniDirectory(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @GET
+    @Path("projects/{projectKey}/sccm")
+    public Response tniSccm(@PathParam("projectKey") final String projectKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.tniSccm(user(), projectKey)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/sccm")
+    public Response saveTniSccm(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.saveTniSccm(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    @POST
+    @Path("projects/{projectKey}/sccm/load")
+    public Response loadTniSccm(@PathParam("projectKey") final String projectKey, final TniSourceDraft draft) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                return Response.ok(assetService.loadTniSccm(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    private Response receiveJson(final String projectKey, final JsonImportDraft draft, final String idempotencyKey) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                if (draft != null && (draft.getIdempotencyKey() == null || draft.getIdempotencyKey().trim().isEmpty())
+                        && idempotencyKey != null && !idempotencyKey.trim().isEmpty()) {
+                    draft.setIdempotencyKey(idempotencyKey.trim());
+                }
+                return Response.ok(assetService.importJson(user(), projectKey, draft)).build();
+            }
+        });
+    }
+
+    private void applyIdempotency(ImportDraft draft, String header) {
+        if (draft == null) {
+            return;
+        }
+        if ((draft.getIdempotencyKey() == null || draft.getIdempotencyKey().trim().isEmpty())
+                && header != null && !header.trim().isEmpty()) {
+            draft.setIdempotencyKey(header.trim());
+        }
+    }
+
     private ApplicationUser user() {
         return authenticationContext().getLoggedInUser();
     }
@@ -1157,9 +2162,27 @@ public class AssetResource {
         } catch (AssetException ex) {
             return message(ex.getStatus(), ex.getMessageKey(), ex.getArgs());
         } catch (Exception ex) {
+            AssetException cause = assetCause(ex);
+            if (cause != null) {
+                return message(cause.getStatus(), cause.getMessageKey(), cause.getArgs());
+            }
             log.error("Asset tree request failed", ex);
-            return message(500, "asset-tree.error.unexpected");
+            boolean reading = request != null && "GET".equalsIgnoreCase(request.getMethod());
+            return message(500, reading ? "asset-tree.error.load" : "asset-tree.error.unexpected");
         }
+    }
+
+    private static AssetException assetCause(Throwable failure) {
+        Throwable current = failure;
+        int guard = 0;
+        while (current != null && guard < 8) {
+            if (current instanceof AssetException) {
+                return (AssetException) current;
+            }
+            current = current.getCause();
+            guard++;
+        }
+        return null;
     }
 
     private Response message(int status, String key, Object... args) {

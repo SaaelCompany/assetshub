@@ -94,4 +94,16 @@ public interface ServicePlanEntity extends Entity {
     String getMoves();
 
     void setMoves(String moves);
+
+    /** Series days already handed to the calendar rule, separated by commas. */
+    @StringLength(StringLength.UNLIMITED)
+    String getRaised();
+
+    void setRaised(String raised);
+
+    /** Request keys created from this plan, {@code yyyy-mm-dd=KEY} pairs separated by commas. */
+    @StringLength(StringLength.UNLIMITED)
+    String getRequests();
+
+    void setRequests(String requests);
 }

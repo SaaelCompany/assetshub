@@ -13,8 +13,11 @@ public class BulkDraft {
     private List<Integer> ids = new ArrayList<Integer>();
     private List<String> keys = new ArrayList<String>();
     private String status;
+    /** Epoch millis of the real status change. Null keeps the moment of the save. */
+    private Long statusAt;
     private String custodianKey;
     private Integer parentId;
+    private String typeKey;
     private boolean toRoot;
     private boolean cascade;
 
@@ -58,6 +61,14 @@ public class BulkDraft {
         this.status = status;
     }
 
+    public Long getStatusAt() {
+        return statusAt;
+    }
+
+    public void setStatusAt(Long statusAt) {
+        this.statusAt = statusAt;
+    }
+
     public String getCustodianKey() {
         return custodianKey;
     }
@@ -72,6 +83,14 @@ public class BulkDraft {
 
     public void setParentId(Integer parentId) {
         this.parentId = parentId;
+    }
+
+    public String getTypeKey() {
+        return typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey;
     }
 
     public boolean isToRoot() {

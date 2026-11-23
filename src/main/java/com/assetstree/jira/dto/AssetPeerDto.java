@@ -13,6 +13,7 @@ public class AssetPeerDto {
     private String projectKey;
     private String projectName;
     private String typeLabel;
+    private String typeKey;
     private String location;
     private boolean open;
     private UserProfileDto custodian;
@@ -65,6 +66,14 @@ public class AssetPeerDto {
 
     public void setTypeLabel(String typeLabel) {
         this.typeLabel = typeLabel;
+    }
+
+    public String getTypeKey() {
+        return typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey == null ? "" : typeKey;
     }
 
     public String getLocation() {

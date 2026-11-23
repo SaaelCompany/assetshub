@@ -9,6 +9,7 @@ import java.util.List;
 @XmlAccessorType(XmlAccessType.PROPERTY)
 public class PortalRuleDraft {
     private int assetId;
+    private String typeKey;
     private List<PortalConditionDraft> conditions = new ArrayList<PortalConditionDraft>();
 
     public int getAssetId() {
@@ -17,6 +18,14 @@ public class PortalRuleDraft {
 
     public void setAssetId(int assetId) {
         this.assetId = assetId;
+    }
+
+    public String getTypeKey() {
+        return typeKey == null ? "" : typeKey;
+    }
+
+    public void setTypeKey(String typeKey) {
+        this.typeKey = typeKey == null ? "" : typeKey;
     }
 
     public List<PortalConditionDraft> getConditions() {

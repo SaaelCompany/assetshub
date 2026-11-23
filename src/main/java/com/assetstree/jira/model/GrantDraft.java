@@ -9,6 +9,12 @@ public class GrantDraft {
     private String userKey;
     private String level;
     private String caps;
+    private String typeScope;
+    private String fieldScope;
+    private String schemaName;
+    private String roleName;
+    private String reach;
+    private String placeScope;
 
     public String getGroupName() {
         return groupName;
@@ -41,4 +47,17 @@ public class GrantDraft {
     public void setCaps(String caps) {
         this.caps = caps;
     }
+
+    public String getTypeScope() { return typeScope; }
+    public void setTypeScope(String typeScope) { this.typeScope = typeScope; }
+    public String getFieldScope() { return fieldScope; }
+    public void setFieldScope(String fieldScope) { this.fieldScope = fieldScope; }
+    public String getSchemaName() { return schemaName; }
+    public void setSchemaName(String schemaName) { this.schemaName = schemaName; }
+    public String getRoleName() { return roleName; }
+    public void setRoleName(String roleName) { this.roleName = roleName; }
+    public String getReach() { return reach; }
+    public void setReach(String reach) { this.reach = reach; }
+    public String getPlaceScope() { return placeScope; }
+    public void setPlaceScope(String placeScope) { this.placeScope = placeScope; }
 }

@@ -11,10 +11,14 @@ public class AssetDraft {
     private String description;
     private String typeKey;
     private String status;
+    /** Epoch millis of the real status change. Null keeps the moment of the save. */
+    private Long statusAt;
     private Integer parentId;
     private String projectKey;
     private String custodianKey;
     private String issuedKey;
+    private String approverKey;
+    private String externalId;
     private List<AttributeDraft> attributes;
 
     public String getName() {
@@ -49,6 +53,14 @@ public class AssetDraft {
         this.status = status;
     }
 
+    public Long getStatusAt() {
+        return statusAt;
+    }
+
+    public void setStatusAt(Long statusAt) {
+        this.statusAt = statusAt;
+    }
+
     public Integer getParentId() {
         return parentId;
     }
@@ -79,6 +91,23 @@ public class AssetDraft {
 
     public void setIssuedKey(String issuedKey) {
         this.issuedKey = issuedKey;
+    }
+
+    /** Write-off approver for a place. Null leaves the stored approver alone. */
+    public String getApproverKey() {
+        return approverKey;
+    }
+
+    public void setApproverKey(String approverKey) {
+        this.approverKey = approverKey;
+    }
+
+    public String getExternalId() {
+        return externalId;
+    }
+
+    public void setExternalId(String externalId) {
+        this.externalId = externalId;
     }
 
     public List<AttributeDraft> getAttributes() {

@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class AssetValidator {
@@ -16,7 +17,8 @@ public final class AssetValidator {
 
     private static final Pattern COLOR = Pattern.compile("^#[0-9A-Fa-f]{6}$");
     private static final Pattern TYPE_KEY = Pattern.compile("^[a-z][a-z0-9-]{0,39}$");
-    private static final Pattern ISSUE_KEY = Pattern.compile("^[A-Z][A-Z0-9]+-\\d+$");
+    private static final Pattern ISSUE_KEY = Pattern.compile("^[A-Z][A-Z0-9_]+-\\d+$");
+    private static final Pattern ISSUE_KEY_IN_TEXT = Pattern.compile("([A-Z][A-Z0-9_]+-\\d+)");
 
     private AssetValidator() {
     }
@@ -123,7 +125,15 @@ public final class AssetValidator {
         if (issueKey == null) {
             return "";
         }
-        return issueKey.trim().toUpperCase(Locale.ROOT);
+        String raw = issueKey.trim().toUpperCase(Locale.ROOT);
+        if (ISSUE_KEY.matcher(raw).matches()) {
+            return raw;
+        }
+        Matcher matcher = ISSUE_KEY_IN_TEXT.matcher(raw);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return raw;
     }
 
     public static boolean isIssueKey(String issueKey) {
