@@ -77,6 +77,7 @@ import javax.ws.rs.core.CacheControl;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.StreamingOutput;
 import java.util.concurrent.Callable;
 
 @Path("/")
@@ -1715,13 +1716,28 @@ public class AssetResource {
             @Override
             public Response call() {
                 StoredFile stored = assetService.openPhoto(user(), id);
+                final byte[] bytes = stored.getData() == null ? new byte[0] : stored.getData();
                 String type = stored.getContentType() == null ? "image/png" : stored.getContentType();
-                return Response.ok(stored.getData(), type)
+                StreamingOutput body = new StreamingOutput() {
+                    @Override
+                    public void write(java.io.OutputStream output) throws java.io.IOException {
+                        output.write(bytes);
+                    }
+                };
+                return Response.ok(body, type)
                         .header("X-Content-Type-Options", "nosniff")
-                        .cacheControl(privateNoStore())
+                        .header("Content-Length", Integer.valueOf(bytes.length))
+                        .cacheControl(privateHour())
                         .build();
             }
         });
+    }
+
+    private CacheControl privateHour() {
+        CacheControl control = new CacheControl();
+        control.setPrivate(true);
+        control.setMaxAge(3600);
+        return control;
     }
 
     private CacheControl privateNoStore() {
