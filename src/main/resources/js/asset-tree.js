@@ -2699,8 +2699,8 @@
         if (state.view === 'schedules' || state.view === 'reports') heading.appendChild(stageMark('beta'));
         if (state.view === 'map') heading.appendChild(stageMark('beta'));
         titles.appendChild(heading);
-        if (state.view === 'all') {
-            titles.appendChild(el('p', 'asset-tree-hint', t('allHint')));
+        if (state.view === 'all' || state.view === 'schedules') {
+            titles.appendChild(el('p', 'asset-tree-hint', state.view === 'schedules' ? t('allHint') : t('allHint')));
         }
         var actions = el('div', 'asset-tree-actions');
         if (state.view === 'reports') actions.appendChild(reportToolButtons());
@@ -2805,7 +2805,7 @@
         notice.id = 'asset-tree-notice';
         body.appendChild(notice);
 
-        var frame = el('div', 'asset-tree-frame ' + (state.view === 'all' ? 'is-split' : 'is-plain'));
+        var frame = el('div', 'asset-tree-frame ' + (state.view === 'all' || state.view === 'schedules' ? 'is-split' : 'is-plain') + (state.view === 'schedules' ? ' is-schedules' : ''));
         frame.id = 'asset-tree-frame';
         body.appendChild(frame);
         app.appendChild(body);
@@ -3052,7 +3052,10 @@
             return;
         }
         if (state.view === 'schedules') {
+            frame.appendChild(renderSide());
+            frame.appendChild(panelSplit('side'));
             frame.appendChild(renderSchedules());
+            applyPanels();
             return;
         }
         if (state.view === 'reports') {
@@ -3339,6 +3342,10 @@
             spot.report = state.reportKey || '';
             return spot;
         }
+        if (view === 'schedules') {
+            spot.id = state.selectedId || 0;
+            return spot;
+        }
         if (view !== 'all') return spot;
         if (state.trashOpen) {
             spot.trash = 1;
@@ -3367,8 +3374,9 @@
         params.push('view=' + encodeURIComponent(spot.v || 'all'));
         if (spot.tab) params.push('tab=' + encodeURIComponent(spot.tab));
         if (spot.report) params.push('report=' + encodeURIComponent(spot.report));
-        var hash = '';
-        if (spot.v === 'all') {
+        if (spot.v === 'schedules' && spot.id) {
+            hash = '#s:' + spot.id;
+        } else if (spot.v === 'all') {
             if (spot.trash) hash = '#trash';
             else if (spot.tg) hash = '#t:' + spot.tg.placeId + ':' + encodeURIComponent(spot.tg.typeKey) + ':' + (spot.tg.scope || 'direct');
             else if (spot.id) hash = '#' + spot.id;
@@ -3388,6 +3396,10 @@
             trash: hash === 'trash' ? 1 : 0,
             report: queryValue('report') || ''
         };
+        if (view === 'schedules') {
+            var scheduleHash = /^s:(\d+)$/.exec(hash);
+            if (scheduleHash) spot.id = parseInt(scheduleHash[1], 10);
+        }
         if (view === 'all' && !spot.trash) {
             var group = /^t:(\d+):([^:]+)(?::(direct|under))?$/.exec(hash);
             if (group) {
@@ -3440,6 +3452,17 @@
         state.typeGroup = null;
         if (spot.v === 'settings') state.schemaTab = spot.tab || 'project';
         if (spot.v === 'reports' && spot.report) state.reportKey = spot.report;
+        if (spot.v === 'schedules') {
+            state.selectedId = spot.id && byId()[spot.id] ? spot.id : null;
+            state.pane = 'list';
+            state.scheduleRows = null;
+            state.scheduleLoading = false;
+            state.scheduleError = '';
+            state.scheduleToken++;
+            mount();
+            loadSchedules();
+            return;
+        }
         if (spot.v === 'mine') {
             state.mineAssets = null;
             mount();
@@ -3543,7 +3566,8 @@
         if (hidden) row.appendChild(el('span', 'asset-tree-qcount', '(' + hidden + ')'));
         row.appendChild(nestButton(null));
         row.addEventListener('click', function () {
-            openRoot();
+            if (state.view === 'schedules') { openScheduleRoot(); return; }
+             openRoot();
         });
         return row;
     }
@@ -3684,6 +3708,10 @@
             row.appendChild(nestButton(asset.id));
             row.addEventListener('click', function () {
                 state.treePicked = {};
+                if (state.view === 'schedules') {
+                    selectScheduleScope(asset.id);
+                    return;
+                }
                 state.pane = 'list';
                 selectAsset(asset.id);
             });
@@ -4020,6 +4048,18 @@
             row.appendChild(nest);
         }
         row.addEventListener('click', function () {
+            if (state.view === 'schedules') {
+                state.typeGroup = { placeId: placeId, typeKey: type.typeKey, scope: 'direct' };
+                state.selectedId = placeId;
+                state.scheduleRows = null;
+                state.scheduleLoading = false;
+                state.scheduleError = '';
+                state.scheduleToken++;
+                rememberPlace();
+                renderFrame();
+                loadSchedules();
+                return;
+            }
             selectTypeGroup(placeId, type.typeKey);
         });
         row.addEventListener('contextmenu', function (event) {
@@ -4087,6 +4127,7 @@
                 return;
             }
             state.treePicked = {};
+            if (state.view === 'schedules') { selectScheduleScope(asset.id); return; }
             state.pane = 'card';
             selectAsset(asset.id);
         });
@@ -18217,11 +18258,53 @@
         return head;
     }
 
+    function scheduleScopeId() {
+        var selected = state.selectedId ? byId()[state.selectedId] : null;
+        if (!selected) return 0;
+        return selected.id;
+    }
+
+    function scheduleScopeLabel() {
+        var id = scheduleScopeId();
+        var asset = id ? byId()[id] : null;
+        var path = asset ? crumbs(asset) : (currentProject() ? currentProject().name : state.projectKey);
+        if (state.typeGroup && state.typeGroup.typeKey) {
+            var type = typeByKey(state.typeGroup.typeKey);
+            path += ' / ' + (type && type.label ? type.label : state.typeGroup.typeKey);
+        }
+        return path;
+    }
+
+    function selectScheduleScope(id) {
+        state.treePicked = {};
+        state.selectedId = id || null;
+        state.typeGroup = null;
+        state.pane = 'list';
+        state.scheduleRows = null;
+        state.scheduleLoading = false;
+        state.scheduleError = '';
+        state.scheduleToken++;
+        if (id) expandPath(id);
+        rememberPlace();
+        renderFrame();
+        loadSchedules();
+    }
+
+    function openScheduleRoot() {
+        selectScheduleScope(0);
+    }
+
     function loadSchedules(quiet) {
         if (state.scheduleLoading) return;
         state.scheduleLoading = true;
         var token = ++state.scheduleToken;
-        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schedule', null, function (status, payload) {
+        var scope = scheduleScopeId();
+        var typeKey = state.typeGroup && state.typeGroup.typeKey ? state.typeGroup.typeKey : '';
+        var query = [];
+        if (scope) query.push('placeId=' + encodeURIComponent(scope));
+        if (typeKey) query.push('typeKey=' + encodeURIComponent(typeKey));
+        var suffix = query.length ? '?' + query.join('&') : '';
+        ajax('GET', '/projects/' + encodeURIComponent(state.projectKey) + '/schedule' + suffix, null, function (status, payload) {
             if (token !== state.scheduleToken) return;
             state.scheduleLoading = false;
             if (quiet && status !== 200 && state.scheduleRows) return;
@@ -18323,7 +18406,7 @@
         var head = el('div', 'asset-tree-board-head');
         var nav = el('div', 'asset-tree-calendar-nav');
         nav.appendChild(button('\u2039', 'asset-tree-month-btn', function () { shiftScheduleView(-1); }));
-        nav.appendChild(el('strong', 'asset-tree-calendar-title', scheduleViewTitle()));
+        nav.appendChild(el('strong', 'asset-tree-calendar-title', scheduleScopeLabel() + ' · ' + scheduleViewTitle()));
         nav.appendChild(button('\u203A', 'asset-tree-month-btn', function () { shiftScheduleView(1); }));
         nav.appendChild(button(t('schedulesToday'), 'asset-tree-btn slim', function () {
             var now = new Date();
@@ -19686,9 +19769,13 @@
         var timed = typeof presetTime === 'string' && /^\d{2}:\d{2}$/.test(presetTime);
         var startText = timed ? presetTime : '';
         var endText = timed ? addMinutes(presetTime, 60) : '';
+        var fixedAsset = state.view === 'schedules' && state.selectedId && byId()[state.selectedId] && !isFolder(byId()[state.selectedId])
+            ? byId()[state.selectedId] : null;
+        var fixedAssetIds = {};
+        if (fixedAsset) fixedAssetIds[fixedAsset.id] = true;
         var draft = {
             name: '', kind: 'to', first: typeof presetDate === 'string' ? presetDate : isoDate(new Date()), allDay: !timed, startTime: startText, endTime: endText,
-            repeat: 'once', assigneeKey: '', assigneeName: '', assetIds: {}, note: '', assetQuery: ''
+            repeat: 'once', assigneeKey: '', assigneeName: '', assetIds: fixedAssetIds, note: '', assetQuery: ''
         };
         openModal(function (dialog) {
             dialog.className += ' asset-tree-work-dialog';
@@ -19863,10 +19950,18 @@
             whoField.appendChild(hits);
             dialog.appendChild(whoField);
             var assetField = el('div', 'asset-tree-plan-field');
-            assetField.appendChild(el('span', null, t('schedulesAssets')));
-            assetField.appendChild(el('span', 'asset-tree-hint', t('schedulesObjectsOptional')));
-            assetField.appendChild(assetQuery);
-            assetField.appendChild(assets);
+            var assetsLabel = el('span', null, t('schedulesAssets'));
+            var assetsHint = el('span', 'asset-tree-hint', t('schedulesObjectsOptional'));
+            assetsLabel.hidden = !!fixedAsset;
+            assetsHint.hidden = !!fixedAsset;
+            assetField.appendChild(assetsLabel);
+            assetField.appendChild(assetsHint);
+            if (fixedAsset) {
+                assetField.appendChild(el('span', 'asset-tree-hint', (fixedAsset.objectKey || '') + ' · ' + (fixedAsset.name || '')));
+            } else {
+                assetField.appendChild(assetQuery);
+                assetField.appendChild(assets);
+            }
             dialog.appendChild(assetField);
             dialog.appendChild(planField(t('schedulesWhat'), note));
             var actions = el('div', 'asset-tree-inline-actions');
@@ -19887,6 +19982,7 @@
                 }
                 var body = {
                     assetIds: ids,
+                    placeId: scheduleScopeId() || null,
                     name: name.value.trim(),
                     kind: kind.value,
                     lastDone: first.value,

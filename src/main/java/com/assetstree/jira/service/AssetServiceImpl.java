@@ -1489,8 +1489,7 @@ public class AssetServiceImpl implements AssetService {
         ProjectViewEntity view = viewRow(projectKey);
         ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
         PortalMineDto.Card summary = portalCard(asset, attributes, type, index,
-                ModuleSetup.portalColumnList(setup.getPortalColumns()), role, projectKey,
-                Boolean.TRUE.equals(setup.getPhoto()));
+                ModuleSetup.portalColumnList(setup.getPortalColumns()), role, projectKey, true);
         PortalCardDto dto = new PortalCardDto();
         dto.setId(id);
         dto.setName(summary.getName());
@@ -2492,15 +2491,42 @@ public class AssetServiceImpl implements AssetService {
         return asset;
     }
 
+    /**
+     * A portal customer may read a picture of equipment the profile already lists,
+     * even when that person cannot browse the Jira project.
+     */
     private boolean portalParticipant(ApplicationUser user, int assetId) {
+        if (user == null || user.getKey() == null || user.getKey().trim().isEmpty()) {
+            return false;
+        }
         try {
             requirePortalAsset(user, assetId);
             return true;
-        } catch (AssetException ex) {
-            return false;
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException denied) {
+            try {
+                return listedOnPortal(user, assetId);
+            } catch (RuntimeException ignored) {
+                return false;
+            }
+        }
+    }
+
+    private boolean listedOnPortal(ApplicationUser user, int assetId) {
+        PortalMineDto profile = portalMine(user);
+        if (profile == null || profile.getProjects() == null) {
             return false;
         }
+        for (PortalMineDto.Group group : profile.getProjects()) {
+            if (group == null || group.getAssets() == null) {
+                continue;
+            }
+            for (PortalMineDto.Card card : group.getAssets()) {
+                if (card != null && card.getId() == assetId) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override
@@ -2541,7 +2567,13 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public StoredFile openCardImage(ApplicationUser user, int assetId) {
-        AssetEntity entity = requireReadable(user, assetId);
+        if (!portalParticipant(user, assetId)) {
+            requireReadable(user, assetId);
+        }
+        AssetEntity entity = ao().get(AssetEntity.class, assetId);
+        if (entity == null) {
+            throw new AssetException(404, "asset-tree.error.notFound");
+        }
         String kind = entity.getCardImage();
         if (kind == null || kind.isEmpty()) {
             throw new AssetException(404, "asset-tree.error.notFound");
@@ -2678,17 +2710,19 @@ public class AssetServiceImpl implements AssetService {
     @Override
     public StoredFile openPhoto(ApplicationUser user, int assetId) {
         AssetEntity entity = ao().get(AssetEntity.class, assetId);
-        if (entity == null || !photosOn(entity.getProjectKey())) {
+        if (entity == null) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         String kind = entity.getPhoto();
+        boolean cardImage = kind == null || kind.isEmpty();
+        if (cardImage) kind = entity.getCardImage();
         if (kind == null || kind.isEmpty()) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
         if (!portalParticipant(user, assetId)) {
             requireReadable(user, assetId);
         }
-        java.io.File stored = PhotoStore.file(assetId);
+        java.io.File stored = cardImage ? CardImageStore.file(assetId) : PhotoStore.file(assetId);
         if (!stored.isFile()) {
             throw new AssetException(404, "asset-tree.error.notFound");
         }
@@ -2712,19 +2746,25 @@ public class AssetServiceImpl implements AssetService {
         }
         byte[] shown = data;
         String shownKind = kind;
-        try {
-            byte[] framed = PhotoStore.frame(data);
-            if (framed != data) {
-                PhotoStore.write(assetId, framed);
-                shown = framed;
-                shownKind = "jpeg";
-                if (!"jpeg".equals(kind)) {
-                    markPhotoJpeg(assetId);
+        if (!cardImage) {
+            try {
+                byte[] framed = PhotoStore.frame(data);
+                if (framed != data) {
+                    shown = framed;
+                    shownKind = "jpeg";
+                    try {
+                        PhotoStore.write(assetId, framed);
+                        if (!"jpeg".equals(kind)) {
+                            markPhotoJpeg(assetId);
+                        }
+                    } catch (Exception ignored) {
+                        // A portal reader still receives the picture when the file cannot be rewritten.
+                    }
                 }
+            } catch (Exception ex) {
+                shown = data;
+                shownKind = kind;
             }
-        } catch (IOException ex) {
-            shown = data;
-            shownKind = kind;
         }
         String name = "jpeg".equals(shownKind) ? "photo.jpg" : "photo.png";
         return new StoredFile(name, PhotoStore.contentType(shownKind), shown);
@@ -6749,7 +6789,7 @@ public class AssetServiceImpl implements AssetService {
                         }
                         String role = portalRole(row, attributes.get(row.getID()), type, holder, shared);
                         PortalMineDto.Card card = portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey(),
-                                Boolean.TRUE.equals(setup.getPhoto()));
+                                true);
                         card.setSharedOnly(personal == null);
                         cards.add(card);
                     }
@@ -9317,6 +9357,7 @@ public class AssetServiceImpl implements AssetService {
         }
         card.setLines(lines);
         String kind = row.getPhoto();
+        if ((kind == null || kind.isEmpty()) && row.getCardImage() != null && !row.getCardImage().isEmpty()) kind = row.getCardImage();
         if (photos && kind != null && !kind.isEmpty()) {
             card.setPhoto(true);
             card.setUpdated(format(row.getUpdated()));
@@ -13578,15 +13619,26 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public List<ScheduleRowDto> schedule(ApplicationUser user, String projectKey) {
+    public List<ScheduleRowDto> schedule(ApplicationUser user, String projectKey, final Integer requestedPlaceId, final String requestedTypeKey) {
         final Project project = requireReadableProject(user, projectKey);
         requireModule(project.getKey(), ProjectModules.SERVICE);
+        final int placeId = schedulePlaceId(project.getKey(), requestedPlaceId);
+        final String typeKey = requestedTypeKey == null ? "" : requestedTypeKey.trim();
         return ao().executeInTransaction(new TransactionCallback<List<ScheduleRowDto>>() {
             @Override
             public List<ScheduleRowDto> doInTransaction() {
-                return scheduleRows(user, project);
+                return scheduleRows(user, project, placeId, typeKey);
             }
         });
+    }
+
+    private int schedulePlaceId(String projectKey, Integer requestedPlaceId) {
+        if (requestedPlaceId == null || requestedPlaceId.intValue() <= 0) return 0;
+        AssetEntity place = ao().get(AssetEntity.class, requestedPlaceId.intValue());
+        if (place == null || !ProjectKeys.same(place.getProjectKey(), projectKey)) {
+            throw new AssetException(400, "asset-tree.error.service");
+        }
+        return requestedPlaceId.intValue();
     }
 
     @Override
@@ -13615,6 +13667,11 @@ public class AssetServiceImpl implements AssetService {
         List<ScheduleRowDto> created = ao().executeInTransaction(new TransactionCallback<List<ScheduleRowDto>>() {
             @Override
             public List<ScheduleRowDto> doInTransaction() {
+                Map<Integer, AssetEntity> projectAssets = indexAssets(assetsIn(project.getKey()));
+                int placeId = schedulePlaceId(project.getKey(), draft.getPlaceId());
+                if (unbound && placeId > 0) {
+                    throw new AssetException(400, "asset-tree.error.service");
+                }
                 List<ScheduleRowDto> rows = new ArrayList<ScheduleRowDto>();
                 LocalDate today = businessToday();
                 if (unbound) {
@@ -13637,7 +13694,8 @@ public class AssetServiceImpl implements AssetService {
                         throw new AssetException(400, "asset-tree.error.service");
                     }
                     AssetEntity asset = ao().get(AssetEntity.class, assetId.intValue());
-                    if (asset == null || !ProjectKeys.same(asset.getProjectKey(), project.getKey()) || isLocation(asset)) {
+                    if (asset == null || !ProjectKeys.same(asset.getProjectKey(), project.getKey()) || isLocation(asset)
+                            || (placeId > 0 && !underPlace(asset, placeId, projectAssets))) {
                         throw new AssetException(400, "asset-tree.error.service");
                     }
                     if (plansOf(asset.getID()).size() >= MAX_PLANS) {
@@ -13724,25 +13782,24 @@ public class AssetServiceImpl implements AssetService {
         });
     }
 
-    private List<ScheduleRowDto> scheduleRows(ApplicationUser user, Project project) {
+    private List<ScheduleRowDto> scheduleRows(ApplicationUser user, Project project, int placeId, String typeKey) {
         String projectKey = project.getKey();
-        Map<Integer, AssetEntity> assets = new HashMap<Integer, AssetEntity>();
-        for (AssetEntity asset : forViewer(user, project, assetsIn(projectKey))) {
-            assets.put(Integer.valueOf(asset.getID()), asset);
-        }
+        AssetEntity[] visibleRows = forViewer(user, project, assetsIn(projectKey));
+        Map<Integer, AssetEntity> assets = indexAssets(visibleRows);
         ServicePlanEntity[] plans = ao().find(ServicePlanEntity.class);
         List<ScheduleRowDto> rows = new ArrayList<ScheduleRowDto>();
         LocalDate today = businessToday();
         if (plans != null) {
             for (ServicePlanEntity plan : plans) {
                 if (plan.getAssetId() == 0) {
-                    if (ProjectKeys.same(plan.getProjectKey(), projectKey)) {
+                    if (placeId == 0 && ProjectKeys.same(plan.getProjectKey(), projectKey)) {
                         rows.add(scheduleRow(plan, null, today));
                     }
                     continue;
                 }
                 AssetEntity asset = assets.get(Integer.valueOf(plan.getAssetId()));
-                if (asset == null || isLocation(asset)) {
+                if (asset == null || isLocation(asset) || (typeKey != null && !typeKey.isEmpty() && !typeKey.equals(asset.getTypeKey()))
+                        || (placeId > 0 && !underPlace(asset, placeId, assets))) {
                     continue;
                 }
                 rows.add(scheduleRow(plan, asset, today));
@@ -13759,6 +13816,7 @@ public class AssetServiceImpl implements AssetService {
         row.setAssetName(asset == null || asset.getName() == null ? "" : asset.getName());
         row.setObjectKey(asset == null || asset.getObjectKey() == null ? "" : asset.getObjectKey());
         row.setName(source.getName());
+        row.setTypeKey(asset == null || asset.getTypeKey() == null ? "" : asset.getTypeKey());
         row.setKind(source.getKind());
         row.setAssigneeKey(source.getAssigneeKey());
         row.setAssigneeName(source.getAssigneeName());

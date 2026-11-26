@@ -2093,7 +2093,7 @@
 
     function portalPhotoUrl(card) {
         var stamp = card && card.updated ? encodeURIComponent(card.updated) : '';
-        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + card.id + (stamp ? '&v=' + stamp : '');
+        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + encodeURIComponent(card.id) + (stamp ? '&v=' + stamp : '');
     }
 
     function portalSection(title) {

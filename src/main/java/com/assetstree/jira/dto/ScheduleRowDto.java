@@ -9,6 +9,7 @@ public class ScheduleRowDto {
     private int assetId;
     private String assetName;
     private String objectKey;
+    private String typeKey;
     private String name;
     private String kind;
     private String assigneeKey;
@@ -34,6 +35,8 @@ public class ScheduleRowDto {
     public void setAssetName(String assetName) { this.assetName = assetName; }
     public String getObjectKey() { return objectKey; }
     public void setObjectKey(String objectKey) { this.objectKey = objectKey; }
+    public String getTypeKey() { return typeKey; }
+    public void setTypeKey(String typeKey) { this.typeKey = typeKey; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public String getKind() { return kind; }
