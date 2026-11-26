@@ -793,15 +793,24 @@ public class AssetServiceImpl implements AssetService {
        user directory for contacts. One list request builds each person once. */
     private static final ThreadLocal<Map<String, UserProfileDto>> PROFILE_MEMO = new ThreadLocal<Map<String, UserProfileDto>>();
     private static final ThreadLocal<Map<String, Boolean>> EDIT_MEMO = new ThreadLocal<Map<String, Boolean>>();
+    private static final ThreadLocal<Map<String, String>> LABEL_MEMO = new ThreadLocal<Map<String, String>>();
+    private static final ThreadLocal<Map<String, ProjectViewEntity>> VIEW_MEMO = new ThreadLocal<Map<String, ProjectViewEntity>>();
+    private static final ThreadLocal<Map<String, AssetTypeDto>> TYPE_MEMO = new ThreadLocal<Map<String, AssetTypeDto>>();
 
     private static void startListMemo() {
         PROFILE_MEMO.set(new HashMap<String, UserProfileDto>());
         EDIT_MEMO.set(new HashMap<String, Boolean>());
+        LABEL_MEMO.set(new HashMap<String, String>());
+        VIEW_MEMO.set(new HashMap<String, ProjectViewEntity>());
+        TYPE_MEMO.set(new HashMap<String, AssetTypeDto>());
     }
 
     private static void endListMemo() {
         PROFILE_MEMO.remove();
         EDIT_MEMO.remove();
+        LABEL_MEMO.remove();
+        VIEW_MEMO.remove();
+        TYPE_MEMO.remove();
     }
 
     private boolean editableIn(Project project) {
@@ -1489,7 +1498,7 @@ public class AssetServiceImpl implements AssetService {
         ProjectViewEntity view = viewRow(projectKey);
         ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
         PortalMineDto.Card summary = portalCard(asset, attributes, type, index,
-                ModuleSetup.portalColumnList(setup.getPortalColumns()), role, projectKey, true);
+                ModuleSetup.portalColumnList(setup.getPortalColumns()), role, projectKey, true, statusIndex(projectKey));
         PortalCardDto dto = new PortalCardDto();
         dto.setId(id);
         dto.setName(summary.getName());
@@ -2494,39 +2503,108 @@ public class AssetServiceImpl implements AssetService {
     /**
      * A portal customer may read a picture of equipment the profile already lists,
      * even when that person cannot browse the Jira project.
+     * The check walks only this card and its parents — not the whole profile.
      */
     private boolean portalParticipant(ApplicationUser user, int assetId) {
         if (user == null || user.getKey() == null || user.getKey().trim().isEmpty()) {
             return false;
         }
+        startListMemo();
         try {
-            requirePortalAsset(user, assetId);
-            return true;
+            return portalListed(user, assetId);
         } catch (RuntimeException denied) {
-            try {
-                return listedOnPortal(user, assetId);
-            } catch (RuntimeException ignored) {
-                return false;
-            }
+            return false;
+        } finally {
+            endListMemo();
         }
     }
 
-    private boolean listedOnPortal(ApplicationUser user, int assetId) {
-        PortalMineDto profile = portalMine(user);
-        if (profile == null || profile.getProjects() == null) {
+    private boolean portalListed(ApplicationUser user, int assetId) {
+        requireUser(user);
+        String holder = user.getKey() == null ? "" : user.getKey().trim();
+        if (holder.isEmpty()) {
             return false;
         }
-        for (PortalMineDto.Group group : profile.getProjects()) {
-            if (group == null || group.getAssets() == null) {
-                continue;
+        AssetEntity asset = ao().get(AssetEntity.class, assetId);
+        if (asset == null || asset.getDeletedAt() != null || isLocation(asset)) {
+            return false;
+        }
+        String projectKey = asset.getProjectKey();
+        if (!moduleOn(projectKey, ProjectModules.PORTAL)) {
+            return false;
+        }
+        ProjectViewEntity view = viewRow(projectKey);
+        ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+        if (!Boolean.TRUE.equals(setup.getPortalMine())) {
+            return false;
+        }
+        Project project = project(projectKey);
+        if (secretOnChain(user, project, asset)) {
+            return false;
+        }
+        Set<Integer> sharedIds = portalShareIds(holder);
+        boolean shared = shareCovers(asset, sharedIds);
+        AssetTypeDto type = typeDtoOnce(asset.getTypeKey());
+        return portalRole(asset, attributesFor(assetId), type, holder, shared) != null;
+    }
+
+    /** Walk parents of one card instead of loading every row of the project. */
+    private boolean shareCovers(AssetEntity asset, Set<Integer> sharedIds) {
+        if (asset == null || sharedIds == null || sharedIds.isEmpty()) {
+            return false;
+        }
+        Integer cursor = Integer.valueOf(asset.getID());
+        Set<Integer> seen = new HashSet<Integer>();
+        String projectKey = asset.getProjectKey();
+        while (cursor != null && seen.add(cursor)) {
+            if (sharedIds.contains(cursor)) {
+                return true;
             }
-            for (PortalMineDto.Card card : group.getAssets()) {
-                if (card != null && card.getId() == assetId) {
-                    return true;
-                }
+            AssetEntity row = cursor.intValue() == asset.getID() ? asset : ao().get(AssetEntity.class, cursor.intValue());
+            if (row == null || row.getDeletedAt() != null || !ProjectKeys.same(row.getProjectKey(), projectKey)) {
+                return false;
             }
+            cursor = TreeLogic.normalizeParent(row.getParentId());
         }
         return false;
+    }
+
+    /** Same rule as concealedFrom, without scanning the whole project tree. */
+    private boolean secretOnChain(ApplicationUser user, Project project, AssetEntity asset) {
+        if (asset == null || project == null || seesSecret(user, project)) {
+            return false;
+        }
+        Integer cursor = Integer.valueOf(asset.getID());
+        Set<Integer> seen = new HashSet<Integer>();
+        String projectKey = asset.getProjectKey();
+        while (cursor != null && seen.add(cursor)) {
+            AssetEntity row = cursor.intValue() == asset.getID() ? asset : ao().get(AssetEntity.class, cursor.intValue());
+            if (row == null || row.getDeletedAt() != null || !ProjectKeys.same(row.getProjectKey(), projectKey)) {
+                return false;
+            }
+            if (row.getSecret() != 0) {
+                return true;
+            }
+            cursor = TreeLogic.normalizeParent(row.getParentId());
+        }
+        return false;
+    }
+
+    private AssetTypeDto typeDtoOnce(String typeKey) {
+        if (typeKey == null || typeKey.trim().isEmpty()) {
+            return null;
+        }
+        String key = typeKey.trim();
+        Map<String, AssetTypeDto> memo = TYPE_MEMO.get();
+        if (memo != null && memo.containsKey(key)) {
+            return memo.get(key);
+        }
+        AssetTypeEntity type = findType(key);
+        AssetTypeDto dto = type == null ? null : toTypeDto(type, i18n(), 0);
+        if (memo != null) {
+            memo.put(key, dto);
+        }
+        return dto;
     }
 
     @Override
@@ -2746,7 +2824,8 @@ public class AssetServiceImpl implements AssetService {
         }
         byte[] shown = data;
         String shownKind = kind;
-        if (!cardImage) {
+        // Stored JPEGs are already framed on upload. Re-framing every portal tile decode is slow.
+        if (!cardImage && !"jpeg".equals(kind)) {
             try {
                 byte[] framed = PhotoStore.frame(data);
                 if (framed != data) {
@@ -2754,9 +2833,7 @@ public class AssetServiceImpl implements AssetService {
                     shownKind = "jpeg";
                     try {
                         PhotoStore.write(assetId, framed);
-                        if (!"jpeg".equals(kind)) {
-                            markPhotoJpeg(assetId);
-                        }
+                        markPhotoJpeg(assetId);
                     } catch (Exception ignored) {
                         // A portal reader still receives the picture when the file cannot be rewritten.
                     }
@@ -6049,15 +6126,28 @@ public class AssetServiceImpl implements AssetService {
     }
 
     private ProjectViewEntity viewRow(String projectKey) {
-        ProjectViewEntity[] rows = ao().find(ProjectViewEntity.class);
+        if (projectKey == null || projectKey.trim().isEmpty()) {
+            return null;
+        }
+        String key = projectKey.trim();
+        Map<String, ProjectViewEntity> memo = VIEW_MEMO.get();
+        if (memo != null && memo.containsKey(key)) {
+            return memo.get(key);
+        }
+        ProjectViewEntity found = null;
+        ProjectViewEntity[] rows = ao().find(ProjectViewEntity.class, Query.select().where("PROJECT_KEY = ?", key));
         if (rows != null) {
             for (ProjectViewEntity row : rows) {
-                if (ProjectKeys.same(row.getProjectKey(), projectKey)) {
-                    return row;
+                if (ProjectKeys.same(row.getProjectKey(), key)) {
+                    found = row;
+                    break;
                 }
             }
         }
-        return null;
+        if (memo != null) {
+            memo.put(key, found);
+        }
+        return found;
     }
 
     private void attachViews(List<ProjectDto> projects) {
@@ -6724,101 +6814,109 @@ public class AssetServiceImpl implements AssetService {
         if (holder.isEmpty()) {
             throw new AssetException(401, "asset-tree.error.auth");
         }
-        return ao().executeInTransaction(new TransactionCallback<PortalMineDto>() {
-            @Override
-            public PortalMineDto doInTransaction() {
-                PortalMineDto page = new PortalMineDto();
-                page.setTitle(i18n().getText("asset-tree.ui.portalMineHeading"));
-                List<PortalMineDto.Group> groups = new ArrayList<PortalMineDto.Group>();
-                List<Project> ordered = new ArrayList<Project>();
-                Collection<Project> known = projectManager().getProjects();
-                if (known != null) {
-                    for (Project project : known) {
-                        if (project != null && project.getKey() != null && !project.getKey().trim().isEmpty()) {
-                            ordered.add(project);
+        startListMemo();
+        try {
+            return ao().executeInTransaction(new TransactionCallback<PortalMineDto>() {
+                @Override
+                public PortalMineDto doInTransaction() {
+                    PortalMineDto page = new PortalMineDto();
+                    page.setTitle(i18n().getText("asset-tree.ui.portalMineHeading"));
+                    List<PortalMineDto.Group> groups = new ArrayList<PortalMineDto.Group>();
+                    List<Project> ordered = new ArrayList<Project>();
+                    Collection<Project> known = projectManager().getProjects();
+                    if (known != null) {
+                        for (Project project : known) {
+                            if (project != null && project.getKey() != null && !project.getKey().trim().isEmpty()) {
+                                ordered.add(project);
+                            }
                         }
                     }
-                }
-                Collections.sort(ordered, new Comparator<Project>() {
-                    @Override
-                    public int compare(Project left, Project right) {
-                        return left.getKey().compareToIgnoreCase(right.getKey());
-                    }
-                });
-                int total = 0;
-                final Set<Integer> sharedIds = portalShareIds(holder);
-                for (Project project : ordered) {
-                    if (!moduleOn(project.getKey(), ProjectModules.PORTAL)) {
-                        continue;
-                    }
-                    ProjectViewEntity view = viewRow(project.getKey());
-                    ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
-                    boolean mineOn = Boolean.TRUE.equals(setup.getPortalMine());
-                    List<String> circleReports = circleReportIds(project.getKey(), holder);
-                    List<PortalMineDto.Chart> charts = portalCharts(project, circleReports);
-                    if (!mineOn && charts.isEmpty()) {
-                        continue;
-                    }
-                    if (!mineOn) {
-                        if (charts.isEmpty()) {
-                            continue;
-                        }
-                        PortalMineDto.Group chartsOnly = new PortalMineDto.Group();
-                        chartsOnly.setKey(project.getKey());
-                        chartsOnly.setLayout(portalLayoutFor(project.getKey()));
-                        chartsOnly.setCharts(charts);
-                        groups.add(chartsOnly);
-                        continue;
-                    }
-                    List<String> columns = ModuleSetup.portalColumnList(setup.getPortalColumns());
-                    AssetEntity[] rows = forViewer(user, project, assetsIn(project.getKey()));
-                    Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
-                    Map<Integer, AssetEntity> index = indexAssets(rows);
-                    Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
-                    Map<Integer, Integer> parents = parentMap(rows);
-                    List<PortalMineDto.Card> cards = new ArrayList<PortalMineDto.Card>();
-                    for (AssetEntity row : rows) {
-                        AssetTypeDto type = types.get(row.getTypeKey());
-                        if (type != null && type.isLocation()) {
-                            continue;
-                        }
-                        String personal = holderRole(row, attributes.get(row.getID()), type, holder);
-                        boolean shared = TreeLogic.coveredByShare(row.getID(), parents, sharedIds);
-                        if (personal == null && !shared) {
-                            continue;
-                        }
-                        String role = portalRole(row, attributes.get(row.getID()), type, holder, shared);
-                        PortalMineDto.Card card = portalCard(row, attributes.get(row.getID()), type, index, columns, role, project.getKey(),
-                                true);
-                        card.setSharedOnly(personal == null);
-                        cards.add(card);
-                    }
-                    Collections.sort(cards, new Comparator<PortalMineDto.Card>() {
+                    Collections.sort(ordered, new Comparator<Project>() {
                         @Override
-                        public int compare(PortalMineDto.Card left, PortalMineDto.Card right) {
-                            return left.getName().compareToIgnoreCase(right.getName());
+                        public int compare(Project left, Project right) {
+                            return left.getKey().compareToIgnoreCase(right.getKey());
                         }
                     });
-                    if (cards.isEmpty() && charts.isEmpty()) {
-                        continue;
+                    int total = 0;
+                    final Set<Integer> sharedIds = portalShareIds(holder);
+                    final ClinicMemberEntity[] membership = clinicMembership(holder);
+                    for (Project project : ordered) {
+                        if (!moduleOn(project.getKey(), ProjectModules.PORTAL)) {
+                            continue;
+                        }
+                        ProjectViewEntity view = viewRow(project.getKey());
+                        ModuleSetupDto setup = ModuleSetup.read(view == null ? "" : view.getOptionList());
+                        boolean mineOn = Boolean.TRUE.equals(setup.getPortalMine());
+                        List<String> circleReports = circleReportIds(project.getKey(), membership);
+                        List<PortalMineDto.Chart> charts = portalCharts(project, circleReports);
+                        if (!mineOn && charts.isEmpty()) {
+                            continue;
+                        }
+                        if (!mineOn) {
+                            if (charts.isEmpty()) {
+                                continue;
+                            }
+                            PortalMineDto.Group chartsOnly = new PortalMineDto.Group();
+                            chartsOnly.setKey(project.getKey());
+                            chartsOnly.setLayout(portalLayoutFor(project.getKey()));
+                            chartsOnly.setCharts(charts);
+                            groups.add(chartsOnly);
+                            continue;
+                        }
+                        List<String> columns = ModuleSetup.portalColumnList(setup.getPortalColumns());
+                        AssetEntity[] rows = forViewer(user, project, assetsIn(project.getKey()));
+                        Map<String, AssetTypeDto> types = indexTypes(typeDtos(project.getKey(), rows));
+                        Map<Integer, AssetEntity> index = indexAssets(rows);
+                        Map<Integer, List<AssetAttributeEntity>> attributes = attributesByAsset(idsOf(rows));
+                        Map<Integer, Integer> parents = parentMap(rows);
+                        Map<String, ProjectStatusEntity> statuses = statusIndex(project.getKey());
+                        List<PortalMineDto.Card> cards = new ArrayList<PortalMineDto.Card>();
+                        for (AssetEntity row : rows) {
+                            AssetTypeDto type = types.get(row.getTypeKey());
+                            if (type != null && type.isLocation()) {
+                                continue;
+                            }
+                            List<AssetAttributeEntity> attrs = attributes.get(row.getID());
+                            String personal = holderRole(row, attrs, type, holder);
+                            boolean shared = TreeLogic.coveredByShare(row.getID(), parents, sharedIds);
+                            if (personal == null && !shared) {
+                                continue;
+                            }
+                            String role = portalRole(row, attrs, type, holder, shared);
+                            PortalMineDto.Card card = portalCard(row, attrs, type, index, columns, role, project.getKey(),
+                                    true, statuses);
+                            card.setSharedOnly(personal == null);
+                            cards.add(card);
+                        }
+                        Collections.sort(cards, new Comparator<PortalMineDto.Card>() {
+                            @Override
+                            public int compare(PortalMineDto.Card left, PortalMineDto.Card right) {
+                                return left.getName().compareToIgnoreCase(right.getName());
+                            }
+                        });
+                        if (cards.isEmpty() && charts.isEmpty()) {
+                            continue;
+                        }
+                        PortalMineDto.Group group = new PortalMineDto.Group();
+                        group.setKey(project.getKey());
+                        group.setCount(cards.size());
+                        group.setCountLabel(portalCount(cards.size()));
+                        group.setLayout(portalLayoutFor(project.getKey()));
+                        group.setAssets(cards);
+                        group.setCharts(charts);
+                        groups.add(group);
+                        total += cards.size();
                     }
-                    PortalMineDto.Group group = new PortalMineDto.Group();
-                    group.setKey(project.getKey());
-                    group.setCount(cards.size());
-                    group.setCountLabel(portalCount(cards.size()));
-                    group.setLayout(portalLayoutFor(project.getKey()));
-                    group.setAssets(cards);
-                    group.setCharts(charts);
-                    groups.add(group);
-                    total += cards.size();
+                    page.setProjects(groups);
+                    page.setTotal(total);
+                    page.setTotalLabel(portalCount(total));
+                    page.setLayout(groups.isEmpty() ? readPortalLayout() : groups.get(0).getLayout());
+                    return page;
                 }
-                page.setProjects(groups);
-                page.setTotal(total);
-                page.setTotalLabel(portalCount(total));
-                page.setLayout(groups.isEmpty() ? readPortalLayout() : groups.get(0).getLayout());
-                return page;
-            }
-        });
+            });
+        } finally {
+            endListMemo();
+        }
     }
 
     @Override
@@ -9200,13 +9298,21 @@ public class AssetServiceImpl implements AssetService {
         return setup;
     }
 
-    private List<String> circleReportIds(String projectKey, String userKey) {
-        List<String> ids = new ArrayList<String>();
+    private ClinicMemberEntity[] clinicMembership(String userKey) {
         if (userKey == null || userKey.isEmpty()) {
-            return ids;
+            return new ClinicMemberEntity[0];
         }
         ClinicMemberEntity[] membership = ao().find(ClinicMemberEntity.class, "USER_KEY = ?", userKey);
-        if (membership == null) {
+        return membership == null ? new ClinicMemberEntity[0] : membership;
+    }
+
+    private List<String> circleReportIds(String projectKey, String userKey) {
+        return circleReportIds(projectKey, clinicMembership(userKey));
+    }
+
+    private List<String> circleReportIds(String projectKey, ClinicMemberEntity[] membership) {
+        List<String> ids = new ArrayList<String>();
+        if (membership == null || membership.length == 0) {
             return ids;
         }
         for (ClinicMemberEntity member : membership) {
@@ -9307,6 +9413,12 @@ public class AssetServiceImpl implements AssetService {
     private PortalMineDto.Card portalCard(AssetEntity row, List<AssetAttributeEntity> attributes, AssetTypeDto type,
                                           Map<Integer, AssetEntity> index, List<String> columns, String role,
                                           String projectKey, boolean photos) {
+        return portalCard(row, attributes, type, index, columns, role, projectKey, photos, null);
+    }
+
+    private PortalMineDto.Card portalCard(AssetEntity row, List<AssetAttributeEntity> attributes, AssetTypeDto type,
+                                          Map<Integer, AssetEntity> index, List<String> columns, String role,
+                                          String projectKey, boolean photos, Map<String, ProjectStatusEntity> statuses) {
         PortalMineDto.Card card = new PortalMineDto.Card();
         card.setId(row.getID());
         card.setName(row.getName() == null ? "" : row.getName());
@@ -9314,7 +9426,7 @@ public class AssetServiceImpl implements AssetService {
         card.setRole(role);
         String status = Statuses.canonical(row.getStatus());
         card.setStatus(status);
-        ProjectStatusEntity statusRow = findStatus(projectKey, status);
+        ProjectStatusEntity statusRow = statuses == null ? findStatus(projectKey, status) : statuses.get(status);
         if (statusRow != null && statusRow.getLabel() != null && !statusRow.getLabel().trim().isEmpty()) {
             card.setStatusLabel(statusRow.getLabel().trim());
             card.setStatusCategory(statusRow.getCategory() == null ? "" : statusRow.getCategory());
@@ -10571,6 +10683,24 @@ public class AssetServiceImpl implements AssetService {
         return found.length == 0 ? null : found[0];
     }
 
+    private Map<String, ProjectStatusEntity> statusIndex(String projectKey) {
+        Map<String, ProjectStatusEntity> map = new HashMap<String, ProjectStatusEntity>();
+        if (projectKey == null || projectKey.trim().isEmpty()) {
+            return map;
+        }
+        ProjectStatusEntity[] rows = projectStatuses(projectKey.trim());
+        if (rows == null) {
+            return map;
+        }
+        for (ProjectStatusEntity row : rows) {
+            if (row == null || row.getStatusKey() == null || row.getStatusKey().trim().isEmpty()) {
+                continue;
+            }
+            map.put(Statuses.canonical(row.getStatusKey()), row);
+        }
+        return map;
+    }
+
     private List<StatusDto> statusDtos(String projectKey, AssetEntity[] assets) {
         ensureStatuses(projectKey);
         Map<String, Integer> counts = new HashMap<String, Integer>();
@@ -11795,18 +11925,16 @@ public class AssetServiceImpl implements AssetService {
         if (userKey == null || userKey.isEmpty()) {
             return ids;
         }
-        ClinicMemberEntity[] membership = ao().find(ClinicMemberEntity.class, "USER_KEY = ?", userKey);
-        if (membership == null) {
+        ClinicMemberEntity[] membership = clinicMembership(userKey);
+        if (membership.length == 0) {
             return ids;
         }
+        List<Integer> circleIds = new ArrayList<Integer>();
         for (ClinicMemberEntity member : membership) {
-            ClinicPlaceEntity[] links = ao().find(ClinicPlaceEntity.class, "CIRCLE_ID = ?", Integer.valueOf(member.getCircleId()));
-            if (links == null) {
-                continue;
-            }
-            for (ClinicPlaceEntity link : links) {
-                ids.add(Integer.valueOf(link.getAssetId()));
-            }
+            circleIds.add(Integer.valueOf(member.getCircleId()));
+        }
+        for (ClinicPlaceEntity link : findIn(ClinicPlaceEntity.class, "CIRCLE_ID", circleIds, null)) {
+            ids.add(Integer.valueOf(link.getAssetId()));
         }
         return ids;
     }
@@ -12531,15 +12659,24 @@ public class AssetServiceImpl implements AssetService {
         if (userKey == null || userKey.trim().isEmpty()) {
             return "";
         }
+        String key = userKey.trim();
+        Map<String, String> memo = LABEL_MEMO.get();
+        if (memo != null && memo.containsKey(key)) {
+            return memo.get(key);
+        }
+        String label = key;
         try {
-            ApplicationUser user = userManager().getUserByKey(userKey.trim());
+            ApplicationUser user = userManager().getUserByKey(key);
             if (user != null && user.getDisplayName() != null && !user.getDisplayName().isEmpty()) {
-                return user.getDisplayName();
+                label = user.getDisplayName();
             }
         } catch (RuntimeException ex) {
             log.debug("User {} was not resolved", userKey, ex);
         }
-        return userKey;
+        if (memo != null) {
+            memo.put(key, label);
+        }
+        return label;
     }
 
     private String displayName(String userKey) {

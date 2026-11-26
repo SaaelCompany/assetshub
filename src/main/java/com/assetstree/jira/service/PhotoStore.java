@@ -184,12 +184,54 @@ public final class PhotoStore {
     }
 
     private static boolean alreadyFrame(byte[] data) {
+        int[] jpeg = jpegSize(data);
+        if (jpeg != null) {
+            return jpeg[0] == FRAME_WIDTH && jpeg[1] == FRAME_HEIGHT;
+        }
         try {
             BufferedImage image = ImageIO.read(new ByteArrayInputStream(data));
             return image != null && image.getWidth() == FRAME_WIDTH && image.getHeight() == FRAME_HEIGHT;
         } catch (IOException ex) {
             return false;
         }
+    }
+
+    /** Width and height from a JPEG SOF marker, without decoding the pixels. */
+    static int[] jpegSize(byte[] data) {
+        if (data == null || data.length < 10) {
+            return null;
+        }
+        if ((data[0] & 0xff) != 0xff || (data[1] & 0xff) != 0xd8) {
+            return null;
+        }
+        int i = 2;
+        while (i + 9 < data.length) {
+            if ((data[i] & 0xff) != 0xff) {
+                return null;
+            }
+            int marker = data[i + 1] & 0xff;
+            if (marker == 0xd8 || marker == 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+                i += 2;
+                continue;
+            }
+            if (marker == 0xd9 || marker == 0xda) {
+                return null;
+            }
+            int size = ((data[i + 2] & 0xff) << 8) | (data[i + 3] & 0xff);
+            if (size < 2 || i + 2 + size > data.length) {
+                return null;
+            }
+            if (marker >= 0xc0 && marker <= 0xcf && marker != 0xc4 && marker != 0xc8 && marker != 0xcc) {
+                int height = ((data[i + 5] & 0xff) << 8) | (data[i + 6] & 0xff);
+                int width = ((data[i + 7] & 0xff) << 8) | (data[i + 8] & 0xff);
+                if (width > 0 && height > 0) {
+                    return new int[] {width, height};
+                }
+                return null;
+            }
+            i += 2 + size;
+        }
+        return null;
     }
 
     static BufferedImage turn(BufferedImage source, int orientation) {
