@@ -1732,6 +1732,7 @@ public class AssetResource {
         return control;
     }
 
+    @GET
     @Path("portal/mine")
     public Response portalMine() {
         return invoke(new Callable<Response>() {
