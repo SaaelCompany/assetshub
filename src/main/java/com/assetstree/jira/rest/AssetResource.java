@@ -58,6 +58,7 @@ import com.assetstree.jira.dto.TniWatchDraft;
 import com.assetstree.jira.model.TniSubnetDraft;
 import com.assetstree.jira.service.AssetBridge;
 import com.assetstree.jira.service.AssetService;
+import com.assetstree.jira.service.StoredFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,6 +77,7 @@ import javax.ws.rs.core.CacheControl;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.StreamingOutput;
 import java.util.concurrent.Callable;
 
 @Path("/")
@@ -699,11 +701,12 @@ public class AssetResource {
 
     @GET
     @Path("projects/{projectKey}/schedule")
-    public Response schedule(@PathParam("projectKey") final String projectKey) {
+    public Response schedule(@PathParam("projectKey") final String projectKey, @QueryParam("placeId") final Integer placeId,
+                             @QueryParam("typeKey") final String typeKey) {
         return invoke(new Callable<Response>() {
             @Override
             public Response call() {
-                return Response.ok(assetService.schedule(user(), projectKey)).build();
+                return Response.ok(assetService.schedule(user(), projectKey, placeId, typeKey)).build();
             }
         });
     }
@@ -1703,6 +1706,46 @@ public class AssetResource {
                 return Response.noContent().build();
             }
         });
+    }
+
+    @GET
+    @Path("portal/assets/{id}/photo")
+    @Produces({"image/jpeg", "image/png", "image/gif"})
+    public Response portalPhoto(@PathParam("id") final int id) {
+        return invoke(new Callable<Response>() {
+            @Override
+            public Response call() {
+                StoredFile stored = assetService.openPhoto(user(), id);
+                final byte[] bytes = stored.getData() == null ? new byte[0] : stored.getData();
+                String type = stored.getContentType() == null ? "image/png" : stored.getContentType();
+                StreamingOutput body = new StreamingOutput() {
+                    @Override
+                    public void write(java.io.OutputStream output) throws java.io.IOException {
+                        output.write(bytes);
+                    }
+                };
+                return Response.ok(body, type)
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("Content-Length", Integer.valueOf(bytes.length))
+                        .cacheControl(privateHour())
+                        .build();
+            }
+        });
+    }
+
+    private CacheControl privateHour() {
+        CacheControl control = new CacheControl();
+        control.setPrivate(true);
+        control.setMaxAge(3600);
+        return control;
+    }
+
+    private CacheControl privateNoStore() {
+        CacheControl control = new CacheControl();
+        control.setPrivate(true);
+        control.setNoStore(true);
+        control.setNoCache(true);
+        return control;
     }
 
     @GET

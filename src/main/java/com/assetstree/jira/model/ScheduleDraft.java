@@ -9,6 +9,7 @@ import java.util.List;
 @XmlAccessorType(XmlAccessType.PROPERTY)
 public class ScheduleDraft {
     private List<Integer> assetIds = new ArrayList<Integer>();
+    private Integer placeId;
     private String name;
     private String kind;
     private String assigneeKey;
@@ -23,6 +24,8 @@ public class ScheduleDraft {
 
     public List<Integer> getAssetIds() { return assetIds; }
     public void setAssetIds(List<Integer> assetIds) { this.assetIds = assetIds; }
+    public Integer getPlaceId() { return placeId; }
+    public void setPlaceId(Integer placeId) { this.placeId = placeId; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public String getKind() { return kind; }

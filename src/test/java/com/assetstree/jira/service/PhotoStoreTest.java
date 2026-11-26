@@ -41,6 +41,9 @@ public class PhotoStoreTest {
         assertEquals(PhotoStore.FRAME_WIDTH, wideImage.getWidth());
         assertEquals(PhotoStore.FRAME_HEIGHT, wideImage.getHeight());
         assertSame(tall, PhotoStore.frame(tall));
+        int[] size = PhotoStore.jpegSize(tall);
+        assertEquals(PhotoStore.FRAME_WIDTH, size[0]);
+        assertEquals(PhotoStore.FRAME_HEIGHT, size[1]);
         assertTrue(reddish(tallImage.getRGB(4, 4)));
         assertTrue(reddish(tallImage.getRGB(PhotoStore.FRAME_WIDTH - 5, PhotoStore.FRAME_HEIGHT - 5)));
         assertTrue(bluish(wideImage.getRGB(4, 4)));

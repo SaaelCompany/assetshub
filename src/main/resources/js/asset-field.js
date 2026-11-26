@@ -1932,8 +1932,11 @@
                     item.classList.add('has-photo');
                     var picture = el('img', 'asset-tree-portal-mine-photo');
                     picture.alt = '';
-                    picture.src = portalPhotoUrl(card);
                     picture.addEventListener('error', function () {
+                        item.classList.remove('has-photo');
+                        if (picture.parentNode) picture.parentNode.removeChild(picture);
+                    });
+                    showPortalPhoto(picture, card, function () {
                         item.classList.remove('has-photo');
                         if (picture.parentNode) picture.parentNode.removeChild(picture);
                     });
@@ -2064,8 +2067,10 @@
                 var frame = el('div', 'asset-tree-portal-photo-frame');
                 var picture = el('img', 'asset-tree-portal-photo');
                 picture.alt = '';
-                picture.src = portalPhotoUrl(card);
                 picture.addEventListener('click', function (event) { event.stopPropagation(); });
+                showPortalPhoto(picture, card, function () {
+                    if (frame.parentNode) frame.parentNode.removeChild(frame);
+                });
                 frame.appendChild(picture);
                 row.appendChild(frame);
                 body.appendChild(row);
@@ -2093,7 +2098,67 @@
 
     function portalPhotoUrl(card) {
         var stamp = card && card.updated ? encodeURIComponent(card.updated) : '';
-        return contextPath() + '/plugins/servlet/asset-tree-photo?assetId=' + card.id + (stamp ? '&v=' + stamp : '');
+        return contextPath() + '/rest/asset-tree/1.0/portal/assets/' + encodeURIComponent(card.id) + '/photo' + (stamp ? '?v=' + stamp : '');
+    }
+
+    var photoJobs = [];
+    var photoBusy = 0;
+    var PHOTO_LIMIT = 6;
+
+    function showPortalPhoto(picture, card, onFail) {
+        photoJobs.push({ picture: picture, card: card, onFail: onFail });
+        pumpPortalPhotos();
+    }
+
+    function pumpPortalPhotos() {
+        while (photoBusy < PHOTO_LIMIT && photoJobs.length) {
+            (function (job) {
+                photoBusy += 1;
+                loadPortalPhoto(job.picture, job.card, function (ok) {
+                    photoBusy -= 1;
+                    if (!ok && job.onFail) job.onFail();
+                    pumpPortalPhotos();
+                });
+            })(photoJobs.shift());
+        }
+    }
+
+    function loadPortalPhoto(picture, card, done) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', portalPhotoUrl(card), true);
+        xhr.responseType = 'blob';
+        xhr.setRequestHeader('Accept', 'image/png,image/jpeg,image/gif,*/*');
+        xhr.setRequestHeader('X-Atlassian-Token', 'no-check');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var blob = xhr.response;
+            if (xhr.status !== 200 || !blob || !blob.size) {
+                done(false);
+                return;
+            }
+            var header = String(xhr.getResponseHeader('Content-Type') || '').split(';')[0].replace(/\s/g, '').toLowerCase();
+            if (header.indexOf('image/') === 0) {
+                picture.src = (window.URL || window.webkitURL).createObjectURL(blob);
+                done(true);
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () {
+                var bytes = new Uint8Array(reader.result || new ArrayBuffer(0));
+                var png = bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+                var jpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+                if (!png && !jpeg) {
+                    done(false);
+                    return;
+                }
+                var typed = blob.slice(0, blob.size, png ? 'image/png' : 'image/jpeg');
+                picture.src = (window.URL || window.webkitURL).createObjectURL(typed);
+                done(true);
+            };
+            reader.onerror = function () { done(false); };
+            reader.readAsArrayBuffer(blob.slice(0, 12));
+        };
+        xhr.send(null);
     }
 
     function portalSection(title) {

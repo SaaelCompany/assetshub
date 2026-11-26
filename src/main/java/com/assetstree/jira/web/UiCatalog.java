@@ -1775,6 +1775,7 @@ public final class UiCatalog {
             "schedulesAllKinds",
             "schedulesAllLayers",
             "schedulesAllPeople",
+            "schedulesAllPlaces",
             "schedulesToday",
             "schedulesSpanYears",
             "schedulesSpanYear",

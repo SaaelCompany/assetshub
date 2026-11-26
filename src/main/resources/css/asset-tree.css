@@ -10999,7 +10999,99 @@ a.asset-tree-preview-icon:focus {
     font-weight: 700;
 }
 
-#asset-tree-app .asset-tree-board button,
+#asset-tree-app .asset-tree-body > .asset-tree-top {
+    min-height: 76px;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules {
+    height: calc(100vh - 196px);
+    min-height: 420px;
+    margin-top: 0;
+    padding: 0;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules > .asset-tree-side {
+    padding-top: 0;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules > .asset-tree-board {
+    padding: 18px 18px 28px;
+    overflow: auto;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board-head {
+    margin: 0 0 18px;
+    padding: 0 2px;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board-head > .asset-tree-sheet-filters {
+    padding-right: 2px;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-layers {
+    margin: 0 2px 14px;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board .asset-tree-calendar {
+    padding: 12px;
+    margin-bottom: 8px;
+    overflow: visible;
+}
+
+
+#asset-tree-app .asset-tree-frame.is-schedules > .asset-tree-side {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+    height: 100%;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules > .asset-tree-split {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules > .asset-tree-board {
+    grid-column: 3;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px 14px;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board-head > .asset-tree-calendar-nav {
+    min-width: 0;
+    flex-wrap: nowrap;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board-head > .asset-tree-span-switch {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: start;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board-head > .asset-tree-sheet-filters {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    margin-left: 0;
+    justify-content: flex-end;
+}
+
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board .asset-tree-calendar,
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board .asset-tree-year,
+#asset-tree-app .asset-tree-frame.is-schedules .asset-tree-board .asset-tree-outlook {
+    min-width: 720px;
+}
+
 #asset-tree-app .asset-tree-board input,
 #asset-tree-app .asset-tree-board select,
 #asset-tree-app .asset-tree-board strong {
